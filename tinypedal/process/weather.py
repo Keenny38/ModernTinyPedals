@@ -1,0 +1,64 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Weather forecast function
+"""
+
+from __future__ import annotations
+
+from typing import NamedTuple
+
+from ..const_common import ABS_ZERO_CELSIUS
+
+
+class WeatherNode(NamedTuple):
+    """Weather forecast node info
+
+    Attributes:
+        start: fraction of forecast start time relative to session length, range 0.0 - 1.0.
+        sky_type: sky type index, range 0 - 10.
+        temperature: degrees in Celsius.
+        rain_chance: fraction of rain chance, range 0.0 - 1.0.
+    """
+
+    start: float = 1.0
+    sky_type: int = -1
+    temperature: float = ABS_ZERO_CELSIUS
+    rain_chance: float = 0.0
+
+
+FORECAST_DEFAULT = (WeatherNode(),)
+
+
+def forecast_rf2(data: dict, default: tuple[WeatherNode, ...]) -> tuple[WeatherNode, ...]:
+    """Get value from weather forecast dictionary, output 5 api data"""
+    try:
+        forecast_nodes = ("START", "NODE_25", "NODE_50", "NODE_75", "FINISH")
+        output = tuple(
+            WeatherNode(
+                start=round(index * 0.2, 1),
+                sky_type=int(data[node]["WNV_SKY"]["currentValue"]),
+                temperature=float(data[node]["WNV_TEMPERATURE"]["currentValue"]),
+                rain_chance=min(max(float(data[node]["WNV_RAIN_CHANCE"]["currentValue"]) * 0.01, 0.0), 1.0),
+            )
+            for index, node in enumerate(forecast_nodes)
+        )
+    except (KeyError, TypeError, ValueError):
+        output = default
+    return output

@@ -1,0 +1,145 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Weight distribution Widget
+"""
+
+from .. import calculation as calc
+from ..module_info import minfo
+from ._base import Overlay
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config variable
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        self.percent_sign_text = "%" if self.wcfg["show_percentage_sign"] else ""
+        self.decimals = max(int(self.wcfg["decimal_places"]), 1)
+
+        if self.wcfg["layout"] == 0:
+            prefix_just = max(
+                len(self.wcfg["prefix_front_to_rear_distribution"]),
+                len(self.wcfg["prefix_left_to_right_distribution"]),
+                len(self.wcfg["prefix_cross_weight"]),
+            )
+        else:
+            prefix_just = 0
+
+        self.prefix_distf = self.wcfg["prefix_front_to_rear_distribution"].ljust(prefix_just)
+        self.prefix_distl = self.wcfg["prefix_left_to_right_distribution"].ljust(prefix_just)
+        self.prefix_cross = self.wcfg["prefix_cross_weight"].ljust(prefix_just)
+
+        # Front to rear distribution
+        if self.wcfg["show_front_to_rear_distribution"]:
+            text_distf = self.format_dist(0, self.prefix_distf)
+            self.bar_distf = self.set_rawtext(
+                text=text_distf,
+                width=font_m.width * len(text_distf) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_front_to_rear_distribution"],
+                bg_color=self.wcfg["background_color_front_to_rear_distribution"],
+                last=0,
+            )
+            self.set_primary_orient(
+                target=self.bar_distf,
+                column=self.wcfg["display_order_front_to_rear_distribution"],
+            )
+
+        # Left to right distribution
+        if self.wcfg["show_left_to_right_distribution"]:
+            text_distl = self.format_dist(0, self.prefix_distl)
+            self.bar_distl = self.set_rawtext(
+                text=text_distl,
+                width=font_m.width * len(text_distl) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_left_to_right_distribution"],
+                bg_color=self.wcfg["background_color_left_to_right_distribution"],
+                last=0,
+            )
+            self.set_primary_orient(
+                target=self.bar_distl,
+                column=self.wcfg["display_order_left_to_right_distribution"],
+            )
+
+        # Cross weight
+        if self.wcfg["show_cross_weight"]:
+            text_cross = self.format_dist(0, self.prefix_cross)
+            self.bar_cross = self.set_rawtext(
+                text=text_cross,
+                width=font_m.width * len(text_cross) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_cross_weight"],
+                bg_color=self.wcfg["background_color_cross_weight"],
+                last=0,
+            )
+            self.set_primary_orient(
+                target=self.bar_cross,
+                column=self.wcfg["display_order_cross_weight"],
+            )
+
+        self.calc_ema_ratio = calc.ema_filter(self.wcfg["smoothing_samples"])
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        # Front to rear distribution
+        if self.wcfg["show_front_to_rear_distribution"]:
+            ema_front = self.calc_ema_ratio(self.bar_distf.last, minfo.wheels.frontWeightRatio)
+            self.update_dist(self.bar_distf, ema_front, self.prefix_distf)
+
+        # Left to right distribution
+        if self.wcfg["show_left_to_right_distribution"]:
+            ema_left = self.calc_ema_ratio(self.bar_distl.last, minfo.wheels.leftWeightRatio)
+            self.update_dist(self.bar_distl, ema_left, self.prefix_distl)
+
+        # Cross weight
+        if self.wcfg["show_cross_weight"]:
+            ema_cross = self.calc_ema_ratio(self.bar_cross.last, minfo.wheels.crossWeightRatio)
+            self.update_dist(self.bar_cross, ema_cross, self.prefix_cross)
+
+    # GUI update methods
+    def update_dist(self, target, data, prefix):
+        """Weight distribution ratio"""
+        if target.last != data:
+            target.last = data
+            target.text = self.format_dist(data * 100, prefix)
+            target.update()
+
+    def format_dist(self, angle, prefix):
+        """Format distribution ratio"""
+        ratio = f"{angle:.{self.decimals + 1}f}"
+        return f"{prefix}{ratio:.{self.decimals + 3}}{self.percent_sign_text}"

@@ -1,0 +1,295 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Laps and position Widget
+"""
+
+from .. import calculation as calc
+from ..api_control import api
+from ..module_info import minfo
+from ._base import Overlay
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config variable
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        width_extra_laps = int(self.wcfg["show_predicted_extra_laps"]) * 4
+
+        self.prefix_laps = self.wcfg["prefix_laps"]
+        self.prefix_pos_overall = self.wcfg["prefix_position_overall"]
+        self.prefix_pos_inclass = self.wcfg["prefix_position_in_class"]
+        self.prefix_cut_points = self.wcfg["prefix_track_limits_points"]
+
+        if self.wcfg["layout"] == 0:
+            max_width = max(
+                len(self.prefix_laps) + 12 + width_extra_laps,
+                len(self.prefix_pos_overall) + 5,
+                len(self.prefix_pos_inclass) + 5,
+                len(self.prefix_cut_points) + 7,
+            )
+            self.just_laps = max_width - len(self.prefix_laps)
+            self.just_pos_overall = max_width - len(self.prefix_pos_overall)
+            self.just_pos_inclass = max_width - len(self.prefix_pos_inclass)
+            self.just_cut_points = max_width - len(self.prefix_cut_points)
+            self.just_pos_change = max_width - 1
+        else:
+            self.just_laps = 12 + width_extra_laps
+            self.just_pos_overall = 5
+            self.just_pos_inclass = 5
+            self.just_cut_points = 7
+            self.just_pos_change = 2
+
+        # Lap number
+        if self.wcfg["show_laps"]:
+            if self.wcfg["show_predicted_extra_laps"]:
+                text_laps = f"{self.prefix_laps}{'0.00/0.00(+0)':>{self.just_laps}}"
+            else:
+                text_laps = f"{self.prefix_laps}{'0.00/0.00':>{self.just_laps}}"
+            self.bar_style_laps = (
+                self.wcfg["background_color_laps"],
+                self.wcfg["warning_color_maximum_laps"],
+            )
+            self.bar_laps = self.set_rawtext(
+                text=text_laps,
+                width=font_m.width * len(text_laps) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_laps"],
+                bg_color=self.bar_style_laps[0],
+            )
+            self.set_primary_orient(
+                target=self.bar_laps,
+                column=self.wcfg["display_order_laps"],
+            )
+
+        # Position overall
+        if self.wcfg["show_position_overall"]:
+            text_pos_overall = f"{self.prefix_pos_overall}{'00/00':>{self.just_pos_overall}}"
+            self.bar_pos_overall = self.set_rawtext(
+                text=text_pos_overall,
+                width=font_m.width * len(text_pos_overall) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_position_overall"],
+                bg_color=self.wcfg["background_color_position_overall"],
+            )
+            self.set_primary_orient(
+                target=self.bar_pos_overall,
+                column=self.wcfg["display_order_position_overall"],
+            )
+
+        # Position in class
+        if self.wcfg["show_position_in_class"]:
+            text_pos_inclass = f"{self.prefix_pos_inclass}{'00/00':>{self.just_pos_inclass}}"
+            self.bar_pos_inclass = self.set_rawtext(
+                text=text_pos_inclass,
+                width=font_m.width * len(text_pos_inclass) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_position_in_class"],
+                bg_color=self.wcfg["background_color_position_in_class"],
+            )
+            self.set_primary_orient(
+                target=self.bar_pos_inclass,
+                column=self.wcfg["display_order_position_in_class"],
+            )
+
+        # Track limits points
+        if self.wcfg["show_track_limits_points"]:
+            text_cut_points = f"{self.prefix_cut_points}{'0.000/-':>{self.just_cut_points}}"
+            self.bar_cut_points = self.set_rawtext(
+                text=text_cut_points,
+                width=font_m.width * len(text_cut_points) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_track_limits_points"],
+                bg_color=self.wcfg["background_color_track_limits_points"],
+            )
+            self.set_primary_orient(
+                target=self.bar_cut_points,
+                column=self.wcfg["display_order_track_limits_points"],
+            )
+
+        # Position change
+        if self.wcfg["show_position_change"]:
+            text_pos_change = f"-{'0':>{self.just_pos_change}}"
+            self.bar_style_pos_change = (
+                (
+                    self.wcfg["font_color_position_same"],
+                    self.wcfg["background_color_position_same"],
+                ),
+                (
+                    self.wcfg["font_color_position_gain"],
+                    self.wcfg["background_color_position_gain"],
+                ),
+                (
+                    self.wcfg["font_color_position_loss"],
+                    self.wcfg["background_color_position_loss"],
+                ),
+            )
+            self.bar_pos_change = self.set_rawtext(
+                text=text_pos_change,
+                width=font_m.width * len(text_pos_change) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_pos_change[0][0],
+                bg_color=self.bar_style_pos_change[0][1],
+            )
+            self.set_primary_orient(
+                target=self.bar_pos_change,
+                column=self.wcfg["display_order_position_change"],
+            )
+
+        # Last data
+        self.last_veh_total = -1
+        self.last_plr_place = -1
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        # Lap number
+        if self.wcfg["show_laps"]:
+            lap_into = calc.lap_progress_correction(api.read.lap.progress(), api.read.timing.current_laptime())
+            self.update_laps(self.bar_laps, lap_into)
+
+        # Position update
+        plr_place = api.read.vehicle.place()
+        veh_total = api.read.vehicle.total_vehicles()
+
+        # Only update if total vehicle or player position changes
+        if self.last_plr_place != plr_place or self.last_veh_total != veh_total:
+            self.last_plr_place = plr_place
+            self.last_veh_total = veh_total
+
+            # Position overall
+            if self.wcfg["show_position_overall"]:
+                self.update_position_overall(self.bar_pos_overall, plr_place, veh_total)
+
+            # Position in class
+            if self.wcfg["show_position_in_class"]:
+                plr_class = api.read.vehicle.class_name()
+                total_class_vehicle = 0
+                place_higher = 0
+
+                for index in range(veh_total):
+                    if api.read.vehicle.class_name(index) == plr_class:
+                        total_class_vehicle += 1
+                        if api.read.vehicle.place(index) > plr_place:
+                            place_higher += 1
+
+                pos_in_class = total_class_vehicle - place_higher
+                self.update_position_inclass(self.bar_pos_inclass, pos_in_class, total_class_vehicle)
+
+        # Track limits points
+        if self.wcfg["show_track_limits_points"]:
+            current_points = api.read.session.cut_points()
+            total_points = api.read.session.limits_points() * api.read.session.in_race()
+            self.update_cut_points(self.bar_cut_points, current_points, total_points)
+
+        # Position change
+        if self.wcfg["show_position_change"]:
+            veh_info = minfo.vehicles.dataSet[minfo.vehicles.playerIndex]
+            if self.wcfg["show_position_change_in_class"]:
+                pos_diff = veh_info.qualifyInClass - veh_info.positionInClass
+            else:
+                pos_diff = veh_info.qualifyOverall - veh_info.positionOverall
+            self.update_position_change(self.bar_pos_change, pos_diff)
+
+    # GUI update methods
+    def update_laps(self, target, data):
+        """Lap number"""
+        if target.last != data:
+            target.last = data
+            lap_num = api.read.lap.number()
+            lap_max = api.read.lap.maximum()
+
+            if api.read.session.finish_type(minfo.vehicles.finishAsLap):
+                text_lap_total = f"{lap_max:.2f}"
+            else:
+                session_time = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
+                lap_total = lap_num + calc.end_timer_laps_remain(data, minfo.delta.lapTimePace, session_time)
+                text_lap_total = f"~{lap_total:.2f}"
+
+            text_laps_done = f"{lap_num + data:.2f}"
+            if self.wcfg["show_predicted_extra_laps"]:
+                text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}({minfo.vehicles.finishLapOffset:+.0f})"
+            else:
+                text_laps = f"{text_laps_done:.5}/{text_lap_total:.6}"
+            target.text = f"{self.prefix_laps}{text_laps:>{self.just_laps}.{self.just_laps}}"
+            target.bg = self.bar_style_laps[lap_num - lap_max >= -1]
+            target.update()
+
+    def update_position_overall(self, target, place, total):
+        """Driver place & total vehicles"""
+        text_pos = f"{place:02.0f}/{total:02.0f}"
+        target.text = f"{self.prefix_pos_overall}{text_pos:>{self.just_pos_overall}}"
+        target.update()
+
+    def update_position_inclass(self, target, place, total):
+        """Driver place & total vehicles"""
+        text_pos = f"{place:02.0f}/{total:02.0f}"
+        target.text = f"{self.prefix_pos_inclass}{text_pos:>{self.just_pos_inclass}}"
+        target.update()
+
+    def update_cut_points(self, target, *data):
+        """Update track limits points"""
+        if target.last != data:
+            target.last = data
+            if data[1] > 0:
+                text_total = f"{data[1]:.0f}"
+            else:
+                text_total = "-"
+            size = 3 - (len(text_total) > 1)
+            text_cut = f"{data[0]:.{size}f}"
+            text_points = f"{text_cut:.{size + 2}}/{text_total}"
+            target.text = f"{self.prefix_cut_points}{text_points:>{self.just_cut_points}}"
+            target.update()
+
+    def update_position_change(self, target, data):
+        """Driver place change"""
+        if target.last != data:
+            target.last = data
+            if data > 0:
+                prefix = "▲"
+                color_index = 1
+            elif data < 0:
+                prefix = "▼"
+                color_index = 2
+            else:
+                prefix = "-"
+                color_index = 0
+            target.text = f"{prefix}{abs(data):>{self.just_pos_change}}"
+            target.fg, target.bg = self.bar_style_pos_change[color_index]
+            target.update()

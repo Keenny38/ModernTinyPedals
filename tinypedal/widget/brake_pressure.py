@@ -1,0 +1,137 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Brake pressure Widget
+"""
+
+from ..api_control import api
+from ..const_common import WHEELS_NA, WHEELS_ZERO
+from ._base import Overlay
+from ._painter import WheelGaugeBar
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        bar_gap = self.wcfg["bar_gap"]
+        bar_gap_hori = self.wcfg["horizontal_gap"]
+        bar_gap_vert = self.wcfg["vertical_gap"]
+        layout = self.set_grid_layout(gap=bar_gap)
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config variable
+        padx = round(font_m.width * self.wcfg["bar_padding_horizontal"])
+        pady = round(font_m.capital * self.wcfg["bar_padding_vertical"])
+        bar_width = max(self.wcfg["bar_width"], 20)
+        bar_height = int(font_m.capital + pady * 2)
+        brake_input_color = (
+            self.wcfg["brake_input_color"]
+            if self.wcfg["show_brake_input"]
+            else ""
+        )
+
+        # Caption
+        if self.wcfg["show_caption"]:
+            font_cap = self.config_font(
+                self.wcfg["font_name"],
+                self.wcfg["font_size"] * self.wcfg["font_scale_caption"],
+                self.wcfg["font_weight"],
+            )
+            font_cap_m = self.get_font_metrics(font_cap)
+
+            cap_bar = self.set_rawtext(
+                font=font_cap,
+                text=self.wcfg["caption_text"],
+                fixed_height=font_cap_m.height,
+                offset_y=font_cap_m.voffset,
+                fg_color=self.wcfg["font_color_caption"],
+                bg_color=self.wcfg["background_color_caption"],
+            )
+            self.set_primary_orient(
+                target=cap_bar,
+                column=0,
+            )
+
+        # Brake pressure
+        layout_inner = self.set_grid_layout(gap_hori=bar_gap_hori, gap_vert=bar_gap_vert)
+        self.bars_bpres = tuple(
+            WheelGaugeBar(
+                self,
+                padding_x=padx,
+                bar_width=bar_width,
+                bar_height=bar_height,
+                offset_y=font_m.voffset,
+                decimals=self.wcfg["decimal_places"],
+                input_color=self.wcfg["highlight_color"],
+                fg_color=self.wcfg["font_color"],
+                bg_color=self.wcfg["background_color"],
+                maxrange_height=max(self.wcfg["brake_input_size"], 0),
+                maxrange_color=brake_input_color,
+                right_side=idx % 2,
+                top_side=idx < 2,
+            ) for idx in range(4)
+        )
+        self.set_grid_layout_quad(
+            layout=layout_inner,
+            targets=self.bars_bpres,
+        )
+        self.set_primary_orient(
+            target=layout_inner,
+            column=1,
+        )
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        brake_pressure = api.read.brake.pressure(scale=100)
+        brake_inputs = WHEELS_NA
+
+        if self.wcfg["show_brake_input"]:
+            raw_brake = api.read.inputs.brake_raw()
+            if raw_brake > 0:
+                raw_brake *= 100
+                bbias = api.read.brake.bias_front()
+                raw_brake_f = raw_brake * bbias
+                raw_brake_r = raw_brake * (1 - bbias)
+                brake_inputs = raw_brake_f, raw_brake_f, raw_brake_r, raw_brake_r
+            else:
+                brake_inputs = WHEELS_ZERO
+
+        for idx, bar_bpres in enumerate(self.bars_bpres):
+            self.update_bpres(bar_bpres, brake_pressure[idx], brake_inputs[idx])
+
+    # GUI update methods
+    def update_bpres(self, target, data, inputs):
+        """Brake pressure"""
+        if target.last != data:
+            target.last = data
+            if inputs != -1:
+                target.update_maxrange(inputs)
+            target.update_input(data)

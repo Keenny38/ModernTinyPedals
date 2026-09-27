@@ -1,0 +1,44 @@
+﻿# ignore list
+
+/dist/
+__pycache__/
+
+# User data folder
+/brandlogo/
+/deltabest/
+/settings/
+/trackmap/
+/pacenotes/
+/tracknotes/
+/carsetups/
+
+# pipenv stuff
+Pipfile
+Pipfile.lock
+
+# pylint stuff
+pylintrc
+
+# local config file
+*.json
+*.csv
+*.fuel
+
+# random file
+/test*.py
+*.7z
+*.zip
+*.log
+*.db
+
+# build stuff
+/build/
+.venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# test output
+/tests/_render/
+coverage.xml
+.coverage

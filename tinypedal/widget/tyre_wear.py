@@ -1,0 +1,410 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Tyre Wear Widget
+"""
+
+from .. import calculation as calc
+from ..const_common import TEXT_NA
+from ..module_info import minfo
+from ._base import Overlay
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        if self.wcfg["show_caption"]:
+            font_cap = self.config_font(
+                self.wcfg["font_name"],
+                self.wcfg["font_size"] * self.wcfg["font_scale_caption"],
+                self.wcfg["font_weight"],
+            )
+            font_cap_m = self.get_font_metrics(font_cap)
+
+        # Config variable
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        bar_width = font_m.width * 4 + bar_padx
+
+        # Remaining tyre tread
+        if self.wcfg["show_remaining"]:
+            layout_remain = self.set_grid_layout()
+            self.bar_style_remain = (
+                self.wcfg["font_color_remaining"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_remain = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_remain[0],
+                bg_color=self.wcfg["background_color_remaining"],
+                count=4,
+                last=0,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_remain,
+                targets=self.bars_remain,
+            )
+            self.set_primary_orient(
+                target=layout_remain,
+                column=self.wcfg["display_order_remaining"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_remain = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_remaining"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_remain.addWidget(cap_remain, 0, 0, 1, 0)
+
+        # Wear difference
+        if self.wcfg["show_wear_difference"]:
+            layout_diff = self.set_grid_layout()
+            self.bar_style_diff = (
+                self.wcfg["font_color_wear_difference"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_diff = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_diff[0],
+                bg_color=self.wcfg["background_color_wear_difference"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_diff,
+                targets=self.bars_diff,
+            )
+            self.set_primary_orient(
+                target=layout_diff,
+                column=self.wcfg["display_order_wear_difference"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_diff = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_wear_difference"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_diff.addWidget(cap_diff, 0, 0, 1, 0)
+
+        # Live wear difference
+        if self.wcfg["show_live_wear_difference"]:
+            layout_live = self.set_grid_layout()
+            self.bar_style_live = (
+                self.wcfg["font_color_live_wear_difference"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_live = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_live[0],
+                bg_color=self.wcfg["background_color_live_wear_difference"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_live,
+                targets=self.bars_live,
+            )
+            self.set_primary_orient(
+                target=layout_live,
+                column=self.wcfg["display_order_live_wear_difference"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_live = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_live_wear_difference"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_live.addWidget(cap_live, 0, 0, 1, 0)
+
+        # Flat spot wear
+        if self.wcfg["show_flat_spot"]:
+            layout_lock = self.set_grid_layout()
+            self.bar_style_lock = (
+                self.wcfg["font_color_flat_spot"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_lock = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_lock[0],
+                bg_color=self.wcfg["background_color_flat_spot"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_lock,
+                targets=self.bars_lock,
+            )
+            self.set_primary_orient(
+                target=layout_lock,
+                column=self.wcfg["display_order_flat_spot"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_lock = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_flat_spot"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_lock.addWidget(cap_lock, 0, 0, 1, 0)
+
+        # Estimated lifespan in laps
+        if self.wcfg["show_lifespan_laps"]:
+            layout_laps = self.set_grid_layout()
+            self.bar_style_laps = (
+                self.wcfg["font_color_lifespan_laps"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_laps = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_laps[0],
+                bg_color=self.wcfg["background_color_lifespan_laps"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_laps,
+                targets=self.bars_laps,
+            )
+            self.set_primary_orient(
+                target=layout_laps,
+                column=self.wcfg["display_order_lifespan_laps"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_laps = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_lifespan_laps"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_laps.addWidget(cap_laps, 0, 0, 1, 0)
+
+        # Estimated lifespan in minutes
+        if self.wcfg["show_lifespan_minutes"]:
+            layout_mins = self.set_grid_layout()
+            self.bar_style_mins = (
+                self.wcfg["font_color_lifespan_minutes"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_mins = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_mins[0],
+                bg_color=self.wcfg["background_color_lifespan_minutes"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_mins,
+                targets=self.bars_mins,
+            )
+            self.set_primary_orient(
+                target=layout_mins,
+                column=self.wcfg["display_order_lifespan_minutes"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_mins = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_lifespan_minutes"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_mins.addWidget(cap_mins, 0, 0, 1, 0)
+
+        # Estimated end stint remaining tyre tread
+        if self.wcfg["show_end_stint_remaining"]:
+            layout_end = self.set_grid_layout()
+            self.bar_style_end = (
+                self.wcfg["font_color_end_stint_remaining"],
+                self.wcfg["font_color_warning"],
+            )
+            self.bars_end = self.set_rawtext(
+                text=TEXT_NA,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.bar_style_end[0],
+                bg_color=self.wcfg["background_color_end_stint_remaining"],
+                count=4,
+            )
+            self.set_grid_layout_quad(
+                layout=layout_end,
+                targets=self.bars_end,
+            )
+            self.set_primary_orient(
+                target=layout_end,
+                column=self.wcfg["display_order_end_stint_remaining"],
+            )
+
+            if self.wcfg["show_caption"]:
+                cap_end = self.set_rawtext(
+                    font=font_cap,
+                    text=self.wcfg["caption_text_end_stint_remaining"],
+                    fixed_height=font_cap_m.height,
+                    offset_y=font_cap_m.voffset,
+                    fg_color=self.wcfg["font_color_caption"],
+                    bg_color=self.wcfg["background_color_caption"],
+                )
+                layout_end.addWidget(cap_end, 0, 0, 1, 0)
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        laptime_pace = minfo.delta.lapTimePace
+        if minfo.energy.available:
+            est_runlaps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
+        else:
+            est_runlaps = minfo.fuel.estimatedLaps
+
+        for idx in range(4):
+            tread_curr = minfo.wheels.currentTreadDepth[idx]
+            est_valid_wear = minfo.wheels.estimatedValidTreadWear[idx]
+
+            # Remaining tyre tread
+            if self.wcfg["show_remaining"]:
+                self.update_remain(self.bars_remain[idx], tread_curr)
+
+            # Wear differences
+            if self.wcfg["show_wear_difference"]:
+                self.update_diff(self.bars_diff[idx], minfo.wheels.estimatedTreadWear[idx])
+
+            # Live wear difference
+            if self.wcfg["show_live_wear_difference"]:
+                self.update_live(self.bars_live[idx], minfo.wheels.currentLapTreadWear[idx])
+
+            # Flat spot wear
+            if self.wcfg["show_flat_spot"]:
+                self.update_lock(self.bars_lock[idx], minfo.wheels.lockingTreadWear[idx])
+
+            # Estimated lifespan in laps
+            if self.wcfg["show_lifespan_laps"]:
+                wear_laps = calc.wear_lifespan_in_laps(tread_curr, est_valid_wear)
+                self.update_laps(self.bars_laps[idx], wear_laps)
+
+            # Estimated lifespan in minutes
+            if self.wcfg["show_lifespan_minutes"]:
+                wear_mins = calc.wear_lifespan_in_mins(tread_curr, est_valid_wear, laptime_pace)
+                self.update_mins(self.bars_mins[idx], wear_mins)
+
+            # Estimated end stint remaining tyre tread
+            if self.wcfg["show_end_stint_remaining"]:
+                end_remain = calc.end_stint_tread(tread_curr, est_valid_wear, est_runlaps)
+                self.update_end(self.bars_end[idx], end_remain)
+
+    # GUI update methods
+    def update_remain(self, target, data):
+        """Remaining tyre tread"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_remain[data <= self.wcfg["warning_threshold_remaining"]]
+            target.update()
+
+    def update_diff(self, target, data):
+        """Wear differences"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_diff[data > self.wcfg["warning_threshold_wear"]]
+            target.update()
+
+    def update_live(self, target, data):
+        """Live wear differences"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_live[data > self.wcfg["warning_threshold_wear"]]
+            target.update()
+
+    def update_lock(self, target, data):
+        """Flat spot wear"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_lock[data > self.wcfg["warning_threshold_wear"]]
+            target.update()
+
+    def update_laps(self, target, data):
+        """Estimated lifespan in laps"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_laps[data <= self.wcfg["warning_threshold_laps"]]
+            target.update()
+
+    def update_mins(self, target, data):
+        """Estimated lifespan in minutes"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_mins[data <= self.wcfg["warning_threshold_minutes"]]
+            target.update()
+
+    def update_end(self, target, data):
+        """End stint remaining tyre tread"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.2f}"[:4].strip(".")
+            target.fg = self.bar_style_end[data <= self.wcfg["warning_threshold_remaining"]]
+            target.update()

@@ -1,0 +1,129 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Default module setting template
+
+Module key name must match corresponding file name in 'module' folder
+"""
+
+
+MODULE_DEFAULT = {
+    "module_delta": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "minimum_delta_distance": 5,
+        "delta_smoothing_samples": 30,
+        "laptime_pace_samples": 6,
+        "laptime_pace_margin": 5,
+    },
+    "module_force": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "gravitational_acceleration": 9.80665,
+        "maximum_g_force_reset_delay": 5,
+        "maximum_average_g_force_samples": 10,
+        "maximum_average_g_force_difference": 0.2,
+        "maximum_average_g_force_reset_delay": 30,
+        "maximum_braking_rate_reset_delay": 60,
+    },
+    "module_fuel": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "minimum_delta_distance": 5,
+        "fuel_density": 0.75,
+    },
+    "module_hybrid": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "minimum_delta_distance": 5,
+    },
+    "module_mapping": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+    },
+    "module_notes": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+    },
+    "module_relative": {
+        "enable": True,
+        "update_interval": 100,
+        "idle_update_interval": 400,
+    },
+    "module_sectors": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+    },
+    "module_stats": {
+        "enable": True,
+        "update_interval": 200,
+        "idle_update_interval": 400,
+        "vehicle_classification": "Class - Brand",
+        "enable_podium_by_class": True,
+    },
+    "module_recorder": {
+        "enable": False,
+        "update_interval": 20,
+        "idle_update_interval": 400,
+        "minimum_lap_distance_percentage": 90,
+        "number_of_saved_laps_per_track": 50,
+        "save_invalid_laps": True,
+    },
+    "module_stint": {
+        "enable": True,
+        "update_interval": 100,
+        "idle_update_interval": 400,
+        "minimum_stint_threshold_minutes": 10,
+        "minimum_pitstop_threshold_seconds": 3,
+        "minimum_tyre_temperature_threshold": 55,
+    },
+    "module_vehicles": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "lap_difference_ahead_threshold": 0.9,
+        "lap_difference_behind_threshold": 0.9,
+        "finish_time_difference_threshold": 200,
+    },
+    "module_wheels": {
+        "enable": True,
+        "update_interval": 10,
+        "idle_update_interval": 400,
+        "minimum_axle_rotation": 4,
+        "maximum_rotation_difference_front": 0.002,
+        "maximum_rotation_difference_rear": 0.002,
+        "wheel_lock_threshold": 0.3,
+        "minimum_delta_distance": 5,
+        "average_suspension_position_samples": 20,
+        "average_suspension_position_margin": 1,
+        "enable_suspension_measurement_while_offroad": False,
+        "wheel_lift_off_threshold": 1,
+        "estimated_unsprung_weight": 200,
+        "minimum_static_weight_override": -1,
+    },
+}
+
+MODULE_FILENAME = tuple(MODULE_DEFAULT)

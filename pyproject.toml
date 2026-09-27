@@ -1,0 +1,86 @@
+[project]
+name = "tinypedal"
+dynamic = ["version"]
+description = "Free and Open Source telemetry overlay application for racing simulation"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.10"
+dependencies = [
+    "psutil>=6.1",
+    "PySide6>=6.8,<7",
+    "pyxdg; sys_platform == 'linux'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=6",
+    "pre-commit>=3",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+build = [
+    "pyinstaller>=6.10",
+]
+vr = [
+    "openvr>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/TinyPedal/TinyPedal"
+Wiki = "https://github.com/TinyPedal/TinyPedal/wiki"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tinypedal*", "pyLMUSharedMemory*", "pyRfactor2SharedMemory*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tinypedal.version.__version__" }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = ["pyLMUSharedMemory", "pyRfactor2SharedMemory"]
+
+[tool.ruff.lint]
+# pyflakes, bugbear, simplify, pylint errors, pyupgrade
+select = ["E9", "F", "B", "SIM", "PIE", "RUF", "PLE", "UP", "I"]
+ignore = [
+    "SIM102",   # nested if kept when clearer (confirmation, grouped checks)
+    "SIM103",   # explicit return True/False kept when clearer
+    "SIM108",   # if-else block preferred over ternary for long expressions
+    "SIM113",   # manual counter kept in hot loops
+    "SIM114",   # separate branches kept when they document different cases
+    "RUF023",   # __slots__ grouped by meaning, not sorted
+    "B905",     # zip() strict not needed, lengths are known
+    "RUF012",   # class-level constant mappings
+    "F403",     # widget & module registry uses star import
+    "PLE0605",  # widget & module registry __all__ built dynamically
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+exclude = ["pyLMUSharedMemory/", "pyRfactor2SharedMemory/", "tests/"]
+follow_imports = "silent"
+# Blocking checks only for high-signal errors, other categories are reported by `mypy --enable-error-code`
+# Re-enabled so far: call-overload, index, operator, override, return-value
+disable_error_code = [
+    "arg-type", "assignment", "attr-defined", "union-attr", "misc", "has-type",
+    "var-annotated", "type-arg", "no-redef",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["tinypedal"]
+omit = ["tinypedal/i18n/fr.py"]
+
+[tool.coverage.report]
+skip_empty = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]

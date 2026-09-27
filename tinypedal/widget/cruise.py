@@ -1,0 +1,179 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Cruise Widget
+"""
+
+from .. import calculation as calc
+from .. import units
+from ..api_control import api
+from ..const_common import COMPASS_BEARINGS
+from ..module_info import minfo
+from ._base import Overlay
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config variable
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        self.odm_digits = max(int(self.wcfg["odometer_maximum_digits"]), 1)
+        if self.cfg.units["odometer_unit"] == "Meter":
+            self.odm_digits += 0.0
+            self.odm_range = int(int(self.odm_digits) * "9")
+        else:
+            self.odm_range = float(self.odm_digits * "9") + 0.9
+            self.odm_digits += 2.1
+
+        # Config units
+        self.unit_dist = units.set_unit_distance(self.cfg.units["distance_unit"])
+        self.symbol_dist = units.set_symbol_distance(self.cfg.units["distance_unit"])
+        self.unit_odm = units.set_unit_distance(self.cfg.units["odometer_unit"])
+        self.symbol_odm = units.set_symbol_distance(self.cfg.units["odometer_unit"])
+
+        # Compass
+        if self.wcfg["show_compass"]:
+            text_compass = f"{180:03.0f}°{calc.select_grade(COMPASS_BEARINGS, 180):>2}"
+            self.bar_compass = self.set_rawtext(
+                text=text_compass,
+                width=font_m.width * len(text_compass) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_compass"],
+                bg_color=self.wcfg["background_color_compass"],
+            )
+            self.set_primary_orient(
+                target=self.bar_compass,
+                column=self.wcfg["display_order_compass"],
+            )
+
+        # Elevation
+        if self.wcfg["show_elevation"]:
+            text_elevation = f"↑{self.unit_dist(0):>5.0f}{self.symbol_dist}"
+            self.bar_elevation = self.set_rawtext(
+                text=text_elevation,
+                width=font_m.width * len(text_elevation) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_elevation"],
+                bg_color=self.wcfg["background_color_elevation"],
+            )
+            self.set_primary_orient(
+                target=self.bar_elevation,
+                column=self.wcfg["display_order_elevation"],
+            )
+
+        # Odometer
+        if self.wcfg["show_odometer"]:
+            text_odometer = f"{min(self.unit_odm(0), self.odm_range):>{self.odm_digits}f}{self.symbol_odm}"
+            self.bar_odometer = self.set_rawtext(
+                text=text_odometer,
+                width=font_m.width * len(text_odometer) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_odometer"],
+                bg_color=self.wcfg["background_color_odometer"],
+            )
+            self.set_primary_orient(
+                target=self.bar_odometer,
+                column=self.wcfg["display_order_odometer"],
+            )
+
+        # Distance into lap
+        if self.wcfg["show_distance_into_lap"]:
+            text_lap_distance = f"{self.unit_dist(0):>6.0f}{self.symbol_dist}"
+            self.bar_lap_distance = self.set_rawtext(
+                text=text_lap_distance,
+                width=font_m.width * len(text_lap_distance) + bar_padx,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_distance_into_lap"],
+                bg_color=self.wcfg["background_color_distance_into_lap"],
+            )
+            self.set_primary_orient(
+                target=self.bar_lap_distance,
+                column=self.wcfg["display_order_distance_into_lap"],
+            )
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        # Compass
+        if self.wcfg["show_compass"]:
+            orientation = api.read.vehicle.orientation_yaw_radians()
+            self.update_compass(self.bar_compass, orientation)
+
+        # Elevation
+        if self.wcfg["show_elevation"]:
+            elevation = api.read.vehicle.position_vertical()
+            self.update_elevation(self.bar_elevation, elevation)
+
+        # Odometer
+        if self.wcfg["show_odometer"]:
+            traveled_distance = int(minfo.stats.metersDriven)
+            self.update_odometer(self.bar_odometer, traveled_distance)
+
+        # Distance into lap
+        if self.wcfg["show_distance_into_lap"]:
+            lap_distance = minfo.delta.lapDistance
+            self.update_lap_distance(self.bar_lap_distance, lap_distance)
+
+    # GUI update methods
+    def update_compass(self, target, data):
+        """Compass"""
+        if target.last != data:
+            target.last = data
+            degree = 180 - calc.degrees(data)
+            target.text = f"{degree:03.0f}°{calc.select_grade(COMPASS_BEARINGS, degree):>2}"
+            target.update()
+
+    def update_elevation(self, target, data):
+        """Elevation"""
+        if target.last != data:
+            target.last = data
+            target.text = f"↑{self.unit_dist(data):>5.0f}{self.symbol_dist}"
+            target.update()
+
+    def update_odometer(self, target, data):
+        """Odometer"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{min(self.unit_odm(data), self.odm_range):>{self.odm_digits}f}{self.symbol_odm}"
+            target.update()
+
+    def update_lap_distance(self, target, data):
+        """Distance into lap"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{self.unit_dist(data):>6.0f}{self.symbol_dist}"
+            target.update()

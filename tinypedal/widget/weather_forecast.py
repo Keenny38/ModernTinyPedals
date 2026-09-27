@@ -1,0 +1,283 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Weather forecast Widget
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
+
+from .. import units
+from ..api_control import api
+from ..const_common import (
+    ABS_ZERO_CELSIUS,
+    MAX_FORECAST_MINUTES,
+    MAX_FORECASTS,
+    TEXT_NA,
+)
+from ..const_file import ImageFile
+from ..process.weather import WeatherNode
+from ..userfile.custom_image import split_pixmap_image
+from ._base import Overlay
+from ._painter import ProgressBar
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap_hori=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config variable
+        layout_reversed = self.wcfg["layout"] != 0
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        icon_size = max(self.wcfg["icon_size"], 16) // 2 * 2
+        self.total_slot = min(max(self.wcfg["number_of_forecasts"], 1), MAX_FORECASTS - 1) + 1
+        self.bar_width = max(font_m.width * 4 + bar_padx, icon_size)
+        self.bar_rain_height = max(self.wcfg["rain_chance_bar_height"], 1)
+
+        # Config units
+        self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
+
+        # Config canvas
+        self.pixmap_weather = create_weather_icon_set(icon_size)
+        self.pixmap_rainchance = QPixmap(self.bar_width, self.bar_rain_height)
+
+        # Estimated time
+        if self.wcfg["show_estimated_time"]:
+            self.bars_time = self.set_rawtext(
+                text=TEXT_NA,
+                fixed_width=self.bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_estimated_time"],
+                bg_color=self.wcfg["background_color_estimated_time"],
+                count=self.total_slot,
+            )
+            self.bars_time[0].text = "now"
+            self.set_grid_layout_table_row(
+                layout=layout,
+                targets=self.bars_time,
+                row=self.wcfg["display_order_estimated_time"],
+                right_to_left=layout_reversed,
+            )
+
+        # Ambient temperature
+        if self.wcfg["show_ambient_temperature"]:
+            self.bars_temp = self.set_rawtext(
+                text=TEXT_NA,
+                fixed_width=self.bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_ambient_temperature"],
+                bg_color=self.wcfg["background_color_ambient_temperature"],
+                count=self.total_slot,
+            )
+            self.set_grid_layout_table_row(
+                layout=layout,
+                targets=self.bars_temp,
+                row=self.wcfg["display_order_ambient_temperature"],
+                right_to_left=layout_reversed,
+            )
+
+        # Rain chance
+        if self.wcfg["show_rain_chance_bar"]:
+            self.bars_rain = tuple(
+                ProgressBar(
+                    self,
+                    font=font,
+                    text=TEXT_NA,
+                    width=self.bar_width,
+                    height=self.bar_rain_height,
+                    offset_x=0.5,
+                    offset_y=font_m.voffset,
+                    input_color=self.wcfg["rain_chance_bar_color"],
+                    fg_color=self.wcfg["font_color_rain_chance"],
+                    bg_color=self.wcfg["background_color_rain_chance_bar"],
+                    show_reading=self.wcfg["show_rain_chance_reading"],
+                ) for _ in range(self.total_slot)
+            )
+            self.set_grid_layout_table_row(
+                layout=layout,
+                targets=self.bars_rain,
+                row=self.wcfg["display_order_rain_chance_bar"],
+                right_to_left=layout_reversed,
+            )
+
+        # Forecast icon
+        self.bars_icon = self.set_rawimage(
+            image=self.pixmap_weather[-1],
+            fixed_width=self.bar_width,
+            fixed_height=icon_size,
+            bg_color=self.wcfg["background_color"],
+            count=self.total_slot,
+        )
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_icon,
+            row=self.wcfg["display_order_weather_icon"],
+            right_to_left=layout_reversed,
+        )
+
+        # Last data
+        self.estimated_time = [MAX_FORECAST_MINUTES] * MAX_FORECASTS
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        # Read weather data
+        finish_as_lap = api.read.session.finish_type() == 1
+        forecast_info = api.read.session.weather_forecast()
+        forecast_count = min(len(forecast_info), MAX_FORECASTS)
+
+        if forecast_count < 1:
+            return
+
+        if finish_as_lap:
+            index_offset = 0
+        else:  # time type race, add index offset to ignore negative estimated time
+            index_offset = self.set_forecast_time(forecast_info)
+
+        # Forecast
+        for index in range(self.total_slot):
+            index_bias = index + index_offset
+
+            # Update slot 0 with live(now) weather condition
+            if index == 0:
+                rain_chance = api.read.session.raininess()
+                icon_index = api.read.session.cloud_coverage()
+                estimated_temp = api.read.session.ambient_temperature()
+                estimated_time = 0
+            # Update slot with available forecast
+            elif index_bias < forecast_count:
+                rain_chance = forecast_info[index_bias].rain_chance
+                icon_index = forecast_info[index_bias].sky_type
+                estimated_temp = forecast_info[index_bias].temperature
+                if finish_as_lap:
+                    estimated_time = MAX_FORECAST_MINUTES
+                else:
+                    estimated_time = self.estimated_time[index_bias]
+            # Update slot with unavailable forecast
+            else:
+                rain_chance = 0
+                icon_index = -1
+                estimated_temp = ABS_ZERO_CELSIUS
+                estimated_time = MAX_FORECAST_MINUTES
+
+            self.update_weather_icon(self.bars_icon[index], icon_index, index)
+
+            if self.wcfg["show_estimated_time"] and index > 0:
+                self.update_estimated_time(self.bars_time[index], estimated_time)
+
+            if self.wcfg["show_ambient_temperature"]:
+                self.update_estimated_temp(self.bars_temp[index], estimated_temp)
+
+            if self.wcfg["show_rain_chance_bar"]:
+                self.update_rain_chance(self.bars_rain[index], rain_chance)
+
+    # GUI update methods
+    def update_estimated_time(self, target, data):
+        """Estimated time"""
+        if target.last != data:
+            target.last = data
+            if data >= MAX_FORECAST_MINUTES or data < 0:
+                time_text = TEXT_NA
+            elif data >= 60:
+                time_text = f"{data / 60:.1f}h"
+            else:
+                time_text = f"{data:.0f}m"
+            target.text = time_text
+            target.update()
+
+    def update_estimated_temp(self, target, data):
+        """Estimated temperature"""
+        if target.last != data:
+            target.last = data
+            if data > ABS_ZERO_CELSIUS:
+                temp_text = f"{self.unit_temp(data):.0f}°"
+            else:
+                temp_text = TEXT_NA
+            target.text = temp_text
+            target.update()
+
+    def update_rain_chance(self, target, data):
+        """Rain chance (fraction)"""
+        if target.last != data:
+            target.last = data
+            if target.show_reading:
+                target.text = f"{data:.0%}"
+            target.update_input(data)
+
+    def update_weather_icon(self, target, icon_index, slot_index):
+        """Weather icon, toggle visibility"""
+        if target.last != icon_index:
+            target.last = icon_index
+            if not 0 <= icon_index <= 10:
+                icon_index = -1
+            target.image = self.pixmap_weather[icon_index]
+            target.update()
+
+            if not self.wcfg["show_unavailable_data"] and slot_index > 0:  # skip first slot
+                unavailable = icon_index < 0
+                self.bars_icon[slot_index].setHidden(unavailable)
+                if self.wcfg["show_estimated_time"]:
+                    self.bars_time[slot_index].setHidden(unavailable)
+                if self.wcfg["show_ambient_temperature"]:
+                    self.bars_temp[slot_index].setHidden(unavailable)
+                if self.wcfg["show_rain_chance_bar"]:
+                    self.bars_rain[slot_index].setHidden(unavailable)
+
+    # Additional methods
+    def set_forecast_time(self, forecast_info: tuple[WeatherNode, ...]) -> int:
+        """Set forecast estimated time"""
+        index_offset = 0
+        session_length = api.read.session.end()
+        elapsed_time = api.read.session.elapsed()
+        for index, forecast in enumerate(forecast_info):
+            if index == 0:
+                continue
+            # Seconds away = next node start percent * session length - elapsed time
+            _time = self.estimated_time[index] = round(
+                (forecast.start * session_length - elapsed_time) / 60)
+            if _time <= 0:
+                index_offset += 1
+        return index_offset
+
+
+def create_weather_icon_set(icon_size: int):
+    """Create weather icon set"""
+    icon_source = QPixmap(ImageFile.WEATHER)
+    pixmap_icon = icon_source.scaledToWidth(icon_size * 12, mode=Qt.TransformationMode.SmoothTransformation)
+    return tuple(
+        split_pixmap_image(pixmap_icon, icon_size, h_offset)
+        for h_offset in range(12)
+    )

@@ -1,0 +1,411 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Relative finish order Widget
+"""
+
+from math import ceil
+
+from .. import calculation as calc
+from .. import units
+from ..api_control import api
+from ..const_common import (
+    ENERGY_TYPE_ID,
+    MAX_SECONDS,
+    RACELENGTH_TYPE_ID,
+    TEXT_PLACEHOLDER,
+)
+from ..module_info import minfo
+from ._base import Overlay
+
+
+class Realtime(Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+        layout = self.set_grid_layout(gap_hori=self.wcfg["bar_gap"])
+        self.set_primary_layout(layout=layout)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        font_cap = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"] * 0.8,
+            self.wcfg["font_weight"],
+        )
+        font_cap_m = self.get_font_metrics(font_cap)
+
+        # Config variable
+        layout_reversed = self.wcfg["layout"] != 0
+        bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
+        self.char_width = max(self.wcfg["bar_width"], 3)
+        bar_width = font_m.width * self.char_width + bar_padx
+        self.range_start = max(self.wcfg["near_start_range"], 0)
+        self.range_finish = max(self.wcfg["near_finish_range"], 0)
+        self.total_slot = min(max(self.wcfg["number_of_prediction"], 0), 10) + 3
+        self.leader_pit_time_set = list(self.create_pit_time_set(self.total_slot, "leader"))
+        self.player_pit_time_set = list(self.create_pit_time_set(self.total_slot, "player"))
+        self.decimals_laps = max(self.wcfg["decimal_places_laps"], 0)
+        self.decimals_refill = max(self.wcfg["decimal_places_refill"], 0)
+        self.extra_laps = max(self.wcfg["number_of_extra_laps"], 1)
+        self.refill_sign = "" if self.wcfg["show_absolute_refilling"] else "+"
+
+        # Config units
+        self.unit_fuel = units.set_unit_fuel(self.cfg.units["fuel_unit"])
+
+        # Leader pit time row
+        self.bars_pit_leader = self.set_rawtext(
+            font=font_cap,
+            width=bar_width,
+            fixed_height=font_cap_m.height,
+            offset_y=font_cap_m.voffset,
+            fg_color=self.wcfg["font_color_pit_time"],
+            bg_color=self.wcfg["background_color_pit_time"],
+            count=self.total_slot,
+        )
+        for _pit_time, target in zip(self.leader_pit_time_set, self.bars_pit_leader):
+            target.text = f"{_pit_time:.0f}s"
+        self.bars_pit_leader[0].text = "TIME"
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_pit_leader,
+            row=0,
+            right_to_left=layout_reversed,
+        )
+
+        # Leader lap row
+        self.leader_lap_color = (
+            self.wcfg["font_color_leader"],
+            self.wcfg["font_color_near_start"],
+            self.wcfg["font_color_near_finish"],
+        )
+        self.bars_lap_leader = self.set_rawtext(
+            text=TEXT_PLACEHOLDER,
+            width=bar_width,
+            fixed_height=font_m.height,
+            offset_y=font_m.voffset,
+            fg_color=self.leader_lap_color[0],
+            bg_color=self.wcfg["background_color_leader"],
+            count=self.total_slot,
+        )
+        self.bars_lap_leader[0].text = "LDR"
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_lap_leader,
+            row=1,
+            right_to_left=layout_reversed,
+        )
+
+        # Player lap row
+        self.player_lap_color = (
+            self.wcfg["font_color_player"],
+            self.wcfg["font_color_near_start"],
+            self.wcfg["font_color_near_finish"],
+        )
+        self.bars_lap_player = self.set_rawtext(
+            text=TEXT_PLACEHOLDER,
+            width=bar_width,
+            fixed_height=font_m.height,
+            offset_y=font_m.voffset,
+            fg_color=self.player_lap_color[0],
+            bg_color=self.wcfg["background_color_player"],
+            count=self.total_slot,
+        )
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_lap_player,
+            row=2,
+            right_to_left=layout_reversed,
+        )
+
+        # Player pit time row
+        self.bars_pit_player = self.set_rawtext(
+            font=font_cap,
+            width=bar_width,
+            fixed_height=font_cap_m.height,
+            offset_y=font_cap_m.voffset,
+            fg_color=self.wcfg["font_color_pit_time"],
+            bg_color=self.wcfg["background_color_pit_time"],
+            count=self.total_slot,
+        )
+        for _pit_time, target in zip(self.player_pit_time_set, self.bars_pit_player):
+            target.text = f"{_pit_time:.0f}s"
+        self.bars_pit_player[0].text = "DIFF"
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_pit_player,
+            row=3,
+            right_to_left=layout_reversed,
+        )
+
+        # Player refill row
+        self.bars_refill = self.set_rawtext(
+            text=TEXT_PLACEHOLDER,
+            width=bar_width,
+            fixed_height=font_m.height,
+            offset_y=font_m.voffset,
+            fg_color=self.wcfg["font_color_refill"],
+            bg_color=self.wcfg["background_color_refill"],
+            count=self.total_slot,
+        )
+        self.set_grid_layout_table_row(
+            layout=layout,
+            targets=self.bars_refill,
+            row=4,
+            right_to_left=layout_reversed,
+        )
+
+        # Player extra lap refill row
+        if self.wcfg["show_extra_refilling"]:
+            self.bars_refill_extra = self.set_rawtext(
+                text=TEXT_PLACEHOLDER,
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_refill"],
+                bg_color=self.wcfg["background_color_refill"],
+                count=self.total_slot,
+            )
+            self.bars_refill_extra[0].text = f"EX+{self.extra_laps}"
+            self.set_grid_layout_table_row(
+                layout=layout,
+                targets=self.bars_refill_extra,
+                row=5,
+                right_to_left=layout_reversed,
+            )
+
+        # Last data
+        self.relative_lap_offset = -MAX_SECONDS
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        pre_race = api.read.session.pre_race()
+        energy_type = minfo.energy.available
+
+        leader_index = minfo.vehicles.leaderIndex
+        player_index = minfo.vehicles.playerIndex
+        leader_lap_into = api.read.lap.progress(leader_index)
+        player_lap_into = api.read.lap.progress()
+
+        leader_laptime_pace = minfo.vehicles.dataSet[leader_index].lapTimeHistory.average
+        player_laptime_pace = minfo.delta.lapTimePace
+
+        leader_valid = 0 < leader_laptime_pace < MAX_SECONDS
+        player_valid = 0 < player_laptime_pace < MAX_SECONDS
+
+        finish_as_lap = api.read.session.finish_type(minfo.vehicles.finishAsLap) > 0
+
+        if finish_as_lap and leader_valid and player_valid:
+            laps_total = api.read.lap.maximum()
+            leader_laps_left = laps_total - api.read.lap.completed_laps(leader_index) - leader_lap_into
+            player_laps_left = laps_total - api.read.lap.completed_laps() - player_lap_into
+            time_left = min(leader_laptime_pace, player_laptime_pace) * leader_laps_left
+            laps_diff = player_laps_left - (time_left / player_laptime_pace)
+        else:
+            time_left = api.read.session.remaining() - minfo.vehicles.finishTimeOffset
+            laps_diff = 0
+
+        # Update last pit time slot
+        self.leader_pit_time_set[-1] = minfo.vehicles.dataSet[leader_index].pitTimer.elapsed
+        self.update_pit_time(self.bars_pit_leader[-1], self.leader_pit_time_set[-1])
+
+        self.player_pit_time_set[-1] = minfo.vehicles.dataSet[player_index].pitTimer.elapsed
+        self.update_pit_time(self.bars_pit_player[-1], self.player_pit_time_set[-1])
+
+        # Get remaining fuel/energy & consumption
+        consumption = minfo.energy if energy_type else minfo.fuel
+        fuel_in_tank = 0 if self.wcfg["show_absolute_refilling"] else consumption.amountCurrent
+        fuel_consumption = consumption.estimatedValidConsumption
+
+        # Update race & refill type
+        self.update_energy_type(self.bars_refill[0], energy_type)
+        self.update_race_type(self.bars_pit_leader[0], finish_as_lap)
+
+        # Update lap progress difference (fraction) between leader and player
+        if MAX_SECONDS > player_laptime_pace > leader_laptime_pace > 0:
+            lap_diff = (player_laptime_pace - leader_laptime_pace) / player_laptime_pace
+        else:
+            lap_diff = 0
+        self.update_lap_int(self.bars_lap_player[0], lap_diff)
+
+        # Update slots
+        for index in range(1, self.total_slot):
+            # Predicate player
+            if not player_valid:
+                lap_final, player_hi_range, full_laps_left = -MAX_SECONDS, 0, 0
+            elif finish_as_lap and index > 1:
+                lap_final = calc.lap_progress_offset(  # relative lap offset based on 0s column
+                    player_laptime_pace, self.relative_lap_offset, self.player_pit_time_set[index])
+                player_hi_range = self.set_highlight_range(player_laptime_pace, lap_final % 1)
+                full_laps_left = 0
+            else:  # time-type race
+                lap_into_offset = calc.lap_progress_offset(
+                    player_laptime_pace, player_lap_into, self.player_pit_time_set[index])
+                lap_remaining = calc.end_timer_laps_remain(
+                    lap_into_offset, player_laptime_pace, time_left)
+                lap_final = lap_remaining % 1
+                player_hi_range = self.set_highlight_range(player_laptime_pace, lap_final)
+                full_laps_left = calc.time_type_laps_remain(ceil(lap_remaining), player_lap_into)
+            self.update_lap_player(self.bars_lap_player[index], lap_final, player_hi_range)
+
+            if index == 1:  # store relative lap offset
+                self.relative_lap_offset = lap_final
+
+            # Player refill
+            if ((finish_as_lap and index != 1)
+                or pre_race or not leader_valid or not player_valid):
+                refill_player = -MAX_SECONDS
+            else:
+                refill_player = calc.total_fuel_needed(
+                    full_laps_left,
+                    fuel_consumption,
+                    fuel_in_tank,
+                )
+            self.update_refill(self.bars_refill[index], refill_player, energy_type)
+
+            # Player refill extra
+            if self.wcfg["show_extra_refilling"]:
+                if refill_player == -MAX_SECONDS:
+                    refill_extra = -MAX_SECONDS
+                else:
+                    refill_extra = calc.total_fuel_needed(
+                        full_laps_left + self.extra_laps,  # add extra laps
+                        fuel_consumption,
+                        fuel_in_tank,
+                    )
+                self.update_refill(self.bars_refill_extra[index], refill_extra, energy_type)
+
+            # Predicate leader
+            if not leader_valid or player_index == leader_index:
+                leader_lap_final, leader_hi_range = -MAX_SECONDS, 0
+            elif finish_as_lap:
+                # Lap-type final lap progress + lap difference from leader
+                # Round up laps difference for relative final lap progress against player
+                leader_lap_final = calc.lap_progress_offset(
+                    leader_laptime_pace, ceil(laps_diff), self.leader_pit_time_set[index])
+                leader_hi_range = self.set_highlight_range(
+                    leader_laptime_pace, leader_lap_final % 1)
+            else:  # time-type race
+                leader_lap_into_offset = calc.lap_progress_offset(
+                    leader_laptime_pace, leader_lap_into, self.leader_pit_time_set[index])
+                leader_lap_remaining = calc.end_timer_laps_remain(
+                    leader_lap_into_offset, leader_laptime_pace, time_left)
+                leader_lap_final = leader_lap_remaining % 1
+                leader_hi_range = self.set_highlight_range(
+                    leader_laptime_pace, leader_lap_final)
+            self.update_lap_leader(
+                self.bars_lap_leader[index], leader_lap_final, leader_hi_range)
+
+    # GUI update methods
+    def update_lap_leader(self, target, data, highlight):
+        """Leader final lap progress"""
+        if target.last != data:
+            target.last = data
+            if data > -MAX_SECONDS:
+                lap_text = f"{data:.{self.decimals_laps}f}"[:self.char_width]
+            else:
+                lap_text = TEXT_PLACEHOLDER
+            target.text = lap_text
+            target.fg = self.leader_lap_color[highlight]
+            target.update()
+
+    def update_lap_player(self, target, data, highlight):
+        """Player final lap progress"""
+        if target.last != data:
+            target.last = data
+            if data > -MAX_SECONDS:
+                lap_text = f"{data:.{self.decimals_laps}f}"[:self.char_width]
+            else:
+                lap_text = TEXT_PLACEHOLDER
+            target.text = lap_text
+            target.fg = self.player_lap_color[highlight]
+            target.update()
+
+    def update_lap_int(self, target, data):
+        """Lap progress difference"""
+        if target.last != data:
+            target.last = data
+            if data > 0:
+                lap_text = f"{data:.{self.decimals_laps}f}"[:self.char_width]
+            else:
+                lap_text = TEXT_PLACEHOLDER
+            target.text = lap_text
+            target.update()
+
+    def update_pit_time(self, target, data):
+        """Leader or player pit time"""
+        if target.last != data:
+            target.last = data
+            target.text = f"{data:.0f}s"
+            target.update()
+
+    def update_race_type(self, target, data):
+        """Race type"""
+        if target.last != data:
+            target.last = data
+            target.text = RACELENGTH_TYPE_ID[data]
+            target.update()
+
+    def update_energy_type(self, target, data):
+        """Energy type"""
+        if target.last != data:
+            target.last = data
+            target.text = ENERGY_TYPE_ID[data > 0]
+            target.update()
+
+    def update_refill(self, target, data, energy_type):
+        """Player refill"""
+        if target.last != data:
+            target.last = data
+            if data > -MAX_SECONDS:
+                if not energy_type:
+                    data = self.unit_fuel(data)
+                refill_text = f"{data:{self.refill_sign}.{self.decimals_refill}f}"[:self.char_width].strip(".")
+            else:
+                refill_text = TEXT_PLACEHOLDER
+            target.text = refill_text
+            target.update()
+
+    # Additional methods
+    def create_pit_time_set(self, total_slot, suffix):
+        """Create pit time set"""
+        yield 0  # reserved first 2 slots
+        yield 0
+        for index in range(total_slot - 3):
+            yield max(self.wcfg[f"prediction_{index + 1}_{suffix}_pit_time"], 0)
+        yield 0  # reserved last slot
+
+    def set_highlight_range(self, laptime_pace, lap_final):
+        """Final lap highlight range"""
+        if laptime_pace > 0:
+            range_limit = laptime_pace / 3  # limit max range to 1/3 of laptime pace
+            if lap_final < min(self.range_start, range_limit) / laptime_pace:
+                return 1  # near start
+            if lap_final > 1 - min(self.range_finish, range_limit) / laptime_pace:
+                return -1  # near finish
+        return 0

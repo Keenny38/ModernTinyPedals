@@ -1,0 +1,26 @@
+# Run checks before each commit: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-json
+        exclude: ^(settings|deltabest|trackmap)/
+      - id: check-yaml
+      - id: end-of-file-fixer
+        files: \.py$
+      - id: trailing-whitespace
+        files: \.py$
+      - id: check-merge-conflict
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: python -m mypy tinypedal
+        language: system
+        pass_filenames: false
+        files: ^tinypedal/.*\.py$
