@@ -25,10 +25,16 @@ Plugin layout (in "plugins" folder next to TinyPedal):
 
 Plugin is registered as "plugin_<name>" widget. Plugins run as normal Python code,
 only install plugins from trusted source.
+
+Plugin code is only executed after user trusted it (Plugin Manager, or install from zip).
+Trust is bound to SHA-256 digest of all Python files in plugin folder, so any code change
+requires trusting again. Digests are stored in config folder, plugins shipped with TinyPedal
+are trusted by digest listed in BUNDLED_PLUGINS.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import logging
@@ -58,6 +64,12 @@ PLUGIN_BASE_DEFAULT = MappingProxyType({
 _valid_name = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 PLUGIN_ERRORS: dict[str, str] = {}  # widget name: last loading error
 ALLOWED_PACKAGE_FILES = (".py", ".json", ".png", ".svg", ".txt", ".md")
+TRUST_FILE = "plugin_trust.json"
+UNTRUSTED_ERROR = "Not trusted: review plugin code, then trust it in Plugin Manager"
+# Plugins shipped with TinyPedal: widget name: plugin digest
+BUNDLED_PLUGINS = MappingProxyType({
+    "plugin_example_speed": "599d71d9f3644b7e02fe0efb2722d802a70eecd45a2d7c25a407bbb12a67c36f",
+})
 
 
 def discover_plugins(folder: str = PLUGIN_FOLDER) -> dict[str, str]:
@@ -94,10 +106,90 @@ def load_plugin_defaults(folder: str = PLUGIN_FOLDER) -> dict[str, dict]:
     return defaults
 
 
+def plugin_path(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
+    """Plugin folder path from widget name"""
+    return os.path.join(folder, widget_name[len(PLUGIN_PREFIX):])
+
+
+def plugin_code_files(path: str) -> list[str]:
+    """Relative path of all Python files in plugin folder, sorted"""
+    code_files = []
+    for root, dirs, files in os.walk(path):
+        dirs[:] = sorted(name for name in dirs if name != "__pycache__")
+        for name in sorted(files):
+            if name.endswith(".py"):
+                code_files.append(os.path.relpath(os.path.join(root, name), path).replace("\\", "/"))
+    return code_files
+
+
+def plugin_digest(path: str) -> str:
+    """SHA-256 digest of all Python files in plugin folder (relative path & content, line ending neutral)"""
+    digest = hashlib.sha256()
+    for relative in plugin_code_files(path):
+        with open(os.path.join(path, relative), "rb") as file:
+            content = file.read().replace(b"\r\n", b"\n")
+        digest.update(relative.encode("utf-8") + b"\0" + content + b"\0")
+    return digest.hexdigest()
+
+
+def trust_filename() -> str:
+    """Trusted plugin digest file (config folder)"""
+    from .setting import cfg  # late import, setting imports plugin defaults
+
+    return f"{cfg.path.config}{TRUST_FILE}"
+
+
+def load_trusted() -> dict[str, str]:
+    """Load trusted plugin digests, empty if missing or invalid"""
+    try:
+        with open(trust_filename(), encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(name): str(digest) for name, digest in data.items()}
+
+
+def is_trusted(widget_name: str, folder: str = PLUGIN_FOLDER) -> bool:
+    """Check if plugin code matches trusted digest"""
+    digest = plugin_digest(plugin_path(widget_name, folder))
+    return digest in (BUNDLED_PLUGINS.get(widget_name), load_trusted().get(widget_name))
+
+
+def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
+    """Trust current plugin code, returns digest
+
+    Raises:
+        OSError: unable to save trust file.
+    """
+    digest = plugin_digest(plugin_path(widget_name, folder))
+    trusted = load_trusted()
+    trusted[widget_name] = digest
+    filename = trust_filename()
+    temp_filename = f"{filename}.tmp"
+    with open(temp_filename, "w", encoding="utf-8") as file:
+        json.dump(trusted, file, indent=4, sort_keys=True)
+    os.replace(temp_filename, filename)
+    logger.info("PLUGIN: trusted %s (%s)", widget_name, digest[:12])
+    return digest
+
+
 def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLDER) -> ModuleType:
     """Load plugin widget module as "<package>.<widget_name>", or error placeholder if failed"""
     module_name = f"{package}.{widget_name}"
-    path = os.path.join(folder, widget_name[len(PLUGIN_PREFIX):], "widget.py")
+    path = os.path.join(plugin_path(widget_name, folder), "widget.py")
+    try:
+        trusted = is_trusted(widget_name, folder)
+    except OSError as error:
+        trusted = False
+        logger.error("PLUGIN: unable to read %s code: %s", widget_name, error)
+    if not trusted:
+        logger.warning("PLUGIN: %s not trusted, code not loaded", widget_name)
+        PLUGIN_ERRORS[widget_name] = UNTRUSTED_ERROR
+        placeholder = error_placeholder(module_name, widget_name, UNTRUSTED_ERROR)
+        sys.modules[module_name] = placeholder
+        return placeholder
     try:
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:

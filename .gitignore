@@ -1,4 +1,4 @@
-﻿# ignore list
+# ignore list
 
 /dist/
 __pycache__/
@@ -21,6 +21,7 @@ pylintrc
 
 # local config file
 *.json
+!/plugins/*/setting.json
 *.csv
 *.fuel
 

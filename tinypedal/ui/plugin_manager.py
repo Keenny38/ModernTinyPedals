@@ -17,11 +17,12 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Plugin manager: list widget plugins, show errors, enable, hot reload, install
+Plugin manager: list widget plugins, show errors, enable, trust, hot reload, install
 """
 
 from __future__ import annotations
 
+import html
 import os
 
 from PySide6.QtCore import QUrl
@@ -45,9 +46,14 @@ from ..plugin_loader import (
     PLUGIN_ERRORS,
     PLUGIN_FOLDER,
     PLUGIN_PREFIX,
+    UNTRUSTED_ERROR,
     discover_plugins,
     install_plugin_package,
     load_plugin_widget,
+    plugin_code_files,
+    plugin_digest,
+    plugin_path,
+    trust_plugin,
 )
 from ..setting import cfg
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
@@ -59,6 +65,8 @@ def plugin_status(widget_name: str) -> tuple[str, str]:
     """Plugin status text & detail"""
     if widget_name not in wctrl.names:
         return tr("Restart required"), tr("Plugin found after start, restart TinyPedal to load it.")
+    if PLUGIN_ERRORS.get(widget_name) == UNTRUSTED_ERROR:
+        return tr("Not trusted"), tr(UNTRUSTED_ERROR)
     if widget_name in PLUGIN_ERRORS:
         return tr("Error"), PLUGIN_ERRORS[widget_name]
     return tr("Loaded"), ""
@@ -97,6 +105,8 @@ class PluginManager(BaseDialog):
 
         button_toggle = CompactButton(tr("Enable / Disable"))
         button_toggle.clicked.connect(self.toggle_selected)
+        button_trust = CompactButton(tr("Trust..."))
+        button_trust.clicked.connect(self.trust_selected)
         button_reload = CompactButton(tr("Reload Code"))
         button_reload.clicked.connect(self.reload_selected)
         button_install = CompactButton(tr("Install..."))
@@ -107,7 +117,7 @@ class PluginManager(BaseDialog):
         button_close.clicked.connect(self.reject)
 
         layout_button = QHBoxLayout()
-        for button in (button_toggle, button_reload, button_install, button_folder):
+        for button in (button_toggle, button_trust, button_reload, button_install, button_folder):
             layout_button.addWidget(button)
         layout_button.addStretch(1)
         layout_button.addWidget(button_close)
@@ -172,6 +182,41 @@ class PluginManager(BaseDialog):
         self.refresh()
         self.show_detail()
 
+    def trust_selected(self):
+        """Show plugin code files & digest, trust after confirmation, then load code"""
+        name = self.selected_name()
+        if not name:
+            return
+        path = plugin_path(name)
+        try:
+            files = plugin_code_files(path)
+            digest = plugin_digest(path)
+        except OSError as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to read plugin:<br>{error}"))
+            return
+        file_list = "<br>".join(html.escape(file) for file in files) or "-"
+        if not self.confirm_operation(
+            tr("Trust..."),
+            (
+                "Plugins run as normal Python code with full access to your computer."
+                f"<br>Only trust <b>{name[len(PLUGIN_PREFIX):]}</b> if you reviewed its code or trust its author."
+                f"<br><br>Code files:<br>{file_list}<br><br>SHA-256: <code>{digest[:32]}<br>{digest[32:]}</code>"
+                "<br><br>Trust this plugin? Any later code change requires trusting again."
+            ),
+        ):
+            return
+        try:
+            trust_plugin(name)
+        except OSError as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save plugin trust:<br>{error}"))
+            return
+        if name in wctrl.names:
+            error = reload_plugin(name)
+            if error:
+                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{error}"))
+        self.refresh()
+        self.show_detail()
+
     def install(self):
         filename, _ = QFileDialog.getOpenFileName(self, tr("Install..."), "", "Zip (*.zip)")
         if not filename:
@@ -183,6 +228,7 @@ class PluginManager(BaseDialog):
             return
         try:
             name = install_plugin_package(filename)
+            trust_plugin(name)  # installing is confirmed by user above
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to install plugin:<br>{error}"))
             return

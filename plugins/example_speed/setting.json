@@ -1,0 +1,8 @@
+{
+    "enable": false,
+    "update_interval": 50,
+    "font_color": "#FFFFFF",
+    "background_color": "#222222",
+    "font_color_gear": "#000000",
+    "background_color_gear": "#FFAA00"
+}

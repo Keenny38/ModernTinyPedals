@@ -2,19 +2,38 @@
 
 import json
 
+import pytest
+
+from tinypedal import plugin_loader
 from tinypedal.plugin_loader import (
+    BUNDLED_PLUGINS,
     PLUGIN_BASE_DEFAULT,
+    PLUGIN_ERRORS,
+    UNTRUSTED_ERROR,
     discover_plugins,
+    is_trusted,
     load_plugin_defaults,
     load_plugin_widget,
+    plugin_digest,
+    trust_plugin,
 )
 
 
-def make_plugin(folder, name, widget_code, setting=None):
+@pytest.fixture(autouse=True)
+def trust_file(monkeypatch, tmp_path):
+    """Trusted plugin digests in tmp folder"""
+    filename = tmp_path / "plugin_trust.json"
+    monkeypatch.setattr(plugin_loader, "trust_filename", lambda: str(filename))
+    return filename
+
+
+def make_plugin(folder, name, widget_code, setting=None, trusted=True):
     path = folder / name
     path.mkdir(parents=True)
     (path / "setting.json").write_text(json.dumps(setting or {"font_color": "#FFFFFF"}), encoding="utf-8")
     (path / "widget.py").write_text(widget_code, encoding="utf-8")
+    if trusted:
+        trust_plugin(f"plugin_{name}", str(folder))
 
 
 def test_discover_and_defaults(tmp_path):
@@ -74,6 +93,7 @@ def test_plugin_error_recorded_and_cleared(tmp_path):
     load_plugin_widget("tinypedal.widget", "plugin_flaky", str(tmp_path))
     assert "bad value" in PLUGIN_ERRORS["plugin_flaky"]
     (tmp_path / "flaky" / "widget.py").write_text("Realtime = object", encoding="utf-8")
+    trust_plugin("plugin_flaky", str(tmp_path))  # code changed, trust again
     load_plugin_widget("tinypedal.widget", "plugin_flaky", str(tmp_path))
     assert "plugin_flaky" not in PLUGIN_ERRORS
 
@@ -119,3 +139,50 @@ def test_plugin_manager(ui_env):
         assert wctrl._module_pack[name] is not old_module  # code reloaded
     finally:
         manager.close()
+
+
+def test_untrusted_plugin_not_executed(tmp_path):
+    marker = tmp_path / "executed.txt"
+    make_plugin(tmp_path, "sneaky", f"open({str(marker)!r}, 'w').close()\nRealtime = object", trusted=False)
+    module = load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    assert not marker.exists()  # code never ran
+    assert module.Realtime.__doc__ == "Plugin error"
+    assert PLUGIN_ERRORS["plugin_sneaky"] == UNTRUSTED_ERROR
+    trust_plugin("plugin_sneaky", str(tmp_path))
+    load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    assert marker.exists() and "plugin_sneaky" not in PLUGIN_ERRORS
+
+
+def test_code_change_revokes_trust(tmp_path, trust_file):
+    make_plugin(tmp_path, "gauge", "Realtime = object")
+    assert is_trusted("plugin_gauge", str(tmp_path))
+    assert json.loads(trust_file.read_text(encoding="utf-8"))["plugin_gauge"] == plugin_digest(str(tmp_path / "gauge"))
+    (tmp_path / "gauge" / "helper.py").write_text("x = 1", encoding="utf-8")  # extra module counts too
+    assert not is_trusted("plugin_gauge", str(tmp_path))
+    trust_plugin("plugin_gauge", str(tmp_path))
+    (tmp_path / "gauge" / "widget.py").write_text("Realtime = int", encoding="utf-8")
+    assert not is_trusted("plugin_gauge", str(tmp_path))
+
+
+def test_digest_ignores_line_endings_and_cache(tmp_path):
+    make_plugin(tmp_path, "crlf", "a = 1\nRealtime = object\n", trusted=False)
+    digest = plugin_digest(str(tmp_path / "crlf"))
+    (tmp_path / "crlf" / "widget.py").write_bytes(b"a = 1\r\nRealtime = object\r\n")
+    (tmp_path / "crlf" / "__pycache__").mkdir()
+    (tmp_path / "crlf" / "__pycache__" / "junk.py").write_text("x", encoding="utf-8")
+    (tmp_path / "crlf" / "setting.json").write_text("{}", encoding="utf-8")  # not code
+    assert plugin_digest(str(tmp_path / "crlf")) == digest
+
+
+def test_invalid_trust_file(tmp_path, trust_file):
+    make_plugin(tmp_path, "gauge", "Realtime = object", trusted=False)
+    trust_file.write_text("[broken", encoding="utf-8")
+    assert not is_trusted("plugin_gauge", str(tmp_path))
+    trust_plugin("plugin_gauge", str(tmp_path))  # rewrites invalid file
+    assert is_trusted("plugin_gauge", str(tmp_path))
+
+
+def test_bundled_plugin_digest_up_to_date():
+    """Update BUNDLED_PLUGINS digest after editing a bundled plugin"""
+    for widget_name, digest in BUNDLED_PLUGINS.items():
+        assert plugin_digest(plugin_loader.plugin_path(widget_name)) == digest, widget_name
