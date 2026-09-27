@@ -21,10 +21,14 @@ Option labels & help (tooltips) for config dialogs
 
 Labels: generated per language (tools/gen_fr_options.py), English label is formatted from key.
 Help: generated from documentation (tools/gen_option_help.py), English only.
+Both are stored as JSON data files in "data" folder, loaded on first use.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
 from fnmatch import fnmatchcase
 from functools import lru_cache
@@ -32,14 +36,31 @@ from functools import lru_cache
 from ..formatter import format_module_name, format_option_name
 from . import current_language
 
+logger = logging.getLogger(__name__)
+
+DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+LABEL_LANGUAGES = ("fr",)  # languages with option label file: <code>_options.json
+
+
+def load_data(filename: str) -> dict:
+    """Load i18n JSON data file, empty dict if missing or invalid (UI falls back to English)"""
+    try:
+        with open(os.path.join(DATA_PATH, filename), encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError) as error:
+        logger.error("I18N: unable to load %s: %s", filename, error)
+        return {}
+    if not isinstance(data, dict):
+        logger.error("I18N: invalid data in %s", filename)
+        return {}
+    return data
+
 
 @lru_cache(maxsize=4)
 def _labels(code: str) -> dict[str, str]:
     """Option labels of language"""
-    if code == "fr":
-        from .fr_options import OPTIONS
-
-        return OPTIONS
+    if code in LABEL_LANGUAGES:
+        return load_data(f"{code}_options.json")
     return {}
 
 
@@ -65,9 +86,8 @@ def search_text(key: str) -> str:
 
 @lru_cache(maxsize=1)
 def _help() -> tuple[dict, str]:
-    from .option_help import COMMON, HELP
-
-    return HELP, COMMON
+    data = load_data("option_help.json")
+    return data.get("help", {}), data.get("common", "")
 
 
 # Generic words documented once in common terms, matched as part of other keys

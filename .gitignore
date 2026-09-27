@@ -22,6 +22,7 @@ pylintrc
 # local config file
 *.json
 !/plugins/*/setting.json
+!/tinypedal/i18n/data/*.json
 *.csv
 *.fuel
 

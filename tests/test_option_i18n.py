@@ -27,7 +27,10 @@ def test_french_labels(french):
 
 def test_every_option_has_french_label():
     """New options must be added by running tools/gen_fr_options.py"""
-    from tinypedal.i18n.fr_options import OPTIONS
+    from tinypedal.i18n.options import load_data
+
+    OPTIONS = load_data("fr_options.json")
+    assert OPTIONS
     from tinypedal.setting import cfg
 
     cfg.default.set_default()
@@ -54,3 +57,13 @@ def test_option_help():
     assert option_help("speedometer", "font_color_speed")  # generic "color"
     assert option_help("speedometer", "no_such_option") == ""
     assert "<i>no_such_option</i>" in option_tooltip("speedometer", "no_such_option")
+
+def test_missing_i18n_data_falls_back(monkeypatch, tmp_path):
+    from tinypedal.i18n import options
+
+    monkeypatch.setattr(options, "DATA_PATH", str(tmp_path))
+    assert options.load_data("fr_options.json") == {}
+    (tmp_path / "broken.json").write_text("[1", encoding="utf-8")
+    assert options.load_data("broken.json") == {}
+    (tmp_path / "list.json").write_text("[1]", encoding="utf-8")
+    assert options.load_data("list.json") == {}

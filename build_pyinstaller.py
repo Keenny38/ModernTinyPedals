@@ -93,6 +93,7 @@ def build_exe():
         f"--workpath={WORK_FOLDER}",
         f"--specpath={WORK_FOLDER}",
         "--optimize=2",
+        f"--add-data={os.path.abspath('tinypedal/i18n/data')}{os.pathsep}tinypedal/i18n/data",
         *(f"--exclude-module={name}" for name in EXCLUDE_MODULES),
     ])
     shutil.move(os.path.join(temp_dist, EXE_NAME), APP_FOLDER)

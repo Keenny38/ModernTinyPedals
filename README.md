@@ -193,8 +193,8 @@ For reproducible builds, `requirements-lock.txt` pins the tested versions.
 
 After adding options or editing documentation, regenerate French option names and tooltips:
 ```
-python tools/gen_fr_options.py
-python tools/gen_option_help.py
+python tools/gen_fr_options.py  # writes tinypedal/i18n/data/fr_options.json
+python tools/gen_option_help.py  # writes tinypedal/i18n/data/option_help.json
 ```
 
 ## Build Executable for Windows
