@@ -76,8 +76,8 @@ disable_error_code = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Manual tests need a running sim, run them with: pytest -m manual
-addopts = "-m 'not manual'"
+# Manual tests need a running sim (pytest -m manual), benchmark runs separately (pytest -m benchmark)
+addopts = "-m 'not manual and not benchmark'"
 markers = [
     "manual: requires running sim, skipped by default (pytest -m manual)",
     "benchmark: widget render timing, fails on large performance regression",

@@ -47,6 +47,10 @@ jobs:
     - name: Tests (with coverage)
       run: pytest -v --cov=tinypedal --cov-report=term --cov-report=xml:coverage.xml
 
+    - name: Widget benchmark
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+      run: pytest -m benchmark -q
+
     - name: Coverage summary
       if: always() && hashFiles('.coverage') != ''
       run: |
