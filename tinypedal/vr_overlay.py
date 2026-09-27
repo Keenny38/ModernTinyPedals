@@ -133,6 +133,7 @@ class VROverlay(QObject):
             self._overlay.showOverlay(self._handle)
             self._visible = True
         except Exception as error:  # SteamVR not running, or openvr error
+            logger.debug("VR overlay: init failed", exc_info=True)
             self.__fail(f"VR overlay unavailable: {error}")
             self.disable()
             return
@@ -178,7 +179,8 @@ class VROverlay(QObject):
             if not self._visible:
                 overlay.showOverlay(self._handle)
                 self._visible = True
-        except Exception as error:
+        except Exception as error:  # SteamVR closed, or openvr error
+            logger.debug("VR overlay: update failed", exc_info=True)
             self.__fail(f"VR overlay stopped: {error}")
             self.disable()
 

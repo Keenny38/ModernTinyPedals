@@ -88,15 +88,15 @@ def system_info() -> str:
                 f"Screen: {screen.name()} {geometry.width()}x{geometry.height()} "
                 f"scale {screen.devicePixelRatio():g}"
             )
-    except Exception:  # no GUI
-        pass
+    except Exception:  # no GUI, report must still be generated
+        logger.debug("BUG REPORT: screen info unavailable", exc_info=True)
     try:
         from .module_control import mctrl, wctrl
 
         lines.append(f"Active widgets: {', '.join(sorted(wctrl.active_modules)) or '-'}")
         lines.append(f"Active modules: {', '.join(sorted(mctrl.active_modules)) or '-'}")
-    except Exception:
-        pass
+    except Exception:  # module control not loaded, report must still be generated
+        logger.debug("BUG REPORT: module info unavailable", exc_info=True)
     return redact_text("\n".join(lines)) + "\n"
 
 

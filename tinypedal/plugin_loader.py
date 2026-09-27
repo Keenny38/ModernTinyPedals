@@ -111,6 +111,7 @@ def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLD
         return module
     except Exception as error:  # any error in plugin code must not stop app
         logger.error("PLUGIN: unable to load %s: %s", widget_name, error)
+        logger.debug("PLUGIN: %s traceback", widget_name, exc_info=True)
         PLUGIN_ERRORS[widget_name] = f"{type(error).__name__}: {error}"
         placeholder = error_placeholder(module_name, widget_name, str(error))
         sys.modules[module_name] = placeholder

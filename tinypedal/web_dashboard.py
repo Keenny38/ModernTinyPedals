@@ -75,8 +75,8 @@ def local_addresses() -> list[str]:
 def _safe(func, default=0.0):
     try:
         return func()
-    except Exception:  # API not ready, missing data
-        return default
+    except (AttributeError, TypeError, ValueError, IndexError, KeyError, ZeroDivisionError):
+        return default  # API not ready, missing data
 
 
 def _quad(func) -> list[float]:
