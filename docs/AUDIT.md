@@ -265,3 +265,42 @@ Bilan : 295 tests, ruff et mypy propres (222 fichiers).
 18. 💡 Mettre le projet sous Git et le publier sur GitHub.
 
 Réalisé (27/09/2026) : D1, D2, D4 à D12 dans le widget « Roues et freins » (D3 non demandé).
+
+## E. Audit du widget « Roues et freins » (28/09/2026)
+
+Audit dédié du fichier `tinypedal/widget/wheel_status.py` (640 lignes exécutables, 114 options, 98 % de couverture de tests après corrections ; 2ᵉ widget le plus lourd sur 77 au benchmark).
+
+### 🔴 Bugs corrigés
+1. ✅ La dernière LED de régime ne s'allumait jamais (son seuil était égal à `redline`, où la branche « surrégime » prend le dessus). Formule corrigée : `start + led / count * (redline - start)`.
+2. ✅ L'usure estimée en fin de relais affichait « →0 % » au lieu de rien quand le module Wheels/Fuel n'avait pas encore de données (sentinelle `-1.0` qui satisfaisait la condition d'affichage `>= -100`). Remplacé par un indicateur explicite `tread_end_known`.
+3. ✅ Seuil de masquage incohérent, résolu par le même correctif (n°2).
+
+### 🟠 Corrigé
+4. ✅ La pastille d'alerte de pression réutilisait `tyre_wear_warning_color` (option de l'usure) au lieu d'une couleur dédiée ; nouvelle option `tyre_pressure_warning_background_color`.
+5. ✅ `display_scale` n'avait pas de borne haute (une faute de frappe pouvait produire un overlay de 2000 px) ; borné à `4`, comme les autres options d'échelle du widget.
+6. ✅ Trois options sans bulle d'aide (`show_background`, `show_degree_sign`, `warning_outline_width`) ; documentées dans `docs/customization.md` et régénérées.
+
+### ⚙️ Performance (corrigé)
+7. ✅ Données lues même quand non affichées (pression, température de frein, niveaux ABS/TC, biais de frein, vitesse, régime, pédales, ravitaillement) : lecture conditionnée à l'affichage réel, la disposition compacte ne lit plus du tout la colonne centrale.
+8. ✅ `QPainterPath` du pneu reconstruit à chaque roue à chaque frame ; construit une fois à l'initialisation (les 4 pneus ont la même géométrie). `is_right` calculé depuis l'index de roue au lieu d'une comparaison de coordonnées.
+9. ✅ `in_pits()` lu deux fois par tick ; lu une fois et réutilisé.
+
+Résultat mesuré (benchmark `pytest -m benchmark`) : **0,785 ms → 0,585 ms par frame** (−25 %), pic de mise à jour 0,283 → 0,097 ms.
+
+### 💡 Ajouté
+10. ✅ Usure de frein (`show_brake_wear`), épaisseur restante en pourcentage, avec seuil et couleur d'alerte dédiés — donnée déjà calculée par le module Wheels mais absente du widget.
+11. ✅ Symbole de composé de gomme sur chaque pneu (`show_tyre_compound`).
+12. Delta best / temps au tour sous la vitesse (D3 de la section D) — toujours pas fait, hors périmètre de cet audit.
+13. ✅ Seuil d'alerte de température pneu (`tyre_temperature_warning_threshold`).
+14. ✅ Titre optionnel (`show_caption`), comme la plupart des autres widgets.
+15. ✅ Étiquette « lap » ajoutée aux lignes carburant/énergie restants (affichaient un nombre nu).
+
+### 🟡 Corrigé
+16. ✅ Colonne centrale en disposition verticale : l'espace des éléments masqués (ABS/TC/PIT-LIM inactifs) est maintenant partagé au-dessus et en dessous au lieu de laisser un vide en bas.
+17. Conversion des seuils de pression cible selon l'unité choisie (psi) — pas fait, mineur, les seuils restent en kPa comme documenté.
+
+### 🧪 Tests
+- Couverture 94 % → **98 %**. 13 nouveaux tests couvrant chaque bug corrigé (régression) et chaque ajout.
+- Effet de bord découvert en testant : le faux lecteur API des tests (`tests/conftest.py`) recréait un nouvel objet à chaque accès (impossible à monkeypatcher) et renvoyait un entier nu pour les lecteurs par roue. Corrigé (mise en cache du groupe, formes par roue correctes) ; ce correctif a aussi éliminé un crash latent (`Fatal Python error: Aborted`) dans le rendu de prévisualisation du widget `elevation` lors de l'exécution de la suite complète.
+
+Réalisé (28/09/2026) : E1 à E11, E13 à E16. Non traités : E12 (D3, non demandé), E17 (mineur).
