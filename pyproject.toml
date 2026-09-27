@@ -76,6 +76,12 @@ disable_error_code = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Manual tests need a running sim, run them with: pytest -m manual
+addopts = "-m 'not manual'"
+markers = [
+    "manual: requires running sim, skipped by default (pytest -m manual)",
+    "benchmark: widget render timing, fails on large performance regression",
+]
 
 [tool.coverage.run]
 source = ["tinypedal"]

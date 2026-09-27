@@ -1,6 +1,7 @@
-"""Manual API check (requires running sim), not collected by pytest
+"""Manual API check (requires running sim)
 
 Usage: python tests/manual_api_check.py [lmu|rf2]
+or with pytest: pytest -m manual (see test_manual_api.py, skipped in normal test run)
 """
 
 import logging
@@ -13,8 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SEPARATOR = "=" * 50
 
 
-def check_api(info, read_info):
-    """Start, restart, read, close API"""
+def check_api(info, read_info) -> tuple[str, str, str]:
+    """Start, restart, read, close API, returns (version, driver name, track name)"""
     logging.basicConfig(level=logging.INFO)
     print("Test API - Start")
     info.setMode(1)  # set direct access
@@ -40,24 +41,25 @@ def check_api(info, read_info):
     print(SEPARATOR)
     print("Test API - Close")
     info.stop()
+    return version, driver, track
 
 
-def check_lmu():
+def check_lmu() -> tuple[str, str, str]:
     from tinypedal.adapter.lmu_connector import LMUInfo
 
-    check_api(LMUInfo(), lambda info: (
+    return check_api(LMUInfo(), lambda info: (
         info.lmuGeneric.gameVersion,
         info.lmuScorVeh(0).mDriverName.decode(),
         info.lmuScorInfo.mTrackName.decode(),
     ))
 
 
-def check_rf2():
+def check_rf2() -> tuple[str, str, str]:
     from tinypedal.adapter.rf2_connector import RF2Info
 
     info = RF2Info()
     info.setPID("")
-    check_api(info, lambda info: (
+    return check_api(info, lambda info: (
         info.rf2Ext.mVersion.decode(),
         info.rf2ScorVeh(0).mDriverName.decode(),
         info.rf2ScorInfo.mTrackName.decode(),
