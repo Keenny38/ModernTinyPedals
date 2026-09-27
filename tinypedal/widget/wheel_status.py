@@ -38,12 +38,14 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
+from ..const_common import WHEELS_ZERO
 from ..module_info import minfo
 from ..userfile.heatmap import (
     HEATMAP_DEFAULT_BRAKE,
     HEATMAP_DEFAULT_TYRE,
     load_heatmap_color,
     select_brake_heatmap_name,
+    select_compound_symbol,
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
@@ -56,24 +58,31 @@ LAYOUT_COMPACT = 2  # tyres & brakes only
 
 CENTER_ITEMS = ("abs", "tc", "brake_bias", "pit_limiter", "gear", "speed", "rpm", "pedals")
 DAMAGE_COLORS = ("", "#FFCC00", "#FF6600", "#FF2200")  # severity 1, 2, 3 (detached)
+LAPS_LABEL = "lap"  # short unit for estimated laps left
+NO_STATUS = (False, False, False, False)
 
 
 class WheelState:
     """Drawing state of one wheel"""
 
     __slots__ = (
-        "steer", "tread", "tread_end", "tyre_temp", "ico_colors", "brake_temp", "pressure",
+        "steer", "tread", "tread_end", "tread_end_known", "tyre_temp", "ico_colors", "brake_temp",
+        "brake_wear", "brake_wear_known", "pressure", "compound",
         "tyre_color", "brake_color", "warning", "status", "suspension_damage",
     )
 
     def __init__(self):
         self.steer = 0.0  # displayed wheel angle (degrees, positive = right)
         self.tread = 100.0  # remaining tyre tread (percent)
-        self.tread_end = -1.0  # estimated remaining tread at end of stint (percent), -1 unknown
+        self.tread_end = 0.0  # estimated remaining tread at end of stint (percent)
+        self.tread_end_known = False  # estimate needs Wheels & Fuel module data
+        self.brake_wear = 100.0  # remaining brake thickness (percent)
+        self.brake_wear_known = False  # brake thickness needs Wheels module data
+        self.compound = ""  # tyre compound symbol
         self.tyre_temp = 0.0
         self.ico_colors = ("#444444", "#444444", "#444444")  # left to right bands
         self.brake_temp = 0.0
-        self.pressure = 0.0
+        self.pressure = 0.0  # kPa
         self.tyre_color = "#444444"
         self.brake_color = "#444444"
         self.warning = ""  # "", "lock", "spin"
@@ -90,7 +99,7 @@ class Realtime(Overlay):
         wcfg = self.wcfg
 
         # Config font (scaled with display)
-        scale = max(wcfg["display_scale"], 0.5)
+        scale = min(max(wcfg["display_scale"], 0.5), 4)
         font = self.config_font(wcfg["font_name"], wcfg["font_size"] * scale, wcfg["font_weight"])
         self.setFont(font)
         font_m = self.get_font_metrics(font)
@@ -125,13 +134,28 @@ class Realtime(Overlay):
         side_w = pad_x + tyre_w + brake_gap + brake_w
 
         has_center = self.layout_mode != LAYOUT_COMPACT and bool(self.center_order)
+        # Only read data that is actually displayed (compact layout skips the whole center column)
+        shown = set(self.center_order) if has_center else set()
+        self.match_heatmap = bool(wcfg["enable_heatmap_auto_matching"])
+        self.show_tyre_wear = bool(wcfg["show_tyre_wear"])
+        self.need_switches = bool(shown & {"abs", "tc"})
+        self.need_brake_bias = "brake_bias" in shown
+        self.need_limiter = "pit_limiter" in shown
+        self.need_gear = "gear" in shown
+        self.need_pedals = "pedals" in shown
+        self.need_rpm = "rpm" in shown or bool(wcfg["show_rpm_leds"]) or (
+            self.need_gear and bool(wcfg["enable_gear_rpm_color"]))
         center_between = round(unit * 5.2) if has_center and self.layout_mode == LAYOUT_NORMAL else round(unit * 0.8)
         width = side_w * 2 + center_between + gap * 2
 
-        # RPM LEDs on top
+        # Caption (widget name) on top, then RPM LEDs
+        caption_h = round(unit * 0.9) if wcfg["show_caption"] else 0
+        self.rect_caption = QRectF(0, 0, width, caption_h)
         self.led_h = round(unit * 0.55) if wcfg["show_rpm_leds"] else 0
-        top_y = self.led_h + gap if self.led_h else 0
-        self.rect_leds = QRectF(round(unit * 0.3), round(gap * 0.6), width - round(unit * 0.6), self.led_h)
+        led_y = caption_h + (gap if caption_h else 0)
+        top_y = led_y + (self.led_h + gap if self.led_h else 0)
+        self.rect_leds = QRectF(
+            round(unit * 0.3), led_y + round(gap * 0.6), width - round(unit * 0.6), self.led_h)
 
         axle_gap = round(unit * 0.9) + pad_y * 2
         if has_center and self.layout_mode == LAYOUT_NORMAL:  # taller if center column needs more room
@@ -142,6 +166,12 @@ class Realtime(Overlay):
         self.rects_tyre = []
         self.rects_disc = []
         self.rects_suspension = []
+        # All tyres share the same size, so the rounded path is built once instead of every frame
+        tyre_radius = tyre_w * 0.28
+        self.path_tyre = QPainterPath()
+        self.path_tyre.addRoundedRect(
+            QRectF(-tyre_w / 2, -tyre_h / 2, tyre_w, tyre_h), tyre_radius, tyre_radius)
+        self.local_tyre = QRectF(-tyre_w / 2, -tyre_h / 2, tyre_w, tyre_h)
         for index in range(4):
             is_right = index % 2
             top = top_y + pad_y + (0 if index < 2 else tyre_h + axle_gap)
@@ -207,6 +237,7 @@ class Realtime(Overlay):
         self.sign_text = "°" if wcfg["show_degree_sign"] else ""
         self.heatmap_tyre = 4 * [self.load_tyre_heatmap(wcfg["heatmap_name_tyre"])]
         self.heatmap_brake = 4 * [self.load_brake_heatmap(wcfg["heatmap_name_brake"])]
+        self.temp_warning = wcfg["tyre_temperature_warning_threshold"]  # Celsius, 0 disables
         self.lock_threshold = -abs(wcfg["wheel_lock_threshold"])
         self.spin_threshold = abs(wcfg["wheel_spin_threshold"])
         self.min_speed = max(wcfg["slip_warning_minimum_speed"], 0) / 3.6  # km/h to m/s
@@ -290,22 +321,23 @@ class Realtime(Overlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         wcfg = self.wcfg
-        if wcfg["enable_heatmap_auto_matching"]:
-            self.update_heatmap_matching()
+        in_pits = api.read.vehicle.in_pits()  # read once, also used by compound matching
+        if self.match_heatmap or wcfg["show_tyre_compound"]:
+            self.update_compound_state(in_pits)
 
         tyre_temp = api.read.tyre.surface_temperature_avg()
         brake_temp = api.read.brake.temperature()
-        pressure = api.read.tyre.pressure()
-        tread = api.read.tyre.wear()  # remaining tread (fraction)
+        pressure = api.read.tyre.pressure() if wcfg["show_tyre_pressure"] else WHEELS_ZERO
+        tread = api.read.tyre.wear() if self.show_tyre_wear else WHEELS_ZERO  # remaining tread (fraction)
         speed = api.read.vehicle.speed()
         slip_ratio = minfo.wheels.slipRatio
         wheel_angle = minfo.wheels.toeAngle  # degrees, positive to right side of vehicle
         multiplier = wcfg["wheel_angle_multiplier"]
-        braking = api.read.inputs.brake_raw() > 0.02
+        braking = api.read.inputs.brake_raw() > 0.02 if wcfg["show_slip_warning"] else False
         ico = api.read.tyre.surface_temperature_ico() if wcfg["show_tyre_temperature_bands"] else ()
-        detached = api.read.wheel.is_detached() if wcfg["show_tyre_status"] else (False,) * 4
-        puncture = api.read.tyre.puncture() if wcfg["show_tyre_status"] else (False,) * 4
-        suspension = api.read.wheel.suspension_damage() if wcfg["show_suspension_damage"] else (0.0,) * 4
+        detached = api.read.wheel.is_detached() if wcfg["show_tyre_status"] else NO_STATUS
+        puncture = api.read.tyre.puncture() if wcfg["show_tyre_status"] else NO_STATUS
+        suspension = api.read.wheel.suspension_damage() if wcfg["show_suspension_damage"] else WHEELS_ZERO
         if wcfg["show_tyre_wear_end_stint"]:
             if minfo.energy.available:
                 run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
@@ -325,8 +357,9 @@ class Realtime(Overlay):
                 wheel.ico_colors = self.band_colors(index, ico[index * 3:index * 3 + 3])
             wheel.status = self.tyre_status(detached[index], puncture[index], minfo.wheels.lockingTreadWear[index])
             if wcfg["show_tyre_wear_end_stint"]:
-                wheel.tread_end = calc.end_stint_tread(
-                    minfo.wheels.currentTreadDepth[index], minfo.wheels.estimatedValidTreadWear[index], run_laps)
+                self.update_end_stint_tread(wheel, index, run_laps)
+            if wcfg["show_brake_wear"]:
+                self.update_brake_wear(wheel, index)
             if self.max_steer:
                 steer = wheel_angle[index] * multiplier
                 wheel.steer = min(max(steer, -self.max_steer), self.max_steer)
@@ -334,35 +367,60 @@ class Realtime(Overlay):
         if wcfg["show_body_damage"]:
             self.body_damage = api.read.vehicle.damage_severity()
 
-        vehicle_name = api.read.vehicle.vehicle_name()
-        if self.last_vehicle_name != vehicle_name:  # new car, detect again
-            self.last_vehicle_name = vehicle_name
-            self.abs_seen = self.tc_seen = False
-        self.abs_active = bool(api.read.switch.abs_active())
-        self.tc_active = bool(api.read.switch.tc_active())
-        self.abs_seen = self.abs_seen or self.abs_active
-        self.tc_seen = self.tc_seen or self.tc_active
-        self.abs_level = api.read.switch.abs_level()
-        self.tc_level = api.read.switch.tc_level()
-        self.tc_cut_level = api.read.switch.tc_cut_level()
-        self.tc_slip_level = api.read.switch.tc_slip_level()
-        self.brake_bias = api.read.brake.bias_front()
-        self.in_pits = bool(api.read.vehicle.in_pits())
-        self.limiter = bool(api.read.switch.speed_limiter())
-        self.gear = api.read.engine.gear()
+        if self.need_switches:
+            vehicle_name = api.read.vehicle.vehicle_name()
+            if self.last_vehicle_name != vehicle_name:  # new car, detect again
+                self.last_vehicle_name = vehicle_name
+                self.abs_seen = self.tc_seen = False
+            self.abs_active = bool(api.read.switch.abs_active())
+            self.tc_active = bool(api.read.switch.tc_active())
+            self.abs_seen = self.abs_seen or self.abs_active
+            self.tc_seen = self.tc_seen or self.tc_active
+            self.abs_level = api.read.switch.abs_level()
+            self.tc_level = api.read.switch.tc_level()
+            self.tc_cut_level = api.read.switch.tc_cut_level()
+            self.tc_slip_level = api.read.switch.tc_slip_level()
+        if self.need_brake_bias:
+            self.brake_bias = api.read.brake.bias_front()
+        self.in_pits = bool(in_pits)
+        if self.need_limiter:
+            self.limiter = bool(api.read.switch.speed_limiter())
+        if self.need_gear:
+            self.gear = api.read.engine.gear()
         self.speed = speed
-        self.rpm = api.read.engine.rpm()
-        self.rpm_max = api.read.engine.rpm_max()
-        self.refuel = minfo.fuel.neededRelative
-        self.refill = minfo.energy.neededRelative
-        self.fuel = minfo.fuel.amountCurrent
-        self.fuel_laps = minfo.fuel.estimatedLaps
-        self.energy = minfo.energy.amountCurrent
-        self.energy_laps = minfo.energy.estimatedLaps
-        self.energy_available = minfo.energy.available
-        self.throttle = api.read.inputs.throttle()
-        self.brake = api.read.inputs.brake()
+        if self.need_rpm:
+            self.rpm = api.read.engine.rpm()
+            self.rpm_max = api.read.engine.rpm_max()
+        if self.need_pedals:
+            self.throttle = api.read.inputs.throttle()
+            self.brake = api.read.inputs.brake()
+        if self.bottom_rows:
+            self.refuel = minfo.fuel.neededRelative
+            self.refill = minfo.energy.neededRelative
+            self.fuel = minfo.fuel.amountCurrent
+            self.fuel_laps = minfo.fuel.estimatedLaps
+            self.energy = minfo.energy.amountCurrent
+            self.energy_laps = minfo.energy.estimatedLaps
+            self.energy_available = minfo.energy.available
         self.update()
+
+    @staticmethod
+    def update_end_stint_tread(wheel: WheelState, index: int, run_laps: float):
+        """Estimated remaining tread at end of stint, needs Wheels & Fuel module data"""
+        tread_now = minfo.wheels.currentTreadDepth[index]
+        wheel.tread_end_known = tread_now > 0 and run_laps > 0
+        if wheel.tread_end_known:
+            wheel.tread_end = calc.end_stint_tread(
+                tread_now, minfo.wheels.estimatedValidTreadWear[index], run_laps)
+
+    @staticmethod
+    def update_brake_wear(wheel: WheelState, index: int):
+        """Remaining brake thickness (percent of usable thickness), needs Wheels module data"""
+        failure = minfo.wheels.failureBrakeThickness[index]
+        usable = minfo.wheels.maxBrakeThickness[index] - failure
+        wheel.brake_wear_known = usable > 0
+        if wheel.brake_wear_known:
+            wheel.brake_wear = (minfo.wheels.currentBrakeThickness[index] - failure) * 100 / usable
 
     @property
     def has_abs(self) -> bool:
@@ -402,9 +460,11 @@ class Realtime(Overlay):
             return inner, center, outer
         return outer, center, inner
 
-    def update_heatmap_matching(self):
-        """Match heatmap with tyre compound & brake type (checked while in pit)"""
-        in_pits = api.read.vehicle.in_pits()
+    def update_compound_state(self, in_pits):
+        """Match heatmap & compound symbol with tyre compound and brake type (checked while in pit)
+
+        Tyre compound and car only change in pit, so this is skipped while driving.
+        """
         if not in_pits and self.last_in_pits == in_pits:
             return
         self.last_in_pits = in_pits
@@ -412,7 +472,12 @@ class Realtime(Overlay):
         if self.last_compounds != compounds:
             self.last_compounds = compounds
             for index, compound in enumerate(compounds[:4]):
-                self.heatmap_tyre[index] = self.load_tyre_heatmap(select_tyre_heatmap_name(compound))
+                if self.match_heatmap:
+                    self.heatmap_tyre[index] = self.load_tyre_heatmap(select_tyre_heatmap_name(compound))
+                if self.wcfg["show_tyre_compound"]:
+                    self.wheels[index].compound = select_compound_symbol(compound)
+        if not self.match_heatmap:
+            return
         vehicle = (api.read.vehicle.class_name(), api.read.vehicle.vehicle_name())
         if self.last_vehicle != vehicle:
             self.last_vehicle = vehicle
@@ -428,11 +493,15 @@ class Realtime(Overlay):
         wcfg = self.wcfg
         if wcfg["show_background"]:
             fill_rect(painter, self.rect_bg, wcfg["background_color"])
+        if not self.rect_caption.isEmpty():
+            fill_rect(painter, self.rect_caption, wcfg["background_color_caption"])
+            painter.setPen(QColor(wcfg["font_color_caption"]))
+            self.draw_fit_text(painter, self.rect_caption, wcfg["caption_text"], self.font_small)
         if self.led_h:
             self.draw_leds(painter, self.rect_leds)
         for index, wheel in enumerate(self.wheels):
             self.draw_tyre(painter, self.rects_tyre[index], wheel)
-            self.draw_disc(painter, self.rects_disc[index], wheel)
+            self.draw_disc(painter, index, self.rects_disc[index], wheel)
             if wcfg["show_suspension_damage"]:
                 self.draw_suspension_damage(painter, self.rects_suspension[index], wheel.suspension_damage)
         if not self.rect_center.isNull():
@@ -443,10 +512,8 @@ class Realtime(Overlay):
 
     def draw_tyre(self, painter: QPainter, rect: QRectF, wheel: WheelState):
         wcfg = self.wcfg
-        radius = rect.width() * 0.28
-        local = QRectF(-rect.width() / 2, -rect.height() / 2, rect.width(), rect.height())
-        path = QPainterPath()
-        path.addRoundedRect(local, radius, radius)
+        local = self.local_tyre
+        path = self.path_tyre
         # Tyre turned with wheel angle (left / right)
         painter.save()
         painter.translate(rect.center())
@@ -477,18 +544,23 @@ class Realtime(Overlay):
 
         # Text lines (upright): (text, font, weight in height, pill color or "", text color)
         lines = []
+        if wcfg["show_tyre_compound"] and wheel.compound:
+            lines.append((wheel.compound, self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_temperature"]:
-            lines.append((self.format_temp(wheel.tyre_temp), self.font(), 1.3, "", ""))
+            hot = 0 < self.temp_warning <= wheel.tyre_temp
+            lines.append((self.format_temp(wheel.tyre_temp), self.font(), 1.3, "",
+                          wcfg["font_color_tyre_temperature_warning"] if hot else ""))
         if wcfg["show_tyre_pressure"]:
             text = f"{self.unit_pres(wheel.pressure):.{self.pres_decimals}f}"
             color = self.pressure_color(wheel.pressure)
-            lines.append((text, self.font_small, 1.0, wcfg["tyre_wear_warning_color"] if color else "", color))
+            pill = wcfg["tyre_pressure_warning_background_color"] if color else ""
+            lines.append((text, self.font_small, 1.0, pill, color))
         if wcfg["show_tyre_wear"]:
             low = wheel.tread < wcfg["tyre_wear_warning_threshold"]
             lines.append((f"{wheel.tread:.0f}%", self.font_small, 1.0,
                           wcfg["tyre_wear_warning_color"] if low else "",
                           wcfg["font_color_tyre_wear_warning"] if low else ""))
-        if wcfg["show_tyre_wear_end_stint"] and wheel.tread_end >= -100:
+        if wcfg["show_tyre_wear_end_stint"] and wheel.tread_end_known:
             lines.append((f"→{max(wheel.tread_end, 0):.0f}%", self.font_small, 0.9, "", ""))
         if wheel.status in ("puncture", "flat"):
             text = "PUNCT" if wheel.status == "puncture" else "FLAT"
@@ -522,10 +594,11 @@ class Realtime(Overlay):
             return wcfg["tyre_pressure_high_color"]
         return ""
 
-    def draw_disc(self, painter: QPainter, rect: QRectF, wheel: WheelState):
+    def draw_disc(self, painter: QPainter, index: int, rect: QRectF, wheel: WheelState):
         """Brake: thin vertical bar (disc seen from above) next to tyre, colored by brake temperature,
-        with temperature written beside it in same color"""
-        is_right = rect.center().x() > self.rect_bg.center().x()
+        with temperature (and remaining thickness) written beside it"""
+        wcfg = self.wcfg
+        is_right = index % 2  # FL, FR, RL, RR: odd index is on right side
         bar_w, bar_gap = self.brake_bar_w, self.brake_bar_gap
         if is_right:  # tyre on right side of brake
             bar = QRectF(rect.right() - bar_w, rect.top(), bar_w, rect.height())
@@ -539,9 +612,17 @@ class Realtime(Overlay):
         path = QPainterPath()
         path.addRoundedRect(bar, radius, radius)
         painter.fillPath(path, QColor(wheel.brake_color))
-        if self.wcfg["show_brake_temperature"]:
+        show_wear = wcfg["show_brake_wear"] and wheel.brake_wear_known
+        if wcfg["show_brake_temperature"]:
+            temp_rect = text_rect if not show_wear else QRectF(
+                text_rect.left(), text_rect.top(), text_rect.width(), text_rect.height() * 0.55)
             painter.setPen(QColor(wheel.brake_color))
-            self.draw_fit_text(painter, text_rect, self.format_temp(wheel.brake_temp), self.font(), align)
+            self.draw_fit_text(painter, temp_rect, self.format_temp(wheel.brake_temp), self.font(), align)
+        if show_wear:
+            wear_rect = QRectF(text_rect.left(), text_rect.center().y(), text_rect.width(), text_rect.height() * 0.45)
+            low = wheel.brake_wear < wcfg["brake_wear_warning_threshold"]
+            painter.setPen(QColor(wcfg["font_color_brake_wear_warning"] if low else wcfg["font_color"]))
+            self.draw_fit_text(painter, wear_rect, f"{max(wheel.brake_wear, 0):.0f}%", self.font_small, align)
 
     def draw_suspension_damage(self, painter: QPainter, rect: QRectF, damage: float):
         """Suspension damage bar below brake, shown only if damaged"""
@@ -590,7 +671,7 @@ class Realtime(Overlay):
         led_w = (rect.width() - gap * (count - 1)) / count
         for led in range(count):
             led_rect = QRectF(rect.left() + led * (led_w + gap), rect.top(), led_w, rect.height())
-            threshold = start + (led + 1) / count * (redline - start)
+            threshold = start + led / count * (redline - start)
             if over:
                 color = wcfg["indicator_inactive_color"] if flash_off else wcfg["rpm_led_shift_color"]
             elif ratio >= threshold:
@@ -606,18 +687,33 @@ class Realtime(Overlay):
         interval = max(self.wcfg["shift_flash_interval"], 0.05)
         return int(monotonic() / interval) % 2 == 1
 
+    def visible_center_items(self) -> list[str]:
+        """Center items to draw now: ABS & TC only if car has them, pit & limiter only while active"""
+        return [
+            name for name in self.center_order
+            if not (
+                (name == "abs" and not self.has_abs)
+                or (name == "tc" and not self.has_tc)
+                or (name == "pit_limiter" and not (self.in_pits or self.limiter))
+            )
+        ]
+
     def draw_center(self, painter: QPainter, rect: QRectF):
-        """Center column, items in user defined order"""
+        """Center column, items in user defined order
+
+        Column height is reserved for every enabled item, so the widget never resizes during a
+        session. Hidden items leave free space, which is shared above and below in vertical layout.
+        """
         gap = self.unit * 0.2
+        items = self.visible_center_items()
         top = rect.top()
-        for name in self.center_order:
-            if (name == "abs" and not self.has_abs) or (name == "tc" and not self.has_tc):
-                continue  # car without ABS or TC
-            if name == "pit_limiter" and not (self.in_pits or self.limiter):
-                continue  # shown only while active
+        if self.layout_mode == LAYOUT_VERTICAL:
+            used = sum(self.item_height(name) + gap for name in items)
+            top += max(rect.height() - used, 0) / 2
+        for name in items:
             height = self.item_height(name)
             if name == "pedals":  # pedals stick to bottom in normal layout
-                item_top = rect.bottom() - height if self.layout_mode == LAYOUT_NORMAL and name == self.center_order[-1] else top
+                item_top = rect.bottom() - height if self.layout_mode == LAYOUT_NORMAL and name == items[-1] else top
             else:
                 item_top = top
             self.draw_center_item(painter, name, QRectF(rect.left(), item_top, rect.width(), height))
@@ -700,9 +796,9 @@ class Realtime(Overlay):
             ))
         if wcfg["show_fuel_remaining"] or wcfg["show_energy_remaining"]:
             rows.append((
-                ("Fuel", f"{self.unit_fuel(self.fuel):.1f} {self.fuel_label} · {self.fuel_laps:.1f}")
+                ("Fuel", f"{self.unit_fuel(self.fuel):.1f} {self.fuel_label} · {self.fuel_laps:.1f} {LAPS_LABEL}")
                 if wcfg["show_fuel_remaining"] else None,
-                ("Energy", f"{self.energy:.0f}% · {self.energy_laps:.1f}")
+                ("Energy", f"{self.energy:.0f}% · {self.energy_laps:.1f} {LAPS_LABEL}")
                 if wcfg["show_energy_remaining"] and self.energy_available else None,
             ))
         for (rect_left, rect_right), (left, right) in zip(self.bottom_rows, rows):

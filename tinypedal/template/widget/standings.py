@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_STANDINGS = {
-        "radar": {
+    "radar": {
         "enable": True,
         "update_interval": 20,
         "position_x": 683,
@@ -110,7 +110,7 @@ WIDGET_STANDINGS = {
         "vehicle_maximum_visible_distance_behind": -1,
         "vehicle_maximum_visible_distance_side": -1,
     },
-        "relative": {
+    "relative": {
         "enable": False,
         "update_interval": 100,
         "position_x": 320,
@@ -314,7 +314,7 @@ WIDGET_STANDINGS = {
         "display_order_lift_and_coast_time": 21,
         "display_order_pit_status": 22,
     },
-        "relative_finish_order": {
+    "relative_finish_order": {
         "enable": False,
         "update_interval": 100,
         "position_x": 360,
@@ -368,7 +368,7 @@ WIDGET_STANDINGS = {
         "prediction_10_leader_pit_time": 120,
         "prediction_10_player_pit_time": 120,
     },
-        "rivals": {
+    "rivals": {
         "enable": False,
         "update_interval": 50,
         "position_x": 433,
@@ -528,7 +528,7 @@ WIDGET_STANDINGS = {
         "display_order_lift_and_coast_time": 22,
         "display_order_pit_status": 23,
     },
-        "standings": {
+    "standings": {
         "enable": False,
         "update_interval": 100,
         "position_x": 57,
@@ -749,7 +749,7 @@ WIDGET_STANDINGS = {
         "display_order_lift_and_coast_time": 22,
         "display_order_pit_status": 23,
     },
-        "traffic": {
+    "traffic": {
         "enable": False,
         "update_interval": 200,
         "position_x": 518,

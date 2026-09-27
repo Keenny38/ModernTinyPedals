@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_DRIVER = {
-        "acceleration": {
+    "acceleration": {
         "enable": False,
         "update_interval": 10,
         "position_x": 440,
@@ -78,7 +78,7 @@ WIDGET_DRIVER = {
         "display_order_best": 3,
         "display_order_delta": 4,
     },
-        "force": {
+    "force": {
         "enable": False,
         "update_interval": 20,
         "position_x": 453,
@@ -127,7 +127,7 @@ WIDGET_DRIVER = {
         "display_order_estimated_dynamic_weight": 7,
         "display_order_acceleration_reduction": 8,
     },
-        "friction_circle": {
+    "friction_circle": {
         "enable": False,
         "update_interval": 20,
         "position_x": 1000,
@@ -194,7 +194,7 @@ WIDGET_DRIVER = {
         "reference_circle_5_width": 1,
         "reference_circle_5_color": "#88999999",
     },
-        "instrument": {
+    "instrument": {
         "enable": False,
         "update_interval": 20,
         "position_x": 306,
@@ -226,7 +226,7 @@ WIDGET_DRIVER = {
         "display_order_wheel_lock": 4,
         "display_order_wheel_slip": 5,
     },
-        "pedal": {
+    "pedal": {
         "enable": True,
         "update_interval": 20,
         "position_x": 1041,
@@ -272,7 +272,7 @@ WIDGET_DRIVER = {
         "display_order_clutch": 2,
         "display_order_ffb": 1,
     },
-        "steering_angle": {
+    "steering_angle": {
         "enable": False,
         "update_interval": 20,
         "position_x": 369,
@@ -329,7 +329,7 @@ WIDGET_DRIVER = {
         "display_order_turning_radius": 7,
         "display_order_turning_radius_under_slip_angle": 8,
     },
-        "steering_meter": {
+    "steering_meter": {
         "enable": False,
         "update_interval": 20,
         "position_x": 585,
@@ -355,7 +355,7 @@ WIDGET_DRIVER = {
         "scale_mark_degree": 90,
         "scale_mark_color": "#555555",
     },
-        "steering_wheel": {
+    "steering_wheel": {
         "enable": True,
         "update_interval": 20,
         "position_x": 1133,
@@ -387,7 +387,7 @@ WIDGET_DRIVER = {
         "rotation_line_width": 3,
         "rotation_line_margin": 2,
     },
-        "damage": {
+    "damage": {
         "enable": False,
         "update_interval": 100,
         "position_x": 658,
@@ -437,7 +437,7 @@ WIDGET_DRIVER = {
         "show_inverted_integrity": False,
         "font_color_integrity": "#FFFFFF",
     },
-        "damage_stats": {
+    "damage_stats": {
         "enable": False,
         "update_interval": 200,
         "position_x": 582,
@@ -484,7 +484,7 @@ WIDGET_DRIVER = {
         "display_order_suspension_integrity": 3,
         "display_order_tyre_integrity": 4,
     },
-        "system_performance": {
+    "system_performance": {
         "enable": False,
         "update_interval": 500,
         "position_x": 145,

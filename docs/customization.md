@@ -5183,7 +5183,19 @@ Tyres are drawn at each corner (seen from above), with a thin brake bar next to 
 Set layout: `0` = info column between tyres (default), `1` = vertical (info column below tyres), `2` = compact (tyres & brakes only).
 
     display_scale
-Scale whole widget, including text. Default is `1.0`.
+Scale whole widget, including text. Value range in `0.5` to `4`. Default is `1.0`.
+
+    show_background
+Show widget background color, set by `background_color`.
+
+    show_caption, caption_text, font_color_caption, background_color_caption
+Show short caption text on top of widget.
+
+    show_degree_sign
+Show degree sign (`°`) next to temperature values. Disabled by default, as it may not render correctly with some fonts.
+
+    warning_outline_width
+Outline width (pixel) for wheel lock (`wheel_lock_color`) and wheel spin (`wheel_spin_color`) warning. Default is `3`.
 
     show_rpm_leds, number_of_rpm_leds, rpm_led_start_ratio
 Show a row of RPM LEDs on top of widget, lit from `rpm_led_start_ratio` (fraction of maximum RPM) up to `rpm_redline_ratio`, green, yellow then red. Over `rpm_redline_ratio` all LEDs flash with `rpm_led_shift_color` (shift point).
@@ -5233,11 +5245,23 @@ Maximum displayed wheel angle in degrees, value range in `0` to `45`. Default is
     show_tyre_temperature, show_tyre_pressure, show_brake_temperature
 Show tyre surface temperature, tyre pressure and brake temperature.
 
+    tyre_temperature_warning_threshold, font_color_tyre_temperature_warning
+Highlight tyre temperature (Celsius) at or above this threshold. Set `0` to disable. Default is `0` (disabled).
+
+    tyre_pressure_warning_background_color
+Background color of tyre pressure text when out of target range (see `enable_tyre_pressure_target`).
+
+    show_tyre_compound
+Show tyre compound symbol (from `Tyre compound editor`) on each tyre.
+
     show_tyre_wear
 Show remaining tyre tread (percent) in each tyre.
 
     tyre_wear_warning_threshold
 Remaining tread (percent) below which tyre wear is highlighted with `tyre_wear_warning_color`. Default is `30`.
+
+    show_brake_wear, brake_wear_warning_threshold, font_color_brake_wear_warning
+Show remaining brake thickness (percent of usable thickness) beside brake temperature, from `Wheels module`. Highlighted with `font_color_brake_wear_warning` below `brake_wear_warning_threshold` percent. Default threshold is `30`.
 
     enable_heatmap_auto_matching, heatmap_name_tyre, heatmap_name_brake
 Heatmap used for tyre and brake colors. Auto matching selects heatmap from tyre compound and brake type while in pit.

@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_CHASSIS = {
-        "differential": {
+    "differential": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -64,7 +64,7 @@ WIDGET_CHASSIS = {
         "display_order_power_locking_rear": 3,
         "display_order_coast_locking_rear": 4,
     },
-        "rake_angle": {
+    "rake_angle": {
         "enable": False,
         "update_interval": 20,
         "position_x": 593,
@@ -86,7 +86,7 @@ WIDGET_CHASSIS = {
         "background_color_rake_angle": "#222222",
         "warning_color_negative_rake": "#00AAFF",
     },
-        "ride_height": {
+    "ride_height": {
         "enable": False,
         "update_interval": 20,
         "position_x": 253,
@@ -119,7 +119,7 @@ WIDGET_CHASSIS = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "roll_angle": {
+    "roll_angle": {
         "enable": False,
         "update_interval": 20,
         "position_x": 770,
@@ -158,7 +158,7 @@ WIDGET_CHASSIS = {
         "display_order_roll_angle_difference": 3,
         "display_order_roll_angle_ratio": 4,
     },
-        "suspension_force": {
+    "suspension_force": {
         "enable": False,
         "update_interval": 20,
         "position_x": 391,
@@ -186,7 +186,7 @@ WIDGET_CHASSIS = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "suspension_position": {
+    "suspension_position": {
         "enable": False,
         "update_interval": 20,
         "position_x": 145,
@@ -221,7 +221,7 @@ WIDGET_CHASSIS = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "suspension_travel": {
+    "suspension_travel": {
         "enable": False,
         "update_interval": 20,
         "position_x": 728,
@@ -281,7 +281,7 @@ WIDGET_CHASSIS = {
         "display_order_maximum_position": 7,
         "display_order_live_position": 8,
     },
-        "weight_distribution": {
+    "weight_distribution": {
         "enable": False,
         "update_interval": 20,
         "position_x": 830,

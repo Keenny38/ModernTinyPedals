@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_FUEL = {
-        "fuel": {
+    "fuel": {
         "enable": True,
         "update_interval": 20,
         "position_x": 713,
@@ -107,7 +107,7 @@ WIDGET_FUEL = {
         "display_order_middle": 2,
         "display_order_lower": 3,
     },
-        "fuel_energy_saver": {
+    "fuel_energy_saver": {
         "enable": False,
         "update_interval": 100,
         "position_x": 115,
@@ -141,7 +141,7 @@ WIDGET_FUEL = {
         "font_color_lap_gain": "#448800",
         "font_color_lap_loss": "#DD5500",
     },
-        "virtual_energy": {
+    "virtual_energy": {
         "enable": True,
         "update_interval": 20,
         "position_x": 949,
@@ -234,7 +234,7 @@ WIDGET_FUEL = {
         "display_order_middle": 2,
         "display_order_lower": 3,
     },
-        "pit_stop_estimate": {
+    "pit_stop_estimate": {
         "enable": False,
         "update_interval": 50,
         "position_x": 360,
@@ -302,7 +302,7 @@ WIDGET_FUEL = {
         "display_order_upper": 1,
         "display_order_lower": 3,
     },
-        "lift_and_coast_led": {
+    "lift_and_coast_led": {
         "enable": False,
         "update_interval": 20,
         "position_x": 827,
@@ -337,7 +337,7 @@ WIDGET_FUEL = {
         "wheel_slip_color": "#FFFF00",
         "wheel_slip_threshold": 0.1,
     },
-        "onboard_setting": {
+    "onboard_setting": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,

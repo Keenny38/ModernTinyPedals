@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_TRACK = {
-        "cruise": {
+    "cruise": {
         "enable": False,
         "update_interval": 100,
         "position_x": 57,
@@ -55,7 +55,7 @@ WIDGET_TRACK = {
         "display_order_odometer": 3,
         "display_order_distance_into_lap": 4,
     },
-        "elevation": {
+    "elevation": {
         "enable": False,
         "update_interval": 20,
         "position_x": 115,
@@ -106,7 +106,7 @@ WIDGET_TRACK = {
         "position_mark_color": "#FF4422",
         "position_mark_width": 2,
     },
-        "heading": {
+    "heading": {
         "enable": False,
         "update_interval": 20,
         "position_x": 1015,
@@ -158,7 +158,7 @@ WIDGET_TRACK = {
         "center_mark_width": 1,
         "center_mark_color": "#88999999",
     },
-        "navigation": {
+    "navigation": {
         "enable": False,
         "update_interval": 20,
         "position_x": 1040,
@@ -210,7 +210,7 @@ WIDGET_TRACK = {
         "vehicle_outline_color": "#88000000",
         "vehicle_outline_width": 1,
     },
-        "pace_notes": {
+    "pace_notes": {
         "enable": False,
         "update_interval": 20,
         "position_x": 739,
@@ -250,7 +250,7 @@ WIDGET_TRACK = {
         "display_order_comments": 2,
         "display_order_debugging": 3,
     },
-        "session": {
+    "session": {
         "enable": False,
         "update_interval": 100,
         "position_x": 57,
@@ -289,7 +289,7 @@ WIDGET_TRACK = {
         "display_order_session_time": 2,
         "display_order_estimated_laps": 3,
     },
-        "track_clock": {
+    "track_clock": {
         "enable": False,
         "update_interval": 200,
         "position_x": 340,
@@ -323,7 +323,7 @@ WIDGET_TRACK = {
         "display_order_time_scale": 2,
         "display_order_sunlight_phase_countdown": 3,
     },
-        "track_map": {
+    "track_map": {
         "enable": True,
         "update_interval": 20,
         "position_x": 663,
@@ -419,7 +419,7 @@ WIDGET_TRACK = {
         "font_color_pitstop_duration": "#FFFFFF",
         "background_color_pitstop_duration": "#AA000000",
     },
-        "track_notes": {
+    "track_notes": {
         "enable": False,
         "update_interval": 20,
         "position_x": 739,
@@ -460,7 +460,7 @@ WIDGET_TRACK = {
         "display_order_comments": 2,
         "display_order_debugging": 3,
     },
-        "trailing": {
+    "trailing": {
         "enable": True,
         "update_interval": 20,
         "position_x": 713,
@@ -560,7 +560,7 @@ WIDGET_TRACK = {
         "display_order_speed": 10,
         "display_order_slip_angle_difference": 11,
     },
-        "flag": {
+    "flag": {
         "enable": True,
         "update_interval": 20,
         "position_x": 1111,
@@ -650,7 +650,7 @@ WIDGET_TRACK = {
         "display_order_finish_state": 9,
         "display_order_scheduled_repairs": 10,
     },
-        "weather": {
+    "weather": {
         "enable": False,
         "update_interval": 100,
         "position_x": 57,
@@ -695,7 +695,7 @@ WIDGET_TRACK = {
         "display_order_rain": 2,
         "display_order_wetness": 3,
     },
-        "weather_forecast": {
+    "weather_forecast": {
         "enable": False,
         "update_interval": 100,
         "position_x": 256,

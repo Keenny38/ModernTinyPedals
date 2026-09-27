@@ -25,7 +25,7 @@ Widget key name must match corresponding file name in 'widget' folder
 from ..setting_heatmap import HEATMAP_DEFAULT_BRAKE
 
 WIDGET_BRAKES = {
-        "brake_bias": {
+    "brake_bias": {
         "enable": False,
         "update_interval": 20,
         "position_x": 593,
@@ -62,7 +62,7 @@ WIDGET_BRAKES = {
         "display_order_baseline_bias_delta": 2,
         "display_order_brake_migration": 3,
     },
-        "brake_performance": {
+    "brake_performance": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -100,7 +100,7 @@ WIDGET_BRAKES = {
         "display_order_front_wheel_lock_duration": 4,
         "display_order_rear_wheel_lock_duration": 5,
     },
-        "brake_pressure": {
+    "brake_pressure": {
         "enable": False,
         "update_interval": 20,
         "position_x": 253,
@@ -130,7 +130,7 @@ WIDGET_BRAKES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "brake_temperature": {
+    "brake_temperature": {
         "enable": False,
         "update_interval": 20,
         "position_x": 460,
@@ -161,7 +161,7 @@ WIDGET_BRAKES = {
         "display_order_temperature": 1,
         "display_order_average": 2,
     },
-        "brake_wear": {
+    "brake_wear": {
         "enable": False,
         "update_interval": 20,
         "position_x": 688,

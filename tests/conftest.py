@@ -40,19 +40,43 @@ def ui_env(monkeypatch, tmp_path):
     return saved
 
 
+_TEXT_READERS = ("version", "track_name", "combo_name", "class_name", "driver_name", "vehicle_name")
+# Groups whose readers return one value per wheel (FL, FR, RL, RR). Same method name means a
+# different shape depending on the group (Vehicle.position_vertical is a scalar, Wheel's is a set).
+_WHEEL_GROUPS = ("tyre", "brake", "wheel")
+# Readers of a wheel group that still return a single value
+_WHEEL_GROUP_SCALARS = ("bias_front", "migration", "offroad", "is_wheel_locked")
+
+
 class _FakeGroup:
-    """API reader group, any method returns neutral value"""
+    """API reader group, any method returns a neutral value of the expected shape"""
+
+    def __init__(self, group_name: str = ""):
+        self._group_name = group_name
 
     def __getattr__(self, name):
+        wheel_set = self._group_name in _WHEEL_GROUPS and name not in _WHEEL_GROUP_SCALARS
+
         def reader(*args, **kwargs):
-            if name in ("version", "track_name", "combo_name", "class_name", "driver_name", "vehicle_name"):
+            if name in _TEXT_READERS:
                 return "test"
+            if name == "surface_temperature_ico":
+                return (0,) * 12
+            if name == "damage_severity":
+                return (0,) * 8
+            if wheel_set:
+                return ("",) * 4 if name in ("compound_class", "compound_name") else (0,) * 4
             return 0
         return reader
 
 
 class _FakeReader:
-    """API reader (no game running)"""
+    """API reader (no game running)
+
+    Groups are cached, so tests can monkeypatch a single reader (api.read.tyre.wear, ...).
+    """
 
     def __getattr__(self, name):
-        return _FakeGroup()
+        group = _FakeGroup(name)
+        setattr(self, name, group)  # cache, so the same object is returned next time
+        return group

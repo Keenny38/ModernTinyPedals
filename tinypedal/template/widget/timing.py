@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_TIMING = {
-        "deltabest": {
+    "deltabest": {
         "enable": True,
         "update_interval": 20,
         "position_x": 987,
@@ -54,7 +54,7 @@ WIDGET_TIMING = {
         "freeze_duration": 3,
         "enable_animated_deltabest": True,
     },
-        "deltabest_extended": {
+    "deltabest_extended": {
         "enable": False,
         "update_interval": 20,
         "position_x": 320,
@@ -92,7 +92,7 @@ WIDGET_TIMING = {
         "display_order_stint_deltabest": 3,
         "display_order_deltalast": 4,
     },
-        "lap_time_history": {
+    "lap_time_history": {
         "enable": False,
         "update_interval": 20,
         "position_x": 523,
@@ -165,7 +165,7 @@ WIDGET_TIMING = {
         "display_order_fuel_ratio": 5,
         "display_order_wear": 6,
     },
-        "laps_and_position": {
+    "laps_and_position": {
         "enable": False,
         "update_interval": 100,
         "position_x": 57,
@@ -211,7 +211,7 @@ WIDGET_TIMING = {
         "display_order_track_limits_points": 4,
         "display_order_position_change": 5,
     },
-        "sectors": {
+    "sectors": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -243,7 +243,7 @@ WIDGET_TIMING = {
         "display_order_target_time": 0,
         "display_order_sector_time": 1,
     },
-        "stint_history": {
+    "stint_history": {
         "enable": False,
         "update_interval": 20,
         "position_x": 523,
@@ -323,7 +323,7 @@ WIDGET_TIMING = {
         "display_order_delta": 6,
         "display_order_consistency": 7,
     },
-        "timing": {
+    "timing": {
         "enable": False,
         "update_interval": 20,
         "position_x": 147,

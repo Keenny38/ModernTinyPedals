@@ -23,7 +23,7 @@ Widget key name must match corresponding file name in 'widget' folder
 """
 
 WIDGET_ENGINE = {
-        "battery": {
+    "battery": {
         "enable": False,
         "update_interval": 20,
         "position_x": 140,
@@ -67,7 +67,7 @@ WIDGET_ENGINE = {
         "display_order_estimated_net_change": 4,
         "display_order_activation_timer": 5,
     },
-        "drs": {
+    "drs": {
         "enable": False,
         "update_interval": 20,
         "position_x": 504,
@@ -90,7 +90,7 @@ WIDGET_ENGINE = {
         "font_color_not_available": "#888888",
         "background_color_not_available": "#222222",
     },
-        "electric_motor": {
+    "electric_motor": {
         "enable": False,
         "update_interval": 20,
         "position_x": 223,
@@ -132,7 +132,7 @@ WIDGET_ENGINE = {
         "display_order_power": 5,
         "display_order_regeneration_level": 6,
     },
-        "engine": {
+    "engine": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -182,7 +182,7 @@ WIDGET_ENGINE = {
         "display_order_power": 7,
         "display_order_power_to_weight_ratio": 8,
     },
-        "engine_temperature": {
+    "engine_temperature": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -221,7 +221,7 @@ WIDGET_ENGINE = {
         "display_order_oil_temperature": 1,
         "display_order_water_temperature": 2,
     },
-        "gear": {
+    "gear": {
         "enable": True,
         "update_interval": 20,
         "position_x": 721,
@@ -307,7 +307,7 @@ WIDGET_ENGINE = {
         "display_order_rpm": 3,
         "display_order_consumption": 4,
     },
-        "push_to_pass": {
+    "push_to_pass": {
         "enable": False,
         "update_interval": 20,
         "position_x": 556,
@@ -341,7 +341,7 @@ WIDGET_ENGINE = {
         "display_order_battery_charge": 1,
         "display_order_activation_timer": 2,
     },
-        "rpm_led": {
+    "rpm_led": {
         "enable": False,
         "update_interval": 20,
         "position_x": 766,
@@ -374,7 +374,7 @@ WIDGET_ENGINE = {
         "speed_limiter_flash_interval": 0.25,
         "speed_limiter_flash_color": "#00FF00",
     },
-        "speedometer": {
+    "speedometer": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,

@@ -25,7 +25,7 @@ Widget key name must match corresponding file name in 'widget' folder
 from ..setting_heatmap import HEATMAP_DEFAULT_TYRE
 
 WIDGET_TYRES = {
-        "tyre_carcass": {
+    "tyre_carcass": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -59,7 +59,7 @@ WIDGET_TYRES = {
         "font_color_tyre_compound": "#666666",
         "background_color_tyre_compound": "#222222",
     },
-        "tyre_deflection": {
+    "tyre_deflection": {
         "enable": False,
         "update_interval": 20,
         "position_x": 502,
@@ -89,7 +89,7 @@ WIDGET_TYRES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "tyre_inner_layer": {
+    "tyre_inner_layer": {
         "enable": False,
         "update_interval": 20,
         "position_x": 249,
@@ -117,7 +117,7 @@ WIDGET_TYRES = {
         "font_color_tyre_compound": "#666666",
         "background_color_tyre_compound": "#222222",
     },
-        "tyre_load": {
+    "tyre_load": {
         "enable": False,
         "update_interval": 20,
         "position_x": 253,
@@ -147,7 +147,7 @@ WIDGET_TYRES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "tyre_pressure": {
+    "tyre_pressure": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -176,7 +176,7 @@ WIDGET_TYRES = {
         "font_color_tyre_compound": "#666666",
         "background_color_tyre_compound": "#222222",
     },
-        "tyre_temperature": {
+    "tyre_temperature": {
         "enable": False,
         "update_interval": 20,
         "position_x": 249,
@@ -204,7 +204,7 @@ WIDGET_TYRES = {
         "font_color_tyre_compound": "#666666",
         "background_color_tyre_compound": "#222222",
     },
-        "tyre_wear": {
+    "tyre_wear": {
         "enable": False,
         "update_interval": 20,
         "position_x": 57,
@@ -263,7 +263,7 @@ WIDGET_TYRES = {
         "display_order_lifespan_minutes": 6,
         "display_order_end_stint_remaining": 7,
     },
-        "wheel_camber": {
+    "wheel_camber": {
         "enable": False,
         "update_interval": 20,
         "position_x": 140,
@@ -295,7 +295,7 @@ WIDGET_TYRES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "wheel_status": {
+    "wheel_status": {
         "enable": False,
         "update_interval": 20,
         "position_x": 620,
@@ -311,10 +311,16 @@ WIDGET_TYRES = {
         "show_background": True,
         "background_color": "#222222",
         "font_color": "#CCCCCC",
+        "show_caption": False,
+        "caption_text": "wheels",
+        "font_color_caption": "#AAAAAA",
+        "background_color_caption": "#333333",
         "show_wheel_angle": True,
         "wheel_angle_multiplier": 2.0,
         "maximum_wheel_angle": 30,
         "show_tyre_temperature": True,
+        "tyre_temperature_warning_threshold": 0,
+        "font_color_tyre_temperature_warning": "#FF2200",
         "show_tyre_temperature_bands": False,
         "font_color_temperature": "#000000",
         "show_degree_sign": False,
@@ -327,17 +333,22 @@ WIDGET_TYRES = {
         "tyre_pressure_target_maximum": 190,
         "tyre_pressure_low_color": "#00CCFF",
         "tyre_pressure_high_color": "#FF2200",
+        "tyre_pressure_warning_background_color": "#222222",
         "show_tyre_wear": True,
         "tyre_wear_warning_threshold": 30,
         "tyre_wear_warning_color": "#222222",
         "font_color_tyre_wear_warning": "#FF2200",
         "show_tyre_wear_end_stint": True,
+        "show_tyre_compound": False,
         "show_tyre_status": True,
         "flat_spot_threshold": 1.0,
         "wheel_puncture_color": "#FF2200",
         "wheel_flat_spot_color": "#FFAA00",
         "wheel_detached_color": "#888888",
         "show_brake_temperature": True,
+        "show_brake_wear": False,
+        "brake_wear_warning_threshold": 30,
+        "font_color_brake_wear_warning": "#FF2200",
         "show_slip_warning": True,
         "wheel_lock_threshold": 0.2,
         "wheel_spin_threshold": 0.15,
@@ -400,7 +411,7 @@ WIDGET_TYRES = {
         "display_order_rpm": 7,
         "display_order_pedals": 8,
     },
-        "wheel_toe": {
+    "wheel_toe": {
         "enable": False,
         "update_interval": 20,
         "position_x": 140,
@@ -432,7 +443,7 @@ WIDGET_TYRES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "slip_angle": {
+    "slip_angle": {
         "enable": False,
         "update_interval": 20,
         "position_x": 612,
@@ -464,7 +475,7 @@ WIDGET_TYRES = {
         "font_color_caption": "#CCCCCC",
         "background_color_caption": "#777777",
     },
-        "slip_ratio": {
+    "slip_ratio": {
         "enable": False,
         "update_interval": 20,
         "position_x": 280,
