@@ -187,11 +187,14 @@ class FuelCalculator(BaseDialog):
         self.button_adddata.setHidden(not checked)
         self.button_toggle.setText("Hide History" if checked else "Show History")
 
-        margin = self.layout().contentsMargins()
+        layout = self.layout()
+        if layout is None:
+            return
+        margin = layout.contentsMargins()
         width = self.panel_calculator.sizeHint().width() + margin.left() + margin.right()
 
         if checked:
-            width += self.panel_history.sizeHint().width() + self.layout().spacing()
+            width += self.panel_history.sizeHint().width() + layout.spacing()
         self.setFixedWidth(width)
 
         config = cfg.user.config["fuel_calculator"]

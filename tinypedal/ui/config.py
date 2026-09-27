@@ -332,11 +332,16 @@ class UserConfig(BaseDialog):
                 continue
             label = label_item.widget()
             option = option_item.widget()
+            if label is None or option is None:
+                continue
             if label is option:  # group title (spans both columns), hide while searching
                 label.setHidden(bool(words))
                 continue
             key = editor_keys.get(id(option), "")
-            haystack = search_text(key) if key else label.text().lower()
+            if key:
+                haystack = search_text(key)
+            else:
+                haystack = label.text().lower() if isinstance(label, QLabel) else ""
             hidden = not all(word in haystack for word in words)
             label.setHidden(hidden)
             option.setHidden(hidden)

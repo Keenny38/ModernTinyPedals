@@ -195,12 +195,12 @@ class Realtime(Overlay):
             last_skip = 0
 
             sectors_indexes = (0, *sectors_index)
-            map_sector_path = None
+            map_sector_path = QPainterPath()  # replaced at index 0 (always a sector start)
             # Map sector path
             for index, coords in enumerate(self.map_scaled):
                 if index in sectors_indexes:
                     last_skip = 0
-                    if map_sector_path:  # close previous sector path
+                    if index > 0:  # close previous sector path
                         map_sector_path.lineTo(*coords)
                     # Create new sector path
                     map_sector_path = QPainterPath()

@@ -51,6 +51,7 @@ from ._common import (
     TableBatchReplace,
     UIScaler,
     run_after_saving,
+    table_item,
 )
 
 HEADER_BRANDS = "Vehicle name","Brand name"
@@ -321,8 +322,8 @@ class VehicleBrandEditor(BaseEditor):
         """Update temporary changes to brands temp first"""
         self.brands_temp.clear()
         for index in range(self.table_brands.rowCount()):
-            key_name = self.table_brands.item(index, 0).text()
-            item_name = self.table_brands.item(index, 1).text()
+            key_name = table_item(self.table_brands, index, 0).text()
+            item_name = table_item(self.table_brands, index, 1).text()
             self.brands_temp[key_name] = item_name
 
     def save_setting(self):

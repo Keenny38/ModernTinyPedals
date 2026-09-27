@@ -43,6 +43,7 @@ from ._common import (
     CompactButton,
     UIScaler,
     run_after_saving,
+    table_item,
 )
 from ._option import ColorEdit
 
@@ -208,8 +209,8 @@ class VehicleClassEditor(BaseEditor):
         loaded = self.classes_temp.copy()
         self.classes_temp.clear()
         for index in range(self.table_classes.rowCount()):
-            class_name = self.table_classes.item(index, 0).text()
-            abbr_name = self.table_classes.item(index, 1).text()
+            class_name = table_item(self.table_classes, index, 0).text()
+            abbr_name = table_item(self.table_classes, index, 1).text()
             color_string = self.table_classes.cellWidget(index, 2).text()
             self.classes_temp[class_name] = {
                 "alias": abbr_name,

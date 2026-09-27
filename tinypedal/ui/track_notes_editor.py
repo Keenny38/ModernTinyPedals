@@ -71,6 +71,7 @@ from ._common import (
     FloatTableItem,
     TableBatchReplace,
     UIScaler,
+    table_item,
 )
 from .track_map_viewer import MapView
 
@@ -432,7 +433,7 @@ class TrackNotesEditor(BaseEditor):
 
         pos_curr = round(position, DECIMALS)
         row_index = self.table_notes.currentRow()
-        self.table_notes.item(row_index, 0).setValue(pos_curr)
+        table_item(self.table_notes, row_index, 0, FloatTableItem).setValue(pos_curr)
         self.mark_positions_on_map()
         self.highlight_position_on_map()
         self.table_notes.setCurrentCell(-1, -1)  # deselect to avoid mis-clicking
@@ -561,7 +562,7 @@ class TrackNotesEditor(BaseEditor):
         if self._verify_enabled:
             self.set_modified()
             if column_index == 0:
-                item = self.table_notes.item(row_index, column_index)
+                item = table_item(self.table_notes, row_index, column_index)
                 item.validate()
                 self.mark_positions_on_map()
 
@@ -621,7 +622,7 @@ class TrackNotesEditor(BaseEditor):
         column_index = 3
         row_indexes = set(data.row() for data in self.table_notes.selectedIndexes())
         for row_index in row_indexes:
-            item = self.table_notes.item(row_index, column_index)
+            item = table_item(self.table_notes, row_index, column_index)
             text = item.text()
             if tag_name not in text:
                 item.setText(text + tag_name)
@@ -632,20 +633,20 @@ class TrackNotesEditor(BaseEditor):
             column_index = 3
             row_indexes = set(data.row() for data in self.table_notes.selectedIndexes())
             for row_index in row_indexes:
-                item = self.table_notes.item(row_index, column_index)
+                item = table_item(self.table_notes, row_index, column_index)
                 item.setText("")
                 #item.setText(item.text().replace(tag_name, ""))
 
     def highlight_position_on_map(self):
         """Highlight selected position on map"""
-        value = self.table_notes.item(self.table_notes.currentRow(), 0).value()
+        value = table_item(self.table_notes, self.table_notes.currentRow(), 0, FloatTableItem).value()
         self.trackmap.spinbox_pos_dist.setValue(value)
         self.trackmap.update_highlighted_coords()
 
     def mark_positions_on_map(self):
         """Mark all positions on map"""
         temp_coords = set(
-            self.table_notes.item(row_index, 0).value()
+            table_item(self.table_notes, row_index, 0, FloatTableItem).value()
             for row_index in range(self.table_notes.rowCount())
         )
         self.trackmap.update_marked_coords(temp_coords)

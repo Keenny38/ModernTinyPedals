@@ -44,6 +44,7 @@ from ._common import (
     TableBatchReplace,
     UIScaler,
     run_after_saving,
+    table_item,
 )
 from ._option import ColorEdit
 
@@ -245,7 +246,7 @@ class TyreCompoundEditor(BaseEditor):
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
-        item = self.table_compounds.item(row_index, column_index)
+        item = table_item(self.table_compounds, row_index, column_index)
         if column_index == 1:  # symbol column
             text = item.text()
             if not text:
@@ -257,8 +258,8 @@ class TyreCompoundEditor(BaseEditor):
         """Update temporary changes to compounds temp first"""
         self.compounds_temp.clear()
         for index in range(self.table_compounds.rowCount()):
-            compound_name = self.table_compounds.item(index, 0).text()
-            symbol_name = self.table_compounds.item(index, 1).text()
+            compound_name = table_item(self.table_compounds, index, 0).text()
+            symbol_name = table_item(self.table_compounds, index, 1).text()
             color = self.table_compounds.cellWidget(index, 2).text()
             heatmap_name = self.table_compounds.cellWidget(index, 3).currentText()
             self.compounds_temp[compound_name] = {

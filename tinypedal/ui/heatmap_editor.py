@@ -45,6 +45,7 @@ from ._common import (
     FloatTableItem,
     UIScaler,
     run_after_saving,
+    table_item,
 )
 from ._option import ColorEdit
 
@@ -161,7 +162,7 @@ class HeatmapEditor(BaseEditor):
     def capture_table(self) -> tuple[tuple[float, str], ...]:
         """Capture table rows (temperature, color) for undo history, no side effect"""
         return tuple(
-            (self.table_heatmap.item(index, 0).value(), self.table_heatmap.cellWidget(index, 1).text())
+            (table_item(self.table_heatmap, index, 0, FloatTableItem).value(), self.table_heatmap.cellWidget(index, 1).text())
             for index in range(self.table_heatmap.rowCount())
         )
 
@@ -227,7 +228,7 @@ class HeatmapEditor(BaseEditor):
         """Verify input value"""
         if self._verify_enabled:
             self.set_modified()
-            item = self.table_heatmap.item(row_index, column_index)
+            item = table_item(self.table_heatmap, row_index, column_index)
             if column_index == 0:
                 item.validate()
 
@@ -249,7 +250,7 @@ class HeatmapEditor(BaseEditor):
         self.sort_temperature()
         row_index = self.table_heatmap.rowCount()
         if row_index > 0:
-            temperature = self.table_heatmap.item(row_index - 1, 0).value() + 10
+            temperature = table_item(self.table_heatmap, row_index - 1, 0, FloatTableItem).value() + 10
             color = "#FFFFFF"
         else:
             temperature = -273.0
@@ -336,7 +337,7 @@ class HeatmapEditor(BaseEditor):
         self.sort_temperature()
         self.selected_heatmap_dict.clear()
         for index in range(self.table_heatmap.rowCount()):
-            temperature = f"{self.table_heatmap.item(index, 0).value():.1f}"
+            temperature = f"{table_item(self.table_heatmap, index, 0, FloatTableItem).value():.1f}"
             color_string = self.table_heatmap.cellWidget(index, 1).text()
             self.selected_heatmap_dict[temperature] = color_string
         # Apply changes to heatmap preset dictionary

@@ -45,6 +45,7 @@ from ._common import (
     FloatTableItem,
     UIScaler,
     run_after_saving,
+    table_item,
 )
 
 HEADER_TRACKS = (
@@ -226,7 +227,7 @@ class TrackInfoEditor(BaseEditor):
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
-        item = self.table_tracks.item(row_index, column_index)
+        item = table_item(self.table_tracks, row_index, column_index)
         if column_index >= 1:
             item.validate()
 
@@ -268,7 +269,7 @@ class TrackInfoEditor(BaseEditor):
             return
 
         row_index = self.table_tracks.currentRow()
-        track_name = self.table_tracks.item(row_index, 0).text()
+        track_name = table_item(self.table_tracks, row_index, 0).text()
         current_name = api.read.session.track_name()
         if track_name != current_name:
             msg_text = (
@@ -283,16 +284,16 @@ class TrackInfoEditor(BaseEditor):
             message=f"Set speed trap at position <b>{position}</b><br>for <b>{track_name}</b>?"):
             return
 
-        self.table_tracks.item(row_index, 4).setValue(position)
+        table_item(self.table_tracks, row_index, 4, FloatTableItem).setValue(position)
         self.table_tracks.setCurrentCell(-1, -1)  # deselect to avoid mis-clicking
 
     def update_tracks_temp(self):
         """Update temporary changes to tracks temp first"""
         self.tracks_temp.clear()
         for row_index in range(self.table_tracks.rowCount()):
-            track_name = self.table_tracks.item(row_index, 0).text()
+            track_name = table_item(self.table_tracks, row_index, 0).text()
             self.tracks_temp[track_name] = {
-                key: self.table_tracks.item(row_index, column_index).value()
+                key: table_item(self.table_tracks, row_index, column_index).value()
                 for column_index, key in enumerate(TRACKINFO_DEFAULT, start=1)
             }
 

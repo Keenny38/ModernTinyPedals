@@ -65,7 +65,10 @@ def absolute_refilling(dataset: list[dict], default: float) -> float:
             # Get absolute refilling fuel (liter) from raw string
             if data.get("name") == "FUEL:":
                 raw_value = data["settings"][data["currentSetting"]]["text"]
-                abs_refill = float(rex_number_extract.search(raw_value).group())
+                matched = rex_number_extract.search(raw_value)
+                if matched is None:  # no number in setting text
+                    return default
+                abs_refill = float(matched.group())
                 if "gal" in raw_value.lower():  # convert to liter
                     abs_refill *= 3.7854118
                 break

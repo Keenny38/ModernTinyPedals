@@ -68,8 +68,8 @@ class MousePosition:
     def reset(self):
         """Reset"""
         self._init_pos: Any = None
-        self._grid_x = None
-        self._grid_y = None
+        self._grid_x: list[int] = []
+        self._grid_y: list[int] = []
         self._center_x: list[float] = []
         self._center_y: list[float] = []
         self._delta_x = 0

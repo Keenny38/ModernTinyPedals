@@ -181,7 +181,7 @@ def load_heatmap_color(
         tuple(tuple(temperature value, tuple(color string, color string)))
     """
     heatmap_dict = cfg.user.heatmap.get(heatmap_name)
-    if not verify_heatmap(heatmap_dict):
+    if heatmap_dict is None or not verify_heatmap(heatmap_dict):
         heatmap_dict = cfg.default.heatmap[default_name]
     if swap_style:
         return tuple(sorted(

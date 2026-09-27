@@ -52,7 +52,7 @@ from ..widget._style import (
     custom_themes,
     set_custom_themes,
 )
-from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog, table_item
 from .widget_preview import render_widget
 
 logger = logging.getLogger(__name__)
@@ -248,7 +248,7 @@ class ThemeEditor(BaseEditor):
     def pick_color(self, row: int, column: int):
         if column != COLUMN_THEME or self.current_theme() is None:
             return
-        current = QColor(self.table.item(row, COLUMN_THEME).text())
+        current = QColor(table_item(self.table, row, COLUMN_THEME).text())
         color = QColorDialog.getColor(current, self, tr("Select Color"))
         if color.isValid():
             self.set_theme_color(row, color.name()[1:].upper())

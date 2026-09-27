@@ -22,6 +22,7 @@ API connector
 
 from abc import ABC, abstractmethod
 from functools import partial
+from typing import ClassVar
 
 # Import APIs
 from .adapter import (
@@ -42,6 +43,8 @@ class Connector(ABC):
     """API Connector"""
 
     __slots__ = ()
+    NAME: ClassVar[str]
+    LEGACY: ClassVar[bool]
 
     @abstractmethod
     def start(self):

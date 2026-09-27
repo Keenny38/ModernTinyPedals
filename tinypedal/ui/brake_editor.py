@@ -44,6 +44,7 @@ from ._common import (
     UIScaler,
     #TableBatchReplace,
     run_after_saving,
+    table_item,
 )
 
 HEADER_BRAKES = "Brake name","Failure (mm)","Heatmap name"
@@ -231,7 +232,7 @@ class BrakeEditor(BaseEditor):
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
-        item = self.table_brakes.item(row_index, column_index)
+        item = table_item(self.table_brakes, row_index, column_index)
         if column_index == 1:  # failure thickness column
             item.validate()
 
@@ -239,8 +240,8 @@ class BrakeEditor(BaseEditor):
         """Update temporary changes to brakes temp first"""
         self.brakes_temp.clear()
         for index in range(self.table_brakes.rowCount()):
-            class_name = self.table_brakes.item(index, 0).text()
-            failure_thickness = self.table_brakes.item(index, 1).value()
+            class_name = table_item(self.table_brakes, index, 0).text()
+            failure_thickness = table_item(self.table_brakes, index, 1, FloatTableItem).value()
             heatmap_name = self.table_brakes.cellWidget(index, 2).currentText()
             self.brakes_temp[class_name] = {
                 "failure_thickness": failure_thickness,

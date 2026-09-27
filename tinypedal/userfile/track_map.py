@@ -81,8 +81,11 @@ def load_track_map_file(filepath: str, filename: str, extension: str = FileExt.S
     """Load svg track map file (*.svg)"""
     try:
         dom = xml.dom.minidom.parse(f"{filepath}{filename}{extension}")
-        desc_col = dom.documentElement.getElementsByTagName("desc")
-        path_col = dom.documentElement.getElementsByTagName("polyline")
+        root = dom.documentElement
+        if root is None:
+            raise TypeError
+        desc_col = root.getElementsByTagName("desc")
+        path_col = root.getElementsByTagName("polyline")
         svg_coords = svg_dists = None
         for tags in path_col:
             if tags.getAttribute("id") == "map":

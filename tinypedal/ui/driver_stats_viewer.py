@@ -53,6 +53,7 @@ from ._common import (
     CompactButton,
     NumericTableItem,
     UIScaler,
+    table_item,
 )
 from .track_map_viewer import TrackMapViewer
 
@@ -265,7 +266,7 @@ class DriverStatsViewer(BaseEditor):
             QMessageBox.warning(self, tr("Error"), tr("No data found."))
             return
 
-        selected_vehicle = self.table_stats.item(selected_rows[0], 0).text()
+        selected_vehicle = table_item(self.table_stats, selected_rows[0], 0).text()
         msg_text = (
             f"Remove all stats from <b>{selected_vehicle}</b>?<br><br>"
             "This cannot be undone!"
@@ -280,9 +281,9 @@ class DriverStatsViewer(BaseEditor):
 
     def reset_stat(self, row: int, column: int):
         """Reset stat"""
-        selected_vehicle = self.table_stats.item(row, 0).text()
+        selected_vehicle = table_item(self.table_stats, row, 0).text()
         selected_column = self.table_header_key[column]
-        best_laptime = self.table_stats.item(row, column).text()
+        best_laptime = table_item(self.table_stats, row, column).text()
         if best_laptime == TEXT_NOLAPTIME:
             QMessageBox.warning(self, tr("Error"), tr("No lap time found."))
             return

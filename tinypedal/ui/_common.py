@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from typing import TypeVar, overload
 
 from PySide6.QtCore import QRegularExpression, Qt, QTimer
 from PySide6.QtGui import (
@@ -536,7 +537,7 @@ class TableBatchReplace(BaseDialog):
         column_index = self.table_selector[self.column_selector.currentText()]
         self.search_selector.clear()
         selector_list = set(
-            self.table_data.item(row_index, column_index).text()
+            table_item(self.table_data, row_index, column_index).text()
             for row_index in range(self.table_data.rowCount())
         )
         self.search_selector.addItems(sorted(selector_list))
@@ -562,10 +563,30 @@ class TableBatchReplace(BaseDialog):
             match_flag = re.IGNORECASE
 
         for row_index in range(self.table_data.rowCount()):
-            item = self.table_data.item(row_index, column_index)
+            item = table_item(self.table_data, row_index, column_index)
             item.setText(re.sub(pattern, replace, item.text(), flags=match_flag))
 
         self.update_selector(column_index, search)
+
+
+# Table item access
+TableItemT = TypeVar("TableItemT", bound=QTableWidgetItem)
+
+
+@overload
+def table_item(table: QTableWidget, row: int, column: int) -> QTableWidgetItem: ...
+@overload
+def table_item(table: QTableWidget, row: int, column: int, item_type: type[TableItemT]) -> TableItemT: ...
+def table_item(table: QTableWidget, row: int, column: int, item_type: type = QTableWidgetItem):
+    """Get table cell item, raise LookupError if cell is empty or has unexpected item type
+
+    All editor tables populate every cell on refresh, so a missing item is a programming error
+    (or an invalid row index such as -1 from currentRow() with no selection).
+    """
+    item = table.item(row, column)
+    if not isinstance(item, item_type):
+        raise LookupError(f"no {item_type.__name__} at row {row}, column {column}")
+    return item
 
 
 # Table item class

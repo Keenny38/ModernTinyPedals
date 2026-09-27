@@ -45,7 +45,7 @@ from ..i18n.options import module_label, option_label, option_tooltip
 from ..setting import cfg, load_setting_json_file, save_and_verify_json_file
 from ..userfile.json_setting import copy_setting
 from ..userfile.preset_compare import copy_values, diff_presets
-from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog, table_item
 
 COLUMNS = ("Section", "Option", "Preset A", "Preset B")
 
@@ -167,14 +167,14 @@ class PresetCompare(BaseEditor):
     def apply_filter(self, text: str):
         words = text.lower().split()
         for row in range(self.table.rowCount()):
-            content = " ".join(self.table.item(row, column).text() for column in range(2)).lower()
-            section, key = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            content = " ".join(table_item(self.table, row, column).text() for column in range(2)).lower()
+            section, key = table_item(self.table, row, 0).data(Qt.ItemDataRole.UserRole)
             haystack = f"{content} {section} {key}"
             self.table.setRowHidden(row, not all(word in haystack for word in words))
 
     def selected_items(self) -> list[tuple[str, str]]:
         rows = sorted({index.row() for index in self.table.selectedIndexes() if not self.table.isRowHidden(index.row())})
-        return [self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in rows]
+        return [table_item(self.table, row, 0).data(Qt.ItemDataRole.UserRole) for row in rows]
 
     def copy_selected(self, to_a: bool):
         """Copy selected options between presets"""

@@ -73,6 +73,7 @@ from ._common import (
     CompactButton,
     UIScaler,
     add_vertical_separator,
+    table_item,
 )
 from .config import UserConfig
 
@@ -197,13 +198,12 @@ class TyrePlanTable(QTableWidget):
 
         for column_index in range(column_count):
             item = self.item(row_index, column_index)
-            new_item = self.item(new_row_index, column_index)
             if not item:
                 continue
             tyre_name = item.text()
             if not tyre_name:
                 continue
-            new_item.setText(tyre_name)
+            table_item(self, new_row_index, column_index).setText(tyre_name)
             self._add_stats(new_row_index, column_index)
         # Signal update
         self.refresh.emit(True)
@@ -285,7 +285,7 @@ class TyrePlanTable(QTableWidget):
 
     def set_change_time(self, row_index: int, column_index: int, seconds: float):
         """Set tyre change time"""
-        item = self.item(row_index, column_index)
+        item = table_item(self, row_index, column_index)
         if seconds <= 0:
             text_time = "N/A"
             item.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -325,7 +325,7 @@ class TyrePlanTable(QTableWidget):
 
     def _remove_item(self, row_index: int, column_index: int):
         """Remove one item from specific cell"""
-        item = self.item(row_index, column_index)
+        item = table_item(self, row_index, column_index)
         item.setText("")
         self.removeCellWidget(row_index, column_index)
 

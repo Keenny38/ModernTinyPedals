@@ -129,7 +129,7 @@ class VROverlay(QObject):
             self._overlay = openvr.IVROverlay()
             self._handle = self._overlay.createOverlay("tinypedal.overlay", "TinyPedal")
             self._overlay.setOverlayWidthInMeters(self._handle, max(float(setting["overlay_width_meters"]), 0.05))
-            self.__set_transform(setting)
+            self.__set_transform(openvr, self._overlay, setting)
             self._overlay.showOverlay(self._handle)
             self._visible = True
         except Exception as error:  # SteamVR not running, or openvr error
@@ -139,9 +139,8 @@ class VROverlay(QObject):
         self._timer.start(max(int(setting["update_interval"]), 20))
         logger.info("ENABLED: VR overlay")
 
-    def __set_transform(self, setting: dict):
+    def __set_transform(self, openvr, overlay, setting: dict):
         """Set overlay position"""
-        openvr = self._openvr
         matrix = openvr.HmdMatrix34_t()
         rows = overlay_transform(
             float(setting["distance_meters"]),
@@ -152,19 +151,22 @@ class VROverlay(QObject):
             for column_index, value in enumerate(row):
                 matrix.m[row_index][column_index] = value
         if setting["enable_attach_to_headset"]:
-            self._overlay.setOverlayTransformTrackedDeviceRelative(
+            overlay.setOverlayTransformTrackedDeviceRelative(
                 self._handle, openvr.k_unTrackedDeviceIndex_Hmd, matrix)
         else:
-            self._overlay.setOverlayTransformAbsolute(self._handle, openvr.TrackingUniverseSeated, matrix)
+            overlay.setOverlayTransformAbsolute(self._handle, openvr.TrackingUniverseSeated, matrix)
 
     def update_overlay(self):
         """Send composed widgets image to SteamVR, only if changed"""
+        overlay = self._overlay
+        if overlay is None:  # timer tick queued after disable()
+            return
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
         image = compose_widgets(widgets)
         try:
             if image is None:  # all widgets hidden (auto hide, out of session), hide VR overlay too
                 if self._visible:
-                    self._overlay.hideOverlay(self._handle)
+                    overlay.hideOverlay(self._handle)
                     self._visible = False
                     self._checksum = None
                 return
@@ -172,9 +174,9 @@ class VROverlay(QObject):
             if frame.checksum != self._checksum:  # skip unchanged image
                 self._checksum = frame.checksum
                 self._buffer = frame.buffer  # keep reference until next frame
-                self._overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
+                overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
             if not self._visible:
-                self._overlay.showOverlay(self._handle)
+                overlay.showOverlay(self._handle)
                 self._visible = True
         except Exception as error:
             self.__fail(f"VR overlay stopped: {error}")

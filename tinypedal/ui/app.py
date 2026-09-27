@@ -288,12 +288,14 @@ class AppWindow(QMainWindow):
         """Apply new UI language without restart, rebuild menus, tabs, status bar"""
         language_code = set_language(cfg.application["language"])
         install_qt_translation(QApplication.instance(), language_code)
-        tab_index = self.centralWidget().current_index()
+        tab_view = self.centralWidget()
+        tab_index = tab_view.current_index() if isinstance(tab_view, TabView) else 0
         self.setStatusBar(StatusButtonBar(self))  # old widgets are deleted by Qt
         self.menuBar().clear()
         self.set_menu_bar()
-        self.setCentralWidget(TabView(self))
-        self.centralWidget().set_current_index(tab_index)
+        tab_view = TabView(self)
+        self.setCentralWidget(tab_view)
+        tab_view.set_current_index(tab_index)
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:
             old_menu = tray_icon.contextMenu()
@@ -431,7 +433,9 @@ class AppWindow(QMainWindow):
         loader.close()  # must close this first
         self.save_window_state()
         self.__break_signal()
-        self.findChild(QSystemTrayIcon).hide()  # workaround tray icon not removed after exited
+        tray_icon = self.findChild(QSystemTrayIcon)
+        if tray_icon is not None:  # tray is optional (not supported on some desktops)
+            tray_icon.hide()  # workaround tray icon not removed after exited
         QApplication.quit()
 
     def closeEvent(self, event):

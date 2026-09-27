@@ -209,9 +209,9 @@ class TracePlot(QWidget):
         else:
             self.cursor_distance = None
         self.update()
-        parent = self.parent()
-        if hasattr(parent, "update_cursor_info"):
-            parent.update_cursor_info(self.cursor_values())
+        update_cursor_info = getattr(self.parent(), "update_cursor_info", None)
+        if update_cursor_info is not None:
+            update_cursor_info(self.cursor_values())
 
     def wheelEvent(self, event):
         """Zoom around cursor"""

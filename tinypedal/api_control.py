@@ -67,7 +67,7 @@ class APIControl:
     )
 
     def __init__(self):
-        self._api = None
+        self._api: api_connector.Connector | None = None
         self._available_api = ()
         self._enable_legacy = False
         self._same_api_loaded = False
@@ -107,24 +107,24 @@ class APIControl:
 
     def start(self):
         """Start API"""
-        logger.info("CONNECTING: %s API", self._api.NAME)
+        logger.info("CONNECTING: %s API", self._connected.NAME)
         self.setup()
-        self._api.start()
+        self._connected.start()
 
         # Reload dataset if API changed
         if self.read is None or not self._same_api_loaded:
-            init_read = self._api.reader()
+            init_read = self._connected.reader()
             self.read = init_read
             self._same_api_loaded = True
 
         logger.info("ENCODING: %s", cfg.api["character_encoding"])
-        logger.info("CONNECTED: %s API (%s)", self._api.NAME, self.read.state.version())
+        logger.info("CONNECTED: %s API (%s)", self._connected.NAME, self.read.state.version())
 
     def stop(self):
         """Stop API"""
-        logger.info("DISCONNECTING: %s API (%s)", self._api.NAME, self.read.state.version())
-        self._api.stop()
-        logger.info("DISCONNECTED: %s API", self._api.NAME)
+        logger.info("DISCONNECTING: %s API (%s)", self._connected.NAME, self.read.state.version())
+        self._connected.stop()
+        logger.info("DISCONNECTED: %s API", self._connected.NAME)
 
     def close(self):
         """Close & dereference API"""
@@ -144,7 +144,14 @@ class APIControl:
         setting_api = cfg.api
         realtime_state.overriding = setting_api["enable_active_state_override"]
         realtime_state.spectating = setting_api["enable_player_index_override"]
-        self._api.setup(setting_api)
+        self._connected.setup(setting_api)
+
+    @property
+    def _connected(self) -> api_connector.Connector:
+        """Connected API, raise RuntimeError if connect() was not called"""
+        if self._api is None:
+            raise RuntimeError("API not connected, call connect() first")
+        return self._api
 
     @property
     def available(self):
@@ -154,12 +161,12 @@ class APIControl:
     @property
     def name(self) -> str:
         """API full name"""
-        return self._api.NAME
+        return self._connected.NAME
 
     @property
     def alias(self) -> str:
         """API alias name"""
-        return API_MAP_ALIAS[self._api.NAME]
+        return API_MAP_ALIAS[self._connected.NAME]
 
 
 api = APIControl()
