@@ -1,13 +1,22 @@
 """Web dashboard tests (localhost only)"""
 
+import http.cookiejar
 import json
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
 
 from tinypedal.setting import cfg
-from tinypedal.web_dashboard import DashboardHandler, WebDashboard, generate_access_code
+from tinypedal.web_dashboard import (
+    FAILURE_WINDOW_SECONDS,
+    MAX_SESSIONS,
+    DashboardHandler,
+    WebDashboard,
+    generate_access_code,
+)
 
 PORT = 18338
 
@@ -22,20 +31,66 @@ def dashboard(ui_env):
     server.disable()
 
 
-def get(path, headers=None):
-    req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", headers=headers or {})
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def request(path, headers=None, data=None, opener=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", headers=headers or {}, data=data)
     try:
-        with urllib.request.urlopen(req, timeout=5) as response:
-            return response.status, response.read()
+        with (opener or urllib.request.build_opener()).open(req, timeout=5) as response:
+            return response.status, response.read(), response.headers
     except urllib.error.HTTPError as error:
-        return error.code, error.read()
+        return error.code, error.read(), error.headers
+
+
+def get(path, headers=None, opener=None):
+    status, body, _ = request(path, headers, opener=opener)
+    return status, body
+
+
+def browser():
+    """Opener that keeps cookies, like a browser"""
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
 
 def test_page_requires_code(dashboard):
     status, body = get("/")
     assert status == 401 and b"Access code" in body
-    status, body = get("/?code=TESTCODE")
+    status, body = get("/?code=TESTCODE", opener=browser())
     assert status == 200 and b"TinyPedal Dashboard" in body
+
+
+def test_code_link_redirects_to_clean_url(dashboard):
+    status, _, headers = request("/?code=TESTCODE", opener=urllib.request.build_opener(NoRedirect))
+    assert status == 303 and headers["Location"] == "/"
+    cookie = headers["Set-Cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Strict" in cookie and "TESTCODE" not in cookie
+
+
+def test_login_form_post(dashboard):
+    opener = browser()
+    status, body = get("/", opener=opener)
+    assert status == 401 and b'method="post"' in body and b"code=" not in body.split(b"<form")[0]
+    data = urllib.parse.urlencode({"code": "TESTCODE"}).encode()
+    status, body, _ = request("/login", data=data, opener=opener)
+    assert status == 200 and b"TinyPedal Dashboard" in body
+    assert b"X-Access-Code" not in body  # page script uses session cookie, no code
+    # Session cookie grants API access
+    assert get("/api/telemetry", opener=opener)[0] == 200
+
+
+def test_login_form_wrong_code(dashboard):
+    data = urllib.parse.urlencode({"code": "WRONG"}).encode()
+    status, body, _ = request("/login", data=data, opener=browser())
+    assert status == 401 and b"Access code" in body
+    DashboardHandler.failures.clear()
+
+
+def test_forged_session_rejected(dashboard):
+    assert get("/api/telemetry", {"Cookie": "tp_session=forged"})[0] == 401
+    assert get("/", {"Cookie": "tp_session=forged"})[0] == 401
 
 
 def test_telemetry_api(dashboard):
@@ -52,6 +107,33 @@ def test_lockout_after_failures(dashboard):
     status, _ = get("/api/telemetry", {"X-Access-Code": "TESTCODE"})
     assert status == 429  # blocked even with right code
     DashboardHandler.failures.clear()
+
+
+def test_missing_code_not_counted_as_failure(dashboard):
+    for _ in range(15):  # dashboard polling after server restart must not lock user out
+        get("/api/telemetry")
+    assert get("/api/telemetry", {"X-Access-Code": "TESTCODE"})[0] == 200
+
+
+def test_failures_purged():
+    now = time.monotonic()
+    DashboardHandler.failures = {
+        "old": [3, 0.0, now - FAILURE_WINDOW_SECONDS - 1],
+        "recent": [3, 0.0, now],
+        "locked": [10, now + 30, now - FAILURE_WINDOW_SECONDS - 1],
+    }
+    DashboardHandler.purge_failures(now)
+    assert set(DashboardHandler.failures) == {"recent", "locked"}
+    DashboardHandler.failures = {}
+
+
+def test_session_limit(dashboard):
+    opener_first = browser()
+    get("/?code=TESTCODE", opener=opener_first)
+    for _ in range(MAX_SESSIONS):
+        get("/?code=TESTCODE", opener=browser())
+    assert len(DashboardHandler.sessions) == MAX_SESSIONS
+    assert get("/api/telemetry", opener=opener_first)[0] == 401  # oldest session dropped
 
 
 def test_access_code_generated(ui_env):

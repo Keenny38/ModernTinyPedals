@@ -19,11 +19,15 @@
 """
 Web dashboard: show live telemetry on phone or tablet (browser), disabled by default
 
-    GET /?code=<access code>          dashboard page
-    GET /api/telemetry                live data (JSON), requires "X-Access-Code" header
+    GET  /                            dashboard page (session cookie), or login form
+    POST /login                       login form, access code in request body
+    GET  /?code=<access code>         login link shown in app, redirects to "/" with session cookie
+    GET  /api/telemetry               live data (JSON), requires session cookie or "X-Access-Code" header
 
 Listens on 127.0.0.1 only, unless LAN access is enabled. Access code is always required,
 and repeated wrong codes from same address are blocked for a while.
+Access code is exchanged for a random session cookie, so it is not kept in page address or scripts.
+Note: plain HTTP (no TLS), only enable LAN access on a trusted network.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ import secrets
 import socket
 import threading
 import time
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -46,6 +51,10 @@ logger = logging.getLogger(__name__)
 
 MAX_FAILURES = 10
 LOCKOUT_SECONDS = 60
+FAILURE_WINDOW_SECONDS = 600  # failure count is forgotten after this time
+MAX_SESSIONS = 32
+MAX_FORM_SIZE = 1024
+SESSION_COOKIE = "tp_session"
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O, 1/I
 
 
@@ -129,7 +138,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     server_version = "TinyPedal"
     access_code = ""
-    failures: dict[str, list[float]] = {}  # address: [count, blocked until]
+    failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
+    sessions: dict[str, float] = {}  # session token: created time
     lock = threading.Lock()
 
     def do_GET(self):
@@ -145,17 +155,61 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if url.path in ("/", "/index.html"):
             code = parse_qs(url.query).get("code", [""])[0]
-            if self.authorized(code, html=True):
+            if code:  # link with code (shown in app), exchange for session cookie & remove code from address bar
+                if self.authorized(code, html=True):
+                    self.send_redirect_with_session()
+                return
+            if self.has_session():
                 self.send_body(200, DASHBOARD_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            else:
+                self.send_body(401, LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
         self.send_body(404, b"not found", "text/plain")
 
+    def do_POST(self):
+        """Login form, access code sent in request body (not kept in browser history)"""
+        if urlparse(self.path).path != "/login":
+            self.send_body(404, b"not found", "text/plain")
+            return
+        length = min(int(self.headers.get("Content-Length") or 0), MAX_FORM_SIZE)
+        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        if self.authorized(form.get("code", [""])[0].strip(), html=True):
+            self.send_redirect_with_session()
+
+    def has_session(self) -> bool:
+        """Check session cookie"""
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+        except CookieError:
+            return False
+        morsel = cookie.get(SESSION_COOKIE)
+        if morsel is None:
+            return False
+        with self.lock:
+            return any(hmac.compare_digest(morsel.value, token) for token in self.sessions)
+
+    def new_session(self) -> str:
+        """Create session token, oldest session is dropped if limit reached"""
+        token = secrets.token_urlsafe(32)
+        with self.lock:
+            if len(self.sessions) >= MAX_SESSIONS:
+                del self.sessions[min(self.sessions, key=self.sessions.__getitem__)]
+            self.sessions[token] = time.monotonic()
+        return token
+
     def authorized(self, code: str, html: bool = False) -> bool:
-        """Check access code, block address after repeated failures"""
+        """Check session cookie or access code, block address after repeated failures"""
+        if not code:  # no guess made, not counted as failure
+            if self.has_session():
+                return True
+            self.send_unauthorized(html)
+            return False
         address = self.client_address[0]
         now = time.monotonic()
         with self.lock:
-            count, until = self.failures.get(address, [0, 0.0])
+            self.purge_failures(now)
+            count, until, _ = self.failures.get(address, [0, 0.0, 0.0])
             if until > now:
                 self.send_body(429, b"too many attempts, try again later", "text/plain")
                 return False
@@ -163,12 +217,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.failures.pop(address, None)
                 return True
             count += 1
-            self.failures[address] = [count, now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0]
+            self.failures[address] = [count, now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0, now]
+        self.send_unauthorized(html)
+        return False
+
+    def send_unauthorized(self, html: bool):
         if html:
             self.send_body(401, LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
         else:
             self.send_body(401, b'{"error": "invalid access code"}', "application/json")
-        return False
+
+    @classmethod
+    def purge_failures(cls, now: float):
+        """Forget addresses without active lockout & no recent failure (keeps dict bounded)"""
+        expired = [
+            address for address, (_, until, last) in cls.failures.items()
+            if until <= now and now - last > FAILURE_WINDOW_SECONDS
+        ]
+        for address in expired:
+            del cls.failures[address]
+
+    def send_redirect_with_session(self):
+        token = self.new_session()
+        self.send_response(303)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict")
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
 
     def send_body(self, status: int, body: bytes, content_type: str):
         self.send_response(status)
@@ -177,6 +254,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
 
@@ -228,6 +306,7 @@ class WebDashboard:
             return
         DashboardHandler.access_code = self.access_code()
         DashboardHandler.failures = {}
+        DashboardHandler.sessions = {}
         host, port = self.host(), self.port()
         try:
             self._server = ThreadingHTTPServer((host, port), DashboardHandler)
@@ -239,6 +318,8 @@ class WebDashboard:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Web dashboard")
         self._thread.start()
         logger.info("ENABLED: web dashboard on http://%s:%s", host, port)
+        if host != "127.0.0.1":
+            logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
 
     def disable(self):
         """Stop server"""
@@ -258,7 +339,7 @@ LOGIN_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <style>body{background:#0e1116;color:#e9ecf1;font-family:system-ui,sans-serif;display:flex;
 align-items:center;justify-content:center;height:100vh;margin:0}form{display:flex;gap:8px}
 input,button{font-size:20px;padding:10px;border-radius:8px;border:1px solid #373e4c;background:#1b1f27;color:#e9ecf1}
-</style></head><body><form method="get" action="/"><input name="code" placeholder="Access code" autofocus
+</style></head><body><form method="post" action="/login"><input name="code" placeholder="Access code" autofocus
 autocomplete="off"><button>OK</button></form></body></html>"""
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -298,15 +379,14 @@ main{display:grid;gap:10px;padding:12px;grid-template-columns:repeat(auto-fit,mi
 <div class="card"><div class="label">Time left</div><div class="value" id="remain">--:--</div></div>
 </main>
 <script>
-const code=new URLSearchParams(location.search).get("code")||"";
 const $=id=>document.getElementById(id);
 const lap=t=>{if(!(t>0))return"-:--.---";const m=Math.floor(t/60);return m+":"+(t-m*60).toFixed(3).padStart(6,"0")};
 const hms=t=>{if(!(t>0))return"--:--";t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;
 return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0")};
 const quad=v=>v.map(x=>"<div>"+Math.round(x)+"</div>").join("");
 async function tick(){
-try{const r=await fetch("/api/telemetry",{headers:{"X-Access-Code":code},cache:"no-store"});
-if(r.status===401){$("status").textContent="Invalid access code";return setTimeout(tick,3000)}
+try{const r=await fetch("/api/telemetry",{credentials:"same-origin",cache:"no-store"});
+if(r.status===401){$("status").textContent="Session expired";return setTimeout(()=>location.replace("/"),1500)}
 if(!r.ok)throw new Error(r.status);const d=await r.json();
 $("status").textContent=d.active?(d.track||"On track"):"Waiting for session…";
 $("gear").textContent=d.gear>0?d.gear:(d.gear<0?"R":"N");$("speed").textContent=Math.round(d.speed||0);
