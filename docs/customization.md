@@ -795,7 +795,7 @@ Replace default widget font with `modern_font_name`. Width of text bar is calcul
 Set modern font name. Default is `JetBrains Mono`, which is bundled with TinyPedal (`fonts` folder), and works on all platforms. Ligatures are disabled.
 
     corner_radius_scale
-Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.2`.
+Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
 
     minimum_bar_gap
 Set minimum gap between bars in pixels, only applies to widget `bar_gap` option that uses default value. Default is `2`.

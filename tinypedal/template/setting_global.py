@@ -88,7 +88,7 @@ GLOBAL_DEFAULT = {
         "overlay_theme": "Modern Dark",
         "enable_modern_font": True,
         "modern_font_name": "JetBrains Mono",
-        "corner_radius_scale": 0.2,
+        "corner_radius_scale": 0.05,
         "minimum_bar_gap": 2,
     },
     "telemetry": {

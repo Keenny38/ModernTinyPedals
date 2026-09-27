@@ -165,3 +165,15 @@ def test_atomic_write_removes_temp_on_error(tmp_path):
         file.write("partial")
         raise ValueError("boom")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_preview_timer_stopped_when_dialog_deleted(ui_env):
+    """Live preview timer must stop when widget is deleted with dialog, see WidgetPreview
+
+    Otherwise timer event is sent to deleted widget (access violation once memory is reused).
+    """
+    dialog = open_config("speedometer", [])
+    preview = dialog.preview  # Python object outlives C++ widget deleted with dialog
+    assert preview._timer.isActive()
+    close_dialog(dialog)
+    assert not preview._timer.isActive()

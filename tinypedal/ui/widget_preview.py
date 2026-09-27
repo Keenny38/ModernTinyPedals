@@ -91,6 +91,8 @@ class WidgetPreview(QWidget):
         self._read_values = read_values
         self._last_values: dict | None = None
         self._timer = QBasicTimer()
+        # Timer is not unregistered if widget is deleted by parent while Python object lives on
+        self.destroyed.connect(self._timer.stop)
 
         self.checkbox = QCheckBox(tr("Live Preview"))
         self.checkbox.setChecked(True)

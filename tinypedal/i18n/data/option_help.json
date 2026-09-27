@@ -654,7 +654,7 @@
             "vr_compatibility": "Enable widget visibility as windows on taskbar in order to be used in VR via APPs such as OpenKneeboard. Non-VR user should not enable this option.\n\nNote, you will still need a third party program (such as OpenKneeboard) to project overlay windows (widgets) into VR."
         },
         "overlay_style": {
-            "corner_radius_scale": "Set bar corner radius, relative to shorter side of each bar. Value range in 0.0 to 0.5, 0 for square corners. Default is 0.2.",
+            "corner_radius_scale": "Set bar corner radius, relative to shorter side of each bar. Value range in 0.0 to 0.5, 0 for square corners. Default is 0.05.",
             "enable_modern_font": "Replace default widget font with modern_font_name. Width of text bar is calculated from digit width to avoid clipping numbers. Default is enabled.",
             "enable_modern_style": "Enable modern overlay style: rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Default is enabled.",
             "minimum_bar_gap": "Set minimum gap between bars in pixels, only applies to widget bar_gap option that uses default value. Default is 2.",

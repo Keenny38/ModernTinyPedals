@@ -291,6 +291,8 @@ class ConfigHotkey(BaseDialog):
 
         # Set update timer
         self._update_timer = QBasicTimer()
+        # Timer is not unregistered if widget is deleted by parent while Python object lives on
+        self.destroyed.connect(self._update_timer.stop)
 
         # Platform specific
         self.get_key_state = get_key_state_function()

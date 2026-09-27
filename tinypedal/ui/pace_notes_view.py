@@ -67,6 +67,8 @@ class PaceNotesPlayer(QMediaPlayer):
 
         # Set update timer
         self._update_timer = QBasicTimer()
+        # Timer is not unregistered if widget is deleted by parent while Python object lives on
+        self.destroyed.connect(self._update_timer.stop)
 
         # Last data
         self._vehicle_resets = None

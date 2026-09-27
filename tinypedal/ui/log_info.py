@@ -46,6 +46,8 @@ class LogInfo(BaseDialog):
         self.set_utility_title(tr("Log"))
 
         self._update_timer = QBasicTimer()
+        # Timer is not unregistered if widget is deleted by parent while Python object lives on
+        self.destroyed.connect(self._update_timer.stop)
         self.last_position = -1
 
         # Text view
