@@ -398,3 +398,86 @@ def test_pits_read_once_per_update(widget, monkeypatch):
     widget.wcfg["show_tyre_compound"] = True  # also needs pit state, must reuse the same read
     widget.timerEvent(None)
     assert len(calls) == 1
+
+
+# --- Visual polish: capsule-shaped chips (LEDs, badges, gauge bars), gradient bars, LED glow
+def test_chip_radius_respects_corner_scale(monkeypatch):
+    """Chips render square if the user disabled rounded corners, full capsule at the default"""
+    from tinypedal.widget import wheel_status
+    from tinypedal.widget._painter import OverlayStyle
+
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
+    assert wheel_status._chip_radius(20.0) == 0.0
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)  # default
+    assert wheel_status._chip_radius(20.0) == pytest.approx(10.0)  # full capsule (height / 2)
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.5)  # maximum, still capped at a capsule
+    assert wheel_status._chip_radius(20.0) == pytest.approx(10.0)
+
+
+def test_fill_chip_square_when_rounding_disabled(monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from tinypedal.widget import wheel_status
+    from tinypedal.widget._painter import OverlayStyle
+
+    image = QImage(40, 20, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
+    wheel_status._fill_chip(painter, QRectF(0, 0, 40, 20), "#FF0000")
+    painter.end()
+    # Square fill: every corner pixel is opaque (a rounded fill would leave corners transparent)
+    assert image.pixelColor(0, 0).alpha() == 255
+    assert image.pixelColor(39, 19).alpha() == 255
+
+
+def test_fill_chip_gradient_square_when_rounding_disabled(monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from tinypedal.widget import wheel_status
+    from tinypedal.widget._painter import OverlayStyle
+
+    image = QImage(40, 20, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
+    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 40, 20), "#00CCFF")
+    painter.end()
+    assert image.pixelColor(0, 0).alpha() == 255  # square, not rounded
+
+
+def test_fill_chip_gradient_handles_zero_width(widget):
+    """Must not raise on a degenerate (zero-width) bar, e.g. gear/speed rect before first update"""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from tinypedal.widget import wheel_status
+
+    image = QImage(10, 10, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 0, 10), "#00CCFF")
+    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 10, 0), "#00CCFF")
+    painter.end()  # no exception
+
+
+def test_led_glow_only_on_lit_leds(widget, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    glows = []
+    monkeypatch.setattr(widget, "_fill_led_glow", lambda painter, rect, color: glows.append(color))
+    widget.wcfg["number_of_rpm_leds"] = 5
+    widget.rpm_max = 8000.0
+    image = QImage(100, 10, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    widget.rpm = 0.0  # no LED lit
+    widget.draw_leds(painter, QRectF(0, 0, 100, 10))
+    assert glows == []
+    widget.rpm = 6000.0  # some LEDs lit
+    glows.clear()
+    widget.draw_leds(painter, QRectF(0, 0, 100, 10))
+    painter.end()
+    assert glows
+    widget.grab()  # full paint with glow enabled, must not raise

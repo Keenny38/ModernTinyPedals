@@ -33,7 +33,7 @@ import math
 from time import monotonic
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 
 from .. import calculation as calc
 from .. import units
@@ -50,7 +50,7 @@ from ..userfile.heatmap import (
     set_predefined_brake_name,
 )
 from ._base import Overlay
-from ._painter import fill_rect
+from ._painter import OverlayStyle, fill_rect
 
 LAYOUT_NORMAL = 0  # info column between tyres
 LAYOUT_VERTICAL = 1  # info column below tyres
@@ -60,6 +60,45 @@ CENTER_ITEMS = ("abs", "tc", "brake_bias", "pit_limiter", "gear", "speed", "rpm"
 DAMAGE_COLORS = ("", "#FFCC00", "#FF6600", "#FF2200")  # severity 1, 2, 3 (detached)
 LAPS_LABEL = "lap"  # short unit for estimated laps left
 NO_STATUS = (False, False, False, False)
+# How much more rounded small chip-like elements (LEDs, badges, gauge bars) are versus the
+# corner_scale used elsewhere (fill_rect): at the default 0.05 this already reaches full capsule,
+# while corner_scale = 0 (user disabled rounding) still renders them square, like everything else.
+_CHIP_RADIUS_MULTIPLIER = 10
+
+
+def _chip_radius(height: float) -> float:
+    """Corner radius for a capsule-shaped chip, 0 if the user disabled rounded corners"""
+    return height * min(OverlayStyle.corner_scale * _CHIP_RADIUS_MULTIPLIER, 0.5)
+
+
+def _fill_chip(painter: QPainter, rect: QRectF, color) -> None:
+    """Fill rect as a capsule for small chip-like elements (LEDs, indicator badges, gauge bars),
+    more strongly rounded than fill_rect since these are thin and benefit from reading as pills"""
+    radius = _chip_radius(rect.height())
+    if radius < 0.5:
+        painter.fillRect(rect, QColor(color))
+        return
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    painter.fillPath(path, QColor(color))
+
+
+def _fill_chip_gradient(painter: QPainter, rect: QRectF, color) -> None:
+    """Capsule fill with a subtle lengthwise gradient (brighter toward the leading edge),
+    for continuous value bars (RPM, pedals) instead of a flat fill"""
+    if rect.width() <= 0 or rect.height() <= 0:
+        return
+    base = QColor(color)
+    gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+    gradient.setColorAt(0.0, base.darker(112))
+    gradient.setColorAt(1.0, base.lighter(122))
+    radius = _chip_radius(rect.height())
+    if radius < 0.5:
+        painter.fillRect(rect, QBrush(gradient))
+        return
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    painter.fillPath(path, QBrush(gradient))
 
 
 class WheelState:
@@ -578,7 +617,7 @@ class Realtime(Overlay):
                 pill_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
                 pill = QRectF(line_rect.center().x() - pill_w / 2, line_rect.top() + line_rect.height() * 0.08,
                               pill_w, line_rect.height() * 0.84)
-                fill_rect(painter, pill, pill_color)
+                _fill_chip(painter, pill, pill_color)
             painter.setPen(QColor(text_color) if text_color else self.pen_temp)
             painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
         painter.setFont(self.font())
@@ -628,14 +667,14 @@ class Realtime(Overlay):
         """Suspension damage bar below brake, shown only if damaged"""
         if damage <= 0.005:
             return
-        fill_rect(painter, rect, self.wcfg["indicator_inactive_color"])
+        _fill_chip(painter, rect, self.wcfg["indicator_inactive_color"])
         if damage >= 0.99:
             color = DAMAGE_COLORS[3]
         elif damage >= 0.5:
             color = DAMAGE_COLORS[2]
         else:
             color = DAMAGE_COLORS[1]
-        fill_rect(painter, QRectF(rect.left(), rect.top(), rect.width() * min(damage, 1), rect.height()), color)
+        _fill_chip(painter, QRectF(rect.left(), rect.top(), rect.width() * min(damage, 1), rect.height()), color)
 
     def draw_body_damage(self, painter: QPainter, rect: QRectF):
         """Body damage marks around center (only damaged parts): 3x3 grid without center"""
@@ -659,7 +698,7 @@ class Realtime(Overlay):
             fill_rect(painter, mark, color)
 
     def draw_leds(self, painter: QPainter, rect: QRectF):
-        """RPM LEDs: light up from green to red, all flash over shift point"""
+        """RPM LEDs: light up from green to red, all flash over shift point, soft glow when lit"""
         wcfg = self.wcfg
         count = min(max(int(wcfg["number_of_rpm_leds"]), 3), 20)
         ratio = self.rpm / self.rpm_max if self.rpm_max > 0 else 0
@@ -669,18 +708,35 @@ class Realtime(Overlay):
         flash_off = over and self.flash_off()
         gap = rect.height() * 0.3
         led_w = (rect.width() - gap * (count - 1)) / count
+        inactive = wcfg["indicator_inactive_color"]
+        glow_pad = rect.height() * 0.35
         for led in range(count):
             led_rect = QRectF(rect.left() + led * (led_w + gap), rect.top(), led_w, rect.height())
             threshold = start + led / count * (redline - start)
             if over:
-                color = wcfg["indicator_inactive_color"] if flash_off else wcfg["rpm_led_shift_color"]
+                lit = not flash_off
+                color = wcfg["rpm_led_shift_color"] if lit else inactive
             elif ratio >= threshold:
+                lit = True
                 position = led / max(count - 1, 1)
                 key = "rpm_led_low_color" if position < 0.5 else "rpm_led_mid_color" if position < 0.8 else "rpm_led_high_color"
                 color = wcfg[key]
             else:
-                color = wcfg["indicator_inactive_color"]
-            fill_rect(painter, led_rect, color)
+                lit = False
+                color = inactive
+            if lit:
+                self._fill_led_glow(painter, led_rect.adjusted(-glow_pad, -glow_pad, glow_pad, glow_pad), color)
+            _fill_chip(painter, led_rect, color)
+
+    @staticmethod
+    def _fill_led_glow(painter: QPainter, rect: QRectF, color: str) -> None:
+        """Soft halo behind a lit LED"""
+        glow = QColor(color)
+        glow.setAlpha(70)
+        radius = rect.height() / 2
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        painter.fillPath(path, glow)
 
     def flash_off(self) -> bool:
         """Flash state (off phase) for shift warning"""
@@ -755,11 +811,11 @@ class Realtime(Overlay):
             painter.setPen(self.pen_text)
             self.draw_fit_text(painter, text_rect, f"{self.rpm:.0f} rpm", self.font_rpm)
             bar = QRectF(rect.left(), text_rect.bottom(), rect.width(), unit * 0.3)
-            fill_rect(painter, bar, wcfg["indicator_inactive_color"])
+            _fill_chip(painter, bar, wcfg["indicator_inactive_color"])
             if self.rpm_max > 0 and self.rpm > 0:
                 ratio = min(self.rpm / self.rpm_max, 1)
                 color = wcfg["rpm_redline_color" if ratio >= wcfg["rpm_redline_ratio"] else "rpm_bar_color"]
-                fill_rect(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
+                _fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
         elif name == "pedals":
             gap = unit * 0.1
             bar_h = (rect.height() - gap) / 2
@@ -767,9 +823,10 @@ class Realtime(Overlay):
                 ((self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"]))
             ):
                 back = QRectF(rect.left(), rect.top() + index * (bar_h + gap), rect.width(), bar_h)
-                fill_rect(painter, back, wcfg["indicator_inactive_color"])
+                _fill_chip(painter, back, wcfg["indicator_inactive_color"])
                 if value > 0.001:
-                    fill_rect(painter, QRectF(back.left(), back.top(), back.width() * min(value, 1), bar_h), color)
+                    _fill_chip_gradient(
+                        painter, QRectF(back.left(), back.top(), back.width() * min(value, 1), bar_h), color)
 
     def gear_color(self) -> str:
         """Gear text color by RPM: low, mid, shift (flash over shift point)"""
@@ -833,7 +890,7 @@ class Realtime(Overlay):
         return f"{name} {'/'.join(available)}" if available else name
 
     def draw_indicator(self, painter: QPainter, rect: QRectF, text: str, active: bool, color: str):
-        fill_rect(painter, rect, color if active else self.wcfg["indicator_inactive_color"])
+        _fill_chip(painter, rect, color if active else self.wcfg["indicator_inactive_color"])
         painter.setPen(QColor(self.wcfg["font_color_indicator_active" if active else "font_color_indicator"]))
         self.draw_fit_text(painter, rect.adjusted(rect.width() * 0.04, 0, -rect.width() * 0.04, 0), text, self.font())
 

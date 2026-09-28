@@ -324,3 +324,16 @@ Contexte : l'app a deux couches de style bien distinctes. Les **widgets overlay*
 8. Le statut du gestionnaire de plugins (« Loaded », « Error », « Not trusted ») est en texte de couleur sans badge/pastille — repérage moins rapide qu'un badge plein comme utilisé pour ON/OFF dans la liste des widgets.
 
 Réalisé (28/09/2026) : F1, F2. Non traités : F3, F4 (mineurs), F5 à F8 (nécessitent des ressources ou une refonte plus large, proposés comme prochaine étape).
+
+## E (suite, 28/09/2026) — Modernisation visuelle du widget « Roues et freins »
+
+Suite à la demande explicite de pousser plus loin le style de `wheel_status`, sans toucher au reste de la suite de widgets (dont le rendu reste volontairement plus sobre, cf. section F sur le style applicatif général).
+
+### 💡 Ajouté
+- Badges (ABS/TC/PIT/LIM), LED de régime, barre de régime, barres de pédales, barre de dégâts de suspension et pastilles d'alerte (pression, crevaison, pneu à plat) rendus en **capsule pleinement arrondie** au lieu du très léger arrondi hérité du réglage global (`corner_radius_scale`, 0,05 par défaut, quasi invisible sur des éléments aussi fins). Le rendu reste carré si l'utilisateur désactive explicitement les coins arrondis (`corner_radius_scale = 0`) — le choix de l'utilisateur reste respecté, seule l'intensité par défaut est renforcée sur ces petits éléments.
+- **Dégradé subtil** sur le remplissage de la barre de régime et des barres de pédales (plus sombre à la base, plus clair vers le bord), au lieu d'un aplat uni — lecture plus « jauge premium », cohérent avec l'esthétique « Modern Dark » déjà en place pour la couleur.
+- **Halo lumineux** autour de chaque LED de régime allumée (glow semi-transparent), effet « shift light » habituel sur les tableaux de bord modernes, désactivé pendant la phase « éteinte » du clignotement en surrégime.
+
+Toutes les formes représentant une pièce physique (pneu vu de dessus, disque de frein) gardent leur arrondi propre, indépendant du réglage utilisateur — seuls les éléments de chrome (jauges, badges, LED) suivent la nouvelle règle.
+
+Coût mesuré (`pytest -m benchmark`) : 0,585 → 0,64 ms/frame (+0,05 ms), toujours très en dessous du budget de 15 ms et de l'ancien 0,785 ms pré-audit. Couverture maintenue à 98 % (5 nouveaux tests dédiés : rayon des capsules selon le réglage utilisateur, rendu carré vs arrondi vérifié pixel par pixel, dégradé sans exception sur largeur nulle, halo affiché seulement sur LED allumée).
