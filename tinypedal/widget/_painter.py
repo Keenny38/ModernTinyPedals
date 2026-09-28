@@ -26,7 +26,16 @@ from functools import lru_cache
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QWidget
 
 from ..perf_monitor import timed_event
@@ -59,6 +68,77 @@ def fill_rect(painter: QPainter, rect: QRectF, color) -> None:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.fillPath(path, QColor(color))
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, antialiased)
+
+
+# A chip is a small pill-shaped element (LED, indicator badge, gauge bar). It rounds far more
+# than fill_rect does, because these are thin and only read as pills at a large radius.
+_CHIP_RADIUS_MULTIPLIER = 10
+
+
+def chip_radius(rect: QRectF) -> float:
+    """Corner radius for a capsule-shaped chip, 0 if the user disabled rounded corners
+
+    Based on the shorter side, so a wide/short bar (RPM, pedals) and a narrow/tall one
+    (battery) both read as a clean capsule instead of one of them turning into a lens shape.
+    """
+    short_side = min(rect.width(), rect.height())
+    return short_side * min(OverlayStyle.corner_scale * _CHIP_RADIUS_MULTIPLIER, 0.5)
+
+
+def fill_chip(painter: QPainter, rect: QRectF, color) -> None:
+    """Fill rect as a capsule, for small chip-like elements"""
+    radius = chip_radius(rect)
+    if radius < 0.5:
+        painter.fillRect(rect, QColor(color))
+        return
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    painter.fillPath(path, QColor(color))
+
+
+def fill_chip_gradient(painter: QPainter, rect: QRectF, color) -> None:
+    """Capsule fill with a subtle gradient along its length (brighter toward the leading edge:
+    right for a horizontal bar, top for a vertical one), for continuous value bars (RPM, pedals,
+    battery) instead of a flat fill"""
+    if rect.width() <= 0 or rect.height() <= 0:
+        return
+    base = QColor(color)
+    if rect.width() >= rect.height():  # horizontal bar, fills left to right
+        gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+    else:  # vertical bar, fills bottom to top
+        gradient = QLinearGradient(0, rect.bottom(), 0, rect.top())
+    gradient.setColorAt(0.0, base.darker(112))
+    gradient.setColorAt(1.0, base.lighter(122))
+    radius = chip_radius(rect)
+    if radius < 0.5:
+        painter.fillRect(rect, QBrush(gradient))
+        return
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    painter.fillPath(path, QBrush(gradient))
+
+
+def fill_glow(painter: QPainter, rect: QRectF, color, alpha: int = 70) -> None:
+    """Soft halo behind a lit element"""
+    glow = QColor(color)
+    glow.setAlpha(alpha)
+    radius = rect.height() / 2
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    painter.fillPath(path, glow)
+
+
+def fit_font(painter: QPainter, font: QFont, text: str, width: float, height: float) -> QFont:
+    """Smaller copy of font if text does not fit in box (never larger)"""
+    painter.setFont(font)
+    metrics = painter.fontMetrics()
+    text_w = metrics.horizontalAdvance(text)
+    ratio = min(width / text_w if text_w else 1, height / metrics.height() if metrics.height() else 1)
+    if ratio >= 1:
+        return font
+    fitted = QFont(font)
+    fitted.setPixelSize(max(int(font.pixelSize() * ratio), 6))
+    return fitted
 
 
 def fill_pixmap(pixmap: QPixmap, color) -> None:

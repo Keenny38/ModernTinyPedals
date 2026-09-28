@@ -4,6 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+# Safe at module level: conftest builds the QApplication before collection
+from tinypedal.widget import _painter as painter_mod
+from tinypedal.widget import _wheel_state as wheel_state
+from tinypedal.widget import wheel_status
+
 
 @pytest.fixture
 def widget(ui_env, monkeypatch):
@@ -96,11 +101,11 @@ def test_tyres_turn_with_wheel_angle(widget, monkeypatch):
 
 
 def test_tc_text_with_cut_and_slip(widget):
-    assert widget.level_text("TC", 5, 3, 2) == "TC 5/3/2"
-    assert widget.level_text("TC", 5, -1, 2) == "TC 5/2"  # cut not available
-    assert widget.level_text("TC", 5, -1, -1) == "TC 5"
-    assert widget.level_text("TC", -1, -1, -1) == "TC"
-    assert widget.level_text("ABS", 3) == "ABS 3"
+    assert wheel_state.level_text("TC", 5, 3, 2) == "TC 5/3/2"
+    assert wheel_state.level_text("TC", 5, -1, 2) == "TC 5/2"  # cut not available
+    assert wheel_state.level_text("TC", 5, -1, -1) == "TC 5"
+    assert wheel_state.level_text("TC", -1, -1, -1) == "TC"
+    assert wheel_state.level_text("ABS", 3) == "ABS 3"
 
 
 def test_tyre_wear(widget):
@@ -138,7 +143,7 @@ def test_text_sizes_and_fit(ui_env):
     assert large.height() > small.height()  # widget adapts to text sizes
     pixmap = QPixmap(10, 10)
     painter = QPainter(pixmap)
-    fitted = large.fit_font(painter, large.font_gear, "TC 10/10/10", 20, 100)
+    fitted = painter_mod.fit_font(painter, large.font_gear, "TC 10/10/10", 20, 100)
     assert fitted.pixelSize() < large.font_gear.pixelSize()  # reduced to fit width
     painter.end()
     large.deleteLater()
@@ -405,42 +410,39 @@ def test_chip_radius_respects_corner_scale(monkeypatch):
     """Chips render square if the user disabled rounded corners, full capsule at the default"""
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget import wheel_status
     from tinypedal.widget._painter import OverlayStyle
 
     wide = QRectF(0, 0, 100, 20)  # short side is height
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
-    assert wheel_status._chip_radius(wide) == 0.0
+    assert painter_mod.chip_radius(wide) == 0.0
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)  # default
-    assert wheel_status._chip_radius(wide) == pytest.approx(10.0)  # full capsule (height / 2)
+    assert painter_mod.chip_radius(wide) == pytest.approx(10.0)  # full capsule (height / 2)
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.5)  # maximum, still capped at a capsule
-    assert wheel_status._chip_radius(wide) == pytest.approx(10.0)
+    assert painter_mod.chip_radius(wide) == pytest.approx(10.0)
 
 
 def test_chip_radius_uses_shorter_side(monkeypatch):
     """A narrow/tall rect (battery bar) must round by width, not height, or it turns into a lens"""
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget import wheel_status
     from tinypedal.widget._painter import OverlayStyle
 
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)
     tall = QRectF(0, 0, 14, 180)  # short side is width
-    assert wheel_status._chip_radius(tall) == pytest.approx(7.0)
+    assert painter_mod.chip_radius(tall) == pytest.approx(7.0)
 
 
 def test_fill_chip_square_when_rounding_disabled(monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget import wheel_status
     from tinypedal.widget._painter import OverlayStyle
 
     image = QImage(40, 20, QImage.Format.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
-    wheel_status._fill_chip(painter, QRectF(0, 0, 40, 20), "#FF0000")
+    painter_mod.fill_chip(painter, QRectF(0, 0, 40, 20), "#FF0000")
     painter.end()
     # Square fill: every corner pixel is opaque (a rounded fill would leave corners transparent)
     assert image.pixelColor(0, 0).alpha() == 255
@@ -451,14 +453,13 @@ def test_fill_chip_gradient_square_when_rounding_disabled(monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget import wheel_status
     from tinypedal.widget._painter import OverlayStyle
 
     image = QImage(40, 20, QImage.Format.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
-    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 40, 20), "#00CCFF")
+    painter_mod.fill_chip_gradient(painter, QRectF(0, 0, 40, 20), "#00CCFF")
     painter.end()
     assert image.pixelColor(0, 0).alpha() == 255  # square, not rounded
 
@@ -468,12 +469,11 @@ def test_fill_chip_gradient_handles_zero_width(widget):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget import wheel_status
 
     image = QImage(10, 10, QImage.Format.Format_ARGB32)
     painter = QPainter(image)
-    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 0, 10), "#00CCFF")
-    wheel_status._fill_chip_gradient(painter, QRectF(0, 0, 10, 0), "#00CCFF")
+    painter_mod.fill_chip_gradient(painter, QRectF(0, 0, 0, 10), "#00CCFF")
+    painter_mod.fill_chip_gradient(painter, QRectF(0, 0, 10, 0), "#00CCFF")
     painter.end()  # no exception
 
 
@@ -482,7 +482,7 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
     from PySide6.QtGui import QImage, QPainter
 
     glows = []
-    monkeypatch.setattr(widget, "_fill_led_glow", lambda painter, rect, color: glows.append(color))
+    monkeypatch.setattr(wheel_status, "fill_glow", lambda painter, rect, color: glows.append(color))
     widget.wcfg["number_of_rpm_leds"] = 5
     widget.rpm_max = 8000.0
     image = QImage(100, 10, QImage.Format.Format_ARGB32)
@@ -832,7 +832,7 @@ def test_readings_dropped_when_box_too_crowded(ui_env):
         "show_tyre_wear": True, "show_tyre_wear_end_stint": True,
     })
     try:
-        from tinypedal.widget.wheel_status import (
+        from tinypedal.widget._wheel_state import (
             MIN_READING_SCALE,
             READING_COMPOUND,
             READING_STATUS,
@@ -849,7 +849,7 @@ def test_readings_dropped_when_box_too_crowded(ui_env):
             (READING_TEMPERATURE, "90", instance.font(), 1.3, "", ""),
             (READING_STATUS, "FLAT", instance.font_small, 1.0, "", ""),
         ]
-        kept = instance.fit_readings(list(lines), usable)
+        kept = wheel_state.fit_readings(list(lines), usable, instance.unit)
         assert len(kept) < len(lines), "nothing was dropped"
         # What survives is the most important, and is readable
         priorities = [line[0] for line in kept]
@@ -871,7 +871,7 @@ def test_few_readings_are_all_kept(ui_env):
             (4, "90", instance.font(), 1.3, "", ""),
             (3, "28%", instance.font_small, 1.0, "", ""),
         ]
-        assert instance.fit_readings(list(lines), usable) == lines
+        assert wheel_state.fit_readings(list(lines), usable, instance.unit) == lines
     finally:
         instance.deleteLater()
 

@@ -33,7 +33,7 @@ import math
 from time import monotonic
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 
 from .. import calculation as calc
 from .. import units
@@ -51,102 +51,26 @@ from ..userfile.heatmap import (
 )
 from ._base import Overlay
 from ._common import warning_flash
-from ._painter import OverlayStyle, fill_rect
+from ._painter import fill_chip, fill_chip_gradient, fill_glow, fill_rect, fit_font
+from ._wheel_state import (
+    LAPS_LABEL,
+    NO_STATUS,
+    READING_COMPOUND,
+    READING_END_STINT,
+    READING_PRESSURE,
+    READING_STATUS,
+    READING_TEMPERATURE,
+    READING_WEAR,
+    WheelState,
+    fit_readings,
+    level_text,
+)
 
 LAYOUT_NORMAL = 0  # info column between tyres
 LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
 CENTER_ITEMS = ("abs", "tc", "brake_bias", "pit_limiter", "gear", "speed", "rpm", "pedals")
-LAPS_LABEL = "lap"  # short unit for estimated laps left
-# A tyre reading squeezed below this fraction of a text line is unreadable while driving, so
-# the least important readings are dropped instead of shrinking every line into noise
-MIN_READING_SCALE = 0.62
-# Tyre readings, least important first: dropped in this order when the box runs out of room
-READING_COMPOUND = 0
-READING_END_STINT = 1
-READING_PRESSURE = 2
-READING_WEAR = 3
-READING_TEMPERATURE = 4
-READING_STATUS = 5  # puncture or flat spot, never dropped
-NO_STATUS = (False, False, False, False)
-# How much more rounded small chip-like elements (LEDs, badges, gauge bars) are versus the
-# corner_scale used elsewhere (fill_rect): at the default 0.05 this already reaches full capsule,
-# while corner_scale = 0 (user disabled rounding) still renders them square, like everything else.
-_CHIP_RADIUS_MULTIPLIER = 10
-
-
-def _chip_radius(rect: QRectF) -> float:
-    """Corner radius for a capsule-shaped chip, 0 if the user disabled rounded corners
-
-    Based on the shorter side, so a wide/short bar (RPM, pedals) and a narrow/tall one
-    (battery) both read as a clean capsule instead of one of them turning into a lens shape.
-    """
-    short_side = min(rect.width(), rect.height())
-    return short_side * min(OverlayStyle.corner_scale * _CHIP_RADIUS_MULTIPLIER, 0.5)
-
-
-def _fill_chip(painter: QPainter, rect: QRectF, color) -> None:
-    """Fill rect as a capsule for small chip-like elements (LEDs, indicator badges, gauge bars),
-    more strongly rounded than fill_rect since these are thin and benefit from reading as pills"""
-    radius = _chip_radius(rect)
-    if radius < 0.5:
-        painter.fillRect(rect, QColor(color))
-        return
-    path = QPainterPath()
-    path.addRoundedRect(rect, radius, radius)
-    painter.fillPath(path, QColor(color))
-
-
-def _fill_chip_gradient(painter: QPainter, rect: QRectF, color) -> None:
-    """Capsule fill with a subtle gradient along its length (brighter toward the leading edge:
-    right for a horizontal bar, top for a vertical one), for continuous value bars (RPM, pedals,
-    battery) instead of a flat fill"""
-    if rect.width() <= 0 or rect.height() <= 0:
-        return
-    base = QColor(color)
-    if rect.width() >= rect.height():  # horizontal bar, fills left to right
-        gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
-    else:  # vertical bar, fills bottom to top
-        gradient = QLinearGradient(0, rect.bottom(), 0, rect.top())
-    gradient.setColorAt(0.0, base.darker(112))
-    gradient.setColorAt(1.0, base.lighter(122))
-    radius = _chip_radius(rect)
-    if radius < 0.5:
-        painter.fillRect(rect, QBrush(gradient))
-        return
-    path = QPainterPath()
-    path.addRoundedRect(rect, radius, radius)
-    painter.fillPath(path, QBrush(gradient))
-
-
-class WheelState:
-    """Drawing state of one wheel"""
-
-    __slots__ = (
-        "steer", "tread", "tread_end", "tread_end_known", "tyre_temp", "ico_colors", "brake_temp",
-        "brake_wear", "brake_wear_known", "pressure", "compound",
-        "tyre_color", "brake_color", "warning", "status", "suspension_damage",
-    )
-
-    def __init__(self):
-        self.steer = 0.0  # displayed wheel angle (degrees, positive = right)
-        self.tread = 100.0  # remaining tyre tread (percent)
-        self.tread_end = 0.0  # estimated remaining tread at end of stint (percent)
-        self.tread_end_known = False  # estimate needs Wheels & Fuel module data
-        self.brake_wear = 100.0  # remaining brake thickness (percent)
-        self.brake_wear_known = False  # brake thickness needs Wheels module data
-        self.compound = ""  # tyre compound symbol
-        self.tyre_temp = 0.0
-        self.ico_colors = ("#444444", "#444444", "#444444")  # left to right bands
-        self.brake_temp = 0.0
-        self.pressure = 0.0  # kPa
-        self.tyre_color = "#444444"
-        self.brake_color = "#444444"
-        self.warning = ""  # "", "lock", "spin"
-        self.status = ""  # "", "detached", "puncture", "flat"
-        self.suspension_damage = 0.0  # fraction
-
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -683,37 +607,22 @@ class Realtime(Overlay):
             color = wcfg["wheel_puncture_color" if wheel.status == "puncture" else "wheel_flat_spot_color"]
             lines.append((READING_STATUS, text, self.font_small, 1.0, color, "#000000"))
         usable = rect.height() * 0.88
-        lines = self.fit_readings(lines, usable)
+        lines = fit_readings(lines, usable, self.unit)
         total = sum(line[3] for line in lines) or 1
         top = rect.top() + rect.height() * 0.06
         for _priority, text, font, weight, pill_color, text_color in lines:
             line_rect = QRectF(rect.left(), top, rect.width(), usable * weight / total)
             top += line_rect.height()
-            font = self.fit_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
+            font = fit_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
             painter.setFont(font)
             if pill_color:
                 pill_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
                 pill = QRectF(line_rect.center().x() - pill_w / 2, line_rect.top() + line_rect.height() * 0.08,
                               pill_w, line_rect.height() * 0.84)
-                _fill_chip(painter, pill, pill_color)
+                fill_chip(painter, pill, pill_color)
             painter.setPen(QColor(text_color) if text_color else self.pen_temp)
             painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
         painter.setFont(self.font())
-
-    def fit_readings(self, lines: list, usable: float) -> list:
-        """Drop the least important tyre readings until the rest fit at a readable size
-
-        Enabling every reading at once would otherwise squeeze them all below the point
-        where they can be read at a glance, which is worse than showing fewer of them.
-        """
-        min_height = self.unit * MIN_READING_SCALE
-        while len(lines) > 1:
-            total = sum(line[3] for line in lines)
-            if usable * min(line[3] for line in lines) / total >= min_height:
-                break
-            lines.pop(min(range(len(lines)), key=lambda index: lines[index][0]))
-        return lines
-
     def pressure_color(self, pressure: float) -> str:
         """Text color if pressure out of target range (kPa), "" if in range or disabled"""
         wcfg = self.wcfg
@@ -772,14 +681,14 @@ class Realtime(Overlay):
         """Suspension damage bar below brake, shown only if damaged"""
         if damage <= 0.005:
             return
-        _fill_chip(painter, rect, self.wcfg["indicator_inactive_color"])
+        fill_chip(painter, rect, self.wcfg["indicator_inactive_color"])
         if damage >= 0.99:
             color = self.damage_colors[3]
         elif damage >= 0.5:
             color = self.damage_colors[2]
         else:
             color = self.damage_colors[1]
-        _fill_chip(painter, QRectF(rect.left(), rect.top(), rect.width() * min(damage, 1), rect.height()), color)
+        fill_chip(painter, QRectF(rect.left(), rect.top(), rect.width() * min(damage, 1), rect.height()), color)
 
     def draw_body_damage(self, painter: QPainter, rect: QRectF):
         """Body damage marks around center (only damaged parts): 3x3 grid without center"""
@@ -814,7 +723,7 @@ class Realtime(Overlay):
     def draw_battery_bar(self, painter: QPainter, rect: QRectF):
         """Full-height battery charge gauge, with a flowing highlight while charging or draining"""
         wcfg = self.wcfg
-        _fill_chip(painter, rect, wcfg["indicator_inactive_color"])
+        fill_chip(painter, rect, wcfg["indicator_inactive_color"])
         charge = min(max(self.battery_charge, 0), 100) / 100
         fill_h = rect.height() * charge
         if fill_h >= 1:
@@ -829,7 +738,7 @@ class Realtime(Overlay):
                 color = wcfg["battery_discharge_color"]
             else:  # off or n/a: static, neutral fill
                 color = wcfg["battery_idle_color"]
-            _fill_chip_gradient(painter, fill_area, color)
+            fill_chip_gradient(painter, fill_area, color)
             if wcfg["enable_battery_bar_animation"] and state in (2, 3):
                 self.draw_battery_flow(painter, fill_area, charging=state == 3)
         if wcfg["show_battery_percentage"]:
@@ -838,7 +747,7 @@ class Realtime(Overlay):
             # takes more than a third of the gauge.
             label_h = min(self.unit * self.battery_scale * 1.2, rect.height() / 3)
             label_rect = QRectF(rect.left(), rect.top(), rect.width(), label_h)
-            _fill_chip(painter, label_rect, wcfg["info_background_color"])
+            fill_chip(painter, label_rect, wcfg["info_background_color"])
             painter.setPen(self.pen_text)
             # Dash instead of "0" on a car without hybrid system, so an empty gauge is not
             # mistaken for a flat battery (or for the widget being broken)
@@ -889,19 +798,8 @@ class Realtime(Overlay):
                 lit = False
                 color = inactive
             if lit:
-                self._fill_led_glow(painter, led_rect.adjusted(-glow_pad, -glow_pad, glow_pad, glow_pad), color)
-            _fill_chip(painter, led_rect, color)
-
-    @staticmethod
-    def _fill_led_glow(painter: QPainter, rect: QRectF, color: str) -> None:
-        """Soft halo behind a lit LED"""
-        glow = QColor(color)
-        glow.setAlpha(70)
-        radius = rect.height() / 2
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
-        painter.fillPath(path, glow)
-
+                fill_glow(painter, led_rect.adjusted(-glow_pad, -glow_pad, glow_pad, glow_pad), color)
+            fill_chip(painter, led_rect, color)
     def flash_off(self) -> bool:
         """Flash state (off phase) for shift warning"""
         interval = max(self.wcfg["shift_flash_interval"], 0.05)
@@ -943,11 +841,11 @@ class Realtime(Overlay):
         wcfg = self.wcfg
         unit = self.unit
         if name == "abs":
-            self.draw_indicator(painter, rect, self.level_text("ABS", self.abs_level),
+            self.draw_indicator(painter, rect, level_text("ABS", self.abs_level),
                                 self.abs_active, wcfg["abs_active_color"])
         elif name == "tc":
             self.draw_indicator(painter, rect,
-                                self.level_text("TC", self.tc_level, self.tc_cut_level, self.tc_slip_level),
+                                level_text("TC", self.tc_level, self.tc_cut_level, self.tc_slip_level),
                                 self.tc_active, wcfg["tc_active_color"])
         elif name == "brake_bias":
             self.draw_info_row(painter, rect, "BB", f"{self.brake_bias * 100:.1f}")
@@ -975,11 +873,11 @@ class Realtime(Overlay):
             painter.setPen(self.pen_text)
             self.draw_fit_text(painter, text_rect, f"{self.rpm:.0f} rpm", self.font_rpm)
             bar = QRectF(rect.left(), text_rect.bottom(), rect.width(), unit * 0.3)
-            _fill_chip(painter, bar, wcfg["indicator_inactive_color"])
+            fill_chip(painter, bar, wcfg["indicator_inactive_color"])
             if self.rpm_max > 0 and self.rpm > 0:
                 ratio = min(self.rpm / self.rpm_max, 1)
                 color = wcfg["rpm_redline_color" if ratio >= wcfg["rpm_redline_ratio"] else "rpm_bar_color"]
-                _fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
+                fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
         elif name == "pedals":
             gap = unit * 0.1
             bar_h = (rect.height() - gap) / 2
@@ -987,9 +885,9 @@ class Realtime(Overlay):
                 ((self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"]))
             ):
                 back = QRectF(rect.left(), rect.top() + index * (bar_h + gap), rect.width(), bar_h)
-                _fill_chip(painter, back, wcfg["indicator_inactive_color"])
+                fill_chip(painter, back, wcfg["indicator_inactive_color"])
                 if value > 0.001:
-                    _fill_chip_gradient(
+                    fill_chip_gradient(
                         painter, QRectF(back.left(), back.top(), back.width() * min(value, 1), bar_h), color)
 
     def gear_color(self) -> str:
@@ -1046,35 +944,14 @@ class Realtime(Overlay):
         if self.gear > 0:
             return str(self.gear)
         return "R" if self.gear < 0 else "N"
-
-    @staticmethod
-    def level_text(name: str, *levels: int) -> str:
-        """Indicator text with available levels, ex. "TC 5/3/2" (TC, cut, slip)"""
-        available = [str(level) for level in levels if level >= 0]
-        return f"{name} {'/'.join(available)}" if available else name
-
     def draw_indicator(self, painter: QPainter, rect: QRectF, text: str, active: bool, color: str):
-        _fill_chip(painter, rect, color if active else self.wcfg["indicator_inactive_color"])
+        fill_chip(painter, rect, color if active else self.wcfg["indicator_inactive_color"])
         painter.setPen(QColor(self.wcfg["font_color_indicator_active" if active else "font_color_indicator"]))
         self.draw_fit_text(painter, rect.adjusted(rect.width() * 0.04, 0, -rect.width() * 0.04, 0), text, self.font())
-
-    @staticmethod
-    def fit_font(painter: QPainter, font: QFont, text: str, width: float, height: float) -> QFont:
-        """Smaller copy of font if text does not fit in box (never larger)"""
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-        text_w = metrics.horizontalAdvance(text)
-        ratio = min(width / text_w if text_w else 1, height / metrics.height() if metrics.height() else 1)
-        if ratio >= 1:
-            return font
-        fitted = QFont(font)
-        fitted.setPixelSize(max(int(font.pixelSize() * ratio), 6))
-        return fitted
-
     def draw_fit_text(self, painter: QPainter, rect: QRectF, text: str, font: QFont,
                       align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter):
         """Draw text with font adapted to box size"""
-        painter.setFont(self.fit_font(painter, font, text, rect.width() * 0.96, rect.height() * 1.1))
+        painter.setFont(fit_font(painter, font, text, rect.width() * 0.96, rect.height() * 1.1))
         painter.drawText(rect, align, text)
         painter.setFont(self.font())
 
