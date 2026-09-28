@@ -337,3 +337,35 @@ Suite à la demande explicite de pousser plus loin le style de `wheel_status`, s
 Toutes les formes représentant une pièce physique (pneu vu de dessus, disque de frein) gardent leur arrondi propre, indépendant du réglage utilisateur — seuls les éléments de chrome (jauges, badges, LED) suivent la nouvelle règle.
 
 Coût mesuré (`pytest -m benchmark`) : 0,585 → 0,64 ms/frame (+0,05 ms), toujours très en dessous du budget de 15 ms et de l'ancien 0,785 ms pré-audit. Couverture maintenue à 98 % (5 nouveaux tests dédiés : rayon des capsules selon le réglage utilisateur, rendu carré vs arrondi vérifié pixel par pixel, dégradé sans exception sur largeur nulle, halo affiché seulement sur LED allumée).
+
+## G. Audit bugs / optimisation / robustesse (28/09/2026)
+
+### A. Données non finies (nan, inf) — ✅ fait
+Un `nan` ou un `inf` atteignant un appel Qt qui convertit vers un `int` C++ ne lève pas d'exception : il **abandonne le processus entier**, emportant tous les widgets. Les lecteurs assainissent les données du jeu, mais une division par une consommation quasi nulle ou un angle de direction dégénéré peut en produire un en aval.
+
+Trois chemins corrigés : `end_stint_laps`, `turning_radius` et `ackermann_percentage` renvoient 0 plutôt qu'une valeur non finie ; `friction_circle` borne son point et sa trace au widget avant `drawPixmap` ; `force` assainit les valeurs d'appui et de masse avant arrondi.
+
+`tests/test_widget_robustness.py` peint les 78 widgets contre cinq jeux de données dégénérés. **Sans ces garde-fous, il abandonne pytest exactement comme l'overlay.** Effet de bord : le faux lecteur de `conftest.py` déduit désormais la forme de retour de chaque lecteur des annotations du vrai lecteur au lieu d'une liste maintenue à la main — c'est ainsi que le tuple manquant d'`impact_position` était passé inaperçu.
+
+### B. Banc d'essai aveugle sur les widgets de liste — ✅ fait
+Les modules de données ne tournent pas dans le banc d'essai, donc `minfo` ne contenait **aucun véhicule** : `standings`, `relative`, `radar` et les autres widgets de liste dessinaient une liste vide et se mesuraient parmi les moins coûteux du projet. Avec une grille de 20 voitures, ils sont en réalité les plus coûteux : **standings à 3,7 ms/frame** contre 0,4 ms pour le suivant. Plusieurs ne repeignent que si `dataSetVersion` change, donc le pilote de trame l'incrémente désormais comme le fait le module véhicules. Chaque mesure vérifie d'abord la présence de la grille, pour que ce point aveugle ne puisse plus revenir en silence.
+
+### C. Erreurs de type `arg-type` — ✅ fait (92 → 0, contrôle activé)
+`arg-type` est désormais bloquant dans `pyproject.toml`. Deux corrections dépassaient l'annotation :
+- `widget_preview` gardait sa zone de défilement dans `self.scroll`, masquant `QWidget.scroll()`, la méthode héritée du même nom.
+- Le calculateur de carburant construisait ses lignes de tableau *à l'intérieur* de l'`enumerate()` qui les consommait, où les lignes avec et sans couleur de surbrillance étaient fusionnées en un type inutilisable.
+- L'historique des couleurs était initialisé avec des chaînes puis alimenté en `QColor` — il contenait donc les deux.
+- La lecture d'une carte SVG passait `nodeValue` directement à un analyseur de chaîne, sans la vérification que les autres champs de la même fonction ont déjà.
+
+### D. Modules de données non testés — ✅ fait
+| Module | Avant | Après |
+|---|---|---|
+| `module_wheels.py` | 6 % | 40 % |
+| `module_relative.py` | 14 % | 51 % |
+| `module_vehicles.py` | 7 % | 37 % |
+
+Chaque lot a été vérifié **par mutation du code source**, pas seulement au vert : inverser les compteurs avant/arrière de la fenêtre de classement, supprimer le marquage du meilleur tour de classe, prendre le plus long de carburant/énergie au lieu du plus court, ou retirer la correction de tour de formation — chacun fait échouer un test.
+
+Deux de mes attentes initiales étaient fausses et c'est le code qui avait raison : le rayon de roue n'est pas établi aux premières trames, et une remise à zéro de tour est suivie de l'accumulation de la trame courante.
+
+Réalisé (28/09/2026) : A, B, C, D — intégralement.
