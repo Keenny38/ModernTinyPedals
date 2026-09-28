@@ -41,33 +41,49 @@ def ui_env(monkeypatch, tmp_path):
 
 
 _TEXT_READERS = ("version", "track_name", "combo_name", "class_name", "driver_name", "vehicle_name")
-# Groups whose readers return one value per wheel (FL, FR, RL, RR). Same method name means a
-# different shape depending on the group (Vehicle.position_vertical is a scalar, Wheel's is a set).
-_WHEEL_GROUPS = ("tyre", "brake", "wheel")
-# Readers of a wheel group that still return a single value
-_WHEEL_GROUP_SCALARS = ("bias_front", "migration", "offroad", "is_wheel_locked")
+# Readers whose tuple length the annotation does not give: `tuple[float, ...]` says "a set",
+# not how many. Four is the wheel count and covers every other variadic reader but this one.
+_WHEEL_COUNT = 4
+_VARIADIC_LENGTHS = {"surface_temperature_ico": 12, "inner_temperature_ico": 12}
+_NEUTRAL = {"str": "", "bool": False, "int": 0, "float": 0.0}
+
+
+def _neutral_value(annotation: str, name: str):
+    """Build a neutral return value matching a reader's annotated return type
+
+    Shapes come from the real reader's annotations rather than a hand-kept list, so a new
+    reader, or one that changes shape, cannot silently hand widgets the wrong type here.
+    """
+    if name in _TEXT_READERS:
+        return "test"
+    annotation = annotation.strip()
+    if annotation.startswith("tuple["):
+        args = [arg.strip() for arg in annotation[6:-1].split(",")]
+        element = args[0]
+        if element not in _NEUTRAL:  # WeatherNode and friends, nothing neutral to build
+            return ()
+        if args[-1] == "...":
+            length = _VARIADIC_LENGTHS.get(name, _WHEEL_COUNT)
+        else:
+            length = len(args)
+        return (_NEUTRAL[element],) * length
+    return _NEUTRAL.get(annotation, 0)
 
 
 class _FakeGroup:
     """API reader group, any method returns a neutral value of the expected shape"""
 
-    def __init__(self, group_name: str = ""):
-        self._group_name = group_name
+    def __init__(self, group_type: type | None = None):
+        self._returns = {}
+        for name, member in vars(group_type or object).items():
+            if name.startswith("_") or not callable(member):
+                continue
+            annotation = getattr(member, "__annotations__", {}).get("return", "")
+            self._returns[name] = _neutral_value(str(annotation), name)
 
     def __getattr__(self, name):
-        wheel_set = self._group_name in _WHEEL_GROUPS and name not in _WHEEL_GROUP_SCALARS
-
-        def reader(*args, **kwargs):
-            if name in _TEXT_READERS:
-                return "test"
-            if name == "surface_temperature_ico":
-                return (0,) * 12
-            if name == "damage_severity":
-                return (0,) * 8
-            if wheel_set:
-                return ("",) * 4 if name in ("compound_class", "compound_name") else (0,) * 4
-            return 0
-        return reader
+        value = self._returns.get(name, 0)
+        return lambda *args, **kwargs: value
 
 
 class _FakeReader:
@@ -77,6 +93,8 @@ class _FakeReader:
     """
 
     def __getattr__(self, name):
-        group = _FakeGroup(name)
+        from tinypedal.adapter import APIDataReader
+
+        group = _FakeGroup(APIDataReader.__annotations__.get(name))
         setattr(self, name, group)  # cache, so the same object is returned next time
         return group

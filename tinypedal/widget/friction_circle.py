@@ -27,6 +27,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap, QRadialGradie
 
 from .. import calculation as calc
 from ..module_info import minfo
+from ..validator import infnan_to_zero as rmnan
 from ._base import Overlay
 from ._painter import fill_pixmap
 
@@ -115,6 +116,15 @@ class Realtime(Overlay):
     def post_update(self):
         self.data_gforce.clear()
 
+    def to_screen(self, gforce: float) -> float:
+        """Scale a G reading to a drawable coordinate
+
+        Clamped to the widget: a non-finite or absurd G value would otherwise reach
+        drawPixmap, whose conversion to a C++ int aborts the process instead of raising.
+        """
+        position = rmnan(gforce) * self.global_scale + self.area_center
+        return min(max(position, -self.area_size), self.area_size * 2)
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Read acceleration data
@@ -131,9 +141,10 @@ class Realtime(Overlay):
 
         if self.gforce_raw != temp_gforce_raw:
             self.gforce_raw = temp_gforce_raw
-            # Scale position coordinate to global
-            self.last_x = temp_gforce_raw[1] * self.global_scale + self.area_center
-            self.last_y = temp_gforce_raw[0] * self.global_scale + self.area_center
+            # Scale position coordinate to global. Guarded: these end up in drawPixmap, whose
+            # C++ int conversion aborts the whole process on a non-finite or out-of-range value.
+            self.last_x = self.to_screen(temp_gforce_raw[1])
+            self.last_y = self.to_screen(temp_gforce_raw[0])
             if self.wcfg["show_trace"]:
                 self.data_gforce.append(QPointF(self.last_x, self.last_y))
                 self.draw_trace()

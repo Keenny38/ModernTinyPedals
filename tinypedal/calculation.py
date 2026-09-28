@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from functools import partial
-from math import acos, atan, atan2, ceil, cos, degrees, dist, hypot, radians, sin, tan
+from math import acos, atan, atan2, ceil, cos, degrees, dist, hypot, isfinite, radians, sin, tan
 from statistics import fmean
 from typing import Any
 
@@ -727,8 +727,12 @@ def end_stint_fuel(fuel_in_tank: float, consumption_into_lap: float, consumption
 
 
 def end_stint_laps(fuel_in_tank: float, consumption: float) -> float:
-    """Estimate laps current fuel can last to end of stint"""
-    if consumption:
+    """Estimate laps current fuel can last to end of stint
+
+    Note: a non-finite input must not leak out, callers round or floor the result and
+    those raise on nan, which would stop the whole widget update.
+    """
+    if consumption and isfinite(consumption) and isfinite(fuel_in_tank):
         # Laps = remaining fuel / estimate fuel consumption
         return fuel_in_tank / consumption
     return 0
@@ -908,6 +912,9 @@ def ackermann_percentage(
     """
     if wheel_track <= 0 or wheelbase <= 0:
         return 0.0
+    # tan() below rejects a non-finite angle outright, which would stop the widget update
+    if not (isfinite(left_wheel_angle) and isfinite(right_wheel_angle)):
+        return 0.0
     # Left turn (toe < 0)
     if left_wheel_angle < -min_angle > right_wheel_angle:
         inner_raw = abs(left_wheel_angle)
@@ -935,6 +942,8 @@ def ackermann_percentage(
 def turning_radius(wheel_angle: float, wheelbase: float, min_angle: float = 0) -> float:
     """Turning radius, unit based on wheelbase"""
     if wheelbase <= 0 or -min_angle <= wheel_angle <= min_angle:
+        return 0.0
+    if not isfinite(wheel_angle):  # tan() rejects a non-finite angle outright
         return 0.0
     return wheelbase / tan(radians(wheel_angle))
 

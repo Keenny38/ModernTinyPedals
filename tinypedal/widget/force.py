@@ -23,6 +23,7 @@ Force Widget
 from .. import units
 from ..const_common import TEXT_NA
 from ..module_info import minfo
+from ..validator import infnan_to_zero as rmnan
 from ._base import Overlay
 
 
@@ -197,17 +198,17 @@ class Realtime(Overlay):
 
         # Downforce ratio
         if self.wcfg["show_downforce_ratio"]:
-            df_ratio = round(minfo.force.downForceRatio * 100, 2)
+            df_ratio = round(rmnan(minfo.force.downForceRatio) * 100, 2)
             self.update_df_ratio(self.bar_df_ratio, df_ratio)
 
         # Front downforce
         if self.wcfg["show_front_downforce"]:
-            df_front = round(minfo.force.downForceFront)
+            df_front = round(rmnan(minfo.force.downForceFront))
             self.update_df_front(self.bar_df_front, df_front)
 
         # Rear downforce
         if self.wcfg["show_rear_downforce"]:
-            df_rear = round(minfo.force.downForceRear)
+            df_rear = round(rmnan(minfo.force.downForceRear))
             self.update_df_rear(self.bar_df_rear, df_rear)
 
         # Estimated static weight
@@ -216,12 +217,12 @@ class Realtime(Overlay):
                 static_weight = min_static_weight
             else:
                 static_weight = total_static_weight
-            self.update_weight(self.bar_static, round(static_weight))
+            self.update_weight(self.bar_static, round(rmnan(static_weight)))
 
         # Estimated dynamic weight
         if self.wcfg["show_estimated_dynamic_weight"]:
             dynamic_weight = minfo.wheels.totalDynamicWeight
-            self.update_weight(self.bar_dynamic, round(dynamic_weight))
+            self.update_weight(self.bar_dynamic, round(rmnan(dynamic_weight)))
 
         # Acceleration reduction
         if self.wcfg["show_acceleration_reduction"]:
