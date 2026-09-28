@@ -184,7 +184,7 @@ def calc_consumption(
                 extension=extension,
                 defaults=(DELTA_DEFAULT, 0.0, 0.0)
             )
-            delta_array_raw = [DELTA_ZERO]  # distance, fuel used, laptime
+            delta_array_raw: list[tuple[float, ...]] = [DELTA_ZERO]  # distance, fuel used, laptime
             delta_array_temp = DELTA_DEFAULT  # last lap temp
             delta_fuel = 0.0  # delta fuel consumption compare to last lap
 

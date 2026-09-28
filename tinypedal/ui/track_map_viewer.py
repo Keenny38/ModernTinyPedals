@@ -21,6 +21,7 @@ Track map viewer
 """
 
 import os
+from collections.abc import Sequence
 from typing import Any
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt, Signal
@@ -724,7 +725,7 @@ def calc_section_height_delta(
     return height_delta
 
 
-def curve_description(arc_radius: float, turn_direct: int, curve_grade: tuple) -> str:
+def curve_description(arc_radius: float, turn_direct: int, curve_grade: Sequence) -> str:
     """Curve description"""
     if arc_radius >= curve_grade[-1][0]:
         return curve_grade[-1][1]

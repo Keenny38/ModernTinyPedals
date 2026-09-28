@@ -102,22 +102,22 @@ class WidgetPreview(QWidget):
         self.label_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_preview.setObjectName("widgetPreview")
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidget(self.label_preview)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setMinimumHeight(UIScaler.size(6))
-        self.scroll.setMaximumHeight(UIScaler.size(14))
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidget(self.label_preview)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMinimumHeight(UIScaler.size(6))
+        self.scroll_area.setMaximumHeight(UIScaler.size(14))
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.checkbox)
-        layout.addWidget(self.scroll)
+        layout.addWidget(self.scroll_area)
         self.setLayout(layout)
         self.toggle(True)
 
     def toggle(self, enabled: bool):
         """Enable or disable preview"""
-        self.scroll.setVisible(enabled)
+        self.scroll_area.setVisible(enabled)
         if enabled:
             self._last_values = None
             self.refresh()

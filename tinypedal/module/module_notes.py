@@ -211,7 +211,7 @@ def filter_tags(dataset: list[Mapping], tag_name: str) -> tuple[Mapping, ...]:
     return tuple(_note for _note in dataset if tag_name in _note.get(COLUMN_TAGS, ""))
 
 
-def reference_position(dataset: tuple[Mapping]) -> tuple[float, ...]:
+def reference_position(dataset: tuple[Mapping, ...]) -> tuple[float, ...]:
     """Reference notes position list"""
     if not dataset:
         return ()

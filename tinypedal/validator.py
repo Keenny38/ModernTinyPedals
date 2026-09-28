@@ -148,7 +148,7 @@ def valid_delta_set(data: tuple) -> tuple:
     return data
 
 
-def valid_delta_raw(dataset: list[tuple[float, float]], final: float, column: int) -> bool:
+def valid_delta_raw(dataset: list[tuple[float, ...]], final: float, column: int) -> bool:
     """Validate raw delta data set"""
     try:
         if len(dataset) <= 1:

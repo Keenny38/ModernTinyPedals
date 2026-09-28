@@ -23,7 +23,7 @@ Fuel calculator
 from __future__ import annotations
 
 import os
-from collections import deque
+from collections.abc import Sequence
 from math import ceil, floor
 
 from PySide6.QtCore import QPoint, Qt
@@ -363,7 +363,7 @@ class HistoryPanel(QWidget):
 
         self.table_history.setFixedWidth(UIScaler.size(3 + 5.1 * (base_column_count - hidden_column_count)))
 
-    def refresh(self, dataset: deque[ConsumptionDataSet]):
+    def refresh(self, dataset: Sequence[ConsumptionDataSet]):
         """Refresh history data table"""
         self.table_history.setRowCount(0)
         invalid_color = QColor("#F40")
@@ -373,20 +373,19 @@ class HistoryPanel(QWidget):
         for row_index, lap_data in enumerate(dataset):
             highlight_color = None if lap_data.isValidLap else invalid_color
             self.table_history.insertRow(row_index)
-            for column_index, item in enumerate(
-                (
-                    ("lap", f"{lap_data.lapNumber}", flag_unselectable),
-                    ("time", calc.sec2laptime_full(lap_data.lapTimeLast), flag_selectable, highlight_color),
-                    ("fuel", f"{self.unit_fuel(lap_data.lastLapUsedFuel):.3f}", flag_selectable, highlight_color),
-                    ("energy", f"{lap_data.lastLapUsedEnergy:.3f}", flag_selectable, highlight_color),
-                    ("ratio", f"{calc.fuel_to_energy_ratio(lap_data.lastLapUsedFuel, lap_data.lastLapUsedEnergy):.3f}", flag_unselectable),
-                    ("drain", f"{lap_data.batteryDrainLast:.3f}", flag_unselectable),
-                    ("regen", f"{lap_data.batteryRegenLast:.3f}", flag_unselectable),
-                    ("net", f"{lap_data.batteryRegenLast - lap_data.batteryDrainLast:+.3f}", flag_unselectable),
-                    ("tyre", f"{lap_data.tyreAvgWearLast:.3f}", flag_selectable),
-                    ("tank", f"{self.unit_fuel(lap_data.capacityFuel):.3f}", flag_selectable),
-                )
-            ):
+            row_items: tuple[tuple, ...] = (
+                ("lap", f"{lap_data.lapNumber}", flag_unselectable),
+                ("time", calc.sec2laptime_full(lap_data.lapTimeLast), flag_selectable, highlight_color),
+                ("fuel", f"{self.unit_fuel(lap_data.lastLapUsedFuel):.3f}", flag_selectable, highlight_color),
+                ("energy", f"{lap_data.lastLapUsedEnergy:.3f}", flag_selectable, highlight_color),
+                ("ratio", f"{calc.fuel_to_energy_ratio(lap_data.lastLapUsedFuel, lap_data.lastLapUsedEnergy):.3f}", flag_unselectable),
+                ("drain", f"{lap_data.batteryDrainLast:.3f}", flag_unselectable),
+                ("regen", f"{lap_data.batteryRegenLast:.3f}", flag_unselectable),
+                ("net", f"{lap_data.batteryRegenLast - lap_data.batteryDrainLast:+.3f}", flag_unselectable),
+                ("tyre", f"{lap_data.tyreAvgWearLast:.3f}", flag_selectable),
+                ("tank", f"{self.unit_fuel(lap_data.capacityFuel):.3f}", flag_selectable),
+            )
+            for column_index, item in enumerate(row_items):
                 self.table_history.setItem(row_index, column_index, self._add_table_item(*item))
 
     def _add_table_item(self, header: str, text: str, flags: Qt.ItemFlag, highlight_color=None):
@@ -448,7 +447,7 @@ class CalculatorPanel(QWidget):
         layout_panel.addLayout(layout_calculator)
         self.setLayout(layout_panel)
 
-    def fill_in_data(self, dataset: deque[ConsumptionDataSet]):
+    def fill_in_data(self, dataset: Sequence[ConsumptionDataSet]):
         """Fill in history data to edit"""
         latest_history = dataset[0]
         # Load laptime from last valid lap

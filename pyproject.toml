@@ -71,9 +71,9 @@ check_untyped_defs = true
 exclude = ["pyLMUSharedMemory/", "pyRfactor2SharedMemory/", "tests/"]
 follow_imports = "silent"
 # Blocking checks only for high-signal errors, other categories are reported by `mypy --enable-error-code`
-# Re-enabled so far: call-overload, index, operator, override, return-value, union-attr
+# Re-enabled so far: arg-type, call-overload, index, operator, override, return-value, union-attr
 disable_error_code = [
-    "arg-type", "assignment", "attr-defined", "misc", "has-type",
+    "assignment", "attr-defined", "misc", "has-type",
     "var-annotated", "type-arg", "no-redef",
 ]
 

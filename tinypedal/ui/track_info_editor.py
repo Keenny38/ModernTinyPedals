@@ -21,6 +21,7 @@ Track info editor
 """
 
 import logging
+from collections.abc import Mapping
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
@@ -169,7 +170,7 @@ class TrackInfoEditor(BaseEditor):
             self.add_track_entry(row_index, new_track_name, TRACKINFO_DEFAULT)
             self.table_tracks.setCurrentCell(row_index, 0)
 
-    def add_track_entry(self, row_index: int, track_name: str, track_data: dict):
+    def add_track_entry(self, row_index: int, track_name: str, track_data: Mapping):
         """Add new track entry to table"""
         self.table_tracks.insertRow(row_index)
         self.table_tracks.setItem(row_index, 0, QTableWidgetItem(track_name))

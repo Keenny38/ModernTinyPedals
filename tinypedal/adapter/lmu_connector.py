@@ -478,7 +478,7 @@ class LMUInfo:
         """LMU scoring info data"""
         return self._shmm.data.scoring.scoringInfo
 
-    def lmuResults(self, index: int = INVALID_INDEX) -> dict[str, float]:
+    def lmuResults(self, index: int | None = INVALID_INDEX) -> dict[str, float]:
         """LMU results data"""
         if index is None:
             data = self._sync.player_scor

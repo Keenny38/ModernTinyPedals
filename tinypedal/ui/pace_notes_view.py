@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from PySide6.QtCore import QBasicTimer, Qt, QUrl, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -143,7 +144,7 @@ class PaceNotesPlayer(QMediaPlayer):
         """Is playing state"""
         return self.playbackState() == QMediaPlayer.PlaybackState.PlayingState
 
-    def __update_queue(self, pace_note: str | None):
+    def __update_queue(self, pace_note: Any):
         """Update playback queue"""
         if (pace_note is not None
             and len(self._play_queue) < self.mcfg["pace_notes_sound_maximum_queue"]):

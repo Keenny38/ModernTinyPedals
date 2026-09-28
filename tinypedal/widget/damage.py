@@ -111,8 +111,8 @@ class Realtime(Overlay):
         self.detached_parts = False
         self.damage_aero = -1.0
         self.damage_body: tuple[int, ...] = (0,) * 8
-        self.damage_wheel = WHEELS_ZERO
-        self.damage_tyre = WHEELS_ZERO
+        self.damage_wheel: tuple[bool, ...] = (False,) * 4
+        self.damage_tyre: tuple[bool, ...] = (False,) * 4
         self.damage_susp = WHEELS_ZERO
         self.last_impact_time = None
         self.last_impact_expired = True

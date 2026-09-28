@@ -194,7 +194,7 @@ def calc_delta_time(
                 defaults=(DELTA_DEFAULT, MAX_SECONDS)
             )
             output.deltaBestData = delta_array_best
-            delta_array_raw = [DELTA_ZERO]  # distance, laptime
+            delta_array_raw: list[tuple[float, ...]] = [DELTA_ZERO]  # distance, laptime
             delta_array_last = DELTA_DEFAULT  # last lap
 
             delta_ema_best = 0.0

@@ -1002,11 +1002,11 @@ class TyreStrategyPlanner(BaseEditor):
             if index < 4:
                 tyre_plan_header.append("Tread (%)")
         tyre_plan = self.tyre_plan
-        tyre_plan_data = [tyre_plan_header]
+        tyre_plan_data: list[list] = [tyre_plan_header]
         row_count = tyre_plan.rowCount()
         column_count = tyre_plan.columnCount()
         for row_index in range(row_count):
-            column_list = [row_index + 1]
+            column_list: list = [row_index + 1]
             for column_index in range(column_count):
                 item = tyre_plan.item(row_index, column_index)
                 if item:

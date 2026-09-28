@@ -22,7 +22,7 @@ Stint history Widget
 
 from __future__ import annotations
 
-from collections import deque
+from collections.abc import Sequence
 
 from .. import calculation as calc
 from .. import units
@@ -421,7 +421,7 @@ class Realtime(Overlay):
             target.text = f"{text_consist}{self.sign_consist}"
             target.update()
 
-    def update_stint_history(self, dataset: deque[StintDataSet]):
+    def update_stint_history(self, dataset: Sequence[StintDataSet]):
         """Stint history data"""
         show_energy = self.wcfg["show_virtual_energy_if_available"]
         for index in range(self.stint_slot):
