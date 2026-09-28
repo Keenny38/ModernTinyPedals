@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from collections import deque
+from collections.abc import Mapping
 from typing import Any
 
 from PySide6.QtCore import QPoint, Qt
@@ -42,6 +43,44 @@ from ..const_file import FileFilter
 from ..i18n import tr
 from ..userfile import set_relative_path, set_user_data_path
 from ..validator import image_exists, is_clock_format, is_hex_color, is_string_number
+
+# Numeric options are stored in a fixed base unit (kPa, Celsius, meters per second, liters),
+# never in whatever unit the overlay displays, so that changing the display unit cannot
+# silently reinterpret a saved threshold. That leaves the user typing 160 for a pressure they
+# read as 23.2 psi, so the editor shows the same value in their display unit as a live hint.
+# Only temperature and pressure are listed: those two have one base unit across the whole
+# project. Speed options do not (some are stored in km/h, some in m/s), so a hint for them
+# would be wrong as often as right.
+_UNIT_HINTS = (
+    # matched in order, first match wins: "temperature" before "pressure" so that
+    # hot_pressure_temperature_threshold is read as a temperature
+    ("temperature", "temperature_unit", "set_unit_temperature", "Celsius"),
+    ("pressure", "tyre_pressure_unit", "set_unit_pressure", "kPa"),
+)
+_UNIT_SUFFIX = {"Fahrenheit": "°F", "Celsius": "°C"}
+
+
+def unit_hint(key: str, text: str, units: Mapping[str, str]) -> str:
+    """Same value in the user's display unit, "" when the option carries no unit
+
+    Args:
+        key: option key name.
+        text: current editor text.
+        units: the Units section of the settings.
+    """
+    from .. import units as unit_module
+
+    if not is_string_number(text):
+        return ""
+    for subject, unit_key, converter_name, base_unit in _UNIT_HINTS:
+        if subject not in key:
+            continue
+        unit_name = units.get(unit_key, base_unit)
+        if unit_name == base_unit:
+            return ""  # already typing in the unit they read
+        converter = getattr(unit_module, converter_name)(unit_name)
+        return f"{converter(float(text)):.4g} {_UNIT_SUFFIX.get(unit_name, unit_name)}"
+    return ""
 
 
 # Misc

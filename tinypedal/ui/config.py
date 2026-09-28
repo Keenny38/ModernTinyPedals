@@ -71,6 +71,7 @@ from ._option import (
     IntegerEdit,
     OptionGroup,
     StringEdit,
+    unit_hint,
 )
 from .display_order import DisplayOrder
 from .widget_preview import WidgetPreview
@@ -595,6 +596,17 @@ class UserConfig(BaseDialog):
         layout.addWidget(editor, row_index, COLUMN_OPTION)
         self.option_edit[key] = editor
 
+    def _attach_unit_hint(self, editor, key: str):
+        """Show the value in the user's display unit while they type, for unit-bearing options"""
+        def refresh(text: str):
+            hint = unit_hint(key, text, cfg.units)
+            editor.setPlaceholderText(hint)
+            editor.setToolTip(hint)
+
+        if unit_hint(key, "1", cfg.units):  # option carries a unit the user does not type in
+            editor.textChanged.connect(refresh)
+            refresh(editor.text())
+
     def _add_option_integer(self, row_index: int, key: str, layout: QGridLayout):
         """Integer"""
         editor = IntegerEdit(self)
@@ -603,6 +615,7 @@ class UserConfig(BaseDialog):
         # Load selected option
         editor.setText(str(self.user_setting[self.key_name][key]))
         editor.set_default(self.default_setting[self.key_name][key])
+        self._attach_unit_hint(editor, key)
         # Add layout
         layout.addWidget(editor, row_index, COLUMN_OPTION)
         self.option_edit[key] = editor
@@ -615,6 +628,7 @@ class UserConfig(BaseDialog):
         # Load selected option
         editor.setText(str(self.user_setting[self.key_name][key]))
         editor.set_default(self.default_setting[self.key_name][key])
+        self._attach_unit_hint(editor, key)
         # Add layout
         layout.addWidget(editor, row_index, COLUMN_OPTION)
         self.option_edit[key] = editor

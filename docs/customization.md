@@ -5212,6 +5212,8 @@ Show inner, center and outer tyre surface temperatures as 3 colored bands in eac
     enable_tyre_pressure_target, tyre_pressure_target_minimum, tyre_pressure_target_maximum
 Highlight tyre pressure below minimum (`tyre_pressure_low_color`) or above maximum (`tyre_pressure_high_color`). Values in kPa. Defaults are `160` and `190`.
 
+Pressure and temperature options are always entered in kPa and Celsius, whichever units the overlay displays, so that changing a display unit cannot reinterpret a saved threshold. When your display unit differs, the config dialog shows the same value in your unit inside the field while you type (for example `23.21 psi` for `160`).
+
     show_tyre_wear_end_stint
 Show estimated remaining tyre tread at end of current stint (`→61%`), from `Wheels module` and `Fuel module`.
 

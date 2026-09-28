@@ -215,3 +215,19 @@ def test_integer_option_rejects_decimal_without_crashing(ui_env):
     assert editor.validate() == 10
     editor.setText("abc")
     assert editor.validate() is None
+
+
+def test_unit_hint_shown_in_dialog(ui_env, no_message_box):
+    """Pressure thresholds are typed in kPa; the editor shows what that is in the user's unit"""
+    cfg.units["tyre_pressure_unit"] = "psi"
+    dialog = open_config("wheel_status", [])
+    try:
+        editor = dialog.option_edit["tyre_pressure_target_minimum"]
+        assert editor.placeholderText() == "23.21 psi"  # 160 kPa as stored
+        editor.setText("200")
+        assert editor.placeholderText() == "29.01 psi"  # follows what is typed
+        plain = dialog.option_edit["tyre_wear_warning_threshold"]
+        assert plain.placeholderText() == ""  # a percentage, no unit to convert
+    finally:
+        cfg.units["tyre_pressure_unit"] = "kPa"
+        close_dialog(dialog)
