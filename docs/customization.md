@@ -5227,7 +5227,16 @@ Show body damage marks along car edges (front, sides, rear), only for damaged pa
     damage_color_minor, damage_color_major, damage_color_critical
 Color of body and suspension damage marks by severity.
 
-Tyre readings (compound, temperature, pressure, wear, end of stint wear, status) share the space inside each tyre. When too many are enabled to stay readable, the least important ones are dropped, in this order: compound, end of stint wear, pressure, wear, temperature. Puncture and flat spot are always shown.
+    show_tyre_carcass_temperature, show_tyre_load, show_tyre_slip_angle, show_wheel_camber, show_ride_height, show_tyre_wear_per_lap
+Additional per-wheel readings, all off by default. Each is prefixed so it can be told apart from the others at a glance: carcass temperature `K85`, share of the car's total tyre load `L26%`, slip angle `S+4.1` (degrees), camber `C-3.2` (degrees), ride height `H32` (millimeters), and estimated tread lost over a full lap `▼0.82` (percent, from `Wheels module`).
+
+    show_brake_pressure, brake_pressure_color
+Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
+
+    show_wheel_locking
+Show percentage of lap distance spent locking a front and a rear wheel (`LOCK 12/4`), from `Wheels module`. Shown as a center column item.
+
+Tyre readings share the space inside each tyre. When too many are enabled to stay readable, the least important ones are dropped, in this order: ride height, camber, slip angle, load, carcass temperature, wear per lap, compound, end of stint wear, pressure, wear, temperature. Puncture and flat spot are always shown. Enabling many readings at once therefore shows only a few of them unless `display_scale` is raised.
 
     show_battery_bar, battery_bar_position
 Show hybrid battery charge as a full-height bar outside the tyre/brake columns. `battery_bar_position` sets `Left` or `Right`. Requires a car with a hybrid system (LMU); shows a dash instead of a percentage on cars without one.
@@ -5306,6 +5315,9 @@ Show ABS and TC indicators with current level, lit while ABS or TC is active. TC
 
     show_brake_bias, show_pedal_bars
 Show front brake bias (percentage) and throttle & brake bars.
+
+    display_order_locking
+Position of the wheel locking row in the center column. Adding it shifted the default order of the rows below it (pit & limiter, gear, speed, RPM, pedals) down by one; presets saved before this option existed keep their own order values.
 
     show_gear, show_speed, show_rpm
 Show engaged gear (`N` neutral, `R` reverse), vehicle speed (unit from `Units` setting) and engine RPM with RPM bar.

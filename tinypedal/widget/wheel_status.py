@@ -55,12 +55,24 @@ from ._painter import fill_chip, fill_chip_gradient, fill_glow, fill_rect, fit_f
 from ._wheel_state import (
     LAPS_LABEL,
     NO_STATUS,
+    PREFIX_CAMBER,
+    PREFIX_CARCASS,
+    PREFIX_LOAD,
+    PREFIX_RIDE_HEIGHT,
+    PREFIX_SLIP_ANGLE,
+    PREFIX_WEAR_PER_LAP,
+    READING_CAMBER,
+    READING_CARCASS,
     READING_COMPOUND,
     READING_END_STINT,
+    READING_LOAD,
     READING_PRESSURE,
+    READING_RIDE_HEIGHT,
+    READING_SLIP_ANGLE,
     READING_STATUS,
     READING_TEMPERATURE,
     READING_WEAR,
+    READING_WEAR_PER_LAP,
     WheelState,
     fit_readings,
     level_text,
@@ -70,7 +82,7 @@ LAYOUT_NORMAL = 0  # info column between tyres
 LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
-CENTER_ITEMS = ("abs", "tc", "brake_bias", "pit_limiter", "gear", "speed", "rpm", "pedals")
+CENTER_ITEMS = ("abs", "tc", "brake_bias", "locking", "pit_limiter", "gear", "speed", "rpm", "pedals")
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -124,6 +136,7 @@ class Realtime(Overlay):
         self.show_tyre_wear = bool(wcfg["show_tyre_wear"])
         self.need_switches = bool(shown & {"abs", "tc"})
         self.need_brake_bias = "brake_bias" in shown
+        self.need_locking = "locking" in shown
         self.need_limiter = "pit_limiter" in shown
         self.need_gear = "gear" in shown
         self.need_pedals = "pedals" in shown
@@ -274,6 +287,8 @@ class Realtime(Overlay):
         self.tc_seen = False
         self.last_vehicle_name = None
         self.brake_bias = 0.0
+        self.locking_front = 0.0  # percent of lap distance spent locking a front wheel
+        self.locking_rear = 0.0
         self.in_pits = False
         self.limiter = False
         self.gear = 0
@@ -304,6 +319,7 @@ class Realtime(Overlay):
             "abs": self.wcfg["show_abs_indicator"],
             "tc": self.wcfg["show_tc_indicator"],
             "brake_bias": self.wcfg["show_brake_bias"],
+            "locking": self.wcfg["show_wheel_locking"],
             "pit_limiter": self.wcfg["show_pit_limiter_indicator"],
             "gear": self.wcfg["show_gear"],
             "speed": self.wcfg["show_speed"],
@@ -360,6 +376,16 @@ class Realtime(Overlay):
         detached = api.read.wheel.is_detached() if wcfg["show_tyre_status"] else NO_STATUS
         puncture = api.read.tyre.puncture() if wcfg["show_tyre_status"] else NO_STATUS
         suspension = api.read.wheel.suspension_damage() if wcfg["show_suspension_damage"] else WHEELS_ZERO
+        # Diagnostic readings: each reader is skipped unless its own reading is turned on
+        carcass = api.read.tyre.carcass_temperature() if wcfg["show_tyre_carcass_temperature"] else WHEELS_ZERO
+        ride_height = api.read.wheel.ride_height() if wcfg["show_ride_height"] else WHEELS_ZERO
+        brake_pressure = api.read.brake.pressure() if wcfg["show_brake_pressure"] else WHEELS_ZERO
+        if wcfg["show_tyre_load"]:
+            tyre_load = api.read.tyre.load()
+            total_load = sum(tyre_load)
+        else:
+            tyre_load = WHEELS_ZERO
+            total_load = 0.0
         if wcfg["show_tyre_wear_end_stint"]:
             if minfo.energy.available:
                 run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
@@ -378,6 +404,16 @@ class Realtime(Overlay):
             if ico:
                 wheel.ico_colors = self.band_colors(index, ico[index * 3:index * 3 + 3])
             wheel.status = self.tyre_status(detached[index], puncture[index], minfo.wheels.lockingTreadWear[index])
+            wheel.carcass_temp = carcass[index]
+            wheel.ride_height = ride_height[index] * 1000  # meters to millimeters
+            wheel.brake_pressure = brake_pressure[index] * 100
+            wheel.load_ratio = calc.part_to_whole_ratio(tyre_load[index], total_load) * 100
+            if wcfg["show_wheel_camber"]:
+                wheel.camber = minfo.wheels.camberAngle[index]
+            if wcfg["show_tyre_slip_angle"]:
+                wheel.slip_angle = minfo.wheels.slipAngle[index]
+            if wcfg["show_tyre_wear_per_lap"]:
+                wheel.wear_per_lap = minfo.wheels.estimatedValidTreadWear[index]
             if wcfg["show_tyre_wear_end_stint"]:
                 self.update_end_stint_tread(wheel, index, run_laps)
             if wcfg["show_brake_wear"]:
@@ -404,6 +440,9 @@ class Realtime(Overlay):
             self.tc_slip_level = api.read.switch.tc_slip_level()
         if self.need_brake_bias:
             self.brake_bias = api.read.brake.bias_front()
+        if self.need_locking:
+            self.locking_front = minfo.wheels.lockingPercentFront * 100
+            self.locking_rear = minfo.wheels.lockingPercentRear * 100
         self.in_pits = bool(in_pits)
         if self.need_limiter:
             self.limiter = bool(api.read.switch.speed_limiter())
@@ -602,6 +641,22 @@ class Realtime(Overlay):
                           wcfg["font_color_tyre_wear_warning"] if low else ""))
         if wcfg["show_tyre_wear_end_stint"] and wheel.tread_end_known:
             lines.append((READING_END_STINT, f"→{max(wheel.tread_end, 0):.0f}%", self.font_small, 0.9, "", ""))
+        if wcfg["show_tyre_carcass_temperature"]:
+            lines.append((READING_CARCASS, f"{PREFIX_CARCASS}{self.format_temp(wheel.carcass_temp)}",
+                          self.font_small, 0.9, "", ""))
+        if wcfg["show_tyre_wear_per_lap"]:
+            lines.append((READING_WEAR_PER_LAP, f"{PREFIX_WEAR_PER_LAP}{max(wheel.wear_per_lap, 0):.2f}",
+                          self.font_small, 0.9, "", ""))
+        if wcfg["show_tyre_load"]:
+            lines.append((READING_LOAD, f"{PREFIX_LOAD}{wheel.load_ratio:.0f}%", self.font_small, 0.9, "", ""))
+        if wcfg["show_tyre_slip_angle"]:
+            lines.append((READING_SLIP_ANGLE, f"{PREFIX_SLIP_ANGLE}{wheel.slip_angle:+.1f}",
+                          self.font_small, 0.9, "", ""))
+        if wcfg["show_wheel_camber"]:
+            lines.append((READING_CAMBER, f"{PREFIX_CAMBER}{wheel.camber:+.1f}", self.font_small, 0.9, "", ""))
+        if wcfg["show_ride_height"]:
+            lines.append((READING_RIDE_HEIGHT, f"{PREFIX_RIDE_HEIGHT}{wheel.ride_height:.0f}",
+                          self.font_small, 0.9, "", ""))
         if wheel.status in ("puncture", "flat"):
             text = "PUNCT" if wheel.status == "puncture" else "FLAT"
             color = wcfg["wheel_puncture_color" if wheel.status == "puncture" else "wheel_flat_spot_color"]
@@ -665,17 +720,26 @@ class Realtime(Overlay):
             painter.restore()
         else:
             painter.fillPath(path, QColor(wheel.brake_color))
-        show_wear = wcfg["show_brake_wear"] and wheel.brake_wear_known
+        # Temperature, remaining thickness and pressure share the text area, tallest first
+        rows = []
         if wcfg["show_brake_temperature"]:
-            temp_rect = text_rect if not show_wear else QRectF(
-                text_rect.left(), text_rect.top(), text_rect.width(), text_rect.height() * 0.55)
-            painter.setPen(QColor(wheel.brake_color))
-            self.draw_fit_text(painter, temp_rect, self.format_temp(wheel.brake_temp), self.font(), align)
-        if show_wear:
-            wear_rect = QRectF(text_rect.left(), text_rect.center().y(), text_rect.width(), text_rect.height() * 0.45)
+            rows.append((self.format_temp(wheel.brake_temp), self.font(), wheel.brake_color, 1.3))
+        if wcfg["show_brake_wear"] and wheel.brake_wear_known:
             low = wheel.brake_wear < wcfg["brake_wear_warning_threshold"]
-            painter.setPen(QColor(wcfg["font_color_brake_wear_warning"] if low else wcfg["font_color"]))
-            self.draw_fit_text(painter, wear_rect, f"{max(wheel.brake_wear, 0):.0f}%", self.font_small, align)
+            color = wcfg["font_color_brake_wear_warning"] if low else wcfg["font_color"]
+            rows.append((f"{max(wheel.brake_wear, 0):.0f}%", self.font_small, color, 1.0))
+        if wcfg["show_brake_pressure"]:
+            rows.append((f"{wheel.brake_pressure:.0f}%", self.font_small,
+                         wcfg["brake_pressure_color"], 1.0))
+        if not rows:
+            return
+        total = sum(row[3] for row in rows)
+        top = text_rect.top()
+        for text, font, color, weight in rows:
+            row_h = text_rect.height() * weight / total
+            painter.setPen(QColor(color))
+            self.draw_fit_text(painter, QRectF(text_rect.left(), top, text_rect.width(), row_h), text, font, align)
+            top += row_h
 
     def draw_suspension_damage(self, painter: QPainter, rect: QRectF, damage: float):
         """Suspension damage bar below brake, shown only if damaged"""
@@ -849,6 +913,8 @@ class Realtime(Overlay):
                                 self.tc_active, wcfg["tc_active_color"])
         elif name == "brake_bias":
             self.draw_info_row(painter, rect, "BB", f"{self.brake_bias * 100:.1f}")
+        elif name == "locking":
+            self.draw_info_row(painter, rect, "LOCK", f"{self.locking_front:.0f}/{self.locking_rear:.0f}")
         elif name == "pit_limiter":
             # Only active indicators, sharing the row
             active = [

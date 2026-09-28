@@ -25,13 +25,29 @@ Split out of wheel_status so the widget module holds layout and painting only.
 from __future__ import annotations
 
 # Tyre readings, in priority order: the lowest-numbered one is dropped first when the tyre
-# box is too small to show them all at a readable size.
-READING_COMPOUND = 0
-READING_END_STINT = 1
-READING_PRESSURE = 2
-READING_WEAR = 3
-READING_TEMPERATURE = 4
-READING_STATUS = 5  # puncture or flat spot, never dropped
+# box is too small to show them all at a readable size. The diagnostic readings sit below the
+# ones a driver watches lap to lap, so enabling one never pushes out temperature or pressure.
+READING_RIDE_HEIGHT = 0
+READING_CAMBER = 1
+READING_SLIP_ANGLE = 2
+READING_LOAD = 3
+READING_CARCASS = 4
+READING_WEAR_PER_LAP = 5
+READING_COMPOUND = 6
+READING_END_STINT = 7
+READING_PRESSURE = 8
+READING_WEAR = 9
+READING_TEMPERATURE = 10
+READING_STATUS = 11  # puncture or flat spot, never dropped
+
+# Several readings are percentages or degrees, so each carries a one-character prefix to tell
+# them apart in a box only wide enough for four or five characters.
+PREFIX_CAMBER = "C"
+PREFIX_SLIP_ANGLE = "S"
+PREFIX_LOAD = "L"
+PREFIX_CARCASS = "K"
+PREFIX_WEAR_PER_LAP = "▼"  # down arrow: tread lost per lap
+PREFIX_RIDE_HEIGHT = "H"
 
 # A reading below this fraction of a line height is no longer legible at a glance
 MIN_READING_SCALE = 0.62
@@ -49,6 +65,8 @@ class WheelState:
         "steer", "tread", "tread_end", "tread_end_known", "tyre_temp", "ico_colors", "brake_temp",
         "brake_wear", "brake_wear_known", "pressure", "compound",
         "tyre_color", "brake_color", "warning", "status", "suspension_damage",
+        "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
+        "brake_pressure",
     )
 
     def __init__(self):
@@ -68,6 +86,13 @@ class WheelState:
         self.warning = ""  # "", "lock", "spin"
         self.status = ""  # "", "detached", "puncture", "flat"
         self.suspension_damage = 0.0  # fraction
+        self.camber = 0.0  # degrees, negative = top of wheel leaning inward
+        self.slip_angle = 0.0  # degrees
+        self.load_ratio = 0.0  # share of the car's total tyre load (percent)
+        self.carcass_temp = 0.0  # Celsius
+        self.wear_per_lap = 0.0  # estimated tread lost over a full lap (percent)
+        self.ride_height = 0.0  # millimeters
+        self.brake_pressure = 0.0  # percent of maximum
 
 
 def fit_readings(lines: list, usable: float, line_height: float) -> list:

@@ -189,7 +189,7 @@ def test_display_order_and_layouts(ui_env):
     from tinypedal.setting import cfg
     from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"].update(display_order_gear=0, display_order_abs=9)
+    cfg.user.setting["wheel_status"].update(display_order_gear=0, display_order_abs=99)
     widget = wheel_status.Realtime(cfg, "wheel_status")
     assert widget.center_order[0] == "gear" and widget.center_order[-1] == "abs"
     sizes = {}
@@ -835,17 +835,20 @@ def test_readings_dropped_when_box_too_crowded(ui_env):
         from tinypedal.widget._wheel_state import (
             MIN_READING_SCALE,
             READING_COMPOUND,
+            READING_END_STINT,
+            READING_PRESSURE,
             READING_STATUS,
             READING_TEMPERATURE,
+            READING_WEAR,
         )
 
         usable = instance.rects_tyre[0].height() * 0.88
         # Six readings, least important first
         lines = [
             (READING_COMPOUND, "S", instance.font_small, 0.9, "", ""),
-            (1, "→12%", instance.font_small, 0.9, "", ""),
-            (2, "145", instance.font_small, 1.0, "", ""),
-            (3, "28%", instance.font_small, 1.0, "", ""),
+            (READING_END_STINT, "→12%", instance.font_small, 0.9, "", ""),
+            (READING_PRESSURE, "145", instance.font_small, 1.0, "", ""),
+            (READING_WEAR, "28%", instance.font_small, 1.0, "", ""),
             (READING_TEMPERATURE, "90", instance.font(), 1.3, "", ""),
             (READING_STATUS, "FLAT", instance.font_small, 1.0, "", ""),
         ]
@@ -885,5 +888,145 @@ def test_damage_colors_configurable(ui_env):
         for wheel in instance.wheels:
             wheel.suspension_damage = 0.7
         instance.grab()  # both damage drawings use the options
+    finally:
+        instance.deleteLater()
+
+
+# --- Diagnostic readings (camber, load, carcass temperature, wear per lap, ride height,
+# --- slip angle, brake pressure, wheel locking). All opt-in: default presets must not change.
+DIAGNOSTIC_OPTIONS = (
+    "show_tyre_wear_per_lap",
+    "show_tyre_carcass_temperature",
+    "show_tyre_load",
+    "show_tyre_slip_angle",
+    "show_wheel_camber",
+    "show_ride_height",
+    "show_brake_pressure",
+    "show_wheel_locking",
+)
+
+
+def test_diagnostic_readings_are_opt_in(widget):
+    for option in DIAGNOSTIC_OPTIONS:
+        assert widget.wcfg[option] is False, f"{option} must default to off"
+
+
+def test_diagnostic_readings_skip_their_readers_when_off(widget, monkeypatch):
+    """A reading that is off must not cost a shared-memory read every frame"""
+    from tinypedal.api_control import api
+
+    called = []
+
+    def spy(tag):
+        def reader(*args, **kwargs):
+            called.append(tag)
+            return (0.0,) * 4
+        return reader
+
+    for group, name in (
+        ("tyre", "carcass_temperature"), ("tyre", "load"),
+        ("wheel", "ride_height"), ("brake", "pressure"),
+    ):
+        monkeypatch.setattr(getattr(api.read, group), name, spy(f"{group}.{name}"), raising=False)
+    widget.timerEvent(None)
+    assert not called, f"read while hidden: {called}"
+
+
+def test_diagnostic_readings_reach_wheel_state(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.module_info import minfo
+
+    monkeypatch.setattr(api.read.tyre, "carcass_temperature", lambda: (91.0, 92.0, 93.0, 94.0), raising=False)
+    monkeypatch.setattr(api.read.tyre, "load", lambda: (1000.0, 1000.0, 500.0, 500.0), raising=False)
+    monkeypatch.setattr(api.read.wheel, "ride_height", lambda: (0.032, 0.033, 0.058, 0.059), raising=False)
+    monkeypatch.setattr(api.read.brake, "pressure", lambda: (0.8, 0.8, 0.4, 0.4), raising=False)
+    monkeypatch.setattr(minfo.wheels, "camberAngle", [-3.2, -3.1, -2.4, -2.3])
+    monkeypatch.setattr(minfo.wheels, "slipAngle", [4.1, -2.0, 0.8, 0.9])
+    monkeypatch.setattr(minfo.wheels, "estimatedValidTreadWear", [0.82, 0.79, 0.55, 0.57])
+    instance = new_widget(dict.fromkeys(DIAGNOSTIC_OPTIONS, True))
+    try:
+        instance.timerEvent(None)
+        front_left, rear_left = instance.wheels[0], instance.wheels[2]
+        assert front_left.carcass_temp == 91.0
+        assert front_left.ride_height == pytest.approx(32.0)  # meters converted to millimeters
+        assert front_left.brake_pressure == pytest.approx(80.0)
+        assert front_left.load_ratio == pytest.approx(100 / 3)  # share of the car's total load
+        assert rear_left.load_ratio == pytest.approx(100 / 6)
+        assert front_left.camber == pytest.approx(-3.2)
+        assert front_left.slip_angle == pytest.approx(4.1)
+        assert front_left.wear_per_lap == pytest.approx(0.82)
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_wheel_locking_is_a_center_item(ui_env, monkeypatch):
+    from tinypedal.module_info import minfo
+
+    monkeypatch.setattr(minfo.wheels, "lockingPercentFront", 0.12)
+    monkeypatch.setattr(minfo.wheels, "lockingPercentRear", 0.04)
+    instance = new_widget({"show_wheel_locking": True})
+    try:
+        assert "locking" in instance.center_order
+        assert instance.need_locking
+        instance.timerEvent(None)
+        assert instance.locking_front == pytest.approx(12.0)
+        assert instance.locking_rear == pytest.approx(4.0)
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_wheel_locking_not_read_when_hidden(widget):
+    assert not widget.need_locking
+    widget.timerEvent(None)
+    assert widget.locking_front == 0.0
+
+
+def test_diagnostic_readings_yield_to_the_core_ones(ui_env):
+    """A crowded box drops camber or ride height before it drops temperature or pressure"""
+    instance = new_widget(dict.fromkeys(DIAGNOSTIC_OPTIONS, True))
+    try:
+        from tinypedal.widget._wheel_state import (
+            READING_CAMBER,
+            READING_RIDE_HEIGHT,
+            READING_STATUS,
+            READING_TEMPERATURE,
+        )
+
+        lines = [
+            (READING_RIDE_HEIGHT, "H32", instance.font_small, 0.9, "", ""),
+            (READING_CAMBER, "C-3.2", instance.font_small, 0.9, "", ""),
+            (READING_TEMPERATURE, "90", instance.font(), 1.3, "", ""),
+            (READING_STATUS, "FLAT", instance.font_small, 1.0, "", ""),
+        ]
+        usable = instance.unit * 1.5  # far too little room for four lines
+        kept = [line[0] for line in wheel_state.fit_readings(list(lines), usable, instance.unit)]
+        assert READING_TEMPERATURE in kept and READING_STATUS in kept
+        assert READING_RIDE_HEIGHT not in kept and READING_CAMBER not in kept
+    finally:
+        instance.deleteLater()
+
+
+def test_brake_column_shares_rows_between_readings(ui_env, monkeypatch):
+    """Brake temperature, thickness and pressure are drawn without overlapping"""
+    from PySide6.QtCore import QRectF
+
+    instance = new_widget({"show_brake_temperature": True, "show_brake_pressure": True})
+    try:
+        drawn = []
+        monkeypatch.setattr(
+            instance, "draw_fit_text",
+            lambda painter, rect, text, font, align=None: drawn.append(QRectF(rect)),
+        )
+        from PySide6.QtGui import QImage, QPainter
+
+        image = QImage(200, 200, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        instance.draw_disc(painter, 0, instance.rects_disc[0], instance.wheels[0])
+        painter.end()
+        assert len(drawn) == 2
+        assert drawn[0].bottom() == pytest.approx(drawn[1].top())  # stacked, no overlap
+        assert drawn[1].bottom() <= instance.rects_disc[0].bottom() + 0.01
     finally:
         instance.deleteLater()
