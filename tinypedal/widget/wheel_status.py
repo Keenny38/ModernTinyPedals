@@ -727,6 +727,15 @@ class Realtime(Overlay):
                 mark = QRectF(left + third_w * 0.1, y, third_w * 0.8, thickness)
             fill_rect(painter, mark, color)
 
+    @property
+    def has_hybrid(self) -> bool:
+        """Car reports a hybrid system, otherwise the gauge has nothing to show
+
+        The Hybrid module falls back to a derived motor state as soon as there is any charge,
+        so no state and no charge together means no hybrid system (or no data yet).
+        """
+        return self.battery_state != 0 or self.battery_charge > 0
+
     def draw_battery_bar(self, painter: QPainter, rect: QRectF):
         """Full-height battery charge gauge, with a flowing highlight while charging or draining"""
         wcfg = self.wcfg
@@ -752,7 +761,10 @@ class Realtime(Overlay):
             label_rect = QRectF(rect.left(), rect.top(), rect.width(), label_h)
             _fill_chip(painter, label_rect, wcfg["info_background_color"])
             painter.setPen(self.pen_text)
-            self.draw_fit_text(painter, label_rect, f"{self.battery_charge:.0f}", self.font_small)
+            # Dash instead of "0" on a car without hybrid system, so an empty gauge is not
+            # mistaken for a flat battery (or for the widget being broken)
+            text = f"{self.battery_charge:.0f}" if self.has_hybrid else "-"
+            self.draw_fit_text(painter, label_rect, text, self.font_small)
 
     def draw_battery_flow(self, painter: QPainter, rect: QRectF, charging: bool):
         """Translucent bands scrolling up while charging, down while draining, suggesting flow"""

@@ -609,6 +609,18 @@ def test_battery_flow_direction_differs_charge_vs_drain(ui_env, monkeypatch):
         instance.deleteLater()
 
 
+def test_battery_no_hybrid_system_detected(widget):
+    """No state and no charge means no hybrid system, shown as a dash instead of 0%"""
+    widget.battery_state = 0
+    widget.battery_charge = 0.0
+    assert not widget.has_hybrid
+    widget.battery_charge = 30.0  # charge reported before the state is known
+    assert widget.has_hybrid
+    widget.battery_charge = 0.0
+    widget.battery_state = 1  # motor off, but the car does have a hybrid system
+    assert widget.has_hybrid
+
+
 def test_battery_bar_idle_states_have_no_flow(ui_env, monkeypatch):
     """States other than drain/regen (n/a, off) must not animate"""
     calls = []
