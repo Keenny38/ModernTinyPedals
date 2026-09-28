@@ -22,6 +22,8 @@ Track info preset function
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..const_file import ConfigType
 from ..setting import cfg
 from ..template.setting_tracks import TRACKINFO_DEFAULT
@@ -44,7 +46,7 @@ def load_track_info(track_name: str, info_name: str):
     return value
 
 
-def save_track_info(track_name: str, **track_info: dict) -> None:
+def save_track_info(track_name: str, **track_info: Any) -> None:
     """Save track info to tracks preset"""
     if invalid_save_name(track_name):
         return

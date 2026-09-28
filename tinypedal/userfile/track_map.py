@@ -101,7 +101,10 @@ def load_track_map_file(filepath: str, filename: str, extension: str = FileExt.S
             raise TypeError
         raw_coords = points_to_coords(svg_coords)
         raw_dists = points_to_coords(svg_dists)
-        sector_index = string_pair_to_int(desc_col[0].childNodes[0].nodeValue)
+        sector_desc = desc_col[0].childNodes[0].nodeValue
+        if not isinstance(sector_desc, str):
+            raise TypeError
+        sector_index = string_pair_to_int(sector_desc)
         return raw_coords, raw_dists, sector_index
     except FileNotFoundError:
         logger.info("MISSING: track map (%s) data", extension)

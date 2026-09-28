@@ -108,22 +108,22 @@ class Realtime(Overlay):
                 QBrush(QRadialGradient(self.area_center, self.area_center, self.area_center)),
                 QBrush(QRadialGradient(self.area_center, self.area_center, self.area_center)),
             )
-            self.brush_cone[0].gradient().setStops(((0.1, indicator_color_nearby), (1, Qt.GlobalColor.transparent)))
-            self.brush_cone[1].gradient().setStops(((0.1, indicator_color_critical), (1, Qt.GlobalColor.transparent)))
+            self.brush_cone[0].gradient().setStops(((0.1, indicator_color_nearby), (1.0, QColor(Qt.GlobalColor.transparent))))
+            self.brush_cone[1].gradient().setStops(((0.1, indicator_color_critical), (1.0, QColor(Qt.GlobalColor.transparent))))
         else:
             self.lin_grad_l = (
                 QLinearGradient(0, 0, self.indicator_dimension.width, 0),
                 QLinearGradient(0, 0, self.indicator_dimension.width, 0),
             )
-            self.lin_grad_l[0].setStops(((0, Qt.GlobalColor.transparent), (self.indicator_dimension.edge, indicator_color_nearby), (1, Qt.GlobalColor.transparent)))
-            self.lin_grad_l[1].setStops(((0, Qt.GlobalColor.transparent), (self.indicator_dimension.edge, indicator_color_critical), (1, Qt.GlobalColor.transparent)))
+            self.lin_grad_l[0].setStops(((0.0, QColor(Qt.GlobalColor.transparent)), (self.indicator_dimension.edge, indicator_color_nearby), (1.0, QColor(Qt.GlobalColor.transparent))))
+            self.lin_grad_l[1].setStops(((0.0, QColor(Qt.GlobalColor.transparent)), (self.indicator_dimension.edge, indicator_color_critical), (1.0, QColor(Qt.GlobalColor.transparent))))
 
             self.lin_grad_r = (
                 QLinearGradient(0, 0, self.indicator_dimension.width, 0),
                 QLinearGradient(0, 0, self.indicator_dimension.width, 0),
             )
-            self.lin_grad_r[0].setStops(((0, Qt.GlobalColor.transparent), (1 - self.indicator_dimension.edge, indicator_color_nearby), (1, Qt.GlobalColor.transparent)))
-            self.lin_grad_r[1].setStops(((0, Qt.GlobalColor.transparent), (1 - self.indicator_dimension.edge, indicator_color_critical), (1, Qt.GlobalColor.transparent)))
+            self.lin_grad_r[0].setStops(((0.0, QColor(Qt.GlobalColor.transparent)), (1 - self.indicator_dimension.edge, indicator_color_nearby), (1.0, QColor(Qt.GlobalColor.transparent))))
+            self.lin_grad_r[1].setStops(((0.0, QColor(Qt.GlobalColor.transparent)), (1 - self.indicator_dimension.edge, indicator_color_critical), (1.0, QColor(Qt.GlobalColor.transparent))))
 
         # Collision indicator
         if self.wcfg["show_collision_course"]:

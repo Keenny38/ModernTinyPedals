@@ -94,8 +94,8 @@ class TrackNotesEditor(BaseEditor):
         super().__init__(parent)
         self.set_utility_title(tr("Track Notes Editor"))
 
-        self.notes_type = None
-        self.notes_header = None
+        self.notes_type: str = ""
+        self.notes_header: tuple[str, ...] = ()
         self.notes_metadata = create_notes_metadata()
         self._verify_enabled = True
 
@@ -640,7 +640,7 @@ class TrackNotesEditor(BaseEditor):
     def highlight_position_on_map(self):
         """Highlight selected position on map"""
         value = table_item(self.table_notes, self.table_notes.currentRow(), 0, FloatTableItem).value()
-        self.trackmap.spinbox_pos_dist.setValue(value)
+        self.trackmap.spinbox_pos_dist.setValue(int(value))
         self.trackmap.update_highlighted_coords()
 
     def mark_positions_on_map(self):

@@ -255,8 +255,8 @@ class DropDownListEdit(BaseComboBox):
 class ColorEdit(BaseLineEdit):
     """Color option edit with double click dialog trigger"""
 
-    HISTORY = deque(
-        ["#FFF"] * QColorDialog.customCount(),
+    HISTORY: deque[QColor] = deque(
+        [QColor("#FFF")] * QColorDialog.customCount(),
         maxlen=QColorDialog.customCount()
     )
 

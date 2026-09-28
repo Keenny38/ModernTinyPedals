@@ -46,7 +46,7 @@ DELTA_ZERO = (0.0, 0.0)  # pos, target
 DELTA_DEFAULT = (DELTA_ZERO,)
 WHEELS_ZERO = (0.0, 0.0, 0.0, 0.0)  # FL, FR, RL, RR
 WHEELS_NA = (-1.0, -1.0, -1.0, -1.0)  # FL, FR, RL, RR
-WHEELS_DELTA_DEFAULT = (0.0, *WHEELS_ZERO)  # pos, target set
+WHEELS_DELTA_DEFAULT: tuple[float, ...] = (0.0, *WHEELS_ZERO)  # pos, target set
 REL_TIME_DEFAULT = (0.0, -1)  # relative time gap, player index
 
 # Version & date

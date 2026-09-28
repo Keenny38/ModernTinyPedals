@@ -343,7 +343,7 @@ class ProgressBar(QWidget):
         text: str = "",
         width: int = 0,
         height: int = 0,
-        offset_x: int = 0,
+        offset_x: float = 0,
         offset_y: int = 0,
         input_color: str = "",
         fg_color: str = "",
