@@ -58,8 +58,17 @@ LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
 CENTER_ITEMS = ("abs", "tc", "brake_bias", "pit_limiter", "gear", "speed", "rpm", "pedals")
-DAMAGE_COLORS = ("", "#FFCC00", "#FF6600", "#FF2200")  # severity 1, 2, 3 (detached)
 LAPS_LABEL = "lap"  # short unit for estimated laps left
+# A tyre reading squeezed below this fraction of a text line is unreadable while driving, so
+# the least important readings are dropped instead of shrinking every line into noise
+MIN_READING_SCALE = 0.62
+# Tyre readings, least important first: dropped in this order when the box runs out of room
+READING_COMPOUND = 0
+READING_END_STINT = 1
+READING_PRESSURE = 2
+READING_WEAR = 3
+READING_TEMPERATURE = 4
+READING_STATUS = 5  # puncture or flat spot, never dropped
 NO_STATUS = (False, False, False, False)
 # How much more rounded small chip-like elements (LEDs, badges, gauge bars) are versus the
 # corner_scale used elsewhere (fill_rect): at the default 0.05 this already reaches full capsule,
@@ -316,6 +325,13 @@ class Realtime(Overlay):
         self.heatmap_tyre = 4 * [self.load_tyre_heatmap(wcfg["heatmap_name_tyre"])]
         self.heatmap_brake = 4 * [self.load_brake_heatmap(wcfg["heatmap_name_brake"])]
         self.temp_warning = wcfg["tyre_temperature_warning_threshold"]  # Celsius, 0 disables
+        # Indexed by severity: 1 minor, 2 major, 3 critical (detached). Index 0 is never drawn.
+        self.damage_colors = (
+            "",
+            wcfg["damage_color_minor"],
+            wcfg["damage_color_major"],
+            wcfg["damage_color_critical"],
+        )
         self.lock_threshold = -abs(wcfg["wheel_lock_threshold"])
         self.spin_threshold = abs(wcfg["wheel_spin_threshold"])
         self.min_speed = max(wcfg["slip_warning_minimum_speed"], 0) / 3.6  # km/h to m/s
@@ -642,34 +658,35 @@ class Realtime(Overlay):
             painter.drawPath(path)
         painter.restore()
 
-        # Text lines (upright): (text, font, weight in height, pill color or "", text color)
+        # Text lines (upright): (priority, text, font, weight in height, pill color, text color)
         lines = []
         if wcfg["show_tyre_compound"] and wheel.compound:
-            lines.append((wheel.compound, self.font_small, 0.9, "", ""))
+            lines.append((READING_COMPOUND, wheel.compound, self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_temperature"]:
             hot = 0 < self.temp_warning <= wheel.tyre_temp
-            lines.append((self.format_temp(wheel.tyre_temp), self.font(), 1.3, "",
+            lines.append((READING_TEMPERATURE, self.format_temp(wheel.tyre_temp), self.font(), 1.3, "",
                           wcfg["font_color_tyre_temperature_warning"] if hot else ""))
         if wcfg["show_tyre_pressure"]:
             text = f"{self.unit_pres(wheel.pressure):.{self.pres_decimals}f}"
             color = self.pressure_color(wheel.pressure)
             pill = wcfg["tyre_pressure_warning_background_color"] if color else ""
-            lines.append((text, self.font_small, 1.0, pill, color))
+            lines.append((READING_PRESSURE, text, self.font_small, 1.0, pill, color))
         if wcfg["show_tyre_wear"]:
             low = wheel.tread < wcfg["tyre_wear_warning_threshold"]
-            lines.append((f"{wheel.tread:.0f}%", self.font_small, 1.0,
+            lines.append((READING_WEAR, f"{wheel.tread:.0f}%", self.font_small, 1.0,
                           wcfg["tyre_wear_warning_color"] if low else "",
                           wcfg["font_color_tyre_wear_warning"] if low else ""))
         if wcfg["show_tyre_wear_end_stint"] and wheel.tread_end_known:
-            lines.append((f"→{max(wheel.tread_end, 0):.0f}%", self.font_small, 0.9, "", ""))
+            lines.append((READING_END_STINT, f"→{max(wheel.tread_end, 0):.0f}%", self.font_small, 0.9, "", ""))
         if wheel.status in ("puncture", "flat"):
             text = "PUNCT" if wheel.status == "puncture" else "FLAT"
             color = wcfg["wheel_puncture_color" if wheel.status == "puncture" else "wheel_flat_spot_color"]
-            lines.append((text, self.font_small, 1.0, color, "#000000"))
-        total = sum(line[2] for line in lines) or 1
-        top = rect.top() + rect.height() * 0.06
+            lines.append((READING_STATUS, text, self.font_small, 1.0, color, "#000000"))
         usable = rect.height() * 0.88
-        for text, font, weight, pill_color, text_color in lines:
+        lines = self.fit_readings(lines, usable)
+        total = sum(line[3] for line in lines) or 1
+        top = rect.top() + rect.height() * 0.06
+        for _priority, text, font, weight, pill_color, text_color in lines:
             line_rect = QRectF(rect.left(), top, rect.width(), usable * weight / total)
             top += line_rect.height()
             font = self.fit_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
@@ -682,6 +699,20 @@ class Realtime(Overlay):
             painter.setPen(QColor(text_color) if text_color else self.pen_temp)
             painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
         painter.setFont(self.font())
+
+    def fit_readings(self, lines: list, usable: float) -> list:
+        """Drop the least important tyre readings until the rest fit at a readable size
+
+        Enabling every reading at once would otherwise squeeze them all below the point
+        where they can be read at a glance, which is worse than showing fewer of them.
+        """
+        min_height = self.unit * MIN_READING_SCALE
+        while len(lines) > 1:
+            total = sum(line[3] for line in lines)
+            if usable * min(line[3] for line in lines) / total >= min_height:
+                break
+            lines.pop(min(range(len(lines)), key=lambda index: lines[index][0]))
+        return lines
 
     def pressure_color(self, pressure: float) -> str:
         """Text color if pressure out of target range (kPa), "" if in range or disabled"""
@@ -743,11 +774,11 @@ class Realtime(Overlay):
             return
         _fill_chip(painter, rect, self.wcfg["indicator_inactive_color"])
         if damage >= 0.99:
-            color = DAMAGE_COLORS[3]
+            color = self.damage_colors[3]
         elif damage >= 0.5:
-            color = DAMAGE_COLORS[2]
+            color = self.damage_colors[2]
         else:
-            color = DAMAGE_COLORS[1]
+            color = self.damage_colors[1]
         _fill_chip(painter, QRectF(rect.left(), rect.top(), rect.width() * min(damage, 1), rect.height()), color)
 
     def draw_body_damage(self, painter: QPainter, rect: QRectF):
@@ -760,7 +791,7 @@ class Realtime(Overlay):
         for severity, (column, row) in zip(self.body_damage, positions):
             if not severity:
                 continue
-            color = DAMAGE_COLORS[min(int(severity), 3)]
+            color = self.damage_colors[min(int(severity), 3)]
             left = rect.left() + column * third_w
             top = rect.top() + row * third_h
             if row == 1:  # left / right side: vertical mark

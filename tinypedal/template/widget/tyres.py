@@ -358,6 +358,9 @@ WIDGET_TYRES = {
         "wheel_spin_color": "#FFCC00",
         "show_suspension_damage": True,
         "show_body_damage": True,
+        "damage_color_minor": "#FFCC00",
+        "damage_color_major": "#FF6600",
+        "damage_color_critical": "#FF2200",
         # Order matters: config dialog names each option group after its first option,
         # so the bar options come first, then the animation pair, then the colors
         "show_battery_bar": False,

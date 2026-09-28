@@ -5224,6 +5224,11 @@ Show suspension damage bar below brake of damaged corner (yellow, orange, red).
     show_body_damage
 Show body damage marks along car edges (front, sides, rear), only for damaged parts.
 
+    damage_color_minor, damage_color_major, damage_color_critical
+Color of body and suspension damage marks by severity.
+
+Tyre readings (compound, temperature, pressure, wear, end of stint wear, status) share the space inside each tyre. When too many are enabled to stay readable, the least important ones are dropped, in this order: compound, end of stint wear, pressure, wear, temperature. Puncture and flat spot are always shown.
+
     show_battery_bar, battery_bar_position
 Show hybrid battery charge as a full-height bar outside the tyre/brake columns. `battery_bar_position` sets `Left` or `Right`. Requires a car with a hybrid system (LMU); shows a dash instead of a percentage on cars without one.
 

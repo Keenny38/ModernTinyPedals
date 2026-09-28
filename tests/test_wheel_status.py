@@ -822,3 +822,68 @@ def test_battery_bar_idle_states_have_no_flow(ui_env, monkeypatch):
         assert calls
     finally:
         instance.deleteLater()
+
+
+# --- Readability guard and configurable damage colours
+def test_readings_dropped_when_box_too_crowded(ui_env):
+    """Enabling every tyre reading must not squeeze them all into unreadable slivers"""
+    instance = new_widget({
+        "show_tyre_compound": True, "show_tyre_temperature": True, "show_tyre_pressure": True,
+        "show_tyre_wear": True, "show_tyre_wear_end_stint": True,
+    })
+    try:
+        from tinypedal.widget.wheel_status import (
+            MIN_READING_SCALE,
+            READING_COMPOUND,
+            READING_STATUS,
+            READING_TEMPERATURE,
+        )
+
+        usable = instance.rects_tyre[0].height() * 0.88
+        # Six readings, least important first
+        lines = [
+            (READING_COMPOUND, "S", instance.font_small, 0.9, "", ""),
+            (1, "→12%", instance.font_small, 0.9, "", ""),
+            (2, "145", instance.font_small, 1.0, "", ""),
+            (3, "28%", instance.font_small, 1.0, "", ""),
+            (READING_TEMPERATURE, "90", instance.font(), 1.3, "", ""),
+            (READING_STATUS, "FLAT", instance.font_small, 1.0, "", ""),
+        ]
+        kept = instance.fit_readings(list(lines), usable)
+        assert len(kept) < len(lines), "nothing was dropped"
+        # What survives is the most important, and is readable
+        priorities = [line[0] for line in kept]
+        assert READING_STATUS in priorities and READING_TEMPERATURE in priorities
+        assert READING_COMPOUND not in priorities
+        total = sum(line[3] for line in kept)
+        assert usable * min(line[3] for line in kept) / total >= instance.unit * MIN_READING_SCALE
+        # Display order is preserved
+        assert priorities == sorted(priorities, key=lambda p: [line[0] for line in lines].index(p))
+    finally:
+        instance.deleteLater()
+
+
+def test_few_readings_are_all_kept(ui_env):
+    instance = new_widget({})
+    try:
+        usable = instance.rects_tyre[0].height() * 0.88
+        lines = [
+            (4, "90", instance.font(), 1.3, "", ""),
+            (3, "28%", instance.font_small, 1.0, "", ""),
+        ]
+        assert instance.fit_readings(list(lines), usable) == lines
+    finally:
+        instance.deleteLater()
+
+
+def test_damage_colors_configurable(ui_env):
+    instance = new_widget({"damage_color_minor": "#111111", "damage_color_major": "#222222",
+                           "damage_color_critical": "#333333"})
+    try:
+        assert instance.damage_colors == ("", "#111111", "#222222", "#333333")
+        instance.body_damage = (1, 2, 3, 0, 0, 0, 0, 0)
+        for wheel in instance.wheels:
+            wheel.suspension_damage = 0.7
+        instance.grab()  # both damage drawings use the options
+    finally:
+        instance.deleteLater()

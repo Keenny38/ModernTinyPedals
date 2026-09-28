@@ -87,7 +87,7 @@ WORDS = {
     "locked": "verrouillé", "locking": "blocage", "logo": "logo", "long": "long", "longitudinal": "longitudinal",
     "loss": "perte", "low": "faible", "lower": "inférieur", "manager": "gestionnaire", "manual": "manuel",
     "map": "carte", "mapping": "cartographie", "margin": "marge", "mark": "repère", "marked": "marqué",
-    "matching": "correspondance", "maximum": "maximum", "measurement": "mesure", "median": "médiane",
+    "matching": "correspondance", "major": "majeur", "maximum": "maximum", "minor": "mineur", "measurement": "mesure", "median": "médiane",
     "medium": "moyen", "meter": "mètre", "meters": "mètres", "middle": "milieu", "migration": "migration",
     "minimize": "réduire", "minimum": "minimum", "minutes": "minutes", "mixed": "mixte", "mode": "mode",
     "moderate": "modérée", "modern": "moderne", "module": "module", "more": "plus", "motion": "mouvement",
