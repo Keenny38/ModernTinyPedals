@@ -5318,8 +5318,20 @@ Show ABS and TC indicators with current level, lit while ABS or TC is active. TC
     show_brake_bias, show_pedal_bars
 Show front brake bias (percentage) and throttle & brake bars.
 
-    display_order_locking
-Position of the wheel locking row in the center column. Adding it shifted the default order of the rows below it (pit & limiter, gear, speed, RPM, pedals) down by one; presets saved before this option existed keep their own order values.
+    show_brake_migration
+Show brake migration (percent) as a center column row.
+
+    show_delta_best, delta_gain_color, delta_loss_color
+Show delta to best lap in the center column, colored by gain or loss, from `Delta module`.
+
+    show_laptime
+Show current lap time in the center column, from `Delta module`.
+
+    center_column_alignment
+`Centered` (default) draws speed and RPM as large centered text. `Justified` draws them as label & value rows, the same as brake bias, delta and lap time, so every value in the column lines up on the right edge.
+
+    display_order_brake_migration, display_order_locking, display_order_delta, display_order_laptime
+Position of the new rows in the center column. Adding them shifted the default order of the rows below (pit & limiter, gear, speed, RPM, pedals); presets saved before these options existed keep their own order values.
 
     show_gear, show_speed, show_rpm
 Show engaged gear (`N` neutral, `R` reverse), vehicle speed (unit from `Units` setting) and engine RPM with RPM bar.

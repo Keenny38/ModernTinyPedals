@@ -82,7 +82,10 @@ LAYOUT_NORMAL = 0  # info column between tyres
 LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
-CENTER_ITEMS = ("abs", "tc", "brake_bias", "locking", "pit_limiter", "gear", "speed", "rpm", "pedals")
+CENTER_ITEMS = (
+    "abs", "tc", "brake_bias", "brake_migration", "locking", "delta", "laptime",
+    "pit_limiter", "gear", "speed", "rpm", "pedals",
+)
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -137,6 +140,12 @@ class Realtime(Overlay):
         self.need_switches = bool(shown & {"abs", "tc"})
         self.need_brake_bias = "brake_bias" in shown
         self.need_locking = "locking" in shown
+        self.need_brake_migration = "brake_migration" in shown
+        self.need_delta = "delta" in shown
+        self.need_laptime = "laptime" in shown
+        # Justified: speed and RPM use the same label/value rows as brake bias and delta,
+        # so every value in the column lines up on the right edge instead of each being centered.
+        self.justify_center = self.wcfg["center_column_alignment"] == "Justified"
         self.need_limiter = "pit_limiter" in shown
         self.need_gear = "gear" in shown
         self.need_pedals = "pedals" in shown
@@ -289,6 +298,9 @@ class Realtime(Overlay):
         self.brake_bias = 0.0
         self.locking_front = 0.0  # percent of lap distance spent locking a front wheel
         self.locking_rear = 0.0
+        self.brake_migration = 0.0  # percent
+        self.delta_best = 0.0  # seconds, negative is faster
+        self.laptime_current = 0.0  # seconds
         self.in_pits = False
         self.limiter = False
         self.gear = 0
@@ -319,7 +331,10 @@ class Realtime(Overlay):
             "abs": self.wcfg["show_abs_indicator"],
             "tc": self.wcfg["show_tc_indicator"],
             "brake_bias": self.wcfg["show_brake_bias"],
+            "brake_migration": self.wcfg["show_brake_migration"],
             "locking": self.wcfg["show_wheel_locking"],
+            "delta": self.wcfg["show_delta_best"],
+            "laptime": self.wcfg["show_laptime"],
             "pit_limiter": self.wcfg["show_pit_limiter_indicator"],
             "gear": self.wcfg["show_gear"],
             "speed": self.wcfg["show_speed"],
@@ -443,6 +458,12 @@ class Realtime(Overlay):
         if self.need_locking:
             self.locking_front = minfo.wheels.lockingPercentFront * 100
             self.locking_rear = minfo.wheels.lockingPercentRear * 100
+        if self.need_brake_migration:
+            self.brake_migration = api.read.brake.migration()
+        if self.need_delta:
+            self.delta_best = minfo.delta.deltaBest
+        if self.need_laptime:
+            self.laptime_current = minfo.delta.lapTimeCurrent
         self.in_pits = bool(in_pits)
         if self.need_limiter:
             self.limiter = bool(api.read.switch.speed_limiter())
@@ -913,6 +934,14 @@ class Realtime(Overlay):
                                 self.tc_active, wcfg["tc_active_color"])
         elif name == "brake_bias":
             self.draw_info_row(painter, rect, "BB", f"{self.brake_bias * 100:.1f}")
+        elif name == "brake_migration":
+            self.draw_info_row(painter, rect, "BMIG", f"{self.brake_migration:.1f}")
+        elif name == "delta":
+            gain = self.delta_best < 0
+            color = wcfg["delta_gain_color" if gain else "delta_loss_color"]
+            self.draw_info_row(painter, rect, "DELTA", f"{self.delta_best:+.3f}", color)
+        elif name == "laptime":
+            self.draw_info_row(painter, rect, "TIME", calc.sec2laptime(self.laptime_current)[:8])
         elif name == "locking":
             self.draw_info_row(painter, rect, "LOCK", f"{self.locking_front:.0f}/{self.locking_rear:.0f}")
         elif name == "pit_limiter":
@@ -932,12 +961,19 @@ class Realtime(Overlay):
             painter.setPen(QColor(self.gear_color()))
             self.draw_fit_text(painter, rect, self.gear_text(), self.font_gear)
         elif name == "speed":
-            painter.setPen(self.pen_text)
-            self.draw_fit_text(painter, rect, f"{self.unit_speed(self.speed):.0f} {self.speed_label}", self.font_speed)
+            text = f"{self.unit_speed(self.speed):.0f} {self.speed_label}"
+            if self.justify_center:
+                self.draw_info_row(painter, rect, "SPD", text)
+            else:
+                painter.setPen(self.pen_text)
+                self.draw_fit_text(painter, rect, text, self.font_speed)
         elif name == "rpm":
             text_rect = QRectF(rect.left(), rect.top(), rect.width(), rect.height() - unit * 0.3)
-            painter.setPen(self.pen_text)
-            self.draw_fit_text(painter, text_rect, f"{self.rpm:.0f} rpm", self.font_rpm)
+            if self.justify_center:
+                self.draw_info_row(painter, text_rect, "RPM", f"{self.rpm:.0f}")
+            else:
+                painter.setPen(self.pen_text)
+                self.draw_fit_text(painter, text_rect, f"{self.rpm:.0f} rpm", self.font_rpm)
             bar = QRectF(rect.left(), text_rect.bottom(), rect.width(), unit * 0.3)
             fill_chip(painter, bar, wcfg["indicator_inactive_color"])
             if self.rpm_max > 0 and self.rpm > 0:
@@ -992,7 +1028,7 @@ class Realtime(Overlay):
             if right:
                 self.draw_info_row(painter, rect_right, *right)
 
-    def draw_info_row(self, painter: QPainter, row: QRectF, label: str, value: str):
+    def draw_info_row(self, painter: QPainter, row: QRectF, label: str, value: str, color: str = ""):
         """Info row: label on left, value on right"""
         unit = self.unit
         fill_rect(painter, row, self.wcfg["info_background_color"])
@@ -1001,7 +1037,7 @@ class Realtime(Overlay):
         painter.setPen(QColor(self.wcfg["font_color_info_label"]))
         painter.drawText(inner, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
         label_w = painter.fontMetrics().horizontalAdvance(label)
-        painter.setPen(self.pen_text)
+        painter.setPen(QColor(color) if color else self.pen_text)
         value_rect = inner.adjusted(label_w + unit * 0.3, 0, 0, 0)
         self.draw_fit_text(painter, value_rect, value, self.font(),
                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

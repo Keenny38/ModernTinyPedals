@@ -1030,3 +1030,85 @@ def test_brake_column_shares_rows_between_readings(ui_env, monkeypatch):
         assert drawn[1].bottom() <= instance.rects_disc[0].bottom() + 0.01
     finally:
         instance.deleteLater()
+
+
+# --- Center column: brake migration, delta to best, lap time, justified alignment
+def test_new_center_items_read_their_data(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.module_info import minfo
+
+    monkeypatch.setattr(api.read.brake, "migration", lambda: 2.5, raising=False)
+    monkeypatch.setattr(minfo.delta, "deltaBest", -0.234)
+    monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 92.5)
+    instance = new_widget({"show_brake_migration": True, "show_delta_best": True, "show_laptime": True})
+    try:
+        assert {"brake_migration", "delta", "laptime"} <= set(instance.center_order)
+        instance.timerEvent(None)
+        assert instance.brake_migration == pytest.approx(2.5)
+        assert instance.delta_best == pytest.approx(-0.234)
+        assert instance.laptime_current == pytest.approx(92.5)
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_new_center_items_are_opt_in(widget):
+    for option in ("show_brake_migration", "show_delta_best", "show_laptime"):
+        assert widget.wcfg[option] is False
+    assert not widget.need_brake_migration
+    assert not widget.need_delta
+    assert not widget.need_laptime
+
+
+def test_delta_row_colors_gain_and_loss(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    instance = new_widget({"show_delta_best": True})
+    try:
+        colors = []
+        monkeypatch.setattr(
+            instance, "draw_info_row",
+            lambda painter, rect, label, value, color="": colors.append(color),
+        )
+        image = QImage(200, 200, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        rect = QRectF(0, 0, 80, 20)
+        instance.delta_best = -0.5
+        instance.draw_center_item(painter, "delta", rect)
+        instance.delta_best = 0.5
+        instance.draw_center_item(painter, "delta", rect)
+        painter.end()
+        assert colors == [instance.wcfg["delta_gain_color"], instance.wcfg["delta_loss_color"]]
+    finally:
+        instance.deleteLater()
+
+
+def test_justified_alignment_uses_label_value_rows(ui_env, monkeypatch):
+    """Justified puts speed and RPM in the same rows as the other readings, so values line up"""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    for alignment, expected in (("Centered", []), ("Justified", ["SPD", "RPM"])):
+        instance = new_widget({"center_column_alignment": alignment})
+        try:
+            labels: list[str] = []
+            monkeypatch.setattr(
+                instance, "draw_info_row",
+                lambda painter, rect, label, value, color="", _out=labels: _out.append(label),
+            )
+            image = QImage(200, 200, QImage.Format.Format_ARGB32)
+            painter = QPainter(image)
+            for name in ("speed", "rpm"):
+                instance.draw_center_item(painter, name, QRectF(0, 0, 80, 20))
+            painter.end()
+            assert labels == expected, alignment
+        finally:
+            instance.deleteLater()
+
+
+def test_center_alignment_option_is_a_valid_choice():
+    """Unmatched choice options are rejected by the config dialog, as bar_position once was"""
+    from tinypedal import regex_pattern as rxp
+
+    assert rxp.CHOICE_COMMON[rxp.CFG_COLUMN_ALIGNMENT] == ("Centered", "Justified")

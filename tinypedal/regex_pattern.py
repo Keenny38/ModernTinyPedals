@@ -77,6 +77,7 @@ CFG_CLOCK_FORMAT = "clock_format"
 CFG_API_NAME = "api_name"
 CFG_BAR_POSITION = "bar_position"
 CFG_CHARACTER_ENCODING = "character_encoding"
+CFG_COLUMN_ALIGNMENT = "column_alignment"
 CFG_DELTABEST_SOURCE = "deltabest_source"
 CFG_FONT_WEIGHT = "font_weight"
 CFG_TARGET_LAPTIME = "target_laptime"
@@ -228,6 +229,7 @@ CHOICE_COMMON = MappingProxyType({
     CFG_API_NAME: tuple(API_MAP_ALIAS),
     CFG_BAR_POSITION: ("Left", "Right"),
     CFG_CHARACTER_ENCODING: ("UTF-8", "ISO-8859-1"),
+    CFG_COLUMN_ALIGNMENT: ("Centered", "Justified"),
     CFG_DELTABEST_SOURCE: ("Best", "Session", "Stint", "Last"),
     CFG_FONT_WEIGHT: tuple(FONT_WEIGHT_MAP),
     CFG_TARGET_LAPTIME: ("Theoretical", "Personal"),
