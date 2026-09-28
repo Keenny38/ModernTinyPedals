@@ -50,6 +50,7 @@ from ..userfile.heatmap import (
     set_predefined_brake_name,
 )
 from ._base import Overlay
+from ._common import warning_flash
 from ._painter import OverlayStyle, fill_rect
 
 LAYOUT_NORMAL = 0  # info column between tyres
@@ -206,6 +207,18 @@ class Realtime(Overlay):
         battery_extra = battery_bar_w + gap if self.show_battery_bar else 0
         content_x = battery_extra if self.show_battery_bar and self.battery_bar_left else 0
         width = content_w + battery_extra
+        self.battery_low = wcfg["battery_low_threshold"]
+        self.battery_high = wcfg["battery_high_threshold"]
+        # Flashes a few times on crossing a threshold, then stays highlighted. Without the
+        # flash the warning color is simply shown steadily, same as the Battery widget.
+        if self.show_battery_bar and wcfg["show_battery_warning_flash"]:
+            self.battery_flash = warning_flash(
+                wcfg["battery_warning_flash_duration"],
+                wcfg["battery_warning_flash_interval"],
+                wcfg["number_of_battery_warning_flashes"],
+            )
+        else:
+            self.battery_flash = None
 
         # Caption (widget name) on top, then RPM LEDs (span full width, above everything else)
         caption_h = round(unit * 0.9) if wcfg["show_caption"] else 0
@@ -341,6 +354,8 @@ class Realtime(Overlay):
         self.last_compounds: tuple = ("", "", "", "")
         self.battery_charge = 0.0  # percent
         self.battery_state = 0  # 0 n/a, 1 off, 2 drain, 3 regen
+        self.battery_warning = 0  # 0 none, 1 low charge, 2 high charge
+        self.battery_highlight = True  # warning color shown now (flash phase, or flash disabled)
 
     # Config helpers
     def ordered_center_items(self) -> list[str]:
@@ -472,7 +487,20 @@ class Realtime(Overlay):
         if self.show_battery_bar:
             self.battery_charge = minfo.hybrid.batteryCharge
             self.battery_state = minfo.hybrid.motorState
+            self.battery_warning = self.battery_warning_level()
+            if self.battery_flash is not None:
+                self.battery_highlight = self.battery_flash.send(self.battery_warning)
         self.update()
+
+    def battery_warning_level(self) -> int:
+        """Charge warning: 0 none, 1 low, 2 high (never on a car without hybrid system)"""
+        if not self.has_hybrid:
+            return 0
+        if self.battery_charge <= self.battery_low:
+            return 1
+        if self.battery_charge >= self.battery_high:
+            return 2
+        return 0
 
     @staticmethod
     def update_end_stint_tread(wheel: WheelState, index: int, run_laps: float):
@@ -748,7 +776,10 @@ class Realtime(Overlay):
         if fill_h >= 1:
             fill_area = QRectF(rect.left(), rect.bottom() - fill_h, rect.width(), fill_h)
             state = self.battery_state
-            if state == 3:  # regen
+            if self.battery_warning and self.battery_highlight:  # warning wins over flow color
+                color = wcfg["warning_color_low_battery" if self.battery_warning == 1
+                             else "warning_color_high_battery"]
+            elif state == 3:  # regen
                 color = wcfg["battery_charge_color"]
             elif state == 2:  # drain
                 color = wcfg["battery_discharge_color"]

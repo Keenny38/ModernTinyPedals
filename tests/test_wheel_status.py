@@ -649,6 +649,90 @@ def test_battery_no_hybrid_system_detected(widget):
     assert widget.has_hybrid
 
 
+def test_battery_warning_levels(ui_env):
+    instance = new_widget({"show_battery_bar": True, "battery_low_threshold": 10,
+                           "battery_high_threshold": 95})
+    try:
+        instance.battery_state = 2  # hybrid car, draining
+        for charge, expected in ((50.0, 0), (10.0, 1), (4.0, 1), (95.0, 2), (99.0, 2), (94.0, 0)):
+            instance.battery_charge = charge
+            assert instance.battery_warning_level() == expected, charge
+        # A car without hybrid system never warns, even though charge reads 0
+        instance.battery_state = 0
+        instance.battery_charge = 0.0
+        assert instance.battery_warning_level() == 0
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_warning_flashes_then_stays_highlighted(ui_env, monkeypatch):
+    """Flashes a few times to catch the eye, then holds the warning color"""
+    from tinypedal.module_info import minfo
+
+    instance = new_widget({
+        "show_battery_bar": True, "show_battery_warning_flash": True,
+        "battery_warning_flash_duration": 0.2, "battery_warning_flash_interval": 0.2,
+        "number_of_battery_warning_flashes": 3, "battery_low_threshold": 10,
+    })
+    try:
+        monkeypatch.setattr(minfo.hybrid, "batteryCharge", 5.0)
+        monkeypatch.setattr(minfo.hybrid, "motorState", 2)
+        clock = [1000.0]
+        monkeypatch.setattr("tinypedal.widget._common.monotonic", lambda: clock[0])
+        seen = []
+        for _ in range(40):  # 4 seconds at 0.1s steps, past the 3 flashes
+            instance.timerEvent(None)
+            seen.append(instance.battery_highlight)
+            clock[0] += 0.1
+        assert instance.battery_warning == 1
+        assert False in seen[:20], "never turned off, so it did not flash"
+        assert all(seen[-5:]), "did not settle to a steady warning after flashing"
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_warning_steady_when_flash_disabled(ui_env, monkeypatch):
+    from tinypedal.module_info import minfo
+
+    instance = new_widget({"show_battery_bar": True, "show_battery_warning_flash": False,
+                           "battery_low_threshold": 10})
+    try:
+        assert instance.battery_flash is None
+        monkeypatch.setattr(minfo.hybrid, "batteryCharge", 5.0)
+        monkeypatch.setattr(minfo.hybrid, "motorState", 2)
+        for _ in range(5):
+            instance.timerEvent(None)
+            assert instance.battery_highlight  # warning colour shown without blinking
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_warning_color_overrides_flow_color(ui_env):
+    """A low/high warning must win over the charge/discharge colour"""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    instance = new_widget({"show_battery_bar": True, "battery_low_threshold": 10,
+                           "enable_battery_bar_animation": False})
+    try:
+        def render(warning):
+            instance.battery_charge = 8.0
+            instance.battery_state = 2  # draining
+            instance.battery_warning = warning
+            instance.battery_highlight = True
+            image = QImage(20, 100, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            instance.draw_battery_bar(painter, QRectF(0, 0, 20, 100))
+            painter.end()
+            return image.pixelColor(10, 96)  # inside the fill, near the bottom
+
+        assert render(1) != render(0)
+    finally:
+        instance.deleteLater()
+
+
 def test_battery_bar_idle_states_have_no_flow(ui_env, monkeypatch):
     """States other than drain/regen (n/a, off) must not animate"""
     calls = []

@@ -5239,6 +5239,12 @@ Show a moving highlight inside the battery bar: flows upward while the battery i
     battery_idle_color, battery_charge_color, battery_discharge_color
 Battery bar fill color: motor off or not available, charging (regen), draining.
 
+    battery_low_threshold, battery_high_threshold
+Charge percentage at or below which the battery bar shows `warning_color_low_battery`, and at or above which it shows `warning_color_high_battery`. Defaults are `10` and `95`. A car without hybrid system never warns.
+
+    show_battery_warning_flash, number_of_battery_warning_flashes, battery_warning_flash_duration, battery_warning_flash_interval
+Flash the battery bar when it enters a low or high charge warning, then keep the warning color steady. `number_of_battery_warning_flashes` sets how many flashes, `battery_warning_flash_duration` how long each flash lasts and `battery_warning_flash_interval` the gap between them, both in seconds. Set `show_battery_warning_flash` to false to show the warning color without flashing.
+
     show_pit_limiter_indicator
 Show pit lane (`PIT`) and speed limiter (`LIM`) indicators, only while active.
 
