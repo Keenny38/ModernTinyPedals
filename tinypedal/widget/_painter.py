@@ -25,7 +25,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -56,7 +56,7 @@ def _rounded_path(x: float, y: float, width: float, height: float, radius: float
     return path
 
 
-def fill_rect(painter: QPainter, rect: QRectF, color) -> None:
+def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     """Fill rect, with rounded corner if enabled in overlay style"""
     radius = min(rect.width(), rect.height()) * OverlayStyle.corner_scale
     if radius < 1:

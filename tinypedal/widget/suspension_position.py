@@ -109,7 +109,7 @@ class Realtime(Overlay):
                 mark_color=susp_mark_color,
                 maxrange_height=max(self.wcfg["maximum_position_range_size"], 0),
                 maxrange_color=susp_max_color,
-                right_side=idx % 2,
+                right_side=bool(idx % 2),
                 top_side=idx < 2,
             ) for idx in range(4)
         )

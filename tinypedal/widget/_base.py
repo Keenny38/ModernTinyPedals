@@ -601,7 +601,7 @@ class Overlay(Base):
         target: QWidget | QGridLayout,
         column: int = 0,
         row: int = 0,
-        option: str = "layout",
+        option: str | None = "layout",
         default: str | int = 0,
     ):
         """Set primary layout (QGridLayout) orientation

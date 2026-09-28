@@ -454,9 +454,9 @@ class CalculatorPanel(QWidget):
         # Load laptime from last valid lap
         laptime = latest_history.lapTimeLast
         if laptime > 0 and latest_history.isValidLap:
-            self.input_laptime.minutes.setValue(laptime // 60)
-            self.input_laptime.seconds.setValue(laptime % 60)
-            self.input_laptime.mseconds.setValue(laptime % 1 * 1000)
+            self.input_laptime.minutes.setValue(int(laptime // 60))
+            self.input_laptime.seconds.setValue(int(laptime % 60))
+            self.input_laptime.mseconds.setValue(int(laptime % 1 * 1000))
         # Load tank capacity
         capacity = max(api.read.engine.tank_capacity(), latest_history.capacityFuel)
         if capacity:
@@ -494,9 +494,9 @@ class CalculatorPanel(QWidget):
         # Send data to calculator
         if data_laptime:
             output_value = calc.dataset_mean(data_laptime)
-            self.input_laptime.minutes.setValue(output_value // 60)
-            self.input_laptime.seconds.setValue(output_value % 60)
-            self.input_laptime.mseconds.setValue(output_value % 1 * 1000)
+            self.input_laptime.minutes.setValue(int(output_value // 60))
+            self.input_laptime.seconds.setValue(int(output_value % 60))
+            self.input_laptime.mseconds.setValue(int(output_value % 1 * 1000))
         if data_fuel:
             output_value = calc.dataset_mean(data_fuel)
             self.input_fuel.fuel_used.setValue(output_value)

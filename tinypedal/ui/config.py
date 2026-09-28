@@ -477,7 +477,7 @@ class UserConfig(BaseDialog):
                 continue
             # Heatmap string
             if re.search(rxp.CFG_HEATMAP, key):
-                self._add_option_combolist(row_index, key, layout, cfg.user.heatmap.keys())
+                self._add_option_combolist(row_index, key, layout, tuple(cfg.user.heatmap))
                 continue
             # Clock format string
             if re.search(rxp.CFG_CLOCK_FORMAT, key):

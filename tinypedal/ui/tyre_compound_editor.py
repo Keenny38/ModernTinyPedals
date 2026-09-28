@@ -160,7 +160,7 @@ class TyreCompoundEditor(BaseEditor):
     def __add_option_combolist(self, key):
         """Combo droplist string"""
         combo_edit = QComboBox()
-        combo_edit.addItems(cfg.user.heatmap.keys())
+        combo_edit.addItems(tuple(cfg.user.heatmap))
         combo_edit.setCurrentText(key)
         combo_edit.currentTextChanged.connect(self.set_modified)
         return combo_edit

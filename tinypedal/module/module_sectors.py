@@ -77,7 +77,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
 
     last_sector_idx = -1  # previous recorded sector index value
     combo_name = ""
-    session_id = ()
+    session_id: tuple[int, ...] = ()
 
     while True:
         reset = yield None

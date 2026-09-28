@@ -93,7 +93,7 @@ class Realtime(Overlay):
                 input_color=self.wcfg["highlight_color"],
                 fg_color=self.wcfg["font_color"],
                 bg_color=self.wcfg["background_color"],
-                right_side=idx % 2,
+                right_side=bool(idx % 2),
             ) for idx in range(4)
         )
         self.set_grid_layout_quad(

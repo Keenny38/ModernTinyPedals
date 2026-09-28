@@ -66,7 +66,7 @@ class Realtime(Overlay):
             and self.wcfg["show_time_gap_from_same_class"])
         self.show_class_interval = (self.wcfg["enable_multi_class_split_mode"]
             and self.wcfg["show_time_interval_from_same_class"])
-        self.max_delta = calc.asym_max(int(self.wcfg["number_of_delta_laptime"]), 2, 5)
+        self.max_delta = int(calc.asym_max(int(self.wcfg["number_of_delta_laptime"]), 2, 5))
         self.nrg_decimals = max(int(self.wcfg["decimal_places_energy_remaining"]), 0)
         self.nrg_width = 3 + self.nrg_decimals + (self.nrg_decimals > 0)
 

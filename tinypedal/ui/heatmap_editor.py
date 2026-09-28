@@ -67,7 +67,7 @@ class HeatmapEditor(BaseEditor):
 
         # Preset selector
         self.heatmap_list = QComboBox()
-        self.heatmap_list.addItems(self.heatmap_temp.keys())
+        self.heatmap_list.addItems(tuple(self.heatmap_temp))
         self.heatmap_list.currentIndexChanged.connect(self.select_heatmap)
 
         # Heatmap list box

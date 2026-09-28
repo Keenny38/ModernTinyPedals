@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import TypeVar, overload
+from typing import Any, TypeVar, overload
 
 from PySide6.QtCore import QRegularExpression, Qt, QTimer
 from PySide6.QtGui import (
@@ -217,7 +217,7 @@ class BaseEditor(BaseDialog):
         self._undo_state: object = None
         self._undo_busy = False
 
-    def enable_undo(self, capture: Callable[[], object], restore: Callable[[object], None]):
+    def enable_undo(self, capture: Callable[[], Any], restore: Callable[[Any], None]):
         """Enable undo & redo (Ctrl+Z, Ctrl+Y)
 
         Args:
@@ -490,7 +490,7 @@ class TableBatchReplace(BaseDialog):
         self.search_selector.setCompleter(QCompleter())  # disable auto-complete
 
         self.column_selector = QComboBox()
-        self.column_selector.addItems(self.table_selector.keys())
+        self.column_selector.addItems(tuple(self.table_selector))
         self.column_selector.currentIndexChanged.connect(self.update_selector)
         self.update_selector(self.table_selector[self.column_selector.currentText()])
 

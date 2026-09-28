@@ -440,7 +440,7 @@ def sec2stinttime(seconds: float) -> str:
 
 
 def delta_telemetry(
-    dataset: list, position: float, target: float,
+    dataset: Sequence, position: float, target: float,
     condition: bool = True, position_column: int = 0, target_column: int = 1) -> float:
     """Calculate delta telemetry data"""
     if not condition:

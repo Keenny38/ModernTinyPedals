@@ -721,7 +721,7 @@ class TyreSetPanel(QFrame):
     def load_tyre_set(self, userdata: dict[str, dict]):
         """Load tyre set"""
         self._tyre_selector.clear()
-        self._tyre_selector.addItems(userdata)
+        self._tyre_selector.addItems(tuple(userdata))
         self._tyre_selector.setCurrentIndex(2)
 
     def selected_tyre(self) -> str:

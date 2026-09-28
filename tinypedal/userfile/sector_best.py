@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def load_sector_best_file(
     filepath: str,
     filename: str,
-    session_id: tuple[int, int, int],
+    session_id: tuple[int, ...],
     defaults: tuple[float, float, float],
     extension: str = FileExt.SECTOR,
 ) -> tuple[list, list, list, list]:
@@ -68,7 +68,7 @@ def load_sector_best_file(
 def save_sector_best_file(
     filepath: str,
     filename: str,
-    session_id: tuple[int, int, int],
+    session_id: tuple[int, ...],
     session_best_tb: list[float],
     session_best_pb: list[float],
     alltime_best_tb: list[float],
