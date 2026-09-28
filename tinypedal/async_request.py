@@ -137,8 +137,12 @@ async def latency_test(request: bytes, host: str, port: int, time_out: float, ss
 
 
 def cancel_tasks(current_task: asyncio.Task, task_group: list[asyncio.Task], result: list) -> None:
-    """Cancel task group"""
-    if not result:
+    """Cancel task group once a probe answered
+
+    Runs as a done callback, which must never raise: asyncio would only log it and the
+    other probes would be left running, so a cancelled or failed probe is skipped here.
+    """
+    if not result and not current_task.cancelled() and current_task.exception() is None:
         result.append(current_task.result())
     if task_group:
         for task in reversed(task_group):
@@ -148,9 +152,9 @@ def cancel_tasks(current_task: asyncio.Task, task_group: list[asyncio.Task], res
 
 async def localhost_resolve(hostnames: set[str], port: int, timeout: float = 3) -> str:
     """Resolve localhost name, returns fastest address (or empty if none)"""
-    # Set task
+    # Set task, each probe sends a complete GET request (bytes) with its own Host header
     task_group = [
-        create_task(latency_test("/", hostname, port, timeout))
+        create_task(latency_test(set_header_get("/", hostname), hostname, port, timeout))
         for hostname in hostnames
     ]
     # Cancel all task on first response
