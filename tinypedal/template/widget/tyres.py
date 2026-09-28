@@ -363,6 +363,8 @@ WIDGET_TYRES = {
         "show_battery_bar": False,
         "show_battery_percentage": True,
         "battery_bar_position": "Left",
+        "battery_bar_scale": 1.1,
+        "font_scale_battery": 0.9,
         "enable_battery_bar_animation": True,
         "battery_bar_animation_speed": 1.0,
         "battery_idle_color": "#888888",

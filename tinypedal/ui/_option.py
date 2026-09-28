@@ -183,9 +183,12 @@ class IntegerEdit(BaseLineEdit):
     def validate(self):
         """Validate & export value, returns None if invalid"""
         value = self.text()
-        if not is_string_number(value):
+        if not is_string_number(value):  # accepts decimals, which int() cannot parse
             return None
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:  # decimal typed in an integer option, report as invalid
+            return None
 
 
 class FloatEdit(BaseLineEdit):

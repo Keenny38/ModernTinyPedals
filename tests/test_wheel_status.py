@@ -609,6 +609,34 @@ def test_battery_flow_direction_differs_charge_vs_drain(ui_env, monkeypatch):
         instance.deleteLater()
 
 
+def test_battery_bar_width_and_text_size_configurable(ui_env):
+    narrow = new_widget({"show_battery_bar": True, "battery_bar_scale": 0.55, "font_scale_battery": 0.75})
+    narrow_size = (narrow.rect_battery.width(), narrow.font_battery.pixelSize(), narrow.width())
+    narrow.deleteLater()
+    wide = new_widget({"show_battery_bar": True, "battery_bar_scale": 1.8, "font_scale_battery": 1.3})
+    try:
+        assert wide.rect_battery.width() > narrow_size[0]
+        assert wide.font_battery.pixelSize() > narrow_size[1]
+        assert wide.width() > narrow_size[2]  # widget grows with the bar
+    finally:
+        wide.deleteLater()
+
+
+def test_battery_bar_width_and_text_size_clamped(ui_env):
+    """Out-of-range values must not produce a giant or invisible gauge"""
+    huge = new_widget({"show_battery_bar": True, "battery_bar_scale": 99.0, "font_scale_battery": 99.0})
+    limit = new_widget({"show_battery_bar": True, "battery_bar_scale": 4.0, "font_scale_battery": 4.0})
+    tiny = new_widget({"show_battery_bar": True, "battery_bar_scale": 0.0, "font_scale_battery": 0.0})
+    try:
+        assert huge.rect_battery.width() == limit.rect_battery.width()
+        assert huge.font_battery.pixelSize() == limit.font_battery.pixelSize()
+        assert tiny.rect_battery.width() >= 4  # still visible
+        assert tiny.font_battery.pixelSize() > 0
+    finally:
+        for instance in (huge, limit, tiny):
+            instance.deleteLater()
+
+
 def test_battery_no_hybrid_system_detected(widget):
     """No state and no charge means no hybrid system, shown as a dash instead of 0%"""
     widget.battery_state = 0

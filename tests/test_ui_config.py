@@ -198,3 +198,20 @@ def test_preview_timer_stopped_when_dialog_deleted(ui_env):
     assert preview._timer.isActive()
     close_dialog(dialog)
     assert not preview._timer.isActive()
+
+
+def test_integer_option_rejects_decimal_without_crashing(ui_env):
+    """Typing a decimal in an integer option must be reported as invalid, not raise.
+
+    is_string_number() accepts decimals but int() cannot parse them, so the dialog used to
+    crash with ValueError instead of showing "Invalid value for ... option".
+    """
+    from tinypedal.ui._option import IntegerEdit
+
+    editor = IntegerEdit(None)
+    editor.setText("10.5")
+    assert editor.validate() is None
+    editor.setText("10")
+    assert editor.validate() == 10
+    editor.setText("abc")
+    assert editor.validate() is None

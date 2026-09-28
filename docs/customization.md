@@ -5225,10 +5225,13 @@ Show suspension damage bar below brake of damaged corner (yellow, orange, red).
 Show body damage marks along car edges (front, sides, rear), only for damaged parts.
 
     show_battery_bar, battery_bar_position
-Show hybrid battery charge as a full-height bar outside the tyre/brake columns. `battery_bar_position` sets `Left` or `Right`. Requires a car with a hybrid system (LMU); shows a flat empty bar on cars without one.
+Show hybrid battery charge as a full-height bar outside the tyre/brake columns. `battery_bar_position` sets `Left` or `Right`. Requires a car with a hybrid system (LMU); shows a dash instead of a percentage on cars without one.
 
-    show_battery_percentage
-Show charge percentage on a small readout at the top of the battery bar.
+    battery_bar_scale
+Width of the battery bar, relative to `font_size`. Value range in `0.3` to `4`. Default is `1.1`. Widget width adapts to this value.
+
+    show_battery_percentage, font_scale_battery
+Show charge percentage on a readout at the top of the battery bar. `font_scale_battery` sets its text size relative to `font_size`, value range in `0.3` to `4`, default `0.9`.
 
     enable_battery_bar_animation, battery_bar_animation_speed
 Show a moving highlight inside the battery bar: flows upward while the battery is charging (regen), downward while it is draining. Disabled automatically while the motor is off or the car has no hybrid system (charge is then shown as a static fill). `battery_bar_animation_speed` scales the flow speed, default `1.0`.

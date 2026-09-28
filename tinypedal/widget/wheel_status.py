@@ -154,11 +154,13 @@ class Realtime(Overlay):
         self.gear_scale = min(max(wcfg["font_scale_gear"], 0.5), 5)
         self.speed_scale = min(max(wcfg["font_scale_speed"], 0.3), 4)
         self.rpm_scale = min(max(wcfg["font_scale_rpm"], 0.3), 4)
+        self.battery_scale = min(max(wcfg["font_scale_battery"], 0.3), 4)
         size = wcfg["font_size"] * scale
         self.font_gear = self.config_font(wcfg["font_name"], size * self.gear_scale, wcfg["font_weight"])
         self.font_speed = self.config_font(wcfg["font_name"], size * self.speed_scale, wcfg["font_weight"])
         self.font_rpm = self.config_font(wcfg["font_name"], size * self.rpm_scale, wcfg["font_weight"])
         self.font_small = self.config_font(wcfg["font_name"], size * 0.75, wcfg["font_weight"])
+        self.font_battery = self.config_font(wcfg["font_name"], size * self.battery_scale, wcfg["font_weight"])
 
         # Config geometry (unit: font line height)
         unit = font_m.height
@@ -199,7 +201,8 @@ class Realtime(Overlay):
         # Battery bar: full-height side gauge, outside the tyre/brake columns, left or right
         self.show_battery_bar = bool(wcfg["show_battery_bar"])
         self.battery_bar_left = wcfg["battery_bar_position"] != "Right"
-        battery_bar_w = round(unit * 0.55) if self.show_battery_bar else 0
+        battery_bar_scale = min(max(wcfg["battery_bar_scale"], 0.3), 4)
+        battery_bar_w = max(round(unit * battery_bar_scale), 4) if self.show_battery_bar else 0
         battery_extra = battery_bar_w + gap if self.show_battery_bar else 0
         content_x = battery_extra if self.show_battery_bar and self.battery_bar_left else 0
         width = content_w + battery_extra
@@ -755,16 +758,17 @@ class Realtime(Overlay):
             if wcfg["enable_battery_bar_animation"] and state in (2, 3):
                 self.draw_battery_flow(painter, fill_area, charging=state == 3)
         if wcfg["show_battery_percentage"]:
-            # Small readout chip fixed at the top, own background so it stays legible
-            # regardless of the fill color or level behind it
-            label_h = min(rect.height() * 0.22, self.unit * 0.9)
+            # Readout chip fixed at the top, own background so it stays legible regardless of
+            # the fill color or level behind it. Chip follows the text size, capped so it never
+            # takes more than a third of the gauge.
+            label_h = min(self.unit * self.battery_scale * 1.2, rect.height() / 3)
             label_rect = QRectF(rect.left(), rect.top(), rect.width(), label_h)
             _fill_chip(painter, label_rect, wcfg["info_background_color"])
             painter.setPen(self.pen_text)
             # Dash instead of "0" on a car without hybrid system, so an empty gauge is not
             # mistaken for a flat battery (or for the widget being broken)
             text = f"{self.battery_charge:.0f}" if self.has_hybrid else "-"
-            self.draw_fit_text(painter, label_rect, text, self.font_small)
+            self.draw_fit_text(painter, label_rect, text, self.font_battery)
 
     def draw_battery_flow(self, painter: QPainter, rect: QRectF, charging: bool):
         """Translucent bands scrolling up while charging, down while draining, suggesting flow"""
