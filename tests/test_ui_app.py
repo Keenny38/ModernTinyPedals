@@ -1,9 +1,9 @@
-"""Main window tests (headless): build, live language switch"""
+"""Main window tests (headless): build, live language switch, app-wide style"""
 
 from contextlib import suppress
 
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from tinypedal import app_signal
 from tinypedal.i18n import current_language, set_language
@@ -12,6 +12,25 @@ from tinypedal.setting import cfg
 
 def menu_titles(window):
     return [action.text() for action in window.menuBar().actions()]
+
+
+def test_style_applied_at_application_level(ui_env, monkeypatch):
+    """Style must be set on QApplication, not just AppWindow, so QMessageBox and other
+    Qt-built top-level windows are also styled (they are not visual children of AppWindow)"""
+    from tinypedal.ui import app as app_module
+
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    app_instance = QApplication.instance()
+    assert app_instance is not None
+    app_instance.setStyleSheet("")  # style may already be cached from a previous test
+    window = app_module.AppWindow()
+    try:
+        style = app_instance.styleSheet()
+        assert "QPushButton" in style and "QComboBox" in style and "QCheckBox" in style
+        assert window.styleSheet() == ""  # not set on the window itself anymore
+    finally:
+        window.deleteLater()
+        QCoreApplication.processEvents()
 
 
 def test_live_language_switch(ui_env, monkeypatch):

@@ -225,6 +225,81 @@ def set_style_window(base_font_pt: int) -> str:
             color: {color_disabled_window_text};
         }}
 
+        /* Generic combo box */
+        QComboBox {{
+            color: {color_active_window_text};
+            background: {color_active_button};
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_input}px;
+            padding: 0.1em 1.6em 0.1em 0.4em;
+        }}
+        QComboBox:hover {{
+            border-color: {color_active_highlight};
+        }}
+        QComboBox:disabled {{
+            color: {color_disabled_window_text};
+        }}
+        QComboBox QAbstractItemView {{
+            background: {color_active_base};
+            border: 1px solid {color_active_mid};
+            selection-color: {color_active_highlighted_text};
+            selection-background-color: {color_active_highlight};
+            outline: none;
+        }}
+
+        /* Generic checkbox & radio button (filled square/dot, no checkmark glyph) */
+        QCheckBox::indicator,
+        QRadioButton::indicator {{
+            width: 1em;
+            height: 1em;
+            border: 1px solid {color_active_mid};
+            background: {color_active_base};
+        }}
+        QCheckBox::indicator {{
+            border-radius: {border_radius_input}px;
+        }}
+        QRadioButton::indicator {{
+            border-radius: 0.5em;
+        }}
+        QCheckBox::indicator:hover,
+        QRadioButton::indicator:hover {{
+            border-color: {color_active_highlight};
+        }}
+        QCheckBox::indicator:checked,
+        QRadioButton::indicator:checked {{
+            background: {color_active_highlight};
+            border-color: {color_active_highlight};
+        }}
+        QCheckBox:disabled,
+        QRadioButton:disabled {{
+            color: {color_disabled_window_text};
+        }}
+        QCheckBox::indicator:disabled,
+        QRadioButton::indicator:disabled {{
+            border-color: {color_disabled_window_text};
+        }}
+
+        /* Generic slider */
+        QSlider::groove:horizontal {{
+            height: 4px;
+            background: {color_active_mid};
+            border-radius: 2px;
+        }}
+        QSlider::sub-page:horizontal {{
+            background: {color_active_highlight};
+            border-radius: 2px;
+        }}
+        QSlider::handle:horizontal {{
+            width: 1em;
+            height: 1em;
+            margin: -0.4em 0;
+            border-radius: 0.5em;
+            background: {color_active_window_text};
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {color_active_highlight};
+        }}
+
         /* Tabs */
         QTabWidget::pane {{
             border: none;

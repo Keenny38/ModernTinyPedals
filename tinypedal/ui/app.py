@@ -277,7 +277,12 @@ class AppWindow(QMainWindow):
         if self.last_style != style:
             self.last_style = style
             set_style_palette(self.last_style)
-            self.setStyleSheet(set_style_window(QApplication.font().pointSize()))
+            # Applied at QApplication level (not just this window), so every dialog picks up the
+            # style even if not a visual child of AppWindow at the time it is shown, including
+            # QMessageBox, QColorDialog and other Qt-built top-level windows.
+            app_instance = QApplication.instance()
+            if app_instance is not None:
+                app_instance.setStyleSheet(set_style_window(QApplication.font().pointSize()))
             logger.info("GUI: loading window color theme: %s", style)
         # Language
         if self.last_language != cfg.application["language"]:
