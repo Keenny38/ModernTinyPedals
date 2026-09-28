@@ -55,6 +55,7 @@ CFG_BOOL = (
     "^minimize_to_tray$|"
     "^remember_position$|"
     "^remember_size$|"
+    "^save_invalid_laps$|"
     "^vr_compatibility$|"
     # Partial match
     "^notify_|"
@@ -74,6 +75,7 @@ CFG_CLOCK_FORMAT = "clock_format"
 
 # String choice
 CFG_API_NAME = "api_name"
+CFG_BAR_POSITION = "bar_position"
 CFG_CHARACTER_ENCODING = "character_encoding"
 CFG_DELTABEST_SOURCE = "deltabest_source"
 CFG_FONT_WEIGHT = "font_weight"
@@ -224,6 +226,7 @@ FONT_WEIGHT_MAP = MappingProxyType({
 # Choice dictionary
 CHOICE_COMMON = MappingProxyType({
     CFG_API_NAME: tuple(API_MAP_ALIAS),
+    CFG_BAR_POSITION: ("Left", "Right"),
     CFG_CHARACTER_ENCODING: ("UTF-8", "ISO-8859-1"),
     CFG_DELTABEST_SOURCE: ("Best", "Session", "Stint", "Last"),
     CFG_FONT_WEIGHT: tuple(FONT_WEIGHT_MAP),

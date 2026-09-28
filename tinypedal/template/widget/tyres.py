@@ -358,9 +358,11 @@ WIDGET_TYRES = {
         "wheel_spin_color": "#FFCC00",
         "show_suspension_damage": True,
         "show_body_damage": True,
+        # Order matters: config dialog names each option group after its first option,
+        # so the bar options come first, then the animation pair, then the colors
         "show_battery_bar": False,
-        "battery_bar_position": "Left",
         "show_battery_percentage": True,
+        "battery_bar_position": "Left",
         "enable_battery_bar_animation": True,
         "battery_bar_animation_speed": 1.0,
         "battery_idle_color": "#888888",

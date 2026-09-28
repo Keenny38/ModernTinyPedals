@@ -91,6 +91,27 @@ def test_every_widget_config_opens(ui_env):
         close_dialog(dialog)
 
 
+def test_every_option_accepts_its_own_default(ui_env):
+    """Each option must get an editor that accepts its default value.
+
+    An option whose key matches no known pattern falls through to the number editor, so a
+    string default (for example a "Left"/"Right" position) is then rejected on save with
+    "Invalid value for ... option", and the whole dialog refuses to save.
+    """
+    from tinypedal.module_control import mctrl, wctrl
+
+    rejected = []
+    for name in (*wctrl.names, *mctrl.names):
+        dialog = open_config(name, [])
+        try:
+            for key, editor in dialog.option_edit.items():
+                if editor.validate() is None:
+                    rejected.append(f"{name}.{key}")
+        finally:
+            close_dialog(dialog)
+    assert not rejected, f"options rejected by their own editor: {rejected}"
+
+
 def test_rename_preset_updates_references(ui_env, no_message_box, monkeypatch):
     from tinypedal.ui.preset_management import CreatePreset
 
