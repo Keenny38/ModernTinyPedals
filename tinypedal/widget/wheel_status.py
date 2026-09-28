@@ -66,15 +66,20 @@ NO_STATUS = (False, False, False, False)
 _CHIP_RADIUS_MULTIPLIER = 10
 
 
-def _chip_radius(height: float) -> float:
-    """Corner radius for a capsule-shaped chip, 0 if the user disabled rounded corners"""
-    return height * min(OverlayStyle.corner_scale * _CHIP_RADIUS_MULTIPLIER, 0.5)
+def _chip_radius(rect: QRectF) -> float:
+    """Corner radius for a capsule-shaped chip, 0 if the user disabled rounded corners
+
+    Based on the shorter side, so a wide/short bar (RPM, pedals) and a narrow/tall one
+    (battery) both read as a clean capsule instead of one of them turning into a lens shape.
+    """
+    short_side = min(rect.width(), rect.height())
+    return short_side * min(OverlayStyle.corner_scale * _CHIP_RADIUS_MULTIPLIER, 0.5)
 
 
 def _fill_chip(painter: QPainter, rect: QRectF, color) -> None:
     """Fill rect as a capsule for small chip-like elements (LEDs, indicator badges, gauge bars),
     more strongly rounded than fill_rect since these are thin and benefit from reading as pills"""
-    radius = _chip_radius(rect.height())
+    radius = _chip_radius(rect)
     if radius < 0.5:
         painter.fillRect(rect, QColor(color))
         return
@@ -84,15 +89,19 @@ def _fill_chip(painter: QPainter, rect: QRectF, color) -> None:
 
 
 def _fill_chip_gradient(painter: QPainter, rect: QRectF, color) -> None:
-    """Capsule fill with a subtle lengthwise gradient (brighter toward the leading edge),
-    for continuous value bars (RPM, pedals) instead of a flat fill"""
+    """Capsule fill with a subtle gradient along its length (brighter toward the leading edge:
+    right for a horizontal bar, top for a vertical one), for continuous value bars (RPM, pedals,
+    battery) instead of a flat fill"""
     if rect.width() <= 0 or rect.height() <= 0:
         return
     base = QColor(color)
-    gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+    if rect.width() >= rect.height():  # horizontal bar, fills left to right
+        gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+    else:  # vertical bar, fills bottom to top
+        gradient = QLinearGradient(0, rect.bottom(), 0, rect.top())
     gradient.setColorAt(0.0, base.darker(112))
     gradient.setColorAt(1.0, base.lighter(122))
-    radius = _chip_radius(rect.height())
+    radius = _chip_radius(rect)
     if radius < 0.5:
         painter.fillRect(rect, QBrush(gradient))
         return
@@ -185,23 +194,31 @@ class Realtime(Overlay):
         self.need_rpm = "rpm" in shown or bool(wcfg["show_rpm_leds"]) or (
             self.need_gear and bool(wcfg["enable_gear_rpm_color"]))
         center_between = round(unit * 5.2) if has_center and self.layout_mode == LAYOUT_NORMAL else round(unit * 0.8)
-        width = side_w * 2 + center_between + gap * 2
+        content_w = side_w * 2 + center_between + gap * 2
 
-        # Caption (widget name) on top, then RPM LEDs
+        # Battery bar: full-height side gauge, outside the tyre/brake columns, left or right
+        self.show_battery_bar = bool(wcfg["show_battery_bar"])
+        self.battery_bar_left = wcfg["battery_bar_position"] != "Right"
+        battery_bar_w = round(unit * 0.55) if self.show_battery_bar else 0
+        battery_extra = battery_bar_w + gap if self.show_battery_bar else 0
+        content_x = battery_extra if self.show_battery_bar and self.battery_bar_left else 0
+        width = content_w + battery_extra
+
+        # Caption (widget name) on top, then RPM LEDs (span full width, above everything else)
         caption_h = round(unit * 0.9) if wcfg["show_caption"] else 0
         self.rect_caption = QRectF(0, 0, width, caption_h)
         self.led_h = round(unit * 0.55) if wcfg["show_rpm_leds"] else 0
         led_y = caption_h + (gap if caption_h else 0)
         top_y = led_y + (self.led_h + gap if self.led_h else 0)
         self.rect_leds = QRectF(
-            round(unit * 0.3), led_y + round(gap * 0.6), width - round(unit * 0.6), self.led_h)
+            content_x + round(unit * 0.3), led_y + round(gap * 0.6), content_w - round(unit * 0.6), self.led_h)
 
         axle_gap = round(unit * 0.9) + pad_y * 2
         if has_center and self.layout_mode == LAYOUT_NORMAL:  # taller if center column needs more room
             axle_gap += max(round(self.center_height() - (pad_y * 2 + tyre_h * 2 + axle_gap)), 0)
         body_h = pad_y + tyre_h * 2 + axle_gap + pad_y
 
-        right_x = width - side_w
+        right_x = content_x + content_w - side_w
         self.rects_tyre = []
         self.rects_disc = []
         self.rects_suspension = []
@@ -218,8 +235,8 @@ class Realtime(Overlay):
                 brake_x = right_x
                 tyre_x = right_x + brake_w + brake_gap
             else:
-                tyre_x = pad_x
-                brake_x = pad_x + tyre_w + brake_gap
+                tyre_x = content_x + pad_x
+                brake_x = content_x + pad_x + tyre_w + brake_gap
             brake_top = top + (tyre_h - brake_h) / 2
             self.rects_tyre.append(QRectF(tyre_x, top, tyre_w, tyre_h))
             self.rects_disc.append(QRectF(brake_x, brake_top, brake_w, brake_h))
@@ -231,30 +248,36 @@ class Realtime(Overlay):
         inset = round(unit * 0.3)
         bottom_y = top_y + body_h
         if has_center and self.layout_mode == LAYOUT_NORMAL:
-            self.rect_center = QRectF(side_w + gap, top_y, center_between, body_h)
-        elif has_center:  # vertical: below tyres, full width
-            self.rect_center = QRectF(inset, bottom_y + gap, width - inset * 2, self.center_height())
+            self.rect_center = QRectF(content_x + side_w + gap, top_y, center_between, body_h)
+        elif has_center:  # vertical: below tyres, full content width
+            self.rect_center = QRectF(content_x + inset, bottom_y + gap, content_w - inset * 2, self.center_height())
             bottom_y = self.rect_center.bottom()
         else:
             self.rect_center = QRectF()
         # Body damage marks along car edges (outside tyres)
         edge = round(unit * 0.08)
-        self.rect_body_damage = QRectF(edge, top_y, width - edge * 2, body_h)
+        self.rect_body_damage = QRectF(content_x + edge, top_y, content_w - edge * 2, body_h)
 
         # Bottom rows: refuel & fuel remaining (left), refill & energy remaining (right)
         self.row_h = round(unit * 1.05)
         self.bottom_rows: list[tuple[QRectF, QRectF]] = []
         rows = int(wcfg["show_refuel"] or wcfg["show_refill"]) + int(
             wcfg["show_fuel_remaining"] or wcfg["show_energy_remaining"])
-        row_w = (width - inset * 2 - gap) / 2
+        row_w = (content_w - inset * 2 - gap) / 2
         for row in range(rows):
             row_top = bottom_y + gap + row * (self.row_h + gap)
             self.bottom_rows.append((
-                QRectF(inset, row_top, row_w, self.row_h),
-                QRectF(width - inset - row_w, row_top, row_w, self.row_h),
+                QRectF(content_x + inset, row_top, row_w, self.row_h),
+                QRectF(content_x + content_w - inset - row_w, row_top, row_w, self.row_h),
             ))
         height = bottom_y + (rows * (self.row_h + gap) + gap if rows else 0)
         self.rect_bg = QRectF(0, 0, width, height)
+
+        if self.show_battery_bar:
+            battery_x = 0 if self.battery_bar_left else content_x + content_w + gap
+            self.rect_battery = QRectF(battery_x, top_y, battery_bar_w, bottom_y - top_y)
+        else:
+            self.rect_battery = QRectF()
         self.resize(int(width), int(height))
 
         # Config pens & colors
@@ -313,6 +336,8 @@ class Realtime(Overlay):
         self.last_in_pits = -1
         self.last_vehicle = ("", "")
         self.last_compounds: tuple = ("", "", "", "")
+        self.battery_charge = 0.0  # percent
+        self.battery_state = 0  # 0 n/a, 1 off, 2 drain, 3 regen
 
     # Config helpers
     def ordered_center_items(self) -> list[str]:
@@ -441,6 +466,9 @@ class Realtime(Overlay):
             self.energy = minfo.energy.amountCurrent
             self.energy_laps = minfo.energy.estimatedLaps
             self.energy_available = minfo.energy.available
+        if self.show_battery_bar:
+            self.battery_charge = minfo.hybrid.batteryCharge
+            self.battery_state = minfo.hybrid.motorState
         self.update()
 
     @staticmethod
@@ -547,6 +575,8 @@ class Realtime(Overlay):
             self.draw_center(painter, self.rect_center)
         if wcfg["show_body_damage"] and any(self.body_damage):
             self.draw_body_damage(painter, self.rect_body_damage)
+        if self.show_battery_bar:
+            self.draw_battery_bar(painter, self.rect_battery)
         self.draw_bottom_rows(painter)
 
     def draw_tyre(self, painter: QPainter, rect: QRectF, wheel: WheelState):
@@ -696,6 +726,49 @@ class Realtime(Overlay):
                 y = rect.top() if row == 0 else rect.bottom() - thickness
                 mark = QRectF(left + third_w * 0.1, y, third_w * 0.8, thickness)
             fill_rect(painter, mark, color)
+
+    def draw_battery_bar(self, painter: QPainter, rect: QRectF):
+        """Full-height battery charge gauge, with a flowing highlight while charging or draining"""
+        wcfg = self.wcfg
+        _fill_chip(painter, rect, wcfg["indicator_inactive_color"])
+        charge = min(max(self.battery_charge, 0), 100) / 100
+        fill_h = rect.height() * charge
+        if fill_h >= 1:
+            fill_area = QRectF(rect.left(), rect.bottom() - fill_h, rect.width(), fill_h)
+            state = self.battery_state
+            if state == 3:  # regen
+                color = wcfg["battery_charge_color"]
+            elif state == 2:  # drain
+                color = wcfg["battery_discharge_color"]
+            else:  # off or n/a: static, neutral fill
+                color = wcfg["battery_idle_color"]
+            _fill_chip_gradient(painter, fill_area, color)
+            if wcfg["enable_battery_bar_animation"] and state in (2, 3):
+                self.draw_battery_flow(painter, fill_area, charging=state == 3)
+        if wcfg["show_battery_percentage"]:
+            # Small readout chip fixed at the top, own background so it stays legible
+            # regardless of the fill color or level behind it
+            label_h = min(rect.height() * 0.22, self.unit * 0.9)
+            label_rect = QRectF(rect.left(), rect.top(), rect.width(), label_h)
+            _fill_chip(painter, label_rect, wcfg["info_background_color"])
+            painter.setPen(self.pen_text)
+            self.draw_fit_text(painter, label_rect, f"{self.battery_charge:.0f}", self.font_small)
+
+    def draw_battery_flow(self, painter: QPainter, rect: QRectF, charging: bool):
+        """Translucent bands scrolling up while charging, down while draining, suggesting flow"""
+        band_h = max(rect.width() * 0.7, 3)
+        spacing = band_h * 2.4
+        speed = max(self.wcfg["battery_bar_animation_speed"], 0) * 40  # pixels per second
+        direction = -1 if charging else 1
+        phase = (monotonic() * speed * direction) % spacing
+        painter.save()
+        painter.setClipRect(rect)
+        glow = QColor(255, 255, 255, 55)
+        y = rect.top() - spacing + phase
+        while y < rect.bottom() + spacing:
+            painter.fillRect(QRectF(rect.left(), y, rect.width(), band_h), glow)
+            y += spacing
+        painter.restore()
 
     def draw_leds(self, painter: QPainter, rect: QRectF):
         """RPM LEDs: light up from green to red, all flash over shift point, soft glow when lit"""

@@ -403,15 +403,30 @@ def test_pits_read_once_per_update(widget, monkeypatch):
 # --- Visual polish: capsule-shaped chips (LEDs, badges, gauge bars), gradient bars, LED glow
 def test_chip_radius_respects_corner_scale(monkeypatch):
     """Chips render square if the user disabled rounded corners, full capsule at the default"""
+    from PySide6.QtCore import QRectF
+
     from tinypedal.widget import wheel_status
     from tinypedal.widget._painter import OverlayStyle
 
+    wide = QRectF(0, 0, 100, 20)  # short side is height
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
-    assert wheel_status._chip_radius(20.0) == 0.0
+    assert wheel_status._chip_radius(wide) == 0.0
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)  # default
-    assert wheel_status._chip_radius(20.0) == pytest.approx(10.0)  # full capsule (height / 2)
+    assert wheel_status._chip_radius(wide) == pytest.approx(10.0)  # full capsule (height / 2)
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.5)  # maximum, still capped at a capsule
-    assert wheel_status._chip_radius(20.0) == pytest.approx(10.0)
+    assert wheel_status._chip_radius(wide) == pytest.approx(10.0)
+
+
+def test_chip_radius_uses_shorter_side(monkeypatch):
+    """A narrow/tall rect (battery bar) must round by width, not height, or it turns into a lens"""
+    from PySide6.QtCore import QRectF
+
+    from tinypedal.widget import wheel_status
+    from tinypedal.widget._painter import OverlayStyle
+
+    monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)
+    tall = QRectF(0, 0, 14, 180)  # short side is width
+    assert wheel_status._chip_radius(tall) == pytest.approx(7.0)
 
 
 def test_fill_chip_square_when_rounding_disabled(monkeypatch):
@@ -481,3 +496,132 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
     painter.end()
     assert glows
     widget.grab()  # full paint with glow enabled, must not raise
+
+
+# --- Battery bar (charge/discharge gauge, positioned left or right of the widget)
+def new_widget(overrides=None):
+    from tinypedal.setting import cfg
+    from tinypedal.widget import wheel_status
+
+    if overrides:
+        cfg.user.setting["wheel_status"].update(overrides)
+    return wheel_status.Realtime(cfg, "wheel_status")
+
+
+def test_battery_bar_hidden_by_default(widget):
+    assert not widget.show_battery_bar
+    assert widget.rect_battery.isEmpty()
+
+
+def test_battery_bar_adds_width_on_left(ui_env):
+    base = new_widget({"show_battery_bar": False})
+    base_width = base.width()
+    base.deleteLater()
+    left = new_widget({"show_battery_bar": True, "battery_bar_position": "Left"})
+    try:
+        assert left.width() > base_width
+        assert left.rect_battery.left() == 0  # flush against the left edge
+        assert left.rects_tyre[0].left() > left.rect_battery.right()  # content pushed right
+    finally:
+        left.deleteLater()
+
+
+def test_battery_bar_position_right(ui_env):
+    right = new_widget({"show_battery_bar": True, "battery_bar_position": "Right"})
+    try:
+        assert right.rects_tyre[0].left() < right.rect_battery.left()  # content stays first
+        assert right.rect_battery.right() == pytest.approx(right.width(), abs=1)
+    finally:
+        right.deleteLater()
+
+
+def test_battery_bar_spans_car_view_height(ui_env):
+    """Same vertical extent as the car view (tyres/center column), matching rect_body_damage,
+    not stretched into the caption/LED row above or the bottom info rows below"""
+    instance = new_widget({"show_battery_bar": True})
+    try:
+        assert instance.rect_battery.top() == pytest.approx(instance.rect_body_damage.top())
+        assert instance.rect_battery.bottom() == pytest.approx(instance.rect_body_damage.bottom())
+        assert instance.rect_battery.bottom() < instance.bottom_rows[0][0].top()
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_data_not_read_when_disabled(widget, monkeypatch):
+    from tinypedal.module_info import minfo
+
+    monkeypatch.setattr(minfo.hybrid, "batteryCharge", 88.0)
+    monkeypatch.setattr(minfo.hybrid, "motorState", 3)
+    widget.timerEvent(None)
+    assert widget.battery_charge == 0.0  # unchanged, never read
+    assert widget.battery_state == 0
+
+
+def test_battery_data_read_when_enabled(widget, monkeypatch):
+    from tinypedal.module_info import minfo
+
+    widget.show_battery_bar = True
+    monkeypatch.setattr(minfo.hybrid, "batteryCharge", 42.5)
+    monkeypatch.setattr(minfo.hybrid, "motorState", 2)
+    widget.timerEvent(None)
+    assert widget.battery_charge == 42.5
+    assert widget.battery_state == 2
+
+
+@pytest.mark.parametrize("state", [0, 1, 2, 3])
+@pytest.mark.parametrize("charge", [-10.0, 0.0, 55.0, 100.0, 150.0])
+def test_battery_bar_draws_without_crash(ui_env, state, charge):
+    instance = new_widget({"show_battery_bar": True})
+    try:
+        instance.battery_charge = charge
+        instance.battery_state = state
+        instance.grab()  # full paint, must not raise regardless of value/state combination
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_flow_direction_differs_charge_vs_drain(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    instance = new_widget({"show_battery_bar": True})
+    try:
+        monkeypatch.setattr("tinypedal.widget.wheel_status.monotonic", lambda: 12.345)
+        rect = QRectF(0, 0, 16, 120)
+
+        def render(charging):
+            image = QImage(16, 120, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            instance.draw_battery_flow(painter, rect, charging=charging)
+            painter.end()
+            return image
+
+        charging_img = render(True)
+        draining_img = render(False)
+        # Same instant, opposite flow direction: band pattern must differ
+        different = any(
+            charging_img.pixelColor(x, y) != draining_img.pixelColor(x, y)
+            for x in (2, 8, 14) for y in range(0, 120, 5)
+        )
+        assert different
+    finally:
+        instance.deleteLater()
+
+
+def test_battery_bar_idle_states_have_no_flow(ui_env, monkeypatch):
+    """States other than drain/regen (n/a, off) must not animate"""
+    calls = []
+    instance = new_widget({"show_battery_bar": True})
+    try:
+        monkeypatch.setattr(instance, "draw_battery_flow", lambda *a, **k: calls.append(1))
+        for state in (0, 1):
+            instance.battery_state = state
+            instance.battery_charge = 50.0
+            instance.grab()
+        assert calls == []
+        instance.battery_state = 2
+        instance.grab()
+        assert calls
+    finally:
+        instance.deleteLater()

@@ -5224,6 +5224,18 @@ Show suspension damage bar below brake of damaged corner (yellow, orange, red).
     show_body_damage
 Show body damage marks along car edges (front, sides, rear), only for damaged parts.
 
+    show_battery_bar, battery_bar_position
+Show hybrid battery charge as a full-height bar outside the tyre/brake columns. `battery_bar_position` sets `Left` or `Right`. Requires a car with a hybrid system (LMU); shows a flat empty bar on cars without one.
+
+    show_battery_percentage
+Show charge percentage on a small readout at the top of the battery bar.
+
+    enable_battery_bar_animation, battery_bar_animation_speed
+Show a moving highlight inside the battery bar: flows upward while the battery is charging (regen), downward while it is draining. Disabled automatically while the motor is off or the car has no hybrid system (charge is then shown as a static fill). `battery_bar_animation_speed` scales the flow speed, default `1.0`.
+
+    battery_idle_color, battery_charge_color, battery_discharge_color
+Battery bar fill color: motor off or not available, charging (regen), draining.
+
     show_pit_limiter_indicator
 Show pit lane (`PIT`) and speed limiter (`LIM`) indicators, only while active.
 
