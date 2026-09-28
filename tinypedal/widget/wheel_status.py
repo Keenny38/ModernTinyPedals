@@ -696,7 +696,11 @@ class Realtime(Overlay):
 
     def draw_disc(self, painter: QPainter, index: int, rect: QRectF, wheel: WheelState):
         """Brake: thin vertical bar (disc seen from above) next to tyre, colored by brake temperature,
-        with temperature (and remaining thickness) written beside it"""
+        with temperature (and remaining thickness) written beside it
+
+        The bar turns with the wheel, around the tyre center, so the disc stays bolted to the
+        wheel instead of floating beside a steered tyre. Readings stay upright and in place.
+        """
         wcfg = self.wcfg
         is_right = index % 2  # FL, FR, RL, RR: odd index is on right side
         bar_w, bar_gap = self.brake_bar_w, self.brake_bar_gap
@@ -711,7 +715,16 @@ class Realtime(Overlay):
         radius = bar_w / 2
         path = QPainterPath()
         path.addRoundedRect(bar, radius, radius)
-        painter.fillPath(path, QColor(wheel.brake_color))
+        if wheel.steer:
+            pivot = self.rects_tyre[index].center()
+            painter.save()
+            painter.translate(pivot.x(), pivot.y())
+            painter.rotate(wheel.steer)
+            painter.translate(-pivot.x(), -pivot.y())
+            painter.fillPath(path, QColor(wheel.brake_color))
+            painter.restore()
+        else:
+            painter.fillPath(path, QColor(wheel.brake_color))
         show_wear = wcfg["show_brake_wear"] and wheel.brake_wear_known
         if wcfg["show_brake_temperature"]:
             temp_rect = text_rect if not show_wear else QRectF(

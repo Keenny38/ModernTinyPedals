@@ -5255,7 +5255,7 @@ Show remaining fuel & estimated laps (bottom left), remaining virtual energy & e
 Set order of center column items (ABS, TC, brake bias, pit & limiter, gear, speed, RPM, pedals). Can be changed with `Configure Display Order` button in config dialog.
 
     show_wheel_angle
-Turn tyres left or right with real wheel angle (front wheels follow steering). `Wheels module` must be enabled.
+Turn tyres left or right with real wheel angle (front wheels follow steering). The brake disc bar turns with its wheel, keeping the corner assembly together, while brake readings stay upright. `Wheels module` must be enabled.
 
     wheel_angle_multiplier
 Multiply displayed wheel angle, as real wheel angle is small (usually less than 15 degrees). Default is `2.0`.

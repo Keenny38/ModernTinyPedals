@@ -1340,7 +1340,7 @@
             "show_tyre_temperature_bands": "Show inner, center and outer tyre surface temperatures as 3 colored bands in each tyre (outer side toward outside of car), useful for camber setup.",
             "show_tyre_wear": "Show remaining tyre tread (percent) in each tyre.",
             "show_tyre_wear_end_stint": "Show estimated remaining tyre tread at end of current stint (→61%), from Wheels module and Fuel module.",
-            "show_wheel_angle": "Turn tyres left or right with real wheel angle (front wheels follow steering). Wheels module must be enabled.",
+            "show_wheel_angle": "Turn tyres left or right with real wheel angle (front wheels follow steering). The brake disc bar turns with its wheel, keeping the corner assembly together, while brake readings stay upright. Wheels module must be enabled.",
             "slip_warning_minimum_speed": "Minimum speed (km/h) for lock & spin warning. Default is 10.",
             "tyre_pressure_target_maximum": "Highlight tyre pressure below minimum (tyre_pressure_low_color) or above maximum (tyre_pressure_high_color). Values in kPa. Defaults are 160 and 190.",
             "tyre_pressure_target_minimum": "Highlight tyre pressure below minimum (tyre_pressure_low_color) or above maximum (tyre_pressure_high_color). Values in kPa. Defaults are 160 and 190.",

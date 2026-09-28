@@ -649,6 +649,79 @@ def test_battery_no_hybrid_system_detected(widget):
     assert widget.has_hybrid
 
 
+def disc_pixels(instance, index, steer, color="#00FF00"):
+    """Bounding box of the brake disc bar as actually painted, in widget coordinates"""
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    wheel = instance.wheels[index]
+    wheel.brake_color = color
+    wheel.steer = steer
+    image = QImage(instance.width(), instance.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    instance.wcfg["show_brake_temperature"] = False  # bar only, no text pixels
+    instance.draw_disc(painter, index, instance.rects_disc[index], wheel)
+    painter.end()
+    target = QColor(color).rgb()
+    points = [
+        (x, y)
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).rgb() == target
+    ]
+    assert points, "brake disc not painted"
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def test_brake_disc_turns_with_wheel(ui_env):
+    """Disc must stay bolted to the wheel instead of floating beside a steered tyre"""
+    instance = new_widget({"show_wheel_angle": True, "maximum_wheel_angle": 30})
+    try:
+        straight = disc_pixels(instance, 0, 0.0)
+        turned = disc_pixels(instance, 0, 30.0)
+        assert turned != straight, "disc did not move with the wheel"
+        # A tilted bar covers a wider band than an upright one
+        assert (turned[2] - turned[0]) > (straight[2] - straight[0])
+        # Opposite lock mirrors it
+        other = disc_pixels(instance, 0, -30.0)
+        assert other != turned
+    finally:
+        instance.deleteLater()
+
+
+def test_brake_disc_keeps_its_gap_to_the_tyre(ui_env):
+    """Turning about the tyre centre keeps the wheel assembly rigid: same distance, no overlap"""
+    import math
+
+    instance = new_widget({"show_wheel_angle": True, "maximum_wheel_angle": 30})
+    try:
+        tyre_centre = instance.rects_tyre[0].center()
+
+        def distance(steer):
+            left, top, right, bottom = disc_pixels(instance, 0, steer)
+            cx, cy = (left + right) / 2, (top + bottom) / 2
+            return math.hypot(cx - tyre_centre.x(), cy - tyre_centre.y())
+
+        assert distance(30.0) == pytest.approx(distance(0.0), abs=1.5)
+        assert distance(-30.0) == pytest.approx(distance(0.0), abs=1.5)
+    finally:
+        instance.deleteLater()
+
+
+def test_brake_disc_static_without_wheel_angle(ui_env):
+    """With wheel angle off nothing steers, so the disc stays upright"""
+    instance = new_widget({"show_wheel_angle": False})
+    try:
+        assert instance.max_steer == 0
+        instance.timerEvent(None)
+        assert all(wheel.steer == 0 for wheel in instance.wheels)
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
 def test_battery_warning_levels(ui_env):
     instance = new_widget({"show_battery_bar": True, "battery_low_threshold": 10,
                            "battery_high_threshold": 95})
