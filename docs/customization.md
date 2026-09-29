@@ -5333,8 +5333,11 @@ Position of the new rows in the center column. Adding them shifted the default o
     show_gear, show_speed, show_rpm
 Show engaged gear (`N` neutral, `R` reverse), vehicle speed (unit from `Units` setting) and engine RPM with RPM bar.
 
+    show_gear_speed_cluster
+Draw gear and speed together in one block of the center column: thin RPM accent along the top in gear color (turns shift color over redline), large gear, large speed and its unit below (`KM/H`). In normal layout the block grows to fill free room of the center column, so no empty space is left between items. Enabled by default, speed display order is then ignored.
+
     font_scale_gear, font_scale_speed, font_scale_rpm
-Set text size of gear, speed and RPM, relative to `font_size`. Defaults are `2.0`, `1.0` and `0.75`. Widget height adapts to these sizes.
+Set text size of gear, speed and RPM, relative to `font_size`. Defaults are `3.0`, `1.6` and `0.75`. Widget height adapts to these sizes.
 
 All texts of this widget are automatically reduced if they do not fit in their box (for example large font, long values, `TC 10/10/10`), and follow `font_name`, `font_weight`, `Global Font Override` and modern overlay font.
 
@@ -5349,6 +5352,24 @@ Hide secondary elements (diagnostic readings, end of stint wear, compound, brake
 
     slow_data_update_interval
 Update interval (milliseconds) of slow changing data: temperatures, pressure, wear, damage, fuel & energy. Fast data (slip warning, steering, center column, battery) still follows `update_interval`. `0` updates everything every time. Default is `200`. The widget is also only repainted when something visible changed.
+
+    enable_auto_resize, resize_delay
+Resize widget to what the current car and data actually have: energy gauge dropped on cars without virtual energy, battery gauge on cars without hybrid system, ABS & TC rows on cars without them, gauges when `Fuel module` is off. Stint comparison row appears once there is stint data. The widget starts compact (fuel gauge only, no energy, battery, ABS, TC or stint row), so nothing empty is shown in menus, and each block appears once its data exists. A change is applied only once it stayed the same for `resize_delay` seconds (default `2`), so data arriving in steps never makes it jump several times. When disabled, room is kept for every enabled block and the widget never resizes.
+
+    resize_anchor
+Corner that stays in place on screen when the widget resizes: `Top Left` (default), `Top Center`, `Top Right`, `Bottom Left`, `Bottom Center` or `Bottom Right`. For example `Bottom Right` for a widget placed in the bottom right corner of the screen.
+
+    fixed_width, fixed_height
+Force widget width and/or height in pixels, `0` (default) follows content. Content is scaled uniformly to fit inside (never distorted) and centered, background fills the whole widget. With only one set, the other follows the content proportions.
+
+    tyre_scale, center_column_scale, gauge_row_scale, event_log_line_scale
+Size of each block relative to its default, on top of `display_scale`: tyres & brakes, center column width (normal layout), fuel / energy gauge & stint rows height, event log lines height. Value range `0.5` to `3`. Battery gauge, damage panel and incident trace have their own `battery_bar_scale`, `damage_panel_scale` and `trace_height_scale`.
+
+    show_module_warning, font_color_module_warning
+Several readings come from data modules: `Wheels module` (slip warning, wheel angle, camber, slip angle, wear per lap, end of stint wear, brake wear, locking, flat spot, stint wear), `Fuel module` (fuel & energy gauges, end of stint wear), `Delta module` (delta, lap time) and `Hybrid module` (battery gauge). When a module needed by an enabled option is turned off, its readings are no longer read (they would stay frozen), values show `-` or are hidden, and a notice at the bottom of the car view says which module is off (`Wheels, Fuel modules off`). Module state is checked about once per second, so turning a module back on is picked up without reloading the widget.
+
+    enable_required_modules
+Turn on and start any data module needed by enabled options when the widget starts, the same as turning it on in the module list (saved). Disabled by default.
 
     override_unit_temperature, override_unit_tyre_pressure, override_unit_speed, override_unit_fuel
 Unit used by this widget only. `Global` follows the `Units` setting. Default is `Global`, except fuel which defaults to `Liter`, so fuel gauge always reads in liters unless changed here.
@@ -5382,8 +5403,8 @@ Fade tyre and brake heatmap colors from one grade to the next over `smooth_trans
     enable_alert_pulse, alert_pulse_frequency
 Pulse wheel lock & spin outline, detached wheel, puncture and flat spot warnings at `alert_pulse_frequency` (Hz, default `1.5`).
 
-    show_damage_panel, damage_panel_scale
-Show the same data as `Damage` widget at the bottom right of this widget, next to the bottom rows: rounded body shell cut in 8 segments (intact ones stay faint, damaged ones light up), wheels as rounded chips colored by suspension damage (outlined on puncture, dashed when detached), a fading cone toward the last impact, and integrity in the middle, colored by level (green, yellow, red) with its source (`BODY` or `AERO`) and a gauge. `damage_panel_scale` sets its height in lines (default `3.4`). Detached parts and punctures pulse with `enable_alert_pulse`.
+    show_damage_panel, damage_panel_position, damage_panel_scale
+Show the same data as `Damage` widget in its own column outside the main area, flush with a corner of the widget: `Bottom Right` (default), `Bottom Left`, `Top Right` or `Top Left`. It sits on its own card with the same background as the widget, placed right against it without being merged into it, room above or below it stays transparent. `Center Horizontally` and `Center Vertically` (widget right click menu) center the black box card only, the damage panel card is left out. It shows the car seen from above: rounded body cut in 8 segments (front, sides, rear), intact ones in body color, damaged ones light up, detached ones pulse; wheels on both sides colored by suspension damage (outlined on puncture, dashed when detached); a fading cone toward the last impact; integrity in the middle, colored by level (green, yellow, red) with its source (`BODY` or `AERO`) and a gauge. `damage_panel_scale` sets its height in lines (default `4.5`).
 
     damage_panel_body_color, damage_panel_body_color_light, damage_panel_body_color_heavy, damage_panel_body_color_detached
 Body part color: intact, light damage, heavy damage, detached.

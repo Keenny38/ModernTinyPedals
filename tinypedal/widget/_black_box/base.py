@@ -23,7 +23,7 @@ Black box widget, shared painting helpers: cached background, fitted text, units
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QFont, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
 from .._painter import fill_rect, fit_font
 from .common import FONT_CACHE_SIZE
@@ -51,8 +51,13 @@ class PaintBase:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setFont(self.font())
         wcfg = self.wcfg
-        if wcfg["show_background"]:
-            fill_rect(painter, self.rect_bg, wcfg["background_color"])
+        fit = self.fit
+        fitted = fit.scale != 1 or fit.offset_x or fit.offset_y
+        if wcfg["show_background"] and fitted:  # fixed size: whole widget, room around content included
+            fill_rect(painter, QRectF(0, 0, self.width(), self.height()), wcfg["background_color"])
+        self.apply_fit(painter)
+        if wcfg["show_background"] and not fitted:  # main area & damage panel tab, nothing above panel
+            painter.fillPath(self.path_bg, QColor(wcfg["background_color"]))
         if not self.rect_caption.isEmpty():
             fill_rect(painter, self.rect_caption, wcfg["background_color_caption"])
             painter.setPen(self.pen_caption)
@@ -62,6 +67,26 @@ class PaintBase:
         painter.end()
         self.static_layer = layer
         return layer
+
+    def draw_module_warning(self, painter: QPainter):
+        """Which data module is off, at the bottom of the car view, on its own chip"""
+        text = self.modules.missing_text()
+        view = self.rect_car_view
+        chip_h = self.unit * 0.8
+        painter.setFont(self.font_label)
+        chip_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.8, view.width())
+        chip = QRectF(view.center().x() - chip_w / 2, view.bottom() - chip_h - self.unit * 0.1, chip_w, chip_h)
+        fill_rect(painter, chip, self.wcfg["info_background_color"])
+        painter.setPen(QColor(self.wcfg["font_color_module_warning"]))
+        self.draw_fit_text(painter, chip, text, self.font_label)
+        painter.setFont(self.font())
+
+    def apply_fit(self, painter: QPainter):
+        """Content transform for fixed width / height: uniform scale, centered"""
+        fit = self.fit
+        if fit.scale != 1 or fit.offset_x or fit.offset_y:
+            painter.translate(fit.offset_x, fit.offset_y)
+            painter.scale(fit.scale, fit.scale)
 
     def draw_fit_text(self, painter: QPainter, rect: QRectF, text: str, font: QFont,
                       align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter):

@@ -167,6 +167,7 @@ TRANSLATION = MappingProxyType({
     "Configure Display Order": "Configurer l'ordre d'affichage",
     # Config dialog sections
     "General": "Général",
+    "Size & Layout": "Taille et disposition",
     "Visual Style": "Style visuel",
     "Tyres": "Pneus",
     "Brakes": "Freins",

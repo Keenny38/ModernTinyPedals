@@ -250,6 +250,8 @@ CHOICE_COMMON = MappingProxyType({
     CFG_WINDOW_COLOR_THEME: ("Light", "Dark"),
     CFG_LANGUAGE: ("English", "Français"),
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
+    "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),
+    "^resize_anchor$": ("Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"),
     # Per widget unit, "Global" = use Units setting
     "^override_unit_temperature$": ("Global", *CHOICE_UNITS["temperature_unit"]),
     "^override_unit_tyre_pressure$": ("Global", *CHOICE_UNITS["tyre_pressure_unit"]),

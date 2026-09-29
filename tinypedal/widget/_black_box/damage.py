@@ -34,9 +34,9 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 
 from ... import calculation as calc
-from .._painter import fill_chip, fill_chip_gradient, fill_rect
+from .._painter import fill_chip, fill_chip_gradient
 
-INTACT_ALPHA = 150  # intact body & wheels stay in the background
+INTACT_ALPHA = 200  # intact body & wheels: visible, but behind damaged parts
 GOOD_INTEGRITY = 0.75
 LOW_INTEGRITY = 0.4
 
@@ -53,47 +53,54 @@ class DamageGeometry(NamedTuple):
 
 
 def damage_geometry(rect: QRectF, unit: float) -> DamageGeometry:
-    """Rounded body shell cut in 8 segments, wheels inside its corners, integrity in the middle"""
-    margin = max(unit * 0.15, 1)
-    gap = max(unit * 0.07, 1)
+    """Car seen from above: rounded body shell cut in 8 segments, wheels sticking out on both
+    sides at front & rear, integrity in the middle of the body"""
+    margin = max(unit * 0.2, 2)
+    gap = max(unit * 0.08, 1)
     inner = rect.adjusted(margin, margin, -margin, -margin)
-    part_h = (inner.height() - gap * 2) / 3
-    side_w = (inner.width() - gap * 2) * 0.3
-    center_w = inner.width() - gap * 2 - side_w * 2
+    wheel_w = max(inner.width() * 0.15, 3)
+    body = inner.adjusted(wheel_w + gap, 0, -wheel_w - gap, 0)
+    # Segment grid: side columns & front / rear rows, middle row taller
+    side_w = body.width() * 0.3
+    front_h = body.height() * 0.28
     columns = (
-        (inner.left(), side_w),
-        (inner.left() + side_w + gap, center_w),
-        (inner.right() - side_w, side_w),
+        (body.left(), side_w),
+        (body.left() + side_w + gap, body.width() - side_w * 2 - gap * 2),
+        (body.right() - side_w, side_w),
     )
-    rows = (inner.top(), inner.top() + part_h + gap, inner.bottom() - part_h)
+    rows = (
+        (body.top(), front_h),
+        (body.top() + front_h + gap, body.height() - front_h * 2 - gap * 2),
+        (body.bottom() - front_h, front_h),
+    )
     grid = ((0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2))  # (column, row)
-    parts = tuple(QRectF(columns[column][0], rows[row], columns[column][1], part_h) for column, row in grid)
-
-    short = min(inner.width(), inner.height())
-    thickness = max(short * 0.13, 2)
+    parts = tuple(
+        QRectF(columns[column][0], rows[row][0], columns[column][1], rows[row][1]) for column, row in grid
+    )
+    radius = body.width() * 0.38  # rounded nose & tail
+    thickness = max(body.width() * 0.2, 2)
     shell = QPainterPath()
-    shell.addRoundedRect(inner, short * 0.32, short * 0.32)
-    hole = inner.adjusted(thickness, thickness, -thickness, -thickness)
+    shell.addRoundedRect(body, radius, radius)
+    hole = body.adjusted(thickness, thickness, -thickness, -thickness)
     cut = QPainterPath()
-    hole_radius = max(short * 0.32 - thickness, 1)
-    cut.addRoundedRect(hole, hole_radius, hole_radius)
+    cut.addRoundedRect(hole, max(radius - thickness, 1), max(radius - thickness, 1))
     shell = shell.subtracted(cut)
 
-    wheel_w = max(hole.width() * 0.2, 2)
-    wheel_h = max(hole.height() * 0.26, 2)
-    pad = gap * 1.5
+    wheel_h = body.height() * 0.22
+    front_y = body.top() + body.height() * 0.1
+    rear_y = body.bottom() - body.height() * 0.1 - wheel_h
     wheels = (
-        QRectF(hole.left() + pad, hole.top() + pad, wheel_w, wheel_h),
-        QRectF(hole.right() - pad - wheel_w, hole.top() + pad, wheel_w, wheel_h),
-        QRectF(hole.left() + pad, hole.bottom() - pad - wheel_h, wheel_w, wheel_h),
-        QRectF(hole.right() - pad - wheel_w, hole.bottom() - pad - wheel_h, wheel_w, wheel_h),
+        QRectF(inner.left(), front_y, wheel_w, wheel_h),
+        QRectF(inner.right() - wheel_w, front_y, wheel_w, wheel_h),
+        QRectF(inner.left(), rear_y, wheel_w, wheel_h),
+        QRectF(inner.right() - wheel_w, rear_y, wheel_w, wheel_h),
     )
-    middle_left = wheels[0].right() + gap
-    middle_w = max(wheels[1].left() - gap - middle_left, 2)
-    caption = QRectF(middle_left, hole.top() + hole.height() * 0.18, middle_w, hole.height() * 0.18)
-    integrity = QRectF(middle_left, caption.bottom(), middle_w, hole.height() * 0.36)
-    gauge_h = max(hole.height() * 0.07, 2)
-    gauge = QRectF(middle_left, integrity.bottom() + gap, middle_w, gauge_h)
+    text_area = hole.adjusted(gap, hole.height() * 0.12, -gap, -hole.height() * 0.12)
+    caption = QRectF(text_area.left(), text_area.top(), text_area.width(), text_area.height() * 0.22)
+    integrity = QRectF(text_area.left(), caption.bottom(), text_area.width(), text_area.height() * 0.5)
+    gauge_h = max(text_area.height() * 0.08, 2)
+    gauge = QRectF(text_area.left() + text_area.width() * 0.1, integrity.bottom() + gap,
+                   text_area.width() * 0.8, gauge_h)
     return DamageGeometry(parts, shell, wheels, caption, integrity, gauge)
 
 
@@ -110,7 +117,7 @@ class DamagePainter:
         wcfg = self.wcfg
         shapes = self.damage_shapes
         strength = self.pulse()
-        fill_rect(painter, rect, wcfg["info_background_color"])
+        # No panel box of its own: drawn straight on the widget background (tab of the same color)
         if self.impact_visible and wcfg["show_damage_panel_impact_cone"]:
             self.draw_impact_cone(painter, rect)
         self.draw_damage_shell(painter, shapes, strength)
@@ -132,6 +139,10 @@ class DamagePainter:
             else:
                 painter.fillRect(part, color)
         painter.restore()
+        # Thin outline keeps the car shape readable at a glance, whatever the damage
+        edge = QColor(self.wcfg["damage_panel_body_color"]).lighter(150)
+        edge.setAlpha(170)
+        painter.strokePath(shapes.shell, QPen(edge, max(self.unit * 0.05, 1)))
 
     def draw_damage_wheels(self, painter: QPainter, shapes: DamageGeometry, strength: float):
         wcfg = self.wcfg
@@ -168,7 +179,8 @@ class DamagePainter:
         source = "integrity_aero" if self.uses_aero_integrity() else "integrity_body"
         self.draw_fit_text(painter, shapes.caption, self.text[source], self.font_label, align)
         painter.setPen(color)
-        self.draw_fit_text(painter, shapes.integrity, f"{value:.0%}", self.font(), align)
+        self.draw_fit_text(painter, shapes.integrity, f"{value:.0%}", self.grown_font(self.font(), shapes.integrity),
+                           align)
         gauge = shapes.gauge
         fill_chip(painter, gauge, wcfg["indicator_inactive_color"])
         if value > 0.005:

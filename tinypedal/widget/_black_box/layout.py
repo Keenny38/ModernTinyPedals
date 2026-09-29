@@ -35,6 +35,8 @@ from PySide6.QtGui import QPainterPath
 
 from .common import LAYOUT_NORMAL
 
+DAMAGE_PANEL_RATIO = 0.8  # damage panel width relative to its height
+
 
 @dataclass
 class LayoutInput:
@@ -54,6 +56,12 @@ class LayoutInput:
     trace_height_scale: float  # 0 if no incident trace
     event_lines: int  # 0 if no event log
     damage_panel_scale: float = 0.0  # height in lines of damage panel, 0 if hidden
+    tyre_scale: float = 1.0  # tyres & brakes
+    center_scale: float = 1.0  # center column width
+    row_scale: float = 1.0  # gauge & stint rows height
+    event_scale: float = 1.0  # event log line height
+    corner_scale: float = 0.0  # background corner radius, relative to shorter side
+    damage_position: str = "Bottom Right"  # corner of damage panel, outside main area
 
 
 @dataclass
@@ -70,6 +78,8 @@ class Layout:
     row_h: int
     event_row_h: int
     rect_bg: QRectF
+    rect_main: QRectF  # main card, without damage panel card (used for screen centering)
+    path_bg: QPainterPath  # background shape: main area plus a tab under the damage panel
     rect_caption: QRectF
     rect_leds: QRectF
     rect_center: QRectF
@@ -89,9 +99,10 @@ def build_layout(spec: LayoutInput) -> Layout:
     """Compute widget geometry"""
     unit = spec.unit
     gap = round(unit * 0.25)
-    tyre_w, tyre_h = round(unit * 2.1), round(unit * 2.9)
+    tyre_unit = unit * spec.tyre_scale
+    tyre_w, tyre_h = round(tyre_unit * 2.1), round(tyre_unit * 2.9)
     # Brake: thin vertical bar next to tyre, temperature written beside it
-    brake_w, brake_h = round(unit * 2.1), round(tyre_h * 0.8)
+    brake_w, brake_h = round(tyre_unit * 2.1), round(tyre_h * 0.8)
     brake_bar_w = max(round(unit * 0.32), 3)
     brake_bar_gap = round(unit * 0.15)
 
@@ -103,18 +114,29 @@ def build_layout(spec: LayoutInput) -> Layout:
     side_w = pad_x + tyre_w + brake_gap + brake_w
 
     center_between_tyres = spec.has_center and spec.layout_mode == LAYOUT_NORMAL
-    center_between = round(unit * 5.2) if center_between_tyres else round(unit * 0.8)
+    center_between = round(unit * 5.2 * spec.center_scale) if center_between_tyres else round(unit * 0.8)
     content_w = side_w * 2 + center_between + gap * 2
 
-    # Battery bar: full-height side gauge, outside the tyre/brake columns, left or right
+    # Columns, left to right: [damage panel] [battery] content [battery] [damage panel]
+    # Battery: gauge along the whole widget height. Damage panel: own column outside the main
+    # area, on the left or right, flush with the chosen top or bottom corner of the widget.
     battery_bar_w = max(round(unit * spec.battery_bar_scale), 4) if spec.show_battery_bar else 0
     battery_extra = battery_bar_w + gap if spec.show_battery_bar else 0
-    content_x = battery_extra if spec.show_battery_bar and spec.battery_bar_left else 0
-    width = content_w + battery_extra
+    if spec.damage_panel_scale > 0:
+        panel_h = max(round(unit * spec.damage_panel_scale), round(unit * 2))
+        panel_w = round(panel_h * DAMAGE_PANEL_RATIO)
+    else:
+        panel_h = panel_w = 0
+    damage_extra = panel_w  # panel card placed right against main card, no gap
+    damage_left = spec.damage_position.endswith("Left")
+    damage_top = spec.damage_position.startswith("Top")
+    main_x = damage_extra if damage_left else 0  # main area starts after a left damage column
+    content_x = main_x + (battery_extra if spec.show_battery_bar and spec.battery_bar_left else 0)
+    width = content_w + battery_extra + damage_extra
 
-    # Caption on top, then RPM LEDs (span full width, above everything else)
+    # Caption on top, then RPM LEDs (span content width, above everything else in it)
     caption_h = round(unit * 0.9) if spec.show_caption else 0
-    rect_caption = QRectF(0, 0, width, caption_h)
+    rect_caption = QRectF(content_x, 0, content_w, caption_h)
     led_h = round(unit * 0.55) if spec.show_leds else 0
     led_y = caption_h + (gap if caption_h else 0)
     top_y = led_y + (led_h + gap if led_h else 0)
@@ -160,30 +182,18 @@ def build_layout(spec: LayoutInput) -> Layout:
     rect_car_view = QRectF(content_x + edge, top_y, content_w - edge * 2, body_h)
     car_bottom = bottom_y
 
-    # Bottom rows: fuel gauge, energy gauge (each spans both halves), stint comparison.
-    # Damage panel at bottom right, rows share the width left of it.
-    row_h = round(unit * 1.05)
-    rows_h = spec.bottom_rows * (row_h + gap) - gap if spec.bottom_rows else 0
-    if spec.damage_panel_scale > 0:
-        panel_h = max(round(unit * spec.damage_panel_scale), rows_h, round(unit * 2))
-        panel_w = round(panel_h * 0.75)
-        rect_damage = QRectF(content_x + content_w - inset - panel_w, bottom_y + gap, panel_w, panel_h)
-        rows_right = rect_damage.left() - gap
-    else:
-        panel_h = 0
-        rect_damage = QRectF()
-        rows_right = content_x + content_w - inset
-    row_w = (rows_right - content_x - inset - gap) / 2
+    # Bottom rows: fuel gauge, energy gauge (each spans both halves), stint comparison
+    row_h = round(unit * 1.05 * spec.row_scale)
+    row_w = (content_w - inset * 3) / 2
     bottom_rows = []
     for row in range(spec.bottom_rows):
         row_top = bottom_y + gap + row * (row_h + gap)
         bottom_rows.append((
             QRectF(content_x + inset, row_top, row_w, row_h),
-            QRectF(rows_right - row_w, row_top, row_w, row_h),
+            QRectF(content_x + content_w - inset - row_w, row_top, row_w, row_h),
         ))
-    block_h = max(rows_h, panel_h)
-    if block_h:
-        bottom_y += block_h + gap
+    if spec.bottom_rows:
+        bottom_y += spec.bottom_rows * (row_h + gap)
 
     # Incident trace: speed, throttle & brake over recorder duration
     if spec.trace_height_scale > 0:
@@ -194,7 +204,7 @@ def build_layout(spec: LayoutInput) -> Layout:
         rect_trace = QRectF()
 
     # Event log, one line per event
-    event_row_h = round(unit * 0.85)
+    event_row_h = round(unit * 0.85 * spec.event_scale)
     event_rows = []
     for line in range(spec.event_lines):
         event_rows.append(QRectF(content_x + inset, bottom_y + gap + line * event_row_h,
@@ -202,19 +212,47 @@ def build_layout(spec: LayoutInput) -> Layout:
     if spec.event_lines:
         bottom_y += gap + spec.event_lines * event_row_h
 
-    height = bottom_y + (gap if bottom_y > car_bottom else 0)
+    height = max(bottom_y + (gap if bottom_y > car_bottom else 0), panel_h)
     if spec.show_battery_bar:
-        battery_x = 0 if spec.battery_bar_left else content_x + content_w + gap
-        rect_battery = QRectF(battery_x, top_y, battery_bar_w, car_bottom - top_y)
+        battery_x = main_x if spec.battery_bar_left else content_x + content_w + gap
+        rect_battery = QRectF(battery_x, 0, battery_bar_w, height)
     else:
         rect_battery = QRectF()
+    if panel_w:
+        rect_damage = QRectF(0 if damage_left else width - panel_w, 0 if damage_top else height - panel_h,
+                             panel_w, panel_h)
+    else:
+        rect_damage = QRectF()
+    path_bg = background_shape(width, height, damage_extra, panel_h, spec.corner_scale, damage_left, damage_top)
+    rect_main = QRectF(main_x, 0, width - damage_extra, height)
 
     return Layout(
         unit=unit, gap=gap, width=width, height=height,
         brake_bar_w=brake_bar_w, brake_bar_gap=brake_bar_gap, led_h=led_h, row_h=row_h,
-        event_row_h=event_row_h, rect_bg=QRectF(0, 0, width, height), rect_caption=rect_caption,
+        event_row_h=event_row_h, rect_bg=QRectF(0, 0, width, height), rect_main=rect_main, path_bg=path_bg, rect_caption=rect_caption,
         rect_leds=rect_leds, rect_center=rect_center, rect_car_view=rect_car_view,
         rect_battery=rect_battery, rect_trace=rect_trace, rect_damage=rect_damage, path_tyre=path_tyre,
         local_tyre=local_tyre, rects_tyre=rects_tyre, rects_disc=rects_disc,
         bottom_rows=bottom_rows, event_rows=event_rows,
     )
+
+
+def background_shape(width: float, height: float, column_w: float, panel_h: float, corner_scale: float,
+                     left: bool = False, top: bool = False, gap: float = 0.0) -> QPainterPath:
+    """Main card, plus a separate card for the damage panel beside it
+
+    Two distinct rounded cards with the same background, placed against each other: the damage
+    panel touches the widget without being merged into it. Room above or below the panel card
+    stays transparent.
+    """
+    main_w = width - column_w
+    main_x = column_w if left else 0
+    path = QPainterPath()
+    radius = min(main_w, height) * corner_scale
+    path.addRoundedRect(QRectF(main_x, 0, main_w, height), radius, radius)
+    if column_w and panel_h:
+        card_w = column_w - gap
+        card = QRectF(0 if left else width - card_w, 0 if top else height - panel_h, card_w, panel_h)
+        card_radius = min(card_w, panel_h) * corner_scale
+        path.addRoundedRect(card, card_radius, card_radius)
+    return path

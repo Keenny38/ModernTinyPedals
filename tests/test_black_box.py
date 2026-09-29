@@ -48,6 +48,7 @@ def widget(ui_env, monkeypatch):
     monkeypatch.setattr(minfo.wheels, "slipRatio", [-0.4, 0.0, 0.0, 0.0])
     cfg.user.setting["black_box"]["enable_heatmap_auto_matching"] = False
     cfg.user.setting["black_box"]["slow_data_update_interval"] = 0  # read everything every update
+    cfg.user.setting["black_box"]["enable_auto_resize"] = False  # layout tests: room for every block
     instance = black_box.Realtime(cfg, "black_box")
     yield instance
     instance.deleteLater()
@@ -500,8 +501,7 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
 def new_widget(overrides=None):
     from tinypedal.setting import cfg
 
-    if overrides:
-        cfg.user.setting["black_box"].update(overrides)
+    cfg.user.setting["black_box"].update({"enable_auto_resize": False, **(overrides or {})})
     return black_box.Realtime(cfg, "black_box")
 
 
@@ -526,20 +526,20 @@ def test_battery_bar_adds_width_on_left(ui_env):
 def test_battery_bar_position_right(ui_env):
     right = new_widget({"show_battery_bar": True, "battery_bar_position": "Right"})
     try:
-        assert right.rects_tyre[0].left() < right.rect_battery.left()  # content stays first
-        assert right.rect_battery.right() == pytest.approx(right.width(), abs=1)
+        assert right.rects_tyre[1].right() < right.rect_battery.left()  # content stays first
+        assert right.rect_battery.right() <= right.rect_damage.left() + 0.5  # damage panel outermost
+        assert right.rect_damage.right() == pytest.approx(right.width(), abs=1)
     finally:
         right.deleteLater()
 
 
-def test_battery_bar_spans_car_view_height(ui_env):
-    """Same vertical extent as the car view (tyres/center column), matching rect_car_view,
-    not stretched into the caption/LED row above or the bottom info rows below"""
-    instance = new_widget({"show_battery_bar": True})
+def test_battery_bar_spans_whole_widget_height(ui_env):
+    """Battery gauge runs along the whole widget, top to bottom"""
+    instance = new_widget({"show_battery_bar": True, "show_caption": True})
     try:
-        assert instance.rect_battery.top() == pytest.approx(instance.rect_car_view.top())
-        assert instance.rect_battery.bottom() == pytest.approx(instance.rect_car_view.bottom())
-        assert instance.rect_battery.bottom() < instance.bottom_rows[0][0].top()
+        assert instance.rect_battery.top() == 0
+        assert instance.rect_battery.bottom() == pytest.approx(instance.height(), abs=1)
+        assert instance.rect_caption.left() >= instance.rect_battery.right()  # caption beside it
     finally:
         instance.deleteLater()
 
@@ -784,7 +784,8 @@ def test_battery_warning_color_overrides_flow_color(ui_env):
     from PySide6.QtGui import QImage, QPainter
 
     instance = new_widget({"show_battery_bar": True, "battery_low_threshold": 10,
-                           "enable_battery_bar_animation": False})
+                           "enable_battery_bar_animation": False,
+                           "show_battery_percentage": False})  # readout chip rides the fill level
     try:
         def render(warning):
             instance.battery_charge = 8.0
@@ -1287,6 +1288,7 @@ def test_stint_row_and_trends_draw(ui_env, monkeypatch):
                 "show_tyre_pressure"):
         monkeypatch.setitem(setting, key, True)
     monkeypatch.setitem(setting, "slow_data_update_interval", 0)
+    monkeypatch.setitem(setting, "enable_auto_resize", False)  # stint row reserved before data
     instance = black_box.Realtime(cfg, "black_box")
     try:
         assert instance.show_stint and len(instance.bottom_rows) == 3
@@ -1333,3 +1335,28 @@ def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):
     monkeypatch.setattr(api.read.timing, "elapsed", lambda: 200.0)
     widget.timerEvent(None)
     assert not widget.impact_visible  # cone expired
+
+
+def test_battery_percentage_follows_fill_level(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    instance = new_widget({"show_battery_bar": True})
+    try:
+        chips = []
+        monkeypatch.setattr(instance, "draw_fit_text", lambda painter, rect, *args, **kwargs: chips.append(rect))
+        rect = QRectF(0, 0, 20, 200)
+        image = QImage(20, 200, QImage.Format.Format_ARGB32)
+        for charge in (80.0, 50.0, 20.0, 0.0, 100.0):
+            instance.battery_charge = charge
+            instance.battery_state = 1
+            painter = QPainter(image)
+            instance.draw_battery_bar(painter, rect)
+            painter.end()
+        centers = [chip.center().y() for chip in chips]
+        assert centers[0] < centers[1] < centers[2]  # lower charge, lower readout
+        assert chips[1].center().y() == pytest.approx(100, abs=1)  # 50%: middle of gauge
+        assert chips[3].bottom() == pytest.approx(200, abs=1)  # empty: kept inside at bottom
+        assert chips[4].top() == pytest.approx(0, abs=1)  # full: kept inside at top
+    finally:
+        instance.deleteLater()

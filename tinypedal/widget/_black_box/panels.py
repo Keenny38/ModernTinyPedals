@@ -22,6 +22,7 @@ Black box widget, draw battery gauge and bottom info rows
 
 from __future__ import annotations
 
+import math
 from time import monotonic
 from typing import NamedTuple
 
@@ -74,11 +75,13 @@ class PanelPainter:
             if wcfg["enable_battery_bar_animation"] and state in (2, 3):
                 self.draw_battery_flow(painter, fill_area, charging=state == 3)
         if wcfg["show_battery_percentage"]:
-            # Readout chip fixed at the top, own background so it stays legible regardless of
-            # the fill color or level behind it. Chip follows the text size, capped so it never
-            # takes more than a third of the gauge.
+            # Readout chip rides the fill level (centered on its top edge, kept inside the gauge),
+            # own background so it stays legible regardless of the fill color behind it. Chip
+            # follows the text size, capped so it never takes more than a third of the gauge.
             label_h = min(self.unit * self.battery_scale * 1.2, rect.height() / 3)
-            label_rect = QRectF(rect.left(), rect.top(), rect.width(), label_h)
+            level_y = rect.bottom() - rect.height() * charge
+            label_top = min(max(level_y - label_h / 2, rect.top()), rect.bottom() - label_h)
+            label_rect = QRectF(rect.left(), label_top, rect.width(), label_h)
             fill_chip(painter, label_rect, wcfg["info_background_color"])
             painter.setPen(self.pen_text)
             # Dash instead of "0" on a car without hybrid system, so an empty gauge is not
@@ -105,19 +108,19 @@ class PanelPainter:
     def draw_bottom_rows(self, painter: QPainter):
         """Fuel gauge, virtual energy gauge (full row width), stint comparison"""
         rows = iter(self.bottom_rows)
-        if self.need_fuel_rows:
+        if self.row_fuel:
             left, right = next(rows)
             self.draw_level_gauge(
                 painter, left.united(right), self.text["fuel"], self.fuel_gauge(), self.wcfg["fuel_gauge_color"])
-        if self.need_energy_rows:
+        if self.row_energy:
             left, right = next(rows)
-            if self.energy_available:  # row kept on cars without virtual energy, widget never resizes
+            if self.energy_available:  # row kept on cars without virtual energy unless auto resize
                 self.draw_level_gauge(
                     painter, left.united(right), self.text["energy"], self.energy_gauge(),
                     self.wcfg["energy_gauge_color"])
             else:
                 fill_rect(painter, left.united(right), self.wcfg["info_background_color"])
-        if self.show_stint:
+        if self.row_stint:
             (rect_left, rect_right), (left_item, right_item) = next(rows), self.stint_row()
             self.draw_info_row(painter, rect_left, *left_item)
             self.draw_info_row(painter, rect_right, *right_item)
@@ -150,7 +153,8 @@ class PanelPainter:
         unit = self.unit
         fill_rect(painter, row, wcfg["info_background_color"])
         low = 0 < gauge.laps <= wcfg["gauge_low_lap_threshold"]
-        if gauge.capacity > 0:
+        # Module data may be non finite (division by a near zero consumption): no bar then
+        if gauge.capacity > 0 and all(map(math.isfinite, (gauge.level, gauge.capacity, gauge.start, gauge.needed))):
             fill = QColor(self.pulsed_color(wcfg["gauge_low_color"], self.pulse()) if low else qcolor(color))
             fill.setAlpha(min(fill.alpha(), 120))
             ratio = min(max(gauge.level / gauge.capacity, 0.0), 1.0)

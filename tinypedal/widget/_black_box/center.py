@@ -25,11 +25,11 @@ from __future__ import annotations
 from time import monotonic
 
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
 
 from ... import calculation as calc
-from .._painter import fill_chip, fill_chip_gradient, fill_glow
-from .common import CENTER_ITEMS, LAYOUT_NORMAL, LAYOUT_VERTICAL, qcolor
+from .._painter import fill_chip, fill_chip_gradient, fill_glow, fill_rect
+from .common import CENTER_ITEMS, LAYOUT_NORMAL, qcolor
 from .state import (
     level_text,
 )
@@ -55,11 +55,16 @@ class CenterPainter:
             "pedals": self.wcfg["show_pedal_bars"],
         }
         items = [name for name in CENTER_ITEMS if enabled[name]]
+        # Gear & speed cluster: speed drawn inside the gear block
+        if self.gear_speed_cluster and "gear" in items and "speed" in items:
+            items.remove("speed")
         return sorted(items, key=lambda name: (self.wcfg[f"display_order_{name}"], CENTER_ITEMS.index(name)))
 
     def item_height(self, name: str) -> float:
         """Height of center item (without gap)"""
         unit = self.unit
+        if name == "gear" and self.gear_speed_cluster and self.wcfg["show_speed"]:
+            return unit * (0.95 * self.gear_scale + 0.95 * self.speed_scale + 0.55) + unit * 0.35
         if name == "gear":
             return unit * 0.95 * self.gear_scale
         if name == "speed":
@@ -70,10 +75,10 @@ class CenterPainter:
             return unit * 0.7
         return unit * 1.05
 
-    def center_height(self) -> float:
-        """Height needed by center column (ABS & TC counted as shown)"""
+    def center_height(self, items=None) -> float:
+        """Height needed by center column items (all enabled items if not given)"""
         gap = self.unit * 0.2
-        return sum(self.item_height(name) + gap for name in self.center_order)
+        return sum(self.item_height(name) + gap for name in (self.center_order if items is None else items))
 
     def draw_leds(self, painter: QPainter, rect: QRectF):
         """RPM LEDs: light up from green to red, all flash over shift point, soft glow when lit"""
@@ -130,18 +135,20 @@ class CenterPainter:
         """
         gap = self.unit * 0.2
         items = self.visible_center_items()
+        if not items:
+            return
+        heights = {name: self.item_height(name) for name in items}
+        free = max(rect.height() - sum(heights.values()) - gap * (len(items) - 1), 0)
         top = rect.top()
-        if self.layout_mode == LAYOUT_VERTICAL:
-            used = sum(self.item_height(name) + gap for name in items)
-            top += max(rect.height() - used, 0) / 2
+        # Free room (column is as tall as the tyres, or items hidden now) never stays empty:
+        # the gear block grows to fill it, otherwise items are centered as a group
+        if self.layout_mode == LAYOUT_NORMAL and "gear" in heights:
+            heights["gear"] += free
+        else:
+            top += free / 2
         for name in items:
-            height = self.item_height(name)
-            if name == "pedals":  # pedals stick to bottom in normal layout
-                item_top = rect.bottom() - height if self.layout_mode == LAYOUT_NORMAL and name == items[-1] else top
-            else:
-                item_top = top
-            self.draw_center_item(painter, name, QRectF(rect.left(), item_top, rect.width(), height))
-            top += height + gap
+            self.draw_center_item(painter, name, QRectF(rect.left(), top, rect.width(), heights[name]))
+            top += heights[name] + gap
 
     def draw_center_item(self, painter: QPainter, name: str, rect: QRectF):
         wcfg = self.wcfg
@@ -160,11 +167,14 @@ class CenterPainter:
         elif name == "delta":
             gain = self.delta_best < 0
             color = wcfg["delta_gain_color" if gain else "delta_loss_color"]
-            self.draw_info_row(painter, rect, self.text["delta"], f"{self.delta_best:+.3f}", color)
+            self.draw_info_row(painter, rect, self.text["delta"],
+                               f"{self.delta_best:+.3f}" if self.use_delta else "-", color)
         elif name == "laptime":
-            self.draw_info_row(painter, rect, self.text["laptime"], calc.sec2laptime(self.laptime_current)[:8])
+            self.draw_info_row(painter, rect, self.text["laptime"],
+                               calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-")
         elif name == "locking":
-            self.draw_info_row(painter, rect, self.text["locking"], f"{self.locking_front:.0f}/{self.locking_rear:.0f}")
+            self.draw_info_row(painter, rect, self.text["locking"],
+                               f"{self.locking_front:.0f}/{self.locking_rear:.0f}" if self.use_wheels else "-")
         elif name == "pit_limiter":
             # Only active indicators, sharing the row
             active = [
@@ -178,6 +188,8 @@ class CenterPainter:
             for index, (text, color) in enumerate(active):
                 item = QRectF(rect.left() + index * (item_w + gap), rect.top(), item_w, rect.height())
                 self.draw_indicator(painter, item, text, True, color)
+        elif name == "gear" and self.gear_speed_cluster and wcfg["show_speed"]:
+            self.draw_gear_speed_cluster(painter, rect)
         elif name == "gear":
             painter.setPen(qcolor(self.gear_color()))
             self.draw_fit_text(painter, rect, self.gear_text(), self.font_gear)
@@ -212,6 +224,55 @@ class CenterPainter:
                 if value > 0.001:
                     fill_chip_gradient(
                         painter, QRectF(back.left(), back.top(), back.width() * min(value, 1), bar_h), color)
+
+    def draw_gear_speed_cluster(self, painter: QPainter, rect: QRectF):
+        """Gear & speed in one block: RPM accent on top, large gear, large speed, unit below"""
+        wcfg = self.wcfg
+        unit = self.unit
+        gear_color = self.gear_color()
+        fill_rect(painter, rect, wcfg["info_background_color"])
+        if self.depth_effects:  # lighter top, block reads as raised
+            shade = QLinearGradient(0, rect.top(), 0, rect.bottom())
+            shade.setColorAt(0.0, QColor(255, 255, 255, 22))
+            shade.setColorAt(1.0, QColor(0, 0, 0, 30))
+            painter.fillRect(rect, shade)
+        # RPM accent: thin bar along top edge, in gear color (turns shift color at redline)
+        accent = QRectF(rect.left(), rect.top(), rect.width(), max(unit * 0.1, 2))
+        fill_chip(painter, accent, wcfg["indicator_inactive_color"])
+        if self.rpm_max > 0 and self.rpm > 0:
+            ratio = min(self.rpm / self.rpm_max, 1)
+            fill_chip_gradient(painter, QRectF(accent.left(), accent.top(), accent.width() * ratio, accent.height()),
+                               gear_color)
+        inner = rect.adjusted(unit * 0.15, accent.height() + unit * 0.05, -unit * 0.15, -unit * 0.1)
+        gear_h = unit * 0.95 * self.gear_scale
+        speed_h = unit * 0.95 * self.speed_scale
+        label_h = unit * 0.5
+        total = gear_h + speed_h + label_h
+        scale = inner.height() / total if total else 1
+        gear_rect = QRectF(inner.left(), inner.top(), inner.width(), gear_h * scale)
+        speed_rect = QRectF(inner.left(), gear_rect.bottom(), inner.width(), speed_h * scale)
+        label_rect = QRectF(inner.left(), speed_rect.bottom(), inner.width(), label_h * scale)
+        # Gear & speed grow with the block (it takes free room of the column), unlike other texts
+        painter.setPen(qcolor(gear_color))
+        self.draw_fit_text(painter, gear_rect, self.gear_text(), self.grown_font(self.font_gear, gear_rect))
+        painter.setPen(self.pen_text)
+        self.draw_fit_text(painter, speed_rect, f"{self.unit_speed(self.speed):.0f}",
+                           self.grown_font(self.font_speed, speed_rect))
+        painter.setPen(self.pen_info_label)
+        self.draw_fit_text(painter, label_rect, self.speed_label.upper(), self.font_label)
+
+    def grown_font(self, font, rect: QRectF):
+        """Copy of font sized to box height (never smaller than font), cached per size"""
+        size = max(int(rect.height() * 0.95), font.pixelSize())
+        if size == font.pixelSize():
+            return font
+        key = ("grown", font.key(), size)
+        grown = self.font_cache.get(key)
+        if grown is None:
+            grown = QFont(font)
+            grown.setPixelSize(size)
+            self.font_cache[key] = grown
+        return grown
 
     def gear_color(self) -> str:
         """Gear text color by RPM: low, mid, shift (flash over shift point)"""

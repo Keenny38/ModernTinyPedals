@@ -38,6 +38,7 @@ from ...userfile.heatmap import (
     set_predefined_brake_name,
 )
 from .recorder import Sample, export_incident
+from .sizing import Presence
 from .state import (
     NO_STATUS,
     WheelState,
@@ -59,6 +60,8 @@ class DataReader:
     def timerEvent(self, event):
         """Update when vehicle on track"""
         slow = self.tick % self.slow_every == 0
+        if self.tick % self.module_check_every == 0 and self.modules.refresh():
+            self.apply_module_status()
         self.tick += 1
         in_pits = api.read.vehicle.in_pits()  # read once, also used by compound matching
         if self.need_compound:
@@ -67,6 +70,8 @@ class DataReader:
             self.update_slow(in_pits)
         self.update_fast(in_pits)
 
+        if self.auto_resize and slow:
+            self.update_presence()
         state = self.render_state()
         if state != self.last_state or self.animating():
             self.last_state = state
@@ -83,7 +88,7 @@ class DataReader:
         if wcfg["show_tyre_status"]:
             detached = api.read.wheel.is_detached()
             puncture = api.read.tyre.puncture()
-            locking_wear = minfo.wheels.lockingTreadWear
+            locking_wear = minfo.wheels.lockingTreadWear if self.use_wheels else WHEELS_ZERO
         else:
             detached = puncture = NO_STATUS
             locking_wear = WHEELS_ZERO
@@ -92,12 +97,14 @@ class DataReader:
         else:
             suspension = WHEELS_ZERO
         carcass = api.read.tyre.carcass_temperature() if wcfg["show_tyre_carcass_temperature"] else WHEELS_ZERO
-        if wcfg["show_tyre_wear_end_stint"]:
+        end_stint = wcfg["show_tyre_wear_end_stint"] and self.use_wheels and self.use_fuel
+        if end_stint:
             if minfo.energy.available:
                 run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
             else:
                 run_laps = minfo.fuel.estimatedLaps
-        need_wear_per_lap = wcfg["show_tyre_wear_per_lap"] or self.show_stint
+        need_wear_per_lap = (wcfg["show_tyre_wear_per_lap"] or self.show_stint) and self.use_wheels
+        brake_wear = wcfg["show_brake_wear"] and self.use_wheels
         now = monotonic()
 
         for index, wheel in enumerate(self.wheels):
@@ -113,9 +120,9 @@ class DataReader:
             wheel.carcass_temp = carcass[index]
             if need_wear_per_lap:
                 wheel.wear_per_lap = minfo.wheels.estimatedValidTreadWear[index]
-            if wcfg["show_tyre_wear_end_stint"]:
+            if end_stint:
                 self.update_end_stint_tread(wheel, index, run_laps)
-            if wcfg["show_brake_wear"]:
+            if brake_wear:
                 self.update_brake_wear(wheel, index)
             if self.need_temp_trend:
                 wheel.temp_trend = self.temp_trends[index].update(now, wheel.tyre_temp, wheel.tyre_temp > -100)
@@ -135,13 +142,13 @@ class DataReader:
             )
         if self.show_stint:
             self.update_stint(bool(in_pits))
-        if self.need_fuel_rows:
+        if self.need_fuel_rows and self.use_fuel:
             self.refuel = minfo.fuel.neededRelative
             self.fuel_capacity = minfo.fuel.capacity
             self.fuel_start = minfo.fuel.amountStart
             self.fuel = minfo.fuel.amountCurrent
             self.fuel_laps = minfo.fuel.estimatedLaps
-        if self.need_energy_rows:
+        if self.need_energy_rows and self.use_fuel:
             self.refill = minfo.energy.neededRelative
             self.energy_capacity = minfo.energy.capacity
             self.energy_start = minfo.energy.amountStart
@@ -153,7 +160,11 @@ class DataReader:
         """Fast changing data: slip, steering, center column, battery"""
         wcfg = self.wcfg
         speed = api.read.vehicle.speed()
-        if self.need_slip:
+        need_slip = self.need_slip and self.use_wheels
+        steer = self.max_steer and self.use_wheels
+        camber = wcfg["show_wheel_camber"] and self.use_wheels
+        slip_angle = wcfg["show_tyre_slip_angle"] and self.use_wheels
+        if need_slip:
             slip_ratio = minfo.wheels.slipRatio
             braking = api.read.inputs.brake_raw() > 0.02
         # Diagnostic readings: each reader is skipped unless its own reading is turned on
@@ -165,23 +176,22 @@ class DataReader:
         else:
             tyre_load = WHEELS_ZERO
             total_load = 0.0
-        if self.max_steer:
+        if steer:
             wheel_angle = minfo.wheels.toeAngle  # degrees, positive to right side of vehicle
             multiplier = wcfg["wheel_angle_multiplier"]
 
         for index, wheel in enumerate(self.wheels):
-            if self.need_slip:
+            if need_slip:
                 wheel.warning = self.slip_warning(slip_ratio[index], speed, braking)
             wheel.ride_height = ride_height[index] * 1000  # meters to millimeters
             wheel.brake_pressure = brake_pressure[index] * 100
             wheel.load_ratio = calc.part_to_whole_ratio(tyre_load[index], total_load) * 100
-            if wcfg["show_wheel_camber"]:
+            if camber:
                 wheel.camber = minfo.wheels.camberAngle[index]
-            if wcfg["show_tyre_slip_angle"]:
+            if slip_angle:
                 wheel.slip_angle = minfo.wheels.slipAngle[index]
-            if self.max_steer:
-                steer = wheel_angle[index] * multiplier
-                wheel.steer = min(max(steer, -self.max_steer), self.max_steer)
+            if steer:
+                wheel.steer = min(max(wheel_angle[index] * multiplier, -self.max_steer), self.max_steer)
 
         if self.need_switches:
             vehicle_name = api.read.vehicle.vehicle_name()
@@ -198,14 +208,14 @@ class DataReader:
             self.tc_slip_level = api.read.switch.tc_slip_level()
         if self.need_brake_bias:
             self.brake_bias = api.read.brake.bias_front()
-        if self.need_locking:
+        if self.need_locking and self.use_wheels:
             self.locking_front = minfo.wheels.lockingPercentFront * 100
             self.locking_rear = minfo.wheels.lockingPercentRear * 100
         if self.need_brake_migration:
             self.brake_migration = api.read.brake.migration()
-        if self.need_delta:
+        if self.need_delta and self.use_delta:
             self.delta_best = minfo.delta.deltaBest
-        if self.need_laptime:
+        if self.need_laptime and self.use_delta:
             self.laptime_current = minfo.delta.lapTimeCurrent
         self.in_pits = bool(in_pits)
         if self.need_limiter:
@@ -221,12 +231,55 @@ class DataReader:
             self.brake = api.read.inputs.brake()
         if self.show_recorder:
             self.update_recorder(speed)
-        if self.show_battery_bar:
+        if self.show_battery_bar and self.use_hybrid:
             self.battery_charge = minfo.hybrid.batteryCharge
             self.battery_state = minfo.hybrid.motorState
             self.battery_warning = self.battery_warning_level()
             if self.battery_flash is not None:
                 self.battery_highlight = self.battery_flash.send(self.battery_warning)
+
+    def current_presence(self) -> Presence:
+        """Blocks the current car & data have, blocks without data are dropped from layout"""
+        return Presence(
+            fuel_row=self.use_fuel,
+            energy_row=self.use_fuel and self.energy_available,
+            battery=self.use_hybrid and self.has_hybrid,
+            abs=self.has_abs,
+            tc=self.has_tc,
+            stint=self.stint_wear > 0 or self.stint_pressure > 0 or self.stint_has_previous,
+        )
+
+    def update_presence(self):
+        """Relayout once a presence change stayed stable for resize_delay"""
+        target = self.resize_debounce.update(self.current_presence(), monotonic())
+        if target != self.presence:
+            self.relayout(target)
+            self.last_state = ()  # repaint
+
+    def apply_module_status(self):
+        """Use data of enabled modules only, clear data of the others so nothing stays frozen"""
+        modules = self.modules
+        self.use_wheels = modules.ready("module_wheels")
+        self.use_fuel = modules.ready("module_fuel")
+        self.use_delta = modules.ready("module_delta")
+        self.use_hybrid = modules.ready("module_hybrid")
+        if not self.use_wheels:
+            for wheel in self.wheels:
+                wheel.warning = ""
+                wheel.steer = wheel.camber = wheel.slip_angle = wheel.wear_per_lap = 0.0
+                wheel.tread_end_known = wheel.brake_wear_known = False
+                if wheel.status == "flat":
+                    wheel.status = ""
+            self.locking_front = self.locking_rear = 0.0
+        if not self.use_fuel:
+            self.fuel = self.fuel_capacity = self.fuel_start = self.refuel = self.fuel_laps = 0.0
+            self.energy = self.energy_capacity = self.energy_start = self.refill = self.energy_laps = 0.0
+            self.energy_available = False
+        if not self.use_delta:
+            self.delta_best = self.laptime_current = 0.0
+        if not self.use_hybrid:
+            self.battery_charge = 0.0
+            self.battery_state = self.battery_warning = 0
 
     def update_damage_panel(self, suspension):
         """Wheel, tyre & aero damage, last impact (same data as the Damage widget)"""
@@ -315,7 +368,7 @@ class DataReader:
             rounded(self.stint_pressure, 1), rounded(self.stint_pressure_delta, 1), self.stint_has_previous,
             self.trace_version if self.show_recorder and not self.showing_incident() else -1,
             len(self.recorder.incidents), self.show_recorder and self.showing_incident(),
-            len(self.event_log.events),
+            len(self.event_log.events), self.modules.version,
             self.damage_detached, self.damage_puncture, rounded(self.damage_aero, 2),
             tuple(rounded(value, 2) for value in self.damage_suspension), self.impact_visible,
             self.impact_position if self.impact_visible else None,

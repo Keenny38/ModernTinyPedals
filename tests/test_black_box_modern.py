@@ -116,7 +116,8 @@ def new_widget(overrides=None):
     from tinypedal.setting import cfg
     from tinypedal.widget import black_box
 
-    cfg.user.setting["black_box"].update(overrides or {})
+    # Layout tests need room for every block, auto resize has its own tests
+    cfg.user.setting["black_box"].update({"enable_auto_resize": False, **(overrides or {})})
     return black_box.Realtime(cfg, "black_box")
 
 
@@ -242,29 +243,6 @@ def test_robust_with_recorder_and_extreme_values(ui_env):
 
 
 # --- Damage panel (same display as Damage widget), bottom right
-def test_damage_panel_bottom_right(ui_env):
-    widget = new_widget()
-    try:
-        panel = widget.rect_damage
-        assert not panel.isNull()
-        assert panel.right() <= widget.width() and panel.bottom() <= widget.height()
-        assert panel.top() >= widget.rect_car_view.bottom()  # below car view
-        assert panel.right() > widget.width() - widget.unit  # right edge
-        for _left, right in widget.bottom_rows:
-            assert right.right() < panel.left()  # rows share the width left of panel
-    finally:
-        widget.deleteLater()
-
-
-def test_damage_panel_can_be_hidden(ui_env):
-    widget = new_widget({"show_damage_panel": False})
-    try:
-        assert widget.rect_damage.isNull()
-        assert widget.bottom_rows[0][1].right() > widget.width() - widget.unit
-    finally:
-        widget.deleteLater()
-
-
 def test_damage_panel_geometry():
     from PySide6.QtCore import QRectF
 
@@ -417,3 +395,360 @@ def test_fuel_gauge_in_liters(ui_env):
             widget.deleteLater()
     finally:
         cfg.units["fuel_unit"] = "Liter"
+
+
+# --- Data module dependencies
+def test_required_modules_follow_options():
+    from tinypedal.widget._black_box.modules import required_modules
+
+    assert required_modules({}) == ()
+    assert required_modules({"show_delta_best": True, "show_fuel_gauge": True}) == ("module_fuel", "module_delta")
+    assert "module_wheels" in required_modules({"show_slip_warning": True})
+
+
+def test_module_status_refresh_and_notice():
+    from tinypedal.widget._black_box.modules import ModuleStatus
+
+    settings = {"module_wheels": {"enable": True}, "module_fuel": {"enable": False}}
+    status = ModuleStatus(settings, ("module_wheels", "module_fuel"))
+    assert status.ready("module_wheels") and not status.ready("module_fuel")
+    assert status.ready("module_delta")  # not required: never reported
+    assert status.missing_text() == "Fuel module off"
+    version = status.version
+    assert not status.refresh()  # nothing changed
+    settings["module_wheels"]["enable"] = False
+    assert status.refresh() and status.version == version + 1
+    assert status.missing_text() == "Wheels, Fuel modules off"
+
+
+def test_disabled_module_data_not_read_and_cleared(ui_env, monkeypatch):
+    from tinypedal.module_info import minfo
+    from tinypedal.setting import cfg
+
+    monkeypatch.setattr(minfo.fuel, "amountCurrent", 42.0)
+    monkeypatch.setattr(minfo.delta, "deltaBest", -0.5)
+    widget = new_widget({"show_delta_best": True, "slow_data_update_interval": 0})
+    try:
+        widget.timerEvent(None)
+        assert widget.fuel == 42.0 and widget.delta_best == -0.5
+        cfg.user.setting["module_fuel"]["enable"] = False
+        cfg.user.setting["module_delta"]["enable"] = False
+        widget.tick = 0  # next update checks module state
+        widget.timerEvent(None)
+        assert not widget.use_fuel and not widget.use_delta
+        assert widget.fuel == 0.0 and widget.delta_best == 0.0  # cleared, never frozen
+        assert widget.modules.missing_text() == "Fuel, Delta modules off"
+        widget.grab()  # notice drawn
+        cfg.user.setting["module_fuel"]["enable"] = True  # turned back on: picked up
+        widget.tick = 0
+        widget.timerEvent(None)
+        assert widget.use_fuel and widget.fuel == 42.0
+    finally:
+        widget.deleteLater()
+
+
+def test_enable_required_modules(ui_env, monkeypatch):
+    from tinypedal import module_control
+    from tinypedal.setting import cfg
+
+    started = []
+    monkeypatch.setattr(module_control.ModuleControl, "start", lambda self, name="": started.append(name))
+    cfg.user.setting["module_wheels"]["enable"] = False
+    widget = new_widget({"enable_required_modules": True})
+    try:
+        assert started == ["module_wheels"]
+        assert cfg.user.setting["module_wheels"]["enable"] is True
+        assert not widget.modules.missing
+    finally:
+        widget.deleteLater()
+
+
+def test_gauge_survives_non_finite_module_data(ui_env):
+    import math
+
+    widget = new_widget()
+    try:
+        for value in (math.nan, math.inf, -math.inf):
+            widget.fuel = widget.fuel_capacity = widget.fuel_start = widget.refuel = value
+            widget.grab()  # must not abort Qt
+    finally:
+        widget.deleteLater()
+
+
+# --- Dynamic size
+def test_debounce_applies_stable_value_only():
+    from tinypedal.widget._black_box.sizing import Debounce
+
+    debounce = Debounce("a", delay=2.0)
+    assert debounce.update("b", 0.0) == "a"
+    assert debounce.update("c", 1.0) == "a"  # new candidate restarts waiting
+    assert debounce.update("c", 2.5) == "a"
+    assert debounce.update("c", 3.0) == "c"
+    assert debounce.update("c", 3.1) == "c"
+    assert Debounce("a", 0).update("b", 0.0) == "b"
+
+
+def test_fit_content():
+    from tinypedal.widget._black_box.sizing import fit_content
+
+    assert fit_content(200, 100) == (200, 100, 1.0, 0.0, 0.0)
+    both = fit_content(200, 100, 400, 400)
+    assert (both.width, both.height, both.scale) == (400, 400, 2.0)
+    assert both.offset_x == 0 and both.offset_y == 100  # centered vertically
+    width_only = fit_content(200, 100, 100, 0)
+    assert (width_only.width, width_only.height, width_only.scale) == (100, 50, 0.5)
+    assert fit_content(200, 100, float("nan"), -5).scale == 1.0  # invalid: follow content
+
+
+def test_anchored_position():
+    from tinypedal.widget._black_box.sizing import anchored_position
+
+    assert anchored_position(100, 100, 300, 200, 300, 150, "Top Left") == (100, 100)
+    assert anchored_position(100, 100, 300, 200, 250, 150, "Bottom Right") == (150, 150)
+    assert anchored_position(100, 100, 300, 200, 200, 200, "Top Center") == (150, 100)
+
+
+def test_auto_resize_starts_compact_and_grows_with_data(ui_env, monkeypatch):
+    from tinypedal.module_info import minfo
+    from tinypedal.widget._black_box import reader
+
+    clock = [0.0]
+    monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
+    widget = new_widget({"enable_auto_resize": True, "slow_data_update_interval": 0, "resize_delay": 1.0,
+                         "show_battery_bar": True, "show_damage_panel": False})
+    try:
+        compact_h, compact_w = widget.height(), widget.width()
+        assert not widget.row_energy and not widget.row_battery  # nothing empty before data
+        monkeypatch.setattr(minfo.energy, "available", True)
+        monkeypatch.setattr(minfo.hybrid, "batteryCharge", 60.0)
+        widget.timerEvent(None)  # data arrived: waits for delay
+        assert widget.height() == compact_h
+        clock[0] = 1.5
+        widget.timerEvent(None)
+        assert widget.row_energy and widget.row_battery
+        assert widget.height() > compact_h and widget.width() > compact_w
+        monkeypatch.setattr(minfo.energy, "available", False)  # other car: shrinks again
+        clock[0] = 2.0
+        widget.timerEvent(None)
+        clock[0] = 3.5
+        widget.timerEvent(None)
+        assert not widget.row_energy
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_stint_row_appears_with_data(ui_env):
+    from tinypedal.widget._black_box.sizing import Presence
+
+    widget = new_widget({"enable_auto_resize": True, "show_stint_comparison": True})
+    try:
+        assert not widget.row_stint
+        widget.stint_wear = 1.2
+        assert widget.current_presence().stint
+        widget.relayout(widget.current_presence())
+        assert widget.row_stint
+        widget.relayout(Presence(stint=False))
+        assert not widget.row_stint
+    finally:
+        widget.deleteLater()
+
+
+def test_auto_resize_disabled_keeps_size(ui_env, monkeypatch):
+    from tinypedal.widget._black_box import reader
+
+    clock = [0.0]
+    monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
+    widget = new_widget({"enable_auto_resize": False, "slow_data_update_interval": 0, "resize_delay": 0})
+    try:
+        size = widget.size()
+        clock[0] = 10.0
+        widget.timerEvent(None)
+        assert widget.size() == size and widget.row_energy
+    finally:
+        widget.deleteLater()
+
+
+def test_fixed_size_scales_content(ui_env):
+    widget = new_widget({"fixed_width": 300, "fixed_height": 300})
+    try:
+        assert (widget.width(), widget.height()) == (300, 300)
+        natural = widget.car_layout
+        assert widget.fit.scale == pytest.approx(min(300 / natural.width, 300 / natural.height))
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_block_scales_change_geometry(ui_env):
+    base = new_widget({"show_damage_panel": False})  # rows would stretch to panel height
+    tyre, row = base.rects_tyre[0].height(), base.bottom_rows[0][0].height()
+    base.deleteLater()
+    widget = new_widget({"tyre_scale": 1.5, "gauge_row_scale": 2.0, "center_column_scale": 1.5})
+    try:
+        assert widget.rects_tyre[0].height() == pytest.approx(tyre * 1.5, abs=1)
+        assert widget.bottom_rows[0][0].height() == pytest.approx(row * 2, abs=1)
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_resize_keeps_anchor(ui_env):
+    widget = new_widget({"resize_anchor": "Bottom Right", "enable_auto_resize": True})
+    try:
+        widget.show()
+        widget.move(500, 400)
+        right, bottom = widget.x() + widget.width(), widget.y() + widget.height()
+        from tinypedal.widget._black_box.sizing import Presence
+
+        widget.relayout(Presence(energy_row=False, battery=False, abs=False, tc=False))
+        assert widget.x() + widget.width() == right
+        assert widget.y() + widget.height() == bottom
+    finally:
+        widget.close()
+        widget.deleteLater()
+
+
+def test_gear_speed_cluster_fills_center_column(ui_env, monkeypatch):
+    widget = new_widget()
+    try:
+        assert "speed" not in widget.center_order  # drawn inside gear block
+        drawn = {}
+        monkeypatch.setattr(widget, "draw_center_item", lambda painter, name, rect: drawn.__setitem__(name, rect))
+        widget.draw_center(None, widget.rect_center)
+        bottom = max(rect.bottom() for rect in drawn.values())
+        assert bottom == pytest.approx(widget.rect_center.bottom(), abs=0.5)  # no empty room left
+        assert drawn["gear"].height() > widget.item_height("gear")  # gear block took free room
+    finally:
+        widget.deleteLater()
+
+
+def test_gear_speed_cluster_can_be_split(ui_env):
+    widget = new_widget({"show_gear_speed_cluster": False})
+    try:
+        assert "speed" in widget.center_order
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_damage_panel_outside_bottom_right(ui_env):
+    """Own column on the outside right, flush with the widget bottom right corner"""
+    widget = new_widget({"show_stint_comparison": True})
+    try:
+        panel = widget.rect_damage
+        assert panel.right() == pytest.approx(widget.width(), abs=1)
+        assert panel.bottom() == pytest.approx(widget.height(), abs=1)
+        content_right = max(rect.right() for rect in widget.rects_tyre)
+        assert panel.left() > content_right  # outside the car view
+        for _left, right in widget.bottom_rows:
+            assert right.right() < panel.left()  # rows keep full content width, beside panel column
+    finally:
+        widget.deleteLater()
+
+
+def test_damage_panel_can_be_hidden(ui_env):
+    with_panel = new_widget()
+    width = with_panel.width()
+    with_panel.deleteLater()
+    widget = new_widget({"show_damage_panel": False})
+    try:
+        assert widget.rect_damage.isNull()
+        assert widget.width() < width  # no empty column left
+    finally:
+        widget.deleteLater()
+
+
+def test_no_background_above_damage_panel(ui_env):
+    widget = new_widget()
+    try:
+        panel = widget.rect_damage
+        above = panel.center() - panel.center()  # origin, reused as point type
+        above.setX(panel.center().x())
+        above.setY(panel.top() - widget.unit)
+        assert not widget.path_bg.contains(above)  # transparent above the panel
+        assert widget.path_bg.contains(panel.center())  # tab under the panel
+        # grab() has no alpha: unpainted room shows window color, never widget background
+        image = widget.grab().toImage()
+        background = widget.wcfg["background_color"].upper()
+        assert image.pixelColor(int(above.x()), int(above.y())).name().upper() != background
+        assert image.pixelColor(1, widget.height() // 2).name().upper() == background  # main area painted
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("corner", ["Bottom Right", "Bottom Left", "Top Right", "Top Left"])
+def test_damage_panel_any_corner(ui_env, corner):
+    widget = new_widget({"damage_panel_position": corner})
+    try:
+        panel = widget.rect_damage
+        width, height = widget.width(), widget.height()
+        if corner.endswith("Left"):
+            assert panel.left() == 0
+            assert panel.right() < min(rect.left() for rect in widget.rects_tyre)  # outside main area
+        else:
+            assert panel.right() == pytest.approx(width, abs=1)
+            assert panel.left() > max(rect.right() for rect in widget.rects_tyre)
+        if corner.startswith("Top"):
+            assert panel.top() == 0
+        else:
+            assert panel.bottom() == pytest.approx(height, abs=1)
+        assert widget.path_bg.contains(panel.center())  # same background as widget
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_damage_panel_car_shape():
+    from PySide6.QtCore import QRectF
+
+    from tinypedal.widget._black_box.damage import damage_geometry
+
+    rect = QRectF(0, 0, 80, 100)
+    shapes = damage_geometry(rect, 16)
+    body = shapes.shell.boundingRect()
+    for wheel in shapes.wheels:  # wheels stick out beside the body
+        assert wheel.right() <= body.left() + 0.5 or wheel.left() >= body.right() - 0.5
+    assert shapes.integrity.width() > rect.width() * 0.25  # readable reading in the middle
+
+
+def test_damage_panel_card_against_widget(ui_env):
+    """Own card, right against the black box card: no gap, not merged"""
+    widget = new_widget()
+    try:
+        panel, main = widget.rect_damage, widget.rect_main
+        assert panel.left() == pytest.approx(main.right(), abs=0.5)  # touching
+        assert widget.path_bg.contains(panel.center()) and widget.path_bg.contains(main.center())
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("corner", ["Bottom Right", "Top Left"])
+def test_centering_ignores_damage_panel(ui_env, corner):
+    widget = new_widget({"damage_panel_position": corner})
+    try:
+        area = widget.centering_rect()
+        assert area.width() == pytest.approx(widget.width() - widget.rect_damage.width(), abs=1)
+        if corner.endswith("Left"):
+            assert area.x() == pytest.approx(widget.rect_damage.width(), abs=1)
+        else:
+            assert area.x() == 0
+    finally:
+        widget.deleteLater()
+
+
+def test_center_action_uses_centering_rect(ui_env, monkeypatch):
+    """Base overlay: centered part is centering_rect, whole widget by default"""
+    from PySide6.QtCore import QRect
+
+    widget = new_widget()
+    try:
+        screen_w = widget.screen().geometry().width()
+        area = widget.centering_rect()
+        widget.move((screen_w - area.width()) // 2 - area.x(), 0)
+        assert widget.x() + area.x() + area.width() // 2 == pytest.approx(screen_w // 2, abs=1)
+        from tinypedal.widget._base import Overlay
+
+        assert Overlay.centering_rect(widget) == QRect(0, 0, widget.width(), widget.height())
+    finally:
+        widget.deleteLater()

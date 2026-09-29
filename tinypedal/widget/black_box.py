@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
 
 from .. import units
@@ -42,9 +42,11 @@ from ._black_box.center import CenterPainter
 from ._black_box.common import LAYOUT_COMPACT
 from ._black_box.damage import DamagePainter, damage_geometry
 from ._black_box.layout import LayoutInput, build_layout
+from ._black_box.modules import ModuleStatus, enable_modules, required_modules
 from ._black_box.panels import PanelPainter
 from ._black_box.reader import DataReader
 from ._black_box.recorder import EventLog, Recorder
+from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
 from ._black_box.state import (
     StintTracker,
     Trend,
@@ -55,6 +57,7 @@ from ._black_box.state import (
 from ._black_box.trace import TracePainter
 from ._black_box.wheels import ColorFade, WheelPainter
 from ._common import warning_flash
+from ._painter import OverlayStyle
 from ._style import StyledConfig
 
 
@@ -83,6 +86,7 @@ class Realtime(
         self.config_thresholds(wcfg)
         self.config_recorder(wcfg)
         self.reset_data()
+        self.config_modules(wcfg)
 
     # Config
     def config_fonts(self, wcfg):
@@ -110,6 +114,7 @@ class Realtime(
     def config_data_needs(self, wcfg):
         """Only read data that is actually displayed (compact layout skips the whole center column)"""
         self.layout_mode = min(max(int(wcfg["layout"]), 0), 2)
+        self.gear_speed_cluster = bool(wcfg["show_gear_speed_cluster"])
         self.center_order = self.ordered_center_items()
         self.has_center = self.layout_mode != LAYOUT_COMPACT and bool(self.center_order)
         shown = set(self.center_order) if self.has_center else set()
@@ -146,26 +151,52 @@ class Realtime(
         self.tick = 0
 
     def config_geometry(self, wcfg):
-        """Widget geometry, see _black_box.layout"""
+        """Widget geometry, see _black_box.layout & _black_box.sizing"""
         self.show_battery_bar = bool(wcfg["show_battery_bar"])
         self.battery_bar_left = wcfg["battery_bar_position"] != "Right"
         self.max_steer = min(max(wcfg["maximum_wheel_angle"], 0), 45) if wcfg["show_wheel_angle"] else 0
-        bottom_rows = int(self.need_fuel_rows) + int(self.need_energy_rows) + int(self.show_stint)
+        self.auto_resize = bool(wcfg["enable_auto_resize"])
+        self.resize_anchor = wcfg["resize_anchor"]
+        self.fixed_size = (wcfg["fixed_width"], wcfg["fixed_height"])
+        # Auto resize: start compact, blocks appear with their data. Otherwise room for every block.
+        self.presence = COMPACT_START if self.auto_resize else Presence()
+        self.resize_debounce = Debounce(self.presence, wcfg["resize_delay"])
+        self.fit = Fit(0, 0, 1.0, 0.0, 0.0)
+        self.relayout(self.presence)
+
+    def relayout(self, presence: Presence):
+        """Build geometry for blocks present now, resize widget keeping anchor in place"""
+        wcfg = self.wcfg
+        self.presence = presence
+        self.row_fuel = self.need_fuel_rows and presence.fuel_row
+        self.row_energy = self.need_energy_rows and presence.energy_row
+        self.row_battery = self.show_battery_bar and presence.battery
+        self.row_stint = self.show_stint and presence.stint
+        center_items = [
+            name for name in self.center_order
+            if not ((name == "abs" and not presence.abs) or (name == "tc" and not presence.tc))
+        ]
         layout = build_layout(LayoutInput(
             unit=self.unit,
             layout_mode=self.layout_mode,
             has_center=self.has_center,
-            center_height=self.center_height(),
+            center_height=self.center_height(center_items),
             max_steer=self.max_steer,
             show_caption=bool(wcfg["show_caption"]),
             show_leds=bool(wcfg["show_rpm_leds"]),
-            show_battery_bar=self.show_battery_bar,
+            show_battery_bar=self.row_battery,
             battery_bar_left=self.battery_bar_left,
             battery_bar_scale=min(max(wcfg["battery_bar_scale"], 0.3), 4),
-            bottom_rows=bottom_rows,
+            bottom_rows=int(self.row_fuel) + int(self.row_energy) + int(self.row_stint),
             trace_height_scale=min(max(wcfg["trace_height_scale"], 1), 8) if self.show_recorder else 0,
             event_lines=min(max(wcfg["number_of_event_log_lines"], 1), 10) if self.show_event_log else 0,
             damage_panel_scale=min(max(wcfg["damage_panel_scale"], 2), 10) if self.show_damage_panel else 0,
+            tyre_scale=min(max(wcfg["tyre_scale"], 0.5), 3),
+            center_scale=min(max(wcfg["center_column_scale"], 0.5), 3),
+            row_scale=min(max(wcfg["gauge_row_scale"], 0.5), 3),
+            event_scale=min(max(wcfg["event_log_line_scale"], 0.5), 3),
+            corner_scale=OverlayStyle.corner_scale,
+            damage_position=wcfg["damage_panel_position"],
         ))
         self.car_layout = layout
         # Painting code reads geometry as widget attributes (width & height stay QWidget methods)
@@ -173,7 +204,28 @@ class Realtime(
             if name not in ("width", "height"):
                 setattr(self, name, value)
         self.damage_shapes = damage_geometry(layout.rect_damage, self.unit)
-        self.resize(int(layout.width), int(layout.height))
+        self.static_layer = None
+        self.fit = fit_content(layout.width, layout.height, *self.fixed_size)
+        self.resize_anchored(self.fit.width, self.fit.height)
+
+    def centering_rect(self) -> QRect:
+        """Center actions center the black box card only, damage panel card left out"""
+        fit = self.fit
+        main = self.rect_main
+        return QRectF(
+            fit.offset_x + main.x() * fit.scale, fit.offset_y + main.y() * fit.scale,
+            main.width() * fit.scale, main.height() * fit.scale,
+        ).toRect()
+
+    def resize_anchored(self, width: int, height: int):
+        """Resize, moving widget so the anchor corner stays where it was"""
+        old_w, old_h = self.width(), self.height()
+        if (old_w, old_h) == (width, height):
+            return
+        if self.isVisible():
+            x, y = anchored_position(self.x(), self.y(), old_w, old_h, width, height, self.resize_anchor)
+            self.move(x, y)
+        self.resize(width, height)
 
     def config_style(self, wcfg):
         """Pens, visual effects & caches"""
@@ -279,6 +331,17 @@ class Realtime(
             "impact": self.text["impact"],
         }
 
+    def config_modules(self, wcfg):
+        """Data modules needed by enabled options, checked about once per second"""
+        settings = self.cfg.user.setting
+        self.modules = ModuleStatus(settings, required_modules(wcfg))
+        if wcfg["enable_required_modules"] and self.modules.missing:
+            enable_modules(self.modules.missing, settings, self.cfg.save)
+            self.modules.refresh()
+        self.module_check_every = max(round(1000 / max(wcfg["update_interval"], 1)), 1)
+        self.show_module_warning = bool(wcfg["show_module_warning"])
+        self.apply_module_status()
+
     def reset_data(self):
         """Last data"""
         self.wheels = [WheelState() for _ in range(4)]
@@ -345,6 +408,7 @@ class Realtime(
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawPixmap(0, 0, self.background_layer())
+        self.apply_fit(painter)
         if self.led_h:
             self.draw_leds(painter, self.rect_leds)
         for index, wheel in enumerate(self.wheels):
@@ -352,7 +416,7 @@ class Realtime(
             self.draw_disc(painter, index, self.rects_disc[index], wheel)
         if not self.rect_center.isNull():
             self.draw_center(painter, self.rect_center)
-        if self.show_battery_bar:
+        if self.row_battery:
             self.draw_battery_bar(painter, self.rect_battery)
         self.draw_bottom_rows(painter)
         if self.show_damage_panel:
@@ -361,3 +425,5 @@ class Realtime(
             self.draw_trace(painter, self.rect_trace)
         if self.show_event_log:
             self.draw_event_log(painter)
+        if self.show_module_warning and self.modules.missing:
+            self.draw_module_warning(painter)

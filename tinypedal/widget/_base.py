@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, overload
 
-from PySide6.QtCore import QBasicTimer, Qt, Slot
+from PySide6.QtCore import QBasicTimer, QRect, Qt, Slot
 from PySide6.QtGui import QFont, QFontMetrics, QPalette, QPixmap
 from PySide6.QtWidgets import QGridLayout, QLayout, QMenu, QWidget
 
@@ -245,10 +245,12 @@ class Base(QWidget):
 
         action = untr(selected_action.text())
         if action == "Center Horizontally":
-            self.move((self.screen().geometry().width() - self.width()) // 2, self.y())
+            area = self.centering_rect()
+            self.move((self.screen().geometry().width() - area.width()) // 2 - area.x(), self.y())
             self.__save_position()
         elif action == "Center Vertically":
-            self.move(self.x(), (self.screen().geometry().height() - self.height()) // 2)
+            area = self.centering_rect()
+            self.move(self.x(), (self.screen().geometry().height() - area.height()) // 2 - area.y())
             self.__save_position()
         elif action == "Config":
             config_widget(self.widget_name)
@@ -256,6 +258,14 @@ class Base(QWidget):
             reload_widget(self.widget_name)
         elif action == "Disable":
             disable_widget(self.widget_name)
+
+    def centering_rect(self) -> QRect:
+        """Part of widget centered on screen by Center actions (widget coordinates)
+
+        Whole widget by default. A widget with a side part (such as an attached panel) can
+        return its main part only, so that part is what ends up centered.
+        """
+        return self.rect()
 
     def closeEvent(self, event):
         """Ignore attempts to close via window Close button when VR compatibility enabled"""
