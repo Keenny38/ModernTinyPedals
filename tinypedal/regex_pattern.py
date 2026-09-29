@@ -100,6 +100,7 @@ CFG_STRING = (
     "^process_id$|"
     "^version$|"
     # Partial match
+    "by_class|"
     "by_compound|"
     "file_name|"
     "prefix|"
@@ -250,6 +251,8 @@ CHOICE_COMMON = MappingProxyType({
     CFG_WINDOW_COLOR_THEME: ("Light", "Dark"),
     CFG_LANGUAGE: ("English", "Français"),
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
+    "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
+    "^tyre_load_display$": ("Percent", "Kilogram", "Newton"),
     "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),
     "^resize_anchor$": ("Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"),
     # Per widget unit, "Global" = use Units setting

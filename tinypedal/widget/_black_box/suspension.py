@@ -22,9 +22,13 @@ Black box widget, suspension (coilover) beside each brake
 Drawn from the side: top mount fixed to the chassis, damper body, shaft, and a coil spring
 down to the bottom mount. The bottom mount moves 1:1 with the car: its offset from the static
 position (tick) is the real suspension offset in millimeters, at the same scale as the tyre
-drawing (tyre height = real tyre diameter). suspension_motion_scale can magnify it. The spring
-is tinted by compression / rebound speed and turns bump stop color (pulsing) near the end of
-travel.
+drawing (tyre height = real tyre diameter). suspension_motion_scale can magnify it.
+
+The coilover turns with its wheel around the tyre center, like the brake disc, so the corner
+reads as one assembly when steering. Tyre & disc move by the wheel travel (spring travel / motion ratio), which is larger than
+the spring travel on a pushrod or rocker suspension. The spring is tinted by damper speed in two
+zones (low speed body motion, high speed kerbs & bumps), and turns bump stop color (pulsing)
+while the bump rubber is loaded, or airborne color while the wheel is in the air.
 """
 
 from __future__ import annotations
@@ -32,11 +36,14 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
-from .state import WheelState
+from .state import WheelState, damper_tint
 
 COILS = 6
-MAX_COMPRESSION = 0.5  # shortest spring, relative to longest
-STATIC_LENGTH = 0.75  # spring length at static position, relative to longest
+MAX_COMPRESSION = 0.8  # shortest spring is 1 - this, relative to longest
+# Spring length at static position, relative to longest: 0.5 puts the wheel mount at the
+# middle of the suspension rect, which is as tall as the tyre, so at the tyre (hub) center
+STATIC_LENGTH = 0.5
+DAMPER_LENGTH = 0.18  # damper body, relative to longest spring (shorter than shortest spring)
 TYRE_DIAMETER_MM = 680.0  # tyre drawing height stands for this real diameter (race tyre)
 
 
@@ -77,14 +84,15 @@ class SuspensionPainter:
         wcfg = self.wcfg
         width = rect.width()
         cap_h, top, full = spring_frame(rect)  # top: chassis mount, fixed
-        bottom = top + spring_length_real(full, wheel.susp_offset, self.susp_pixels_per_mm)  # wheel mount, 1:1
+        # Wheel mount follows the wheel (same travel as tyre & disc), so the corner moves as one piece
+        bottom = top + spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index))
         center = rect.center().x()
         spring_color = self.spring_color(wheel)
         mount_color = QColor(wcfg["suspension_spring_color"]).darker(160)
 
         painter.save()
         if wheel.steer and index < len(self.rects_tyre):  # same rotation as tyre & disc
-            pivot = self.rects_tyre[index].center()
+            pivot = self.rects_tyre[index].center() + QPointF(0, self.wheel_shift(index, wheel))
             painter.translate(pivot)
             painter.rotate(wheel.steer)
             painter.translate(-pivot)
@@ -100,7 +108,7 @@ class SuspensionPainter:
                                     link_h), mount_color.lighter(130))
         # Damper body (fixed to chassis) and shaft (to wheel mount), behind the spring
         body_w = width * 0.42
-        body = QRectF(center - body_w / 2, top, body_w, full * MAX_COMPRESSION)
+        body = QRectF(center - body_w / 2, top, body_w, full * DAMPER_LENGTH)
         shade = QLinearGradient(body.left(), 0, body.right(), 0)
         shade.setColorAt(0.0, mount_color.darker(130))
         shade.setColorAt(0.5, mount_color.lighter(150))
@@ -124,12 +132,34 @@ class SuspensionPainter:
         painter.setBrush(spring_color.darker(120))
         painter.drawRoundedRect(QRectF(rect.left(), bottom, width, cap_h), radius, radius)
         # Static position tick, where the wheel mount sits with the car at rest: the gap between
-        # it and the wheel mount is the real suspension offset
+        # it and the wheel mount is the real suspension offset. Hollow while the rest position is
+        # only estimated (joined while driving, Wheels module off): offset is then approximate.
         static_y = top + full * STATIC_LENGTH
         tick = QColor(wcfg["font_color"])
-        tick.setAlpha(140)
-        painter.fillRect(QRectF(rect.left() - width * 0.15, static_y, width * 0.2, max(cap_h * 0.35, 1)), tick)
+        tick_rect = QRectF(rect.left() - width * 0.15, static_y, width * 0.2, max(cap_h * 0.35, 1))
+        if wheel.susp_estimated:
+            tick.setAlpha(110)
+            painter.setPen(QPen(tick, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(tick_rect)
+        else:
+            tick.setAlpha(140)
+            painter.fillRect(tick_rect, tick)
         painter.restore()
+
+    def wheel_shift(self, index: int, wheel: WheelState) -> float:
+        """Vertical shift of tyre & disc by the real wheel travel, 1:1 with the car
+        (0 if suspension hidden or wheel motion disabled)"""
+        if not self.wheel_suspension_motion or index >= len(self.rects_susp) or self.rects_susp[index].isNull():
+            return 0.0
+        _, _, full = spring_frame(self.rects_susp[index])
+        return spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index)) - full * STATIC_LENGTH
+
+    def pixels_per_mm(self, index: int) -> float:
+        """Scale of wheel index: tyre drawing height stands for that tyre's real diameter"""
+        diameters = getattr(self, "tyre_diameters", ())
+        diameter = diameters[index] if index < len(diameters) else TYRE_DIAMETER_MM
+        return self.susp_pixels_per_mm * TYRE_DIAMETER_MM / max(diameter, 1)
 
     @staticmethod
     def coil_path(left: float, right: float, top: float, bottom: float) -> QPainterPath:
@@ -144,14 +174,17 @@ class SuspensionPainter:
         return path
 
     def spring_color(self, wheel: WheelState) -> QColor:
-        """Bump stop color near end of travel, else tinted by compression / rebound speed"""
+        """Airborne or bump stop color (pulsing), else tinted by damper speed in two zones"""
         wcfg = self.wcfg
-        if wheel.susp_travel >= wcfg["suspension_bump_threshold"]:
+        if wheel.susp_airborne:
+            return QColor(self.pulsed_color(wcfg["suspension_airborne_color"], self.pulse()))
+        if wheel.susp_bump:
             return QColor(self.pulsed_color(wcfg["suspension_bump_color"], self.pulse()))
         base = QColor(wcfg["suspension_spring_color"])
         velocity = wheel.susp_velocity
+        amount = damper_tint(velocity, self.susp_low_speed, self.susp_full_speed)
         if velocity > 0:
-            return blend(base, QColor(wcfg["suspension_compression_color"]), velocity)
+            return blend(base, QColor(wcfg["suspension_compression_color"]), amount)
         if velocity < 0:
-            return blend(base, QColor(wcfg["suspension_rebound_color"]), -velocity)
+            return blend(base, QColor(wcfg["suspension_rebound_color"]), amount)
         return base

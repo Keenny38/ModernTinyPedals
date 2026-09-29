@@ -79,6 +79,13 @@ def _user_prior_2_50_1(dict_user: dict):
     wheel_status = dict_user.get("wheel_status")
     if isinstance(wheel_status, dict) and "black_box" not in dict_user:
         dict_user["black_box"] = wheel_status.copy()
+    # Black box: effect on/off options merged into their duration / frequency (0 = off)
+    if isinstance(dict_user.get("black_box"), dict):
+        box = dict_user["black_box"]
+        if box.get("enable_smooth_transition") is False:
+            box["smooth_transition_duration"] = 0
+        if box.get("enable_alert_pulse") is False:
+            box["alert_pulse_frequency"] = 0
     # Black box: refuel & fuel rows merged into fuel gauge, refill & energy rows into energy gauge
     black_box = dict_user.get("black_box")
     if isinstance(black_box, dict):

@@ -20,6 +20,8 @@ def widget(ui_env, monkeypatch):
     fake = SimpleNamespace(
         tyre=SimpleNamespace(
             surface_temperature_avg=lambda: (80.0, 81.0, 82.0, 83.0),
+            inner_temperature_avg=lambda: (80.0, 81.0, 82.0, 83.0),
+            load=lambda: (3000.0, 3000.0, 3500.0, 3500.0),
             pressure=lambda: (170.0, 171.0, 172.0, 173.0),
             wear=lambda: (0.9, 0.8, 0.5, 0.2),
             surface_temperature_ico=lambda: (70.0, 80.0, 90.0) * 4,
@@ -37,8 +39,10 @@ def widget(ui_env, monkeypatch):
         wheel=SimpleNamespace(
             is_detached=lambda: (False, True, False, False), suspension_damage=lambda: (0.0, 0.0, 0.6, 0.0),
             suspension_deflection=lambda: (40.0, 45.0, 50.0, 55.0), toe=lambda: (0.0, 0.0, 0.0, 0.0),
+            suspension_force=lambda: (4000.0, 4000.0, 4500.0, 4500.0),
         ),
-        inputs=SimpleNamespace(brake_raw=lambda: 0.9, throttle=lambda: 0.0, brake=lambda: 0.9),
+        inputs=SimpleNamespace(
+            brake_raw=lambda: 0.9, throttle=lambda: 0.0, brake=lambda: 0.9, steering=lambda: 0.0),
         engine=SimpleNamespace(gear=lambda: -1, rpm=lambda: 6000.0, rpm_max=lambda: 8000.0),
         switch=SimpleNamespace(
             abs_active=lambda: True, tc_active=lambda: False, abs_level=lambda: 4, tc_level=lambda: -1,
@@ -172,10 +176,11 @@ def test_tyre_status_and_damage(widget):
 
 def test_temperature_bands_order(widget):
     widget.heatmap_tyre = [((0.0, ("", "#A")), (75.0, ("", "#B")), (85.0, ("", "#C")))] * 4
-    left = widget.band_colors(0, (70.0, 80.0, 90.0))  # inner, center, outer
+    # Game reports left, center, right of the car (not inner / outer): drawn as is on every wheel
+    left = widget.band_colors(0, (70.0, 80.0, 90.0))
     right = widget.band_colors(1, (70.0, 80.0, 90.0))
-    assert left == ("#C", "#B", "#A")  # left wheel: outer on left side
-    assert right == ("#A", "#B", "#C")  # right wheel: inner on left side
+    assert left == ("#A", "#B", "#C")  # left wheel: its outer side (game left) on the left
+    assert right == ("#A", "#B", "#C")  # right wheel: its inner side (game left) on the left
 
 
 def test_pressure_target(widget):
@@ -936,6 +941,7 @@ def test_diagnostic_readings_skip_their_readers_when_off(widget, monkeypatch):
         ("wheel", "ride_height"), ("brake", "pressure"),
     ):
         monkeypatch.setattr(getattr(api.read, group), name, spy(f"{group}.{name}"), raising=False)
+    widget.show_suspension = False  # suspension reads tyre load itself (wheel in the air)
     widget.timerEvent(None)
     assert not called, f"read while hidden: {called}"
 
@@ -946,7 +952,7 @@ def test_diagnostic_readings_reach_wheel_state(ui_env, monkeypatch):
 
     monkeypatch.setattr(api.read.tyre, "carcass_temperature", lambda: (91.0, 92.0, 93.0, 94.0), raising=False)
     monkeypatch.setattr(api.read.tyre, "load", lambda: (1000.0, 1000.0, 500.0, 500.0), raising=False)
-    monkeypatch.setattr(api.read.wheel, "ride_height", lambda: (0.032, 0.033, 0.058, 0.059), raising=False)
+    monkeypatch.setattr(api.read.wheel, "ride_height", lambda: (32.0, 33.0, 58.0, 59.0), raising=False)
     monkeypatch.setattr(api.read.brake, "pressure", lambda: (0.8, 0.8, 0.4, 0.4), raising=False)
     monkeypatch.setattr(minfo.wheels, "camberAngle", [-3.2, -3.1, -2.4, -2.3])
     monkeypatch.setattr(minfo.wheels, "slipAngle", [4.1, -2.0, 0.8, 0.9])
@@ -956,7 +962,7 @@ def test_diagnostic_readings_reach_wheel_state(ui_env, monkeypatch):
         instance.timerEvent(None)
         front_left, rear_left = instance.wheels[0], instance.wheels[2]
         assert front_left.carcass_temp == 91.0
-        assert front_left.ride_height == pytest.approx(32.0)  # meters converted to millimeters
+        assert front_left.ride_height == pytest.approx(32.0)  # API already in millimeters: not scaled again
         assert front_left.brake_pressure == pytest.approx(80.0)
         assert front_left.load_ratio == pytest.approx(100 / 3)  # share of the car's total load
         assert rear_left.load_ratio == pytest.approx(100 / 6)
@@ -1192,7 +1198,7 @@ def test_slow_data_read_every_n_updates(widget, monkeypatch):
     widget.tick = 0
     widget.timerEvent(None)
     assert widget.wheels[0].tyre_temp == 80.0
-    monkeypatch.setattr(api.read.tyre, "surface_temperature_avg", lambda: (99.0,) * 4)
+    monkeypatch.setattr(api.read.tyre, "inner_temperature_avg", lambda: (99.0,) * 4)
     widget.timerEvent(None)
     widget.timerEvent(None)
     assert widget.wheels[0].tyre_temp == 80.0  # slow data waits

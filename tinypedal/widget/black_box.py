@@ -48,11 +48,14 @@ from ._black_box.reader import DataReader
 from ._black_box.recorder import EventLog, Recorder
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
 from ._black_box.state import (
+    BumpStop,
+    SteerConvention,
     StintTracker,
     SuspensionTravel,
     Trend,
     WheelState,
     display_overrides,
+    parse_class_targets,
     parse_compound_targets,
 )
 from ._black_box.suspension import TYRE_DIAMETER_MM, SuspensionPainter
@@ -148,6 +151,7 @@ class Realtime(
         self.need_energy_rows = bool(wcfg["show_energy_gauge"])
         self.show_damage_panel = bool(wcfg["show_damage_panel"])
         self.show_suspension = bool(wcfg["show_suspension"])
+        self.wheel_suspension_motion = self.show_suspension and bool(wcfg["enable_wheel_suspension_motion"])
         self.need_damage_total = self.show_recorder or self.show_event_log
         # Slow changing data (temperatures, pressure, wear, damage, fuel) is read every N updates
         slow_interval = max(wcfg["slow_data_update_interval"], 0)
@@ -241,6 +245,7 @@ class Realtime(
         self.pen_temp = QPen(QColor(wcfg["font_color_temperature"]))
         self.outline_width = max(wcfg["warning_outline_width"], 1)
         self.pen_lock = QPen(QColor(wcfg["wheel_lock_color"]), self.outline_width)
+        self.pen_locked = QPen(QColor(wcfg["wheel_lock_color"]), self.outline_width * 2)
         self.pen_spin = QPen(QColor(wcfg["wheel_spin_color"]), self.outline_width)
         self.pen_detached = QPen(QColor(wcfg["wheel_detached_color"]), self.outline_width, Qt.PenStyle.DashLine)
         self.pen_caption = QPen(QColor(wcfg["font_color_caption"]))
@@ -249,10 +254,11 @@ class Realtime(
         self.pen_indicator_active = QPen(QColor(wcfg["font_color_indicator_active"]))
         # Visual effects
         self.depth_effects = bool(wcfg["enable_depth_effects"])
-        self.alert_pulse = bool(wcfg["enable_alert_pulse"])
+        # Frequency / duration 0 turns the effect off
+        self.alert_pulse = wcfg["alert_pulse_frequency"] > 0
         self.pulse_frequency = min(max(wcfg["alert_pulse_frequency"], 0.2), 5)
-        self.smooth_transition = bool(wcfg["enable_smooth_transition"])
-        fade_time = max(wcfg["smooth_transition_duration"], 0) if self.smooth_transition else 0
+        fade_time = max(wcfg["smooth_transition_duration"], 0)
+        self.smooth_transition = fade_time > 0
         self.tyre_fades = [ColorFade(fade_time) for _ in range(4)]
         self.brake_fades = [ColorFade(fade_time) for _ in range(4)]
         # Tyre gloss: light on the left edge, shade on the right, turns with the tyre
@@ -285,6 +291,7 @@ class Realtime(
         self.fuel_label = "gal" if fuel_unit == "Gallon" else "L"
         self.pres_decimals = 0 if pres_unit == "kPa" else 1
         self.sign_text = "°" if wcfg["show_degree_sign"] else ""
+        self.tyre_temp_source = wcfg["tyre_temperature_source"]
         self.heatmap_tyre = 4 * [self.load_tyre_heatmap(wcfg["heatmap_name_tyre"])]
         self.heatmap_brake = 4 * [self.load_brake_heatmap(wcfg["heatmap_name_brake"])]
 
@@ -297,8 +304,13 @@ class Realtime(
             wcfg["tyre_temperature_cold_threshold"], self.temp_warning,
         )
         self.wheel_targets = [self.default_targets] * 4
-        self.brake_cold = wcfg["brake_temperature_cold_threshold"]
-        self.brake_hot = wcfg["brake_temperature_hot_threshold"]
+        # Brake disc window: by car class (carbon or iron discs work in very different ranges),
+        # else the cold & hot thresholds
+        self.default_brake_window = (
+            wcfg["brake_temperature_cold_threshold"], wcfg["brake_temperature_hot_threshold"])
+        self.brake_class_targets = parse_class_targets(wcfg["brake_target_by_class"])
+        self.brake_cold, self.brake_hot = self.default_brake_window
+        self.brake_class = None
         # Trends: needed for arrows, and for warming phase of cold tyres
         self.show_temp_trend = bool(wcfg["show_tyre_temperature_trend"])
         self.show_pres_trend = bool(wcfg["show_tyre_pressure_trend"])
@@ -307,9 +319,18 @@ class Realtime(
         window = wcfg["tyre_trend_duration"]
         self.temp_trends = [Trend(window, wcfg["tyre_heat_trend_threshold"]) for _ in range(4)]
         self.pres_trends = [Trend(window, wcfg["tyre_pressure_trend_threshold"]) for _ in range(4)]
-        self.lock_threshold = -abs(wcfg["wheel_lock_threshold"])
+        # Brake disc: heats within a braking zone and cools on the next straight, short window
+        self.show_brake_trend = bool(wcfg["show_brake_temperature_trend"]) and bool(wcfg["show_brake_temperature"])
+        self.brake_trends = [
+            Trend(wcfg["brake_trend_duration"], wcfg["brake_heat_trend_threshold"]) for _ in range(4)]
+        self.lock_threshold = -abs(wcfg["wheel_lock_threshold"])  # past peak grip
+        self.locked_threshold = min(-abs(wcfg["wheel_locked_threshold"]), self.lock_threshold)  # wheel stopped
         self.spin_threshold = abs(wcfg["wheel_spin_threshold"])
         self.min_speed = max(wcfg["slip_warning_minimum_speed"], 0) / 3.6  # km/h to m/s
+        # Damper speeds (mm/s): low / high speed knee, and speed of full tint
+        self.susp_low_speed = max(wcfg["suspension_low_speed_threshold"], 1.0)
+        self.susp_full_speed = max(wcfg["suspension_velocity_scale"], self.susp_low_speed + 1)
+        self.susp_bump_margin = max(wcfg["suspension_bump_force_margin"], 0.05)
         self.battery_low = wcfg["battery_low_threshold"]
         self.battery_high = wcfg["battery_high_threshold"]
         # Flashes a few times on crossing a threshold, then stays highlighted. Without the
@@ -360,6 +381,7 @@ class Realtime(
         self.damage_puncture: tuple = (False,) * 4
         self.damage_suspension: tuple = (0.0,) * 4
         self.impact_time = None
+        self.recorder_impact_time = None  # last game impact time seen by incident recorder
         self.impact_position: tuple = (0.0, 0.0)
         self.impact_visible = False  # last impact cone shown
         self.abs_active = False
@@ -405,8 +427,12 @@ class Realtime(
         self.battery_warning = 0  # 0 none, 1 low charge, 2 high charge
         self.battery_highlight = True  # warning color shown now (flash phase, or flash disabled)
         self.stint = StintTracker()
-        velocity_scale = self.wcfg["suspension_velocity_scale"]
-        self.susp_travels = [SuspensionTravel(velocity_scale) for _ in range(4)]
+        self.susp_travels = [SuspensionTravel() for _ in range(4)]
+        self.tyre_diameters = (TYRE_DIAMETER_MM,) * 4  # millimeters, from Wheels module once learned
+        self.vehicle_name = ""
+        self.steer_convention = SteerConvention()
+        self.steer_vehicle = None
+        self.susp_bumps = [BumpStop() for _ in range(4)]
         self.susp_vehicle = None
         self.stint_wear = self.stint_wear_delta = 0.0
         self.stint_pressure = self.stint_pressure_delta = 0.0
@@ -423,10 +449,16 @@ class Realtime(
         if self.led_h:
             self.draw_leds(painter, self.rect_leds)
         for index, wheel in enumerate(self.wheels):
-            # Top view: suspension travel is up & down, across the screen, so it never moves
-            # tyre or disc on screen (that would read as the wheel moving along the car)
+            # Tyre & disc hang on the suspension, like on the car: they move with the wheel
+            # mount, by the real offset (screen vertical axis = suspension axis, as the spring)
+            shift = self.wheel_shift(index, wheel)
+            if shift:
+                painter.save()
+                painter.translate(0, shift)
             self.draw_tyre(painter, self.rects_tyre[index], wheel, index)
             self.draw_disc(painter, index, self.rects_disc[index], wheel)
+            if shift:
+                painter.restore()
             if self.show_suspension:
                 self.draw_suspension(painter, self.rects_susp[index], wheel, index)
         if not self.rect_center.isNull():

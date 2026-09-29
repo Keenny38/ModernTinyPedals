@@ -55,6 +55,7 @@ from .state import (
 )
 
 SHADOW_COLOR = QColor(0, 0, 0, 90)
+GRAVITY = 9.80665  # N per kg
 
 
 class ColorFade:
@@ -109,7 +110,7 @@ class WheelPainter:
     """Draw tyres & brakes"""
 
     def pulse(self, now: float | None = None) -> float:
-        """Alert intensity, 0.35 to 1, pulsing at alert_pulse_frequency (1 if pulse disabled)"""
+        """Alert intensity, 0.35 to 1, pulsing at alert_pulse_frequency (1 if frequency is 0)"""
         if not self.alert_pulse:
             return 1.0
         phase = math.sin(2 * math.pi * self.pulse_frequency * (monotonic() if now is None else now))
@@ -163,8 +164,14 @@ class WheelPainter:
             painter.fillPath(path, self.tyre_fades[index].color_of(wheel.tyre_color, now))
         if self.depth_effects:  # rounded rubber look: light on one side, shade on the other
             painter.fillPath(path, self.brush_gloss)
-        if wheel.warning:
-            painter.setPen(self.pulsed_pen(self.pen_lock if wheel.warning == "lock" else self.pen_spin, strength))
+        if wheel.warning:  # locked wheel: twice as thick as past peak grip
+            if wheel.warning == "locked":
+                pen = self.pen_locked
+            elif wheel.warning == "lock":
+                pen = self.pen_lock
+            else:
+                pen = self.pen_spin
+            painter.setPen(self.pulsed_pen(pen, strength))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
         painter.restore()
@@ -199,7 +206,7 @@ class WheelPainter:
             lines.append((READING_WEAR_PER_LAP, f"{PREFIX_WEAR_PER_LAP}{max(wheel.wear_per_lap, 0):.2f}",
                           self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_load"]:
-            lines.append((READING_LOAD, f"{PREFIX_LOAD}{wheel.load_ratio:.0f}%", self.font_small, 0.9, "", ""))
+            lines.append((READING_LOAD, f"{PREFIX_LOAD}{self.format_load(wheel)}", self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_slip_angle"]:
             lines.append((READING_SLIP_ANGLE, f"{PREFIX_SLIP_ANGLE}{wheel.slip_angle:+.1f}",
                           self.font_small, 0.9, "", ""))
@@ -230,6 +237,18 @@ class WheelPainter:
             painter.setPen(qcolor(text_color) if text_color else self.pen_temp)
             painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
         painter.setFont(self.font())
+
+    def format_load(self, wheel: WheelState) -> str:
+        """Tyre load: share of the car total (default), or absolute load in kg or N
+
+        Absolute load shows aero downforce: the same share at 80 and 250 km/h is a very different load.
+        """
+        display = self.wcfg["tyre_load_display"]
+        if display == "Kilogram":
+            return f"{wheel.load / GRAVITY:.0f}"
+        if display == "Newton":
+            return f"{wheel.load:.0f}"
+        return f"{wheel.load_ratio:.0f}%"
 
     def tyre_phase_color(self, index: int, wheel: WheelState) -> str:
         """Tyre temperature text color: hot, cold, warming (cold but rising), "" if in window"""
@@ -305,7 +324,10 @@ class WheelPainter:
         # Temperature, remaining thickness and pressure share the text area, tallest first
         rows = []
         if wcfg["show_brake_temperature"]:
-            rows.append((self.format_temp(wheel.brake_temp), self.font(), self.brake_phase_color(wheel), 1.3))
+            text = self.format_temp(wheel.brake_temp)
+            if self.show_brake_trend:
+                text += TREND_SYMBOLS[wheel.brake_trend]
+            rows.append((text, self.font(), self.brake_phase_color(wheel), 1.3))
         if wcfg["show_brake_wear"] and wheel.brake_wear_known:
             low = wheel.brake_wear < wcfg["brake_wear_warning_threshold"]
             color = wcfg["font_color_brake_wear_warning"] if low else wcfg["font_color"]

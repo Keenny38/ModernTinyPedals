@@ -969,6 +969,7 @@ class WheelsInfo:
         "minSuspensionPosition",
         "maxSuspensionPosition",
         "motionRatio",
+        "wheelRadius",
         "minimumStaticWeight",
         "totalStaticWeight",
         "totalDynamicWeight",
@@ -1017,6 +1018,7 @@ class WheelsInfo:
         self.minSuspensionPosition: list[float] = list(WHEELS_ZERO)
         self.maxSuspensionPosition: list[float] = list(WHEELS_ZERO)
         self.motionRatio: list[float] = list(WHEELS_ZERO)
+        self.wheelRadius: list[float] = list(WHEELS_ZERO)  # rolling radius (meters), 0 until learned
         # Weight
         self.minimumStaticWeight: float = 0.0
         self.totalStaticWeight: float = 0.0

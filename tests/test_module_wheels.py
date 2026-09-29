@@ -72,10 +72,22 @@ def rolling(monkeypatch, *, speed=50.0, rotation=(-25.0,) * 4, brake=0.0, elapse
     set_reader(monkeypatch, "vehicle", "vehicle_name", "car")
 
 
-def test_locking_time_only_accumulates_while_braking_and_locked(driving, monkeypatch):
-    rolling(monkeypatch, elapsed=0.0)
-    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+def learn_radius(generator, monkeypatch):
+    """Roll straight with a slight left/right difference, as on track: wheel radius gets learned"""
+    rolling(monkeypatch, rotation=(-25.0, -25.02, -25.0, -25.02), elapsed=0.0)
     generator.send(0)
+
+
+def test_no_lock_before_wheel_radius_is_learned(driving, monkeypatch):
+    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+    rolling(monkeypatch, rotation=(-25.0,) * 4, brake=0.9, elapsed=0.0)
+    generator.send(0)  # identical rotations: radius not learned
+    assert list(driving.slipRatio) == [0.0] * 4
+
+
+def test_locking_time_only_accumulates_while_braking_and_locked(driving, monkeypatch):
+    generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+    learn_radius(generator, monkeypatch)
     # Coasting with a locked front wheel: no brake input, so nothing is recorded
     rolling(monkeypatch, rotation=(0.0, -25.0, -25.0, -25.0), brake=0.0, elapsed=0.1)
     generator.send(0)
@@ -88,6 +100,7 @@ def test_locking_time_only_accumulates_while_braking_and_locked(driving, monkeyp
 
 def test_locking_time_resets_on_a_new_lap(driving, monkeypatch):
     generator = calc_wheel_rotation(driving, 1.5, 1.5, 0.1, -0.2)
+    learn_radius(generator, monkeypatch)
     for elapsed in (0.0, 0.1, 0.2):
         rolling(monkeypatch, rotation=(0.0,) * 4, brake=0.9, elapsed=elapsed, start=0.0)
         generator.send(0)

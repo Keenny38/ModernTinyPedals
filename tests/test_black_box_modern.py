@@ -43,7 +43,7 @@ def test_impact_freezes_after_post_trigger_time():
         incident = recorder.add(sample(time, 0.0), 0.0)
     assert incident is not None
     assert incident.reason == "impact"
-    assert incident.peak_g > 30  # 40 m/s to 0 in 0.1 s
+    assert incident.peak_g > 15  # 40 m/s to 0, measured over the 150 ms window (2 samples here)
     assert incident.samples[-1].time - incident.time == pytest.approx(1.0, abs=0.11)
     assert recorder.last_incident is incident
 
@@ -222,7 +222,7 @@ def test_alerts_pulse_and_keep_repainting(ui_env, monkeypatch):
 
 def test_visual_effects_can_be_disabled(ui_env):
     widget = new_widget({"enable_depth_effects": False,
-                         "enable_smooth_transition": False, "enable_alert_pulse": False})
+                         "smooth_transition_duration": 0, "alert_pulse_frequency": 0})
     try:
         assert not widget.depth_effects and not widget.alert_pulse
         assert widget.tyre_fades[0].duration == 0
@@ -404,6 +404,7 @@ def test_required_modules_follow_options():
     assert required_modules({}) == ()
     assert required_modules({"show_delta_best": True, "show_fuel_gauge": True}) == ("module_fuel", "module_delta")
     assert "module_wheels" in required_modules({"show_slip_warning": True})
+    assert "module_wheels" in required_modules({"show_suspension": True})  # range, static, motion ratio
 
 
 def test_module_status_refresh_and_notice():
@@ -756,16 +757,57 @@ def test_center_action_uses_centering_rect(ui_env, monkeypatch):
 
 # --- Suspension (coilover beside brakes)
 def test_suspension_travel_uses_module_range():
-    from tinypedal.widget._black_box.state import SuspensionTravel
+    from tinypedal.widget._black_box.state import DAMPER_FILTER_TIME, SuspensionTravel
 
-    travel = SuspensionTravel(velocity_scale=100)
+    travel = SuspensionTravel()
     assert travel.update(50.0, 0.0, 20.0, 80.0) == (0.5, 0.0)  # first sample: no speed yet
     position, velocity = travel.update(60.0, 0.1, 20.0, 80.0)  # 10 mm in 0.1 s = 100 mm/s
-    assert position == pytest.approx(40 / 60) and velocity == pytest.approx(1.0)
-    position, velocity = travel.update(55.0, 0.2, 20.0, 80.0)
-    assert velocity == pytest.approx(-0.5)  # rebound
-    assert travel.update(200.0, 0.3, 20.0, 80.0)[0] == 1.0  # clamped at bump stop
+    assert position == pytest.approx(40 / 60)
+    assert velocity == pytest.approx(100 * (1 - math.exp(-0.1 / DAMPER_FILTER_TIME)))  # smoothed, mm/s
+    for step in range(2, 12):  # steady 100 mm/s: filter settles on it
+        velocity = travel.update(60.0 + (step - 1) * 10, step / 10, 20.0, 400.0)[1]
+    assert velocity == pytest.approx(100, rel=0.01)
+    assert travel.update(0.0, 5.0, 20.0, 80.0)[1] == 0.0  # long gap (pause): no speed
+    assert travel.update(200.0, 5.1, 20.0, 80.0)[0] == 1.0  # clamped at end of range
     assert travel.ratio(35.0, 20.0, 80.0) == pytest.approx(0.25)
+
+
+def test_damper_speed_tint_has_low_and_high_speed_zones():
+    from tinypedal.widget._black_box.state import LOW_SPEED_TINT, damper_tint
+
+    assert damper_tint(0.0, 50, 150) == 0.0
+    assert damper_tint(25.0, 50, 150) == pytest.approx(LOW_SPEED_TINT / 2)  # body motion: light tint
+    assert damper_tint(-50.0, 50, 150) == pytest.approx(LOW_SPEED_TINT)  # knee, rebound same as bump
+    assert damper_tint(100.0, 50, 150) == pytest.approx(LOW_SPEED_TINT + (1 - LOW_SPEED_TINT) / 2)
+    assert damper_tint(900.0, 50, 150) == 1.0  # kerb strike: full color
+    assert damper_tint(math.nan, 50, 150) == 0.0
+
+
+def test_wheel_travel_from_motion_ratio():
+    from tinypedal.widget._black_box.state import wheel_offset
+
+    assert wheel_offset(10.0, 0.5) == pytest.approx(20.0)  # pushrod: wheel moves twice the spring
+    assert wheel_offset(10.0, 0.0) == 10.0  # ratio not learned yet: spring travel
+    assert wheel_offset(10.0, 50.0) == 10.0  # implausible ratio ignored
+
+
+def test_bump_stop_from_force_above_spring_line():
+    from tinypedal.widget._black_box.state import BUMP_MIN_SAMPLES, BumpStop
+
+    bump = BumpStop()
+    rate, preload = 100.0, 1000.0  # N/mm, N
+    bump.update(50.0, preload + rate * 50, 10.0, 50.0, 0.3)  # travel seen up to 50 mm
+    for step in range(BUMP_MIN_SAMPLES * 3):  # slow motion over 0 to 29 mm: pure spring
+        position = step % 30
+        assert not bump.update(position, preload + rate * position, 10.0, 50.0, 0.3)
+    line = bump.line()
+    assert line == pytest.approx((preload, rate))
+    assert not bump.update(45.0, preload + rate * 45, 10.0, 50.0, 0.3)  # deep but on the spring line
+    assert bump.update(45.0, (preload + rate * 45) * 1.6, 10.0, 50.0, 0.3)  # bump rubber loaded
+    assert not bump.update(45.0, (preload + rate * 45) * 1.6, 400.0, 50.0, 0.3)  # damper force: not judged
+    assert not bump.update(10.0, (preload + rate * 10) * 1.6, 10.0, 50.0, 0.3)  # low in travel: never bump
+    bump.reset()
+    assert bump.line() is None and not bump.update(45.0, 9000.0, 0.0, 50.0, 0.3)
 
 
 def test_suspension_travel_learns_range_without_module():
@@ -819,21 +861,34 @@ def test_suspension_live_and_dynamic(ui_env, monkeypatch):
     monkeypatch.setattr(minfo.wheels, "minSuspensionPosition", [20.0] * 4)
     monkeypatch.setattr(minfo.wheels, "maxSuspensionPosition", [80.0] * 4)
     monkeypatch.setattr(minfo.wheels, "staticSuspensionPosition", [40.0] * 4)
+    monkeypatch.setattr(minfo.wheels, "motionRatio", [0.5, 0.5, 1.0, 0.0])
     positions = [(50.0, 50.0, 50.0, 50.0)]
+    loads = [(3000.0, 3000.0, 3000.0, 3000.0)]
     monkeypatch.setattr(api.read.wheel, "suspension_deflection", lambda: positions[0])
+    monkeypatch.setattr(api.read.wheel, "suspension_force", lambda: (4000.0,) * 4, raising=False)
+    monkeypatch.setattr(api.read.tyre, "load", lambda: loads[0], raising=False)
+    monkeypatch.setattr(api.read.vehicle, "speed", lambda: 40.0)
     widget = new_widget()
     try:
+        widget.alert_pulse = True
         widget.timerEvent(None)
-        assert widget.wheels[0].susp_travel == pytest.approx(0.5)
-        assert widget.wheels[0].susp_static == pytest.approx(1 / 3)
+        front_left = widget.wheels[0]
+        assert front_left.susp_travel == pytest.approx(0.5)
+        assert front_left.susp_static == pytest.approx(1 / 3)
+        assert front_left.susp_offset == pytest.approx(10.0)  # spring 10 mm compressed
+        assert front_left.susp_wheel_offset == pytest.approx(20.0)  # wheel: 10 mm / 0.5 motion ratio
+        assert not front_left.susp_estimated  # static position from Wheels module
         positions[0] = (79.0, 50.0, 30.0, 50.0)
+        loads[0] = (3000.0, 0.0, 3000.0, 3000.0)  # front right in the air
         clock[0] = 0.05
         widget.timerEvent(None)
-        front_left, _, rear_left, _ = widget.wheels
+        front_left, front_right, rear_left, _ = widget.wheels
         assert front_left.susp_velocity > 0 and rear_left.susp_velocity < 0
-        bump = widget.spring_color(front_left)  # near bump stop
-        assert widget.animating()  # bump stop pulses
-        assert widget.spring_color(rear_left) != bump
+        assert front_right.susp_airborne and not front_left.susp_airborne
+        assert not front_left.susp_bump  # deep in travel, but no force rise: not a bump stop
+        assert widget.animating()  # airborne wheel pulses
+        airborne = widget.spring_color(front_right)
+        assert widget.spring_color(rear_left) != airborne
         widget.grab()
     finally:
         widget.deleteLater()
@@ -843,8 +898,8 @@ def test_spring_shortens_when_compressed():
     from tinypedal.widget._black_box.suspension import spring_length
 
     assert spring_length(100, 0) == 100
-    assert spring_length(100, 1) == 50
-    assert spring_length(100, 5) == 50  # clamped
+    assert spring_length(100, 1) == pytest.approx(20)
+    assert spring_length(100, 5) == pytest.approx(20)  # clamped
 
 
 def test_suspension_offset_is_real_millimeters():
@@ -880,7 +935,7 @@ def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
 
 def test_suspension_turns_with_wheel(ui_env, monkeypatch):
     """Anchored to its wheel: same rotation around tyre center as tyre & disc"""
-    from PySide6.QtGui import QPainter
+    from PySide6.QtGui import QImage, QPainter
 
     widget = new_widget()
     try:
@@ -890,8 +945,6 @@ def test_suspension_turns_with_wheel(ui_env, monkeypatch):
                                                                          original(painter, angle))[1])
         wheel = widget.wheels[0]
         wheel.steer = 12.0
-        from PySide6.QtGui import QImage
-
         image = QImage(widget.size(), QImage.Format.Format_ARGB32)
         painter = QPainter(image)
         widget.draw_suspension(painter, widget.rects_susp[0], wheel, 0)
@@ -907,14 +960,282 @@ def test_suspension_turns_with_wheel(ui_env, monkeypatch):
         widget.deleteLater()
 
 
-def test_tyre_and_disc_stay_in_place_with_suspension(ui_env, monkeypatch):
-    """Top view: suspension travel is across the screen, it must not move tyre or disc"""
+def test_tyre_and_disc_move_with_suspension(ui_env, monkeypatch):
+    """Tyre & disc move by the real wheel travel (not spring travel), 1:1"""
+    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+
     widget = new_widget()
     try:
-        widget.wheels[0].susp_offset = 30.0
+        wheel = widget.wheels[0]
+        assert widget.wheel_shift(0, wheel) == 0.0  # static position
+        wheel.susp_offset = 5.0  # spring 5 mm...
+        wheel.susp_wheel_offset = 10.0  # ...wheel 10 mm compressed: goes up by wheel travel
+        expected = -10 * widget.rects_tyre[0].height() / TYRE_DIAMETER_MM
+        assert widget.wheel_shift(0, wheel) == pytest.approx(expected)
+        wheel.susp_wheel_offset = -10.0  # droop: goes down
+        assert widget.wheel_shift(0, wheel) == pytest.approx(-expected)
+        wheel.susp_wheel_offset = 10.0
         shifts = []
         monkeypatch.setattr(widget, "draw_tyre", lambda painter, *args: shifts.append(painter.transform().dy()))
         widget.grab()
-        assert shifts and all(shift == 0 for shift in shifts)
+        assert shifts and shifts[0] == pytest.approx(expected)
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("overrides", [{"enable_wheel_suspension_motion": False}, {"show_suspension": False}])
+def test_wheels_fixed_when_motion_off(ui_env, overrides):
+    widget = new_widget(overrides)
+    try:
+        widget.wheels[0].susp_offset = widget.wheels[0].susp_wheel_offset = 30.0
+        assert widget.wheel_shift(0, widget.wheels[0]) == 0.0
+    finally:
+        widget.deleteLater()
+
+
+def test_wheel_mount_at_tyre_center(ui_env):
+    """At static position, the suspension wheel mount is at the tyre (hub) & disc center"""
+    from tinypedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame
+
+    widget = new_widget()
+    try:
+        for index in range(4):
+            _, top, full = spring_frame(widget.rects_susp[index])
+            mount_y = top + full * STATIC_LENGTH
+            assert mount_y == pytest.approx(widget.rects_tyre[index].center().y(), abs=0.5)
+            assert mount_y == pytest.approx(widget.rects_disc[index].center().y(), abs=0.5)
+    finally:
+        widget.deleteLater()
+
+
+# --- Realistic dynamics: recorder, brakes by class, tyre temperature source, slip
+def test_game_impact_triggers_incident():
+    recorder = Recorder(duration=5.0, sample_interval=0.05, deceleration_threshold=4.0, post_trigger=0.5)
+    recorder.add(sample(0.0, 40.0), 0.0)
+    recorder.add(sample(0.05, 39.9), 0.0, impact=True)  # light contact: no speed drop, game reports it
+    assert recorder.pending is not None and recorder.pending[1] == "impact"
+
+
+def test_braking_noise_is_not_an_impact():
+    """Hypercar braking at 3.5 g with a noisy 20 ms step (one step alone reads over 4 g)"""
+    recorder = Recorder(duration=5.0, sample_interval=0.02, deceleration_threshold=4.0)
+    speed, time = 80.0, 0.0
+    for step in range(100):
+        time += 0.02
+        drop = 3.5 * rec.GRAVITY * 0.02 * (1.4 if step % 2 else 0.6)  # jitter around 3.5 g
+        speed -= drop
+        recorder.add(sample(time, speed), 0.0)
+    assert recorder.pending is None and not recorder.incidents
+
+
+def test_recorder_uses_game_impact_time(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    impact = [10.0]
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: impact[0])
+    widget = new_widget({"show_incident_recorder": True})
+    try:
+        widget.update_recorder(30.0)  # impact before widget started: ignored
+        assert widget.recorder.pending is None
+        impact[0] = 55.0
+        widget.recorder.samples[-1] = widget.recorder.samples[-1]._replace(time=-1.0)  # next sample not skipped
+        widget.update_recorder(30.0)
+        assert widget.recorder.pending is not None and widget.recorder.pending[1] == "impact"
+    finally:
+        widget.deleteLater()
+
+
+def test_brake_window_by_car_class(ui_env):
+    from tinypedal.widget._black_box.state import class_target, parse_class_targets
+
+    targets = parse_class_targets("Hypercar=400-950; GT3=250-650; LMGT3=260-640; broken")
+    assert class_target(targets, "LMGT3") == (260.0, 640.0)  # longest name wins
+    assert class_target(targets, "hypercar") == (400.0, 950.0)
+    assert class_target(targets, "GTE") is None
+    widget = new_widget({"brake_temperature_cold_threshold": 100, "brake_temperature_hot_threshold": 500})
+    try:
+        widget.update_brake_window("Hypercar")
+        assert (widget.brake_cold, widget.brake_hot) == (400, 950)  # carbon disc window
+        widget.update_brake_window("GT3")
+        assert (widget.brake_cold, widget.brake_hot) == (250, 650)  # iron disc window
+        widget.update_brake_window("Unknown class")
+        assert (widget.brake_cold, widget.brake_hot) == (100, 500)  # fallback thresholds
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("source, reader", [
+    ("Inner layer", "inner_temperature_avg"), ("Carcass", "carcass_temperature"),
+    ("Surface", "surface_temperature_avg"),
+])
+def test_tyre_temperature_source(ui_env, monkeypatch, source, reader):
+    from tinypedal.api_control import api
+
+    for name in ("inner_temperature_avg", "carcass_temperature", "surface_temperature_avg"):
+        value = 95.0 if name == reader else 40.0
+        monkeypatch.setattr(api.read.tyre, name, lambda value=value: (value,) * 4, raising=False)
+    widget = new_widget({"tyre_temperature_source": source})
+    try:
+        assert widget.read_tyre_temperature() == (95.0,) * 4
+    finally:
+        widget.deleteLater()
+
+
+def test_slip_ratio_against_each_wheel_ground_speed():
+    from tinypedal.module.module_wheels import wheel_ground_speed
+
+    assert wheel_ground_speed(-31.0, 30.0) == 31.0  # outer wheel in a corner, sign of game axis dropped
+    assert wheel_ground_speed(0.0, 30.0) == 30.0  # not reported: vehicle speed
+    assert wheel_ground_speed(math.nan, 30.0) == 30.0
+
+
+# --- Steering convention, slip levels, load, brake trend, tyre size, estimated rest position
+@pytest.mark.parametrize("front_left, front_right, mirrored, inverted", [
+    (12.0, 10.0, False, False),  # vehicle frame, positive right: as is
+    (12.0, -10.0, True, False),  # toe-in per wheel: right side flipped
+    (-12.0, -10.0, False, True),  # vehicle frame, positive left: all flipped
+    (-12.0, 10.0, True, True),
+])
+def test_steer_convention_learned_from_steering(front_left, front_right, mirrored, inverted):
+    from tinypedal.widget._black_box.state import STEER_VOTES, SteerConvention
+
+    convention = SteerConvention()
+    convention.update(front_left, front_right, 0.5)
+    assert convention.screen_angle(1, front_right) == front_right  # not settled yet: game angle
+    for _ in range(STEER_VOTES):
+        convention.update(front_left, front_right, 0.5)  # steering right
+        convention.update(0.3, 0.3, 0.0)  # straight: static toe, no vote
+    assert (convention.mirrored, convention.inverted) == (mirrored, inverted)
+    assert convention.screen_angle(0, front_left) > 0 and convention.screen_angle(1, front_right) > 0
+    convention.reset()
+    assert not convention.mirrored and not convention.inverted
+
+
+def test_slip_past_peak_and_locked_wheel(ui_env):
+    widget = new_widget({"wheel_lock_threshold": 0.15, "wheel_locked_threshold": 0.8})
+    try:
+        assert widget.slip_warning(-0.1, 30.0, True) == ""  # around peak grip
+        assert widget.slip_warning(-0.3, 30.0, True) == "lock"  # past peak
+        assert widget.slip_warning(-0.95, 30.0, True) == "locked"  # wheel stopped
+        assert widget.slip_warning(0.3, 30.0, False) == "spin"
+        widget.wheels[0].warning = "locked"
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("display, text", [("Percent", "25%"), ("Kilogram", "408"), ("Newton", "4000")])
+def test_tyre_load_display(ui_env, display, text):
+    widget = new_widget({"tyre_load_display": display})
+    try:
+        wheel = widget.wheels[0]
+        wheel.load, wheel.load_ratio = 4000.0, 25.0
+        assert widget.format_load(wheel) == text
+    finally:
+        widget.deleteLater()
+
+
+def test_brake_temperature_trend(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.widget._black_box import reader
+
+    clock = [0.0]
+    temps = [300.0]
+    monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(api.read.brake, "temperature", lambda: (temps[0],) * 4)
+    widget = new_widget({"show_brake_temperature_trend": True, "slow_data_update_interval": 0})
+    try:
+        for step in range(30):  # braking zone: +200 C per second
+            clock[0] = step * 0.1
+            temps[0] = 300.0 + step * 20
+            widget.timerEvent(None)
+        assert widget.wheels[0].brake_trend == 1
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_tyre_diameter_from_wheel_radius(ui_env):
+    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+
+    widget = new_widget()
+    try:
+        base = widget.susp_pixels_per_mm
+        widget.update_tyre_diameters([0.355, 0.355, 0.0, 9.0])  # hypercar front, rear not learned
+        assert widget.tyre_diameters == (710, 710, TYRE_DIAMETER_MM, TYRE_DIAMETER_MM)
+        assert widget.pixels_per_mm(0) == pytest.approx(base * TYRE_DIAMETER_MM / 710)
+        assert widget.pixels_per_mm(2) == pytest.approx(base)
+    finally:
+        widget.deleteLater()
+
+
+def test_estimated_rest_position_flagged():
+    from tinypedal.widget._black_box.state import SuspensionTravel
+
+    travel = SuspensionTravel()
+    travel.offset(40.0)
+    assert travel.estimated  # no static position: averaged
+    travel.offset(40.0, 38.0)
+    assert not travel.estimated
+
+
+def test_vehicle_name_read_with_slow_data_only(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    calls = []
+    monkeypatch.setattr(api.read.vehicle, "vehicle_name", lambda: calls.append(1) or "car")
+    widget = new_widget({"slow_data_update_interval": 1000, "update_interval": 20})
+    try:
+        for _ in range(10):
+            widget.timerEvent(None)
+        assert len(calls) == 1  # 10 updates, one slow update
+    finally:
+        widget.deleteLater()
+
+
+# --- Bug fixes: new session impact, slip before radius is known
+def test_new_session_impact_time_is_not_an_impact(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.widget._black_box.reader import is_new_impact
+
+    assert is_new_impact(55.0, 10.0)
+    assert not is_new_impact(0.0, 120.0)  # session restart: time stamp back to 0
+    assert not is_new_impact(30.0, 120.0)  # new session, older stamp
+    assert not is_new_impact(math.nan, 10.0)
+    impact = [120.0]
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: impact[0])
+    widget = new_widget({"show_incident_recorder": True})
+    try:
+        widget.update_recorder(30.0)
+        impact[0] = 0.0  # new session
+        widget.recorder.samples[-1] = widget.recorder.samples[-1]._replace(time=-1.0)
+        widget.update_recorder(30.0)
+        assert widget.recorder.pending is None
+        widget.update_damage_panel((0.0,) * 4)
+        widget.update_damage_panel((0.0,) * 4)
+        assert not widget.impact_visible
+    finally:
+        widget.deleteLater()
+
+
+def test_no_slip_before_wheel_radius_is_known():
+    from tinypedal import calculation as calc
+
+    assert calc.slip_ratio(50.0, 0.0, 30.0) == 0  # radius not learned: not a locked wheel
+    assert calc.slip_ratio(50.0, 0.33, 30.0) == pytest.approx(50 * 0.33 / 30 - 1)
+
+
+def test_wheel_mount_moves_with_tyre(ui_env):
+    """Spring wheel mount and tyre move by the same wheel travel: the corner stays in one piece"""
+    from tinypedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame, spring_length_real
+
+    widget = new_widget()
+    try:
+        wheel = widget.wheels[0]
+        wheel.susp_offset, wheel.susp_wheel_offset = 5.0, 12.0  # motion ratio about 0.4
+        _, top, full = spring_frame(widget.rects_susp[0])
+        mount_shift = top + spring_length_real(full, wheel.susp_wheel_offset, widget.pixels_per_mm(0)) - (
+            top + full * STATIC_LENGTH)
+        assert mount_shift == pytest.approx(widget.wheel_shift(0, wheel))
     finally:
         widget.deleteLater()

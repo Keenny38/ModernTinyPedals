@@ -38,7 +38,7 @@ MODULE_FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
     "module_wheels": ("Wheels", (
         "show_slip_warning", "show_wheel_camber", "show_tyre_slip_angle",
         "show_tyre_wear_per_lap", "show_tyre_wear_end_stint", "show_brake_wear", "show_wheel_locking",
-        "show_stint_comparison", "show_tyre_status",
+        "show_stint_comparison", "show_tyre_status", "show_suspension",
     )),
     "module_fuel": ("Fuel", ("show_fuel_gauge", "show_energy_gauge", "show_tyre_wear_end_stint")),
     "module_delta": ("Delta", ("show_delta_best", "show_laptime")),

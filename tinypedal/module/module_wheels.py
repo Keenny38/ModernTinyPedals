@@ -108,6 +108,12 @@ class Realtime(DataModule):
                     update_interval = self.idle_interval
 
 
+def wheel_ground_speed(wheel_speed: float, vehicle_speed: float) -> float:
+    """Ground speed of one wheel along its heading (m/s), vehicle speed if not reported"""
+    speed = abs(wheel_speed)
+    return speed if speed == speed and speed > 0 else vehicle_speed  # speed == speed: not NaN
+
+
 @generator_init
 def calc_wheel_rotation(
     output: WheelsInfo,
@@ -181,11 +187,13 @@ def calc_wheel_rotation(
             if rot_axle_r < -min_rot_axle and 0 < rot_bias_r < max_rot_bias_r:
                 radius_rear_ema = calc.exp_mov_avg(d_factor, radius_rear_ema, calc.rotation_radius(speed, rot_axle_r))
 
-        # Calculate slip ratio
-        slip_ratio[0] = calc.slip_ratio(wheel_rot[0], radius_front_ema, speed)
-        slip_ratio[1] = calc.slip_ratio(wheel_rot[1], radius_front_ema, speed)
-        slip_ratio[2] = calc.slip_ratio(wheel_rot[2], radius_rear_ema, speed)
-        slip_ratio[3] = calc.slip_ratio(wheel_rot[3], radius_rear_ema, speed)
+        # Calculate slip ratio, against each wheel's own ground speed: in a corner the outer
+        # wheels travel faster than the car center, which would read as false slip
+        wheel_speed = api.read.wheel.velocity_longitudinal()
+        slip_ratio[0] = calc.slip_ratio(wheel_rot[0], radius_front_ema, wheel_ground_speed(wheel_speed[0], speed))
+        slip_ratio[1] = calc.slip_ratio(wheel_rot[1], radius_front_ema, wheel_ground_speed(wheel_speed[1], speed))
+        slip_ratio[2] = calc.slip_ratio(wheel_rot[2], radius_rear_ema, wheel_ground_speed(wheel_speed[2], speed))
+        slip_ratio[3] = calc.slip_ratio(wheel_rot[3], radius_rear_ema, wheel_ground_speed(wheel_speed[3], speed))
 
         # Calculate wheel lock duration
         elapsed_time = api.read.timing.elapsed()
@@ -212,6 +220,7 @@ def calc_wheel_rotation(
         output.lockingPercentFront = locking_f
         output.lockingPercentRear = locking_r
         output.slipRatio[:] = slip_ratio
+        output.wheelRadius[:] = (radius_front_ema, radius_front_ema, radius_rear_ema, radius_rear_ema)
         output.lockingTime[:] = locking_time
 
 

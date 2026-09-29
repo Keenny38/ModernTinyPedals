@@ -23,6 +23,7 @@ Each module holds default options of its widgets, merged here into WIDGET_CATEGO
 WIDGET_DISPLAY_ORDER sets the order of widget list in UI & keybinding, and must list every widget.
 """
 
+from .black_box_ui import BLACK_BOX_UI
 from .brakes import WIDGET_BRAKES
 from .chassis import WIDGET_CHASSIS
 from .driver import WIDGET_DRIVER
@@ -31,7 +32,7 @@ from .fuel import WIDGET_FUEL
 from .standings import WIDGET_STANDINGS
 from .timing import WIDGET_TIMING
 from .track import WIDGET_TRACK
-from .tyres import BLACK_BOX_SECTIONS, WIDGET_TYRES
+from .tyres import WIDGET_TYRES
 
 WIDGET_CATEGORIES = (
     WIDGET_BRAKES,
@@ -45,10 +46,13 @@ WIDGET_CATEGORIES = (
     WIDGET_DRIVER,
 )
 
-# Config dialog sections per widget: {widget: {first option of section: section title}}
-WIDGET_OPTION_SECTIONS = {
-    "black_box": BLACK_BOX_SECTIONS,
+# Config dialog extras for widgets with many options: sections, simple mode, color themes,
+# profile overrides (see black_box_ui.OptionUI)
+WIDGET_OPTION_UI = {
+    "black_box": BLACK_BOX_UI,
 }
+# Config dialog sections per widget: {widget: {first option of section: section title}}
+WIDGET_OPTION_SECTIONS = {name: ui.sections for name, ui in WIDGET_OPTION_UI.items()}
 
 # Display order of widget list (UI, keyboard shortcuts)
 WIDGET_DISPLAY_ORDER = (

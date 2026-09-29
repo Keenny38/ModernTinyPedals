@@ -854,8 +854,8 @@ def yaw_rate(lateral_accel: float, speed: float, min_speed: float = 8) -> float:
 
 
 def slip_ratio(w_rotation: float, w_radius: float, v_speed: float) -> float:
-    """Slip ratio (percentage), speed unit in m/s"""
-    if v_speed > 1:
+    """Slip ratio (percentage), speed unit in m/s, 0 until wheel radius is known"""
+    if v_speed > 1 and w_radius > 0:
         return abs(w_rotation) * w_radius / v_speed - 1
     return 0
 

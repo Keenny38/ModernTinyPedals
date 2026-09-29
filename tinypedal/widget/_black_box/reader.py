@@ -41,10 +41,24 @@ from ...userfile.heatmap import (
 from .recorder import Sample, export_incident
 from .sizing import Presence
 from .state import (
+    AIRBORNE_LOAD,
     NO_STATUS,
     WheelState,
+    class_target,
     rounded,
+    wheel_offset,
 )
+from .suspension import TYRE_DIAMETER_MM
+
+MIN_AIRBORNE_SPEED = 5.0  # m/s, below this a light tyre load is a car at rest or jacked up
+
+
+def is_new_impact(impact_time: float, last_time: float) -> bool:
+    """Game impact time stamp moved forward: a new impact
+
+    It goes back to 0 (or lower) on a new session or restart, which is not an impact.
+    """
+    return math.isfinite(impact_time) and impact_time > 0 and impact_time > last_time
 
 
 class DataReader:
@@ -65,6 +79,8 @@ class DataReader:
             self.apply_module_status()
         self.tick += 1
         in_pits = api.read.vehicle.in_pits()  # read once, also used by compound matching
+        if slow:  # car only changes in pit: read with slow data, used by every part
+            self.vehicle_name = api.read.vehicle.vehicle_name()
         if self.need_compound:
             self.update_compound_state(in_pits)
         if slow:
@@ -81,7 +97,7 @@ class DataReader:
     def update_slow(self, in_pits):
         """Slow changing data: temperatures, pressure, wear, damage, fuel"""
         wcfg = self.wcfg
-        tyre_temp = api.read.tyre.surface_temperature_avg()
+        tyre_temp = self.read_tyre_temperature()
         brake_temp = api.read.brake.temperature()
         pressure = api.read.tyre.pressure() if self.need_pressure else WHEELS_ZERO
         tread = api.read.tyre.wear() if self.show_tyre_wear else WHEELS_ZERO  # remaining tread (fraction)
@@ -129,7 +145,13 @@ class DataReader:
                 wheel.temp_trend = self.temp_trends[index].update(now, wheel.tyre_temp, wheel.tyre_temp > -100)
             if self.show_pres_trend:
                 wheel.pressure_trend = self.pres_trends[index].update(now, wheel.pressure, wheel.pressure > 0)
+            if self.show_brake_trend:
+                wheel.brake_trend = self.brake_trends[index].update(now, wheel.brake_temp, wheel.brake_temp > -100)
+        if self.show_suspension and self.use_wheels:
+            self.update_tyre_diameters(minfo.wheels.wheelRadius)
 
+        if self.brake_class_targets and wcfg["show_brake_temperature"]:
+            self.update_brake_window(api.read.vehicle.class_name())
         if self.need_damage_total or self.show_damage_panel:
             self.body_damage = api.read.vehicle.damage_severity()
         if self.show_damage_panel:
@@ -157,6 +179,20 @@ class DataReader:
             self.energy_laps = minfo.energy.estimatedLaps
             self.energy_available = minfo.energy.available
 
+    def read_tyre_temperature(self) -> tuple[float, ...]:
+        """Tyre temperature that colors the tyre & drives its warnings (tyre_temperature_source)
+
+        Surface reacts within milliseconds to a slide and cools on every straight; the inner layer
+        (default) and carcass follow the temperature the rubber actually works at, so the color
+        tells whether the tyre is in its window instead of flickering with each corner.
+        """
+        source = self.tyre_temp_source
+        if source == "Surface":
+            return api.read.tyre.surface_temperature_avg()
+        if source == "Carcass":
+            return api.read.tyre.carcass_temperature()
+        return api.read.tyre.inner_temperature_avg()
+
     def update_fast(self, in_pits):
         """Fast changing data: slip, steering, center column, battery"""
         wcfg = self.wcfg
@@ -172,30 +208,35 @@ class DataReader:
         ride_height = api.read.wheel.ride_height() if wcfg["show_ride_height"] else WHEELS_ZERO
         brake_pressure = api.read.brake.pressure() if wcfg["show_brake_pressure"] else WHEELS_ZERO
         if wcfg["show_tyre_load"]:
-            tyre_load = api.read.tyre.load()
+            tyre_load = api.read.tyre.load()  # Newtons
             total_load = sum(tyre_load)
         else:
             tyre_load = WHEELS_ZERO
             total_load = 0.0
-        if steer:  # real wheel angle 1:1, straight from game (radians, positive to right)
-            wheel_angle = api.read.wheel.toe()
+        if steer:  # real wheel angle 1:1, from game (radians), signed as learned by steer convention
+            if self.steer_vehicle != self.vehicle_name:  # new car: learn again
+                self.steer_vehicle = self.vehicle_name
+                self.steer_convention.reset()
+            wheel_angle = [math.degrees(angle) if math.isfinite(angle) else 0.0 for angle in api.read.wheel.toe()]
+            self.steer_convention.update(wheel_angle[0], wheel_angle[1], api.read.inputs.steering())
 
         for index, wheel in enumerate(self.wheels):
             if need_slip:
                 wheel.warning = self.slip_warning(slip_ratio[index], speed, braking)
-            wheel.ride_height = ride_height[index] * 1000  # meters to millimeters
+            wheel.ride_height = ride_height[index]  # millimeters (converted by API)
             wheel.brake_pressure = brake_pressure[index] * 100
             wheel.load_ratio = calc.part_to_whole_ratio(tyre_load[index], total_load) * 100
+            wheel.load = tyre_load[index]
             if camber:
                 wheel.camber = minfo.wheels.camberAngle[index]
             if slip_angle:
                 wheel.slip_angle = minfo.wheels.slipAngle[index]
             if steer:
-                angle = math.degrees(wheel_angle[index]) if math.isfinite(wheel_angle[index]) else 0.0
+                angle = self.steer_convention.screen_angle(index, wheel_angle[index])
                 wheel.steer = min(max(angle, -self.max_steer), self.max_steer)
 
         if self.need_switches:
-            vehicle_name = api.read.vehicle.vehicle_name()
+            vehicle_name = self.vehicle_name
             if self.last_vehicle_name != vehicle_name:  # new car, detect again
                 self.last_vehicle_name = vehicle_name
                 self.abs_seen = self.tc_seen = False
@@ -231,7 +272,7 @@ class DataReader:
             self.throttle = api.read.inputs.throttle()
             self.brake = api.read.inputs.brake()
         if self.show_suspension:
-            self.update_suspension()
+            self.update_suspension(speed)
         if self.show_recorder:
             self.update_recorder(speed)
         if self.show_battery_bar and self.use_hybrid:
@@ -293,8 +334,8 @@ class DataReader:
         if not self.wcfg["show_damage_panel_impact_cone"]:
             return
         impact_time = api.read.vehicle.impact_time()
-        if self.impact_time is None:  # impact before widget started: not shown
-            self.impact_time = impact_time
+        if self.impact_time is None or not is_new_impact(impact_time, self.impact_time):
+            self.impact_time = impact_time  # before widget started, or new session: not shown
         elif impact_time != self.impact_time:
             self.impact_time = impact_time
             self.impact_position = api.read.vehicle.impact_position()
@@ -309,13 +350,17 @@ class DataReader:
         recorder = self.recorder
         now = monotonic()
         warnings = [wheel.warning for wheel in self.wheels]
-        slip = "lock" if "lock" in warnings else "spin" if "spin" in warnings else ""
+        slip = "lock" if ("lock" in warnings or "locked" in warnings) else "spin" if "spin" in warnings else ""
         last_time = recorder.samples[-1].time if recorder.samples else None
+        impact_time = api.read.vehicle.impact_time()
+        impact = self.recorder_impact_time is not None and is_new_impact(impact_time, self.recorder_impact_time)
+        self.recorder_impact_time = impact_time  # impact before widget started: not an incident
         incident = recorder.add(
             Sample(now, speed, self.throttle, self.brake, self.gear, self.abs_active, self.tc_active, slip),
             self.damage_total,
             api.read.lap.number(),
             api.read.session.elapsed(),
+            impact,
         )
         if recorder.samples and recorder.samples[-1].time != last_time:
             self.trace_version += 1
@@ -335,29 +380,41 @@ class DataReader:
             return False
         return (monotonic() if now is None else now) - incident.time < self.incident_display_time
 
-    def update_suspension(self):
-        """Live suspension position within travel range, compression speed, static position
+    def update_suspension(self, speed: float):
+        """Live suspension: spring & wheel offset from static position, damper speed, bump stop, airborne
 
-        Range from Wheels module when on, else learned per car (reset on car change).
+        Range, static position and motion ratio from Wheels module when on, else learned per car
+        (reset on car change).
         """
-        vehicle = api.read.vehicle.vehicle_name()
+        vehicle = self.vehicle_name
         if vehicle != self.susp_vehicle:
             self.susp_vehicle = vehicle
             for travel in self.susp_travels:
                 travel.reset()
+            for bump in self.susp_bumps:
+                bump.reset()
         positions = api.read.wheel.suspension_deflection()
+        forces = api.read.wheel.suspension_force()
+        loads = api.read.tyre.load()
         now = monotonic()
         if self.use_wheels:
             lows = minfo.wheels.minSuspensionPosition
             highs = minfo.wheels.maxSuspensionPosition
             statics = minfo.wheels.staticSuspensionPosition
+            ratios = minfo.wheels.motionRatio
         else:
-            lows = highs = statics = WHEELS_ZERO
+            lows = highs = statics = ratios = WHEELS_ZERO
+        moving = speed > MIN_AIRBORNE_SPEED
         for index, wheel in enumerate(self.wheels):
             tracker = self.susp_travels[index]
             wheel.susp_travel, wheel.susp_velocity = tracker.update(positions[index], now, lows[index], highs[index])
             wheel.susp_static = tracker.ratio(statics[index], lows[index], highs[index])
             wheel.susp_offset = tracker.offset(positions[index], statics[index])
+            wheel.susp_estimated = tracker.estimated
+            wheel.susp_wheel_offset = wheel_offset(wheel.susp_offset, ratios[index])
+            wheel.susp_airborne = moving and loads[index] < AIRBORNE_LOAD
+            wheel.susp_bump = not wheel.susp_airborne and self.susp_bumps[index].update(
+                positions[index], forces[index], wheel.susp_velocity, self.susp_low_speed, self.susp_bump_margin)
 
     def update_stint(self, in_pits: bool):
         """Average tread wear per lap & pressure of 4 wheels, compared with previous stint"""
@@ -400,6 +457,7 @@ class DataReader:
             tuple(rounded(value, 2) for value in self.damage_suspension), self.impact_visible,
             self.impact_position if self.impact_visible else None,
             self.event_log.events[-1] if self.event_log.events else None,
+            self.brake_cold, self.brake_hot, tuple(self.wheel_targets),
         )
 
     def animating(self) -> bool:
@@ -420,7 +478,7 @@ class DataReader:
         if self.alert_pulse and self.gauge_low():
             return True
         if self.alert_pulse and self.show_suspension and any(
-            wheel.susp_travel >= wcfg["suspension_bump_threshold"] for wheel in self.wheels
+            wheel.susp_bump or wheel.susp_airborne for wheel in self.wheels
         ):
             return True
         if self.alert_pulse and self.show_damage_panel and (
@@ -479,6 +537,8 @@ class DataReader:
         """Wheel lock (braking) or wheel spin (accelerating) warning"""
         if not self.wcfg["show_slip_warning"] or speed < self.min_speed:
             return ""
+        if braking and slip_ratio < self.locked_threshold:
+            return "locked"
         if braking and slip_ratio < self.lock_threshold:
             return "lock"
         if slip_ratio > self.spin_threshold:
@@ -498,12 +558,13 @@ class DataReader:
         return ""
 
     def band_colors(self, index: int, temps) -> tuple[str, str, str]:
-        """Inner, center, outer temperature colors, from left to right on screen"""
-        colors = [calc.select_grade(self.heatmap_tyre[index], temp)[1] for temp in temps]
-        inner, center, outer = colors
-        if index % 2:  # right wheel: inner side on left
-            return inner, center, outer
-        return outer, center, inner
+        """Band colors from left to right on screen
+
+        Game reports each tyre left / center / right of the car (not inner / outer), which is
+        already left to right seen from above: outer band of a left tyre is on the left.
+        """
+        left, center, right = (calc.select_grade(self.heatmap_tyre[index], temp)[1] for temp in temps)
+        return left, center, right
 
     def update_compound_state(self, in_pits):
         """Match heatmap & compound symbol with tyre compound and brake type (checked while in pit)
@@ -524,12 +585,32 @@ class DataReader:
                 self.wheel_targets[index] = self.compound_target(compound, symbol)
         if not self.match_heatmap:
             return
-        vehicle = (api.read.vehicle.class_name(), api.read.vehicle.vehicle_name())
+        vehicle = (api.read.vehicle.class_name(), self.vehicle_name)
         if self.last_vehicle != vehicle:
             self.last_vehicle = vehicle
             front = self.load_brake_heatmap(select_brake_heatmap_name(set_predefined_brake_name(*vehicle, True)))
             rear = self.load_brake_heatmap(select_brake_heatmap_name(set_predefined_brake_name(*vehicle, False)))
             self.heatmap_brake = [front, front, rear, rear]
+
+    def update_tyre_diameters(self, radii):
+        """Tyre diameter (mm) per wheel from rolling radius learned by Wheels module, for 1:1 motion
+
+        Kept at TYRE_DIAMETER_MM until a plausible radius is learned (0.25 to 0.45 m).
+        """
+        diameters = tuple(
+            round(radius * 2000) if math.isfinite(radius) and 0.25 <= radius <= 0.45 else TYRE_DIAMETER_MM
+            for radius in radii
+        )
+        if diameters != self.tyre_diameters:
+            self.tyre_diameters = diameters
+
+    def update_brake_window(self, class_name: str):
+        """Brake cold & hot thresholds of the car class (brake_target_by_class), else defaults"""
+        if class_name == self.brake_class:
+            return
+        self.brake_class = class_name
+        target = class_target(self.brake_class_targets, class_name)
+        self.brake_cold, self.brake_hot = target if target is not None else self.default_brake_window
 
     def compound_target(self, compound: str, symbol: str) -> tuple:
         """(pressure min, pressure max, cold, hot) of compound, matched by symbol or full name"""

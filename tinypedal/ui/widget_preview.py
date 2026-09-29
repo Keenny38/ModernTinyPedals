@@ -99,14 +99,14 @@ class WidgetPreview(QWidget):
         self.checkbox.toggled.connect(self.toggle)
 
         self.label_preview = QLabel(self)
-        self.label_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_preview.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.label_preview.setObjectName("widgetPreview")
 
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidget(self.label_preview)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setMinimumHeight(UIScaler.size(6))
-        self.scroll_area.setMaximumHeight(UIScaler.size(14))
+        # Beside the option list, as tall as it: room for tall widgets without scrolling
+        self.scroll_area.setMinimumWidth(UIScaler.size(16))
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)

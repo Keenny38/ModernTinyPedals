@@ -5207,7 +5207,7 @@ Color gear number by RPM: low color, mid color from `gear_mid_rpm_ratio`, shift 
 Flash gear number (and LEDs) over shift point, interval in seconds. Default is `0.12`.
 
     show_tyre_temperature_bands
-Show inner, center and outer tyre surface temperatures as 3 colored bands in each tyre (outer side toward outside of car), useful for camber setup.
+Show tyre surface temperatures across the tread as 3 colored bands in each tyre, seen from above: game reports left, center and right of the car, so the outer side of a left tyre and the inner side of a right tyre are on the left. Useful for camber setup.
 
     enable_tyre_pressure_target, tyre_pressure_target_minimum, tyre_pressure_target_maximum
 Highlight tyre pressure below minimum (`tyre_pressure_low_color`) or above maximum (`tyre_pressure_high_color`). Values in kPa. Defaults are `160` and `190`.
@@ -5221,19 +5221,28 @@ Show estimated remaining tyre tread at end of current stint (`→61%`), from `Wh
 Show detached wheel (dashed outline, `OFF`), puncture (`PUNCT`) and flat spot (`FLAT`, tyre wear while locked above `flat_spot_threshold` percent).
 
     show_tyre_carcass_temperature, show_tyre_load, show_tyre_slip_angle, show_wheel_camber, show_ride_height, show_tyre_wear_per_lap
-Additional per-wheel readings, all off by default. Each is prefixed so it can be told apart from the others at a glance: carcass temperature `K85`, share of the car's total tyre load `L26%`, slip angle `S+4.1` (degrees), camber `C-3.2` (degrees), ride height `H32` (millimeters), and estimated tread lost over a full lap `▼0.82` (percent, from `Wheels module`).
+Additional per-wheel readings, all off by default. Each is prefixed so it can be told apart from the others at a glance: carcass temperature `K85`, tyre load `L26%` (see `tyre_load_display`), slip angle `S+4.1` (degrees), camber `C-3.2` (degrees), ride height `H32` (millimeters), and estimated tread lost over a full lap `▼0.82` (percent, from `Wheels module`).
+
+    tyre_load_display
+Tyre load reading: `Percent` share of the car's total tyre load (default), or absolute load in `Kilogram` or `Newton`. Absolute load shows aero downforce: the same share at 80 and 250 km/h is a very different load.
 
     show_suspension, suspension_scale
-Show each suspension (coilover seen from the side) right beside the brake bar, anchored to its wheel: it turns with the tyre and brake disc when steering, and a link joins its wheel mount to the disc bar (hub). The car is seen from above, where suspension travel is up and down (across the screen): it shows on the coilover, seen from the side, and never moves tyre or disc, which would read as the wheel moving along the car. Damper body and top mount, coil spring and shaft down to the wheel mount. The wheel mount moves 1:1 with the car in game: its distance from the static position tick is the real suspension offset in millimeters, at the same scale as the tyre drawing (tyre height stands for a 680 mm race tyre), so a 20 mm compression moves it by 20 mm at that scale. Static position from `Wheels module`, or a slow average of positions (position at rest) while it is off. `suspension_scale` sets its width (default `1.0`, range `0.5` to `3`).
+Show each suspension (coilover seen from the side) right beside the brake bar. It is anchored to its wheel: it turns with the tyre and brake disc when steering, and a link joins its wheel mount to the disc bar (hub). Damper body and top mount, coil spring and shaft down to the wheel mount. The wheel mount moves 1:1 with the wheel in game, together with tyre and disc: its distance from the static position tick is the real wheel offset in millimeters, at the same scale as the tyre drawing (tyre height stands for the real tyre diameter, learned from wheel rolling radius by `Wheels module`, 680 mm until known). Tyre and disc move by the real wheel travel, which is the spring travel divided by the motion ratio learned by `Wheels module` (on a pushrod or rocker suspension the wheel moves more than the spring). Static position from `Wheels module`; while it is unknown (joined while driving, or module off) a slow average of positions is used and the static tick is drawn hollow, as the offset is then approximate. `suspension_scale` sets its width (default `1.0`, range `0.5` to `3`).
+
+    enable_wheel_suspension_motion
+Move tyre and brake disc with the suspension wheel mount (enabled by default). Disable to keep them fixed, suspension travel then only shows on the coilover.
 
     suspension_motion_scale
 Magnify suspension motion, `1.0` (default) is real scale. Real suspension travel is small next to a tyre, `3` to `5` makes small movements easier to see.
 
-    suspension_spring_color, suspension_compression_color, suspension_rebound_color, suspension_velocity_scale
-Spring color at rest, tinted toward compression color while compressing and rebound color while extending, fully at `suspension_velocity_scale` mm/s (default `150`).
+    suspension_spring_color, suspension_compression_color, suspension_rebound_color, suspension_low_speed_threshold, suspension_velocity_scale
+Spring color at rest, tinted toward compression color while compressing and rebound color while extending, by damper speed (smoothed over 60 ms) in two zones like a real damper: low speed, up to `suspension_low_speed_threshold` mm/s (default `50`, body roll & pitch), gives a light tint; high speed (kerbs & bumps) goes on to the full color at `suspension_velocity_scale` mm/s (default `150`).
 
-    suspension_bump_color, suspension_bump_threshold
-Spring turns bump stop color, pulsing with `enable_alert_pulse`, above this fraction of travel (default `0.92`): suspension bottoming out.
+    suspension_bump_color, suspension_bump_force_margin
+Spring turns bump stop color, pulsing with `alert_pulse_frequency`, while the bump rubber is loaded. A spring alone gives a force growing linearly with deflection: that line is learned from suspension force at low damper speed in the lower part of the travel, and contact is shown once force in the upper part of the travel is above it by more than `suspension_bump_force_margin` (fraction, default `0.3`). Judged at low to medium damper speed only, where damper force does not hide the spring force.
+
+    suspension_airborne_color
+Spring color, pulsing, while the wheel is in the air (tyre load near zero with the car moving): kerb strike, crest, or two wheels lifting in a corner.
 
     show_brake_pressure, brake_pressure_color
 Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
@@ -5271,7 +5280,7 @@ Show pit lane (`PIT`) and speed limiter (`LIM`) indicators, only while active.
 Show fuel gauge and virtual energy gauge at the bottom, one full-width bar each, like the level bar of `Fuel` and `Virtual Energy` widgets: filled to current level (percent of capacity), with a mark at stint start level and a mark at the level after refuel/refill (current level plus amount needed to finish). Label on the left, remaining amount & estimated laps, then amount to add (`+12.4 L`, in refill mark color when fuel must be added) on the right, from `Fuel module` and `Energy module`. The energy row stays empty on cars without virtual energy, so the widget never resizes.
 
     fuel_gauge_color, energy_gauge_color, gauge_low_color, gauge_low_lap_threshold
-Gauge fill colors. Below `gauge_low_lap_threshold` estimated laps (default `2`), the gauge and its reading turn `gauge_low_color` and pulse with `enable_alert_pulse`.
+Gauge fill colors. Below `gauge_low_lap_threshold` estimated laps (default `2`), the gauge and its reading turn `gauge_low_color` and pulse with `alert_pulse_frequency`.
 
     show_gauge_start_mark, gauge_start_mark_color, show_gauge_refill_mark, gauge_refill_mark_color
 Stint start level mark and level after refuel/refill mark.
@@ -5280,16 +5289,19 @@ Stint start level mark and level after refuel/refill mark.
 Set order of center column items (ABS, TC, brake bias, pit & limiter, gear, speed, RPM, pedals). Can be changed with `Configure Display Order` button in config dialog.
 
     show_wheel_angle
-Turn tyres left or right with real wheel angle, 1:1 with the car in game (read straight from the game, each wheel its own angle, so Ackermann and toe show as they are). The brake disc bar turns with its wheel, keeping the corner assembly together, while brake readings stay upright.
+Turn tyres left or right with real wheel angle, 1:1 with the car in game (read from the game, each wheel its own angle, so Ackermann and toe show as they are). How the game signs wheel angles (same sign on both sides, or toe-in per wheel, positive left or right) is learned from steering input within the first corners of each car, then both front wheels turn the way the steering wheel does. The brake disc bar and the suspension turn with their wheel, keeping the corner assembly together, while brake readings stay upright.
 
     maximum_wheel_angle
 Maximum displayed wheel angle in degrees, value range in `0` to `45`. Default is `30`. It also sets the room kept around tyres, a real angle above it is shown at this maximum.
 
     show_tyre_temperature, show_tyre_pressure, show_brake_temperature
-Show tyre surface temperature, tyre pressure and brake temperature.
+Show tyre temperature, tyre pressure and brake temperature.
+
+    tyre_temperature_source
+Tyre temperature that colors the tyre, is written in it and drives its cold & hot warnings: `Inner layer` (default), `Carcass` or `Surface`. Surface temperature jumps within milliseconds in a slide and cools on every straight, so a surface colored tyre flickers with each corner; the inner layer and the carcass follow the temperature the rubber actually works at, which tells whether the tyre is in its window. Temperature bands (`show_tyre_temperature_bands`) always show surface temperatures.
 
     tyre_temperature_warning_threshold, font_color_tyre_temperature_warning
-Highlight tyre temperature (Celsius) at or above this threshold. Set `0` to disable. Default is `0` (disabled).
+Highlight tyre temperature (Celsius) at or above this threshold. Set `0` to disable. Default is `110`.
 
     tyre_pressure_warning_background_color
 Background color of tyre pressure text when out of target range (see `enable_tyre_pressure_target`).
@@ -5313,7 +5325,10 @@ Heatmap used for tyre and brake colors. Auto matching selects heatmap from tyre 
 Show wheel lock (while braking) and wheel spin warning outline.
 
     wheel_lock_threshold, wheel_spin_threshold
-Slip ratio threshold for wheel lock (negative slip while braking) and wheel spin (positive slip). Default is `0.2` and `0.15`.
+Slip ratio threshold for wheel lock (negative slip while braking) and wheel spin (positive slip). Default is `0.2` and `0.15`. Peak grip is around `0.08` to `0.12`, so the default lock threshold means past peak grip, not a stopped wheel. Slip ratio is measured against each wheel's own ground speed (from `Wheels module`), so the outer wheels of a corner, which travel faster than the car center, show no false slip.
+
+    wheel_locked_threshold
+Slip ratio of a locked (stopped) wheel, shown with a twice as thick lock outline. Default is `0.8`, `1.0` being a fully stopped wheel.
 
     slip_warning_minimum_speed
 Minimum speed (km/h) for lock & spin warning. Default is `10`.
@@ -5384,7 +5399,7 @@ Turn on and start any data module needed by enabled options when the widget star
 Unit used by this widget only. `Global` follows the `Units` setting. Default is `Global`, except fuel which defaults to `Liter`, so fuel gauge always reads in liters unless changed here.
 
     tyre_temperature_cold_threshold, font_color_tyre_temperature_cold, font_color_tyre_temperature_warming
-Tyre temperature text turns cold color below this temperature (Celsius), or warming color while still below it but rising (see trends). `0` disables (default). Above `tyre_temperature_warning_threshold` it turns `font_color_tyre_temperature_warning`.
+Tyre temperature text turns cold color below this temperature (Celsius), or warming color while still below it but rising (see trends). `0` disables. Default is `70`. Above `tyre_temperature_warning_threshold` it turns `font_color_tyre_temperature_warning`.
 
     show_tyre_temperature_trend, show_tyre_pressure_trend, tyre_trend_duration, tyre_heat_trend_threshold, tyre_pressure_trend_threshold
 Append an arrow to tyre temperature or pressure: `↑` rising, `↓` falling, compared with the value `tyre_trend_duration` seconds ago (default `10`). A change smaller than the threshold (`2` Celsius degrees, `1` kPa by default) shows no arrow.
@@ -5393,7 +5408,13 @@ Append an arrow to tyre temperature or pressure: `↑` rising, `↓` falling, co
 Pressure target (kPa) and optional temperature window (Celsius) per tyre compound, replacing `tyre_pressure_target_minimum`, `tyre_pressure_target_maximum`, `tyre_temperature_cold_threshold` and `tyre_temperature_warning_threshold` for that compound. Format: `symbol=min-max/cold-hot`, entries separated by `;`, for example `S=160-190/75-105; W=150-175/40-70`. The symbol is the compound symbol (see `Tyre Compound Editor`) or the full compound name. Invalid entries are ignored. Empty by default.
 
     brake_temperature_cold_threshold, brake_temperature_hot_threshold, font_color_brake_temperature_cold, font_color_brake_temperature_hot
-Brake temperature text turns cold color below the cold threshold, hot color above the hot threshold (Celsius), instead of heatmap color. `0` disables (default).
+Brake temperature text turns cold color below the cold threshold, hot color above the hot threshold (Celsius), instead of heatmap color. `0` disables (default). Used for car classes not found in `brake_target_by_class`.
+
+    brake_target_by_class
+Brake disc temperature window (Celsius) per car class, replacing `brake_temperature_cold_threshold` and `brake_temperature_hot_threshold` for that class: carbon discs (prototypes, GTE) work far hotter than iron discs (GT3, LMP3). Format: `class=cold-hot`, entries separated by `;`, matched when the name is found in the car class name (longest name wins, case ignored). Default is `Hypercar=400-950; LMP2=400-950; GTE=400-950; LMP3=250-650; GT3=250-650`.
+
+    show_brake_temperature_trend, brake_trend_duration, brake_heat_trend_threshold
+Append an arrow to brake temperature: `↑` heating (braking zone), `↓` cooling, compared with the value `brake_trend_duration` seconds ago (default `2`). A change smaller than `brake_heat_trend_threshold` (default `20` Celsius degrees) shows no arrow.
 
     show_stint_comparison
 Show an extra bottom row with average tread wear per lap (percent) and average tyre pressure of the current stint, followed by the difference with the previous stint once a stint has been completed (a stint ends when entering the pits). Needs `Wheels module` for wear.
@@ -5406,11 +5427,11 @@ The order of the center column items can be changed by drag & drop with the `Con
     enable_depth_effects
 Soft drop shadow and rounded rubber shading on tyres, thin highlight edge on info rows.
 
-    enable_smooth_transition, smooth_transition_duration
-Fade tyre and brake heatmap colors from one grade to the next over `smooth_transition_duration` seconds (default `0.4`), instead of stepping.
+    smooth_transition_duration
+Fade tyre and brake heatmap colors from one grade to the next over `smooth_transition_duration` seconds (default `0.4`), instead of stepping. `0` turns fading off.
 
-    enable_alert_pulse, alert_pulse_frequency
-Pulse wheel lock & spin outline, detached wheel, puncture and flat spot warnings at `alert_pulse_frequency` (Hz, default `1.5`).
+    alert_pulse_frequency
+Pulse wheel lock & spin outline, detached wheel, puncture and flat spot warnings at `alert_pulse_frequency` (Hz, default `1.5`), `0` keeps them steady.
 
     show_damage_panel, damage_panel_position, damage_panel_scale
 Show the same data as `Damage` widget in its own column outside the main area, flush with a corner of the widget: `Bottom Right` (default), `Bottom Left`, `Top Right` or `Top Left`. It sits on its own card with the same background as the widget, placed right against it without being merged into it, room above or below it stays transparent. `Center Horizontally` and `Center Vertically` (widget right click menu) center the black box card only, the damage panel card is left out. It shows the car seen from above: rounded body cut in 8 segments (front, sides, rear), intact ones in body color, damaged ones light up, detached ones pulse; wheels on both sides colored by suspension damage (outlined on puncture, dashed when detached); a fading cone toward the last impact; integrity in the middle, colored by level (green, yellow, red) with its source (`BODY` or `AERO`) and a gauge. `damage_panel_scale` sets its height in lines (default `4.5`).
@@ -5431,7 +5452,7 @@ Show a cone toward the last impact for `damage_panel_impact_cone_duration` secon
 Show remaining body integrity in the middle, or aero integrity if the car reports it, with its source label (defaults `BODY` and `AERO`).
 
     show_incident_recorder, recorder_duration, incident_deceleration_threshold, incident_display_duration
-Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on a deceleration above `incident_deceleration_threshold` (g, default `4`, `0` disables) or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g`), before going back to live. The dot at top right counts incidents of the session.
+Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g`), before going back to live. The dot at top right counts incidents of the session.
 
     enable_incident_file_export
 Save each incident as a JSON file (times relative to incident, speed in m/s, pedals, gear, ABS, TC, slip) in the `blackbox` folder of the configuration folder, to look at afterwards. Enabled by default, only used with the incident recorder.
@@ -5445,7 +5466,7 @@ Event log below the trace: puncture, flat spot, detached wheel, damage and incid
     text_damage, text_impact
 Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
 
-Options in the config dialog of this widget are split in sections (General, Visual Style, Units, Tyres, Brakes, Wheel Slip, Battery, RPM LEDs, Center Column, Bottom Rows, Incident Recorder & Event Log, Labels, Center Column Order), and the live preview at the top of the dialog shows changes before saving.
+Options in the config dialog of this widget are split in sections, one per part of the widget: General, Profile & Data, Size & Layout, Visual Style, Units, Steering & Wheel Slip, Tyre Temperature, Tyre Pressure, Tyre Wear & Status, Tyre Readings, Brakes, Suspension, RPM LEDs, Gear & Speed, Center Column, Fuel & Energy Gauges, Battery, Damage Panel, Incident Recorder & Event Log, Labels and Center Column Order. The live preview shows changes before saving. The dialog opens in simple mode, showing on/off and choice options plus the few common ones; tick `Advanced Options` to show every option (colors, thresholds, labels). Click a section title to collapse or expand it, `Reset` beside it resets that section only; a search looks through every option, collapsed or advanced ones included. Options that only matter while another option is on are greyed out while it is off, and options set by the selected `display_profile` are greyed out in italic, their tooltip naming the profile. `Color Theme...` sets every color at once (Default, High Contrast, Colorblind Safe, Soft), saved only with Apply or Save. Double click `tyre_target_by_compound` to edit it as a table. Each label text sits in the section of the part it names. Default colors follow one palette: red for warnings and hot, cyan for cold and low, green for good, orange and yellow for intermediate states.
 
 [**`Back to Top`**](#)
 

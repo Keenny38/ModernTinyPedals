@@ -33,13 +33,15 @@ import math
 import os
 import time
 from collections import deque
-from itertools import pairwise
 from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
 GRAVITY = 9.80665
 MIN_IMPACT_SPEED = 5.0  # m/s, deceleration below this speed is not an impact (pit stop, spin at rest)
+# Deceleration measured over this window (seconds): one ~20 ms telemetry step is noisy enough to
+# read 4 g under normal braking, a real impact stays far above the threshold over 150 ms
+DECELERATION_WINDOW = 0.15
 WHEEL_NAMES = ("FL", "FR", "RL", "RR")
 
 
@@ -102,18 +104,24 @@ class Recorder:
         self.pending = None
         self.last_damage = 0.0
 
-    def add(self, sample: Sample, damage: float, lap: int = 0, session_time: float = 0.0) -> Incident | None:
-        """Add sample, return a finished incident once its post trigger time has passed"""
+    def add(
+        self, sample: Sample, damage: float, lap: int = 0, session_time: float = 0.0, impact: bool = False,
+    ) -> Incident | None:
+        """Add sample, return a finished incident once its post trigger time has passed
+
+        Args:
+            impact: game reported a new impact (contact with car or wall) since last sample.
+        """
         samples = self.samples
         if samples and sample.time - samples[-1].time < self.sample_interval - 1e-6:
             return None
         if not all(math.isfinite(value) for value in (sample.speed, sample.throttle, sample.brake, damage)):
             return None
-        # Trigger: impact from speed drop since previous sample, or damage increase
-        reason = ""
-        if samples:
-            previous = samples[-1]
-            if self.deceleration_g(previous, sample) >= self.deceleration_threshold > 0 and (
+        # Trigger: impact reported by game, hard speed drop over the window, or damage increase
+        reason = "impact" if impact else ""
+        if not reason and samples:
+            previous = self.window_start(sample.time)
+            if previous is not None and self.deceleration_g(previous, sample) >= self.deceleration_threshold > 0 and (
                 previous.speed >= MIN_IMPACT_SPEED
             ):
                 reason = "impact"
@@ -140,6 +148,13 @@ class Recorder:
         self.incidents.append(incident)
         return incident
 
+    def window_start(self, now: float) -> Sample | None:
+        """Newest sample at least DECELERATION_WINDOW old, None if none is yet"""
+        for previous in reversed(self.samples):
+            if now - previous.time >= DECELERATION_WINDOW - 1e-6:
+                return previous
+        return None
+
     @staticmethod
     def deceleration_g(previous: Sample, current: Sample) -> float:
         """Deceleration between two samples (g), 0 if accelerating"""
@@ -150,11 +165,16 @@ class Recorder:
 
     @classmethod
     def peak_g(cls, samples) -> float:
-        """Highest deceleration (g) in samples"""
-        return max(
-            (cls.deceleration_g(previous, current) for previous, current in pairwise(samples)),
-            default=0.0,
-        )
+        """Highest deceleration (g) in samples, each measured over DECELERATION_WINDOW"""
+        peak = 0.0
+        start = 0
+        for current in samples:
+            while start + 1 < len(samples) and current.time - samples[start + 1].time >= DECELERATION_WINDOW - 1e-6:
+                start += 1
+            previous = samples[start]
+            if current.time - previous.time >= DECELERATION_WINDOW - 1e-6:
+                peak = max(peak, cls.deceleration_g(previous, current))
+        return peak
 
     @property
     def last_incident(self) -> Incident | None:

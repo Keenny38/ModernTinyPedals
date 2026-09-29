@@ -23,8 +23,16 @@ Black box widget, per-wheel state, reading priority and pure helpers (trend, sti
 from __future__ import annotations
 
 import math
-import re
 from collections import deque
+
+from ...template.widget.black_box_ui import (  # noqa: F401  re-exported for widget & tests
+    COMPACT_HIDDEN,
+    DISPLAY_PROFILES,
+    class_target,
+    display_overrides,
+    parse_class_targets,
+    parse_compound_targets,
+)
 
 # Tyre readings, in priority order: the lowest-numbered one is dropped first when the tyre
 # box is too small to show them all at a readable size. The diagnostic readings sit below the
@@ -68,8 +76,8 @@ class WheelState:
         "brake_wear", "brake_wear_known", "pressure", "compound",
         "tyre_color", "brake_color", "warning", "status",
         "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
-        "brake_pressure", "temp_trend", "pressure_trend", "susp_travel", "susp_static", "susp_velocity",
-        "susp_offset",
+        "brake_pressure", "temp_trend", "pressure_trend", "brake_trend", "load", "susp_travel", "susp_static", "susp_velocity",
+        "susp_offset", "susp_wheel_offset", "susp_bump", "susp_airborne", "susp_estimated",
     )
 
     def __init__(self):
@@ -97,15 +105,21 @@ class WheelState:
         self.brake_pressure = 0.0  # percent of maximum
         self.temp_trend = 0  # tyre temperature: 1 rising, -1 falling, 0 steady or unknown
         self.pressure_trend = 0  # tyre pressure: same as above
+        self.brake_trend = 0  # brake disc temperature: same as above
+        self.load = 0.0  # tyre load (Newtons)
         self.susp_travel = 0.0  # suspension compression within its range: 0 full droop, 1 bump stop
         self.susp_static = -1.0  # static position within range, -1 if unknown
-        self.susp_velocity = 0.0  # compression speed, -1 fast rebound to 1 fast compression
-        self.susp_offset = 0.0  # millimeters from static position, positive = compressed
+        self.susp_velocity = 0.0  # damper speed (mm/s), positive = compression, negative = rebound
+        self.susp_offset = 0.0  # spring: millimeters from static position, positive = compressed
+        self.susp_wheel_offset = 0.0  # wheel: millimeters from static position (spring / motion ratio)
+        self.susp_bump = False  # bump stop reached (force above spring line)
+        self.susp_airborne = False  # wheel in the air (no tyre load)
+        self.susp_estimated = True  # static position unknown: offset from an estimated rest position
 
     def signature(self) -> tuple:
         """Displayed state, floats rounded, so a repaint is skipped when nothing visible changed"""
         # Suspension moves continuously: finer steps, so its motion stays smooth
-        return tuple(rounded(getattr(self, name), 2 if name.startswith("susp") else 1) for name in self.__slots__)
+        return tuple(rounded(getattr(self, name), 0 if name == "susp_velocity" else 2 if name.startswith("susp") else 1) for name in self.__slots__)
 
 
 def rounded(value, digits: int = 1):
@@ -177,6 +191,54 @@ class Trend:
         return 0
 
 
+class SteerConvention:
+    """How the game signs wheel angles, learned from steering input
+
+    Wheel toe may be signed in the vehicle frame (both front wheels same sign when steering) or
+    per wheel as toe-in (left & right opposite), and positive may mean left or right. Once
+    STEER_VOTES steered samples agree, angles are turned into screen angles (positive = right).
+    """
+
+    __slots__ = ("mirror", "same", "invert", "keep")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.mirror = self.same = self.invert = self.keep = 0
+
+    def update(self, front_left: float, front_right: float, steering: float):
+        """Vote with front wheel angles (degrees) and steering input (-1 left to 1 right)"""
+        if not (math.isfinite(front_left) and math.isfinite(front_right) and math.isfinite(steering)):
+            return
+        if abs(steering) < STEER_MIN_INPUT or abs(front_left) < STEER_MIN_ANGLE or abs(front_right) < STEER_MIN_ANGLE:
+            return  # straight: static toe only, too small to tell
+        if front_left * front_right < 0:
+            self.mirror += 1
+        else:
+            self.same += 1
+        if front_left * steering < 0:
+            self.invert += 1
+        else:
+            self.keep += 1
+
+    @property
+    def mirrored(self) -> bool:
+        """Right side wheels signed the other way (toe-in per wheel)"""
+        return self.mirror >= STEER_VOTES and self.mirror > self.same
+
+    @property
+    def inverted(self) -> bool:
+        """Positive angle means left"""
+        return self.invert >= STEER_VOTES and self.invert > self.keep
+
+    def screen_angle(self, index: int, angle: float) -> float:
+        """Wheel angle on screen (degrees, positive = right) for game angle of wheel index"""
+        if self.mirrored and index % 2:
+            angle = -angle
+        return -angle if self.inverted else angle
+
+
 class StintTracker:
     """Average tread wear per lap and tyre pressure of the current and previous stint
 
@@ -213,89 +275,45 @@ class StintTracker:
         return wear, pressure
 
 
-# Compound targets: "S=160-190/75-100; W=150-175" (pressure kPa, then optional temperature Celsius)
-_rex_target = re.compile(
-    r"^\s*([^=\s]+)\s*=\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)"
-    r"(?:\s*/\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?))?\s*$"
-)
+# Damper speed: finite difference of ~50 Hz telemetry is noisy, smoothed over this time (seconds)
+DAMPER_FILTER_TIME = 0.06
+# Tint reached at the low / high speed damper knee: low speed (body roll & pitch) stays a light
+# tint, high speed (kerbs & bumps) reaches the full color
+LOW_SPEED_TINT = 0.4
+# Bump stop: spring line learned below this fraction of the travel seen, from this many samples
+BUMP_LEARN_FRACTION = 0.6
+BUMP_MIN_SAMPLES = 40
+BUMP_DECAY = 0.999  # old samples fade out, so a setup change is learned again
+STEER_VOTES = 15  # steered samples needed to settle how the game signs wheel angles
+STEER_MIN_INPUT = 0.15  # steering input (fraction) that counts as steering
+STEER_MIN_ANGLE = 1.0  # degrees, above static toe
+AIRBORNE_LOAD = 50.0  # Newtons, tyre load below this with the car moving: wheel in the air
 
 
-def parse_compound_targets(text: str) -> dict[str, tuple[float, float, float | None, float | None]]:
-    """Per compound symbol: (pressure min, pressure max, temperature min, temperature max)
+def damper_tint(velocity: float, low_speed: float, full_speed: float) -> float:
+    """Tint amount (0 to 1) for a damper speed (mm/s), two zones like a real damper
 
-    Invalid entries are ignored, so a typo only loses that one compound.
+    Low speed (below low_speed, body motion) is tinted up to LOW_SPEED_TINT, high speed
+    (kerbs, bumps) from there to full tint at full_speed.
     """
-    targets = {}
-    for entry in re.split(r"[;,]", text or ""):
-        matched = _rex_target.match(entry)
-        if not matched:
-            continue
-        symbol, p_min, p_max, t_min, t_max = matched.groups()
-        targets[symbol.upper()] = (
-            float(p_min), float(p_max),
-            float(t_min) if t_min is not None else None,
-            float(t_max) if t_max is not None else None,
-        )
-    return targets
-
-
-# Display profiles: override a group of show options at once ("Custom" keeps user values)
-_DIAGNOSTICS = (
-    "show_tyre_carcass_temperature", "show_tyre_load", "show_tyre_slip_angle",
-    "show_wheel_camber", "show_ride_height", "show_tyre_wear_per_lap",
-)
-DISPLAY_PROFILES: dict[str, dict[str, bool]] = {
-    "Minimal": {
-        **dict.fromkeys(_DIAGNOSTICS, False),
-        "show_tyre_pressure": False, "show_tyre_wear_end_stint": False, "show_tyre_compound": False,
-        "show_brake_wear": False, "show_brake_pressure": False, "show_brake_migration": False,
-        "show_wheel_locking": False, "show_delta_best": False, "show_laptime": False,
-        "show_fuel_gauge": False, "show_energy_gauge": False, "show_stint_comparison": False,
-        "show_tyre_temperature_trend": False, "show_tyre_pressure_trend": False,
-    },
-    "Sprint": {
-        **dict.fromkeys(_DIAGNOSTICS, False),
-        "show_tyre_pressure": True, "show_tyre_wear": True, "show_tyre_wear_end_stint": False,
-        "show_delta_best": True, "show_laptime": True, "show_rpm_leds": True,
-        "show_fuel_gauge": False, "show_energy_gauge": False, "show_stint_comparison": False,
-    },
-    "Endurance": {
-        "show_tyre_pressure": True, "show_tyre_wear": True, "show_tyre_wear_end_stint": True,
-        "show_tyre_wear_per_lap": True, "show_tyre_compound": True, "show_brake_wear": True,
-        "show_fuel_gauge": True, "show_energy_gauge": True, "show_stint_comparison": True,
-        "show_tyre_temperature_trend": True, "show_tyre_pressure_trend": True,
-    },
-}
-
-# Secondary elements hidden by auto compact mode, when the widget is scaled down
-COMPACT_HIDDEN = (
-    *_DIAGNOSTICS, "show_tyre_wear_end_stint", "show_tyre_compound", "show_brake_wear",
-    "show_brake_pressure", "show_caption", "show_stint_comparison",
-    "show_tyre_temperature_trend", "show_tyre_pressure_trend",
-)
-
-
-def display_overrides(wcfg) -> dict[str, bool]:
-    """Options overridden by display profile, then by auto compact mode"""
-    overrides = dict(DISPLAY_PROFILES.get(wcfg["display_profile"], {}))
-    threshold = wcfg["auto_compact_display_scale"]
-    if 0 < wcfg["display_scale"] < threshold:
-        overrides.update(dict.fromkeys(COMPACT_HIDDEN, False))
-    return overrides
+    speed = abs(velocity) if math.isfinite(velocity) else 0.0
+    low_speed = max(low_speed, 1.0)
+    if speed <= low_speed:
+        return LOW_SPEED_TINT * speed / low_speed
+    return LOW_SPEED_TINT + (1 - LOW_SPEED_TINT) * min((speed - low_speed) / max(full_speed - low_speed, 1.0), 1.0)
 
 
 class SuspensionTravel:
-    """Live suspension position as a fraction of its travel, and compression speed
+    """Live suspension position as a fraction of its travel, and damper speed
 
     Travel range comes from Wheels module (filtered min & max) when available, otherwise it
-    is learned from positions seen since the car changed. Speed is the position change over
-    time, scaled so velocity_scale (mm/s) reads as full speed.
+    is learned from positions seen since the car changed. Damper speed is the position change
+    over time (mm/s), smoothed over DAMPER_FILTER_TIME.
     """
 
-    __slots__ = ("low", "high", "last_position", "last_time", "velocity_scale", "reference")
+    __slots__ = ("low", "high", "last_position", "last_time", "velocity", "reference", "estimated")
 
-    def __init__(self, velocity_scale: float = 200.0):
-        self.velocity_scale = max(velocity_scale, 1.0)
+    def __init__(self):
         self.reset()
 
     def reset(self):
@@ -303,10 +321,12 @@ class SuspensionTravel:
         self.high = -math.inf
         self.last_position = math.nan
         self.last_time = math.nan
+        self.velocity = 0.0
         self.reference = math.nan  # position at rest, averaged, when static position is unknown
+        self.estimated = True  # offset measured from an estimated rest position
 
     def update(self, position: float, now: float, low: float = 0.0, high: float = 0.0) -> tuple[float, float]:
-        """Return (travel 0 to 1, velocity -1 to 1) for position (mm, larger = compressed)
+        """Return (travel 0 to 1, damper speed mm/s) for position (mm, larger = compressed)
 
         Args:
             position: suspension deflection (mm).
@@ -322,25 +342,27 @@ class SuspensionTravel:
         span = high - low
         travel = min(max((position - low) / span, 0.0), 1.0) if span > 1.0 else 0.5
         elapsed = now - self.last_time
-        if elapsed > 0 and math.isfinite(self.last_position):
+        if 0 < elapsed < 0.5 and math.isfinite(self.last_position):
             speed = (position - self.last_position) / elapsed
-            velocity = min(max(speed / self.velocity_scale, -1.0), 1.0)
-        else:
-            velocity = 0.0
+            self.velocity += (speed - self.velocity) * (1 - math.exp(-elapsed / DAMPER_FILTER_TIME))
+        else:  # first sample, or a gap (pause): no speed
+            self.velocity = 0.0
         self.last_position = position
         self.last_time = now
-        return travel, velocity
+        return travel, self.velocity
 
     def offset(self, position: float, static: float = 0.0) -> float:
         """Millimeters from static position (positive = compressed), 1:1 with the car
 
         Static position from Wheels module when known, otherwise a slow average of positions,
-        which settles on the position at rest.
+        which settles on the position at rest (estimated is then True).
         """
         if not math.isfinite(position):
             return 0.0
         if math.isfinite(static) and static > 0:
+            self.estimated = False
             return position - static
+        self.estimated = True
         if math.isfinite(self.reference):
             self.reference += (position - self.reference) * 0.002
         else:
@@ -354,3 +376,73 @@ class SuspensionTravel:
         if not (math.isfinite(position) and high - low > 1.0) or position <= 0:
             return -1.0
         return min(max((position - low) / (high - low), 0.0), 1.0)
+
+
+def wheel_offset(spring_offset: float, motion_ratio: float) -> float:
+    """Wheel travel (mm) from spring travel: the spring moves motion_ratio times the wheel
+
+    Unknown or implausible ratio (not learned yet) keeps spring travel.
+    """
+    if math.isfinite(motion_ratio) and 0.2 <= motion_ratio <= 2.0:
+        return spring_offset / motion_ratio
+    return spring_offset
+
+
+class BumpStop:
+    """Bump stop contact, from suspension (pushrod) force
+
+    A spring alone gives a force growing linearly with deflection. That line is learned from
+    samples at low damper speed (little damper force) in the lower part of the travel seen.
+    Once the bump rubber is reached the force rises well above the line: that is the contact,
+    not a fraction of some travel range.
+    """
+
+    __slots__ = ("weight", "sx", "sy", "sxx", "sxy", "count", "low", "high")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.weight = self.sx = self.sy = self.sxx = self.sxy = 0.0
+        self.count = 0
+        self.low = math.inf
+        self.high = -math.inf
+
+    def line(self) -> tuple[float, float] | None:
+        """(force at 0 mm, spring rate N/mm) of learned spring line, None if not learned yet"""
+        if self.count < BUMP_MIN_SAMPLES:
+            return None
+        denominator = self.weight * self.sxx - self.sx * self.sx
+        if denominator <= 1e-9:
+            return None
+        rate = (self.weight * self.sxy - self.sx * self.sy) / denominator
+        if rate <= 0:
+            return None
+        return (self.sy - rate * self.sx) / self.weight, rate
+
+    def update(self, position: float, force: float, velocity: float, low_speed: float, margin: float) -> bool:
+        """Learn spring line, return True while force is above it by more than margin (fraction)"""
+        if not (math.isfinite(position) and math.isfinite(force) and math.isfinite(velocity)):
+            return False
+        self.low = min(self.low, position)
+        self.high = max(self.high, position)
+        span = self.high - self.low
+        if span <= 2.0:
+            return False
+        upper = position > self.low + span * BUMP_LEARN_FRACTION
+        slow = abs(velocity) <= low_speed
+        if slow and not upper:
+            self.weight = self.weight * BUMP_DECAY + 1
+            self.sx = self.sx * BUMP_DECAY + position
+            self.sy = self.sy * BUMP_DECAY + force
+            self.sxx = self.sxx * BUMP_DECAY + position * position
+            self.sxy = self.sxy * BUMP_DECAY + position * force
+            self.count += 1
+        # Damper force hides the spring force at high damper speed: only judged up to twice low speed
+        if not upper or abs(velocity) > low_speed * 2:
+            return False
+        line = self.line()
+        if line is None:
+            return False
+        predicted = line[0] + line[1] * position
+        return predicted > 0 and force > predicted * (1 + max(margin, 0.0))

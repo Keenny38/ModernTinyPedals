@@ -246,3 +246,144 @@ def test_black_box_config_has_sections(ui_env):
         assert titles == list(sections.values())
     finally:
         close_dialog(dialog)
+
+
+# --- Option tools for widgets with many options (black box)
+def black_box_dialog():
+    return open_config("black_box", [])
+
+
+def row_of(dialog, key):
+    return next(row for row in dialog.rows if row.key == key)
+
+
+def test_simple_mode_hides_advanced_options(ui_env):
+    dialog = black_box_dialog()
+    try:
+        assert not dialog.show_advanced
+        assert dialog.option_edit["tyre_wear_warning_color"].isHidden()  # color: advanced
+        assert not dialog.option_edit["show_tyre_pressure"].isHidden()  # on/off: basic
+        assert not dialog.option_edit["display_scale"].isHidden()  # common option: basic
+        dialog.check_advanced.setChecked(True)
+        assert not dialog.option_edit["tyre_wear_warning_color"].isHidden()
+    finally:
+        close_dialog(dialog)
+
+
+def test_sections_collapse_and_search_finds_hidden(ui_env):
+    dialog = black_box_dialog()
+    try:
+        section = row_of(dialog, "show_tyre_pressure").section
+        dialog.toggle_section(section)
+        assert dialog.option_edit["show_tyre_pressure"].isHidden()
+        assert not dialog.section_headers[section].isHidden()  # header stays to expand again
+        dialog.edit_search.setText("wear warning color")  # advanced option, in its section
+        assert not dialog.option_edit["tyre_wear_warning_color"].isHidden()
+        dialog.edit_search.setText("")
+        dialog.toggle_section(section)
+        assert not dialog.option_edit["show_tyre_pressure"].isHidden()
+    finally:
+        close_dialog(dialog)
+
+
+def test_dependent_options_greyed_out(ui_env):
+    dialog = black_box_dialog()
+    try:
+        show = dialog.option_edit["show_tyre_pressure"]
+        target = dialog.option_edit["enable_tyre_pressure_target"]
+        minimum = dialog.option_edit["tyre_pressure_target_minimum"]
+        show.setChecked(True)
+        target.setChecked(True)
+        assert minimum.isEnabled()
+        target.setChecked(False)
+        assert not minimum.isEnabled()
+        target.setChecked(True)
+        show.setChecked(False)  # grand parent off: whole chain greyed
+        assert not target.isEnabled() and not minimum.isEnabled()
+    finally:
+        close_dialog(dialog)
+
+
+def test_profile_overridden_options_marked(ui_env):
+    dialog = black_box_dialog()
+    try:
+        dialog.option_edit["display_profile"].setCurrentText("Minimal")
+        row = row_of(dialog, "show_tyre_pressure")
+        assert not row.editor.isEnabled() and row.label.font().italic()
+        assert "Minimal" in row.label.toolTip()
+        dialog.option_edit["display_profile"].setCurrentText("Custom")
+        assert row.editor.isEnabled() and not row.label.font().italic()
+    finally:
+        close_dialog(dialog)
+
+
+def test_color_theme_applied_to_editors(ui_env):
+    from tinypedal.template.widget.black_box_ui import BLACK_BOX_COLOR_THEMES, theme_color
+
+    dialog = black_box_dialog()
+    try:
+        index = dialog.combo_theme.findData("Colorblind Safe")
+        dialog.apply_color_theme(index)
+        default = cfg.default.setting["black_box"]["wheel_lock_color"]
+        expected = theme_color(default, BLACK_BOX_COLOR_THEMES["Colorblind Safe"])
+        assert dialog.option_edit["wheel_lock_color"].text() == expected != default
+        cone = dialog.option_edit["damage_panel_impact_cone_color"].text()
+        assert cone.startswith("#CC") and len(cone) == 9  # alpha kept
+        assert dialog.combo_theme.currentIndex() == 0
+    finally:
+        close_dialog(dialog)
+
+
+def test_section_reset_only_resets_its_section(ui_env, monkeypatch):
+    dialog = black_box_dialog()
+    try:
+        monkeypatch.setattr(dialog, "confirm_operation", lambda **kwargs: True)
+        dialog.option_edit["wheel_lock_color"].setText("#123456")
+        dialog.option_edit["tyre_wear_warning_color"].setText("#654321")
+        dialog.reset_section(row_of(dialog, "wheel_lock_color").section)
+        assert dialog.option_edit["wheel_lock_color"].text() == cfg.default.setting["black_box"]["wheel_lock_color"]
+        assert dialog.option_edit["tyre_wear_warning_color"].text() == "#654321"
+    finally:
+        close_dialog(dialog)
+
+
+def test_compound_target_table_editor(ui_env):
+    from tinypedal.ui._option import CompoundTargetDialog, CompoundTargetEdit
+
+    dialog = black_box_dialog()
+    try:
+        assert isinstance(dialog.option_edit["tyre_target_by_compound"], CompoundTargetEdit)
+    finally:
+        close_dialog(dialog)
+    table = CompoundTargetDialog(None, "S=160-190/75-105; W=150-175")
+    assert table.table.rowCount() == 2
+    table.add_row(("m", 165, 195, None, None))
+    table.add_row(("", "bad", 1, None, None))  # incomplete: dropped
+    assert table.result_text() == "S=160-190/75-105; W=150-175; M=165-195"
+    table.deleteLater()
+
+
+def test_other_widgets_keep_plain_dialog(ui_env):
+    dialog = open_config("speedometer", [])
+    try:
+        assert dialog.option_ui is None and dialog.show_advanced
+        assert not hasattr(dialog, "check_advanced")
+        assert all(not row.editor.isHidden() for row in dialog.rows)
+    finally:
+        close_dialog(dialog)
+
+
+def test_live_preview_right_of_option_list(ui_env):
+    from PySide6.QtCore import QCoreApplication
+
+    for name in ("black_box", "speedometer"):
+        dialog = open_config(name, [])
+        try:
+            dialog.resize(900, 600)
+            dialog.show()
+            QCoreApplication.processEvents()
+            scroll = dialog.preview.parentWidget().findChildren(type(dialog.preview.scroll_area))[0]
+            assert dialog.preview.x() > scroll.x() + scroll.width() // 2, name  # beside, on the right
+            assert dialog.preview.height() > dialog.height() // 2, name  # as tall as the list
+        finally:
+            close_dialog(dialog)

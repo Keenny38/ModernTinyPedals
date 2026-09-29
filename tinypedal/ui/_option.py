@@ -33,14 +33,23 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMenu,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
 
 from ..const_file import FileFilter
 from ..i18n import tr
+from ..template.widget.black_box_ui import format_compound_targets, parse_compound_targets
 from ..userfile import set_relative_path, set_user_data_path
 from ..validator import image_exists, is_clock_format, is_hex_color, is_string_number
 
@@ -317,6 +326,90 @@ class ColorEdit(BaseLineEdit):
                 fg_color = "#000"
             # Apply style
             self.setStyleSheet(f"QLineEdit {{color:{fg_color};background:{color_str};}}")
+
+
+class CompoundTargetEdit(StringEdit):
+    """Tyre targets per compound, as text, with double click table editor"""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setToolTip(tr("Double click to edit as a table"))
+
+    def mouseDoubleClickEvent(self, event):
+        """Double click to open table editor"""
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self.open_dialog_table()
+
+    def open_dialog_table(self):
+        dialog = CompoundTargetDialog(self, self.text())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.setText(dialog.result_text())
+
+
+class CompoundTargetDialog(QDialog):
+    """Table of tyre targets: compound, pressure range (kPa), optional temperature range (Celsius)"""
+
+    COLUMNS = ("Compound", "Pressure Min (kPa)", "Pressure Max (kPa)", "Temp Min (°C)", "Temp Max (°C)")
+
+    def __init__(self, parent, text: str):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Tyre Targets by Compound"))
+        self.table = QTableWidget(0, len(self.COLUMNS), self)
+        self.table.setHorizontalHeaderLabels([tr(name) for name in self.COLUMNS])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        for symbol, values in parse_compound_targets(text).items():
+            self.add_row((symbol, *values))
+
+        button_add = QPushButton(tr("Add"))
+        button_add.clicked.connect(lambda: self.add_row(("", 160, 190, None, None)))
+        button_remove = QPushButton(tr("Remove Selected"))
+        button_remove.clicked.connect(self.remove_rows)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout_button = QHBoxLayout()
+        layout_button.addWidget(button_add)
+        layout_button.addWidget(button_remove)
+        layout_button.addStretch(1)
+        layout_button.addWidget(buttons)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(tr("Compound symbol (see Tyre Compound Editor) or full name. "
+                                   "Temperature range is optional.")))
+        layout.addWidget(self.table)
+        layout.addLayout(layout_button)
+
+    def add_row(self, values):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        for column, value in enumerate(values):
+            text = "" if value is None else (f"{value:g}" if isinstance(value, float) else str(value))
+            self.table.setItem(row, column, QTableWidgetItem(text))
+
+    def remove_rows(self):
+        for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
+            self.table.removeRow(row)
+
+    def cell(self, row: int, column: int) -> str:
+        item = self.table.item(row, column)
+        return item.text().strip() if item else ""
+
+    def result_text(self) -> str:
+        """Table back to option text, incomplete rows dropped"""
+        targets = {}
+        for row in range(self.table.rowCount()):
+            symbol = self.cell(row, 0)
+            try:
+                p_min, p_max = float(self.cell(row, 1)), float(self.cell(row, 2))
+            except ValueError:
+                continue
+            try:
+                t_min, t_max = float(self.cell(row, 3)), float(self.cell(row, 4))
+            except ValueError:
+                t_min = t_max = None
+            if symbol:
+                targets[symbol.upper()] = (p_min, p_max, t_min, t_max)
+        return format_compound_targets(targets)
 
 
 class FilePathEdit(BaseLineEdit):

@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from itertools import islice, zip_longest
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QCompleter,
     QDialogButtonBox,
     QGridLayout,
@@ -39,6 +42,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -49,7 +53,8 @@ from ..i18n import tr, trm
 from ..i18n.options import module_label, option_label, option_tooltip, search_text
 from ..setting import cfg
 from ..template.setting_widget import WIDGET_FILENAME
-from ..template.widget import WIDGET_OPTION_SECTIONS
+from ..template.widget import WIDGET_OPTION_UI
+from ..template.widget.black_box_ui import OptionUI, theme_color
 from ..widget._style import GLOBAL_THEME, overlay_theme_names
 from ._common import (
     QVAL_COLOR,
@@ -65,6 +70,7 @@ from ._option import (
     BooleanEdit,
     ClockFormatEdit,
     ColorEdit,
+    CompoundTargetEdit,
     DropDownListEdit,
     FilePathEdit,
     FloatEdit,
@@ -80,6 +86,45 @@ from .widget_preview import WidgetPreview
 
 COLUMN_LABEL = 0  # grid layout column index
 COLUMN_OPTION = 1
+
+
+@dataclass
+class OptionRow:
+    """One option line of the config dialog"""
+
+    key: str
+    label: QLabel
+    editor: QWidget
+    section: str  # section title, "" if widget has no sections
+    group: QWidget | None  # group title shown above it, if any
+    tooltip: str  # label tooltip without profile note
+
+
+class SectionHeader(QWidget):
+    """Section title: click to collapse or expand, with a reset button for its options"""
+
+    def __init__(self, parent, title: str, on_toggle: Callable, on_reset: Callable):
+        super().__init__(parent)
+        self.arrow = QToolButton(self)
+        self.arrow.setArrowType(Qt.ArrowType.DownArrow)
+        self.arrow.setAutoRaise(True)
+        self.arrow.clicked.connect(on_toggle)
+        self.label = OptionSection(title, self)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.mousePressEvent = lambda event: on_toggle()
+        self.label.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_reset = QToolButton(self)
+        button_reset.setText(tr("Reset"))
+        button_reset.setToolTip(tr("Reset options of this section to default"))
+        button_reset.clicked.connect(on_reset)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.arrow)
+        layout.addWidget(self.label, stretch=1)
+        layout.addWidget(button_reset)
+
+    def set_collapsed(self, collapsed: bool):
+        self.arrow.setArrowType(Qt.ArrowType.RightArrow if collapsed else Qt.ArrowType.DownArrow)
 
 
 def get_font_list() -> list[str]:
@@ -245,6 +290,13 @@ class UserConfig(BaseDialog):
         # Option dict (key: option editor)
         self.option_edit: dict = {}
         option_word_set: set[str] = set()
+        # Rows & extras for widgets with many options (sections, simple mode, themes, profile)
+        self.option_ui: OptionUI | None = WIDGET_OPTION_UI.get(key_name) if config_type == ConfigType.WIDGET else None
+        self.rows: list[OptionRow] = []
+        self.section_headers: dict[str, SectionHeader] = {}
+        self.collapsed: set[str] = set()
+        self.search_words: list[str] = []
+        self.show_advanced = self.option_ui is None
 
         # Create options
         self.layout_option = QGridLayout()
@@ -274,6 +326,8 @@ class UserConfig(BaseDialog):
         layout_search = QHBoxLayout()
         layout_search.addWidget(edit_search, stretch=1)
         layout_search.addWidget(button_clearsearch)
+        if self.option_ui is not None:
+            self.create_option_tools(layout_search)
 
         # Button
         has_display_order = (config_type == ConfigType.WIDGET and self.has_display_order())
@@ -304,50 +358,173 @@ class UserConfig(BaseDialog):
         if not self.config_type:
             button_save.hide()
 
-        # Set layout
-        layout_main = QVBoxLayout()
-        layout_main.addLayout(layout_search)
-        layout_main.addWidget(scroll_box, stretch=1)
+        # Set layout: option list, live preview on its right (widget config)
+        layout_options = QHBoxLayout()
+        layout_options.addWidget(scroll_box, stretch=3)
         if config_type == ConfigType.WIDGET and key_name in WIDGET_FILENAME:
             self.preview = WidgetPreview(self, cfg, key_name, self.read_edited_values)
-            layout_main.addWidget(self.preview)
+            layout_options.addWidget(self.preview, stretch=2)
+        layout_main = QVBoxLayout()
+        layout_main.addLayout(layout_search)
+        layout_main.addLayout(layout_options, stretch=1)
         if has_display_order:
             layout_main.addWidget(button_display_order)
         layout_main.addLayout(layout_button)
         layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
         self.setLayout(layout_main)
         self.setMinimumWidth(self.sizeHint().width() + UIScaler.size(2))
+        self.refresh_state()
+        self.refresh_visibility()
+
+    # Options tools: simple / advanced mode, color theme
+    def create_option_tools(self, layout: QHBoxLayout):
+        """Advanced options toggle & color theme picker, for widgets with many options"""
+        ui = self.option_ui
+        if ui is None:
+            return
+        self.check_advanced = QCheckBox(tr("Advanced Options"), self)
+        self.check_advanced.setToolTip(tr("Show every option, including colors, thresholds and labels"))
+        self.check_advanced.toggled.connect(self.set_advanced)
+        layout.addWidget(self.check_advanced)
+        if ui.color_themes:
+            self.combo_theme = QComboBox(self)
+            self.combo_theme.addItem(tr("Color Theme..."))
+            for name in ui.color_themes:
+                self.combo_theme.addItem(tr(name), name)
+            self.combo_theme.setToolTip(tr("Set every color to a theme (saved only with Apply or Save)"))
+            self.combo_theme.activated.connect(self.apply_color_theme)
+            layout.addWidget(self.combo_theme)
+
+    def set_advanced(self, enabled: bool):
+        self.show_advanced = enabled
+        self.refresh_visibility()
+
+    def apply_color_theme(self, index: int):
+        """Set color editors to theme colors, from each option default color"""
+        name = self.combo_theme.itemData(index)
+        self.combo_theme.setCurrentIndex(0)
+        if not name or self.option_ui is None:
+            return
+        theme = self.option_ui.color_themes[name]
+        defaults = self.default_setting[self.key_name]
+        for key, editor in self.option_edit.items():
+            if isinstance(editor, ColorEdit):
+                editor.setText(theme_color(defaults[key], theme))
+
+    def is_basic(self, row: OptionRow) -> bool:
+        """Shown in simple mode: on/off and choice options, and the few common ones"""
+        if self.option_ui is None:
+            return True
+        return isinstance(row.editor, (BooleanEdit, DropDownListEdit)) or row.key in self.option_ui.basic
+
+    # Visibility: search, collapsed sections, simple / advanced mode
+    def toggle_section(self, title: str):
+        if title in self.collapsed:
+            self.collapsed.discard(title)
+        else:
+            self.collapsed.add(title)
+        self.section_headers[title].set_collapsed(title in self.collapsed)
+        self.refresh_visibility()
+
+    def reset_section(self, title: str):
+        """Reset options of one section to default"""
+        msg_text = (
+            f"Reset <b>{title}</b> options to default?<br><br>"
+            "Changes are only saved after clicking Apply or Save Button."
+        )
+        if self.confirm_operation(title=tr("Reset Options"), message=msg_text):
+            for row in self.rows:
+                if row.section == title and row.key != "enable":
+                    row.editor.reset_to_default()
+
+    def refresh_visibility(self):
+        """Show rows matching search; without search, rows of expanded sections, in current mode
+
+        A search looks through every option, including collapsed sections and advanced ones,
+        so a match is never hidden.
+        """
+        words = self.search_words
+        section_shown: dict[str, bool] = {}
+        group_shown: dict[int, bool] = {}
+        for row in self.rows:
+            if words:
+                visible = all(word in search_text(row.key) for word in words)
+            else:
+                visible = row.section not in self.collapsed and (self.show_advanced or self.is_basic(row))
+            row.label.setHidden(not visible)
+            row.editor.setHidden(not visible)
+            section_shown[row.section] = section_shown.get(row.section, False) or visible
+            if row.group is not None:
+                group_shown[id(row.group)] = group_shown.get(id(row.group), False) or visible
+        for row in self.rows:
+            if row.group is not None:  # group titles hidden while searching
+                row.group.setHidden(bool(words) or not group_shown.get(id(row.group), False))
+        for title, header in self.section_headers.items():
+            header.setHidden(bool(words) and not section_shown.get(title, False))
+
+    # State: options depending on an off option, options set by a profile
+    def current_values(self) -> dict:
+        """Edited values, falling back to saved ones for invalid entries"""
+        values = dict(self.user_setting[self.key_name])
+        for key, editor in self.option_edit.items():
+            value = editor.validate()
+            if value is not None:
+                values[key] = value
+        return values
+
+    def refresh_state(self, *_):
+        """Grey out options whose on/off option is off, or which the display profile sets"""
+        ui = self.option_ui
+        if ui is None:
+            return
+        values = self.current_values()
+        overrides = ui.overrides(values) if ui.overrides is not None else {}
+        source = option_label(ui.override_source) if ui.override_source else ""
+        profile = values.get(ui.override_source, "")
+        for row in self.rows:
+            overridden = row.key in overrides
+            enabled = not overridden
+            control = ui.dependencies.get(row.key)
+            while control and enabled:  # every on/off option up the chain must be on
+                enabled = bool(overrides.get(control, values.get(control, True)))
+                control = ui.dependencies.get(control)
+            row.editor.setEnabled(enabled)
+            row.label.setEnabled(enabled or overridden)
+            font = row.label.font()
+            font.setItalic(overridden)
+            row.label.setFont(font)
+            if overridden:
+                state = tr("on") if overrides[row.key] else tr("off")
+                note = f"{tr('Set by')} {source}: {tr(str(profile))} ({state})"
+                row.label.setToolTip(f"{row.tooltip}<br><br><i>{note}</i>")
+            else:
+                row.label.setToolTip(row.tooltip)
+
+    def connect_state_updates(self):
+        """Refresh greyed out options whenever an option they depend on changes"""
+        ui = self.option_ui
+        if ui is None:
+            return
+        watched = set(ui.dependencies.values())
+        if ui.override_source:
+            watched.update((ui.override_source, "display_scale", "auto_compact_display_scale"))
+        for key in watched:
+            editor = self.option_edit.get(key)
+            if isinstance(editor, BooleanEdit):
+                editor.toggled.connect(self.refresh_state)
+            elif isinstance(editor, DropDownListEdit):
+                editor.currentTextChanged.connect(self.refresh_state)
+            elif editor is not None:
+                editor.textChanged.connect(self.refresh_state)
 
     def has_display_order(self) -> bool:
         """Check whether has display order option"""
         return any("display_order" in key for key in reversed(self.user_setting[self.key_name].keys()))
 
     def search_options(self, text: str):
-        """Search for options"""
-        # All words must match (any order), in displayed name or option key
-        words = text.strip().lower().split()
-        editor_keys = {id(editor): key for key, editor in self.option_edit.items()}
-        layout_option = self.layout_option
-        for row_index in range(layout_option.rowCount()):
-            label_item = layout_option.itemAtPosition(row_index, 0)
-            option_item = layout_option.itemAtPosition(row_index, 1)
-            if label_item is None or option_item is None:
-                continue
-            label = label_item.widget()
-            option = option_item.widget()
-            if label is None or option is None:
-                continue
-            if label is option:  # group title (spans both columns), hide while searching
-                label.setHidden(bool(words))
-                continue
-            key = editor_keys.get(id(option), "")
-            if key:
-                haystack = search_text(key)
-            else:
-                haystack = label.text().lower() if isinstance(label, QLabel) else ""
-            hidden = not all(word in haystack for word in words)
-            label.setHidden(hidden)
-            option.setHidden(hidden)
+        """Search for options: all words must match (any order), in displayed name or option key"""
+        self.search_words = text.strip().lower().split()
+        self.refresh_visibility()
 
     def open_display_order(self):
         """Open display order dialog"""
@@ -431,76 +608,98 @@ class UserConfig(BaseDialog):
         row_index = -1
         show_group_title = cfg.application["show_option_group_title"]
         group_name = ""
-        sections = WIDGET_OPTION_SECTIONS.get(self.key_name, {})
+        sections = self.option_ui.sections if self.option_ui is not None else {}
+        section = ""
+        group_label: QWidget | None = None
+        pending: list[tuple[str, QLabel, str, QWidget | None]] = []
 
         for key, next_key in zip_longest(option_keys, islice(option_keys, 1, None), fillvalue=""):
             row_index += 1
             # Section title, for widgets with many options
             if key in sections:
-                self._add_section_label(row_index, tr(sections[key]), layout)
+                section = tr(sections[key])
+                self._add_section_label(row_index, section, layout)
                 row_index += 1
                 group_name = ""
+                group_label = None
             # Group name
             if show_group_title:
                 group_name = option_group_name(key, next_key, group_name)
                 if group_name and group_name != "_same_group":
-                    self._add_group_label(row_index, option_label(group_name), layout)
+                    group_label = self._add_group_label(row_index, option_label(group_name), layout)
                     row_index += 1
+                elif not group_name:
+                    group_label = None
             # Option name
             option_name = option_label(key)
             option_word_set.update(option_name.split())
-            self._add_option_label(row_index, option_name, layout, key)
-            # Bool
-            if re.search(rxp.CFG_BOOL, key):
-                self._add_option_bool(row_index, key, layout)
-                continue
-            # Units choice list string
-            if self._choice_match(rxp.CHOICE_UNITS, row_index, key, layout):
-                continue
-            # Overlay theme (built-in & custom)
-            if re.search(rxp.CFG_OVERLAY_THEME, key):
-                self._add_option_combolist(row_index, key, layout, overlay_theme_names())
-                continue
-            if re.search(rxp.CFG_WIDGET_THEME, key):
-                self._add_option_combolist(row_index, key, layout, (GLOBAL_THEME, *overlay_theme_names()))
-                continue
-            # Common choice list string
-            if self._choice_match(rxp.CHOICE_COMMON, row_index, key, layout):
-                continue
-            # Color string
-            if re.search(rxp.CFG_COLOR, key):
-                self._add_option_color(row_index, key, layout)
-                continue
-            # User path string
-            if re.search(rxp.CFG_USER_PATH, key):
-                self._add_option_path(row_index, key, layout)
-                continue
-            # User image file path string
-            if re.search(rxp.CFG_USER_IMAGE, key):
-                self._add_option_image(row_index, key, layout)
-                continue
-            # Font name string
-            if re.search(rxp.CFG_FONT_NAME, key):
-                self._add_option_combolist(row_index, key, layout, get_font_list())
-                continue
-            # Heatmap string
-            if re.search(rxp.CFG_HEATMAP, key):
-                self._add_option_combolist(row_index, key, layout, tuple(cfg.user.heatmap))
-                continue
-            # Clock format string
-            if re.search(rxp.CFG_CLOCK_FORMAT, key):
-                self._add_option_clock(row_index, key, layout)
-                continue
-            # String
-            if re.search(rxp.CFG_STRING, key):
-                self._add_option_string(row_index, key, layout)
-                continue
-            # Int
-            if re.search(rxp.CFG_INTEGER, key):
-                self._add_option_integer(row_index, key, layout)
-                continue
-            # Float or int
-            self._add_option_float(row_index, key, layout)
+            label = self._add_option_label(row_index, option_name, layout, key)
+            pending.append((key, label, section, group_label))
+            self._add_option_editor(row_index, key, layout)
+
+        self.rows = [
+            OptionRow(key, label, self.option_edit[key], row_section, group, label.toolTip())
+            for key, label, row_section, group in pending if key in self.option_edit
+        ]
+        self.connect_state_updates()
+
+    def _add_option_editor(self, row_index: int, key: str, layout: QGridLayout):
+        """Editor matching option type"""
+        # Bool
+        if re.search(rxp.CFG_BOOL, key):
+            self._add_option_bool(row_index, key, layout)
+            return
+        # Units choice list string
+        if self._choice_match(rxp.CHOICE_UNITS, row_index, key, layout):
+            return
+        # Overlay theme (built-in & custom)
+        if re.search(rxp.CFG_OVERLAY_THEME, key):
+            self._add_option_combolist(row_index, key, layout, overlay_theme_names())
+            return
+        if re.search(rxp.CFG_WIDGET_THEME, key):
+            self._add_option_combolist(row_index, key, layout, (GLOBAL_THEME, *overlay_theme_names()))
+            return
+        # Common choice list string
+        if self._choice_match(rxp.CHOICE_COMMON, row_index, key, layout):
+            return
+        # Color string
+        if re.search(rxp.CFG_COLOR, key):
+            self._add_option_color(row_index, key, layout)
+            return
+        # User path string
+        if re.search(rxp.CFG_USER_PATH, key):
+            self._add_option_path(row_index, key, layout)
+            return
+        # User image file path string
+        if re.search(rxp.CFG_USER_IMAGE, key):
+            self._add_option_image(row_index, key, layout)
+            return
+        # Font name string
+        if re.search(rxp.CFG_FONT_NAME, key):
+            self._add_option_combolist(row_index, key, layout, get_font_list())
+            return
+        # Heatmap string
+        if re.search(rxp.CFG_HEATMAP, key):
+            self._add_option_combolist(row_index, key, layout, tuple(cfg.user.heatmap))
+            return
+        # Clock format string
+        if re.search(rxp.CFG_CLOCK_FORMAT, key):
+            self._add_option_clock(row_index, key, layout)
+            return
+        # Tyre targets per compound (table editor)
+        if "by_compound" in key:
+            self._add_option_compound(row_index, key, layout)
+            return
+        # String
+        if re.search(rxp.CFG_STRING, key):
+            self._add_option_string(row_index, key, layout)
+            return
+        # Int
+        if re.search(rxp.CFG_INTEGER, key):
+            self._add_option_integer(row_index, key, layout)
+            return
+        # Float or int
+        self._add_option_float(row_index, key, layout)
 
     def _choice_match(self, choice_dict: Mapping, row_index: int, key: str, layout: QGridLayout) -> bool:
         """Choice match"""
@@ -511,24 +710,27 @@ class UserConfig(BaseDialog):
         return False
 
     def _add_section_label(self, row_index: int, title: str, layout: QGridLayout):
-        """Section title, above option groups"""
-        label = OptionSection(title, self)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label, row_index, COLUMN_LABEL, 1, 2)
+        """Section title, above option groups: click to collapse, with section reset"""
+        header = SectionHeader(
+            self, title, on_toggle=lambda: self.toggle_section(title), on_reset=lambda: self.reset_section(title))
+        self.section_headers[title] = header
+        layout.addWidget(header, row_index, COLUMN_LABEL, 1, 2)
 
-    def _add_group_label(self, row_index: int, option_name: str, layout: QGridLayout):
+    def _add_group_label(self, row_index: int, option_name: str, layout: QGridLayout) -> QLabel:
         """Option group"""
         label = OptionGroup(option_name, self)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label, row_index, COLUMN_LABEL, 1, 2)
+        return label
 
-    def _add_option_label(self, row_index: int, option_name: str, layout: QGridLayout, key: str = ""):
+    def _add_option_label(self, row_index: int, option_name: str, layout: QGridLayout, key: str = "") -> QLabel:
         """Option label, with documentation tooltip"""
         label = QLabel(option_name, self)
         if key:
             label.setToolTip(option_tooltip(self.key_name, key))
         label.setMinimumHeight(UIScaler.size(1.8))
         layout.addWidget(label, row_index, COLUMN_LABEL)
+        return label
 
     def _add_option_bool(self, row_index: int, key: str, layout: QGridLayout):
         """Bool"""
@@ -596,6 +798,15 @@ class UserConfig(BaseDialog):
         editor.setText(self.user_setting[self.key_name][key])
         editor.set_default(self.default_setting[self.key_name][key])
         # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_compound(self, row_index: int, key: str, layout: QGridLayout):
+        """Tyre targets per compound: text, or table editor on double click"""
+        editor = CompoundTargetEdit(self)
+        editor.setFixedWidth(self.option_width)
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
         layout.addWidget(editor, row_index, COLUMN_OPTION)
         self.option_edit[key] = editor
 
