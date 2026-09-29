@@ -5241,6 +5241,9 @@ Spring color at rest, tinted toward compression color while compressing and rebo
     suspension_bump_color, suspension_bump_force_margin
 Spring turns bump stop color, pulsing with `alert_pulse_frequency`, while the bump rubber is loaded. A spring alone gives a force growing linearly with deflection: that line is learned from suspension force at low damper speed in the lower part of the travel, and contact is shown once force in the upper part of the travel is above it by more than `suspension_bump_force_margin` (fraction, default `0.3`). Judged at low to medium damper speed only, where damper force does not hide the spring force.
 
+    show_coilover_damage
+Show suspension damage on each coilover, with the damage panel thresholds and colors (`damage_panel_suspension_*`): damper body, mounts and link take the color of the damage level (light, medium, heavy), the spring is drawn broken (dashed) from heavy damage, and pulses in totaled color once totaled. Enabled by default.
+
     suspension_airborne_color
 Spring color, pulsing, while the wheel is in the air (tyre load near zero with the car moving): kerb strike, crest, or two wheels lifting in a corner.
 

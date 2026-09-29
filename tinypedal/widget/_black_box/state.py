@@ -77,7 +77,7 @@ class WheelState:
         "tyre_color", "brake_color", "warning", "status",
         "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
         "brake_pressure", "temp_trend", "pressure_trend", "brake_trend", "load", "susp_travel", "susp_static", "susp_velocity",
-        "susp_offset", "susp_wheel_offset", "susp_bump", "susp_airborne", "susp_estimated",
+        "susp_offset", "susp_wheel_offset", "susp_bump", "susp_airborne", "susp_estimated", "susp_damage",
     )
 
     def __init__(self):
@@ -115,6 +115,7 @@ class WheelState:
         self.susp_bump = False  # bump stop reached (force above spring line)
         self.susp_airborne = False  # wheel in the air (no tyre load)
         self.susp_estimated = True  # static position unknown: offset from an estimated rest position
+        self.susp_damage = 0.0  # suspension damage (fraction), 0 intact, 1 totaled
 
     def signature(self) -> tuple:
         """Displayed state, floats rounded, so a repaint is skipped when nothing visible changed"""

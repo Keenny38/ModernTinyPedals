@@ -238,7 +238,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_brake_wear": ("brake_wear_warning_threshold", "font_color_brake_wear_warning"),
     "show_brake_pressure": ("brake_pressure_color",),
     "show_suspension": (
-        "suspension_scale", "suspension_motion_scale", "enable_wheel_suspension_motion",
+        "suspension_scale", "suspension_motion_scale", "enable_wheel_suspension_motion", "show_coilover_damage",
         "suspension_spring_color", "suspension_compression_color", "suspension_rebound_color",
         "suspension_low_speed_threshold", "suspension_velocity_scale", "suspension_bump_color",
         "suspension_bump_force_margin", "suspension_airborne_color",

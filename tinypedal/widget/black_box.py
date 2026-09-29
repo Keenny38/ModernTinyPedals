@@ -152,6 +152,7 @@ class Realtime(
         self.show_damage_panel = bool(wcfg["show_damage_panel"])
         self.show_suspension = bool(wcfg["show_suspension"])
         self.wheel_suspension_motion = self.show_suspension and bool(wcfg["enable_wheel_suspension_motion"])
+        self.show_susp_damage = self.show_suspension and bool(wcfg["show_coilover_damage"])
         self.need_damage_total = self.show_recorder or self.show_event_log
         # Slow changing data (temperatures, pressure, wear, damage, fuel) is read every N updates
         slow_interval = max(wcfg["slow_data_update_interval"], 0)

@@ -89,6 +89,10 @@ class SuspensionPainter:
         center = rect.center().x()
         spring_color = self.spring_color(wheel)
         mount_color = QColor(wcfg["suspension_spring_color"]).darker(160)
+        # Damage: damper body, mounts & link take the damage panel color of its level
+        damage_color = self.suspension_damage_color(wheel)
+        if damage_color is not None:
+            mount_color = damage_color
 
         painter.save()
         if wheel.steer and index < len(self.rects_tyre):  # same rotation as tyre & disc
@@ -120,7 +124,12 @@ class SuspensionPainter:
         painter.fillRect(QRectF(center - shaft_w / 2, body.bottom(), shaft_w, max(bottom - body.bottom(), 0)),
                          QColor(wcfg["suspension_spring_color"]).lighter(115))
         # Coil spring between mounts
-        painter.setPen(QPen(spring_color, max(self.unit * 0.08, 1.2), Qt.PenStyle.SolidLine,
+        # Heavily damaged: spring drawn broken (dashed), pulsing once totaled
+        broken = self.show_susp_damage and wheel.susp_damage >= wcfg["damage_panel_suspension_heavy_threshold"]
+        if self.suspension_totaled(wheel):
+            spring_color = QColor(self.pulsed_color(wcfg["damage_panel_suspension_color_totaled"], self.pulse()))
+        painter.setPen(QPen(spring_color, max(self.unit * 0.08, 1.2),
+                            Qt.PenStyle.DashLine if broken else Qt.PenStyle.SolidLine,
                             Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self.coil_path(rect.left() + width * 0.08, rect.right() - width * 0.08, top, bottom))
@@ -146,6 +155,16 @@ class SuspensionPainter:
             tick.setAlpha(140)
             painter.fillRect(tick_rect, tick)
         painter.restore()
+
+    def suspension_damage_color(self, wheel: WheelState) -> QColor | None:
+        """Damage panel color of the suspension damage level, None if intact or not shown"""
+        if not self.show_susp_damage or wheel.susp_damage < self.wcfg["damage_panel_suspension_light_threshold"]:
+            return None
+        return self.damage_wheel_color(False, wheel.susp_damage)
+
+    def suspension_totaled(self, wheel: WheelState) -> bool:
+        return bool(self.show_susp_damage) and (
+            wheel.susp_damage >= self.wcfg["damage_panel_suspension_totaled_threshold"])
 
     def wheel_shift(self, index: int, wheel: WheelState) -> float:
         """Vertical shift of tyre & disc by the real wheel travel, 1:1 with the car

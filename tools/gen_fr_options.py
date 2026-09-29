@@ -565,6 +565,7 @@ FULL = {
     "suspension_bump_color": "Couleur : suspension en butée",
     "suspension_bump_force_margin": "Marge de force au-dessus du ressort pour la butée (fraction)",
     "suspension_airborne_color": "Couleur : roue en l'air",
+    "show_coilover_damage": "Afficher les dégâts sur les suspensions",
     "suspension_low_speed_threshold": "Vitesse d'amortisseur basse / haute vitesse (mm/s)",
     "suspension_velocity_scale": "Vitesse d'amortisseur pour couleur pleine (mm/s)",
     "tyre_temperature_source": "Source de la température des pneus",

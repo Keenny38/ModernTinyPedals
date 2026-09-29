@@ -109,7 +109,7 @@ class DataReader:
         else:
             detached = puncture = NO_STATUS
             locking_wear = WHEELS_ZERO
-        if self.need_damage_total or self.show_damage_panel:
+        if self.need_damage_total or self.show_damage_panel or self.show_susp_damage:
             suspension = api.read.wheel.suspension_damage()
         else:
             suspension = WHEELS_ZERO
@@ -135,6 +135,9 @@ class DataReader:
                 wheel.ico_colors = self.band_colors(index, ico[index * 3:index * 3 + 3])
             wheel.status = self.tyre_status(detached[index], puncture[index], locking_wear[index])
             wheel.carcass_temp = carcass[index]
+            if self.show_susp_damage:
+                damage = suspension[index]
+                wheel.susp_damage = min(max(damage, 0.0), 1.0) if math.isfinite(damage) else 0.0
             if need_wear_per_lap:
                 wheel.wear_per_lap = minfo.wheels.estimatedValidTreadWear[index]
             if end_stint:
@@ -478,7 +481,7 @@ class DataReader:
         if self.alert_pulse and self.gauge_low():
             return True
         if self.alert_pulse and self.show_suspension and any(
-            wheel.susp_bump or wheel.susp_airborne for wheel in self.wheels
+            wheel.susp_bump or wheel.susp_airborne or self.suspension_totaled(wheel) for wheel in self.wheels
         ):
             return True
         if self.alert_pulse and self.show_damage_panel and (

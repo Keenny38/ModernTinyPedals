@@ -414,6 +414,7 @@ WIDGET_TYRES = {
         "suspension_scale": 1.0,
         "suspension_motion_scale": 1.0,
         "enable_wheel_suspension_motion": True,
+        "show_coilover_damage": True,
         "suspension_spring_color": "#B8C0CC",
         "suspension_compression_color": "#FF9F1C",
         "suspension_rebound_color": "#3D8BFF",

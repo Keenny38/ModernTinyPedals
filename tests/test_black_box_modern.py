@@ -1239,3 +1239,30 @@ def test_wheel_mount_moves_with_tyre(ui_env):
         assert mount_shift == pytest.approx(widget.wheel_shift(0, wheel))
     finally:
         widget.deleteLater()
+
+
+def test_suspension_damage_on_coilover(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.wheel, "suspension_damage", lambda: (0.0, 0.2, 0.5, 0.95), raising=False)
+    widget = new_widget({"show_damage_panel": False, "slow_data_update_interval": 0})
+    try:
+        widget.alert_pulse = True
+        widget.timerEvent(None)
+        intact, medium, heavy, totaled = widget.wheels
+        assert [wheel.susp_damage for wheel in widget.wheels] == [0.0, 0.2, 0.5, 0.95]
+        assert widget.suspension_damage_color(intact) is None
+        assert widget.suspension_damage_color(medium) == widget.damage_wheel_color(False, 0.2)
+        assert widget.suspension_damage_color(heavy) != widget.suspension_damage_color(medium)
+        assert widget.suspension_totaled(totaled) and not widget.suspension_totaled(heavy)
+        assert widget.animating()  # totaled suspension pulses
+        widget.grab()
+    finally:
+        widget.deleteLater()
+    hidden = new_widget({"show_coilover_damage": False})  # new name: old key hid removed suspension bars
+    try:
+        hidden.wheels[0].susp_damage = 0.95
+        assert hidden.suspension_damage_color(hidden.wheels[0]) is None
+        assert not hidden.suspension_totaled(hidden.wheels[0])
+    finally:
+        hidden.deleteLater()
