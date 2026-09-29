@@ -56,8 +56,10 @@ def test_widgets_survive_extreme_values(ui_env, monkeypatch, mode):
             failures.append(f"{name}: {error!r}")
         finally:
             if widget is not None:
-                widget.deleteLater()
-                QCoreApplication.processEvents()  # free it now, 78 widgets per run
+                # Run deletion from code named after the widget: if it crashes the process,
+                # the faulthandler traceback shows File "<delete name>", naming the culprit
+                code = compile("widget.deleteLater(); QCoreApplication.processEvents()", f"<delete {name}>", "exec")
+                exec(code, {"widget": widget, "QCoreApplication": QCoreApplication})  # free it now
     assert not failures, f"{mode} values broke: " + "; ".join(failures)
 
 

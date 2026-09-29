@@ -49,11 +49,13 @@ from ._black_box.recorder import EventLog, Recorder
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
 from ._black_box.state import (
     StintTracker,
+    SuspensionTravel,
     Trend,
     WheelState,
     display_overrides,
     parse_compound_targets,
 )
+from ._black_box.suspension import TYRE_DIAMETER_MM, SuspensionPainter
 from ._black_box.trace import TracePainter
 from ._black_box.wheels import ColorFade, WheelPainter
 from ._common import warning_flash
@@ -62,7 +64,8 @@ from ._style import StyledConfig
 
 
 class Realtime(
-    DataReader, WheelPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter, PaintBase, Overlay
+    DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter,
+    PaintBase, Overlay,
 ):
     """Draw widget
 
@@ -144,6 +147,7 @@ class Realtime(
         self.need_fuel_rows = bool(wcfg["show_fuel_gauge"])
         self.need_energy_rows = bool(wcfg["show_energy_gauge"])
         self.show_damage_panel = bool(wcfg["show_damage_panel"])
+        self.show_suspension = bool(wcfg["show_suspension"])
         self.need_damage_total = self.show_recorder or self.show_event_log
         # Slow changing data (temperatures, pressure, wear, damage, fuel) is read every N updates
         slow_interval = max(wcfg["slow_data_update_interval"], 0)
@@ -197,6 +201,7 @@ class Realtime(
             event_scale=min(max(wcfg["event_log_line_scale"], 0.5), 3),
             corner_scale=OverlayStyle.corner_scale,
             damage_position=wcfg["damage_panel_position"],
+            suspension_scale=min(max(wcfg["suspension_scale"], 0.5), 3) if self.show_suspension else 0,
         ))
         self.car_layout = layout
         # Painting code reads geometry as widget attributes (width & height stay QWidget methods)
@@ -204,6 +209,9 @@ class Realtime(
             if name not in ("width", "height"):
                 setattr(self, name, value)
         self.damage_shapes = damage_geometry(layout.rect_damage, self.unit)
+        # Suspension drawn 1:1 with the tyre drawing: tyre height stands for real tyre diameter
+        tyre_h = layout.rects_tyre[0].height() if layout.rects_tyre else 0
+        self.susp_pixels_per_mm = tyre_h / TYRE_DIAMETER_MM * max(wcfg["suspension_motion_scale"], 0)
         self.static_layer = None
         self.fit = fit_content(layout.width, layout.height, *self.fixed_size)
         self.resize_anchored(self.fit.width, self.fit.height)
@@ -397,6 +405,9 @@ class Realtime(
         self.battery_warning = 0  # 0 none, 1 low charge, 2 high charge
         self.battery_highlight = True  # warning color shown now (flash phase, or flash disabled)
         self.stint = StintTracker()
+        velocity_scale = self.wcfg["suspension_velocity_scale"]
+        self.susp_travels = [SuspensionTravel(velocity_scale) for _ in range(4)]
+        self.susp_vehicle = None
         self.stint_wear = self.stint_wear_delta = 0.0
         self.stint_pressure = self.stint_pressure_delta = 0.0
         self.stint_has_previous = False
@@ -412,8 +423,12 @@ class Realtime(
         if self.led_h:
             self.draw_leds(painter, self.rect_leds)
         for index, wheel in enumerate(self.wheels):
+            # Top view: suspension travel is up & down, across the screen, so it never moves
+            # tyre or disc on screen (that would read as the wheel moving along the car)
             self.draw_tyre(painter, self.rects_tyre[index], wheel, index)
             self.draw_disc(painter, index, self.rects_disc[index], wheel)
+            if self.show_suspension:
+                self.draw_suspension(painter, self.rects_susp[index], wheel, index)
         if not self.rect_center.isNull():
             self.draw_center(painter, self.rect_center)
         if self.row_battery:

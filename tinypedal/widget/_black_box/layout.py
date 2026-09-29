@@ -62,6 +62,7 @@ class LayoutInput:
     event_scale: float = 1.0  # event log line height
     corner_scale: float = 0.0  # background corner radius, relative to shorter side
     damage_position: str = "Bottom Right"  # corner of damage panel, outside main area
+    suspension_scale: float = 0.0  # width of suspension (coilover) beside brake bar, 0 if hidden
 
 
 @dataclass
@@ -91,6 +92,8 @@ class Layout:
     local_tyre: QRectF
     rects_tyre: list[QRectF] = field(default_factory=list)
     rects_disc: list[QRectF] = field(default_factory=list)
+    rects_susp: list[QRectF] = field(default_factory=list)  # null rects if suspension hidden
+    susp_extra: float = 0.0  # room taken by suspension inside brake column
     bottom_rows: list[tuple[QRectF, QRectF]] = field(default_factory=list)
     event_rows: list[QRectF] = field(default_factory=list)
 
@@ -111,6 +114,10 @@ def build_layout(spec: LayoutInput) -> Layout:
     pad_x = round(tyre_h * steer_sin / 2)
     pad_y = round(tyre_w * steer_sin / 2)
     brake_gap = round(unit * 0.12)  # brake bar close to tyre (turned tyre may touch it at full lock)
+    # Suspension: coilover drawn right beside the brake bar, before brake readings
+    susp_w = max(round(unit * 0.5 * spec.suspension_scale), 4) if spec.suspension_scale > 0 else 0
+    susp_extra = susp_w + brake_bar_gap if susp_w else 0
+    brake_w += susp_extra
     side_w = pad_x + tyre_w + brake_gap + brake_w
 
     center_between_tyres = spec.has_center and spec.layout_mode == LAYOUT_NORMAL
@@ -153,7 +160,7 @@ def build_layout(spec: LayoutInput) -> Layout:
     path_tyre.addRoundedRect(local_tyre, tyre_w * 0.28, tyre_w * 0.28)
 
     right_x = content_x + content_w - side_w
-    rects_tyre, rects_disc = [], []
+    rects_tyre, rects_disc, rects_susp = [], [], []
     for index in range(4):
         is_right = index % 2
         top = top_y + pad_y + (0 if index < 2 else tyre_h + axle_gap)
@@ -166,6 +173,12 @@ def build_layout(spec: LayoutInput) -> Layout:
         brake_top = top + (tyre_h - brake_h) / 2
         rects_tyre.append(QRectF(tyre_x, top, tyre_w, tyre_h))
         rects_disc.append(QRectF(brake_x, brake_top, brake_w, brake_h))
+        if susp_w:
+            susp_x = (brake_x + brake_w - brake_bar_w - brake_bar_gap - susp_w if is_right
+                      else brake_x + brake_bar_w + brake_bar_gap)
+            rects_susp.append(QRectF(susp_x, top, susp_w, tyre_h))  # as tall as the tyre
+        else:
+            rects_susp.append(QRectF())
 
     # Center column
     inset = round(unit * 0.3)
@@ -232,7 +245,8 @@ def build_layout(spec: LayoutInput) -> Layout:
         event_row_h=event_row_h, rect_bg=QRectF(0, 0, width, height), rect_main=rect_main, path_bg=path_bg, rect_caption=rect_caption,
         rect_leds=rect_leds, rect_center=rect_center, rect_car_view=rect_car_view,
         rect_battery=rect_battery, rect_trace=rect_trace, rect_damage=rect_damage, path_tyre=path_tyre,
-        local_tyre=local_tyre, rects_tyre=rects_tyre, rects_disc=rects_disc,
+        local_tyre=local_tyre, rects_tyre=rects_tyre, rects_disc=rects_disc, rects_susp=rects_susp,
+        susp_extra=susp_extra,
         bottom_rows=bottom_rows, event_rows=event_rows,
     )
 

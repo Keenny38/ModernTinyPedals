@@ -22,6 +22,7 @@ Black box widget, read telemetry into widget state, decide when to repaint
 
 from __future__ import annotations
 
+import math
 from time import monotonic
 
 from ... import calculation as calc
@@ -161,7 +162,7 @@ class DataReader:
         wcfg = self.wcfg
         speed = api.read.vehicle.speed()
         need_slip = self.need_slip and self.use_wheels
-        steer = self.max_steer and self.use_wheels
+        steer = bool(self.max_steer)
         camber = wcfg["show_wheel_camber"] and self.use_wheels
         slip_angle = wcfg["show_tyre_slip_angle"] and self.use_wheels
         if need_slip:
@@ -176,9 +177,8 @@ class DataReader:
         else:
             tyre_load = WHEELS_ZERO
             total_load = 0.0
-        if steer:
-            wheel_angle = minfo.wheels.toeAngle  # degrees, positive to right side of vehicle
-            multiplier = wcfg["wheel_angle_multiplier"]
+        if steer:  # real wheel angle 1:1, straight from game (radians, positive to right)
+            wheel_angle = api.read.wheel.toe()
 
         for index, wheel in enumerate(self.wheels):
             if need_slip:
@@ -191,7 +191,8 @@ class DataReader:
             if slip_angle:
                 wheel.slip_angle = minfo.wheels.slipAngle[index]
             if steer:
-                wheel.steer = min(max(wheel_angle[index] * multiplier, -self.max_steer), self.max_steer)
+                angle = math.degrees(wheel_angle[index]) if math.isfinite(wheel_angle[index]) else 0.0
+                wheel.steer = min(max(angle, -self.max_steer), self.max_steer)
 
         if self.need_switches:
             vehicle_name = api.read.vehicle.vehicle_name()
@@ -229,6 +230,8 @@ class DataReader:
         if self.need_pedals:
             self.throttle = api.read.inputs.throttle()
             self.brake = api.read.inputs.brake()
+        if self.show_suspension:
+            self.update_suspension()
         if self.show_recorder:
             self.update_recorder(speed)
         if self.show_battery_bar and self.use_hybrid:
@@ -332,6 +335,30 @@ class DataReader:
             return False
         return (monotonic() if now is None else now) - incident.time < self.incident_display_time
 
+    def update_suspension(self):
+        """Live suspension position within travel range, compression speed, static position
+
+        Range from Wheels module when on, else learned per car (reset on car change).
+        """
+        vehicle = api.read.vehicle.vehicle_name()
+        if vehicle != self.susp_vehicle:
+            self.susp_vehicle = vehicle
+            for travel in self.susp_travels:
+                travel.reset()
+        positions = api.read.wheel.suspension_deflection()
+        now = monotonic()
+        if self.use_wheels:
+            lows = minfo.wheels.minSuspensionPosition
+            highs = minfo.wheels.maxSuspensionPosition
+            statics = minfo.wheels.staticSuspensionPosition
+        else:
+            lows = highs = statics = WHEELS_ZERO
+        for index, wheel in enumerate(self.wheels):
+            tracker = self.susp_travels[index]
+            wheel.susp_travel, wheel.susp_velocity = tracker.update(positions[index], now, lows[index], highs[index])
+            wheel.susp_static = tracker.ratio(statics[index], lows[index], highs[index])
+            wheel.susp_offset = tracker.offset(positions[index], statics[index])
+
     def update_stint(self, in_pits: bool):
         """Average tread wear per lap & pressure of 4 wheels, compared with previous stint"""
         pressures = [wheel.pressure for wheel in self.wheels if wheel.pressure > 0]
@@ -391,6 +418,10 @@ class DataReader:
         if self.alert_pulse and any(wheel.warning or wheel.status for wheel in self.wheels):
             return True
         if self.alert_pulse and self.gauge_low():
+            return True
+        if self.alert_pulse and self.show_suspension and any(
+            wheel.susp_travel >= wcfg["suspension_bump_threshold"] for wheel in self.wheels
+        ):
             return True
         if self.alert_pulse and self.show_damage_panel and (
             any(self.damage_detached) or any(self.damage_puncture) or max(self.body_damage, default=0) >= 3

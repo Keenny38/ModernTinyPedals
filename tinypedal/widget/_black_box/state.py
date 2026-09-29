@@ -68,7 +68,8 @@ class WheelState:
         "brake_wear", "brake_wear_known", "pressure", "compound",
         "tyre_color", "brake_color", "warning", "status",
         "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
-        "brake_pressure", "temp_trend", "pressure_trend",
+        "brake_pressure", "temp_trend", "pressure_trend", "susp_travel", "susp_static", "susp_velocity",
+        "susp_offset",
     )
 
     def __init__(self):
@@ -96,10 +97,15 @@ class WheelState:
         self.brake_pressure = 0.0  # percent of maximum
         self.temp_trend = 0  # tyre temperature: 1 rising, -1 falling, 0 steady or unknown
         self.pressure_trend = 0  # tyre pressure: same as above
+        self.susp_travel = 0.0  # suspension compression within its range: 0 full droop, 1 bump stop
+        self.susp_static = -1.0  # static position within range, -1 if unknown
+        self.susp_velocity = 0.0  # compression speed, -1 fast rebound to 1 fast compression
+        self.susp_offset = 0.0  # millimeters from static position, positive = compressed
 
     def signature(self) -> tuple:
         """Displayed state, floats rounded, so a repaint is skipped when nothing visible changed"""
-        return tuple(rounded(getattr(self, name)) for name in self.__slots__)
+        # Suspension moves continuously: finer steps, so its motion stays smooth
+        return tuple(rounded(getattr(self, name), 2 if name.startswith("susp") else 1) for name in self.__slots__)
 
 
 def rounded(value, digits: int = 1):
@@ -276,3 +282,75 @@ def display_overrides(wcfg) -> dict[str, bool]:
     if 0 < wcfg["display_scale"] < threshold:
         overrides.update(dict.fromkeys(COMPACT_HIDDEN, False))
     return overrides
+
+
+class SuspensionTravel:
+    """Live suspension position as a fraction of its travel, and compression speed
+
+    Travel range comes from Wheels module (filtered min & max) when available, otherwise it
+    is learned from positions seen since the car changed. Speed is the position change over
+    time, scaled so velocity_scale (mm/s) reads as full speed.
+    """
+
+    __slots__ = ("low", "high", "last_position", "last_time", "velocity_scale", "reference")
+
+    def __init__(self, velocity_scale: float = 200.0):
+        self.velocity_scale = max(velocity_scale, 1.0)
+        self.reset()
+
+    def reset(self):
+        self.low = math.inf
+        self.high = -math.inf
+        self.last_position = math.nan
+        self.last_time = math.nan
+        self.reference = math.nan  # position at rest, averaged, when static position is unknown
+
+    def update(self, position: float, now: float, low: float = 0.0, high: float = 0.0) -> tuple[float, float]:
+        """Return (travel 0 to 1, velocity -1 to 1) for position (mm, larger = compressed)
+
+        Args:
+            position: suspension deflection (mm).
+            now: time (seconds).
+            low, high: travel range from Wheels module, ignored unless high > low.
+        """
+        if not math.isfinite(position):
+            return 0.0, 0.0
+        self.low = min(self.low, position)
+        self.high = max(self.high, position)
+        if not (math.isfinite(low) and math.isfinite(high) and high - low > 1.0):
+            low, high = self.low, self.high
+        span = high - low
+        travel = min(max((position - low) / span, 0.0), 1.0) if span > 1.0 else 0.5
+        elapsed = now - self.last_time
+        if elapsed > 0 and math.isfinite(self.last_position):
+            speed = (position - self.last_position) / elapsed
+            velocity = min(max(speed / self.velocity_scale, -1.0), 1.0)
+        else:
+            velocity = 0.0
+        self.last_position = position
+        self.last_time = now
+        return travel, velocity
+
+    def offset(self, position: float, static: float = 0.0) -> float:
+        """Millimeters from static position (positive = compressed), 1:1 with the car
+
+        Static position from Wheels module when known, otherwise a slow average of positions,
+        which settles on the position at rest.
+        """
+        if not math.isfinite(position):
+            return 0.0
+        if math.isfinite(static) and static > 0:
+            return position - static
+        if math.isfinite(self.reference):
+            self.reference += (position - self.reference) * 0.002
+        else:
+            self.reference = position
+        return position - self.reference
+
+    def ratio(self, position: float, low: float = 0.0, high: float = 0.0) -> float:
+        """Fraction of travel for a position (static mark), -1 if unknown"""
+        if not (math.isfinite(low) and math.isfinite(high) and high - low > 1.0):
+            low, high = self.low, self.high
+        if not (math.isfinite(position) and high - low > 1.0) or position <= 0:
+            return -1.0
+        return min(max((position - low) / (high - low), 0.0), 1.0)

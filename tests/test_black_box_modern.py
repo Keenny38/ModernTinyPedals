@@ -752,3 +752,169 @@ def test_center_action_uses_centering_rect(ui_env, monkeypatch):
         assert Overlay.centering_rect(widget) == QRect(0, 0, widget.width(), widget.height())
     finally:
         widget.deleteLater()
+
+
+# --- Suspension (coilover beside brakes)
+def test_suspension_travel_uses_module_range():
+    from tinypedal.widget._black_box.state import SuspensionTravel
+
+    travel = SuspensionTravel(velocity_scale=100)
+    assert travel.update(50.0, 0.0, 20.0, 80.0) == (0.5, 0.0)  # first sample: no speed yet
+    position, velocity = travel.update(60.0, 0.1, 20.0, 80.0)  # 10 mm in 0.1 s = 100 mm/s
+    assert position == pytest.approx(40 / 60) and velocity == pytest.approx(1.0)
+    position, velocity = travel.update(55.0, 0.2, 20.0, 80.0)
+    assert velocity == pytest.approx(-0.5)  # rebound
+    assert travel.update(200.0, 0.3, 20.0, 80.0)[0] == 1.0  # clamped at bump stop
+    assert travel.ratio(35.0, 20.0, 80.0) == pytest.approx(0.25)
+
+
+def test_suspension_travel_learns_range_without_module():
+    import math
+
+    from tinypedal.widget._black_box.state import SuspensionTravel
+
+    travel = SuspensionTravel()
+    assert travel.update(40.0, 0.0)[0] == 0.5  # no range yet
+    travel.update(20.0, 0.1)
+    travel.update(60.0, 0.2)
+    assert travel.update(30.0, 0.3)[0] == pytest.approx(0.25)
+    assert travel.update(math.nan, 0.4) == (0.0, 0.0)
+    travel.reset()
+    assert travel.ratio(30.0) == -1.0  # unknown after car change
+
+
+def test_suspension_beside_brake_bar(ui_env):
+    widget = new_widget()
+    try:
+        for index, (susp, disc) in enumerate(zip(widget.rects_susp, widget.rects_disc)):
+            assert not susp.isNull()
+            assert disc.left() <= susp.left() and susp.right() <= disc.right()  # inside brake column
+            if index % 2:  # right side: bar next to tyre on the right, spring just left of it
+                assert susp.right() < disc.right() - widget.brake_bar_w + 0.5
+            else:
+                assert susp.left() > disc.left() + widget.brake_bar_w - 0.5
+    finally:
+        widget.deleteLater()
+
+
+def test_suspension_hidden_frees_room(ui_env):
+    shown = new_widget()
+    width = shown.width()
+    shown.deleteLater()
+    widget = new_widget({"show_suspension": False})
+    try:
+        assert widget.width() < width and widget.rects_susp[0].isNull()
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_suspension_live_and_dynamic(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.module_info import minfo
+    from tinypedal.widget._black_box import reader
+
+    clock = [0.0]
+    monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(minfo.wheels, "minSuspensionPosition", [20.0] * 4)
+    monkeypatch.setattr(minfo.wheels, "maxSuspensionPosition", [80.0] * 4)
+    monkeypatch.setattr(minfo.wheels, "staticSuspensionPosition", [40.0] * 4)
+    positions = [(50.0, 50.0, 50.0, 50.0)]
+    monkeypatch.setattr(api.read.wheel, "suspension_deflection", lambda: positions[0])
+    widget = new_widget()
+    try:
+        widget.timerEvent(None)
+        assert widget.wheels[0].susp_travel == pytest.approx(0.5)
+        assert widget.wheels[0].susp_static == pytest.approx(1 / 3)
+        positions[0] = (79.0, 50.0, 30.0, 50.0)
+        clock[0] = 0.05
+        widget.timerEvent(None)
+        front_left, _, rear_left, _ = widget.wheels
+        assert front_left.susp_velocity > 0 and rear_left.susp_velocity < 0
+        bump = widget.spring_color(front_left)  # near bump stop
+        assert widget.animating()  # bump stop pulses
+        assert widget.spring_color(rear_left) != bump
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_spring_shortens_when_compressed():
+    from tinypedal.widget._black_box.suspension import spring_length
+
+    assert spring_length(100, 0) == 100
+    assert spring_length(100, 1) == 50
+    assert spring_length(100, 5) == 50  # clamped
+
+
+def test_suspension_offset_is_real_millimeters():
+    from tinypedal.widget._black_box.state import SuspensionTravel
+
+    travel = SuspensionTravel()
+    assert travel.offset(62.0, 50.0) == pytest.approx(12.0)  # 12 mm compressed from static
+    assert travel.offset(45.0, 50.0) == pytest.approx(-5.0)  # 5 mm extended
+    unknown = SuspensionTravel()
+    assert unknown.offset(40.0) == 0.0  # no static: first position taken as rest position
+    assert unknown.offset(50.0) == pytest.approx(10.0, abs=0.1)
+
+
+def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
+    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM, spring_length_real
+
+    widget = new_widget()
+    try:
+        tyre_h = widget.rects_tyre[0].height()
+        assert widget.susp_pixels_per_mm == pytest.approx(tyre_h / TYRE_DIAMETER_MM)
+        full = 100.0
+        rest = spring_length_real(full, 0, widget.susp_pixels_per_mm)
+        moved = spring_length_real(full, 20, widget.susp_pixels_per_mm)  # 20 mm compression
+        assert rest - moved == pytest.approx(20 * tyre_h / TYRE_DIAMETER_MM)
+    finally:
+        widget.deleteLater()
+    magnified = new_widget({"suspension_motion_scale": 4.0})
+    try:
+        assert magnified.susp_pixels_per_mm == pytest.approx(4 * tyre_h / TYRE_DIAMETER_MM)
+    finally:
+        magnified.deleteLater()
+
+
+def test_suspension_turns_with_wheel(ui_env, monkeypatch):
+    """Anchored to its wheel: same rotation around tyre center as tyre & disc"""
+    from PySide6.QtGui import QPainter
+
+    widget = new_widget()
+    try:
+        rotations = []
+        original = QPainter.rotate
+        monkeypatch.setattr(QPainter, "rotate", lambda painter, angle: (rotations.append(angle),
+                                                                         original(painter, angle))[1])
+        wheel = widget.wheels[0]
+        wheel.steer = 12.0
+        from PySide6.QtGui import QImage
+
+        image = QImage(widget.size(), QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        widget.draw_suspension(painter, widget.rects_susp[0], wheel, 0)
+        painter.end()
+        assert rotations == [12.0]
+        rotations.clear()
+        wheel.steer = 0.0
+        painter = QPainter(image)
+        widget.draw_suspension(painter, widget.rects_susp[0], wheel, 0)
+        painter.end()
+        assert rotations == []  # straight: no rotation
+    finally:
+        widget.deleteLater()
+
+
+def test_tyre_and_disc_stay_in_place_with_suspension(ui_env, monkeypatch):
+    """Top view: suspension travel is across the screen, it must not move tyre or disc"""
+    widget = new_widget()
+    try:
+        widget.wheels[0].susp_offset = 30.0
+        shifts = []
+        monkeypatch.setattr(widget, "draw_tyre", lambda painter, *args: shifts.append(painter.transform().dy()))
+        widget.grab()
+        assert shifts and all(shift == 0 for shift in shifts)
+    finally:
+        widget.deleteLater()

@@ -36,6 +36,7 @@ def widget(ui_env, monkeypatch):
         timing=SimpleNamespace(elapsed=lambda: 100.0),
         wheel=SimpleNamespace(
             is_detached=lambda: (False, True, False, False), suspension_damage=lambda: (0.0, 0.0, 0.6, 0.0),
+            suspension_deflection=lambda: (40.0, 45.0, 50.0, 55.0), toe=lambda: (0.0, 0.0, 0.0, 0.0),
         ),
         inputs=SimpleNamespace(brake_raw=lambda: 0.9, throttle=lambda: 0.0, brake=lambda: 0.9),
         engine=SimpleNamespace(gear=lambda: -1, rpm=lambda: 6000.0, rpm_max=lambda: 8000.0),
@@ -93,14 +94,20 @@ def test_abs_tc_shown_only_if_car_has_them(widget, monkeypatch):
     assert not widget.has_tc
 
 
-def test_tyres_turn_with_wheel_angle(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+def test_tyres_turn_with_real_wheel_angle(widget, monkeypatch):
+    """1:1 with the car: real angle straight from game, no multiplier, no module needed"""
+    import math
 
-    monkeypatch.setattr(minfo.wheels, "toeAngle", [-10.0, 8.0, 0.5, 40.0])
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.wheel, "toe", lambda: tuple(map(math.radians, (-10.0, 8.0, 0.5, 40.0))),
+                        )
+    widget.use_wheels = False  # Wheels module off: still turns
     widget.timerEvent(None)
-    assert widget.wheels[0].steer == pytest.approx(-20.0)  # left, x2 multiplier
-    assert widget.wheels[1].steer == pytest.approx(16.0)  # right
-    assert widget.wheels[3].steer == pytest.approx(30.0)  # limited to maximum
+    assert widget.wheels[0].steer == pytest.approx(-10.0)  # left, real angle
+    assert widget.wheels[1].steer == pytest.approx(8.0)  # right
+    assert widget.wheels[2].steer == pytest.approx(0.5)
+    assert widget.wheels[3].steer == pytest.approx(30.0)  # limited to maximum (room around tyres)
     widget.grab()  # draws turned tyres
 
 

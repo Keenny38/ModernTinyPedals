@@ -5223,6 +5223,18 @@ Show detached wheel (dashed outline, `OFF`), puncture (`PUNCT`) and flat spot (`
     show_tyre_carcass_temperature, show_tyre_load, show_tyre_slip_angle, show_wheel_camber, show_ride_height, show_tyre_wear_per_lap
 Additional per-wheel readings, all off by default. Each is prefixed so it can be told apart from the others at a glance: carcass temperature `K85`, share of the car's total tyre load `L26%`, slip angle `S+4.1` (degrees), camber `C-3.2` (degrees), ride height `H32` (millimeters), and estimated tread lost over a full lap `▼0.82` (percent, from `Wheels module`).
 
+    show_suspension, suspension_scale
+Show each suspension (coilover seen from the side) right beside the brake bar, anchored to its wheel: it turns with the tyre and brake disc when steering, and a link joins its wheel mount to the disc bar (hub). The car is seen from above, where suspension travel is up and down (across the screen): it shows on the coilover, seen from the side, and never moves tyre or disc, which would read as the wheel moving along the car. Damper body and top mount, coil spring and shaft down to the wheel mount. The wheel mount moves 1:1 with the car in game: its distance from the static position tick is the real suspension offset in millimeters, at the same scale as the tyre drawing (tyre height stands for a 680 mm race tyre), so a 20 mm compression moves it by 20 mm at that scale. Static position from `Wheels module`, or a slow average of positions (position at rest) while it is off. `suspension_scale` sets its width (default `1.0`, range `0.5` to `3`).
+
+    suspension_motion_scale
+Magnify suspension motion, `1.0` (default) is real scale. Real suspension travel is small next to a tyre, `3` to `5` makes small movements easier to see.
+
+    suspension_spring_color, suspension_compression_color, suspension_rebound_color, suspension_velocity_scale
+Spring color at rest, tinted toward compression color while compressing and rebound color while extending, fully at `suspension_velocity_scale` mm/s (default `150`).
+
+    suspension_bump_color, suspension_bump_threshold
+Spring turns bump stop color, pulsing with `enable_alert_pulse`, above this fraction of travel (default `0.92`): suspension bottoming out.
+
     show_brake_pressure, brake_pressure_color
 Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
 
@@ -5268,13 +5280,10 @@ Stint start level mark and level after refuel/refill mark.
 Set order of center column items (ABS, TC, brake bias, pit & limiter, gear, speed, RPM, pedals). Can be changed with `Configure Display Order` button in config dialog.
 
     show_wheel_angle
-Turn tyres left or right with real wheel angle (front wheels follow steering). The brake disc bar turns with its wheel, keeping the corner assembly together, while brake readings stay upright. `Wheels module` must be enabled.
-
-    wheel_angle_multiplier
-Multiply displayed wheel angle, as real wheel angle is small (usually less than 15 degrees). Default is `2.0`.
+Turn tyres left or right with real wheel angle, 1:1 with the car in game (read straight from the game, each wheel its own angle, so Ackermann and toe show as they are). The brake disc bar turns with its wheel, keeping the corner assembly together, while brake readings stay upright.
 
     maximum_wheel_angle
-Maximum displayed wheel angle in degrees, value range in `0` to `45`. Default is `30`.
+Maximum displayed wheel angle in degrees, value range in `0` to `45`. Default is `30`. It also sets the room kept around tyres, a real angle above it is shown at this maximum.
 
     show_tyre_temperature, show_tyre_pressure, show_brake_temperature
 Show tyre surface temperature, tyre pressure and brake temperature.

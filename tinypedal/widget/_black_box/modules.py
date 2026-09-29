@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Module: (short name shown in widget, options that read its data)
 MODULE_FEATURES: dict[str, tuple[str, tuple[str, ...]]] = {
     "module_wheels": ("Wheels", (
-        "show_slip_warning", "show_wheel_angle", "show_wheel_camber", "show_tyre_slip_angle",
+        "show_slip_warning", "show_wheel_camber", "show_tyre_slip_angle",
         "show_tyre_wear_per_lap", "show_tyre_wear_end_stint", "show_brake_wear", "show_wheel_locking",
         "show_stint_comparison", "show_tyre_status",
     )),

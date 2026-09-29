@@ -280,13 +280,14 @@ class WheelPainter:
         wcfg = self.wcfg
         is_right = index % 2  # FL, FR, RL, RR: odd index is on right side
         bar_w, bar_gap = self.brake_bar_w, self.brake_bar_gap
+        skip = bar_w + bar_gap + self.susp_extra  # bar, then suspension, then readings
         if is_right:  # tyre on right side of brake
             bar = QRectF(rect.right() - bar_w, rect.top(), bar_w, rect.height())
-            text_rect = QRectF(rect.left(), rect.top(), rect.width() - bar_w - bar_gap, rect.height())
+            text_rect = QRectF(rect.left(), rect.top(), rect.width() - skip, rect.height())
             align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         else:
             bar = QRectF(rect.left(), rect.top(), bar_w, rect.height())
-            text_rect = QRectF(rect.left() + bar_w + bar_gap, rect.top(), rect.width() - bar_w - bar_gap, rect.height())
+            text_rect = QRectF(rect.left() + skip, rect.top(), rect.width() - skip, rect.height())
             align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         radius = bar_w / 2
         path = QPainterPath()
