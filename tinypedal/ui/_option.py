@@ -88,6 +88,10 @@ class OptionGroup(QLabel):
     """Option group label"""
 
 
+class OptionSection(QLabel):
+    """Option section label, above option groups"""
+
+
 # Base option edit class
 class BaseLineEdit(QLineEdit):
     """QLineEdit with default value & reset method"""

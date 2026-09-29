@@ -100,6 +100,7 @@ CFG_STRING = (
     "^process_id$|"
     "^version$|"
     # Partial match
+    "by_compound|"
     "file_name|"
     "prefix|"
     "repository|"
@@ -225,6 +226,17 @@ FONT_WEIGHT_MAP = MappingProxyType({
 })
 
 # Choice dictionary
+CHOICE_UNITS = MappingProxyType({
+    "distance_unit": ("Meter", "Feet"),
+    "fuel_unit": ("Liter", "Gallon"),
+    "odometer_unit": ("Kilometer", "Mile", "Meter"),
+    "power_unit": ("Kilowatt", "Horsepower", "Metric Horsepower"),
+    "speed_unit": ("KPH", "MPH", "m/s"),
+    "temperature_unit": ("Celsius", "Fahrenheit"),
+    "turbo_pressure_unit": ("bar", "psi", "kPa"),
+    "tyre_pressure_unit": ("kPa", "psi", "bar"),
+    "weight_unit": ("Kilogram", "Pound"),
+})
 CHOICE_COMMON = MappingProxyType({
     CFG_API_NAME: tuple(API_MAP_ALIAS),
     CFG_BAR_POSITION: ("Left", "Right"),
@@ -237,17 +249,12 @@ CHOICE_COMMON = MappingProxyType({
     CFG_STATS_CLASSIFICATION: ("Class - Brand", "Class", "Vehicle"),
     CFG_WINDOW_COLOR_THEME: ("Light", "Dark"),
     CFG_LANGUAGE: ("English", "Français"),
-})
-CHOICE_UNITS = MappingProxyType({
-    "distance_unit": ("Meter", "Feet"),
-    "fuel_unit": ("Liter", "Gallon"),
-    "odometer_unit": ("Kilometer", "Mile", "Meter"),
-    "power_unit": ("Kilowatt", "Horsepower", "Metric Horsepower"),
-    "speed_unit": ("KPH", "MPH", "m/s"),
-    "temperature_unit": ("Celsius", "Fahrenheit"),
-    "turbo_pressure_unit": ("bar", "psi", "kPa"),
-    "tyre_pressure_unit": ("kPa", "psi", "bar"),
-    "weight_unit": ("Kilogram", "Pound"),
+    "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
+    # Per widget unit, "Global" = use Units setting
+    "^override_unit_temperature$": ("Global", *CHOICE_UNITS["temperature_unit"]),
+    "^override_unit_tyre_pressure$": ("Global", *CHOICE_UNITS["tyre_pressure_unit"]),
+    "^override_unit_speed$": ("Global", *CHOICE_UNITS["speed_unit"]),
+    "^override_unit_fuel$": ("Global", *CHOICE_UNITS["fuel_unit"]),
 })
 
 # Misc

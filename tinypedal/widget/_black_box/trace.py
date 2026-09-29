@@ -1,0 +1,139 @@
+#  TinyPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of TinyPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Black box widget, draw incident trace & event log
+
+The trace shows the recorder window: throttle and brake as filled areas, speed as a line,
+ABS & TC activity as ticks on top, wheel lock & spin as marks at the bottom. Live while
+driving, frozen on the last incident for incident_display_duration seconds, with the
+trigger moment marked.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
+
+from .recorder import format_event
+
+MIN_SPEED_SCALE = 20.0  # m/s, so a slow crawl is not stretched to full height
+
+
+def translucent(name: str, alpha: int) -> QColor:
+    color = QColor(name)
+    color.setAlpha(alpha)
+    return color
+
+
+class TracePainter:
+    """Draw incident trace & event log"""
+
+    def draw_trace(self, painter: QPainter, rect: QRectF):
+        wcfg = self.wcfg
+        incident = self.recorder.last_incident if self.showing_incident() else None
+        samples = incident.samples if incident is not None else tuple(self.recorder.samples)
+        inner = rect.adjusted(self.unit * 0.15, self.unit * 0.15, -self.unit * 0.15, -self.unit * 0.15)
+        if len(samples) >= 2 and inner.width() > 2 and inner.height() > 2:
+            end = samples[-1].time
+            span = max(end - samples[0].time, 1.0) if incident is not None else self.recorder.duration
+            start = end - span
+
+            def x_at(time: float) -> float:
+                return inner.left() + (time - start) / span * inner.width()
+
+            self.draw_trace_area(painter, inner, samples, x_at, "throttle", wcfg["throttle_color"])
+            self.draw_trace_area(painter, inner, samples, x_at, "brake", wcfg["brake_color"])
+            self.draw_trace_marks(painter, inner, samples, x_at)
+            self.draw_trace_speed(painter, inner, samples, x_at)
+            if incident is not None:
+                pen = QPen(QColor(wcfg["incident_color"]), max(self.unit * 0.08, 1))
+                painter.setPen(pen)
+                trigger_x = x_at(incident.time)
+                painter.drawLine(QPointF(trigger_x, rect.top()), QPointF(trigger_x, rect.bottom()))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        self.draw_trace_caption(painter, rect, incident)
+
+    @staticmethod
+    def draw_trace_area(painter: QPainter, rect: QRectF, samples, x_at, name: str, color: str):
+        """Pedal input as a filled area from bottom"""
+        points = [QPointF(x_at(samples[0].time), rect.bottom())]
+        for sample in samples:
+            value = min(max(getattr(sample, name), 0.0), 1.0)
+            points.append(QPointF(x_at(sample.time), rect.bottom() - value * rect.height()))
+        points.append(QPointF(x_at(samples[-1].time), rect.bottom()))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(translucent(color, 95))
+        painter.drawPolygon(QPolygonF(points))
+
+    def draw_trace_speed(self, painter: QPainter, rect: QRectF, samples, x_at):
+        """Speed line, scaled to the highest speed in window"""
+        top_speed = max(max(sample.speed for sample in samples), MIN_SPEED_SCALE)
+        path = QPainterPath()
+        for index, sample in enumerate(samples):
+            point = QPointF(x_at(sample.time), rect.bottom() - min(max(sample.speed, 0) / top_speed, 1) * rect.height())
+            if index:
+                path.lineTo(point)
+            else:
+                path.moveTo(point)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(self.wcfg["trace_speed_color"]), max(self.unit * 0.09, 1.2)))
+        painter.drawPath(path)
+
+    def draw_trace_marks(self, painter: QPainter, rect: QRectF, samples, x_at):
+        """ABS & TC ticks on top, lock & spin marks at bottom"""
+        wcfg = self.wcfg
+        tick = max(self.unit * 0.12, 2)
+        width = max(rect.width() / max(len(samples), 1), 1)
+        for sample in samples:
+            x = x_at(sample.time)
+            if sample.abs_active:
+                painter.fillRect(QRectF(x, rect.top(), width, tick), QColor(wcfg["abs_active_color"]))
+            if sample.tc_active:
+                painter.fillRect(QRectF(x, rect.top() + tick, width, tick), QColor(wcfg["tc_active_color"]))
+            if sample.slip:
+                color = wcfg["wheel_lock_color" if sample.slip == "lock" else "wheel_spin_color"]
+                painter.fillRect(QRectF(x, rect.bottom() - tick, width, tick), QColor(color))
+
+    def draw_trace_caption(self, painter: QPainter, rect: QRectF, incident):
+        """Incident summary (frozen) or recording mark (live), with incident count"""
+        wcfg = self.wcfg
+        caption_h = min(self.unit * 0.8, rect.height() / 2)
+        left = QRectF(rect.left() + self.unit * 0.25, rect.top(), rect.width() * 0.7, caption_h)
+        right = QRectF(rect.right() - rect.width() * 0.3 - self.unit * 0.25, rect.top(),
+                       rect.width() * 0.3, caption_h)
+        align_left = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        align_right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        count = len(self.recorder.incidents)
+        if incident is not None:
+            painter.setPen(QColor(wcfg["incident_color"]))
+            text = f"{self.text['impact']} L{incident.lap} {incident.peak_g:.1f}g"
+            self.draw_fit_text(painter, left, text, self.font_label, align_left)
+        else:
+            painter.setPen(translucent(wcfg["incident_color"], 200))
+            self.draw_fit_text(painter, right, f"● {count}" if count else "●", self.font_label, align_right)
+
+    def draw_event_log(self, painter: QPainter):
+        """Newest event on top"""
+        wcfg = self.wcfg
+        events = list(self.event_log.events)[::-1]
+        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        for row, event in zip(self.event_rows, events):
+            painter.setPen(QColor(wcfg["incident_color"] if event.critical else wcfg["font_color_event_log"]))
+            self.draw_fit_text(painter, row, format_event(event), self.font_small, align)

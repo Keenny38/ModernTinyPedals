@@ -21,7 +21,7 @@ Currently supports `rFactor 2` and `Le Mans Ultimate`, and runs on `Windows` and
 * Qt 6 (PySide6), modern overlay style (themes, rounded corners, bundled JetBrains Mono font), custom themes editor and per widget theme.
 * French interface (`Config` > `Application` > `Language`), switched live, including all option names; option descriptions from the documentation shown as tooltips.
 * First launch setup wizard, global option search (`Ctrl+F`), live widget preview, undo & redo in editors, layout guides.
-* New `Wheel status` widget: tyres, brake discs, wheel rotation, lock & spin, ABS & TC activation.
+* New `Black box` widget: tyres, brake discs, wheel rotation, lock & spin, ABS & TC activation.
 * Telemetry recorder (CSV per lap) and lap telemetry viewer, preset comparison, preset packages (zip).
 * Remote control for Stream Deck & co, web dashboard for phone or tablet, experimental SteamVR overlay.
 * Widget plugins with plugin manager, bug report generator, widget & thread performance monitor.

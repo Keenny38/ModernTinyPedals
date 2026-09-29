@@ -45,6 +45,7 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 50, 1), _user_prior_2_50_1),  # 2026-09-28
         ((2, 49, 9), _user_prior_2_49_9),  # 2026-08-30
         ((2, 49, 2), _user_prior_2_49_2),  # 2026-08-09
         ((2, 48, 7), _user_prior_2_48_7),  # 2026-07-27
@@ -73,6 +74,22 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_50_1(dict_user: dict):
+    # Rename wheel_status widget to black_box
+    wheel_status = dict_user.get("wheel_status")
+    if isinstance(wheel_status, dict) and "black_box" not in dict_user:
+        dict_user["black_box"] = wheel_status.copy()
+    # Black box: refuel & fuel rows merged into fuel gauge, refill & energy rows into energy gauge
+    black_box = dict_user.get("black_box")
+    if isinstance(black_box, dict):
+        if "show_refuel" in black_box or "show_fuel_remaining" in black_box:
+            black_box["show_fuel_gauge"] = bool(
+                black_box.get("show_refuel", False) or black_box.get("show_fuel_remaining", False))
+        if "show_refill" in black_box or "show_energy_remaining" in black_box:
+            black_box["show_energy_gauge"] = bool(
+                black_box.get("show_refill", False) or black_box.get("show_energy_remaining", False))
+
+
 def _user_prior_2_49_9(dict_user: dict):
     # Rename steering widget to steering_meter
     steering = dict_user.get("steering")

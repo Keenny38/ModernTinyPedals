@@ -5174,7 +5174,7 @@ Set number of samples for reducing data fluctuation. Lower value may result more
 [**`Back to Top`**](#)
 
 
-## Wheel status
+## Black box
 **This widget displays an all-in-one view of the four wheels: tyre temperature, brake temperature, wheel lock & spin, ABS & TC activation, brake bias and pedals.**
 
 Tyres are drawn at each corner (seen from above), with a thin brake bar next to each tyre and brake temperature written beside it, colored with heatmap (auto matched with tyre compound & brake type if enabled). A locked wheel gets a red outline, a spinning wheel gets a yellow outline. `Wheels module` must be enabled for lock & spin warning.
@@ -5220,15 +5220,6 @@ Show estimated remaining tyre tread at end of current stint (`→61%`), from `Wh
     show_tyre_status, flat_spot_threshold
 Show detached wheel (dashed outline, `OFF`), puncture (`PUNCT`) and flat spot (`FLAT`, tyre wear while locked above `flat_spot_threshold` percent).
 
-    show_suspension_damage
-Show suspension damage bar below brake of damaged corner (yellow, orange, red).
-
-    show_body_damage
-Show body damage marks along car edges (front, sides, rear), only for damaged parts.
-
-    damage_color_minor, damage_color_major, damage_color_critical
-Color of body and suspension damage marks by severity.
-
     show_tyre_carcass_temperature, show_tyre_load, show_tyre_slip_angle, show_wheel_camber, show_ride_height, show_tyre_wear_per_lap
 Additional per-wheel readings, all off by default. Each is prefixed so it can be told apart from the others at a glance: carcass temperature `K85`, share of the car's total tyre load `L26%`, slip angle `S+4.1` (degrees), camber `C-3.2` (degrees), ride height `H32` (millimeters), and estimated tread lost over a full lap `▼0.82` (percent, from `Wheels module`).
 
@@ -5264,8 +5255,14 @@ Flash the battery bar when it enters a low or high charge warning, then keep the
     show_pit_limiter_indicator
 Show pit lane (`PIT`) and speed limiter (`LIM`) indicators, only while active.
 
-    show_fuel_remaining, show_energy_remaining
-Show remaining fuel & estimated laps (bottom left), remaining virtual energy & estimated laps (bottom right).
+    show_fuel_gauge, show_energy_gauge
+Show fuel gauge and virtual energy gauge at the bottom, one full-width bar each, like the level bar of `Fuel` and `Virtual Energy` widgets: filled to current level (percent of capacity), with a mark at stint start level and a mark at the level after refuel/refill (current level plus amount needed to finish). Label on the left, remaining amount & estimated laps, then amount to add (`+12.4 L`, in refill mark color when fuel must be added) on the right, from `Fuel module` and `Energy module`. The energy row stays empty on cars without virtual energy, so the widget never resizes.
+
+    fuel_gauge_color, energy_gauge_color, gauge_low_color, gauge_low_lap_threshold
+Gauge fill colors. Below `gauge_low_lap_threshold` estimated laps (default `2`), the gauge and its reading turn `gauge_low_color` and pulse with `enable_alert_pulse`.
+
+    show_gauge_start_mark, gauge_start_mark_color, show_gauge_refill_mark, gauge_refill_mark_color
+Stint start level mark and level after refuel/refill mark.
 
     display_order_*
 Set order of center column items (ABS, TC, brake bias, pit & limiter, gear, speed, RPM, pedals). Can be changed with `Configure Display Order` button in config dialog.
@@ -5344,8 +5341,81 @@ All texts of this widget are automatically reduced if they do not fit in their b
     rpm_redline_ratio
 RPM bar turns `rpm_redline_color` above this fraction of maximum RPM. Default is `0.95`.
 
-    show_refuel, show_refill
-Show fuel to add (`Refuel`, bottom left, from `Fuel module`) and virtual energy to add (`Refill`, bottom right, percent, only for cars with virtual energy) to finish the race.
+    display_profile
+Preset group of show options: `Custom` (default) uses your own values, `Minimal` keeps only the essentials (tyre temperature & wear, brakes, center column basics), `Sprint` favours lap time & delta without fuel rows, `Endurance` turns on pressure, wear estimates, compound, brake wear, fuel & energy rows, stint comparison and trends. A profile overrides the matching options while it is selected, without changing your saved values.
+
+    auto_compact_display_scale
+Hide secondary elements (diagnostic readings, end of stint wear, compound, brake wear & pressure, caption, stint comparison, trends) when `display_scale` is below this value. `0` disables (default).
+
+    slow_data_update_interval
+Update interval (milliseconds) of slow changing data: temperatures, pressure, wear, damage, fuel & energy. Fast data (slip warning, steering, center column, battery) still follows `update_interval`. `0` updates everything every time. Default is `200`. The widget is also only repainted when something visible changed.
+
+    override_unit_temperature, override_unit_tyre_pressure, override_unit_speed, override_unit_fuel
+Unit used by this widget only. `Global` follows the `Units` setting. Default is `Global`, except fuel which defaults to `Liter`, so fuel gauge always reads in liters unless changed here.
+
+    tyre_temperature_cold_threshold, font_color_tyre_temperature_cold, font_color_tyre_temperature_warming
+Tyre temperature text turns cold color below this temperature (Celsius), or warming color while still below it but rising (see trends). `0` disables (default). Above `tyre_temperature_warning_threshold` it turns `font_color_tyre_temperature_warning`.
+
+    show_tyre_temperature_trend, show_tyre_pressure_trend, tyre_trend_duration, tyre_heat_trend_threshold, tyre_pressure_trend_threshold
+Append an arrow to tyre temperature or pressure: `↑` rising, `↓` falling, compared with the value `tyre_trend_duration` seconds ago (default `10`). A change smaller than the threshold (`2` Celsius degrees, `1` kPa by default) shows no arrow.
+
+    tyre_target_by_compound
+Pressure target (kPa) and optional temperature window (Celsius) per tyre compound, replacing `tyre_pressure_target_minimum`, `tyre_pressure_target_maximum`, `tyre_temperature_cold_threshold` and `tyre_temperature_warning_threshold` for that compound. Format: `symbol=min-max/cold-hot`, entries separated by `;`, for example `S=160-190/75-105; W=150-175/40-70`. The symbol is the compound symbol (see `Tyre Compound Editor`) or the full compound name. Invalid entries are ignored. Empty by default.
+
+    brake_temperature_cold_threshold, brake_temperature_hot_threshold, font_color_brake_temperature_cold, font_color_brake_temperature_hot
+Brake temperature text turns cold color below the cold threshold, hot color above the hot threshold (Celsius), instead of heatmap color. `0` disables (default).
+
+    show_stint_comparison
+Show an extra bottom row with average tread wear per lap (percent) and average tyre pressure of the current stint, followed by the difference with the previous stint once a stint has been completed (a stint ends when entering the pits). Needs `Wheels module` for wear.
+
+    text_puncture, text_flat_spot, text_detached, text_abs, text_tc, text_brake_bias, text_brake_migration, text_locking, text_delta, text_laptime, text_pit, text_limiter, text_speed, text_rpm, text_fuel, text_energy, text_stint_wear, text_stint_pressure
+Custom label texts, for translation or shorter abbreviations. Defaults are `PUNCT`, `FLAT`, `OFF`, `ABS`, `TC`, `BB`, `BMIG`, `LOCK`, `DELTA`, `TIME`, `PIT`, `LIM`, `SPD`, `RPM`, `Fuel`, `Energy`, `Wear/lap` and `Pres`.
+
+The order of the center column items can be changed by drag & drop with the `Configure Display Order` button at the bottom of the config dialog.
+
+    enable_depth_effects
+Soft drop shadow and rounded rubber shading on tyres, thin highlight edge on info rows.
+
+    enable_smooth_transition, smooth_transition_duration
+Fade tyre and brake heatmap colors from one grade to the next over `smooth_transition_duration` seconds (default `0.4`), instead of stepping.
+
+    enable_alert_pulse, alert_pulse_frequency
+Pulse wheel lock & spin outline, detached wheel, puncture and flat spot warnings at `alert_pulse_frequency` (Hz, default `1.5`).
+
+    show_damage_panel, damage_panel_scale
+Show the same data as `Damage` widget at the bottom right of this widget, next to the bottom rows: rounded body shell cut in 8 segments (intact ones stay faint, damaged ones light up), wheels as rounded chips colored by suspension damage (outlined on puncture, dashed when detached), a fading cone toward the last impact, and integrity in the middle, colored by level (green, yellow, red) with its source (`BODY` or `AERO`) and a gauge. `damage_panel_scale` sets its height in lines (default `3.4`). Detached parts and punctures pulse with `enable_alert_pulse`.
+
+    damage_panel_body_color, damage_panel_body_color_light, damage_panel_body_color_heavy, damage_panel_body_color_detached
+Body part color: intact, light damage, heavy damage, detached.
+
+    damage_panel_suspension_color, damage_panel_suspension_color_light, damage_panel_suspension_color_medium, damage_panel_suspension_color_heavy, damage_panel_suspension_color_totaled, damage_panel_wheel_color_detached, damage_panel_puncture_color
+Wheel color by suspension damage, detached wheel color, and puncture outline color.
+
+    damage_panel_suspension_light_threshold, damage_panel_suspension_medium_threshold, damage_panel_suspension_heavy_threshold, damage_panel_suspension_totaled_threshold
+Suspension damage fraction from which each color is used. Defaults are `0.02`, `0.15`, `0.4` and `0.8`, same as `Damage` widget.
+
+    show_damage_panel_impact_cone, damage_panel_impact_cone_angle, damage_panel_impact_cone_duration, damage_panel_impact_cone_color
+Show a cone toward the last impact for `damage_panel_impact_cone_duration` seconds (default `15`), `damage_panel_impact_cone_angle` degrees wide (default `15`).
+
+    show_damage_panel_integrity, show_damage_panel_aero_integrity, text_integrity_body, text_integrity_aero
+Show remaining body integrity in the middle, or aero integrity if the car reports it, with its source label (defaults `BODY` and `AERO`).
+
+    show_incident_recorder, recorder_duration, incident_deceleration_threshold, incident_display_duration
+Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on a deceleration above `incident_deceleration_threshold` (g, default `4`, `0` disables) or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g`), before going back to live. The dot at top right counts incidents of the session.
+
+    enable_incident_file_export
+Save each incident as a JSON file (times relative to incident, speed in m/s, pedals, gear, ABS, TC, slip) in the `blackbox` folder of the configuration folder, to look at afterwards. Enabled by default, only used with the incident recorder.
+
+    trace_height_scale, trace_speed_color, trace_background_color, incident_color
+Height of trace panel relative to font line height (default `2.5`), speed line color, panel background, incident mark & critical event color.
+
+    show_event_log, number_of_event_log_lines, font_color_event_log
+Event log below the trace: puncture, flat spot, detached wheel, damage and incidents, newest on top, with lap and session time (`L12 04:31 PUNCT FR`). Critical events use `incident_color`. Tyre events need `show_tyre_status`.
+
+    text_damage, text_impact
+Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
+
+Options in the config dialog of this widget are split in sections (General, Visual Style, Units, Tyres, Brakes, Wheel Slip, Battery, RPM LEDs, Center Column, Bottom Rows, Incident Recorder & Event Log, Labels, Center Column Order), and the live preview at the top of the dialog shows changes before saving.
 
 [**`Back to Top`**](#)
 

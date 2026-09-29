@@ -670,6 +670,13 @@ def set_style_window(base_font_pt: int) -> str:
         UserConfig #widgetPreview {{
             background: #39424E;
         }}
+        UserConfig OptionSection {{
+            font-size: {font_pt_app_name}pt;
+            font-weight: bold;
+            color: {color_active_window_text};
+            border-bottom: 2px solid {color_active_highlight};
+            padding: 0.6em 0 0.2em 0;
+        }}
         UserConfig OptionGroup {{
             font-size: {font_pt_item_name}pt;
             font-weight: bold;

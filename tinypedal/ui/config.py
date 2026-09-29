@@ -49,6 +49,7 @@ from ..i18n import tr, trm
 from ..i18n.options import module_label, option_label, option_tooltip, search_text
 from ..setting import cfg
 from ..template.setting_widget import WIDGET_FILENAME
+from ..template.widget import WIDGET_OPTION_SECTIONS
 from ..widget._style import GLOBAL_THEME, overlay_theme_names
 from ._common import (
     QVAL_COLOR,
@@ -70,6 +71,7 @@ from ._option import (
     ImagePathEdit,
     IntegerEdit,
     OptionGroup,
+    OptionSection,
     StringEdit,
     unit_hint,
 )
@@ -429,9 +431,15 @@ class UserConfig(BaseDialog):
         row_index = -1
         show_group_title = cfg.application["show_option_group_title"]
         group_name = ""
+        sections = WIDGET_OPTION_SECTIONS.get(self.key_name, {})
 
         for key, next_key in zip_longest(option_keys, islice(option_keys, 1, None), fillvalue=""):
             row_index += 1
+            # Section title, for widgets with many options
+            if key in sections:
+                self._add_section_label(row_index, tr(sections[key]), layout)
+                row_index += 1
+                group_name = ""
             # Group name
             if show_group_title:
                 group_name = option_group_name(key, next_key, group_name)
@@ -501,6 +509,12 @@ class UserConfig(BaseDialog):
                 self._add_option_combolist(row_index, key, layout, choice_list)
                 return True
         return False
+
+    def _add_section_label(self, row_index: int, title: str, layout: QGridLayout):
+        """Section title, above option groups"""
+        label = OptionSection(title, self)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label, row_index, COLUMN_LABEL, 1, 2)
 
     def _add_group_label(self, row_index: int, option_name: str, layout: QGridLayout):
         """Option group"""

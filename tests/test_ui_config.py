@@ -220,7 +220,7 @@ def test_integer_option_rejects_decimal_without_crashing(ui_env):
 def test_unit_hint_shown_in_dialog(ui_env, no_message_box):
     """Pressure thresholds are typed in kPa; the editor shows what that is in the user's unit"""
     cfg.units["tyre_pressure_unit"] = "psi"
-    dialog = open_config("wheel_status", [])
+    dialog = open_config("black_box", [])
     try:
         editor = dialog.option_edit["tyre_pressure_target_minimum"]
         assert editor.placeholderText() == "23.21 psi"  # 160 kPa as stored
@@ -230,4 +230,19 @@ def test_unit_hint_shown_in_dialog(ui_env, no_message_box):
         assert plain.placeholderText() == ""  # a percentage, no unit to convert
     finally:
         cfg.units["tyre_pressure_unit"] = "kPa"
+        close_dialog(dialog)
+
+
+def test_black_box_config_has_sections(ui_env):
+    """Widgets with many options show section titles, in option order"""
+    from tinypedal.template.widget import WIDGET_OPTION_SECTIONS
+    from tinypedal.ui._option import OptionSection
+
+    sections = WIDGET_OPTION_SECTIONS["black_box"]
+    assert set(sections) <= set(cfg.default.setting["black_box"])  # every section starts at a real option
+    dialog = open_config("black_box", [])
+    try:
+        titles = [label.text() for label in dialog.findChildren(OptionSection)]
+        assert titles == list(sections.values())
+    finally:
         close_dialog(dialog)

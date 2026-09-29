@@ -236,13 +236,13 @@ Améliorations : **B1 à B8, B10, B12, B13, B14, B16, B17 réalisées**, plus le
 - B13 : moniteur étendu : CPU par fil (modules, connexion au jeu), CPU et mémoire de l'app.
 - B14 : gestionnaire de plugins (erreurs, activation, rechargement à chaud, installation depuis zip sécurisée).
 - B16, B17 : CI (voir A14) et tests d'interface ; couverture 41 % → 49 %.
-- Nouveau widget `Wheel status` (Roues et freins).
+- Nouveau widget `Black box` (anciennement « Wheel status » / « Black box »).
 
 Bilan : 295 tests, ruff et mypy propres (222 fichiers).
 
 ## D. Idées suivantes (27/09/2026)
 
-### Widget « Roues et freins »
+### Widget « Black box »
 1. 💡 Couleur du rapport engagé selon le régime (vert → orange → rouge) et clignotement au régime de passage.
 2. 💡 Rangée de LED de régime en haut du widget (shift lights).
 3. 💡 Delta best et temps au tour courant sous la vitesse.
@@ -264,11 +264,11 @@ Bilan : 295 tests, ruff et mypy propres (222 fichiers).
 17. 💡 Installeur Windows et mise à jour automatique.
 18. 💡 Mettre le projet sous Git et le publier sur GitHub.
 
-Réalisé (27/09/2026) : D1, D2, D4 à D12 dans le widget « Roues et freins » (D3 non demandé).
+Réalisé (27/09/2026) : D1, D2, D4 à D12 dans le widget « Black box » (D3 non demandé).
 
-## E. Audit du widget « Roues et freins » (28/09/2026)
+## E. Audit du widget « Black box » (28/09/2026)
 
-Audit dédié du fichier `tinypedal/widget/wheel_status.py` (640 lignes exécutables, 114 options, 98 % de couverture de tests après corrections ; 2ᵉ widget le plus lourd sur 77 au benchmark).
+Audit dédié du fichier `tinypedal/widget/black_box.py` (640 lignes exécutables, 114 options, 98 % de couverture de tests après corrections ; 2ᵉ widget le plus lourd sur 77 au benchmark).
 
 ### 🔴 Bugs corrigés
 1. ✅ La dernière LED de régime ne s'allumait jamais (son seuil était égal à `redline`, où la branche « surrégime » prend le dessus). Formule corrigée : `start + led / count * (redline - start)`.
@@ -325,9 +325,9 @@ Contexte : l'app a deux couches de style bien distinctes. Les **widgets overlay*
 
 Réalisé (28/09/2026) : F1, F2. Non traités : F3, F4 (mineurs), F5 à F8 (nécessitent des ressources ou une refonte plus large, proposés comme prochaine étape).
 
-## E (suite, 28/09/2026) — Modernisation visuelle du widget « Roues et freins »
+## E (suite, 28/09/2026) — Modernisation visuelle du widget « Black box »
 
-Suite à la demande explicite de pousser plus loin le style de `wheel_status`, sans toucher au reste de la suite de widgets (dont le rendu reste volontairement plus sobre, cf. section F sur le style applicatif général).
+Suite à la demande explicite de pousser plus loin le style de `black_box`, sans toucher au reste de la suite de widgets (dont le rendu reste volontairement plus sobre, cf. section F sur le style applicatif général).
 
 ### 💡 Ajouté
 - Badges (ABS/TC/PIT/LIM), LED de régime, barre de régime, barres de pédales, barre de dégâts de suspension et pastilles d'alerte (pression, crevaison, pneu à plat) rendus en **capsule pleinement arrondie** au lieu du très léger arrondi hérité du réglage global (`corner_radius_scale`, 0,05 par défaut, quasi invisible sur des éléments aussi fins). Le rendu reste carré si l'utilisateur désactive explicitement les coins arrondis (`corner_radius_scale = 0`) — le choix de l'utilisateur reste respecté, seule l'intensité par défaut est renforcée sur ces petits éléments.

@@ -1,4 +1,4 @@
-"""Wheel status widget tests"""
+"""Black box widget tests"""
 
 from types import SimpleNamespace
 
@@ -6,8 +6,9 @@ import pytest
 
 # Safe at module level: conftest builds the QApplication before collection
 from tinypedal.widget import _painter as painter_mod
-from tinypedal.widget import _wheel_state as wheel_state
-from tinypedal.widget import wheel_status
+from tinypedal.widget import black_box
+from tinypedal.widget._black_box import center as center_mod
+from tinypedal.widget._black_box import state as wheel_state
 
 
 @pytest.fixture
@@ -15,7 +16,6 @@ def widget(ui_env, monkeypatch):
     from tinypedal.api_control import api
     from tinypedal.module_info import minfo
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
     fake = SimpleNamespace(
         tyre=SimpleNamespace(
@@ -31,7 +31,9 @@ def widget(ui_env, monkeypatch):
             speed=lambda: 30.0, in_pits=lambda: False, vehicle_name=lambda: "car",
             class_name=lambda: "GT3",
             damage_severity=lambda: (0, 1, 0, 0, 3, 0, 0, 0),
+            aero_damage=lambda: -1.0, impact_time=lambda: 0.0, impact_position=lambda: (0.0, 0.0),
         ),
+        timing=SimpleNamespace(elapsed=lambda: 100.0),
         wheel=SimpleNamespace(
             is_detached=lambda: (False, True, False, False), suspension_damage=lambda: (0.0, 0.0, 0.6, 0.0),
         ),
@@ -44,8 +46,9 @@ def widget(ui_env, monkeypatch):
     )
     monkeypatch.setattr(api, "read", fake)
     monkeypatch.setattr(minfo.wheels, "slipRatio", [-0.4, 0.0, 0.0, 0.0])
-    cfg.user.setting["wheel_status"]["enable_heatmap_auto_matching"] = False
-    instance = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"]["enable_heatmap_auto_matching"] = False
+    cfg.user.setting["black_box"]["slow_data_update_interval"] = 0  # read everything every update
+    instance = black_box.Realtime(cfg, "black_box")
     yield instance
     instance.deleteLater()
 
@@ -133,12 +136,11 @@ def test_text_sizes_and_fit(ui_env):
     from PySide6.QtGui import QPainter, QPixmap
 
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"].update(font_scale_gear=3.0, font_scale_speed=1.5, font_scale_rpm=1.0)
-    large = wheel_status.Realtime(cfg, "wheel_status")
-    cfg.user.setting["wheel_status"].update(font_scale_gear=1.0, font_scale_speed=0.8, font_scale_rpm=0.5)
-    small = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"].update(font_scale_gear=3.0, font_scale_speed=1.5, font_scale_rpm=1.0)
+    large = black_box.Realtime(cfg, "black_box")
+    cfg.user.setting["black_box"].update(font_scale_gear=1.0, font_scale_speed=0.8, font_scale_rpm=0.5)
+    small = black_box.Realtime(cfg, "black_box")
     assert large.font_gear.pixelSize() > small.font_gear.pixelSize()
     assert large.height() > small.height()  # widget adapts to text sizes
     pixmap = QPixmap(10, 10)
@@ -154,7 +156,7 @@ def test_tyre_status_and_damage(widget):
     widget.timerEvent(None)
     assert widget.wheels[1].status == "detached"
     assert widget.wheels[3].status == "puncture"
-    assert widget.wheels[2].suspension_damage == 0.6
+    assert widget.damage_suspension[2] == 0.6
     assert widget.body_damage[4] == 3
     assert widget.limiter
     widget.grab()
@@ -187,15 +189,14 @@ def test_gear_color_and_leds(widget):
 
 def test_display_order_and_layouts(ui_env):
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"].update(display_order_gear=0, display_order_abs=99)
-    widget = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"].update(display_order_gear=0, display_order_abs=99)
+    widget = black_box.Realtime(cfg, "black_box")
     assert widget.center_order[0] == "gear" and widget.center_order[-1] == "abs"
     sizes = {}
     for layout in (0, 1, 2):
-        cfg.user.setting["wheel_status"]["layout"] = layout
-        instance = wheel_status.Realtime(cfg, "wheel_status")
+        cfg.user.setting["black_box"]["layout"] = layout
+        instance = black_box.Realtime(cfg, "black_box")
         sizes[layout] = (instance.width(), instance.height())
         instance.deleteLater()
     assert sizes[1][1] > sizes[0][1]  # vertical: taller
@@ -251,12 +252,11 @@ def test_end_stint_tread_hidden_while_unknown(widget, monkeypatch):
 
 def test_display_scale_is_clamped(ui_env):
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"]["display_scale"] = 100.0
-    huge = wheel_status.Realtime(cfg, "wheel_status")
-    cfg.user.setting["wheel_status"]["display_scale"] = 4.0
-    limit = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"]["display_scale"] = 100.0
+    huge = black_box.Realtime(cfg, "black_box")
+    cfg.user.setting["black_box"]["display_scale"] = 4.0
+    limit = black_box.Realtime(cfg, "black_box")
     assert (huge.width(), huge.height()) == (limit.width(), limit.height())  # clamped to 4
     huge.deleteLater()
     limit.deleteLater()
@@ -301,13 +301,12 @@ def test_brake_wear_unknown_without_module(widget, monkeypatch):
 def test_tyre_compound_symbol(ui_env, monkeypatch):
     from tinypedal.api_control import api
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"].update(show_tyre_compound=True, enable_heatmap_auto_matching=False)
+    cfg.user.setting["black_box"].update(show_tyre_compound=True, enable_heatmap_auto_matching=False)
     cfg.user.compounds["GT3 - Soft"] = {"symbol": "S", "heatmap": "tyre_default"}
     monkeypatch.setattr(api.read.tyre, "compound_class", lambda: ("GT3 - Soft",) * 4)
     monkeypatch.setattr(api.read.vehicle, "in_pits", lambda: True)
-    widget = wheel_status.Realtime(cfg, "wheel_status")
+    widget = black_box.Realtime(cfg, "black_box")
     try:
         widget.timerEvent(None)
         assert [wheel.compound for wheel in widget.wheels] == ["S"] * 4
@@ -327,12 +326,11 @@ def test_tyre_temperature_warning(widget):
 
 def test_caption(ui_env):
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"]["show_caption"] = False
-    plain = wheel_status.Realtime(cfg, "wheel_status")
-    cfg.user.setting["wheel_status"]["show_caption"] = True
-    titled = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"]["show_caption"] = False
+    plain = black_box.Realtime(cfg, "black_box")
+    cfg.user.setting["black_box"]["show_caption"] = True
+    titled = black_box.Realtime(cfg, "black_box")
     assert titled.height() > plain.height()
     assert not titled.rect_caption.isEmpty() and plain.rect_caption.isEmpty()
     titled.grab()
@@ -340,17 +338,19 @@ def test_caption(ui_env):
     titled.deleteLater()
 
 
-def test_laps_label_on_info_rows(widget, monkeypatch):
+def test_laps_label_on_gauges(widget, monkeypatch):
     from tinypedal.module_info import minfo
 
     monkeypatch.setattr(minfo.fuel, "estimatedLaps", 4.5)
     monkeypatch.setattr(minfo.energy, "available", True)
-    rows = []
-    monkeypatch.setattr(widget, "draw_info_row", lambda painter, rect, label, value: rows.append((label, value)))
+    gauges = []
+    monkeypatch.setattr(widget, "draw_level_gauge",
+                        lambda painter, rect, label, gauge, color: gauges.append((label, gauge)))
     widget.timerEvent(None)
     widget.draw_bottom_rows(None)
-    fuel_row = next(value for label, value in rows if label == "Fuel")
-    assert fuel_row.endswith("lap"), fuel_row  # laps had no unit before
+    fuel = next(gauge for label, gauge in gauges if label == "Fuel")
+    assert fuel.text.endswith("lap"), fuel.text  # laps had no unit before
+    assert [label for label, _ in gauges] == ["Fuel", "Energy"]
 
 
 # --- Layout & performance
@@ -358,10 +358,9 @@ def test_vertical_layout_centers_hidden_items(ui_env):
     from PySide6.QtCore import QRectF
 
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
-    cfg.user.setting["wheel_status"]["layout"] = 1
-    widget = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"]["layout"] = 1
+    widget = black_box.Realtime(cfg, "black_box")
     try:
         widget.abs_seen = widget.tc_seen = False
         widget.abs_level = widget.tc_level = -1
@@ -380,14 +379,13 @@ def test_compact_layout_skips_center_data(ui_env, monkeypatch):
     """Compact layout draws no center column, so its data must not be read every tick"""
     from tinypedal.api_control import api
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
     calls = []
     for name in ("abs_level", "tc_level", "tc_cut_level", "tc_slip_level", "speed_limiter"):
         monkeypatch.setattr(api.read.switch, name, lambda _name=name: calls.append(_name) or 0)
     monkeypatch.setattr(api.read.brake, "bias_front", lambda: calls.append("bias_front") or 0.5)
-    cfg.user.setting["wheel_status"]["layout"] = 2
-    widget = wheel_status.Realtime(cfg, "wheel_status")
+    cfg.user.setting["black_box"]["layout"] = 2
+    widget = black_box.Realtime(cfg, "black_box")
     try:
         widget.timerEvent(None)
         assert calls == []
@@ -482,7 +480,7 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
     from PySide6.QtGui import QImage, QPainter
 
     glows = []
-    monkeypatch.setattr(wheel_status, "fill_glow", lambda painter, rect, color: glows.append(color))
+    monkeypatch.setattr(center_mod, "fill_glow", lambda painter, rect, color: glows.append(color))
     widget.wcfg["number_of_rpm_leds"] = 5
     widget.rpm_max = 8000.0
     image = QImage(100, 10, QImage.Format.Format_ARGB32)
@@ -501,11 +499,10 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
 # --- Battery bar (charge/discharge gauge, positioned left or right of the widget)
 def new_widget(overrides=None):
     from tinypedal.setting import cfg
-    from tinypedal.widget import wheel_status
 
     if overrides:
-        cfg.user.setting["wheel_status"].update(overrides)
-    return wheel_status.Realtime(cfg, "wheel_status")
+        cfg.user.setting["black_box"].update(overrides)
+    return black_box.Realtime(cfg, "black_box")
 
 
 def test_battery_bar_hidden_by_default(widget):
@@ -536,12 +533,12 @@ def test_battery_bar_position_right(ui_env):
 
 
 def test_battery_bar_spans_car_view_height(ui_env):
-    """Same vertical extent as the car view (tyres/center column), matching rect_body_damage,
+    """Same vertical extent as the car view (tyres/center column), matching rect_car_view,
     not stretched into the caption/LED row above or the bottom info rows below"""
     instance = new_widget({"show_battery_bar": True})
     try:
-        assert instance.rect_battery.top() == pytest.approx(instance.rect_body_damage.top())
-        assert instance.rect_battery.bottom() == pytest.approx(instance.rect_body_damage.bottom())
+        assert instance.rect_battery.top() == pytest.approx(instance.rect_car_view.top())
+        assert instance.rect_battery.bottom() == pytest.approx(instance.rect_car_view.bottom())
         assert instance.rect_battery.bottom() < instance.bottom_rows[0][0].top()
     finally:
         instance.deleteLater()
@@ -586,7 +583,7 @@ def test_battery_flow_direction_differs_charge_vs_drain(ui_env, monkeypatch):
 
     instance = new_widget({"show_battery_bar": True})
     try:
-        monkeypatch.setattr("tinypedal.widget.wheel_status.monotonic", lambda: 12.345)
+        monkeypatch.setattr("tinypedal.widget._black_box.panels.monotonic", lambda: 12.345)
         rect = QRectF(0, 0, 16, 120)
 
         def render(charging):
@@ -832,7 +829,7 @@ def test_readings_dropped_when_box_too_crowded(ui_env):
         "show_tyre_wear": True, "show_tyre_wear_end_stint": True,
     })
     try:
-        from tinypedal.widget._wheel_state import (
+        from tinypedal.widget._black_box.state import (
             MIN_READING_SCALE,
             READING_COMPOUND,
             READING_END_STINT,
@@ -879,15 +876,18 @@ def test_few_readings_are_all_kept(ui_env):
         instance.deleteLater()
 
 
-def test_damage_colors_configurable(ui_env):
-    instance = new_widget({"damage_color_minor": "#111111", "damage_color_major": "#222222",
-                           "damage_color_critical": "#333333"})
+def test_old_damage_marks_removed(ui_env):
+    """Body marks & suspension bars are replaced by the damage panel"""
+    from tinypedal.setting import cfg
+
+    options = cfg.default.setting["black_box"]
+    for key in ("show_body_damage", "show_suspension_damage", "damage_color_minor"):
+        assert key not in options
+    instance = new_widget()
     try:
-        assert instance.damage_colors == ("", "#111111", "#222222", "#333333")
+        assert not hasattr(instance, "draw_body_damage") and not hasattr(instance, "rects_suspension")
         instance.body_damage = (1, 2, 3, 0, 0, 0, 0, 0)
-        for wheel in instance.wheels:
-            wheel.suspension_damage = 0.7
-        instance.grab()  # both damage drawings use the options
+        instance.grab()  # damage now only in panel
     finally:
         instance.deleteLater()
 
@@ -987,7 +987,7 @@ def test_diagnostic_readings_yield_to_the_core_ones(ui_env):
     """A crowded box drops camber or ride height before it drops temperature or pressure"""
     instance = new_widget(dict.fromkeys(DIAGNOSTIC_OPTIONS, True))
     try:
-        from tinypedal.widget._wheel_state import (
+        from tinypedal.widget._black_box.state import (
             READING_CAMBER,
             READING_RIDE_HEIGHT,
             READING_STATUS,
@@ -1112,3 +1112,224 @@ def test_center_alignment_option_is_a_valid_choice():
     from tinypedal import regex_pattern as rxp
 
     assert rxp.CHOICE_COMMON[rxp.CFG_COLUMN_ALIGNMENT] == ("Centered", "Justified")
+
+
+# --- Trends, stint comparison, compound targets, profiles (pure logic)
+def test_trend_needs_half_window_then_detects_direction():
+    trend = wheel_state.Trend(window=10, threshold=2)
+    assert trend.update(0.0, 80.0) == 0
+    assert trend.update(3.0, 85.0) == 0  # less than half a window of history
+    assert trend.update(6.0, 86.0) == 1  # +6 over 6 s
+    assert trend.update(14.0, 86.5) == 0  # oldest kept sample is now 85 (3 s), +1.5 below threshold
+    assert trend.update(16.0, 80.0) == -1
+    assert trend.update(17.0, 0.0, valid=False) == 0  # no data: history dropped
+    assert not trend.samples
+
+
+def test_stint_tracker_compares_with_previous_stint():
+    stint = wheel_state.StintTracker()
+    stint.update(False, 1.0, 170.0)
+    stint.update(False, 3.0, 0.0)  # pressure not available: not averaged
+    assert stint.current() == (2.0, 170.0)
+    assert stint.previous is None
+    stint.update(True, 0.0, 0.0)  # pit entry closes the stint
+    assert stint.previous == (2.0, 170.0)
+    assert stint.current() == (0.0, 0.0)
+    stint.update(True, 0.0, 0.0)  # staying in pits keeps previous stint
+    assert stint.previous == (2.0, 170.0)
+
+
+def test_parse_compound_targets():
+    targets = wheel_state.parse_compound_targets("s=160-190/75-105; W = 150-175 , bad, X=1")
+    assert targets == {"S": (160.0, 190.0, 75.0, 105.0), "W": (150.0, 175.0, None, None)}
+    assert wheel_state.parse_compound_targets("") == {}
+
+
+def test_display_overrides_profile_and_auto_compact():
+    base = {"display_profile": "Custom", "auto_compact_display_scale": 0.0, "display_scale": 0.6}
+    assert wheel_state.display_overrides(base) == {}
+    minimal = wheel_state.display_overrides({**base, "display_profile": "Minimal"})
+    assert minimal["show_tyre_pressure"] is False
+    compact = wheel_state.display_overrides({**base, "auto_compact_display_scale": 0.8})
+    assert compact["show_caption"] is False and compact["show_tyre_load"] is False
+    assert wheel_state.display_overrides({**base, "auto_compact_display_scale": 0.5}) == {}
+
+
+def test_rounded_keeps_non_finite_values():
+    assert wheel_state.rounded(1.26) == 1.3
+    assert wheel_state.rounded(float("inf")) == float("inf")
+    assert wheel_state.rounded(3) == 3
+
+
+# --- Widget behaviour
+def test_profile_overrides_without_saving(ui_env, monkeypatch):
+    from tinypedal.setting import cfg
+
+    setting = cfg.user.setting["black_box"]
+    monkeypatch.setitem(setting, "display_profile", "Endurance")
+    monkeypatch.setitem(setting, "show_stint_comparison", False)
+    instance = black_box.Realtime(cfg, "black_box")
+    try:
+        assert instance.wcfg["show_stint_comparison"] is True
+        assert instance.show_stint
+        assert setting["show_stint_comparison"] is False  # user value untouched
+    finally:
+        instance.deleteLater()
+
+
+def test_slow_data_read_every_n_updates(widget, monkeypatch):
+    from tinypedal.api_control import api
+
+    widget.slow_every = 3
+    widget.tick = 0
+    widget.timerEvent(None)
+    assert widget.wheels[0].tyre_temp == 80.0
+    monkeypatch.setattr(api.read.tyre, "surface_temperature_avg", lambda: (99.0,) * 4)
+    widget.timerEvent(None)
+    widget.timerEvent(None)
+    assert widget.wheels[0].tyre_temp == 80.0  # slow data waits
+    assert widget.abs_active  # fast data read every time
+    widget.timerEvent(None)
+    assert widget.wheels[0].tyre_temp == 99.0
+
+
+def test_repaint_only_when_state_changes(widget, monkeypatch):
+    widget.alert_pulse = False  # fixture has a locked wheel & a puncture, which pulse
+    calls = []
+    monkeypatch.setattr(widget, "update", lambda: calls.append(1))
+    widget.timerEvent(None)
+    widget.timerEvent(None)
+    assert len(calls) == 1  # same data: second update skipped
+    widget.speed = 99.0  # next read restores 30, a visible change
+    widget.last_state = ()
+    widget.timerEvent(None)
+    assert len(calls) == 2
+
+
+def test_shift_flash_keeps_repainting(widget, monkeypatch):
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.engine, "rpm", lambda: 7900.0)
+    calls = []
+    monkeypatch.setattr(widget, "update", lambda: calls.append(1))
+    widget.timerEvent(None)
+    widget.timerEvent(None)
+    assert len(calls) == 2  # over redline, LEDs flash without data change
+
+
+def test_fitted_font_cached(widget):
+    from PySide6.QtGui import QImage, QPainter
+
+    image = QImage(50, 50, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    first = widget.fitted_font(painter, widget.font(), "12345", 10, 10)
+    assert widget.fitted_font(painter, widget.font(), "12345", 10, 10) is first
+    painter.end()
+
+
+def test_background_layer_rebuilt_only_on_resize(widget):
+    layer = widget.background_layer()
+    assert widget.background_layer() is layer
+    widget.resize(widget.width() + 10, widget.height())
+    assert widget.background_layer() is not layer
+
+
+def test_unit_override_and_custom_labels(ui_env, monkeypatch):
+    from tinypedal.setting import cfg
+
+    setting = cfg.user.setting["black_box"]
+    monkeypatch.setitem(setting, "override_unit_speed", "MPH")
+    monkeypatch.setitem(setting, "override_unit_temperature", "Fahrenheit")
+    monkeypatch.setitem(setting, "text_puncture", "CREV")
+    instance = black_box.Realtime(cfg, "black_box")
+    try:
+        assert instance.speed_label == "mph"
+        assert instance.format_temp(100) == "212"
+        assert instance.text["puncture"] == "CREV"
+        instance.timerEvent(None)
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_phase_colors_and_compound_targets(widget, monkeypatch):
+    wcfg = widget.wcfg
+    wheel = widget.wheels[0]
+    widget.wheel_targets[0] = (160, 190, 70, 100)
+    wheel.tyre_temp = 60.0
+    assert widget.tyre_phase_color(0, wheel) == wcfg["font_color_tyre_temperature_cold"]
+    wheel.temp_trend = 1
+    assert widget.tyre_phase_color(0, wheel) == wcfg["font_color_tyre_temperature_warming"]
+    wheel.tyre_temp = 85.0
+    assert widget.tyre_phase_color(0, wheel) == ""
+    wheel.tyre_temp = 105.0
+    assert widget.tyre_phase_color(0, wheel) == wcfg["font_color_tyre_temperature_warning"]
+    widget.brake_cold, widget.brake_hot = 200, 800
+    wheel.brake_temp = 100.0
+    assert widget.brake_phase_color(wheel) == wcfg["font_color_brake_temperature_cold"]
+    wheel.brake_temp = 900.0
+    assert widget.brake_phase_color(wheel) == wcfg["font_color_brake_temperature_hot"]
+    # Compound target replaces global pressure range
+    widget.compound_targets = {"S": (150.0, 155.0, None, None)}
+    target = widget.compound_target("Soft", "S")
+    assert target[:2] == (150.0, 155.0) and target[2:] == widget.default_targets[2:]
+    widget.wheel_targets[1] = target
+    monkeypatch.setitem(widget.wcfg, "enable_tyre_pressure_target", True)
+    assert widget.pressure_color(170.0, 1) == wcfg["tyre_pressure_high_color"]
+    assert widget.compound_target("Wet", "W") == widget.default_targets
+
+
+def test_stint_row_and_trends_draw(ui_env, monkeypatch):
+    from tinypedal.setting import cfg
+
+    setting = cfg.user.setting["black_box"]
+    for key in ("show_stint_comparison", "show_tyre_temperature_trend", "show_tyre_pressure_trend",
+                "show_tyre_pressure"):
+        monkeypatch.setitem(setting, key, True)
+    monkeypatch.setitem(setting, "slow_data_update_interval", 0)
+    instance = black_box.Realtime(cfg, "black_box")
+    try:
+        assert instance.show_stint and len(instance.bottom_rows) == 3
+        for wheel in instance.wheels:
+            wheel.wear_per_lap = 1.0
+        instance.wheels[0].pressure = 170.0
+        instance.stint.previous = (0.5, 160.0)
+        instance.update_stint(False)
+        (_, wear_text), (_, pres_text) = instance.stint_row()
+        assert wear_text == "1.00 +0.50"
+        assert pres_text.endswith("+10")  # kPa, previous stint 160
+        instance.grab()
+    finally:
+        instance.deleteLater()
+
+
+def test_new_choice_options_are_valid():
+    from tinypedal import regex_pattern as rxp
+
+    assert "Endurance" in rxp.CHOICE_COMMON["^display_profile$"]
+    assert rxp.CHOICE_COMMON["^override_unit_speed$"][0] == "Global"
+
+
+def test_wheel_status_setting_migrated():
+    from tinypedal.setting_preupdate import preupdate_user_setting
+
+    user = {"wheel_status": {"layout": 2}}
+    preupdate_user_setting((2, 50, 0), user)
+    assert user["black_box"] == {"layout": 2}
+
+
+def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):
+    from tinypedal.api_control import api
+
+    widget.timerEvent(None)
+    assert widget.damage_detached == (False, True, False, False)
+    assert widget.damage_suspension[2] == 0.6
+    assert not widget.impact_visible  # impact before start is not shown
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 95.0)
+    monkeypatch.setattr(api.read.vehicle, "impact_position", lambda: (1.0, 0.0))
+    widget.timerEvent(None)
+    assert widget.impact_visible and widget.impact_position == (1.0, 0.0)
+    widget.grab()  # panel with cone
+    monkeypatch.setattr(api.read.timing, "elapsed", lambda: 200.0)
+    widget.timerEvent(None)
+    assert not widget.impact_visible  # cone expired

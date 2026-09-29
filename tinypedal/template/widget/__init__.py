@@ -31,7 +31,7 @@ from .fuel import WIDGET_FUEL
 from .standings import WIDGET_STANDINGS
 from .timing import WIDGET_TIMING
 from .track import WIDGET_TRACK
-from .tyres import WIDGET_TYRES
+from .tyres import BLACK_BOX_SECTIONS, WIDGET_TYRES
 
 WIDGET_CATEGORIES = (
     WIDGET_BRAKES,
@@ -44,6 +44,11 @@ WIDGET_CATEGORIES = (
     WIDGET_TRACK,
     WIDGET_DRIVER,
 )
+
+# Config dialog sections per widget: {widget: {first option of section: section title}}
+WIDGET_OPTION_SECTIONS = {
+    "black_box": BLACK_BOX_SECTIONS,
+}
 
 # Display order of widget list (UI, keyboard shortcuts)
 WIDGET_DISPLAY_ORDER = (
@@ -122,6 +127,6 @@ WIDGET_DISPLAY_ORDER = (
     "weather_forecast",
     "weight_distribution",
     "wheel_camber",
-    "wheel_status",
+    "black_box",
     "wheel_toe",
 )
