@@ -1105,6 +1105,9 @@ Enable or disable pace notes playback.
     cycle_deltabest_source
 Cycle deltabest source for displaying in [Deltabest](#deltabest) Widget.
 
+    black_box_next_incident
+Show the next older incident in the Black box incident recorder (back to the newest after the oldest). The trace freezes on it for `incident_display_duration` seconds, its caption tells which one it is (`2/5`).
+
     restart_application
 Restart TinyPedal.
 
@@ -5209,13 +5212,28 @@ Flash gear number (and LEDs) over shift point, interval in seconds. Default is `
     show_tyre_temperature_bands
 Show tyre surface temperatures across the tread as 3 colored bands in each tyre, seen from above: game reports left, center and right of the car, so the outer side of a left tyre and the inner side of a right tyre are on the left. Useful for camber setup.
 
+    show_tyre_camber_spread
+Show inner minus outer tread surface temperature on each tyre (`Δ+8`, Celsius): the reading camber is set with. Positive means inner side hotter, the usual result of negative camber. Disabled by default.
+
+    show_tyre_surface_overheat
+Draw a hot strip across the top of a tyre (pulsing, `font_color_tyre_temperature_warning`) while its surface is above the hot threshold but the rubber below is not: the tyre is sliding and wearing, even though its working temperature is fine. Needs a hot threshold (`tyre_temperature_warning_threshold` or compound target). Enabled by default.
+
     enable_tyre_pressure_target, tyre_pressure_target_minimum, tyre_pressure_target_maximum
 Highlight tyre pressure below minimum (`tyre_pressure_low_color`) or above maximum (`tyre_pressure_high_color`). Values in kPa. Defaults are `160` and `190`.
+
+    tyre_pressure_target_rear_minimum, tyre_pressure_target_rear_maximum
+Own pressure window (kPa) for rear tyres, front and rear usually differ. `0` (default) uses the front window. In `tyre_target_by_compound`, an entry named `symbol:R` (for example `S:R=165-195`) sets the rear window of that compound.
+
+    show_tyre_pressure_range
+Show lowest and highest hot pressure of the current stint on each tyre (`171-184`), reset when leaving the pits: what the cold pressure is set from at the next stop. Disabled by default.
 
 Pressure and temperature options are always entered in kPa and Celsius, whichever units the overlay displays, so that changing a display unit cannot reinterpret a saved threshold. When your display unit differs, the config dialog shows the same value in your unit inside the field while you type (for example `23.21 psi` for `160`).
 
     show_tyre_wear_end_stint
 Show estimated remaining tyre tread at end of current stint (`→61%`), from `Wheels module` and `Fuel module`.
+
+    tyre_wear_forecast_laps
+Laps the end of stint tread estimate is made for. `0` (default) uses the laps left in the tank (`Fuel module`); another value, for example the laps to the next planned stop, needs only `Wheels module`.
 
     show_tyre_status, flat_spot_threshold
 Show detached wheel (dashed outline, `OFF`), puncture (`PUNCT`) and flat spot (`FLAT`, tyre wear while locked above `flat_spot_threshold` percent).
@@ -5246,6 +5264,18 @@ Show suspension damage on each coilover, with the damage panel thresholds and co
 
     suspension_airborne_color
 Spring color, pulsing, while the wheel is in the air (tyre load near zero with the car moving): kerb strike, crest, or two wheels lifting in a corner.
+
+    show_suspension_lap_stats
+Show on each tyre the bump stop contacts (`B3`) and the travel range used (`T12-88`, percent of the travel range) over the current lap, reset on each new lap. Disabled by default.
+
+    show_ride_height_minimum, ride_height_bottoming_threshold
+Show on each tyre the lowest ride height of the current lap and how many times it went below `ride_height_bottoming_threshold` (millimeters, default `5`): `⊥18/2`, in warning color once it bottomed. The key reading for ride height setup. Disabled by default.
+
+    show_third_spring
+Show third (heave) spring deflection of the axle on each tyre (`Z12`, millimeters), on cars that have one (prototypes). Disabled by default.
+
+    show_damper_histogram
+Add a bottom row with, for each wheel, the time share of the current lap spent in each damper speed zone: fast rebound, slow rebound, slow bump, fast bump (split at `suspension_low_speed_threshold`). The base tool of damper setup. Disabled by default.
 
     show_brake_pressure, brake_pressure_color
 Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
@@ -5320,6 +5350,9 @@ Remaining tread (percent) below which tyre wear is highlighted with `tyre_wear_w
 
     show_brake_wear, brake_wear_warning_threshold, font_color_brake_wear_warning
 Show remaining brake thickness (percent of usable thickness) beside brake temperature, from `Wheels module`. Highlighted with `font_color_brake_wear_warning` below `brake_wear_warning_threshold` percent. Default threshold is `30`.
+
+    brake_wear_display
+Remaining brake thickness as `Percent` (default) or `Laps` left before failure thickness (`12L`), from brake wear per lap measured by `Wheels module`.
 
     enable_heatmap_auto_matching, heatmap_name_tyre, heatmap_name_brake
 Heatmap used for tyre and brake colors. Auto matching selects heatmap from tyre compound and brake type while in pit.
@@ -5416,6 +5449,15 @@ Brake temperature text turns cold color below the cold threshold, hot color abov
     brake_target_by_class
 Brake disc temperature window (Celsius) per car class, replacing `brake_temperature_cold_threshold` and `brake_temperature_hot_threshold` for that class: carbon discs (prototypes, GTE) work far hotter than iron discs (GT3, LMP3). Format: `class=cold-hot`, entries separated by `;`, matched when the name is found in the car class name (longest name wins, case ignored). Default is `Hypercar=400-950; LMP2=400-950; GTE=400-950; LMP3=250-650; GT3=250-650`.
 
+    show_brake_peak_temperature
+Show highest disc temperature of the last braking zone below the live temperature (`▲812`), in hot color above the hot threshold. The live reading drops as soon as braking ends; the peak tells whether the brakes stay in their window. Disabled by default.
+
+    brake_imbalance_threshold
+Draw a dashed warning outline on both discs of an axle when their temperatures differ by more than this (Celsius, default `150`, `0` disables) while one of them is warm: sticking caliper, blocked brake duct, or damage.
+
+    show_brake_heat_balance, text_brake_heat
+Show average front minus rear disc temperature (`BHEAT +120`) as a center column item: which way to move brake bias. Disabled by default.
+
     show_brake_temperature_trend, brake_trend_duration, brake_heat_trend_threshold
 Append an arrow to brake temperature: `↑` heating (braking zone), `↓` cooling, compared with the value `brake_trend_duration` seconds ago (default `2`). A change smaller than `brake_heat_trend_threshold` (default `20` Celsius degrees) shows no arrow.
 
@@ -5455,10 +5497,16 @@ Show a cone toward the last impact for `damage_panel_impact_cone_duration` secon
 Show remaining body integrity in the middle, or aero integrity if the car reports it, with its source label (defaults `BODY` and `AERO`).
 
     show_incident_recorder, recorder_duration, incident_deceleration_threshold, incident_display_duration
-Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g`), before going back to live. The dot at top right counts incidents of the session.
+Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g ↗`, with an arrow toward the impact reported by the game), before going back to live. Steering input is drawn around the middle line (up is right). Use the `black_box_next_incident` hotkey to look at older incidents. The dot at top right counts incidents of the session. A new session clears the live recording.
 
-    enable_incident_file_export
-Save each incident as a JSON file (times relative to incident, speed in m/s, pedals, gear, ABS, TC, slip) in the `blackbox` folder of the configuration folder, to look at afterwards. Enabled by default, only used with the incident recorder.
+    damage_event_threshold
+Smallest damage increase (sum of body severity and suspension damage fraction) logged as damage and recorded as an incident. Default is `0.02`, so damage creeping up by tiny steps on kerbs does not fill the event log.
+
+    trace_steering_color
+Color of the steering input line in the incident trace.
+
+    enable_incident_file_export, incident_export_format
+Save each incident (times relative to incident, speed in m/s, pedals, steering, gear, ABS, TC, slip, slip ratio and tyre load per wheel) in the `blackbox` folder of the configuration folder, to look at afterwards. `incident_export_format`: `JSON` (default, with incident summary), `CSV` (opens in a spreadsheet or telemetry tool) or `Both`. Enabled by default, only used with the incident recorder.
 
     trace_height_scale, trace_speed_color, trace_background_color, incident_color
 Height of trace panel relative to font line height (default `2.5`), speed line color, panel background, incident mark & critical event color.

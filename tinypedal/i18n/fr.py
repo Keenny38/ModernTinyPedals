@@ -186,6 +186,8 @@ TRANSLATION = MappingProxyType({
     "Carcass": "Carcasse",
     "Surface": "Surface",
     "Percent": "Pourcentage",
+    "Laps": "Tours",
+    "Both": "Les deux",
     "Double click to edit as a table": "Double-cliquer pour éditer sous forme de tableau",
     "Tyre Targets by Compound": "Cibles des pneus par gomme",
     "Compound": "Gomme",

@@ -36,6 +36,8 @@ def widget(ui_env, monkeypatch):
             aero_damage=lambda: -1.0, impact_time=lambda: 0.0, impact_position=lambda: (0.0, 0.0),
         ),
         timing=SimpleNamespace(elapsed=lambda: 100.0),
+        session=SimpleNamespace(elapsed=lambda: 100.0),
+        lap=SimpleNamespace(number=lambda: 3),
         wheel=SimpleNamespace(
             is_detached=lambda: (False, True, False, False), suspension_damage=lambda: (0.0, 0.0, 0.6, 0.0),
             suspension_deflection=lambda: (40.0, 45.0, 50.0, 55.0), toe=lambda: (0.0, 0.0, 0.0, 0.0),

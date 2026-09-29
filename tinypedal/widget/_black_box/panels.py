@@ -124,6 +124,36 @@ class PanelPainter:
             (rect_left, rect_right), (left_item, right_item) = next(rows), self.stint_row()
             self.draw_info_row(painter, rect_left, *left_item)
             self.draw_info_row(painter, rect_right, *right_item)
+        if self.row_damper:
+            left, right = next(rows)
+            self.draw_damper_histogram(painter, left.united(right))
+
+    def draw_damper_histogram(self, painter: QPainter, row: QRectF):
+        """Time share of damper speed zones this lap, per wheel: fast & slow rebound, slow & fast bump
+
+        The base tool of damper setup: rebound on the left, bump on the right of each wheel,
+        slow zones lighter, fast zones in full color.
+        """
+        wcfg = self.wcfg
+        unit = self.unit
+        fill_rect(painter, row, wcfg["info_background_color"])
+        rebound, bump = QColor(wcfg["suspension_rebound_color"]), QColor(wcfg["suspension_compression_color"])
+        colors = (rebound, rebound.lighter(150), bump.lighter(150), bump)
+        group_w = row.width() / 4
+        label_h = row.height() * 0.35
+        align = Qt.AlignmentFlag.AlignCenter
+        for index, (name, wheel) in enumerate(zip(("FL", "FR", "RL", "RR"), self.wheels)):
+            group = QRectF(row.left() + index * group_w, row.top(), group_w, row.height())
+            painter.setPen(self.pen_info_label)
+            self.draw_fit_text(painter, QRectF(group.left(), group.top(), group.width(), label_h), name,
+                               self.font_label, align)
+            area = group.adjusted(unit * 0.2, label_h, -unit * 0.2, -unit * 0.08)
+            bar_w = area.width() / 4
+            for bin_index, (share, color) in enumerate(zip(wheel.damper_shares, colors)):
+                height = area.height() * min(max(share, 0.0), 1.0)
+                if height >= 0.5:
+                    painter.fillRect(QRectF(area.left() + bin_index * bar_w + bar_w * 0.1, area.bottom() - height,
+                                            bar_w * 0.8, height), color)
 
     def fuel_gauge(self) -> Gauge:
         return Gauge(

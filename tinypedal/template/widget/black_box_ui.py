@@ -221,7 +221,10 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
         "enable_tyre_pressure_target", "tyre_pressure_low_color", "tyre_pressure_high_color",
         "tyre_pressure_warning_background_color", "show_tyre_pressure_trend",
     ),
-    "enable_tyre_pressure_target": ("tyre_pressure_target_minimum", "tyre_pressure_target_maximum"),
+    "enable_tyre_pressure_target": (
+        "tyre_pressure_target_minimum", "tyre_pressure_target_maximum",
+        "tyre_pressure_target_rear_minimum", "tyre_pressure_target_rear_maximum",
+    ),
     "show_tyre_pressure_trend": ("tyre_pressure_trend_threshold",),
     "show_tyre_wear": ("tyre_wear_warning_threshold", "tyre_wear_warning_color", "font_color_tyre_wear_warning"),
     "show_tyre_status": (
@@ -230,18 +233,22 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     ),
     "show_brake_temperature": (
         "brake_temperature_cold_threshold", "brake_temperature_hot_threshold", "brake_target_by_class",
-        "show_brake_temperature_trend",
+        "show_brake_temperature_trend", "show_brake_peak_temperature", "brake_imbalance_threshold",
         "font_color_brake_temperature_cold", "font_color_brake_temperature_hot",
     ),
     "show_brake_temperature_trend": ("brake_trend_duration", "brake_heat_trend_threshold"),
+    "show_ride_height_minimum": ("ride_height_bottoming_threshold",),
+    "show_brake_heat_balance": ("text_brake_heat",),
+    "show_tyre_wear_end_stint": ("tyre_wear_forecast_laps",),
     "show_tyre_load": ("tyre_load_display",),
-    "show_brake_wear": ("brake_wear_warning_threshold", "font_color_brake_wear_warning"),
+    "show_brake_wear": ("brake_wear_warning_threshold", "font_color_brake_wear_warning", "brake_wear_display"),
     "show_brake_pressure": ("brake_pressure_color",),
     "show_suspension": (
         "suspension_scale", "suspension_motion_scale", "enable_wheel_suspension_motion", "show_coilover_damage",
         "suspension_spring_color", "suspension_compression_color", "suspension_rebound_color",
         "suspension_low_speed_threshold", "suspension_velocity_scale", "suspension_bump_color",
-        "suspension_bump_force_margin", "suspension_airborne_color",
+        "suspension_bump_force_margin", "suspension_airborne_color", "show_suspension_lap_stats",
+        "show_damper_histogram",
     ),
     "show_rpm_leds": (
         "number_of_rpm_leds", "rpm_led_start_ratio", "rpm_led_low_color", "rpm_led_mid_color",
@@ -295,10 +302,12 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_damage_panel_integrity": ("show_damage_panel_aero_integrity", "text_integrity_body", "text_integrity_aero"),
     "show_incident_recorder": (
         "recorder_duration", "incident_deceleration_threshold", "incident_display_duration",
-        "enable_incident_file_export", "trace_height_scale", "trace_speed_color", "trace_background_color",
+        "enable_incident_file_export", "incident_export_format", "trace_height_scale", "trace_speed_color",
+        "trace_steering_color", "trace_background_color",
         "text_impact",
     ),
     "show_event_log": ("number_of_event_log_lines", "font_color_event_log", "text_damage"),
+    "enable_incident_file_export": ("incident_export_format",),
 }
 # Option: on/off option it depends on
 BLACK_BOX_DEPENDENCIES = {option: control for control, options in _CONTROLS.items() for option in options}

@@ -31,22 +31,33 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from .._painter import fill_chip
 from .common import qcolor
 from .state import (
+    PREFIX_BOTTOMING,
+    PREFIX_BUMPS,
     PREFIX_CAMBER,
+    PREFIX_CAMBER_SPREAD,
     PREFIX_CARCASS,
+    PREFIX_HEAVE,
     PREFIX_LOAD,
     PREFIX_RIDE_HEIGHT,
     PREFIX_SLIP_ANGLE,
+    PREFIX_TRAVEL,
     PREFIX_WEAR_PER_LAP,
+    READING_BOTTOMING,
+    READING_BUMPS,
     READING_CAMBER,
+    READING_CAMBER_SPREAD,
     READING_CARCASS,
     READING_COMPOUND,
     READING_END_STINT,
+    READING_HEAVE,
     READING_LOAD,
     READING_PRESSURE,
+    READING_PRESSURE_RANGE,
     READING_RIDE_HEIGHT,
     READING_SLIP_ANGLE,
     READING_STATUS,
     READING_TEMPERATURE,
+    READING_TRAVEL,
     READING_WEAR,
     READING_WEAR_PER_LAP,
     TREND_SYMBOLS,
@@ -55,6 +66,7 @@ from .state import (
 )
 
 SHADOW_COLOR = QColor(0, 0, 0, 90)
+LAPS_SHORT = "L"  # brake laps left
 GRAVITY = 9.80665  # N per kg
 
 
@@ -162,6 +174,13 @@ class WheelPainter:
             painter.restore()
         else:
             painter.fillPath(path, self.tyre_fades[index].color_of(wheel.tyre_color, now))
+        if wheel.surface_hot:  # surface overheating (sliding): hot strip across the tread top
+            painter.save()
+            painter.setClipPath(path)
+            strip = QColor(wcfg["font_color_tyre_temperature_warning"])
+            strip.setAlphaF(0.85 * self.pulse(now))
+            painter.fillRect(QRectF(local.left(), local.top(), local.width(), local.height() * 0.14), strip)
+            painter.restore()
         if self.depth_effects:  # rounded rubber look: light on one side, shade on the other
             painter.fillPath(path, self.brush_gloss)
         if wheel.warning:  # locked wheel: twice as thick as past peak grip
@@ -177,7 +196,7 @@ class WheelPainter:
         painter.restore()
 
         # Text lines (upright): (priority, text, font, weight in height, pill color, text color)
-        lines = []
+        lines: list[tuple] = []
         if wcfg["show_tyre_compound"] and wheel.compound:
             lines.append((READING_COMPOUND, wheel.compound, self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_temperature"]:
@@ -197,6 +216,25 @@ class WheelPainter:
             lines.append((READING_WEAR, f"{wheel.tread:.0f}%", self.font_small, 1.0,
                           wcfg["tyre_wear_warning_color"] if low else "",
                           wcfg["font_color_tyre_wear_warning"] if low else ""))
+        if self.show_pressure_range and wheel.pressure_min > 0:
+            lines.append((READING_PRESSURE_RANGE,
+                          f"{self.unit_pres(wheel.pressure_min):.{self.pres_decimals}f}-"
+                          f"{self.unit_pres(wheel.pressure_max):.{self.pres_decimals}f}", self.font_small, 0.9, "", ""))
+        if self.show_camber_spread:
+            lines.append((READING_CAMBER_SPREAD, f"{PREFIX_CAMBER_SPREAD}{wheel.camber_spread:+.0f}",
+                          self.font_small, 0.9, "", ""))
+        if self.show_ride_min and wheel.ride_height_min > 0:
+            lines.append((READING_BOTTOMING, f"{PREFIX_BOTTOMING}{wheel.ride_height_min:.0f}/{wheel.bottoming}",
+                          self.font_small, 0.9, "",
+                          wcfg["font_color_tyre_temperature_warning"] if wheel.bottoming else ""))
+        if self.show_lap_stats:
+            lines.append((READING_BUMPS, f"{PREFIX_BUMPS}{wheel.bumps}", self.font_small, 0.9, "",
+                          wcfg["suspension_bump_color"] if wheel.bumps else ""))
+            if wheel.travel_min >= 0:
+                lines.append((READING_TRAVEL, f"{PREFIX_TRAVEL}{wheel.travel_min * 100:.0f}-{wheel.travel_max * 100:.0f}",
+                              self.font_small, 0.9, "", ""))
+        if self.show_heave:
+            lines.append((READING_HEAVE, f"{PREFIX_HEAVE}{wheel.heave:.0f}", self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_wear_end_stint"] and wheel.tread_end_known:
             lines.append((READING_END_STINT, f"→{max(wheel.tread_end, 0):.0f}%", self.font_small, 0.9, "", ""))
         if wcfg["show_tyre_carcass_temperature"]:
@@ -311,16 +349,19 @@ class WheelPainter:
         radius = bar_w / 2
         path = QPainterPath()
         path.addRoundedRect(bar, radius, radius)
+        painter.save()
         if wheel.steer:
             pivot = self.rects_tyre[index].center()
-            painter.save()
             painter.translate(pivot.x(), pivot.y())
             painter.rotate(wheel.steer)
             painter.translate(-pivot.x(), -pivot.y())
-            painter.fillPath(path, self.brake_fades[index].color_of(wheel.brake_color, monotonic()))
-            painter.restore()
-        else:
-            painter.fillPath(path, self.brake_fades[index].color_of(wheel.brake_color, monotonic()))
+        painter.fillPath(path, self.brake_fades[index].color_of(wheel.brake_color, monotonic()))
+        if wheel.brake_imbalance:  # far from the other disc of the axle: dashed warning outline
+            painter.setPen(QPen(qcolor(wcfg["font_color_brake_temperature_hot"]), max(self.unit * 0.07, 1),
+                                Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+        painter.restore()
         # Temperature, remaining thickness and pressure share the text area, tallest first
         rows = []
         if wcfg["show_brake_temperature"]:
@@ -328,10 +369,18 @@ class WheelPainter:
             if self.show_brake_trend:
                 text += TREND_SYMBOLS[wheel.brake_trend]
             rows.append((text, self.font(), self.brake_phase_color(wheel), 1.3))
+        if self.show_brake_peak and wheel.brake_peak > 0:  # peak of last braking zone
+            peak = wheel.brake_peak
+            color = (wcfg["font_color_brake_temperature_hot"] if 0 < self.brake_hot <= peak
+                     else wcfg["font_color"])
+            rows.append((f"▲{self.format_temp(peak)}", self.font_small, color, 1.0))
         if wcfg["show_brake_wear"] and wheel.brake_wear_known:
             low = wheel.brake_wear < wcfg["brake_wear_warning_threshold"]
             color = wcfg["font_color_brake_wear_warning"] if low else wcfg["font_color"]
-            rows.append((f"{max(wheel.brake_wear, 0):.0f}%", self.font_small, color, 1.0))
+            if self.brake_wear_laps and wheel.brake_laps >= 0:
+                rows.append((f"{wheel.brake_laps:.0f}{LAPS_SHORT}", self.font_small, color, 1.0))
+            else:
+                rows.append((f"{max(wheel.brake_wear, 0):.0f}%", self.font_small, color, 1.0))
         if wcfg["show_brake_pressure"]:
             rows.append((f"{wheel.brake_pressure:.0f}%", self.font_small,
                          wcfg["brake_pressure_color"], 1.0))

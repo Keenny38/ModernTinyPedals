@@ -174,7 +174,7 @@ def test_incident_logged_and_exported(ui_env, monkeypatch, tmp_path):
     from tinypedal.widget._black_box import reader
 
     saved = []
-    monkeypatch.setattr(reader, "export_incident", lambda incident, folder: saved.append(folder))
+    monkeypatch.setattr(reader, "export_incident", lambda incident, folder, export_format="JSON": saved.append(folder))
     widget = new_widget({"show_incident_recorder": True, "show_event_log": True})
     try:
         widget.recorder.post_trigger = 0.0
@@ -1266,3 +1266,273 @@ def test_suspension_damage_on_coilover(ui_env, monkeypatch):
         assert not hidden.suspension_totaled(hidden.wheels[0])
     finally:
         hidden.deleteLater()
+
+
+# --- Tyres: camber spread, rear pressure window, pressure range, surface overheat, wear forecast
+def test_camber_spread_inner_minus_outer():
+    from tinypedal.widget._black_box.state import camber_spread
+
+    # left / center / right of the car: inner side of a left wheel is on its right
+    assert camber_spread(0, 80.0, 85.0, 90.0) == pytest.approx(10.0)  # FL inner hotter
+    assert camber_spread(1, 90.0, 85.0, 80.0) == pytest.approx(10.0)  # FR inner (its left) hotter
+    assert camber_spread(1, 80.0, 85.0, 90.0) == pytest.approx(-10.0)
+    assert camber_spread(0, -273.0, 0.0, 90.0) == 0.0  # no data
+
+
+def test_rear_pressure_window(ui_env):
+    widget = new_widget({"tyre_pressure_target_rear_minimum": 170, "tyre_pressure_target_rear_maximum": 200,
+                         "tyre_target_by_compound": "S=160-190; S:R=175-205"})
+    try:
+        assert widget.wheel_targets[0][:2] == (160, 190)
+        assert widget.wheel_targets[2][:2] == (170, 200)  # rear default window
+        assert widget.pressure_color(195, 2) == ""  # in rear window, high at front
+        assert widget.pressure_color(195, 0) == widget.wcfg["tyre_pressure_high_color"]
+        assert widget.compound_target("Soft", "S", rear=True)[:2] == (175, 205)  # compound rear entry
+        assert widget.compound_target("Soft", "S")[:2] == (160, 190)
+        assert widget.compound_target("Medium", "M", rear=True)[:2] == (170, 200)
+    finally:
+        widget.deleteLater()
+
+
+def test_pressure_range_of_stint():
+    from tinypedal.widget._black_box.state import PressureRange
+
+    stint = PressureRange()
+    for pressure in (170.0, 183.0, 0.0, 176.0, math.nan):
+        stint.update(pressure)
+    assert (stint.low, stint.high) == (170.0, 183.0)
+    stint.reset()
+    assert (stint.low, stint.high) == (0.0, 0.0)
+
+
+def test_setup_readings_reach_wheels(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.tyre, "surface_temperature_ico", lambda: (80.0, 85.0, 90.0) * 4, raising=False)
+    monkeypatch.setattr(api.read.tyre, "surface_temperature_avg", lambda: (125.0,) * 4, raising=False)
+    monkeypatch.setattr(api.read.tyre, "inner_temperature_avg", lambda: (95.0,) * 4, raising=False)
+    monkeypatch.setattr(api.read.tyre, "pressure", lambda: (178.0,) * 4, raising=False)
+    monkeypatch.setattr(api.read.wheel, "third_spring_deflection", lambda: (12.0, 12.0, 20.0, 20.0), raising=False)
+    widget = new_widget({
+        "show_tyre_camber_spread": True, "show_tyre_pressure_range": True, "show_third_spring": True,
+        "tyre_temperature_warning_threshold": 110, "slow_data_update_interval": 0,
+    })
+    try:
+        widget.timerEvent(None)
+        front_left = widget.wheels[0]
+        assert front_left.camber_spread == pytest.approx(10.0)
+        assert front_left.surface_hot  # surface 125 over 110, rubber below 95
+        assert (front_left.pressure_min, front_left.pressure_max) == (178.0, 178.0)
+        assert front_left.heave == 12.0 and widget.wheels[2].heave == 20.0
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+def test_wear_forecast_laps_without_fuel_module(ui_env, monkeypatch):
+    from tinypedal.module_info import minfo
+
+    monkeypatch.setattr(minfo.wheels, "currentTreadDepth", [8.0] * 4)
+    monkeypatch.setattr(minfo.wheels, "estimatedValidTreadWear", [0.5] * 4)
+    widget = new_widget({"tyre_wear_forecast_laps": 10.0, "slow_data_update_interval": 0})
+    try:
+        widget.use_fuel = False
+        widget.timerEvent(None)
+        assert widget.wheels[0].tread_end_known
+    finally:
+        widget.deleteLater()
+
+
+# --- Brakes: peak per braking zone, laps left, imbalance, front / rear heat
+def test_brake_peak_of_braking_zone():
+    from tinypedal.widget._black_box.state import BrakePeak
+
+    peak = BrakePeak()
+    for temperature in (400.0, 650.0, 812.0, 790.0):
+        peak.update(temperature, True)
+    assert peak.update(700.0, False) == 812.0  # zone over: its peak kept
+    assert peak.update(500.0, False) == 812.0
+    peak.update(600.0, True)
+    assert peak.update(550.0, False) == 600.0  # next zone
+
+
+def test_brake_laps_left():
+    from tinypedal.widget._black_box.state import brake_laps_left
+
+    assert brake_laps_left(30.0, 20.0, 0.5) == pytest.approx(20.0)
+    assert brake_laps_left(30.0, 20.0, 0.0) == -1.0  # wear per lap not measured yet
+    assert brake_laps_left(19.0, 20.0, 0.5) == 0.0
+
+
+def test_brake_imbalance_and_heat_balance(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.brake, "temperature", lambda: (700.0, 450.0, 400.0, 420.0))
+    widget = new_widget({"show_brake_heat_balance": True, "brake_imbalance_threshold": 150,
+                         "slow_data_update_interval": 0})
+    try:
+        widget.timerEvent(None)
+        front_left, front_right, rear_left, rear_right = widget.wheels
+        assert front_left.brake_imbalance and front_right.brake_imbalance
+        assert not rear_left.brake_imbalance and not rear_right.brake_imbalance
+        assert widget.brake_heat_balance == pytest.approx(575.0 - 410.0)
+        assert "brake_heat" in widget.center_order
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+# --- Suspension: lap statistics, damper histogram
+def test_lap_stats_counts_and_resets():
+    from tinypedal.widget._black_box.state import LapStats
+
+    stats = LapStats()
+    for ride in (30.0, 4.0, 3.0, 20.0, 2.0, 25.0):  # two dips under 5 mm
+        stats.update_ride(ride, 5.0)
+    assert (stats.ride_min, stats.bottoming) == (2.0, 2)
+    for bump in (False, True, True, False, True):
+        stats.update_bump(bump)
+    assert stats.bumps == 2
+    for travel in (0.4, 0.1, 0.9):
+        stats.update_travel(travel)
+    assert (stats.travel_min, stats.travel_max) == (0.1, 0.9)
+    for velocity in (-200.0, -20.0, 20.0, 20.0):
+        stats.update_damper(velocity, 0.1, 50.0)
+    assert stats.damper_shares() == pytest.approx((0.25, 0.25, 0.5, 0.0))
+    stats.reset()
+    assert stats.bumps == 0 and stats.damper_shares() == (0.0,) * 4
+
+
+def test_lap_stats_reset_on_new_lap(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    lap = [5]
+    monkeypatch.setattr(api.read.lap, "number", lambda: lap[0])
+    monkeypatch.setattr(api.read.wheel, "ride_height", lambda: (3.0,) * 4, raising=False)
+    widget = new_widget({"show_ride_height_minimum": True, "show_suspension_lap_stats": True,
+                         "show_damper_histogram": True})
+    try:
+        widget.timerEvent(None)
+        assert widget.wheels[0].bottoming == 1 and widget.wheels[0].ride_height_min == 3.0
+        lap[0] = 6
+        monkeypatch.setattr(api.read.wheel, "ride_height", lambda: (30.0,) * 4, raising=False)
+        widget.timerEvent(None)
+        assert widget.wheels[0].bottoming == 0 and widget.wheels[0].ride_height_min == 30.0
+        assert widget.row_damper
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+# --- Recorder: channels, CSV, damage threshold, browse, session, direction
+def test_export_csv_and_json(tmp_path):
+    incident = rec.Incident(10.0, "impact", 6.3, 4, 250.0, (
+        Sample(9.9, 40.0, 1.0, 0.0, 5, False, False, "", 0.2, (0.01, 0.0, 0.03, 0.02), (4000, 4100, 4500, 4400)),
+        Sample(10.0, 30.0, 0.0, 1.0, 5, True, False, "lock", -0.1),
+    ), "↗")
+    path = rec.export_incident(incident, str(tmp_path), "Both")
+    assert path.endswith(".csv")
+    with open(path, encoding="utf-8") as file:
+        lines = file.read().splitlines()
+    assert lines[0].startswith("time,speed_ms,throttle,brake,steering") and "load_n_rr" in lines[0]
+    assert len(lines) == 3
+    with open(path[:-4] + ".json", encoding="utf-8") as file:
+        data = json.load(file)
+    assert data["direction"] == "↗" and data["samples"][0]["slip_ratio_rl"] == 0.03
+
+
+def test_small_damage_steps_not_logged():
+    log = EventLog(5, damage_threshold=0.02)
+    for damage in (0.005, 0.01, 0.015):  # creeping up on kerbs
+        log.update(1, 10.0, ["", "", "", ""], damage, {})
+    assert not log.events
+    log.update(1, 11.0, ["", "", "", ""], 0.05, {})
+    assert len(log.events) == 1
+    recorder = Recorder(duration=5.0, sample_interval=0.05, damage_threshold=0.02)
+    recorder.add(sample(0.0, 30.0), 0.0)
+    recorder.add(sample(0.1, 30.0), 0.01)
+    assert recorder.pending is None
+    recorder.add(sample(0.2, 30.0), 0.05)
+    assert recorder.pending is not None and recorder.pending[1] == "damage"
+
+
+def test_impact_arrow_matches_damage_cone():
+    from tinypedal.widget._black_box.state import impact_arrow
+
+    assert impact_arrow(180.0) == "↑"  # cone drawn up: front
+    assert impact_arrow(0.0) == "↓"  # rear
+    assert impact_arrow(90.0) == "→"
+    assert impact_arrow(math.nan) == ""
+
+
+def test_browse_incidents_with_hotkey(ui_env, monkeypatch):
+    from tinypedal.widget._black_box import reader
+    from tinypedal.widget._black_box.recorder import request_next_incident
+
+    clock = [100.0]
+    monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
+    widget = new_widget({"show_incident_recorder": True, "incident_display_duration": 20})
+    try:
+        for index in range(3):
+            widget.recorder.incidents.append(rec.Incident(float(index), "impact", 5.0, index, 0.0, (
+                sample(float(index), 30.0), sample(index + 0.5, 10.0))))
+        assert widget.displayed_incident() is None  # last one too old: live trace
+        request_next_incident()
+        widget.timerEvent(None)
+        assert widget.displayed_incident().lap == 2  # newest first
+        request_next_incident()
+        widget.timerEvent(None)
+        assert widget.displayed_incident().lap == 1
+        widget.grab()
+        clock[0] += 25
+        assert widget.displayed_incident() is None  # back to live after display duration
+    finally:
+        widget.deleteLater()
+
+
+def test_new_session_clears_recording(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    elapsed = [500.0]
+    monkeypatch.setattr(api.read.session, "elapsed", lambda: elapsed[0])
+    widget = new_widget({"show_incident_recorder": True, "slow_data_update_interval": 0})
+    try:
+        widget.timerEvent(None)
+        assert widget.recorder.samples
+        elapsed[0] = 3.0  # new session
+        widget.recorder.samples.append(widget.recorder.samples[-1])
+        widget.check_new_session()
+        assert not widget.recorder.samples
+    finally:
+        widget.deleteLater()
+
+
+def test_tyre_diameters_reset_on_car_change(ui_env):
+    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+
+    widget = new_widget()
+    try:
+        widget.update_tyre_diameters([0.355] * 4)
+        widget.vehicle_name = "other car"
+        widget.update_suspension(30.0)
+        assert widget.tyre_diameters == (TYRE_DIAMETER_MM,) * 4
+    finally:
+        widget.deleteLater()
+
+
+def test_every_new_option_draws(ui_env):
+    widget = new_widget({key: True for key in (
+        "show_tyre_camber_spread", "show_tyre_pressure_range", "show_brake_peak_temperature",
+        "show_brake_heat_balance", "show_suspension_lap_stats", "show_damper_histogram",
+        "show_ride_height_minimum", "show_third_spring", "show_incident_recorder", "show_brake_wear",
+    )} | {"brake_wear_display": "Laps", "incident_export_format": "CSV"})
+    try:
+        wheel = widget.wheels[0]
+        wheel.pressure_min, wheel.pressure_max, wheel.brake_peak, wheel.brake_laps = 170.0, 183.0, 812.0, 12.0
+        wheel.ride_height_min, wheel.bottoming, wheel.bumps = 18.0, 2, 3
+        wheel.travel_min, wheel.travel_max, wheel.surface_hot, wheel.brake_imbalance = 0.1, 0.9, True, True
+        wheel.damper_shares = (0.1, 0.4, 0.4, 0.1)
+        wheel.brake_wear_known = True
+        widget.grab()
+    finally:
+        widget.deleteLater()

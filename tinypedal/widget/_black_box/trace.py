@@ -46,7 +46,7 @@ class TracePainter:
 
     def draw_trace(self, painter: QPainter, rect: QRectF):
         wcfg = self.wcfg
-        incident = self.recorder.last_incident if self.showing_incident() else None
+        incident = self.displayed_incident()
         samples = incident.samples if incident is not None else tuple(self.recorder.samples)
         inner = rect.adjusted(self.unit * 0.15, self.unit * 0.15, -self.unit * 0.15, -self.unit * 0.15)
         if len(samples) >= 2 and inner.width() > 2 and inner.height() > 2:
@@ -61,6 +61,7 @@ class TracePainter:
             self.draw_trace_area(painter, inner, samples, x_at, "brake", wcfg["brake_color"])
             self.draw_trace_marks(painter, inner, samples, x_at)
             self.draw_trace_speed(painter, inner, samples, x_at)
+            self.draw_trace_steering(painter, inner, samples, x_at)
             if incident is not None:
                 pen = QPen(QColor(wcfg["incident_color"]), max(self.unit * 0.08, 1))
                 painter.setPen(pen)
@@ -96,6 +97,21 @@ class TracePainter:
         painter.setPen(QPen(QColor(self.wcfg["trace_speed_color"]), max(self.unit * 0.09, 1.2)))
         painter.drawPath(path)
 
+    def draw_trace_steering(self, painter: QPainter, rect: QRectF, samples, x_at):
+        """Steering input around the middle line: up is right, down is left"""
+        middle = rect.center().y()
+        path = QPainterPath()
+        for index, sample in enumerate(samples):
+            steering = min(max(sample.steering, -1.0), 1.0) if sample.steering == sample.steering else 0.0
+            point = QPointF(x_at(sample.time), middle - steering * rect.height() / 2)
+            if index:
+                path.lineTo(point)
+            else:
+                path.moveTo(point)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(self.wcfg["trace_steering_color"]), max(self.unit * 0.06, 1)))
+        painter.drawPath(path)
+
     def draw_trace_marks(self, painter: QPainter, rect: QRectF, samples, x_at):
         """ABS & TC ticks on top, lock & spin marks at bottom"""
         wcfg = self.wcfg
@@ -123,7 +139,10 @@ class TracePainter:
         count = len(self.recorder.incidents)
         if incident is not None:
             painter.setPen(QColor(wcfg["incident_color"]))
-            text = f"{self.text['impact']} L{incident.lap} {incident.peak_g:.1f}g"
+            text = f"{self.text['impact']} L{incident.lap} {incident.peak_g:.1f}g {incident.direction}".rstrip()
+            incidents = list(self.recorder.incidents)
+            if len(incidents) > 1 and incident in incidents:  # which one, when browsing with the hotkey
+                text += f" {incidents.index(incident) + 1}/{len(incidents)}"
             self.draw_fit_text(painter, left, text, self.font_label, align_left)
         else:
             painter.setPen(translucent(wcfg["incident_color"], 200))

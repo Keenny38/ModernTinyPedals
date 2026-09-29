@@ -198,3 +198,35 @@ def test_widget_frame_time(live_api, name):
         before = BASELINE[name]["frame_avg_ms"]
         assert frame_avg < max(before * SLOWDOWN_FACTOR, before + SLOWDOWN_MIN_MS), (
             f"{name}: {frame_avg:.2f} ms per frame, was {before:.2f} ms")
+
+
+def test_black_box_all_options_frame_time(live_api):
+    """Black box with every reading, row and panel on: its heaviest configuration"""
+    options = cfg.user.setting["black_box"]
+    saved = dict(options)
+    options.update({key: True for key in options if key.startswith("show_")})
+    options["display_profile"] = "Custom"
+    try:
+        widget = import_module("tinypedal.widget.black_box").Realtime(cfg, "black_box")
+        widget.adjustSize()
+        event = QTimerEvent(0)
+        PerfMonitor.set_enabled(True)
+        PerfMonitor.reset()
+        try:
+            for frame in range(FRAMES):
+                drive(live_api, frame)
+                widget.timerEvent(event)
+                widget.grab()
+        finally:
+            PerfMonitor.set_enabled(False)
+            widget.deleteLater()
+    finally:
+        options.clear()
+        options.update(saved)
+    stats = {(item.name, item.event): item for item in PerfMonitor.stats()}
+    update = stats.get(("black_box", "update"))
+    paint_total = sum(item.total for (owner, event_name), item in stats.items()
+                      if owner == "black_box" and event_name == "paint")
+    frame_avg = (update.average if update else 0.0) + paint_total / FRAMES
+    RESULTS["black_box (all options)"] = {"frame_avg_ms": round(frame_avg, 3)}
+    assert frame_avg < FRAME_BUDGET_MS, f"black_box all options: {frame_avg:.2f} ms per frame"

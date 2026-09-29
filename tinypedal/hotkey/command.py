@@ -246,6 +246,13 @@ def hotkey_cycle_deltabest_source():
     cfg.save()
 
 
+def hotkey_black_box_next_incident():
+    """Command - Black box: show next older incident in the incident recorder"""
+    from ..widget._black_box.recorder import request_next_incident
+
+    request_next_incident()
+
+
 # Define command list:
 # 0 hotkey name, 1 hotkey function
 COMMANDS_GENERAL = (
@@ -264,6 +271,7 @@ COMMANDS_GENERAL = (
     ("spectate_previous_driver", hotkey_spectate_previous_driver),
     ("pace_notes_playback", hotkey_pace_notes_playback),
     ("cycle_deltabest_source", hotkey_cycle_deltabest_source),
+    ("black_box_next_incident", hotkey_black_box_next_incident),
     ("restart_application", hotkey_restart_application),
     ("quit_application", hotkey_quit_application),
 )

@@ -45,10 +45,13 @@ from ._black_box.layout import LayoutInput, build_layout
 from ._black_box.modules import ModuleStatus, enable_modules, required_modules
 from ._black_box.panels import PanelPainter
 from ._black_box.reader import DataReader
-from ._black_box.recorder import EventLog, Recorder
+from ._black_box.recorder import EventLog, IncidentBrowse, Recorder
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
 from ._black_box.state import (
+    BrakePeak,
     BumpStop,
+    LapStats,
+    PressureRange,
     SteerConvention,
     StintTracker,
     SuspensionTravel,
@@ -153,6 +156,22 @@ class Realtime(
         self.show_suspension = bool(wcfg["show_suspension"])
         self.wheel_suspension_motion = self.show_suspension and bool(wcfg["enable_wheel_suspension_motion"])
         self.show_susp_damage = self.show_suspension and bool(wcfg["show_coilover_damage"])
+        # Setup readings: tyre & brake extras, suspension lap statistics
+        self.show_pressure_range = bool(wcfg["show_tyre_pressure_range"])
+        self.show_camber_spread = bool(wcfg["show_tyre_camber_spread"])
+        self.show_surface_overheat = bool(wcfg["show_tyre_surface_overheat"])
+        self.wear_forecast_laps = max(wcfg["tyre_wear_forecast_laps"], 0)
+        self.show_brake_peak = bool(wcfg["show_brake_peak_temperature"]) and bool(wcfg["show_brake_temperature"])
+        self.brake_wear_laps = wcfg["brake_wear_display"] == "Laps"
+        self.brake_imbalance_threshold = max(wcfg["brake_imbalance_threshold"], 0)
+        self.need_brake_heat = "brake_heat" in shown
+        self.show_ride_min = bool(wcfg["show_ride_height_minimum"])
+        self.show_lap_stats = bool(wcfg["show_suspension_lap_stats"]) and self.show_suspension
+        self.show_heave = bool(wcfg["show_third_spring"])
+        self.show_damper_histogram = bool(wcfg["show_damper_histogram"]) and self.show_suspension
+        self.bottoming_threshold = max(wcfg["ride_height_bottoming_threshold"], 0)
+        self.need_lap_stats = self.show_ride_min or self.show_lap_stats or self.show_damper_histogram
+        self.need_pressure = self.need_pressure or self.show_pressure_range
         self.need_damage_total = self.show_recorder or self.show_event_log
         # Slow changing data (temperatures, pressure, wear, damage, fuel) is read every N updates
         slow_interval = max(wcfg["slow_data_update_interval"], 0)
@@ -181,6 +200,7 @@ class Realtime(
         self.row_energy = self.need_energy_rows and presence.energy_row
         self.row_battery = self.show_battery_bar and presence.battery
         self.row_stint = self.show_stint and presence.stint
+        self.row_damper = self.show_damper_histogram
         center_items = [
             name for name in self.center_order
             if not ((name == "abs" and not presence.abs) or (name == "tc" and not presence.tc))
@@ -196,7 +216,7 @@ class Realtime(
             show_battery_bar=self.row_battery,
             battery_bar_left=self.battery_bar_left,
             battery_bar_scale=min(max(wcfg["battery_bar_scale"], 0.3), 4),
-            bottom_rows=int(self.row_fuel) + int(self.row_energy) + int(self.row_stint),
+            bottom_rows=int(self.row_fuel) + int(self.row_energy) + int(self.row_stint) + int(self.row_damper),
             trace_height_scale=min(max(wcfg["trace_height_scale"], 1), 8) if self.show_recorder else 0,
             event_lines=min(max(wcfg["number_of_event_log_lines"], 1), 10) if self.show_event_log else 0,
             damage_panel_scale=min(max(wcfg["damage_panel_scale"], 2), 10) if self.show_damage_panel else 0,
@@ -304,7 +324,13 @@ class Realtime(
             wcfg["tyre_pressure_target_minimum"], wcfg["tyre_pressure_target_maximum"],
             wcfg["tyre_temperature_cold_threshold"], self.temp_warning,
         )
-        self.wheel_targets = [self.default_targets] * 4
+        # Rear axle: own pressure window if set (0 = same as front)
+        self.default_targets_rear = (
+            wcfg["tyre_pressure_target_rear_minimum"] or wcfg["tyre_pressure_target_minimum"],
+            wcfg["tyre_pressure_target_rear_maximum"] or wcfg["tyre_pressure_target_maximum"],
+            *self.default_targets[2:],
+        )
+        self.wheel_targets = [self.default_targets] * 2 + [self.default_targets_rear] * 2
         # Brake disc window: by car class (carbon or iron discs work in very different ranges),
         # else the cold & hot thresholds
         self.default_brake_window = (
@@ -347,11 +373,17 @@ class Realtime(
 
     def config_recorder(self, wcfg):
         """Incident recorder & event log"""
+        damage_threshold = max(wcfg["damage_event_threshold"], 0)
         self.recorder = Recorder(
             duration=min(max(wcfg["recorder_duration"], 3), 120),
             deceleration_threshold=wcfg["incident_deceleration_threshold"],
+            damage_threshold=damage_threshold,
         )
-        self.event_log = EventLog(max(len(self.event_rows), 1))
+        self.event_log = EventLog(max(len(self.event_rows), 1), damage_threshold)
+        self.export_format = wcfg["incident_export_format"]
+        self.browse_seen = IncidentBrowse.requests  # hotkey requests already handled
+        self.browse_incident = None  # incident picked with hotkey, shown instead of the last one
+        self.browse_since = 0.0
         self.incident_display_time = max(wcfg["incident_display_duration"], 0)
         self.export_folder = (
             os.path.join(self.cfg.path.config, "blackbox") if wcfg["enable_incident_file_export"] else "")
@@ -434,6 +466,15 @@ class Realtime(
         self.steer_convention = SteerConvention()
         self.steer_vehicle = None
         self.susp_bumps = [BumpStop() for _ in range(4)]
+        self.pressure_ranges = [PressureRange() for _ in range(4)]
+        self.brake_peaks = [BrakePeak() for _ in range(4)]
+        self.lap_stats = [LapStats() for _ in range(4)]
+        self.stats_lap = None  # lap of lap statistics
+        self.last_fast_time = 0.0
+        self.last_session_elapsed = 0.0
+        self.last_pits_state = None
+        self.brake_heat_balance = 0.0  # average front minus rear disc temperature (Celsius)
+        self.impact_direction = ""  # arrow toward last impact reported by game
         self.susp_vehicle = None
         self.stint_wear = self.stint_wear_delta = 0.0
         self.stint_pressure = self.stint_pressure_delta = 0.0

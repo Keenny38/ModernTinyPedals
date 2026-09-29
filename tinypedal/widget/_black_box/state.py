@@ -37,14 +37,21 @@ from ...template.widget.black_box_ui import (  # noqa: F401  re-exported for wid
 # Tyre readings, in priority order: the lowest-numbered one is dropped first when the tyre
 # box is too small to show them all at a readable size. The diagnostic readings sit below the
 # ones a driver watches lap to lap, so enabling one never pushes out temperature or pressure.
+# Setup readings (lap statistics) are dropped first: they only matter while working on the setup
+READING_HEAVE = -4
+READING_BOTTOMING = -3
+READING_BUMPS = -2
+READING_TRAVEL = -1
 READING_RIDE_HEIGHT = 0
 READING_CAMBER = 1
+READING_CAMBER_SPREAD = 1.5
 READING_SLIP_ANGLE = 2
 READING_LOAD = 3
 READING_CARCASS = 4
 READING_WEAR_PER_LAP = 5
 READING_COMPOUND = 6
 READING_END_STINT = 7
+READING_PRESSURE_RANGE = 7.5
 READING_PRESSURE = 8
 READING_WEAR = 9
 READING_TEMPERATURE = 10
@@ -58,6 +65,11 @@ PREFIX_LOAD = "L"
 PREFIX_CARCASS = "K"
 PREFIX_WEAR_PER_LAP = "▼"  # down arrow: tread lost per lap
 PREFIX_RIDE_HEIGHT = "H"
+PREFIX_CAMBER_SPREAD = "Δ"  # inner minus outer tread temperature
+PREFIX_TRAVEL = "T"  # suspension travel used this lap
+PREFIX_BUMPS = "B"  # bump stop contacts this lap
+PREFIX_BOTTOMING = "⊥"  # ride height below bottoming threshold this lap
+PREFIX_HEAVE = "Z"  # third (heave) spring deflection
 
 # A reading below this fraction of a line height is no longer legible at a glance
 MIN_READING_SCALE = 0.62
@@ -78,6 +90,9 @@ class WheelState:
         "camber", "slip_angle", "load_ratio", "carcass_temp", "wear_per_lap", "ride_height",
         "brake_pressure", "temp_trend", "pressure_trend", "brake_trend", "load", "susp_travel", "susp_static", "susp_velocity",
         "susp_offset", "susp_wheel_offset", "susp_bump", "susp_airborne", "susp_estimated", "susp_damage",
+        "camber_spread", "surface_hot", "pressure_min", "pressure_max", "brake_peak", "brake_laps",
+        "brake_imbalance", "ride_height_min", "bottoming", "bumps", "travel_min", "travel_max", "heave",
+        "damper_shares",
     )
 
     def __init__(self):
@@ -116,6 +131,20 @@ class WheelState:
         self.susp_airborne = False  # wheel in the air (no tyre load)
         self.susp_estimated = True  # static position unknown: offset from an estimated rest position
         self.susp_damage = 0.0  # suspension damage (fraction), 0 intact, 1 totaled
+        self.camber_spread = 0.0  # inner minus outer tread surface temperature (Celsius)
+        self.surface_hot = False  # surface over hot threshold while the rubber below is not (sliding)
+        self.pressure_min = 0.0  # lowest & highest pressure this stint (kPa), 0 if none yet
+        self.pressure_max = 0.0
+        self.brake_peak = 0.0  # highest disc temperature of the last braking zone (Celsius)
+        self.brake_laps = -1.0  # laps of brake thickness left, -1 if unknown
+        self.brake_imbalance = False  # much hotter or colder than the other disc of the axle
+        self.ride_height_min = 0.0  # lowest ride height this lap (mm), 0 if none yet
+        self.bottoming = 0  # times below bottoming threshold this lap
+        self.bumps = 0  # bump stop contacts this lap
+        self.travel_min = -1.0  # suspension travel range used this lap (0 to 1), -1 if none yet
+        self.travel_max = -1.0
+        self.heave = 0.0  # third spring deflection of the axle (mm)
+        self.damper_shares = (0.0, 0.0, 0.0, 0.0)  # time share: fast rebound, slow rebound, slow bump, fast bump
 
     def signature(self) -> tuple:
         """Displayed state, floats rounded, so a repaint is skipped when nothing visible changed"""
@@ -447,3 +476,127 @@ class BumpStop:
             return False
         predicted = line[0] + line[1] * position
         return predicted > 0 and force > predicted * (1 + max(margin, 0.0))
+
+
+def camber_spread(index: int, left: float, center: float, right: float) -> float:
+    """Inner minus outer tread temperature, from temperatures left / center / right of the car
+
+    Inner side of a left wheel is on its right, of a right wheel on its left. Positive: inner
+    hotter, the usual result of negative camber.
+    """
+    if not (math.isfinite(left) and math.isfinite(right)) or min(left, right) < -100:
+        return 0.0
+    return left - right if index % 2 else right - left
+
+
+class PressureRange:
+    """Lowest & highest tyre pressure of the stint (hot pressure), reset when leaving the pits"""
+
+    __slots__ = ("low", "high")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.low = self.high = 0.0
+
+    def update(self, pressure: float):
+        if not math.isfinite(pressure) or pressure <= 0:
+            return
+        self.low = pressure if self.low <= 0 else min(self.low, pressure)
+        self.high = max(self.high, pressure)
+
+
+class BrakePeak:
+    """Highest disc temperature of the last braking zone
+
+    A disc reading drops as soon as the braking ends; the peak of each braking zone is what
+    tells whether the brakes stay in their window.
+    """
+
+    __slots__ = ("current", "peak")
+
+    def __init__(self):
+        self.current = self.peak = 0.0
+
+    def update(self, temperature: float, braking: bool) -> float:
+        if braking and math.isfinite(temperature):
+            self.current = max(self.current, temperature)
+        elif self.current > 0:  # braking zone over: keep its peak
+            self.peak = self.current
+            self.current = 0.0
+        return self.peak
+
+
+DAMPER_BINS = 4  # fast rebound, slow rebound, slow bump, fast bump
+
+
+class LapStats:
+    """Suspension statistics of one wheel over the current lap: lowest ride height, bottoming,
+    bump stop contacts, travel range used, damper speed histogram"""
+
+    __slots__ = ("ride_min", "bottoming", "below", "bumps", "bumping", "travel_min", "travel_max", "bins")
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.ride_min = 0.0
+        self.bottoming = self.bumps = 0
+        self.below = self.bumping = False
+        self.travel_min = self.travel_max = -1.0
+        self.bins = [0.0] * DAMPER_BINS
+
+    def update_ride(self, ride_height: float, threshold: float):
+        """Ride height (mm): lowest, and times it went below threshold (counted once per dip)"""
+        if not math.isfinite(ride_height) or ride_height <= 0:
+            return
+        self.ride_min = ride_height if self.ride_min <= 0 else min(self.ride_min, ride_height)
+        below = ride_height < threshold
+        if below and not self.below:
+            self.bottoming += 1
+        self.below = below
+
+    def update_bump(self, bump: bool):
+        if bump and not self.bumping:
+            self.bumps += 1
+        self.bumping = bump
+
+    def update_travel(self, travel: float):
+        if not math.isfinite(travel):
+            return
+        self.travel_min = travel if self.travel_min < 0 else min(self.travel_min, travel)
+        self.travel_max = max(self.travel_max, travel)
+
+    def update_damper(self, velocity: float, elapsed: float, low_speed: float):
+        """Add elapsed seconds to the damper speed zone of velocity (mm/s)"""
+        if not (math.isfinite(velocity) and 0 < elapsed < 0.5):
+            return
+        if velocity < 0:
+            index = 0 if velocity < -low_speed else 1
+        else:
+            index = 3 if velocity > low_speed else 2
+        self.bins[index] += elapsed
+
+    def damper_shares(self) -> tuple[float, ...]:
+        """Time share of each damper zone this lap, 0 if no data"""
+        total = sum(self.bins)
+        return tuple(value / total for value in self.bins) if total > 0 else (0.0,) * DAMPER_BINS
+
+
+def brake_laps_left(current: float, failure: float, wear_per_lap: float) -> float:
+    """Laps of brake thickness left before failure thickness, -1 if unknown"""
+    if not all(map(math.isfinite, (current, failure, wear_per_lap))) or wear_per_lap <= 0 or current <= 0:
+        return -1.0
+    return max(current - failure, 0.0) / wear_per_lap
+
+
+def impact_arrow(raw_angle: float) -> str:
+    """Arrow toward the impact seen from above (front up), from the damage cone angle (degrees)
+
+    The damage panel draws its cone at raw_angle - 90 in Qt angles (0 = right, 90 = up).
+    """
+    if not math.isfinite(raw_angle):
+        return ""
+    arrows = "→↗↑↖←↙↓↘"
+    return arrows[round(((raw_angle - 90) % 360) / 45) % 8]

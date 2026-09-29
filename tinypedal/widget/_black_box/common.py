@@ -32,7 +32,7 @@ LAYOUT_COMPACT = 2  # tyres & brakes only
 
 CENTER_ITEMS = (
     "abs", "tc", "brake_bias", "brake_migration", "locking", "delta", "laptime",
-    "pit_limiter", "gear", "speed", "rpm", "pedals",
+    "pit_limiter", "gear", "speed", "rpm", "pedals", "brake_heat",
 )
 
 FONT_CACHE_SIZE = 1024  # fitted fonts kept per widget, cleared when full

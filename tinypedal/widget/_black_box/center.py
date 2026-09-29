@@ -53,6 +53,7 @@ class CenterPainter:
             "speed": self.wcfg["show_speed"],
             "rpm": self.wcfg["show_rpm"],
             "pedals": self.wcfg["show_pedal_bars"],
+            "brake_heat": self.wcfg["show_brake_heat_balance"],
         }
         items = [name for name in CENTER_ITEMS if enabled[name]]
         # Gear & speed cluster: speed drawn inside the gear block
@@ -162,6 +163,10 @@ class CenterPainter:
                                 self.tc_active, wcfg["tc_active_color"])
         elif name == "brake_bias":
             self.draw_info_row(painter, rect, self.text["brake_bias"], f"{self.brake_bias * 100:.1f}")
+        elif name == "brake_heat":
+            # Front minus rear disc temperature: which way to move brake bias
+            difference = self.unit_temp(self.brake_heat_balance) - self.unit_temp(0.0)
+            self.draw_info_row(painter, rect, self.text["brake_heat"], f"{difference:+.0f}{self.sign_text}")
         elif name == "brake_migration":
             self.draw_info_row(painter, rect, self.text["brake_migration"], f"{self.brake_migration:.1f}")
         elif name == "delta":

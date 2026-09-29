@@ -27,6 +27,7 @@ events (puncture, flat spot, detached wheel, damage, incident) with lap and sess
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import math
@@ -56,6 +57,9 @@ class Sample(NamedTuple):
     abs_active: bool
     tc_active: bool
     slip: str  # "", "lock" or "spin" (worst of 4 wheels)
+    steering: float = 0.0  # steering input, -1 left to 1 right
+    slips: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0)  # slip ratio per wheel
+    loads: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0)  # tyre load per wheel (Newtons)
 
 
 class Incident(NamedTuple):
@@ -67,6 +71,7 @@ class Incident(NamedTuple):
     lap: int
     session_time: float
     samples: tuple[Sample, ...]
+    direction: str = ""  # arrow toward the impact reported by game, "" if unknown
 
 
 class Recorder:
@@ -87,16 +92,19 @@ class Recorder:
         deceleration_threshold: float = 4.0,
         post_trigger: float = 2.0,
         max_incidents: int = 10,
+        damage_threshold: float = 0.0,
     ):
         self.duration = max(duration, 1.0)
         self.sample_interval = max(sample_interval, 0.01)
         self.deceleration_threshold = max(deceleration_threshold, 0.0)
         self.post_trigger = max(post_trigger, 0.0)
+        self.damage_threshold = max(damage_threshold, 1e-6)  # smaller damage increase is ignored
         self.samples: deque[Sample] = deque(maxlen=int(self.duration / self.sample_interval) + 1)
         self.incidents: deque[Incident] = deque(maxlen=max(max_incidents, 1))
         self.last_damage = 0.0
         self.last_trigger = -math.inf
         self.pending: tuple[float, str, int, float] | None = None  # (time, reason, lap, session time)
+        self.direction = ""  # direction of the pending impact
 
     def reset(self):
         """Clear rolling window (new session), keep frozen incidents"""
@@ -106,6 +114,7 @@ class Recorder:
 
     def add(
         self, sample: Sample, damage: float, lap: int = 0, session_time: float = 0.0, impact: bool = False,
+        direction: str = "",
     ) -> Incident | None:
         """Add sample, return a finished incident once its post trigger time has passed
 
@@ -125,13 +134,16 @@ class Recorder:
                 previous.speed >= MIN_IMPACT_SPEED
             ):
                 reason = "impact"
-        if damage > self.last_damage + 1e-6:
+        if damage > self.last_damage + self.damage_threshold:
             reason = reason or "damage"
-        self.last_damage = damage
+            self.last_damage = damage
+        elif damage < self.last_damage:  # repaired, or new session
+            self.last_damage = damage
         samples.append(sample)
         # Several triggers within one recording are the same incident
         if reason and self.pending is None and sample.time - self.last_trigger >= self.duration / 2:
             self.pending = (sample.time, reason, lap, session_time)
+            self.direction = direction if impact else ""
             self.last_trigger = sample.time
         if self.pending is not None and sample.time - self.pending[0] >= self.post_trigger:
             return self.freeze()
@@ -144,7 +156,7 @@ class Recorder:
         trigger_time, reason, lap, session_time = self.pending
         self.pending = None
         frozen = tuple(self.samples)
-        incident = Incident(trigger_time, reason, self.peak_g(frozen), lap, session_time, frozen)
+        incident = Incident(trigger_time, reason, self.peak_g(frozen), lap, session_time, frozen, self.direction)
         self.incidents.append(incident)
         return incident
 
@@ -197,8 +209,14 @@ class EventLog:
     logged once when it happens instead of on every update while it lasts.
     """
 
-    def __init__(self, size: int = 5):
+    def __init__(self, size: int = 5, damage_threshold: float = 0.0):
         self.events: deque[Event] = deque(maxlen=max(size, 1))
+        self.last_status = ["", "", "", ""]
+        self.last_damage = 0.0
+        self.damage_threshold = max(damage_threshold, 1e-6)  # smaller damage increase is not logged
+
+    def reset(self):
+        """New session: forget last wheel status & damage, keep logged events"""
         self.last_status = ["", "", "", ""]
         self.last_damage = 0.0
 
@@ -213,9 +231,11 @@ class EventLog:
                          status != "flat")
             self.last_status[index] = status
         if math.isfinite(damage):
-            if damage > self.last_damage + 1e-6:
+            if damage > self.last_damage + self.damage_threshold:
                 self.add(lap, session_time, labels.get("damage", "DAMAGE"), damage >= 1)
-            self.last_damage = damage
+                self.last_damage = damage
+            elif damage < self.last_damage:  # repaired, or new session
+                self.last_damage = damage
 
 
 def format_event(event: Event) -> str:
@@ -227,37 +247,74 @@ def format_event(event: Event) -> str:
     return f"L{max(event.lap, 0)} {clock} {event.text}"
 
 
-def export_incident(incident: Incident, folder: str) -> str:
-    """Save incident as JSON file, return file path ("" if failed)
+EXPORT_FORMATS = ("JSON", "CSV", "Both")
 
-    Sample times are made relative to the trigger, so the file reads -15.0 ... +2.0 seconds.
+
+def incident_rows(incident: Incident) -> list[dict]:
+    """Samples as flat rows, times relative to the trigger (-15.0 ... +2.0 seconds)"""
+    rows = []
+    for sample in incident.samples:
+        row = {
+            "time": round(sample.time - incident.time, 3),
+            "speed_ms": round(sample.speed, 2),
+            "throttle": round(sample.throttle, 3),
+            "brake": round(sample.brake, 3),
+            "steering": round(sample.steering, 3),
+            "gear": sample.gear,
+            "abs": sample.abs_active,
+            "tc": sample.tc_active,
+            "slip": sample.slip,
+        }
+        for name, slip, load in zip(WHEEL_NAMES, sample.slips, sample.loads):
+            row[f"slip_ratio_{name.lower()}"] = round(slip, 3)
+            row[f"load_n_{name.lower()}"] = round(load)
+        rows.append(row)
+    return rows
+
+
+def export_incident(incident: Incident, folder: str, export_format: str = "JSON") -> str:
+    """Save incident as JSON and/or CSV file, return last file path ("" if failed)
+
+    CSV opens directly in a spreadsheet or telemetry tool, JSON keeps the incident summary.
     """
     try:
         os.makedirs(folder, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        filepath = os.path.join(folder, f"incident-{stamp}-lap{incident.lap}.json")
-        data = {
-            "reason": incident.reason,
-            "peak_deceleration_g": round(incident.peak_g, 2),
-            "lap": incident.lap,
-            "session_time": round(incident.session_time, 3),
-            "samples": [
-                {
-                    "time": round(sample.time - incident.time, 3),
-                    "speed_ms": round(sample.speed, 2),
-                    "throttle": round(sample.throttle, 3),
-                    "brake": round(sample.brake, 3),
-                    "gear": sample.gear,
-                    "abs": sample.abs_active,
-                    "tc": sample.tc_active,
-                    "slip": sample.slip,
-                }
-                for sample in incident.samples
-            ],
-        }
-        with open(filepath, "w", encoding="utf-8") as file:
-            json.dump(data, file, indent=1)
+        base = os.path.join(folder, f"incident-{stamp}-lap{incident.lap}")
+        rows = incident_rows(incident)
+        filepath = ""
+        if export_format in ("JSON", "Both"):
+            filepath = f"{base}.json"
+            data = {
+                "reason": incident.reason,
+                "direction": incident.direction,
+                "peak_deceleration_g": round(incident.peak_g, 2),
+                "lap": incident.lap,
+                "session_time": round(incident.session_time, 3),
+                "samples": rows,
+            }
+            with open(filepath, "w", encoding="utf-8") as file:
+                json.dump(data, file, indent=1)
+        if export_format in ("CSV", "Both") and rows:
+            filepath = f"{base}.csv"
+            with open(filepath, "w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
         return filepath
     except (OSError, ValueError) as error:
         logger.warning("BLACK BOX: unable to save incident: %s", error)
         return ""
+
+
+class IncidentBrowse:
+    """Requests to show the next older incident, from the black_box_next_incident hotkey
+
+    The hotkey runs outside the widget: it only counts requests, the widget picks them up.
+    """
+
+    requests = 0
+
+
+def request_next_incident():
+    IncidentBrowse.requests += 1

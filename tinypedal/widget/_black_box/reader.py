@@ -38,13 +38,16 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
-from .recorder import Sample, export_incident
+from .recorder import IncidentBrowse, Sample, export_incident
 from .sizing import Presence
 from .state import (
     AIRBORNE_LOAD,
     NO_STATUS,
     WheelState,
+    brake_laps_left,
+    camber_spread,
     class_target,
+    impact_arrow,
     rounded,
     wheel_offset,
 )
@@ -86,6 +89,9 @@ class DataReader:
         if slow:
             self.update_slow(in_pits)
         self.update_fast(in_pits)
+        if IncidentBrowse.requests != self.browse_seen:
+            self.browse_seen = IncidentBrowse.requests
+            self.browse_next_incident()
 
         if self.auto_resize and slow:
             self.update_presence()
@@ -101,7 +107,14 @@ class DataReader:
         brake_temp = api.read.brake.temperature()
         pressure = api.read.tyre.pressure() if self.need_pressure else WHEELS_ZERO
         tread = api.read.tyre.wear() if self.show_tyre_wear else WHEELS_ZERO  # remaining tread (fraction)
-        ico = api.read.tyre.surface_temperature_ico() if wcfg["show_tyre_temperature_bands"] else ()
+        self.check_new_session()
+        ico = (api.read.tyre.surface_temperature_ico()
+               if wcfg["show_tyre_temperature_bands"] or self.show_camber_spread else ())
+        if self.show_surface_overheat:
+            surface = tyre_temp if self.tyre_temp_source == "Surface" else api.read.tyre.surface_temperature_avg()
+        leaving = self.last_pits_state is not None and self.last_pits_state and not in_pits
+        self.last_pits_state = bool(in_pits)
+        braking = self.show_brake_peak and api.read.inputs.brake_raw() > 0.05
         if wcfg["show_tyre_status"]:
             detached = api.read.wheel.is_detached()
             puncture = api.read.tyre.puncture()
@@ -114,9 +127,13 @@ class DataReader:
         else:
             suspension = WHEELS_ZERO
         carcass = api.read.tyre.carcass_temperature() if wcfg["show_tyre_carcass_temperature"] else WHEELS_ZERO
-        end_stint = wcfg["show_tyre_wear_end_stint"] and self.use_wheels and self.use_fuel
+        # End of stint wear: over tyre_wear_forecast_laps if set, else over laps left in tank
+        end_stint = wcfg["show_tyre_wear_end_stint"] and self.use_wheels and (
+            self.use_fuel or self.wear_forecast_laps > 0)
         if end_stint:
-            if minfo.energy.available:
+            if self.wear_forecast_laps > 0:
+                run_laps = self.wear_forecast_laps
+            elif minfo.energy.available:
                 run_laps = min(minfo.fuel.estimatedLaps, minfo.energy.estimatedLaps)
             else:
                 run_laps = minfo.fuel.estimatedLaps
@@ -132,7 +149,22 @@ class DataReader:
             wheel.tyre_color = calc.select_grade(self.heatmap_tyre[index], wheel.tyre_temp)[1]
             wheel.brake_color = calc.select_grade(self.heatmap_brake[index], wheel.brake_temp)[1]
             if ico:
-                wheel.ico_colors = self.band_colors(index, ico[index * 3:index * 3 + 3])
+                temps = ico[index * 3:index * 3 + 3]
+                if wcfg["show_tyre_temperature_bands"]:
+                    wheel.ico_colors = self.band_colors(index, temps)
+                wheel.camber_spread = camber_spread(index, *temps)
+            if self.show_surface_overheat:
+                hot = self.wheel_targets[index][3]
+                wheel.surface_hot = 0 < hot <= surface[index] and wheel.tyre_temp < hot
+            if self.show_pressure_range:
+                if leaving:  # new stint
+                    self.pressure_ranges[index].reset()
+                if not in_pits:
+                    self.pressure_ranges[index].update(wheel.pressure)
+                wheel.pressure_min = self.pressure_ranges[index].low
+                wheel.pressure_max = self.pressure_ranges[index].high
+            if self.show_brake_peak:
+                wheel.brake_peak = self.brake_peaks[index].update(wheel.brake_temp, braking)
             wheel.status = self.tyre_status(detached[index], puncture[index], locking_wear[index])
             wheel.carcass_temp = carcass[index]
             if self.show_susp_damage:
@@ -152,6 +184,12 @@ class DataReader:
                 wheel.brake_trend = self.brake_trends[index].update(now, wheel.brake_temp, wheel.brake_temp > -100)
         if self.show_suspension and self.use_wheels:
             self.update_tyre_diameters(minfo.wheels.wheelRadius)
+        if self.brake_imbalance_threshold > 0 and wcfg["show_brake_temperature"]:
+            self.update_brake_imbalance()
+        if self.need_brake_heat:
+            front = (self.wheels[0].brake_temp + self.wheels[1].brake_temp) / 2
+            rear = (self.wheels[2].brake_temp + self.wheels[3].brake_temp) / 2
+            self.brake_heat_balance = front - rear if math.isfinite(front - rear) else 0.0
 
         if self.brake_class_targets and wcfg["show_brake_temperature"]:
             self.update_brake_window(api.read.vehicle.class_name())
@@ -208,7 +246,9 @@ class DataReader:
             slip_ratio = minfo.wheels.slipRatio
             braking = api.read.inputs.brake_raw() > 0.02
         # Diagnostic readings: each reader is skipped unless its own reading is turned on
-        ride_height = api.read.wheel.ride_height() if wcfg["show_ride_height"] else WHEELS_ZERO
+        ride_height = (api.read.wheel.ride_height()
+                       if wcfg["show_ride_height"] or self.need_lap_stats else WHEELS_ZERO)
+        heave = api.read.wheel.third_spring_deflection() if self.show_heave else WHEELS_ZERO
         brake_pressure = api.read.brake.pressure() if wcfg["show_brake_pressure"] else WHEELS_ZERO
         if wcfg["show_tyre_load"]:
             tyre_load = api.read.tyre.load()  # Newtons
@@ -227,6 +267,7 @@ class DataReader:
             if need_slip:
                 wheel.warning = self.slip_warning(slip_ratio[index], speed, braking)
             wheel.ride_height = ride_height[index]  # millimeters (converted by API)
+            wheel.heave = heave[index]
             wheel.brake_pressure = brake_pressure[index] * 100
             wheel.load_ratio = calc.part_to_whole_ratio(tyre_load[index], total_load) * 100
             wheel.load = tyre_load[index]
@@ -276,6 +317,8 @@ class DataReader:
             self.brake = api.read.inputs.brake()
         if self.show_suspension:
             self.update_suspension(speed)
+        if self.need_lap_stats:
+            self.update_lap_stats()
         if self.show_recorder:
             self.update_recorder(speed)
         if self.show_battery_bar and self.use_hybrid:
@@ -358,30 +401,103 @@ class DataReader:
         impact_time = api.read.vehicle.impact_time()
         impact = self.recorder_impact_time is not None and is_new_impact(impact_time, self.recorder_impact_time)
         self.recorder_impact_time = impact_time  # impact before widget started: not an incident
+        if impact:  # same direction as the damage panel cone
+            self.impact_direction = impact_arrow(calc.degrees(calc.oriyaw(*api.read.vehicle.impact_position())))
+        slips = tuple(minfo.wheels.slipRatio) if self.use_wheels else WHEELS_ZERO
         incident = recorder.add(
-            Sample(now, speed, self.throttle, self.brake, self.gear, self.abs_active, self.tc_active, slip),
+            Sample(now, speed, self.throttle, self.brake, self.gear, self.abs_active, self.tc_active, slip,
+                   api.read.inputs.steering(), slips, tuple(api.read.tyre.load())),
             self.damage_total,
             api.read.lap.number(),
             api.read.session.elapsed(),
             impact,
+            self.impact_direction,
         )
         if recorder.samples and recorder.samples[-1].time != last_time:
             self.trace_version += 1
         if incident is None:
             return
+        direction = f" {incident.direction}" if incident.direction else ""
         self.event_log.add(
             incident.lap, incident.session_time,
-            f"{self.event_labels['impact']} {incident.peak_g:.1f}g", incident.peak_g >= 10,
+            f"{self.event_labels['impact']} {incident.peak_g:.1f}g{direction}", incident.peak_g >= 10,
         )
+        self.browse_incident = None  # a new incident is shown first
         if self.export_folder:
-            export_incident(incident, self.export_folder)
+            export_incident(incident, self.export_folder, self.export_format)
+
+    def displayed_incident(self, now: float | None = None):
+        """Incident the trace shows frozen: picked with the hotkey, or the last one, for
+        incident_display_duration seconds; None while showing the live recording"""
+        if self.incident_display_time <= 0 or not self.recorder.incidents:
+            return None
+        now = monotonic() if now is None else now
+        if self.browse_incident is not None and now - self.browse_since < self.incident_display_time:
+            return self.browse_incident
+        last = self.recorder.last_incident
+        return last if last is not None and now - last.time < self.incident_display_time else None
 
     def showing_incident(self, now: float | None = None) -> bool:
-        """Trace shows last incident (frozen) instead of live recording"""
-        incident = self.recorder.last_incident
-        if incident is None or self.incident_display_time <= 0:
-            return False
-        return (monotonic() if now is None else now) - incident.time < self.incident_display_time
+        """Trace shows an incident (frozen) instead of live recording"""
+        return self.displayed_incident(now) is not None
+
+    def browse_next_incident(self):
+        """Hotkey: show the next older incident, back to the newest after the oldest"""
+        incidents = list(self.recorder.incidents)
+        if not incidents:
+            return
+        now = monotonic()
+        shown = self.displayed_incident(now)
+        position = incidents.index(shown) if shown in incidents else len(incidents)
+        self.browse_incident = incidents[position - 1] if position > 0 else incidents[-1]
+        self.browse_since = now
+        self.last_state = ()  # repaint
+
+    def check_new_session(self):
+        """New session (session time going back): recorder & event log forget the old session,
+        lap statistics and stint pressure range start again"""
+        elapsed = api.read.session.elapsed()
+        if math.isfinite(elapsed) and elapsed < self.last_session_elapsed - 1:
+            self.recorder.reset()
+            self.event_log.reset()
+            for stats in self.lap_stats:
+                stats.reset()
+            for pressure_range in self.pressure_ranges:
+                pressure_range.reset()
+            self.stats_lap = None
+        self.last_session_elapsed = elapsed if math.isfinite(elapsed) else 0.0
+
+    def update_lap_stats(self):
+        """Per wheel over the current lap: lowest ride height, bottoming, bump stop contacts,
+        travel used, damper speed histogram (reset on each new lap)"""
+        lap = api.read.lap.number()
+        if lap != self.stats_lap:
+            self.stats_lap = lap
+            for stats in self.lap_stats:
+                stats.reset()
+        now = monotonic()
+        elapsed = now - self.last_fast_time
+        self.last_fast_time = now
+        for wheel, stats in zip(self.wheels, self.lap_stats):
+            stats.update_ride(wheel.ride_height, self.bottoming_threshold)
+            wheel.ride_height_min = stats.ride_min
+            wheel.bottoming = stats.bottoming
+            if self.show_suspension:
+                stats.update_bump(wheel.susp_bump)
+                stats.update_travel(wheel.susp_travel)
+                stats.update_damper(wheel.susp_velocity, elapsed, self.susp_low_speed)
+                wheel.bumps = stats.bumps
+                wheel.travel_min, wheel.travel_max = stats.travel_min, stats.travel_max
+                wheel.damper_shares = stats.damper_shares()
+
+    def update_brake_imbalance(self):
+        """Axle discs far apart in temperature (sticking caliper, blocked duct), both warm enough"""
+        floor = max(self.brake_cold, 100)
+        for left, right in ((0, 1), (2, 3)):
+            temp_left, temp_right = self.wheels[left].brake_temp, self.wheels[right].brake_temp
+            flagged = (abs(temp_left - temp_right) >= self.brake_imbalance_threshold
+                       and max(temp_left, temp_right) >= floor)
+            self.wheels[left].brake_imbalance = self.wheels[right].brake_imbalance = flagged
 
     def update_suspension(self, speed: float):
         """Live suspension: spring & wheel offset from static position, damper speed, bump stop, airborne
@@ -396,6 +512,7 @@ class DataReader:
                 travel.reset()
             for bump in self.susp_bumps:
                 bump.reset()
+            self.tyre_diameters = (TYRE_DIAMETER_MM,) * 4  # learned again for the new car
         positions = api.read.wheel.suspension_deflection()
         forces = api.read.wheel.suspension_force()
         loads = api.read.tyre.load()
@@ -460,7 +577,8 @@ class DataReader:
             tuple(rounded(value, 2) for value in self.damage_suspension), self.impact_visible,
             self.impact_position if self.impact_visible else None,
             self.event_log.events[-1] if self.event_log.events else None,
-            self.brake_cold, self.brake_hot, tuple(self.wheel_targets),
+            self.brake_cold, self.brake_hot, tuple(self.wheel_targets), rounded(self.brake_heat_balance, 0),
+            self.browse_incident.time if self.browse_incident is not None else None,
         )
 
     def animating(self) -> bool:
@@ -517,7 +635,9 @@ class DataReader:
         usable = minfo.wheels.maxBrakeThickness[index] - failure
         wheel.brake_wear_known = usable > 0
         if wheel.brake_wear_known:
-            wheel.brake_wear = (minfo.wheels.currentBrakeThickness[index] - failure) * 100 / usable
+            current = minfo.wheels.currentBrakeThickness[index]
+            wheel.brake_wear = (current - failure) * 100 / usable
+            wheel.brake_laps = brake_laps_left(current, failure, minfo.wheels.estimatedValidBrakeWear[index])
 
     @property
     def has_abs(self) -> bool:
@@ -585,7 +705,7 @@ class DataReader:
                     self.heatmap_tyre[index] = self.load_tyre_heatmap(select_tyre_heatmap_name(compound))
                 symbol = select_compound_symbol(compound)
                 self.wheels[index].compound = symbol  # shown only if show_tyre_compound
-                self.wheel_targets[index] = self.compound_target(compound, symbol)
+                self.wheel_targets[index] = self.compound_target(compound, symbol, index >= 2)
         if not self.match_heatmap:
             return
         vehicle = (api.read.vehicle.class_name(), self.vehicle_name)
@@ -615,11 +735,18 @@ class DataReader:
         target = class_target(self.brake_class_targets, class_name)
         self.brake_cold, self.brake_hot = target if target is not None else self.default_brake_window
 
-    def compound_target(self, compound: str, symbol: str) -> tuple:
-        """(pressure min, pressure max, cold, hot) of compound, matched by symbol or full name"""
-        target = self.compound_targets.get(symbol.upper()) or self.compound_targets.get(compound.upper())
+    def compound_target(self, compound: str, symbol: str, rear: bool = False) -> tuple:
+        """(pressure min, pressure max, cold, hot) of compound, matched by symbol or full name
+
+        Rear wheels use the "symbol:R" entry when there is one (own rear pressure window).
+        """
+        target = None
+        if rear:
+            target = (self.compound_targets.get(f"{symbol.upper()}:R")
+                      or self.compound_targets.get(f"{compound.upper()}:R"))
+        target = target or self.compound_targets.get(symbol.upper()) or self.compound_targets.get(compound.upper())
         if target is None:
-            return self.default_targets
+            return self.default_targets_rear if rear else self.default_targets
         p_min, p_max, t_min, t_max = target
         return (
             p_min, p_max,
