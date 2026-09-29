@@ -254,6 +254,7 @@ CHOICE_COMMON = MappingProxyType({
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
     "^tyre_load_display$": ("Percent", "Kilogram", "Newton"),
     "^brake_wear_display$": ("Percent", "Laps"),
+    "^pedal_input_source$": ("Raw", "Filtered"),
     "^incident_export_format$": ("JSON", "CSV", "Both"),
     "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),
     "^resize_anchor$": ("Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"),

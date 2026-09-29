@@ -1536,3 +1536,52 @@ def test_every_new_option_draws(ui_env):
         widget.grab()
     finally:
         widget.deleteLater()
+
+
+# --- Center column: merged brake bias & migration, delta source, pedal source
+def test_brake_bias_and_migration_merged(ui_env):
+    widget = new_widget({"show_brake_bias": True, "show_brake_migration": True})
+    try:
+        assert "brake_bias" in widget.center_order and "brake_migration" not in widget.center_order
+        assert widget.need_brake_migration  # still read, drawn in the brake bias row
+        widget.grab()
+    finally:
+        widget.deleteLater()
+    separate = new_widget({"show_brake_bias": True, "show_brake_migration": True,
+                           "enable_brake_bias_migration_merge": False})
+    try:
+        assert "brake_migration" in separate.center_order
+    finally:
+        separate.deleteLater()
+
+
+@pytest.mark.parametrize("source, field", [
+    ("Best", "deltaBest"), ("Session", "deltaSession"), ("Stint", "deltaStint"), ("Last", "deltaLast"),
+])
+def test_delta_source(ui_env, monkeypatch, source, field):
+    from tinypedal.module_info import minfo
+
+    for name in ("deltaBest", "deltaSession", "deltaStint", "deltaLast"):
+        monkeypatch.setattr(minfo.delta, name, -0.5 if name == field else 1.0)
+    widget = new_widget({"show_delta_best": True, "deltabest_source": source})
+    try:
+        assert widget.read_delta() == -0.5
+        widget.grab()
+    finally:
+        widget.deleteLater()
+
+
+@pytest.mark.parametrize("source, expected", [("Raw", (0.9, 0.8, 0.7)), ("Filtered", (0.6, 0.5, 0.4))])
+def test_pedal_source(ui_env, monkeypatch, source, expected):
+    from tinypedal.api_control import api
+
+    for name, value in (("throttle_raw", 0.9), ("brake_raw", 0.8), ("clutch_raw", 0.7),
+                        ("throttle", 0.6), ("brake", 0.5), ("clutch", 0.4)):
+        monkeypatch.setattr(api.read.inputs, name, lambda value=value: value, raising=False)
+    widget = new_widget({"pedal_input_source": source, "show_clutch_bar": True})
+    try:
+        widget.read_pedals()
+        assert (widget.throttle, widget.brake, widget.clutch) == expected
+        widget.grab()
+    finally:
+        widget.deleteLater()

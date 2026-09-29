@@ -1058,7 +1058,9 @@ def test_new_center_items_read_their_data(ui_env, monkeypatch):
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 92.5)
     instance = new_widget({"show_brake_migration": True, "show_delta_best": True, "show_laptime": True})
     try:
-        assert {"brake_migration", "delta", "laptime"} <= set(instance.center_order)
+        # Brake bias on by default: migration shown inside its row
+        assert {"brake_bias", "delta", "laptime"} <= set(instance.center_order)
+        assert "brake_migration" not in instance.center_order
         instance.timerEvent(None)
         assert instance.brake_migration == pytest.approx(2.5)
         assert instance.delta_best == pytest.approx(-0.234)

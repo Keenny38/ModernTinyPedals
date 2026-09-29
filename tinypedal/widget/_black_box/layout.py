@@ -36,6 +36,7 @@ from PySide6.QtGui import QPainterPath
 from .common import LAYOUT_NORMAL
 
 DAMAGE_PANEL_RATIO = 0.8  # damage panel width relative to its height
+CENTER_WIDTH = 6.4  # center column width between tyres, in lines (room for merged rows like BB/BMIG)
 
 
 @dataclass
@@ -121,7 +122,7 @@ def build_layout(spec: LayoutInput) -> Layout:
     side_w = pad_x + tyre_w + brake_gap + brake_w
 
     center_between_tyres = spec.has_center and spec.layout_mode == LAYOUT_NORMAL
-    center_between = round(unit * 5.2 * spec.center_scale) if center_between_tyres else round(unit * 0.8)
+    center_between = round(unit * CENTER_WIDTH * spec.center_scale) if center_between_tyres else round(unit * 0.8)
     content_w = side_w * 2 + center_between + gap * 2
 
     # Columns, left to right: [damage panel] [battery] content [battery] [damage panel]

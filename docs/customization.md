@@ -5280,6 +5280,15 @@ Add a bottom row with, for each wheel, the time share of the current lap spent i
     show_brake_pressure, brake_pressure_color
 Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
 
+    enable_brake_bias_migration_merge
+Show brake bias and brake migration in one center column row (`BB/BMIG 56.0/2.5`) when both are shown. Enabled by default, disable for two separate rows.
+
+    deltabest_source
+Lap the delta is against: `Best` (default, best lap), `Session` (session best), `Stint` (stint best) or `Last` (last lap), from `Delta module`. Other than `Best`, its initial follows the label (`DELTA S`).
+
+    pedal_input_source, show_clutch_bar, clutch_color
+Pedal bars (and incident recorder pedal traces): `Filtered` (default) shows pedals as the car receives them, after game filtering and driving aids (auto blip, traction control throttle cut, ABS), `Raw` as pressed by the driver. Comparing both shows how much the aids step in. `show_clutch_bar` adds a third bar for the clutch.
+
     show_wheel_locking
 Show percentage of lap distance spent locking a front and a rear wheel (`LOCK 12/4`), from `Wheels module`. Shown as a center column item.
 

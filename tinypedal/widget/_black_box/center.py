@@ -56,10 +56,18 @@ class CenterPainter:
             "brake_heat": self.wcfg["show_brake_heat_balance"],
         }
         items = [name for name in CENTER_ITEMS if enabled[name]]
+        # Brake bias & migration merged in one row: migration drawn inside the brake bias row
+        if self.merged_brake_bias() and "brake_bias" in items:
+            items.remove("brake_migration")
         # Gear & speed cluster: speed drawn inside the gear block
         if self.gear_speed_cluster and "gear" in items and "speed" in items:
             items.remove("speed")
         return sorted(items, key=lambda name: (self.wcfg[f"display_order_{name}"], CENTER_ITEMS.index(name)))
+
+    def merged_brake_bias(self) -> bool:
+        """Brake migration shown inside the brake bias row"""
+        wcfg = self.wcfg
+        return bool(wcfg["enable_brake_bias_migration_merge"] and wcfg["show_brake_bias"] and wcfg["show_brake_migration"])
 
     def item_height(self, name: str) -> float:
         """Height of center item (without gap)"""
@@ -72,8 +80,8 @@ class CenterPainter:
             return unit * 1.05 * self.speed_scale
         if name == "rpm":
             return unit * 1.05 * self.rpm_scale + unit * 0.3
-        if name == "pedals":
-            return unit * 0.7
+        if name == "pedals":  # 2 bars, 3 with clutch
+            return unit * (1.05 if self.wcfg["show_clutch_bar"] else 0.7)
         return unit * 1.05
 
     def center_height(self, items=None) -> float:
@@ -162,7 +170,11 @@ class CenterPainter:
                                 level_text(self.text["tc"], self.tc_level, self.tc_cut_level, self.tc_slip_level),
                                 self.tc_active, wcfg["tc_active_color"])
         elif name == "brake_bias":
-            self.draw_info_row(painter, rect, self.text["brake_bias"], f"{self.brake_bias * 100:.1f}")
+            if self.merged_brake_bias():  # one row: "BB/BMIG  56.0/2.5"
+                self.draw_info_row(painter, rect, f"{self.text['brake_bias']}/{self.text['brake_migration']}",
+                                   f"{self.brake_bias * 100:.1f}/{self.brake_migration:.1f}")
+            else:
+                self.draw_info_row(painter, rect, self.text["brake_bias"], f"{self.brake_bias * 100:.1f}")
         elif name == "brake_heat":
             # Front minus rear disc temperature: which way to move brake bias
             difference = self.unit_temp(self.brake_heat_balance) - self.unit_temp(0.0)
@@ -172,8 +184,10 @@ class CenterPainter:
         elif name == "delta":
             gain = self.delta_best < 0
             color = wcfg["delta_gain_color" if gain else "delta_loss_color"]
-            self.draw_info_row(painter, rect, self.text["delta"],
-                               f"{self.delta_best:+.3f}" if self.use_delta else "-", color)
+            # Delta source initial after the label, unless the default best lap delta
+            source = wcfg["deltabest_source"]
+            label = self.text["delta"] if source == "Best" else f"{self.text['delta']} {source[0]}"
+            self.draw_info_row(painter, rect, label, f"{self.delta_best:+.3f}" if self.use_delta else "-", color)
         elif name == "laptime":
             self.draw_info_row(painter, rect, self.text["laptime"],
                                calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-")
@@ -220,10 +234,11 @@ class CenterPainter:
                 fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
         elif name == "pedals":
             gap = unit * 0.1
-            bar_h = (rect.height() - gap) / 2
-            for index, (value, color) in enumerate(
-                ((self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"]))
-            ):
+            pedals = [(self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"])]
+            if wcfg["show_clutch_bar"]:
+                pedals.append((self.clutch, wcfg["clutch_color"]))
+            bar_h = (rect.height() - gap * (len(pedals) - 1)) / len(pedals)
+            for index, (value, color) in enumerate(pedals):
                 back = QRectF(rect.left(), rect.top() + index * (bar_h + gap), rect.width(), bar_h)
                 fill_chip(painter, back, wcfg["indicator_inactive_color"])
                 if value > 0.001:

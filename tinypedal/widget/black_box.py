@@ -134,7 +134,8 @@ class Realtime(
         self.need_switches = bool(shown & {"abs", "tc"}) or self.show_recorder
         self.need_brake_bias = "brake_bias" in shown
         self.need_locking = "locking" in shown
-        self.need_brake_migration = "brake_migration" in shown
+        self.need_brake_migration = "brake_migration" in shown or (
+            "brake_bias" in shown and self.merged_brake_bias())
         self.need_delta = "delta" in shown
         self.need_laptime = "laptime" in shown
         # Justified: speed and RPM use the same label/value rows as brake bias and delta,
@@ -452,6 +453,7 @@ class Realtime(
         self.energy_available = False
         self.throttle = 0.0
         self.brake = 0.0
+        self.clutch = 0.0
         self.last_in_pits = -1
         self.last_vehicle = ("", "")
         self.last_compounds: tuple = ("", "", "", "")

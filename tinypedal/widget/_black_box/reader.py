@@ -300,7 +300,7 @@ class DataReader:
         if self.need_brake_migration:
             self.brake_migration = api.read.brake.migration()
         if self.need_delta and self.use_delta:
-            self.delta_best = minfo.delta.deltaBest
+            self.delta_best = self.read_delta()
         if self.need_laptime and self.use_delta:
             self.laptime_current = minfo.delta.lapTimeCurrent
         self.in_pits = bool(in_pits)
@@ -313,8 +313,7 @@ class DataReader:
             self.rpm = api.read.engine.rpm()
             self.rpm_max = api.read.engine.rpm_max()
         if self.need_pedals:
-            self.throttle = api.read.inputs.throttle()
-            self.brake = api.read.inputs.brake()
+            self.read_pedals()
         if self.show_suspension:
             self.update_suspension(speed)
         if self.need_lap_stats:
@@ -327,6 +326,30 @@ class DataReader:
             self.battery_warning = self.battery_warning_level()
             if self.battery_flash is not None:
                 self.battery_highlight = self.battery_flash.send(self.battery_warning)
+
+    def read_delta(self) -> float:
+        """Delta against the lap chosen in deltabest_source: best, session best, stint best or last lap"""
+        source = self.wcfg["deltabest_source"]
+        if source == "Session":
+            return minfo.delta.deltaSession
+        if source == "Stint":
+            return minfo.delta.deltaStint
+        if source == "Last":
+            return minfo.delta.deltaLast
+        return minfo.delta.deltaBest
+
+    def read_pedals(self):
+        """Pedals as pressed by the driver (Raw), or as the car receives them (Filtered: after
+        game filtering, auto blip, traction control throttle cut, ABS)"""
+        inputs = api.read.inputs
+        if self.wcfg["pedal_input_source"] == "Filtered":
+            self.throttle, self.brake = inputs.throttle(), inputs.brake()
+            if self.wcfg["show_clutch_bar"]:
+                self.clutch = inputs.clutch()
+        else:
+            self.throttle, self.brake = inputs.throttle_raw(), inputs.brake_raw()
+            if self.wcfg["show_clutch_bar"]:
+                self.clutch = inputs.clutch_raw()
 
     def current_presence(self) -> Presence:
         """Blocks the current car & data have, blocks without data are dropped from layout"""
@@ -562,7 +585,7 @@ class DataReader:
             rounded(self.brake_bias, 4), rounded(self.locking_front, 0), rounded(self.locking_rear, 0),
             rounded(self.brake_migration, 1), rounded(self.delta_best, 3), rounded(self.laptime_current, 2),
             self.in_pits, self.limiter, self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
-            rounded(self.throttle, 3), rounded(self.brake, 3),
+            rounded(self.throttle, 3), rounded(self.brake, 3), rounded(self.clutch, 3),
             rounded(self.refuel, 1), rounded(self.refill, 1), rounded(self.fuel, 1), rounded(self.fuel_laps, 1),
             rounded(self.fuel_capacity, 1), rounded(self.fuel_start, 1),
             rounded(self.energy_capacity, 1), rounded(self.energy_start, 1),
