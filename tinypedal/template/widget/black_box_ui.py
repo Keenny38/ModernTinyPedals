@@ -311,9 +311,16 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
         "recorder_duration", "incident_deceleration_threshold", "incident_display_duration",
         "enable_incident_file_export", "incident_export_format", "trace_height_scale", "trace_speed_color",
         "trace_steering_color", "trace_background_color",
-        "text_impact",
+        "text_impact", "enable_incident_replay", "show_previous_incident_trace",
     ),
-    "show_event_log": ("number_of_event_log_lines", "font_color_event_log", "text_damage"),
+    "show_event_log": (
+        "number_of_event_log_lines", "font_color_event_log", "text_damage",
+        "show_flag_events", "show_pit_events", "show_penalty_events", "show_engine_overheat_events",
+    ),
+    "show_flag_events": ("text_yellow_flag", "text_blue_flag"),
+    "show_pit_events": ("text_pit_in", "text_pit_out"),
+    "show_penalty_events": ("text_penalty", "text_track_limits"),
+    "show_engine_overheat_events": ("text_overheat",),
     "enable_incident_file_export": ("incident_export_format",),
 }
 # Option: on/off option it depends on

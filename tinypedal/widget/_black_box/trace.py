@@ -22,7 +22,8 @@ Black box widget, draw incident trace & event log
 The trace shows the recorder window: throttle and brake as filled areas, speed as a line,
 ABS & TC activity as ticks on top, wheel lock & spin as marks at the bottom. Live while
 driving, frozen on the last incident for incident_display_duration seconds, with the
-trigger moment marked.
+trigger moment marked. A frozen incident can be replayed (cursor sweeping the recording with
+the values under it) and compared with the previous one (its speed drawn behind, dashed).
 """
 
 from __future__ import annotations
@@ -30,9 +31,26 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 
-from .recorder import format_event
+from .recorder import format_event, index_of
 
 MIN_SPEED_SCALE = 20.0  # m/s, so a slow crawl is not stretched to full height
+REPLAY_HOLD = 1.0  # seconds the replay cursor rests at the end before starting again
+
+
+def replay_time(start: float, end: float, elapsed: float) -> float:
+    """Replay cursor time: sweeps start to end in real time, rests, then loops"""
+    span = max(end - start, 0.0)
+    return start + min(elapsed % (span + REPLAY_HOLD), span)
+
+
+def sample_at(samples, time: float):
+    """Last sample at or before time (first sample if time is before it)"""
+    found = samples[0]
+    for sample in samples:
+        if sample.time > time:
+            break
+        found = sample
+    return found
 
 
 def translucent(name: str, alpha: int) -> QColor:
@@ -60,7 +78,14 @@ class TracePainter:
             self.draw_trace_area(painter, inner, samples, x_at, "throttle", wcfg["throttle_color"])
             self.draw_trace_area(painter, inner, samples, x_at, "brake", wcfg["brake_color"])
             self.draw_trace_marks(painter, inner, samples, x_at)
-            self.draw_trace_speed(painter, inner, samples, x_at)
+            previous = self.compared_incident(incident)
+            top_speed = max(max(sample.speed for sample in samples), MIN_SPEED_SCALE)
+            if previous is not None:  # aligned on its own trigger
+                shift = incident.time - previous.time
+                top_speed = max(top_speed, max(sample.speed for sample in previous.samples))
+                self.draw_trace_speed(painter, inner, previous.samples, lambda time: x_at(time + shift),
+                                      top_speed, compared=True)
+            self.draw_trace_speed(painter, inner, samples, x_at, top_speed)
             self.draw_trace_steering(painter, inner, samples, x_at)
             if incident is not None:
                 pen = QPen(QColor(wcfg["incident_color"]), max(self.unit * 0.08, 1))
@@ -69,7 +94,43 @@ class TracePainter:
                 painter.drawLine(QPointF(trigger_x, rect.top()), QPointF(trigger_x, rect.bottom()))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+                if self.incident_replay:
+                    self.draw_replay_cursor(painter, rect, inner, samples, x_at, incident)
         self.draw_trace_caption(painter, rect, incident)
+
+    def compared_incident(self, incident):
+        """Previous incident drawn behind the shown one, None if none or turned off"""
+        if incident is None or not self.show_previous_incident:
+            return None
+        return self.recorder.previous_incident(incident)
+
+    def replay_cursor_time(self, incident) -> float:
+        """Time the replay cursor is at: sweep starts when the incident is first shown"""
+        samples = incident.samples
+        if incident is self.browse_incident:
+            shown_since = self.browse_since
+        else:
+            shown_since = samples[-1].time  # frozen right after its last sample
+        return replay_time(samples[0].time, samples[-1].time, self.recorder_now() - shown_since)
+
+    def draw_replay_cursor(self, painter: QPainter, rect: QRectF, inner: QRectF, samples, x_at, incident):
+        """Cursor line, and speed, pedals & gear at the cursor at the bottom of the trace"""
+        wcfg = self.wcfg
+        time = self.replay_cursor_time(incident)
+        sample = sample_at(samples, time)
+        x = x_at(time)
+        painter.setPen(QPen(QColor(wcfg["trace_speed_color"]), max(self.unit * 0.05, 1), Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(x, inner.top()), QPointF(x, inner.bottom()))
+        speed = self.unit_speed(sample.speed)
+        text = (f"{time - incident.time:+.1f}s {speed:.0f}{self.speed_label} "
+                f"T{sample.throttle * 100:.0f} B{sample.brake * 100:.0f} "
+                f"{'N' if sample.gear == 0 else 'R' if sample.gear < 0 else sample.gear}")
+        caption_h = min(self.unit * 0.8, rect.height() / 2)
+        row = QRectF(rect.left() + self.unit * 0.25, rect.bottom() - caption_h, rect.width() - self.unit * 0.5,
+                     caption_h)
+        painter.setPen(QColor(wcfg["trace_speed_color"]))
+        self.draw_fit_text(painter, row, text, self.font_label,
+                           Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
     @staticmethod
     def draw_trace_area(painter: QPainter, rect: QRectF, samples, x_at, name: str, color: str):
@@ -83,9 +144,9 @@ class TracePainter:
         painter.setBrush(translucent(color, 95))
         painter.drawPolygon(QPolygonF(points))
 
-    def draw_trace_speed(self, painter: QPainter, rect: QRectF, samples, x_at):
-        """Speed line, scaled to the highest speed in window"""
-        top_speed = max(max(sample.speed for sample in samples), MIN_SPEED_SCALE)
+    def draw_trace_speed(self, painter: QPainter, rect: QRectF, samples, x_at, top_speed: float,
+                         compared: bool = False):
+        """Speed line, scaled to top speed (compared incident: dashed & faded, behind)"""
         path = QPainterPath()
         for index, sample in enumerate(samples):
             point = QPointF(x_at(sample.time), rect.bottom() - min(max(sample.speed, 0) / top_speed, 1) * rect.height())
@@ -94,7 +155,11 @@ class TracePainter:
             else:
                 path.moveTo(point)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(self.wcfg["trace_speed_color"]), max(self.unit * 0.09, 1.2)))
+        if compared:
+            pen = QPen(translucent(self.wcfg["trace_speed_color"], 110), max(self.unit * 0.07, 1), Qt.PenStyle.DashLine)
+        else:
+            pen = QPen(QColor(self.wcfg["trace_speed_color"]), max(self.unit * 0.09, 1.2))
+        painter.setPen(pen)
         painter.drawPath(path)
 
     def draw_trace_steering(self, painter: QPainter, rect: QRectF, samples, x_at):
@@ -140,9 +205,9 @@ class TracePainter:
         if incident is not None:
             painter.setPen(QColor(wcfg["incident_color"]))
             text = f"{self.text['impact']} L{incident.lap} {incident.peak_g:.1f}g {incident.direction}".rstrip()
-            incidents = list(self.recorder.incidents)
-            if len(incidents) > 1 and incident in incidents:  # which one, when browsing with the hotkey
-                text += f" {incidents.index(incident) + 1}/{len(incidents)}"
+            position = index_of(self.recorder.incidents, incident)
+            if count > 1 and position >= 0:  # which one, when browsing with the hotkey
+                text += f" {position + 1}/{count}"
             self.draw_fit_text(painter, left, text, self.font_label, align_left)
         else:
             painter.setPen(translucent(wcfg["incident_color"], 200))

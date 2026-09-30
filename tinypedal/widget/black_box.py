@@ -44,10 +44,10 @@ from ._black_box.damage import DamagePainter, damage_geometry
 from ._black_box.layout import LayoutInput, build_layout
 from ._black_box.modules import ModuleStatus, enable_modules, required_modules
 from ._black_box.panels import PanelPainter
+from ._black_box.persist import keep_records, memory, restore_records
 from ._black_box.reader import DataReader
-from ._black_box.recorder import EventLog, IncidentBrowse, Recorder
+from ._black_box.recorder import EventLog, IncidentBrowse, Recorder, open_folder
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
-from ._black_box.status import StatusPainter
 from ._black_box.state import (
     BrakePeak,
     BumpStop,
@@ -62,17 +62,13 @@ from ._black_box.state import (
     parse_class_targets,
     parse_compound_targets,
 )
+from ._black_box.status import StatusPainter
 from ._black_box.suspension import TYRE_DIAMETER_MM, SuspensionPainter
 from ._black_box.trace import TracePainter
 from ._black_box.wheels import ColorFade, WheelPainter
 from ._common import warning_flash
 from ._painter import OverlayStyle
 from ._style import StyledConfig
-
-
-# Last on-screen geometry (x, y, width, height) per widget name: a widget rebuilt after an
-# option change resizes from it, keeping the resize anchor corner in place
-LAST_GEOMETRY: dict[str, tuple[int, int, int, int]] = {}
 
 
 class Realtime(
@@ -270,13 +266,17 @@ class Realtime(
         else:
             # Widget rebuilt after an option change: new size starts from the size it had on
             # screen, so adding or removing blocks keeps the anchor corner in place as well
-            last = LAST_GEOMETRY.get(self.widget_name)
+            last = memory(self.widget_name).geometry
             if last is not None and last[:2] == (self.x(), self.y()) and last[2:] != (width, height):
                 self.move_anchored(last[2], last[3], width, height)
         self.resize(width, height)
 
     def move_anchored(self, old_w: int, old_h: int, width: int, height: int):
-        """Move so the anchor corner stays in place, position saved for next start"""
+        """Move so the anchor corner stays in place, position saved for next start
+
+        Auto resize moves the widget while driving: the file is only written once the car
+        leaves the track (post_update) or the widget stops, never during a lap.
+        """
         x, y = anchored_position(self.x(), self.y(), old_w, old_h, width, height, self.resize_anchor)
         if (x, y) == (self.x(), self.y()):
             return
@@ -284,7 +284,28 @@ class Realtime(
         setting = self.cfg.user.setting[self.widget_name]
         if (setting["position_x"], setting["position_y"]) != (x, y):
             setting["position_x"], setting["position_y"] = x, y
+            self.position_unsaved = True
+
+    def save_position(self):
+        """Write position moved by auto resize to file"""
+        if self.__dict__ and self.position_unsaved:
+            self.position_unsaved = False
             self.cfg.save()
+
+    def post_update(self):
+        self.save_position()
+
+    def stop(self):
+        """Save moved position, hand incidents & event log over to the rebuilt widget"""
+        if self.__dict__:
+            self.save_position()
+            keep_records(self.widget_name, self.recorder, self.event_log)
+        super().stop()
+
+    def menu_actions(self):
+        if not self.export_folder:
+            return ()
+        return (("Open Incident Folder", lambda: open_folder(self.export_folder)),)
 
     def moveEvent(self, event):
         """Remember geometry shown on screen, see resize_anchored"""
@@ -297,7 +318,7 @@ class Realtime(
 
     def remember_geometry(self):
         if self.__dict__ and self.isVisible():  # not previews, not closed widgets
-            LAST_GEOMETRY[self.widget_name] = (self.x(), self.y(), self.width(), self.height())
+            memory(self.widget_name).geometry = (self.x(), self.y(), self.width(), self.height())
 
     def config_style(self, wcfg):
         """Pens, visual effects & caches"""
@@ -419,6 +440,7 @@ class Realtime(
             damage_threshold=damage_threshold,
         )
         self.event_log = EventLog(max(len(self.event_rows), 1), damage_threshold)
+        restore_records(self.widget_name, self.recorder, self.event_log)
         self.export_format = wcfg["incident_export_format"]
         self.browse_seen = IncidentBrowse.requests  # hotkey requests already handled
         self.browse_incident = None  # incident picked with hotkey, shown instead of the last one
@@ -429,8 +451,22 @@ class Realtime(
         self.event_labels = {
             "puncture": self.text["puncture"], "flat": self.text["flat_spot"],
             "detached": self.text["detached"], "damage": self.text["damage"],
-            "impact": self.text["impact"],
+            "impact": self.text["impact"], "yellow": self.text["yellow_flag"], "blue": self.text["blue_flag"],
+            "pit_in": self.text["pit_in"], "pit_out": self.text["pit_out"], "penalty": self.text["penalty"],
+            "track_limits": self.text["track_limits"], "overheat": self.text["overheat"],
+            "oil": self.text["oil"], "water": self.text["water"],
         }
+        # Race events in the event log
+        log = self.show_event_log
+        self.log_flag_events = log and bool(wcfg["show_flag_events"])
+        self.log_pit_events = log and bool(wcfg["show_pit_events"])
+        self.log_penalty_events = log and bool(wcfg["show_penalty_events"])
+        self.log_engine_events = log and bool(wcfg["show_engine_overheat_events"])
+        self.log_race_events = (self.log_flag_events or self.log_pit_events
+                                or self.log_penalty_events or self.log_engine_events)
+        # Frozen incident: replay cursor, previous incident speed drawn behind for comparison
+        self.incident_replay = bool(wcfg["enable_incident_replay"])
+        self.show_previous_incident = bool(wcfg["show_previous_incident_trace"])
 
     def config_modules(self, wcfg):
         """Data modules needed by enabled options, checked about once per second"""
@@ -524,6 +560,9 @@ class Realtime(
         self.stint_pressure = self.stint_pressure_delta = 0.0
         self.stint_has_previous = False
         self.trace_version = 0  # changes when recorder adds a sample, so the trace repaints
+        self.pause_start = None  # recorder clock stopped at (game paused), see recorder_now
+        self.paused_total = 0.0
+        self.position_unsaved = False  # position moved by auto resize, not written to file yet
 
     # Paint
     def paintEvent(self, event):

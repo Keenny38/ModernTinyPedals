@@ -42,7 +42,7 @@ def test_impact_freezes_after_post_trigger_time():
         time += 0.1
         incident = recorder.add(sample(time, 0.0), 0.0)
     assert incident is not None
-    assert incident.reason == "impact"
+    assert incident.reason == "decel"  # speed drop, not reported by game
     assert incident.peak_g > 15  # 40 m/s to 0, measured over the 150 ms window (2 samples here)
     assert incident.samples[-1].time - incident.time == pytest.approx(1.0, abs=0.11)
     assert recorder.last_incident is incident
@@ -174,7 +174,7 @@ def test_incident_logged_and_exported(ui_env, monkeypatch, tmp_path):
     from tinypedal.widget._black_box import reader
 
     saved = []
-    monkeypatch.setattr(reader, "export_incident", lambda incident, folder, export_format="JSON": saved.append(folder))
+    monkeypatch.setattr(reader.EXPORT_QUEUE, "submit", lambda incident, folder, export_format: saved.append(folder))
     widget = new_widget({"show_incident_recorder": True, "show_event_log": True})
     try:
         widget.recorder.post_trigger = 0.0
@@ -1624,13 +1624,13 @@ def test_status_icons_reserve_room_between_axles(ui_env):
 
 def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
     from tinypedal.setting import cfg
-    from tinypedal.widget import black_box
+    from tinypedal.widget._black_box import persist
 
     monkeypatch.setattr(type(cfg), "save", lambda *args, **kwargs: None)
     setting = cfg.user.setting["black_box"]
     setting.update(position_x=100, position_y=500, resize_anchor="Bottom Left")
     small = new_widget({"show_engine_status": False, "show_headlights_indicator": False})
-    black_box.LAST_GEOMETRY["black_box"] = (100, 500, small.width(), small.height())
+    persist.memory("black_box").geometry = (100, 500, small.width(), small.height())
     bottom = 500 + small.height()
     small.deleteLater()
     try:
@@ -1639,5 +1639,5 @@ def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
         assert big.y() + big.height() == bottom and big.x() == 100
         assert (setting["position_x"], setting["position_y"]) == (100, big.y())
     finally:
-        black_box.LAST_GEOMETRY.clear()
+        persist.MEMORY.clear()
         big.deleteLater()

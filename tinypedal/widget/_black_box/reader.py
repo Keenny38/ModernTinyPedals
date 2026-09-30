@@ -38,7 +38,7 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
-from .recorder import IncidentBrowse, Sample, export_incident
+from .recorder import EXPORT_QUEUE, IncidentBrowse, RaceReadings, Sample, index_of, log_race_events
 from .sizing import Presence
 from .state import (
     AIRBORNE_LOAD,
@@ -327,6 +327,8 @@ class DataReader:
             self.update_lap_stats()
         if self.show_recorder:
             self.update_recorder(speed)
+        if self.log_race_events:
+            self.update_race_events(in_pits)
         if self.show_battery_bar and self.use_hybrid:
             self.battery_charge = minfo.hybrid.batteryCharge
             self.battery_state = minfo.hybrid.motorState
@@ -421,10 +423,27 @@ class DataReader:
         ):
             self.impact_visible = False
 
+    def recorder_now(self) -> float:
+        """Recorder clock: monotonic seconds, stopped while the game is paused
+
+        A pause leaves no gap in the recording, and a frozen incident stays on screen
+        as long as the pause lasts.
+        """
+        now = monotonic()
+        paused = bool(api.read.state.paused())
+        if paused and self.pause_start is None:
+            self.pause_start = now
+        elif not paused and self.pause_start is not None:
+            self.paused_total += now - self.pause_start
+            self.pause_start = None
+        return (self.pause_start if self.pause_start is not None else now) - self.paused_total
+
     def update_recorder(self, speed: float):
         """Feed incident recorder, log & save incident once recorded"""
         recorder = self.recorder
-        now = monotonic()
+        now = self.recorder_now()
+        if self.pause_start is not None:  # paused: nothing happens on track
+            return
         warnings = [wheel.warning for wheel in self.wheels]
         slip = "lock" if ("lock" in warnings or "locked" in warnings) else "spin" if "spin" in warnings else ""
         last_time = recorder.samples[-1].time if recorder.samples else None
@@ -445,8 +464,11 @@ class DataReader:
         )
         if recorder.samples and recorder.samples[-1].time != last_time:
             self.trace_version += 1
-        if incident is None:
-            return
+        if incident is not None:
+            self.record_incident(incident)
+
+    def record_incident(self, incident):
+        """Log incident, show it first, save it in the background"""
         direction = f" {incident.direction}" if incident.direction else ""
         self.event_log.add(
             incident.lap, incident.session_time,
@@ -454,14 +476,41 @@ class DataReader:
         )
         self.browse_incident = None  # a new incident is shown first
         if self.export_folder:
-            export_incident(incident, self.export_folder, self.export_format)
+            EXPORT_QUEUE.submit(incident, self.export_folder, self.export_format)
+
+    def update_race_events(self, in_pits):
+        """Event log: flags, pit lane, penalties, track limits, engine overheat"""
+        wcfg = self.wcfg
+        flags = self.log_flag_events
+        penalties = self.log_penalty_events
+        engine = self.log_engine_events
+        if engine:
+            oil = api.read.engine.oil_temperature()
+            water = api.read.engine.water_temperature()
+        else:
+            oil = water = 0.0
+        readings = RaceReadings(
+            yellow=bool(api.read.session.yellow_flag()) if flags else None,
+            blue=bool(api.read.session.blue_flag()) if flags else None,
+            in_pits=bool(in_pits) if self.log_pit_events else None,
+            penalties=api.read.vehicle.number_penalties() if penalties else None,
+            cut_points=api.read.session.cut_points() if penalties else None,
+            limit_points=api.read.session.limits_points() if penalties else 0.0,
+            oil_hot=oil >= wcfg["engine_oil_warning_temperature"] if engine else None,
+            water_hot=water >= wcfg["engine_water_warning_temperature"] if engine else None,
+            oil=oil, water=water,
+        )
+        log_race_events(
+            self.event_log, api.read.lap.number(), api.read.session.elapsed(), readings, self.event_labels,
+            lambda value: f"{self.unit_temp(value):.0f}{self.sign_text}",
+        )
 
     def displayed_incident(self, now: float | None = None):
         """Incident the trace shows frozen: picked with the hotkey, or the last one, for
         incident_display_duration seconds; None while showing the live recording"""
         if self.incident_display_time <= 0 or not self.recorder.incidents:
             return None
-        now = monotonic() if now is None else now
+        now = self.recorder_now() if now is None else now
         if self.browse_incident is not None and now - self.browse_since < self.incident_display_time:
             return self.browse_incident
         last = self.recorder.last_incident
@@ -476,9 +525,10 @@ class DataReader:
         incidents = list(self.recorder.incidents)
         if not incidents:
             return
-        now = monotonic()
+        now = self.recorder_now()
         shown = self.displayed_incident(now)
-        position = incidents.index(shown) if shown in incidents else len(incidents)
+        position = index_of(incidents, shown) if shown is not None else -1
+        position = len(incidents) if position < 0 else position
         self.browse_incident = incidents[position - 1] if position > 0 else incidents[-1]
         self.browse_since = now
         self.last_state = ()  # repaint
@@ -488,7 +538,9 @@ class DataReader:
         lap statistics and stint pressure range start again"""
         elapsed = api.read.session.elapsed()
         if math.isfinite(elapsed) and elapsed < self.last_session_elapsed - 1:
-            self.recorder.reset()
+            incident = self.recorder.reset()  # incident still recording is kept, not lost
+            if incident is not None:
+                self.record_incident(incident)
             self.event_log.reset()
             for stats in self.lap_stats:
                 stats.reset()
@@ -624,6 +676,8 @@ class DataReader:
         if self.smooth_transition and any(
             fade.active(now) for fade in (*self.tyre_fades, *self.brake_fades)
         ):
+            return True
+        if self.incident_replay and self.show_recorder and self.showing_incident():  # replay cursor
             return True
         if self.alert_pulse and any(wheel.warning or wheel.status for wheel in self.wheels):
             return True

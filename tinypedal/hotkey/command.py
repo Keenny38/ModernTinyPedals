@@ -253,6 +253,13 @@ def hotkey_black_box_next_incident():
     request_next_incident()
 
 
+def hotkey_black_box_open_incident_folder():
+    """Command - Black box: open the folder incidents are saved in"""
+    from ..widget._black_box.recorder import open_folder
+
+    open_folder(os.path.join(cfg.path.config, "blackbox"))
+
+
 # Define command list:
 # 0 hotkey name, 1 hotkey function
 COMMANDS_GENERAL = (
@@ -272,6 +279,7 @@ COMMANDS_GENERAL = (
     ("pace_notes_playback", hotkey_pace_notes_playback),
     ("cycle_deltabest_source", hotkey_cycle_deltabest_source),
     ("black_box_next_incident", hotkey_black_box_next_incident),
+    ("black_box_open_incident_folder", hotkey_black_box_open_incident_folder),
     ("restart_application", hotkey_restart_application),
     ("quit_application", hotkey_quit_application),
 )

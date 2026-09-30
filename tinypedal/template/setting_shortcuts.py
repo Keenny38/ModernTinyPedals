@@ -68,6 +68,7 @@ SHORTCUTS_GENERAL = generate_shortcut_setting(
         "pace_notes_playback",
         "cycle_deltabest_source",
         "black_box_next_incident",
+        "black_box_open_incident_folder",
         "restart_application",
         "quit_application",
     ),

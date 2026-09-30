@@ -238,12 +238,20 @@ class Base(QWidget):
         menu.addSeparator()
         menu.addAction(tr("Reload"))
         menu.addAction(tr("Disable"))
+        extra_actions = dict(self.menu_actions())
+        if extra_actions:
+            menu.addSeparator()
+            for name in extra_actions:
+                menu.addAction(tr(name))
 
         selected_action = menu.exec(event.globalPos())
         if not selected_action:
             return
 
         action = untr(selected_action.text())
+        if action in extra_actions:
+            extra_actions[action]()
+            return
         if action == "Center Horizontally":
             area = self.centering_rect()
             self.move((self.screen().geometry().width() - area.width()) // 2 - area.x(), self.y())
@@ -258,6 +266,10 @@ class Base(QWidget):
             reload_widget(self.widget_name)
         elif action == "Disable":
             disable_widget(self.widget_name)
+
+    def menu_actions(self):
+        """Widget specific context menu entries: (name, callback) pairs, shown after the common ones"""
+        return ()
 
     def centering_rect(self) -> QRect:
         """Part of widget centered on screen by Center actions (widget coordinates)

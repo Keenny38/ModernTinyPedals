@@ -21,5 +21,6 @@ Black box widget components
 
 Each module holds one part of the widget as a mixin of the Realtime class:
 reader (telemetry to state), wheels, center, panels (painting), base (shared helpers),
-layout (geometry), recorder (incident recorder & event log), state (per-wheel state).
+layout (geometry), recorder (incident recorder & event log), state (per-wheel state),
+persist (incidents, event log & geometry kept when the widget is rebuilt).
 """

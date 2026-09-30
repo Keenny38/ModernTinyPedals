@@ -352,6 +352,7 @@ TRANSLATION = MappingProxyType({
 
     # Overlay widget context menu
     "Center Horizontally": "Centrer horizontalement",
+    "Open Incident Folder": "Ouvrir le dossier des incidents",
     "Center Vertically": "Centrer verticalement",
     "Disable": "Désactiver",
     # Main menu

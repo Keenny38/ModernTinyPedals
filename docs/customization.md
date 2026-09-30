@@ -1108,6 +1108,9 @@ Cycle deltabest source for displaying in [Deltabest](#deltabest) Widget.
     black_box_next_incident
 Show the next older incident in the Black box incident recorder (back to the newest after the oldest). The trace freezes on it for `incident_display_duration` seconds, its caption tells which one it is (`2/5`).
 
+    black_box_open_incident_folder
+Open the `blackbox` folder of the configuration folder, where the Black box incident recorder saves incidents. Also in the Black box right click menu (`Open Incident Folder`) while incident file export is enabled.
+
     restart_application
 Restart TinyPedal.
 
@@ -5506,7 +5509,13 @@ Show a cone toward the last impact for `damage_panel_impact_cone_duration` secon
 Show remaining body integrity in the middle, or aero integrity if the car reports it, with its source label (defaults `BODY` and `AERO`).
 
     show_incident_recorder, recorder_duration, incident_deceleration_threshold, incident_display_duration
-Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g ↗`, with an arrow toward the impact reported by the game), before going back to live. Steering input is drawn around the middle line (up is right). Use the `black_box_next_incident` hotkey to look at older incidents. The dot at top right counts incidents of the session. A new session clears the live recording.
+Incident recorder: a trace panel shows the last `recorder_duration` seconds (default `15`) of speed (line), throttle & brake (filled areas), ABS & TC activity (ticks on top) and wheel lock & spin (marks at bottom). An incident is detected on an impact reported by the game (contact with a car or a wall, even without much speed loss), on a deceleration above `incident_deceleration_threshold` measured over 150 ms (g, default `4`, `0` disables; a single telemetry step is too noisy, and a prototype already brakes at 3 to 3.5 g), or on new body or suspension damage. The recording continues 2 seconds after the incident, then the trace freezes on it for `incident_display_duration` seconds (default `20`), with the incident moment marked and a caption (`IMPACT L12 6.3g ↗`, with an arrow toward the impact reported by the game), before going back to live. Steering input is drawn around the middle line (up is right). Use the `black_box_next_incident` hotkey to look at older incidents. The dot at top right counts incidents of the session. A new session clears the live recording; an incident still recording its last 2 seconds is kept. The recording stops while the game is paused, so a pause leaves no gap in it. Incidents and event log are kept when the widget is reloaded after an option change.
+
+    enable_incident_replay
+Replay a frozen incident: a cursor sweeps the recording in real time, then starts again, with the time from the incident, speed, throttle, brake and gear under it at the bottom of the trace (`-1.2s 184km/h T0 B87 3`). Enabled by default.
+
+    show_previous_incident_trace
+Draw the speed of the previous incident behind the shown one (dashed and faded), aligned on the incident moment, to compare both. Enabled by default.
 
     damage_event_threshold
 Smallest damage increase (sum of body severity and suspension damage fraction) logged as damage and recorded as an incident. Default is `0.02`, so damage creeping up by tiny steps on kerbs does not fill the event log.
@@ -5515,13 +5524,25 @@ Smallest damage increase (sum of body severity and suspension damage fraction) l
 Color of the steering input line in the incident trace.
 
     enable_incident_file_export, incident_export_format
-Save each incident (times relative to incident, speed in m/s, pedals, steering, gear, ABS, TC, slip, slip ratio and tyre load per wheel) in the `blackbox` folder of the configuration folder, to look at afterwards. `incident_export_format`: `JSON` (default, with incident summary), `CSV` (opens in a spreadsheet or telemetry tool) or `Both`. Enabled by default, only used with the incident recorder.
+Save each incident (written in the background, never slowing the widget; a second incident within the same second gets a numbered name) (times relative to incident, speed in m/s, pedals, steering, gear, ABS, TC, slip, slip ratio and tyre load per wheel) in the `blackbox` folder of the configuration folder, to look at afterwards. `incident_export_format`: `JSON` (default, with incident summary), `CSV` (opens in a spreadsheet or telemetry tool) or `Both`. Enabled by default, only used with the incident recorder.
 
     trace_height_scale, trace_speed_color, trace_background_color, incident_color
 Height of trace panel relative to font line height (default `2.5`), speed line color, panel background, incident mark & critical event color.
 
     show_event_log, number_of_event_log_lines, font_color_event_log
 Event log below the trace: puncture, flat spot, detached wheel, damage and incidents, newest on top, with lap and session time (`L12 04:31 PUNCT FR`). Critical events use `incident_color`. Tyre events need `show_tyre_status`.
+
+    show_flag_events, text_yellow_flag, text_blue_flag
+Log a yellow flag in any sector and a blue flag for you, each once when it comes out. Defaults are `YELLOW` and `BLUE`. Enabled by default.
+
+    show_pit_events, text_pit_in, text_pit_out
+Log pit lane entry and exit. Defaults are `PIT IN` and `PIT OUT`. Enabled by default.
+
+    show_penalty_events, text_penalty, text_track_limits
+Log each new penalty (critical, with the number of penalties) and each new track limits point (`LIMITS 2/4`, points per penalty when the game reports it, LMU only; critical once a penalty is reached). Defaults are `PENALTY` and `LIMITS`. Enabled by default.
+
+    show_engine_overheat_events, text_overheat
+Log oil or water temperature reaching `engine_oil_warning_temperature` or `engine_water_warning_temperature` (critical, `OIL HOT 126°`), once each time it gets hot. Default label is `HOT`. Enabled by default.
 
     text_damage, text_impact
 Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
