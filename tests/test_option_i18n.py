@@ -58,6 +58,29 @@ def test_option_help():
     assert option_help("speedometer", "no_such_option") == ""
     assert "<i>no_such_option</i>" in option_tooltip("speedometer", "no_such_option")
 
+
+def test_option_help_french(french):
+    assert "signe degré" in option_help("brake_temperature", "show_degree_sign")
+    assert "Définit" in option_help("speedometer", "speed_offset_x")
+    assert "<i>show_degree_sign</i>" in option_tooltip("brake_temperature", "show_degree_sign")
+
+
+def test_every_option_help_is_translated():
+    from tinypedal.i18n.options import _help, load_data
+
+    helps, _ = _help()
+    translations = load_data("fr_option_help.json")
+    missing = {text for section in helps.values() for text in section.values()} - set(translations)
+    assert not missing, f"{len(missing)} option help texts without French translation"
+    assert all(value.strip() for value in translations.values())
+
+
+def test_untranslated_help_falls_back_to_english(french, monkeypatch):
+    from tinypedal.i18n import options
+
+    monkeypatch.setattr(options, "_help_translations", lambda code: {})
+    assert "degree sign" in option_help("brake_temperature", "show_degree_sign")
+
 def test_missing_i18n_data_falls_back(monkeypatch, tmp_path):
     from tinypedal.i18n import options
 

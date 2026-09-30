@@ -658,7 +658,7 @@ Enable automatically checking for updates on startup, and display notification m
 
 Click on the notification message will bring up a menu, where user can click `View Updates On GitHub` to open `Latest Releases` page in web browser, or `Dismiss` the message.
 
-Note, this option is checked only once per startup, and notification message will only be displayed if new updates is available. This option only checks for new updates info, it does not provide updates downloading or installing feature.
+Note, this option is checked only once per startup, and notification message will only be displayed if new updates is available. With the Windows installer version, notification menu also offers `Download And Install`, which downloads the new installer, verifies its SHA256 hash and installs it.
 
 User can also manually check for updates any time by accessing `Check for Updates` option from `Help` menu in main window.
 
@@ -732,7 +732,7 @@ Set color theme for main window and dialog. Default theme is `Dark`. This option
 Color theme can be quickly toggled via `UI` button on main window status bar.
 
     language
-Set user interface language: `English` or `Français`. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names in config dialogs are also translated; option descriptions (tooltips) are in English.
+Set user interface language: `English` or `Français`. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names and descriptions (tooltips) in config dialogs are also translated.
 
     show_setup_wizard_at_startup
 Show setup wizard at next startup. The wizard asks for language, game, window & overlay theme, starting preset and widgets. It is shown once on first launch, and can be opened any time from `Help` menu.

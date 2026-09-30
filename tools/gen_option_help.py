@@ -12,6 +12,7 @@ which is matched to setting section name (widget, module, global config).
 from __future__ import annotations
 
 import difflib
+import glob
 import json
 import os
 import re
@@ -132,6 +133,13 @@ def main():
         json.dump({"common": COMMON, "help": data}, file, ensure_ascii=False, indent=4, sort_keys=True)
         file.write("\n")
     print(f"{count} descriptions written to {OUTPUT}")
+    # Translations are keyed by English text: edited descriptions need a new translation
+    texts = {text for options in data.values() for text in options.values()}
+    for translation_file in sorted(glob.glob(os.path.join(os.path.dirname(OUTPUT), "*_option_help.json"))):
+        with open(translation_file, encoding="utf-8") as file:
+            missing = texts - set(json.load(file))
+        if missing:
+            print(f"{len(missing)} descriptions not translated in {translation_file} (shown in English)")
 
 
 if __name__ == "__main__":

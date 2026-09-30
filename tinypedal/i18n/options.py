@@ -20,7 +20,9 @@
 Option labels & help (tooltips) for config dialogs
 
 Labels: generated per language (tools/gen_fr_options.py), English label is formatted from key.
-Help: generated from documentation (tools/gen_option_help.py), English only.
+Help: generated from documentation (tools/gen_option_help.py) in English, translated per language
+    in <code>_option_help.json (English text -> translation). Help edited in documentation shows
+    in English until its translation is updated.
 Both are stored as JSON data files in "data" folder, loaded on first use.
 """
 
@@ -94,7 +96,23 @@ def _help() -> tuple[dict, str]:
 _GENERIC = ("color", "decimal_places", "display_order", "prefix", "text_alignment", "font_name", "font_size", "font_weight")
 
 
+@lru_cache(maxsize=4)
+def _help_translations(code: str) -> dict[str, str]:
+    """Translated option help of language: English text -> translation"""
+    if code in LABEL_LANGUAGES:
+        return load_data(f"{code}_option_help.json")
+    return {}
+
+
 def option_help(section: str, key: str) -> str:
+    """Option description in current language (English if not translated), empty if not documented"""
+    text = option_help_english(section, key)
+    if text:
+        return _help_translations(current_language()).get(text, text)
+    return text
+
+
+def option_help_english(section: str, key: str) -> str:
     """Option description from documentation, empty if not documented"""
     helps, common = _help()
     section_help = helps.get(section, {})
