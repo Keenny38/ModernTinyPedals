@@ -40,7 +40,7 @@ GLOBAL_DEFAULT = {
         "show_option_group_title": True,
         "show_confirmation_for_batch_toggle": True,
         "check_for_updates_on_startup": True,
-        "update_repository": "",
+        "update_repository": "Keenny38/overlays",
         'snap_distance': 10,
         "snap_gap": 0,
         "show_layout_guides": True,

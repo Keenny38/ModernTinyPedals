@@ -30,7 +30,7 @@ import threading
 
 from . import app_signal, version
 from .async_request import get_response, set_header_get
-from .const_app import APP_NAME, REPO_NAME
+from .const_app import APP_NAME, FORK_REPO_NAME
 from .const_common import DATE_NA, VERSION_NA
 from .setting import cfg
 from .version_check import is_new_version, parse_version_string
@@ -48,7 +48,7 @@ def update_repository() -> str:
 
 def release_url() -> str:
     """Get release page url of update repository"""
-    return f"https://github.com/{update_repository() or REPO_NAME}/releases"
+    return f"https://github.com/{update_repository() or FORK_REPO_NAME}/releases"
 
 
 def request_latest_release(repo: str):

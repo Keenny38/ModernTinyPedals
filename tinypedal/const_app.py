@@ -35,7 +35,8 @@ VERSION = version_check.tinypedal()
 
 # App info
 APP_NAME = "TinyPedal"
-REPO_NAME = "TinyPedal/TinyPedal"
+REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
+FORK_REPO_NAME = "Keenny38/overlays"  # this fork (releases, updates)
 COPYRIGHT = "Copyright (C) 2022-2026 TinyPedal developers"
 DESCRIPTION = "Free and Open Source telemetry overlay application for racing simulation."
 LICENSE = "Licensed under the GNU General Public License v3.0 or later."
@@ -44,4 +45,4 @@ LICENSE = "Licensed under the GNU General Public License v3.0 or later."
 URL_WEBSITE = f"https://github.com/{REPO_NAME}"
 URL_USER_GUIDE = f"{URL_WEBSITE}/wiki/User-Guide"
 URL_FAQ = f"{URL_WEBSITE}/wiki/Frequently-Asked-Questions"
-URL_RELEASE = f"{URL_WEBSITE}/releases"
+URL_RELEASE = f"https://github.com/{FORK_REPO_NAME}/releases"
