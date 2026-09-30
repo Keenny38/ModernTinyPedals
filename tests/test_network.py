@@ -113,3 +113,29 @@ def test_set_header_get():
     assert request == (
         b"GET /rest/garage HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\r\n")
 
+
+
+def test_failed_probe_does_not_cancel_others():
+    """A refused probe (instant on Linux) must not stop a probe that may still answer"""
+    import asyncio
+
+    from tinypedal.async_request import cancel_tasks
+
+    async def scenario():
+        async def refused():
+            raise OSError("refused")
+
+        async def slow():
+            await asyncio.sleep(0.05)
+            return "localhost", 0.05
+
+        failed, good = asyncio.create_task(refused()), asyncio.create_task(slow())
+        group, result = [failed, good], []
+        await asyncio.gather(failed, return_exceptions=True)
+        cancel_tasks(failed, group, result)
+        assert not good.cancelled() and result == []
+        await good
+        cancel_tasks(good, group, result)
+        return result
+
+    assert asyncio.run(scenario()) == [("localhost", 0.05)]

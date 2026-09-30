@@ -129,11 +129,24 @@ async def get_response(request: bytes, host: str, port: int, time_out: float, ss
 
 
 async def latency_test(request: bytes, host: str, port: int, time_out: float, ssl: bool = False) -> tuple[str, float]:
-    """Test hostname connection latency, returns hostname, latency (seconds)"""
+    """Test hostname connection latency, returns hostname, latency (seconds)
+
+    Raises OSError if nothing accepts the connection: a refused connection returns at once
+    (on Linux), and must not win the race against hosts that really answer.
+    """
     start = perf_counter()
-    await get_response(request, host, port, time_out, ssl)
-    end = perf_counter()
-    return host, end - start
+    try:
+        _, writer = await wait_for(open_connection(host, port, ssl=ssl), time_out)
+    except asyncio.TimeoutError as error:
+        raise OSError(f"{host}:{port} timed out") from error
+    try:
+        writer.write(request)
+        await writer.drain()
+    finally:
+        writer.close()
+        with suppress(OSError):
+            await writer.wait_closed()
+    return host, perf_counter() - start
 
 
 def cancel_tasks(current_task: asyncio.Task, task_group: list[asyncio.Task], result: list) -> None:
@@ -142,7 +155,11 @@ def cancel_tasks(current_task: asyncio.Task, task_group: list[asyncio.Task], res
     Runs as a done callback, which must never raise: asyncio would only log it and the
     other probes would be left running, so a cancelled or failed probe is skipped here.
     """
-    if not result and not current_task.cancelled() and current_task.exception() is None:
+    if current_task.cancelled() or current_task.exception() is not None:
+        if current_task in task_group:  # failed probe: let the others run
+            task_group.remove(current_task)
+        return
+    if not result:
         result.append(current_task.result())
     if task_group:
         for task in reversed(task_group):
