@@ -1382,6 +1382,7 @@
     "font_offset_vertical": "Décalage vertical du texte",
     "font_scale_battery": "Échelle de police : batterie",
     "font_scale_caption": "Échelle de police : légende",
+    "font_scale_engine": "Échelle : texte moteur",
     "font_scale_gear": "Taille du rapport engagé",
     "font_scale_rpm": "Taille des RPM",
     "font_scale_speed": "Taille de la vitesse",

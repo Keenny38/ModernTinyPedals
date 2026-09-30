@@ -580,6 +580,7 @@ FULL = {
     "display_order_brake_heat": "Ordre : écart avant - arrière des disques",
     "status_icons_side": "Côté des icônes feux / moteur",
     "status_icon_scale": "Échelle : icônes feux / moteur",
+    "font_scale_engine": "Échelle : texte moteur",
     "show_headlights_indicator": "Afficher le voyant des feux",
     "headlights_active_color": "Couleur : feux allumés",
     "show_engine_status": "Afficher l'état moteur (contact, huile / eau)",

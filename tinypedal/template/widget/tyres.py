@@ -473,6 +473,7 @@ WIDGET_TYRES = {
         "show_brake_heat_balance": False,
         "status_icons_side": "Left",
         "status_icon_scale": 1.0,
+        "font_scale_engine": 1.0,
         "show_headlights_indicator": True,
         "headlights_active_color": "#3DC8FF",
         "show_engine_status": True,

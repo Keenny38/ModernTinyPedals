@@ -77,7 +77,15 @@ class StatusPainter:
         if not rects:
             return QRectF()
         left = min(rect.left() for rect in rects)
-        width = max(rect.right() for rect in rects) - left
+        right_edge = max(rect.right() for rect in rects)
+        # Whole side column up to the center column: brake labels sit beyond the disc rect
+        center = self.rect_center
+        if not center.isNull() and center.top() < self.rects_tyre[rear].top():
+            if right:
+                left = min(left, center.right() + self.unit * 0.2)
+            else:
+                right_edge = max(right_edge, center.left() - self.unit * 0.2)
+        width = right_edge - left
         margin = self.unit * 0.25
         top = self.rects_tyre[front].bottom() + margin
         bottom = self.rects_tyre[rear].top() - margin
@@ -96,28 +104,24 @@ class StatusPainter:
         if gap.isNull():
             return
         unit = self.unit
-        size = min(gap.width() * 0.5, unit * 1.2 * max(wcfg["status_icon_scale"], 0.2))
-        row_h = unit * 0.5
+        # Icons side by side (lights left, engine right), engine text rows below
+        count = int(bool(show_lights)) + int(bool(show_engine))
         spacing = unit * 0.3
-        # Heights: lights icon, engine icon + text rows (2 temperatures, or 1 state text)
-        engine_rows = 2 if self.ignition == 2 else 1
-        blocks = []
-        if show_lights:
-            blocks.append(("lights", size))
-        if show_engine:
-            blocks.append(("engine", size + row_h * engine_rows + unit * 0.1))
-        total = sum(height for _, height in blocks) + spacing * (len(blocks) - 1)
+        size = min((gap.width() * 0.9 - spacing * (count - 1)) / count,
+                   unit * 1.2 * max(wcfg["status_icon_scale"], 0.2))
+        row_h = unit * 0.5 * max(wcfg["font_scale_engine"], 0.2)
+        text_h = (row_h * (2 if self.ignition == 2 else 1) + unit * 0.1) if show_engine else 0
+        total = size + text_h
         scale = min(gap.height() / total, 1) if total else 1
+        icon = size * scale
         top = gap.top() + (gap.height() - total * scale) / 2
-        for name, height in blocks:
-            icon = size * scale
-            box = QRectF(gap.center().x() - icon / 2, top, icon, icon)
-            if name == "lights":
-                self.draw_headlights_icon(painter, box)
-            else:
-                self.draw_engine_icon(painter, box, QRectF(gap.left(), box.bottom() + unit * 0.1 * scale,
-                                                           gap.width(), row_h * scale))
-            top += (height + spacing) * scale
+        left = gap.center().x() - (icon * count + spacing * scale * (count - 1)) / 2
+        if show_lights:
+            self.draw_headlights_icon(painter, QRectF(left, top, icon, icon))
+            left += icon + spacing * scale
+        if show_engine:
+            row = QRectF(gap.left(), top + icon + unit * 0.1 * scale, gap.width(), row_h * scale)
+            self.draw_engine_icon(painter, QRectF(left, top, icon, icon), row)
 
     def draw_icon_glow(self, painter: QPainter, box: QRectF, color: str):
         """Soft radial halo behind a lit icon"""
@@ -183,12 +187,13 @@ class StatusPainter:
         if not running:
             painter.setPen(qcolor(color))
             text = self.text["engine_off"] if self.ignition == 0 else self.text["ignition"]
-            self.draw_fit_text(painter, row, text, self.font_label)
+            self.draw_fit_text(painter, row, text, self.grown_font(self.font_label, row))
             return
         for label, value, warning in (
             (self.text["oil"], self.oil_temp, wcfg["engine_oil_warning_temperature"]),
             (self.text["water"], self.water_temp, wcfg["engine_water_warning_temperature"]),
         ):
             painter.setPen(qcolor(wcfg["engine_warning_color"]) if value >= warning else self.pen_text)
-            self.draw_fit_text(painter, row, f"{label} {self.unit_temp(value):.0f}{self.sign_text}", self.font_label)
+            self.draw_fit_text(painter, row, f"{label} {self.unit_temp(value):.0f}{self.sign_text}",
+                               self.grown_font(self.font_label, row))
             row = row.translated(0, row.height())

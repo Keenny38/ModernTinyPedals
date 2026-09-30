@@ -243,7 +243,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_engine_status": (
         "stalling_rpm_threshold", "engine_oil_warning_temperature", "engine_water_warning_temperature",
         "engine_running_color", "engine_warning_color", "engine_off_color", "engine_ignition_color",
-        "text_oil", "text_water", "text_engine_off", "text_ignition",
+        "font_scale_engine", "text_oil", "text_water", "text_engine_off", "text_ignition",
     ),
     "show_tyre_wear_end_stint": ("tyre_wear_forecast_laps",),
     "show_tyre_load": ("tyre_load_display",),
