@@ -863,6 +863,7 @@ Remote control allows other programs (Stream Deck, Companion, SimHub, button box
 
 * `GET http://127.0.0.1:8337/commands` lists available commands.
 * `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-TinyPedal` header (any value).
+* `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). Browser pages from other sites are refused (`Origin` check).
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
 
