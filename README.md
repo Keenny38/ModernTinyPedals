@@ -11,7 +11,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 [Nouveautés](https://github.com/Keenny38/ModernTinyPedals/releases) ·
 [Feuille de route](docs/ROADMAP.md)
 
-![Aperçu](https://user-images.githubusercontent.com/21177177/282278970-b806bf02-a83d-4baa-8b45-0ca10f28f775.png)
+![Aperçu des overlays : relatif, delta, météo, radar, Black box, pédales et carburant](images/readme_preview.png)
 
 ---
 
@@ -144,6 +144,8 @@ Pour prévisualiser les notes en local :
 ```bash
 python tools/gen_release_notes.py v2.51.0
 ```
+
+L'image d'aperçu de ce README est générée à partir des vrais widgets : `python tools/make_readme_preview.py`.
 
 ### Compiler pour Windows
 
