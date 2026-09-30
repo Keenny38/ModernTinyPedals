@@ -63,12 +63,14 @@ class Base(QWidget):
         self.modern_style = style["enable_modern_style"]
         if self.modern_style:
             OverlayStyle.corner_scale = min(max(style["corner_radius_scale"], 0), 0.5)
+            OverlayStyle.depth_effects = bool(style.get("enable_depth_effects", True))
             self.wcfg = StyledConfig(
                 self.wcfg,
                 modern_overrides(self.wcfg, self.cfg.default.setting[widget_name], style),
             )
         else:
             OverlayStyle.corner_scale = 0
+            OverlayStyle.depth_effects = False
 
         # Base setting
         self.setWindowTitle(f"{APP_NAME} - {widget_name.capitalize()}")

@@ -90,6 +90,7 @@ GLOBAL_DEFAULT = {
         "enable_modern_font": True,
         "modern_font_name": "JetBrains Mono",
         "corner_radius_scale": 0.05,
+        "enable_depth_effects": True,
         "minimum_bar_gap": 2,
     },
     "telemetry": {

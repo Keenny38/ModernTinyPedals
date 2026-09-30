@@ -568,6 +568,15 @@ class Realtime(
 
     # Paint
     def paintEvent(self, event):
+        """Draw, without global depth shading (black box draws its own, set by enable_depth_effects)"""
+        depth_effects = OverlayStyle.depth_effects
+        OverlayStyle.depth_effects = False
+        try:
+            self.paint_content()
+        finally:
+            OverlayStyle.depth_effects = depth_effects
+
+    def paint_content(self):
         """Draw"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

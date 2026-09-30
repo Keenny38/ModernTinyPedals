@@ -23,6 +23,8 @@ Each row: name, settings (gear) button and an on/off switch. Search box and All 
 Inactive filter on top, so a widget is found among dozens without scrolling.
 """
 
+import unicodedata
+
 from PySide6.QtCore import Property, QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, Slot
 from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
@@ -136,6 +138,12 @@ class ToggleSwitch(QAbstractButton):
         super().leaveEvent(event)
 
 
+def sort_key(text: str) -> str:
+    """Alphabetical sort key in any language: ignore case & accents (é = e)"""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
 class ModuleList(QWidget):
     """Module & widget list view"""
 
@@ -207,7 +215,7 @@ class ModuleList(QWidget):
 
     def create_list(self):
         """Create module list"""
-        for _name in self.module_control.names:
+        for _name in sorted(self.module_control.names, key=lambda name: sort_key(module_label(name))):
             item = QListWidgetItem()
             item.setText(module_label(_name))
             item.setData(Qt.ItemDataRole.UserRole, _name)
