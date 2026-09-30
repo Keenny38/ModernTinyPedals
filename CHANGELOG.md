@@ -31,6 +31,7 @@ The changelog of the original TinyPedal releases (2.50.0 and older) is in [docs/
 
 ### Changed
 
+- Rewrite the README and generate the changelog on every push ([40b11e7](https://github.com/Keenny38/overlays/commit/40b11e7))
 - Rename the app to Modern Tiny Pedals ([c894892](https://github.com/Keenny38/overlays/commit/c894892))
 - Split remaining roadmap from the audit history ([5c9f37f](https://github.com/Keenny38/overlays/commit/5c9f37f))
 - Declare cryptography in pyproject dependencies ([5038961](https://github.com/Keenny38/overlays/commit/5038961))
