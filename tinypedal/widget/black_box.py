@@ -70,6 +70,11 @@ from ._painter import OverlayStyle
 from ._style import StyledConfig
 
 
+# Last on-screen geometry (x, y, width, height) per widget name: a widget rebuilt after an
+# option change resizes from it, keeping the resize anchor corner in place
+LAST_GEOMETRY: dict[str, tuple[int, int, int, int]] = {}
+
+
 class Realtime(
     DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter, StatusPainter,
     PaintBase, Overlay,
@@ -231,6 +236,7 @@ class Realtime(
             corner_scale=OverlayStyle.corner_scale,
             damage_position=wcfg["damage_panel_position"],
             suspension_scale=min(max(wcfg["suspension_scale"], 0.5), 3) if self.show_suspension else 0,
+            status_height=self.status_height(),
         ))
         self.car_layout = layout
         # Painting code reads geometry as widget attributes (width & height stay QWidget methods)
@@ -260,9 +266,38 @@ class Realtime(
         if (old_w, old_h) == (width, height):
             return
         if self.isVisible():
-            x, y = anchored_position(self.x(), self.y(), old_w, old_h, width, height, self.resize_anchor)
-            self.move(x, y)
+            self.move_anchored(old_w, old_h, width, height)
+        else:
+            # Widget rebuilt after an option change: new size starts from the size it had on
+            # screen, so adding or removing blocks keeps the anchor corner in place as well
+            last = LAST_GEOMETRY.get(self.widget_name)
+            if last is not None and last[:2] == (self.x(), self.y()) and last[2:] != (width, height):
+                self.move_anchored(last[2], last[3], width, height)
         self.resize(width, height)
+
+    def move_anchored(self, old_w: int, old_h: int, width: int, height: int):
+        """Move so the anchor corner stays in place, position saved for next start"""
+        x, y = anchored_position(self.x(), self.y(), old_w, old_h, width, height, self.resize_anchor)
+        if (x, y) == (self.x(), self.y()):
+            return
+        self.move(x, y)
+        setting = self.cfg.user.setting[self.widget_name]
+        if (setting["position_x"], setting["position_y"]) != (x, y):
+            setting["position_x"], setting["position_y"] = x, y
+            self.cfg.save()
+
+    def moveEvent(self, event):
+        """Remember geometry shown on screen, see resize_anchored"""
+        super().moveEvent(event)
+        self.remember_geometry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.remember_geometry()
+
+    def remember_geometry(self):
+        if self.__dict__ and self.isVisible():  # not previews, not closed widgets
+            LAST_GEOMETRY[self.widget_name] = (self.x(), self.y(), self.width(), self.height())
 
     def config_style(self, wcfg):
         """Pens, visual effects & caches"""

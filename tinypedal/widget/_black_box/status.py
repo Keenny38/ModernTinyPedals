@@ -89,12 +89,29 @@ class StatusPainter:
         margin = self.unit * 0.25
         top = self.rects_tyre[front].bottom() + margin
         bottom = self.rects_tyre[rear].top() - margin
-        if bottom - top < self.unit * 1.2:
+        if bottom - top < self.unit * 0.5:
             return QRectF()
         return QRectF(left, top, width, bottom - top)
 
+    def status_height(self) -> float:
+        """Height the icons & engine text need between front and rear wheels (0 if hidden)
+
+        Layout makes the gap between axles at least this tall (plus margins), so icons
+        never vanish, and the widget grows or shrinks when they are toggled or rescaled.
+        """
+        wcfg = self.wcfg
+        show_lights = wcfg["show_headlights_indicator"]
+        show_engine = wcfg["show_engine_status"]
+        if not (show_lights or show_engine):
+            return 0.0
+        unit = self.unit
+        height = unit * 1.2 * max(wcfg["status_icon_scale"], 0.2)
+        if show_engine:
+            height += unit * 0.5 * max(wcfg["font_scale_engine"], 0.2) * 2 + unit * 0.1
+        return height + unit * 0.5  # margins above & below
+
     def draw_status_icons(self, painter: QPainter):
-        """Both icons stacked in one side gap: headlights on top, engine below"""
+        """Icons side by side in one side gap: headlights, then engine with its text below"""
         wcfg = self.wcfg
         show_lights = wcfg["show_headlights_indicator"]
         show_engine = wcfg["show_engine_status"]
@@ -106,11 +123,12 @@ class StatusPainter:
         unit = self.unit
         # Icons side by side (lights left, engine right), engine text rows below
         count = int(bool(show_lights)) + int(bool(show_engine))
-        spacing = unit * 0.3
-        size = min((gap.width() * 0.9 - spacing * (count - 1)) / count,
+        size = min(gap.width() * 0.9 / (count * 1.7 - 0.7),
                    unit * 1.2 * max(wcfg["status_icon_scale"], 0.2))
+        spacing = size * 0.7  # clear room between icons, in proportion to their size
         row_h = unit * 0.5 * max(wcfg["font_scale_engine"], 0.2)
-        text_h = (row_h * (2 if self.ignition == 2 else 1) + unit * 0.1) if show_engine else 0
+        # Always room for 2 rows (temperatures): icons stay put when engine starts or stops
+        text_h = (row_h * 2 + unit * 0.1) if show_engine else 0
         total = size + text_h
         scale = min(gap.height() / total, 1) if total else 1
         icon = size * scale
@@ -120,7 +138,10 @@ class StatusPainter:
             self.draw_headlights_icon(painter, QRectF(left, top, icon, icon))
             left += icon + spacing * scale
         if show_engine:
-            row = QRectF(gap.left(), top + icon + unit * 0.1 * scale, gap.width(), row_h * scale)
+            # Text centered under the engine icon, as wide as the gap allows on both sides
+            middle = left + icon / 2
+            half = min(middle - gap.left(), gap.right() - middle)
+            row = QRectF(middle - half, top + icon + unit * 0.1 * scale, half * 2, row_h * scale)
             self.draw_engine_icon(painter, QRectF(left, top, icon, icon), row)
 
     def draw_icon_glow(self, painter: QPainter, box: QRectF, color: str):

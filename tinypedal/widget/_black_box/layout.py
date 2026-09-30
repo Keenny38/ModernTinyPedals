@@ -64,6 +64,7 @@ class LayoutInput:
     corner_scale: float = 0.0  # background corner radius, relative to shorter side
     damage_position: str = "Bottom Right"  # corner of damage panel, outside main area
     suspension_scale: float = 0.0  # width of suspension (coilover) beside brake bar, 0 if hidden
+    status_height: float = 0.0  # room for headlights & engine icons between axles, 0 if hidden
 
 
 @dataclass
@@ -150,7 +151,7 @@ def build_layout(spec: LayoutInput) -> Layout:
     top_y = led_y + (led_h + gap if led_h else 0)
     rect_leds = QRectF(content_x + round(unit * 0.3), led_y + round(gap * 0.6), content_w - round(unit * 0.6), led_h)
 
-    axle_gap = round(unit * 0.9) + pad_y * 2
+    axle_gap = max(round(unit * 0.9) + pad_y * 2, math.ceil(spec.status_height))
     if center_between_tyres:  # taller if center column needs more room
         axle_gap += max(round(spec.center_height - (pad_y * 2 + tyre_h * 2 + axle_gap)), 0)
     body_h = pad_y + tyre_h * 2 + axle_gap + pad_y

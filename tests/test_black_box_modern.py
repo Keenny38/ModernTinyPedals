@@ -1606,3 +1606,38 @@ def test_pedal_source(ui_env, monkeypatch, source, expected):
         widget.grab()
     finally:
         widget.deleteLater()
+
+
+def test_status_icons_reserve_room_between_axles(ui_env):
+    hidden = new_widget({"show_headlights_indicator": False, "show_engine_status": False, "font_scale_engine": 1.0})
+    shown = new_widget({"show_headlights_indicator": True, "show_engine_status": True, "font_scale_engine": 3.0,
+                         "status_icon_scale": 4.0})
+    try:
+        assert shown.status_height() > hidden.status_height() == 0
+        room = shown.rects_tyre[2].top() - shown.rects_tyre[0].bottom()
+        assert room >= shown.status_height() - 1
+        assert shown.height() > hidden.height()
+    finally:
+        hidden.deleteLater()
+        shown.deleteLater()
+
+
+def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
+    from tinypedal.setting import cfg
+    from tinypedal.widget import black_box
+
+    monkeypatch.setattr(type(cfg), "save", lambda *args, **kwargs: None)
+    setting = cfg.user.setting["black_box"]
+    setting.update(position_x=100, position_y=500, resize_anchor="Bottom Left")
+    small = new_widget({"show_engine_status": False, "show_headlights_indicator": False})
+    black_box.LAST_GEOMETRY["black_box"] = (100, 500, small.width(), small.height())
+    bottom = 500 + small.height()
+    small.deleteLater()
+    try:
+        big = new_widget({"show_engine_status": True, "font_scale_engine": 3.0, "status_icon_scale": 4.0})
+        assert big.height() > small.height()
+        assert big.y() + big.height() == bottom and big.x() == 100
+        assert (setting["position_x"], setting["position_y"]) == (100, big.y())
+    finally:
+        black_box.LAST_GEOMETRY.clear()
+        big.deleteLater()
