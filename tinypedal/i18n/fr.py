@@ -476,4 +476,11 @@ TRANSLATION = MappingProxyType({
     "Play": "Lecture",
     "Export MoTeC...": "Exporter MoTeC...",
     "Export reference lap to MoTeC i2 log file (.ld)": "Exporter le tour de référence en fichier MoTeC i2 (.ld)",
+    "Layout Editor": "Éditeur de disposition",
+    "Load Screenshot...": "Charger une capture...",
+    "Capture Screen": "Capturer l'écran",
+    "Snap": "Magnétisme",
+    "Drag widgets to move, arrow keys to nudge (Shift: 10 px), hold Alt to move without snapping.": "Glissez les widgets pour les déplacer, flèches pour ajuster (Maj : 10 px), Alt pour déplacer sans magnétisme.",
+    "No widget enabled.": "Aucun widget activé.",
+    "Unable to load image.": "Impossible de charger l'image.",
 })

@@ -170,4 +170,6 @@ MESSAGE_RULES = (
     (r"Select (.+?) API to record or replay telemetry\.", r"Sélectionnez l'API \1 pour enregistrer ou rejouer la télémétrie."),
     (r"Unable to export lap: (.+)", r"Impossible d'exporter le tour : \1"),
     (r"Exported: (.+)", r"Exporté : \1"),
+    (r"^(\d+) widgets moved$", r"\1 widget(s) déplacé(s)"),
+    (r"^(\d+) widgets$", r"\1 widget(s)"),
 )

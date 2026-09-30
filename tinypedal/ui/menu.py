@@ -45,6 +45,7 @@ from .driver_stats_viewer import DriverStatsViewer
 from .fuel_calculator import FuelCalculator
 from .heatmap_editor import HeatmapEditor
 from .lap_viewer import LapViewer
+from .layout_editor import LayoutEditor
 from .log_info import LogInfo
 from .option_finder import OptionFinder
 from .perf_view import PerformanceView
@@ -681,6 +682,9 @@ class ToolsMenu(QMenu):
         editor_tracknotes = self.addAction(tr("Track Notes Editor"))
         editor_tracknotes.triggered.connect(self.open_editor_tracknotes)
 
+        editor_layout = self.addAction(tr("Layout Editor"))
+        editor_layout.triggered.connect(self.open_editor_layout)
+
         editor_theme = self.addAction(tr("Overlay Theme Editor"))
         editor_theme.triggered.connect(self.open_editor_theme)
 
@@ -763,6 +767,11 @@ class ToolsMenu(QMenu):
     def open_preset_compare(self):
         """Compare presets"""
         _dialog = PresetCompare(self._parent)
+        _dialog.show()
+
+    def open_editor_layout(self):
+        """Layout editor"""
+        _dialog = LayoutEditor(self._parent)
         _dialog.show()
 
     def open_editor_theme(self):

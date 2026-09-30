@@ -1669,6 +1669,14 @@ Click `Open Replay...` to load a recording: TinyPedal reads from it instead of t
 [**`Back to Top`**](#)
 
 
+## Layout editor
+**Layout editor places and aligns overlay widgets on a game screenshot, which can be accessed from `Tools` menu in main window.**
+
+Enabled widgets are shown as boxes over the whole desktop. `Load Screenshot...` uses a game screenshot as background, `Capture Screen` grabs primary screen. Drag a box to move it: edges and centers snap to other widgets, screen edges and screen center (turn off with `Snap`, or hold `Alt`). Arrow keys nudge selected widget by 1 pixel (`Shift`: 10 pixels). `Apply` moves widgets and saves positions to preset, `Reset` reloads current positions.
+
+[**`Back to Top`**](#)
+
+
 ## Overlay theme editor
 **Overlay theme editor creates custom overlay color themes, which can be accessed from `Tools` menu in main window.**
 
