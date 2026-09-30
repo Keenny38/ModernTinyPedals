@@ -42,6 +42,7 @@ from pyLMUSharedMemory.lmu_mmap import (
     MMapControl,
 )
 
+from ..replay import ReplayMMap, ReplayPlayer
 from ..thread_guard import run_supervised
 
 logger = logging.getLogger(__name__)
@@ -427,10 +428,12 @@ class LMUInfo:
         "_state_override",
         "_active_state",
         "_shmm",
+        "_live_shmm",
     )
 
     def __init__(self) -> None:
         self._sync = SyncData()
+        self._live_shmm = self._sync.dataset.shmm
         self._access_mode = 0
         self._state_override = False
         self._active_state = False
@@ -456,6 +459,20 @@ class LMUInfo:
             mode: 0 = copy access, 1 = direct access
         """
         self._access_mode = mode
+
+    def setReplay(self, player: ReplayPlayer | None = None) -> None:
+        """Read frames from replay player, or live shared memory if None. Call before start()"""
+        if player is None:
+            shmm: Any = self._live_shmm
+        else:
+            shmm = ReplayMMap(lmu_data.LMUObjectOut, player)
+        self._sync.dataset.shmm = shmm
+        self._shmm = shmm
+
+    @property
+    def rawData(self) -> Any:
+        """Raw shared memory structure"""
+        return self._shmm.data
 
     def setStateOverride(self, state: bool = False) -> None:
         """Enable state override"""

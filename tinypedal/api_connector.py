@@ -22,7 +22,7 @@ API connector
 
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import ClassVar
+from typing import Any, ClassVar
 
 # Import APIs
 from .adapter import (
@@ -36,6 +36,7 @@ from .adapter import (
     rf2_restapi,
 )
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
+from .replay import replay
 from .validator import bytes_to_str
 
 
@@ -62,6 +63,10 @@ class Connector(ABC):
     def setup(self, config: dict):
         """Setup API parameters"""
 
+    def raw_data(self) -> Any:
+        """Raw shared memory structure for replay recording, None if unsupported"""
+        return None
+
     def close(self):
         """Dereference all instances"""
         for var in self.__slots__:
@@ -74,6 +79,7 @@ class SimLMU(Connector):
     __slots__ = (
         # Primary API
         "_shmmapi",
+        "_replaying",
         # Secondary API
         "_restapi",
         "_restapi_dataset",
@@ -83,16 +89,26 @@ class SimLMU(Connector):
 
     def __init__(self):
         self._shmmapi = lmu_connector.LMUInfo()
+        self._replaying = False
         self._restapi_dataset = lmu_restapi.RestAPIData()
         self._restapi = restapi_connector.RestAPIConnector(lmu_restapi.lmu_restapi_tasks(), self._restapi_dataset)
 
     def start(self):
+        self._replaying = replay.active
+        self._shmmapi.setReplay(replay.player)  # recorded frames instead of game shared memory
         self._shmmapi.start()  # 1 load first
-        self._restapi.start()  # 2
+        if not self._replaying:
+            self._restapi.start()  # 2
 
     def stop(self):
-        self._restapi.stop()  # 1 unload first
+        if not self._replaying:
+            self._restapi.stop()  # 1 unload first
         self._shmmapi.stop()  # 2
+
+    def raw_data(self) -> Any:
+        if self._replaying or self._shmmapi.isPaused:
+            return None
+        return self._shmmapi.rawData
 
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi

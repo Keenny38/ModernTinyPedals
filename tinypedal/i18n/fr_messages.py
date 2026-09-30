@@ -165,4 +165,7 @@ MESSAGE_RULES = (
     (r"Changes to locked preset will not be saved\.", "Les modifications d'un preset verrouillé ne sont pas enregistrées."),
     (r"Changes are not saved\.", "Les modifications ne sont pas enregistrées."),
     (r"This cannot be undone!", "Cette action est irréversible !"),
+    (r"(\d+) frames: (.+)", r"\1 images : \2"),
+    (r"Unable to open replay file: (.+)", r"Impossible d'ouvrir le fichier de rejeu : \1"),
+    (r"Select (.+?) API to record or replay telemetry\.", r"Sélectionnez l'API \1 pour enregistrer ou rejouer la télémétrie."),
 )

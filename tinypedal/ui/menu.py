@@ -50,6 +50,7 @@ from .option_finder import OptionFinder
 from .perf_view import PerformanceView
 from .plugin_manager import PluginManager
 from .preset_compare import PresetCompare
+from .replay_view import ReplayView
 from .setup_wizard import SetupWizard
 from .theme_editor import ThemeEditor
 from .track_info_editor import TrackInfoEditor
@@ -654,6 +655,9 @@ class ToolsMenu(QMenu):
 
         utility_lapviewer = self.addAction(tr("Lap Telemetry Viewer"))
         utility_lapviewer.triggered.connect(self.open_utility_lapviewer)
+
+        utility_replay = self.addAction(tr("Telemetry Replay"))
+        utility_replay.triggered.connect(self.open_utility_replay)
         self.addSeparator()
 
         editor_heatmap = self.addAction(tr("Heatmap Editor"))
@@ -685,6 +689,11 @@ class ToolsMenu(QMenu):
 
         utility_plugins = self.addAction(tr("Plugin Manager"))
         utility_plugins.triggered.connect(self.open_plugin_manager)
+
+    def open_utility_replay(self):
+        """Telemetry replay"""
+        _dialog = ReplayView(self._parent)
+        _dialog.show()
 
     def open_utility_fuelcalc(self):
         """Fuel calculator"""

@@ -195,7 +195,7 @@ class StatusPainter:
         color = self.engine_color()
         running = self.ignition == 2
         painter.save()
-        if self.engine_hot() and running or self.ignition == 1:
+        if (self.engine_hot() and running) or self.ignition == 1:
             self.draw_icon_glow(painter, box, color)
         stroke = max(box.width() * 0.08, 1.2)
         painter.setPen(QPen(qcolor(color), stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,

@@ -1657,6 +1657,16 @@ Select track, reference lap and compared lap. Charts show time delta, speed, thr
 [**`Back to Top`**](#)
 
 
+## Telemetry replay
+**Telemetry replay records Le Mans Ultimate shared memory while driving, and plays it back through every widget and module without the game, which can be accessed from `Tools` menu in main window.**
+
+Requires `Le Mans Ultimate` API. Click `Start Recording` while in game, and `Stop Recording` when done. Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute).
+
+Click `Open Replay...` to load a recording: TinyPedal reads from it instead of the game until `Back to Game` is clicked. Replay can be paused, sped up or slowed down, looped, and moved with the position slider. REST API data (tyre setup, virtual energy details) is not recorded.
+
+[**`Back to Top`**](#)
+
+
 ## Overlay theme editor
 **Overlay theme editor creates custom overlay color themes, which can be accessed from `Tools` menu in main window.**
 

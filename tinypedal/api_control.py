@@ -23,7 +23,7 @@ API control
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import api_connector, realtime_state
 from .const_api import API_MAP_ALIAS
@@ -152,6 +152,12 @@ class APIControl:
         if self._api is None:
             raise RuntimeError("API not connected, call connect() first")
         return self._api
+
+    def raw_data(self) -> Any:
+        """Raw shared memory of connected API for replay recording, None if unavailable"""
+        if self._api is None:
+            return None
+        return self._api.raw_data()
 
     @property
     def available(self):
