@@ -797,6 +797,9 @@ Set modern font name. Default is `JetBrains Mono`, which is bundled with Modern 
     corner_radius_scale
 Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
 
+    enable_depth_effects
+Apply black box visual style to all widgets: lighter top, darker bottom and thin highlight edge on panels and bars, so they read as slightly raised. Elements smaller than 6 pixels stay flat. Default is enabled.
+
     minimum_bar_gap
 Set minimum gap between bars in pixels, only applies to widget `bar_gap` option that uses default value. Default is `2`.
 

@@ -46,6 +46,14 @@ class OverlayStyle:
 
     # Corner radius scale, relative to the shorter side of rect (0 = square corner)
     corner_scale = 0.0
+    # Black box look: lighter top & thin highlight edge, panels read as slightly raised
+    depth_effects = False
+
+
+_DEPTH_TOP = QColor(255, 255, 255, 22)
+_DEPTH_BOTTOM = QColor(0, 0, 0, 30)
+_DEPTH_EDGE = QColor(255, 255, 255, 28)
+_DEPTH_MIN_SIZE = 6  # smaller elements (marks, thin lines) stay flat
 
 
 @lru_cache(maxsize=1024)
@@ -57,17 +65,39 @@ def _rounded_path(x: float, y: float, width: float, height: float, radius: float
 
 
 def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
-    """Fill rect, with rounded corner if enabled in overlay style"""
+    """Fill rect, with rounded corner & depth shading if enabled in overlay style"""
     radius = min(rect.width(), rect.height()) * OverlayStyle.corner_scale
+    depth = OverlayStyle.depth_effects and min(rect.width(), rect.height()) >= _DEPTH_MIN_SIZE
     if radius < 1:
         painter.fillRect(rect, color)
+        if depth:
+            _fill_depth(painter, QRectF(rect), None)
         return
     rect = QRectF(rect)
     path = _rounded_path(rect.x(), rect.y(), rect.width(), rect.height(), radius)
     antialiased = painter.testRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.fillPath(path, QColor(color))
+    if depth:
+        _fill_depth(painter, rect, path)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, antialiased)
+
+
+def _fill_depth(painter: QPainter, rect: QRectF, path: QPainterPath | None) -> None:
+    """Black box depth shading over a filled rect: lighter top, darker bottom, thin top edge"""
+    shade = QLinearGradient(0, rect.top(), 0, rect.bottom())
+    shade.setColorAt(0.0, _DEPTH_TOP)
+    shade.setColorAt(1.0, _DEPTH_BOTTOM)
+    edge = QRectF(rect.left(), rect.top(), rect.width(), max(rect.height() * 0.05, 1))
+    if path is None:
+        painter.fillRect(rect, QBrush(shade))
+        painter.fillRect(edge, _DEPTH_EDGE)
+        return
+    painter.fillPath(path, QBrush(shade))
+    painter.save()
+    painter.setClipPath(path)
+    painter.fillRect(edge, _DEPTH_EDGE)
+    painter.restore()
 
 
 # A chip is a small pill-shaped element (LED, indicator badge, gauge bar). It rounds far more
