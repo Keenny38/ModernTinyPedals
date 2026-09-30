@@ -474,4 +474,6 @@ TRANSLATION = MappingProxyType({
     "Start Recording": "Démarrer l'enregistrement",
     "Not replaying, reading from game.": "Pas de rejeu, lecture depuis le jeu.",
     "Play": "Lecture",
+    "Export MoTeC...": "Exporter MoTeC...",
+    "Export reference lap to MoTeC i2 log file (.ld)": "Exporter le tour de référence en fichier MoTeC i2 (.ld)",
 })

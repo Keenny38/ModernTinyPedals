@@ -23,12 +23,14 @@ Lap telemetry viewer: compare two recorded laps along distance
 from __future__ import annotations
 
 import logging
+import os
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -38,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from ..i18n import tr, trm
 from ..setting import cfg
+from ..userfile.motec_ld import export_lap
 from ..userfile.telemetry_lap import LapData, compute_delta, interpolate, list_laps, list_tracks, load_lap
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 
@@ -282,11 +285,15 @@ class LapViewer(BaseDialog):
         layout_select.addWidget(self.label_b, 2, 2)
         layout_select.setColumnStretch(1, 1)
 
+        button_export = CompactButton(tr("Export MoTeC..."))
+        button_export.setToolTip(tr("Export reference lap to MoTeC i2 log file (.ld)"))
+        button_export.clicked.connect(self.export_motec)
         button_close = CompactButton(tr("Close"))
         button_close.clicked.connect(self.close)
         layout_button = QHBoxLayout()
         layout_button.addWidget(QLabel(tr("Mouse wheel: zoom, double-click: reset.")))
         layout_button.addStretch(1)
+        layout_button.addWidget(button_export)
         layout_button.addWidget(button_close)
 
         layout_main = QVBoxLayout()
@@ -349,6 +356,25 @@ class LapViewer(BaseDialog):
         self.label_a.setText(self.lap_info(lap_a))
         self.label_b.setText(self.lap_info(lap_b))
         self.plot.set_laps(lap_a, lap_b)
+
+    def export_motec(self):
+        """Export reference lap to MoTeC .ld file"""
+        path = self.combo_a.currentData() or ""
+        lap = self.read_lap(path)
+        if lap is None:
+            return
+        default = os.path.splitext(path)[0] + ".ld"
+        filename, _ = QFileDialog.getSaveFileName(self, tr("Export MoTeC..."), default, "MoTeC i2 (*.ld)")
+        if not filename:
+            return
+        track = self.combo_track.currentText().split(" - ")[0]
+        try:
+            export_lap(lap, filename, venue=track, timestamp=os.path.getmtime(path))
+        except (OSError, ValueError) as error:
+            logger.error("LAP VIEWER: unable to export %s: %s", filename, error)
+            self.label_cursor.setText(trm(f"Unable to export lap: {error}"))
+            return
+        self.label_cursor.setText(trm(f"Exported: {os.path.basename(filename)}"))
 
     @staticmethod
     def lap_info(lap: LapData | None) -> str:

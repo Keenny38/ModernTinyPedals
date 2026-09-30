@@ -1654,6 +1654,8 @@ Note, all setting and data are saved per file as [Tyre strategy](#tyre-strategy)
 
 Select track, reference lap and compared lap. Charts show time delta, speed, throttle, brake, gear and steering along lap distance. Move mouse over charts to read values at a given distance, use mouse wheel to zoom, and double-click to reset zoom.
 
+`Export MoTeC...` saves reference lap as MoTeC i2 log file (`.ld`), resampled at recording rate, with speed, pedals (in percent), steering, gear, RPM, fuel, tyre temperatures & pressures and position channels.
+
 [**`Back to Top`**](#)
 
 
