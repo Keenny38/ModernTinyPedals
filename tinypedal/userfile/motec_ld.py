@@ -29,6 +29,7 @@ from __future__ import annotations
 import struct
 import time
 from array import array
+from itertools import pairwise
 from typing import NamedTuple
 
 from .telemetry_lap import LapData, interpolate
@@ -159,7 +160,7 @@ def read_ld(filename: str) -> tuple[LdInfo, list[Channel]]:
 
 def sample_rate(times: list[float]) -> int:
     """Median sample rate (Hz) of recorded samples"""
-    steps = sorted(b - a for a, b in zip(times, times[1:]) if b > a)
+    steps = sorted(b - a for a, b in pairwise(times) if b > a)
     if not steps:
         return 1
     return min(max(round(1 / steps[len(steps) // 2]), 1), 1000)
