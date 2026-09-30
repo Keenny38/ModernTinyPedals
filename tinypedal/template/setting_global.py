@@ -80,6 +80,7 @@ GLOBAL_DEFAULT = {
     "web_dashboard": {
         "enable_web_dashboard": False,
         "enable_lan_access": False,
+        "enable_https": False,
         "web_dashboard_port": 8338,
         "access_code": "",
     },

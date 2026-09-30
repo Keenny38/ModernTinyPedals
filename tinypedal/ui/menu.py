@@ -36,6 +36,7 @@ from ..module_control import mctrl
 from ..overlay_control import octrl
 from ..setting import cfg
 from ..update import update_checker
+from ..userfile.tls_cert import fingerprint as certificate_fingerprint
 from ..web_dashboard import webdashboard
 from .about import About
 from .brake_editor import BrakeEditor
@@ -460,10 +461,17 @@ class ConfigMenu(QMenu):
         message.setWindowTitle(tr("Web Dashboard"))
         message.setTextFormat(Qt.TextFormat.RichText)
         message.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        message.setText(trm(
+        text = trm(
             f"Open one of these addresses in a browser:<br><br>{links}<br><br>"
             f"Access code: <b>{webdashboard.access_code()}</b>"
-        ))
+        )
+        fingerprint = certificate_fingerprint(cfg.path.config) if webdashboard.use_https() else ""
+        if fingerprint:
+            text += "<br><br>" + trm(
+                "The browser warns once about this self-signed certificate. "
+                f"Accept it only if its SHA-256 fingerprint is:<br><code>{fingerprint}</code>"
+            )
+        message.setText(text)
         message.exec()
 
     def open_config_overlay_style(self):

@@ -958,6 +958,7 @@
     "enable_heatmap_auto_matching": "Activer palette thermique automatique",
     "enable_high_dpi_scaling": "Mise à l'échelle haute résolution",
     "enable_horizontal_style": "Activer style horizontal",
+    "enable_https": "Chiffrer en HTTPS",
     "enable_incident_file_export": "Activer l'export des incidents en fichier",
     "enable_incident_replay": "Activer le rejeu de l'incident",
     "enable_lan_access": "Accès depuis le réseau local",

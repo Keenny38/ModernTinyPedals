@@ -887,6 +887,9 @@ Enable web dashboard server.
     enable_lan_access
 Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow TinyPedal the first time.
 
+    enable_https
+Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: `Web Dashboard Address...` shows its SHA-256 fingerprint to check before accepting it. Disabled by default.
+
     web_dashboard_port
 Set server port. Default is `8338`.
 

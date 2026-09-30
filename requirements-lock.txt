@@ -1,7 +1,10 @@
 # Tested versions (runtime), use for reproducible builds:
 #   pip install -r requirements-lock.txt
 # requirements.txt keeps compatible ranges.
+cffi==2.1.1
+cryptography==50.0.2
 psutil==7.2.2
+pycparser==3.0
 PySide6==6.11.2
 PySide6_Addons==6.11.2
 PySide6_Essentials==6.11.2

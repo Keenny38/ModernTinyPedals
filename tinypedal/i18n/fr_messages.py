@@ -173,4 +173,7 @@ MESSAGE_RULES = (
     (r"^(\d+) widgets moved$", r"\1 widget(s) déplacé(s)"),
     (r"^(\d+) widgets$", r"\1 widget(s)"),
     (r"Unable to download update: (.+)", r"Impossible de télécharger la mise à jour : \1"),
+    (r"The browser warns once about this self-signed certificate\. Accept it only if its SHA-256 fingerprint is:(.*)",
+     r"Le navigateur avertit une fois pour ce certificat auto-signé. Acceptez-le seulement si son empreinte SHA-256 est :\1"),
+    (r"Web dashboard: unable to set up HTTPS \((.+)\)\.", r"Tableau de bord web : impossible de configurer HTTPS (\1)."),
 )

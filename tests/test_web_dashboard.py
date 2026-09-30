@@ -1,7 +1,9 @@
 """Web dashboard tests (localhost only)"""
 
+import http.client
 import http.cookiejar
 import json
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -10,6 +12,7 @@ import urllib.request
 import pytest
 
 from tinypedal.setting import cfg
+from tinypedal.userfile import tls_cert
 from tinypedal.web_dashboard import (
     FAILURE_WINDOW_SECONDS,
     MAX_SESSIONS,
@@ -147,3 +150,66 @@ def test_localhost_only_by_default(ui_env):
     assert WebDashboard.host() == "127.0.0.1"
     cfg.user.config["web_dashboard"]["enable_lan_access"] = True
     assert WebDashboard.host() == "0.0.0.0"
+
+
+# --- HTTPS (self-signed certificate)
+
+@pytest.fixture
+def https_dashboard(ui_env):
+    config = cfg.user.config["web_dashboard"]
+    config.update(enable_web_dashboard=True, web_dashboard_port=PORT, access_code="TESTCODE", enable_https=True)
+    server = WebDashboard()
+    server.enable()
+    yield server
+    server.disable()
+    DashboardHandler.secure = False
+
+
+def https_client() -> http.client.HTTPSConnection:
+    context = ssl.create_default_context(cafile=tls_cert.cert_paths(cfg.path.config)[0])
+    return http.client.HTTPSConnection("127.0.0.1", PORT, context=context, timeout=5)
+
+
+def test_https_serves_with_trusted_certificate(https_dashboard):
+    assert https_dashboard.urls()[0].startswith("https://127.0.0.1")
+    client = https_client()  # verifies certificate & 127.0.0.1 address against it
+    client.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+    response = client.getresponse()
+    assert response.status == 200
+    assert "active" in json.loads(response.read())
+    client.request("GET", "/?code=TESTCODE")
+    response = client.getresponse()
+    response.read()
+    assert "Secure" in response.headers["Set-Cookie"]
+    client.close()
+
+
+def test_https_rejects_plain_http(https_dashboard):
+    with pytest.raises((urllib.error.URLError, http.client.HTTPException, ConnectionError, OSError)):
+        get("/api/telemetry", {"X-Access-Code": "TESTCODE"})
+
+
+def test_certificate_reused_and_renewed_for_new_address(tmp_path):
+    folder = str(tmp_path)
+    tls_cert.server_context(folder, [])
+    first = tls_cert.fingerprint(folder)
+    assert len(first.split(":")) == 32
+    tls_cert.server_context(folder, [])
+    assert tls_cert.fingerprint(folder) == first  # reused, browser keeps trusting it
+    tls_cert.server_context(folder, ["192.168.1.50"])
+    assert tls_cert.fingerprint(folder) != first  # new LAN address not covered
+    assert tls_cert.covers(tls_cert.cert_paths(folder)[0], ["127.0.0.1", "192.168.1.50"])
+
+
+def test_https_error_reported_when_certificate_fails(ui_env, monkeypatch):
+    from tinypedal import web_dashboard
+
+    def broken(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(web_dashboard, "server_context", broken)
+    cfg.user.config["web_dashboard"].update(enable_web_dashboard=True, web_dashboard_port=PORT, enable_https=True)
+    server = WebDashboard()
+    server.enable()
+    assert not server.running
+    DashboardHandler.secure = False

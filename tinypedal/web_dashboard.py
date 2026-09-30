@@ -27,7 +27,8 @@ Web dashboard: show live telemetry on phone or tablet (browser), disabled by def
 Listens on 127.0.0.1 only, unless LAN access is enabled. Access code is always required,
 and repeated wrong codes from same address are blocked for a while.
 Access code is exchanged for a random session cookie, so it is not kept in page address or scripts.
-Note: plain HTTP (no TLS), only enable LAN access on a trusted network.
+HTTPS (self-signed certificate, see userfile.tls_cert) can be enabled, otherwise traffic is plain HTTP,
+so only enable LAN access on a trusted network.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from urllib.parse import parse_qs, urlparse
 from . import app_signal
 from .const_file import ConfigType
 from .setting import cfg
+from .userfile.tls_cert import server_context
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
     failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
     sessions: dict[str, float] = {}  # session token: created time
     lock = threading.Lock()
+    secure = False  # HTTPS: TLS handshake in handler thread, secure cookie
+
+    def setup(self):
+        if self.secure:  # handshake here, so a slow client never blocks accepting others
+            self.request.settimeout(10)
+            self.request.do_handshake()
+        super().setup()
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -241,7 +250,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         token = self.new_session()
         self.send_response(303)
         self.send_header("Location", "/")
-        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict")
+        secure = "; Secure" if self.secure else ""
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}")
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -260,6 +270,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         logger.debug("WEB DASHBOARD: %s", format % args)
+
+
+class DashboardServer(ThreadingHTTPServer):
+    """Dashboard HTTP server, client errors (failed TLS handshake, dropped connection) only logged"""
+
+    def handle_error(self, request, client_address):
+        logger.debug("WEB DASHBOARD: request from %s failed", client_address[0], exc_info=True)
 
 
 class WebDashboard:
@@ -298,7 +315,12 @@ class WebDashboard:
         """Dashboard addresses with access code"""
         code = self.access_code()
         hosts = local_addresses() if cfg.user.config["web_dashboard"]["enable_lan_access"] else []
-        return [f"http://{host}:{self.port()}/?code={code}" for host in ("127.0.0.1", *hosts)]
+        scheme = "https" if self.use_https() else "http"
+        return [f"{scheme}://{host}:{self.port()}/?code={code}" for host in ("127.0.0.1", *hosts)]
+
+    @staticmethod
+    def use_https() -> bool:
+        return bool(cfg.user.config["web_dashboard"]["enable_https"])
 
     def enable(self):
         """Start server if enabled in setting"""
@@ -309,16 +331,30 @@ class WebDashboard:
         DashboardHandler.sessions = {}
         host, port = self.host(), self.port()
         try:
-            self._server = ThreadingHTTPServer((host, port), DashboardHandler)
+            self._server = DashboardServer((host, port), DashboardHandler)
         except OSError as error:
             logger.error("WEB DASHBOARD: unable to listen on %s:%s (%s)", host, port, error)
             app_signal.error.emit(f"Web dashboard: port {port} unavailable ({error.strerror}).")
             return
         self._server.daemon_threads = True
+        DashboardHandler.secure = self.use_https()
+        if DashboardHandler.secure:
+            try:
+                addresses = local_addresses() if host != "127.0.0.1" else []
+                context = server_context(cfg.path.config, addresses)
+            except (OSError, ValueError, ImportError) as error:
+                logger.error("WEB DASHBOARD: unable to set up HTTPS (%s)", error)
+                app_signal.error.emit(f"Web dashboard: unable to set up HTTPS ({error}).")
+                self._server.server_close()
+                self._server = None
+                return
+            self._server.socket = context.wrap_socket(
+                self._server.socket, server_side=True, do_handshake_on_connect=False)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Web dashboard")
         self._thread.start()
-        logger.info("ENABLED: web dashboard on http://%s:%s", host, port)
-        if host != "127.0.0.1":
+        scheme = "https" if DashboardHandler.secure else "http"
+        logger.info("ENABLED: web dashboard on %s://%s:%s", scheme, host, port)
+        if host != "127.0.0.1" and not DashboardHandler.secure:
             logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
 
     def disable(self):
