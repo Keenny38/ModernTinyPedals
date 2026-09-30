@@ -47,6 +47,9 @@ jobs:
 
     - name: Widget benchmark
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+      # Shared runners are 3-4x slower than a desktop and jittery: catch big regressions only
+      env:
+        TINYPEDAL_FRAME_BUDGET_MS: "50"
       run: pytest -m benchmark -q
 
     - name: Coverage summary
