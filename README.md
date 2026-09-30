@@ -215,7 +215,7 @@ After building completed, executable file can be found in `dist\TinyPedal` folde
 
 To build Windows installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run command (replace version):
 ```
-iscc /DAppVersion=2.50.0 installer	inypedal.iss
+iscc /DAppVersion=2.50.0 installer\tinypedal.iss
 ```
 
 Installer is saved in `dist` folder. It installs for current user in `%LOCALAPPDATA%\Programs\TinyPedal` (no admin rights needed), keeps presets and user data when updating, and can be uninstalled from Windows settings. Installed version can download and install new releases from notification bar (`Download And Install`), after verifying installer SHA256 hash.
