@@ -285,7 +285,7 @@ class LayoutEditor(BaseDialog):
             self.label_info.setText(trm(f"{len(self.canvas.boxes)} widgets"))
             return
         rect = self.canvas.boxes[name]
-        self.label_info.setText(f"{format_module_name(name)}: x {rect.x()}, y {rect.y()}  ({rect.width()} × {rect.height()})")
+        self.label_info.setText(f"{format_module_name(name)}: x {rect.x()}, y {rect.y()}  ({rect.width()} x {rect.height()})")
 
     def toggle_snap(self, checked: bool):
         self.canvas.snap = checked
