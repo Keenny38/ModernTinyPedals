@@ -247,3 +247,17 @@ def test_flush_waits_for_queued_save(config):
 
 def test_flush_without_pending_save(config):
     assert config.flush(timeout=0.1)
+
+
+def test_app_version_does_not_drive_setting_migrations(monkeypatch):
+    """App version (0.x) is independent from setting format version (2.x): no old migration rerun"""
+    from tinypedal import setting_validator, version
+    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+
+    assert GLOBAL_DEFAULT["preset"]["version"] == version.SETTING_VERSION
+    calls = []
+    monkeypatch.setattr(setting_validator, "preupdate_user_setting", lambda *args: calls.append(args))
+    monkeypatch.setattr(version, "__version__", "0.11.0")
+    user = {"preset": {"version": version.SETTING_VERSION}}
+    setting_validator.PresetValidator.user_preset(user, {"preset": {"version": ""}})
+    assert calls == []

@@ -8,7 +8,7 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 
 ## Distribution
 
-- 🟠 **Vérifier la première release avec l'installeur Windows.** Le workflow `Build and Release` compile maintenant `TinyPedal-<version>-windows-setup.exe` et son fichier `.sha256`, mais n'a encore jamais tourné (Inno Setup n'est pas installé en local). Lancer le workflow une fois en mode test, installer, puis tester `Télécharger et installer` depuis une version plus ancienne.
+- 🟠 **Vérifier la première release avec l'installeur Windows.** Le workflow `Build and Release` compile maintenant `ModernTinyPedals-<version>-windows-setup.exe` et son fichier `.sha256`, mais n'a encore jamais tourné (Inno Setup n'est pas installé en local). Installer la release 0.10.0, puis tester `Télécharger et installer` depuis une version plus ancienne.
 - 🟡 **Signer l'exécutable et l'installeur.** Sans signature, Windows SmartScreen avertit à chaque installation.
 
 ## Télémétrie

@@ -1,7 +1,7 @@
 ; Modern Tiny Pedals Windows installer (Inno Setup 6)
 ;
 ; Build after PyInstaller (python build_pyinstaller.py -c):
-;   iscc /DAppVersion=2.50.0 installer\tinypedal.iss
+;   iscc /DAppVersion=0.10.0 installer\tinypedal.iss
 ;
 ; Installs per user in %LOCALAPPDATA%\Programs\Modern Tiny Pedals (no admin rights),
 ; because the app keeps presets & user data next to the executable.

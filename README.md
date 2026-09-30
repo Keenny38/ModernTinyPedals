@@ -133,17 +133,24 @@ Le second script signale les bulles d'aide qui n'ont pas encore de traduction fr
 
 ### Releases, mises à jour et changelog
 
-Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedals/releases) : il n'y a pas de fichier de changelog à tenir.
+Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedals/releases), sans rien faire à la main : chaque push sur `master` publie une nouvelle version dès que les contrôles (`Checks`) passent.
 
-1. Augmente `__version__` dans `tinypedal/version.py` et pousse.
-2. Lance le workflow `Build and Release` (onglet Actions). Il crée la release `v<version>` avec le ZIP, l'installeur, son `.sha256`, et des notes de version qui listent les commits depuis la release précédente : **Added** (titres qui commencent par `Add`), **Fixed** (`Fix`), **Changed** (le reste). Écris donc des titres de commit clairs.
-3. L'app installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
+- **Version** (`MAJEUR.MINEUR.CORRECTIF`, à partir de `0.10.0`) : calculée depuis les commits depuis la dernière release. Un titre qui commence par `Add` (nouveauté) monte la version mineure (`0.10.3` → `0.11.0`), tout le reste monte le correctif (`0.10.0` → `0.10.1`). Une version majeure se choisit à la main : lance `Build and Release` depuis l'onglet Actions avec `bump: major`.
+- **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
+- **Changelog** : les notes de chaque release listent ses commits en **Added**, **Fixed** et **Changed**. Écris donc des titres de commit clairs.
+- **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
 
-Pour prévisualiser les notes en local :
+Pour prévisualiser en local la prochaine version et ses notes :
 
 ```bash
-python tools/gen_release_notes.py v2.51.0
+python tools/next_version.py
 ```
+
+```bash
+python tools/gen_release_notes.py v0.10.0
+```
+
+La version de l'app est indépendante de celle du format des réglages (`SETTING_VERSION` dans `tinypedal/version.py`, restée sur la numérotation TinyPedal 2.x), pour que les presets existants continuent de se charger sans migration inutile.
 
 L'image d'aperçu de ce README est générée à partir des vrais widgets : `python tools/make_readme_preview.py`.
 
@@ -160,7 +167,7 @@ python build_pyinstaller.py
 L'exécutable est créé dans `dist\TinyPedal`. Pour l'installeur, installe [Inno Setup 6](https://jrsoftware.org/isinfo.php) puis (en remplaçant la version) :
 
 ```bash
-iscc /DAppVersion=2.50.0 installer\tinypedal.iss
+iscc /DAppVersion=0.10.0 installer\tinypedal.iss
 ```
 
 > Le nom affiché est « Modern Tiny Pedals », mais le nom interne reste `TinyPedal` (dossier de configuration `%APPDATA%\TinyPedal`, `tinypedal.exe`, en-tête `X-TinyPedal` du contrôle à distance), pour garder les réglages existants et la compatibilité des outils.

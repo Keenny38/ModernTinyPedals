@@ -278,8 +278,8 @@ class PresetValidator:
     def global_preset(cls, dict_user: dict, dict_def: dict) -> dict:
         """Validate global preset"""
         # Pre update global preset, run before validation
-        preset_version = _get_preset_version(dict_user, version.__version__)
-        build_version = parse_version_string(version.__version__)
+        preset_version = _get_preset_version(dict_user, version.SETTING_VERSION)
+        build_version = parse_version_string(version.SETTING_VERSION)
         if preset_version == VERSION_NA or preset_version < build_version:
             preupdate_global_setting(preset_version, dict_user)
         # Validate preset
@@ -289,8 +289,8 @@ class PresetValidator:
     def user_preset(cls, dict_user: dict, dict_def: dict) -> dict:
         """Validate user preset"""
         # Pre update user preset, run before validation
-        preset_version = _get_preset_version(dict_user, version.__version__)
-        build_version = parse_version_string(version.__version__)
+        preset_version = _get_preset_version(dict_user, version.SETTING_VERSION)
+        build_version = parse_version_string(version.SETTING_VERSION)
         if preset_version == VERSION_NA or preset_version < build_version:
             preupdate_user_setting(preset_version, dict_user)
         # Validate preset

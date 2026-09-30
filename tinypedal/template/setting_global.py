@@ -23,11 +23,11 @@ Default global (config) setting template
 from ..const_api import API_DEFAULT_NAME
 from ..const_app import PLATFORM
 from ..userfile import set_default_config_path, set_default_data_path
-from ..version import __version__
+from ..version import SETTING_VERSION
 
 GLOBAL_DEFAULT = {
     "preset": {
-        "version": __version__,
+        "version": SETTING_VERSION,
     },
     "application": {
         "show_at_startup": True,

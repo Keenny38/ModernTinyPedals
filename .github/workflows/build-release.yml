@@ -1,81 +1,119 @@
 name: Build and Release
 
+# A release is published automatically after every push to master once Checks passed.
+# Version is computed from commits since the last release (tools/next_version.py):
+# first release 0.10.0, then minor + 1 when a commit title starts with "Add", else patch + 1.
 on:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
     inputs:
-      build_name:
-        description: "Build name"
-        default: ""
-        required: false
-        type: string
+      bump:
+        description: "Version bump (auto: from commit titles)"
+        default: auto
+        type: choice
+        options: [auto, patch, minor, major]
       test_build:
-        description: "Test build"
+        description: "Test build (no release)"
         default: false
-        required: false
         type: boolean
 
-run-name: ${{ inputs.build_name }}
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  # Create linux release file
-  linux:
+  # Decide version, skip when Checks failed or nothing to release
+  version:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
-      app_ver: ${{ steps.get_ver.outputs.app_ver }}
-      sha256: ${{ steps.get_hash.outputs.hash_output }}
-
+      app_ver: ${{ steps.next.outputs.app_ver }}
+      sha: ${{ steps.next.outputs.sha }}
     steps:
-    - name: Checkout master
+    - name: Checkout tested commit with full history and tags
       uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        fetch-depth: 0
 
-    - name: Fetch version number
-      id: get_ver
-      run: |
-        tp_ver=$(grep -w '__version__' './tinypedal/version.py' | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+')
-        echo "app_ver=${tp_ver}" >> $GITHUB_OUTPUT
-        echo "TinyPedal Version:" $tp_ver
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
 
-    - name: ZIP Linux file
+    - name: Next version
+      id: next
       run: |
-        file_name=ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip
-        zip -r $file_name . -x *.git/* -x *.github/*
+        ver=$(python tools/next_version.py --bump "${{ inputs.bump || 'auto' }}")
+        echo "app_ver=${ver}" >> $GITHUB_OUTPUT
+        echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        echo "Next version: ${ver:-none (no change since last release)}"
+
+  # Source code archive
+  linux:
+    needs: version
+    if: needs.version.outputs.app_ver != ''
+    runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.get_hash.outputs.hash_output }}
+    steps:
+    - name: Checkout tested commit
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ needs.version.outputs.sha }}
+
+    - name: Set version
+      run: python3 tools/next_version.py --write ${{ needs.version.outputs.app_ver }}
+
+    - name: ZIP source code
+      run: |
+        file_name=ModernTinyPedals-${{ needs.version.outputs.app_ver }}-source.zip
+        zip -qr $file_name . -x "*.git/*" -x "*.github/*"
 
     - name: Check hash sum
       id: get_hash
       run: |
-        sha256hash=$(sha256sum ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip)
+        sha256hash=$(sha256sum ModernTinyPedals-${{ needs.version.outputs.app_ver }}-source.zip)
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
 
-    - name: Upload release files
-      uses: softprops/action-gh-release@v2
-      if: ${{ !inputs.test_build }}
+    - name: Upload build
+      uses: actions/upload-artifact@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        tag_name: v${{ steps.get_ver.outputs.app_ver }}
-        files: |
-          ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip
+        name: source
+        path: ModernTinyPedals-${{ needs.version.outputs.app_ver }}-source.zip
 
-  # Create windows release file
+  # Windows executable & installer
   windows:
+    needs: version
+    if: needs.version.outputs.app_ver != ''
     runs-on: windows-latest
-    needs: linux
     outputs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
-
     steps:
-    - name: Checkout master
+    - name: Checkout tested commit
       uses: actions/checkout@v6
+      with:
+        ref: ${{ needs.version.outputs.sha }}
 
     - name: Set up Python 3.12 environment for Windows build
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
         architecture: "x64"
+
+    - name: Set version
+      run: python tools/next_version.py --write ${{ needs.version.outputs.app_ver }}
 
     - name: Install dependencies
       run: |
@@ -84,75 +122,76 @@ jobs:
         pip install pyinstaller openvr
 
     - name: Build Windows executable
-      run: |
-        python build_pyinstaller.py -c
+      run: python build_pyinstaller.py -c
 
     - name: ZIP Windows file
       shell: pwsh
       run: |
-        $file_name="ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip"
-        Compress-Archive -Path ./dist/TinyPedal -DestinationPath ./$file_name
+        Compress-Archive -Path ./dist/TinyPedal -DestinationPath ./ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows.zip
 
     - name: Build Windows installer
       shell: pwsh
       run: |
         $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
         if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-        & $iscc /DAppVersion=${{ needs.linux.outputs.app_ver }} installer\tinypedal.iss
+        & $iscc /DAppVersion=${{ needs.version.outputs.app_ver }} installer\tinypedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        Move-Item ./dist/ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe .
+        Move-Item ./dist/ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe .
 
     - name: Check hash sum
       id: get_hash
       run: |
-        setup_name=ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
+        setup_name=ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
         sha256sum $setup_name | sed 's/\*//g' > $setup_name.sha256
-        sha256hash=$(sha256sum ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip | sed 's/\*//g')
+        sha256hash=$(sha256sum ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows.zip | sed 's/\*//g')
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
-        echo $sha256hash
         cat $setup_name.sha256
 
-    - name: Upload release files
-      uses: softprops/action-gh-release@v2
-      if: ${{ !inputs.test_build }}
+    - name: Upload build
+      uses: actions/upload-artifact@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        tag_name: v${{ needs.linux.outputs.app_ver }}
-        files: |
-          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip
-          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
-          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe.sha256
+        name: windows
+        path: |
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows.zip
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe.sha256
 
-  # Generate release notes
-  release-notes:
+  # Tag the tested commit and publish release with notes (the changelog)
+  release:
+    needs: [version, linux, windows]
+    if: ${{ !inputs.test_build }}
     runs-on: ubuntu-latest
-    needs: [linux, windows]
-
     steps:
-    - name: Checkout master with full history and tags
+    - name: Checkout tested commit with full history and tags
       uses: actions/checkout@v6
       with:
+        ref: ${{ needs.version.outputs.sha }}
         fetch-depth: 0
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Download builds
+      uses: actions/download-artifact@v4
       with:
-        python-version: "3.12"
+        path: builds
+        merge-multiple: true
 
     - name: Release notes from commits since previous release
       run: |
-        python tools/gen_release_notes.py v${{ needs.linux.outputs.app_ver }} > release.txt
-        echo "" >> release.txt
-        echo "### SHA256" >> release.txt
-        echo "" >> release.txt
-        echo "- \`${{ needs.linux.outputs.sha256 }}\`" >> release.txt
-        echo "- \`${{ needs.windows.outputs.sha256 }}\`" >> release.txt
+        python3 tools/gen_release_notes.py v${{ needs.version.outputs.app_ver }} > release.txt
+        {
+          echo ""
+          echo "### SHA256"
+          echo ""
+          echo "- \`${{ needs.linux.outputs.sha256 }}\`"
+          echo "- \`${{ needs.windows.outputs.sha256 }}\`"
+        } >> release.txt
         cat release.txt
 
-    - name: Update release notes
+    - name: Publish release
       uses: softprops/action-gh-release@v2
-      if: ${{ !inputs.test_build }}
       with:
-        body_path: release.txt
         token: ${{ secrets.GITHUB_TOKEN }}
-        tag_name: v${{ needs.linux.outputs.app_ver }}
+        tag_name: v${{ needs.version.outputs.app_ver }}
+        target_commitish: ${{ needs.version.outputs.sha }}
+        name: Modern Tiny Pedals ${{ needs.version.outputs.app_ver }}
+        body_path: release.txt
+        files: builds/*

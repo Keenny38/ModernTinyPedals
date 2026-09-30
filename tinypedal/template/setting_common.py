@@ -21,12 +21,12 @@ Default common setting template
 """
 
 from ..const_api import API_DEFAULT_NAME
-from ..version import __version__
+from ..version import SETTING_VERSION
 
 COMMON_DEFAULT = {
     "preset": {
         "api_name": API_DEFAULT_NAME,
-        "version": __version__,
+        "version": SETTING_VERSION,
     },
     "overlay": {
         "fixed_position": False,
