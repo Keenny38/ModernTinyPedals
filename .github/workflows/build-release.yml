@@ -29,10 +29,8 @@ jobs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
 
     steps:
-    - name: Checkout master and submodules
+    - name: Checkout master
       uses: actions/checkout@v6
-      with:
-        submodules: "true"
 
     - name: Fetch version number
       id: get_ver
@@ -70,10 +68,8 @@ jobs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
 
     steps:
-    - name: Checkout master and submodules
+    - name: Checkout master
       uses: actions/checkout@v6
-      with:
-        submodules: "true"
 
     - name: Set up Python 3.12 environment for Windows build
       uses: actions/setup-python@v5
@@ -119,7 +115,7 @@ jobs:
     needs: [linux, windows]
 
     steps:
-    - name: Checkout master and submodules
+    - name: Checkout master
       uses: actions/checkout@v6
 
     - name: Get latest change log
