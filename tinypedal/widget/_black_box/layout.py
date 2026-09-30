@@ -112,9 +112,13 @@ def build_layout(spec: LayoutInput) -> Layout:
     brake_bar_gap = round(unit * 0.15)
 
     # Room around tyres, so turned tyres do not overlap brakes or widget edges
+    # Exact extent of the turned rounded tyre (corner radius as in path_tyre), not a rough bound
     steer_sin = math.sin(math.radians(spec.max_steer))
-    pad_x = round(tyre_h * steer_sin / 2)
-    pad_y = round(tyre_w * steer_sin / 2)
+    steer_cos = math.cos(math.radians(spec.max_steer))
+    corner = tyre_w * 0.28
+    core_w, core_h = tyre_w - corner * 2, tyre_h - corner * 2
+    pad_x = max(math.ceil((core_w * steer_cos + core_h * steer_sin) / 2 + corner - tyre_w / 2), 0)
+    pad_y = max(math.ceil((core_h * steer_cos + core_w * steer_sin) / 2 + corner - tyre_h / 2), 0)
     brake_gap = round(unit * 0.12)  # brake bar close to tyre (turned tyre may touch it at full lock)
     # Suspension: coilover drawn right beside the brake bar, before brake readings
     susp_w = max(round(unit * 0.5 * spec.suspension_scale), 4) if spec.suspension_scale > 0 else 0
