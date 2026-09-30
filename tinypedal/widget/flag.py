@@ -274,7 +274,7 @@ class Realtime(Overlay):
 
         # Pit limiter
         if self.wcfg["show_speed_limiter"]:
-            limiter_state = api.read.switch.speed_limiter()
+            limiter_state: float = api.read.switch.speed_limiter()
             show_speed = self.wcfg["show_current_speed_while_limiter_on"]
             if limiter_state and show_speed:
                 limiter_state = api.read.vehicle.speed() + 0.0000001
@@ -573,15 +573,9 @@ class Realtime(Overlay):
             est_laps = minfo.fuel.estimatedLaps
         safe_laps = calc.pit_in_countdown_laps(est_laps, api.read.lap.progress())
 
-        if safe_laps > 9.94:
-            safe_laps = f"{safe_laps:.0f}"
-        else:
-            safe_laps = f"{safe_laps:.1f}"
-        if est_laps > 9.94:
-            est_laps = f"{est_laps:.0f}"
-        else:
-            est_laps = f"{est_laps:.1f}"
-        return f"{safe_laps:<3}≤{est_laps:>3}"
+        safe_text = f"{safe_laps:.0f}" if safe_laps > 9.94 else f"{safe_laps:.1f}"
+        est_text = f"{est_laps:.0f}" if est_laps > 9.94 else f"{est_laps:.1f}"
+        return f"{safe_text:<3}≤{est_text:>3}"
 
     def yellow_flag_state(self, in_race: bool) -> float:
         """Yellow flag state"""

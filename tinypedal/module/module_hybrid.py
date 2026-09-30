@@ -80,25 +80,25 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
                 continue
             last_reset = reset
 
-            battery_drain = 0
-            battery_regen = 0
-            battery_drain_last = 0
-            battery_regen_last = 0
-            last_battery_charge = 0
+            battery_drain = 0.0
+            battery_regen = 0.0
+            battery_drain_last = 0.0
+            battery_regen_last = 0.0
+            last_battery_charge = 0.0
             last_motor_state = 0
             alt_motor_state = 1  # alternative state in case motor state not available
             alt_motor_state_debounce = 0  # alternative state reset debounce counter
-            motor_active_timer = 0
+            motor_active_timer = 0.0
             motor_active_timer_start = False
             motor_inactive_timer = MAX_SECONDS
-            motor_inactive_timer_start = False
-            lap_etime_last = 0
+            motor_inactive_timer_start: float = False
+            lap_etime_last = 0.0
             last_lap_stime = FLOAT_INF  # last lap start time
 
             delta_reset = False
             delta_recording = False
             delta_array_raw = [DELTA_ZERO]  # distance, battery net change
-            delta_array_last = DELTA_DEFAULT
+            delta_array_last: tuple[tuple[float, ...], ...] = DELTA_DEFAULT
             pos_last = 0.0  # last checked vehicle position
             net_change_last = 0.0
             est_net_change = 0.0  # estimated battery charge net change

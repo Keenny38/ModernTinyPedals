@@ -92,7 +92,7 @@ class Realtime(Overlay):
         self.pen_text = QPen()
 
         # Last data
-        self.delta_best = 0
+        self.delta_best = 0.0
         self.last_laptime = 0
         self.new_lap = True
 

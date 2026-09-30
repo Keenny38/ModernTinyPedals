@@ -68,7 +68,7 @@ class APIControl:
 
     def __init__(self):
         self._api: api_connector.Connector | None = None
-        self._available_api = ()
+        self._available_api: tuple[type[api_connector.Connector], ...] = ()
         self._enable_legacy = False
         self._same_api_loaded = False
         # Data reader, always available after start() (widgets & modules only run after start)

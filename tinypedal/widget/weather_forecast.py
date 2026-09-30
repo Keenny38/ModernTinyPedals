@@ -176,7 +176,7 @@ class Realtime(Overlay):
                 rain_chance = api.read.session.raininess()
                 icon_index = api.read.session.cloud_coverage()
                 estimated_temp = api.read.session.ambient_temperature()
-                estimated_time = 0
+                estimated_time = 0.0
             # Update slot with available forecast
             elif index_bias < forecast_count:
                 rain_chance = forecast_info[index_bias].rain_chance

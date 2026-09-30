@@ -186,7 +186,7 @@ class Preset:
         self.setting = MappingProxyType(ChainMap(WIDGET_DEFAULT, MODULE_DEFAULT, API_DEFAULT, COMMON_DEFAULT))  # type: ignore[assignment]
         # Style preset
         self.brakes = MappingProxyType(BRAKES_DEFAULT)  # type: ignore[assignment]
-        self.brands = EMPTY_DICT
+        self.brands = EMPTY_DICT  # type: ignore[assignment]
         self.classes = MappingProxyType(CLASSES_DEFAULT)  # type: ignore[assignment]
         self.compounds = MappingProxyType(COMPOUNDS_DEFAULT)  # type: ignore[assignment]
         self.heatmap = MappingProxyType(HEATMAP_DEFAULT)  # type: ignore[assignment]

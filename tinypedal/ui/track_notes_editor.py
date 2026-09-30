@@ -23,6 +23,7 @@ Track & pace notes editor
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
@@ -354,13 +355,13 @@ class TrackNotesEditor(BaseEditor):
             self.add_table_row(row_index, note_line)
         self._verify_enabled = True
 
-    def add_table_row(self, row_index: int, note_data: dict = EMPTY_DICT):
+    def add_table_row(self, row_index: int, note_data: Mapping = EMPTY_DICT):
         """Add new table row"""
         self.table_notes.insertRow(row_index)
         for column_index, fieldname in enumerate(self.notes_header):
             if fieldname == COLUMN_DISTANCE:
                 value = note_data.get(fieldname, 0)
-                item = FloatTableItem(round(value, DECIMALS))
+                item: QTableWidgetItem = FloatTableItem(round(value, DECIMALS))
             elif fieldname == COLUMN_TAGS:
                 value = note_data.get(fieldname, "")
                 item = QTableWidgetItem(value)

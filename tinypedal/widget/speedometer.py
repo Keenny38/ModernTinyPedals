@@ -111,11 +111,11 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.speed_min = -1
-        self.speed_max = -1
-        self.speed_fast = -1
-        self.off_throttle_timer_start = 0
-        self.on_throttle_timer_start = 0
+        self.speed_min = -1.0
+        self.speed_max = -1.0
+        self.speed_fast = -1.0
+        self.off_throttle_timer_start = 0.0
+        self.on_throttle_timer_start = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

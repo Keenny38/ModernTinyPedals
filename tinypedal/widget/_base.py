@@ -405,7 +405,7 @@ class Overlay(Base):
     @overload
     def set_rawtext(self, *, count: int, **kwargs: Any) -> tuple[RawText, ...]: ...
 
-    def set_rawtext(
+    def set_rawtext(  # type: ignore[misc]  # overloads only narrow return type by count
         self,
         *,
         font: QFont | None = None,
@@ -468,7 +468,7 @@ class Overlay(Base):
     @overload
     def set_rawimage(self, *, count: int, **kwargs: Any) -> tuple[RawImage, ...]: ...
 
-    def set_rawimage(
+    def set_rawimage(  # type: ignore[misc]  # overloads only narrow return type by count
         self,
         *,
         image: QPixmap | None = None,

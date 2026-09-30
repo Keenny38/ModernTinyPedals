@@ -177,7 +177,7 @@ class TrackInfoEditor(BaseEditor):
         column_index = 1
         for key, value in TRACKINFO_DEFAULT.items():
             if isinstance(value, float):
-                item = FloatTableItem(round(track_data.get(key, value), 4))
+                item: QTableWidgetItem = FloatTableItem(round(track_data.get(key, value), 4))
             elif key == "preset":
                 item = PresetTableItem(track_data.get(key, value))
             else:

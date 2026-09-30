@@ -690,7 +690,7 @@ class MultiCompounds(QWidget):
         self._pen_text = QPen()
         self._width = self.width()
         self._height = self.height()
-        self.compounds = ()
+        self.compounds: tuple[str, ...] = ()
         self.colors = (fg,) * count
 
     def clear(self):
@@ -768,7 +768,7 @@ class DeltaLapTime(QWidget):
         self._width = self.width()
         self._height = self.height()
         self._inverted = inverted
-        self.delta = ()
+        self.delta: tuple = ()
         self.is_player = False
 
     def clear(self):
@@ -786,6 +786,7 @@ class DeltaLapTime(QWidget):
         """Draw"""
         painter = QPainter(self)
         fill_rect(painter, QRectF(0, 0, self._width, self._height), self.bg)
+        fg_color: str | Qt.GlobalColor
         for index, delta in enumerate(
             reversed(self.delta) if self._inverted else self.delta
         ):

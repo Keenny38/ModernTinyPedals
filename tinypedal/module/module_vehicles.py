@@ -61,7 +61,7 @@ class Realtime(DataModule):
                     update_interval = self.active_interval
                     output.dataSetVersion = -1
                     last_veh_total = -1
-                    last_session_elapsed = -1
+                    last_session_elapsed = -1.0
                     last_in_race = -1
 
                 veh_total = output.totalVehicles = api.read.vehicle.total_vehicles()

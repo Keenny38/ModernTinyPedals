@@ -55,7 +55,7 @@ class Realtime(Overlay):
         self.veh_size = max(int(self.wcfg["vehicle_size"]), 1)
 
         if self.wcfg["show_circle_vehicle_shape"]:
-            self.veh_shape = QRectF(
+            self.veh_shape: QRectF | tuple[QPointF, ...] = QRectF(
                 -self.veh_size * 0.5,
                 -self.veh_size * 0.5,
                 self.veh_size,
@@ -359,7 +359,7 @@ class Realtime(Overlay):
             if rounded:
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         else:
-            pen = Qt.PenStyle.NoPen
+            pen = QPen(Qt.PenStyle.NoPen)
         return pen
 
     def set_brush_style(self, color: str):

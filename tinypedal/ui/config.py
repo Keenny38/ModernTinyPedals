@@ -111,7 +111,7 @@ class SectionHeader(QWidget):
         self.arrow.clicked.connect(on_toggle)
         self.label = OptionSection(title, self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.mousePressEvent = lambda event: on_toggle()
+        self.label.mousePressEvent = lambda event: on_toggle()  # type: ignore[method-assign]
         self.label.setCursor(Qt.CursorShape.PointingHandCursor)
         button_reset = QToolButton(self)
         button_reset.setText(tr("Reset"))

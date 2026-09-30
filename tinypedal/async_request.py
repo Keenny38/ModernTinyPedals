@@ -158,7 +158,7 @@ async def localhost_resolve(hostnames: set[str], port: int, timeout: float = 3) 
         for hostname in hostnames
     ]
     # Cancel all task on first response
-    result = []
+    result: list[tuple[str, float]] = []
     cancel_func = partial(cancel_tasks, task_group=task_group, result=result)
     for task in task_group:
         task.add_done_callback(cancel_func)

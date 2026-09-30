@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 def gather_command(commands: Iterable[tuple[str, Callable]]) -> dict[tuple[int, ...], list[tuple[str, Callable]]]:
     """Gather & validate hotkey commands"""
-    key_group = {}
+    key_group: dict[tuple[int, ...], list[tuple[str, Callable]]] = {}
     for hotkey_name, hotkey_func in commands:
         key_string = cfg.user.shortcuts[hotkey_name]["bind"]
         key_codes = load_hotkey(key_string)

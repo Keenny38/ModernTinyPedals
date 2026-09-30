@@ -167,15 +167,15 @@ def record_stint_history(
     update_stint_history = False
 
     start_laps = 0
-    start_time = 0
-    start_fuel = 0
-    start_energy = 0
-    start_wear = 0
+    start_time = 0.0
+    start_fuel = 0.0
+    start_energy = 0.0
+    start_wear = 0.0
 
-    last_wear_avg = 0
-    last_fuel_curr = 0
-    last_energy_curr = 0
-    last_time_stop = 0
+    last_wear_avg = 0.0
+    last_fuel_curr = 0.0
+    last_energy_curr = 0.0
+    last_time_stop = 0.0
 
     # Stint consistency
     pitting = 1

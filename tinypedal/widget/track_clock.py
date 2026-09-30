@@ -141,7 +141,7 @@ class Realtime(Overlay):
             sun_phases = minfo.mapping.sunlightPhases
 
             if sun_phases is None:
-                countdown = 0
+                countdown = 0.0
                 next_phase_index = 0
             else:
                 # Select upcoming phase

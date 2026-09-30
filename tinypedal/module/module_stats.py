@@ -275,7 +275,7 @@ def auto_backup_car_setup(filepath: str):
     data_available = False
 
     best_laptime = FLOAT_INF
-    temp_data = ()
+    temp_data: tuple = ()
     data_hash = 0
     last_data_hash = 0
     temp_filename = ""

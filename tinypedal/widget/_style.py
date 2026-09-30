@@ -26,6 +26,7 @@ any user customized option is kept as it is.
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import Any
 
 # Classic default color (RGB) -> modern color (RGB), alpha channel is kept
 MODERN_PALETTE = MappingProxyType({
@@ -210,7 +211,7 @@ def modern_overrides(wcfg: dict, default: dict, style: dict) -> dict:
     Returns:
         Dictionary of overridden options.
     """
-    overrides = {}
+    overrides: dict[str, Any] = {}
     min_gap = max(int(style["minimum_bar_gap"]), 0)
     theme = wcfg.get("widget_theme", GLOBAL_THEME)
     palette = theme_palette(style["overlay_theme"] if theme == GLOBAL_THEME else theme)

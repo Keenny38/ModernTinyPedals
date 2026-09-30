@@ -1008,9 +1008,9 @@ class TyreStrategyPlanner(BaseEditor):
         for row_index in range(row_count):
             column_list: list = [row_index + 1]
             for column_index in range(column_count):
-                item = tyre_plan.item(row_index, column_index)
-                if item:
-                    tyre_name = item.text()
+                cell = tyre_plan.item(row_index, column_index)
+                if cell:
+                    tyre_name = cell.text()
                 else:
                     tyre_name = ""
                 column_list.append(tyre_name)
@@ -1089,7 +1089,7 @@ class TyreStrategyPlanner(BaseEditor):
         stints = self.tyre_plan.rowCount()
         # Sum of tyre change time
         total_changes = 0
-        total_change_time = 0
+        total_change_time = 0.0
         for row_index in range(1, self.tyre_plan.rowCount()):
             item = self.tyre_plan.item(row_index, 4)
             if not item:

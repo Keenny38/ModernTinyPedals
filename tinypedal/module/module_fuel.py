@@ -144,7 +144,7 @@ def calc_consumption(
     delayed_save = False
 
     combo_name = ""
-    delta_array_last = ()
+    delta_array_last: tuple[tuple[float, ...], ...] = ()
     used_last_valid = 0.0
     laptime_pace = 0.0
 
@@ -172,7 +172,7 @@ def calc_consumption(
             output.reset()
             recording = False
             delayed_save = False
-            validating = 0
+            validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
 
             telemetry_func = detect_consumption_type(is_energy)
@@ -185,7 +185,7 @@ def calc_consumption(
                 defaults=(DELTA_DEFAULT, 0.0, 0.0)
             )
             delta_array_raw: list[tuple[float, ...]] = [DELTA_ZERO]  # distance, fuel used, laptime
-            delta_array_temp = DELTA_DEFAULT  # last lap temp
+            delta_array_temp: tuple[tuple[float, ...], ...] = DELTA_DEFAULT  # last lap temp
             delta_fuel = 0.0  # delta fuel consumption compare to last lap
 
             amount_start = -FLOAT_INF  # start fuel reading

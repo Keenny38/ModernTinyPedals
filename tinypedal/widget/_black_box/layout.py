@@ -188,7 +188,7 @@ def build_layout(spec: LayoutInput) -> Layout:
 
     # Center column
     inset = round(unit * 0.3)
-    bottom_y = top_y + body_h
+    bottom_y: float = top_y + body_h
     if center_between_tyres:
         rect_center = QRectF(content_x + side_w + gap, top_y, center_between, body_h)
     elif spec.has_center:  # vertical: below tyres, full content width

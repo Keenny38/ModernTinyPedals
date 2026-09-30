@@ -48,13 +48,14 @@ class Realtime(Overlay):
 
         # Config variable
         bar_padx = self.set_padding(self.wcfg["font_size"], self.wcfg["bar_padding"])
-        self.odm_digits = max(int(self.wcfg["odometer_maximum_digits"]), 1)
+        digits = max(int(self.wcfg["odometer_maximum_digits"]), 1)
+        self.odm_range: float
         if self.cfg.units["odometer_unit"] == "Meter":
-            self.odm_digits += 0.0
-            self.odm_range = int(int(self.odm_digits) * "9")
+            self.odm_digits = digits + 0.0
+            self.odm_range = int(digits * "9")
         else:
-            self.odm_range = float(self.odm_digits * "9") + 0.9
-            self.odm_digits += 2.1
+            self.odm_range = float(digits * "9") + 0.9
+            self.odm_digits = digits + 2.1
 
         # Config units
         self.unit_dist = units.set_unit_distance(self.cfg.units["distance_unit"])

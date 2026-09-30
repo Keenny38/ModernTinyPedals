@@ -80,7 +80,7 @@ class Realtime(Overlay):
         self.draw_scale_mark()
 
         # Last data
-        self.raw_steering = 0
+        self.raw_steering = 0.0
         self.rot_range = 0
 
     def timerEvent(self, event):

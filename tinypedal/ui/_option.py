@@ -248,12 +248,12 @@ class FloatEdit(BaseLineEdit):
 
     def validate(self):
         """Validate & export value, returns None if invalid"""
-        value = self.text()
-        if not is_string_number(value):
+        text = self.text()
+        if not is_string_number(text):
             return None
-        value = float(value)
+        value = float(text)
         if value % 1 == 0:  # remove unnecessary decimal points
-            value = int(value)
+            return int(value)
         return value
 
 
@@ -403,6 +403,8 @@ class CompoundTargetDialog(QDialog):
                 p_min, p_max = float(self.cell(row, 1)), float(self.cell(row, 2))
             except ValueError:
                 continue
+            t_min: float | None
+            t_max: float | None
             try:
                 t_min, t_max = float(self.cell(row, 3)), float(self.cell(row, 4))
             except ValueError:

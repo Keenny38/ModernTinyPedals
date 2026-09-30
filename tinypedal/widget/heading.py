@@ -109,10 +109,10 @@ class Realtime(Overlay):
         self.draw_dot()
 
         # Last data
-        self.veh_ori_yaw = 0
-        self.last_pos = 0,0
-        self.yaw_angle = 0
-        self.slip_angle = 0
+        self.veh_ori_yaw = 0.0
+        self.last_pos: tuple[float, float] = (0.0, 0.0)
+        self.yaw_angle = 0.0
+        self.slip_angle = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

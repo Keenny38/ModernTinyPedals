@@ -26,4 +26,4 @@ FILELOCKINFO_DEFAULT = MappingProxyType({
     "version": "unknown",
 })
 
-FILELOCK_DEFAULT = {}
+FILELOCK_DEFAULT: dict[str, dict] = {}

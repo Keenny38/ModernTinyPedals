@@ -25,7 +25,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from operator import itemgetter
 from typing import Any
 
@@ -115,7 +115,7 @@ def parse_csv_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
     """Parse TinyPedal notes"""
     # Load meta info
     meta_info = create_notes_metadata()
-    notes_header = ()
+    notes_header: Sequence[str] = ()
     column_key = table_header[0]
     for meta_line in notes_file:
         info_split = meta_line.split(",", 1)
@@ -177,7 +177,7 @@ def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
 def parse_csv_notes_only(notes_file: Iterable[str], table_header: tuple[str, ...]):
     """Parse TinyPedal notes without metadata"""
     column_key = table_header[0]
-    notes_header = ()
+    notes_header: Sequence[str] = ()
     for meta_line in notes_file:
         if meta_line.startswith(column_key):  # start of header
             notes_header = meta_line.strip().split(",")

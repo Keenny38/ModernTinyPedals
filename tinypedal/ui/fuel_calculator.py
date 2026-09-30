@@ -559,7 +559,7 @@ class CalculatorPanel(QWidget):
     def _calc_consumption(self, output_type, tank_capacity, consumption, fuel_start,
         total_race_seconds, absolute_race_laps, total_formation_laps, average_pit_seconds, laptime):
         """Calculate and output results"""
-        estimate_pit_counts = 0
+        estimate_pit_counts = 0.0
         minimum_pit_counts = 0  # minimum pit stop required to finish race
         loop_counts = 10  # max loop limit
 

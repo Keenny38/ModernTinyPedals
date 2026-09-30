@@ -205,17 +205,17 @@ class Realtime(Overlay):
 
         # Last data
         self.flicker = 0
-        self.shifting_timer_start = 0
-        self.shifting_timer = 0
+        self.shifting_timer_start = 0.0
+        self.shifting_timer = 0.0
         self.rpm_safe = 0
         self.rpm_red = 0
         self.rpm_crit = 0
-        self.rpm_range = 0
-        self.rpm_max = 0
+        self.rpm_range = 0.0
+        self.rpm_max = 0.0
         self.gear_max = 0
         self.last_gear = 0
-        self.ema_fuel_rate = 0
-        self.max_fuel_rate = 0
+        self.ema_fuel_rate = 0.0
+        self.max_fuel_rate = 0.0
 
     def post_update(self):
         self.ema_fuel_rate = 0

@@ -23,6 +23,7 @@ Black box widget, read telemetry into widget state, decide when to repaint
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from time import monotonic
 
 from ... import calculation as calc
@@ -66,6 +67,28 @@ def is_new_impact(impact_time: float, last_time: float) -> bool:
 
 class DataReader:
     """Read telemetry into widget state, decide when to repaint"""
+
+    # Widget state written here, initialized by BlackBox (declared for type checking)
+    browse_seen: int
+    last_state: tuple
+    last_pits_state: bool | None
+    heatmap_brake: list
+    steer_vehicle: str | None
+    last_vehicle_name: str | None
+    impact_time: float | None
+    recorder_impact_time: float | None
+    impact_direction: str
+    pause_start: float | None
+    last_session_elapsed: float
+    last_fast_time: float
+    brake_cold: float
+    brake_hot: float
+    brake_class: str | None
+    susp_vehicle: str | None
+    last_in_pits: int
+    last_compounds: tuple
+    last_vehicle: tuple[str, str]
+    tyre_diameters: tuple[float, ...]
 
     def load_tyre_heatmap(self, name: str):
         return load_heatmap_color(heatmap_name=name, default_name=HEATMAP_DEFAULT_TYRE, swap_style=True,
@@ -600,6 +623,10 @@ class DataReader:
         loads = api.read.tyre.load()
         now = monotonic()
         if self.use_wheels:
+            lows: Sequence[float]
+            highs: Sequence[float]
+            statics: Sequence[float]
+            ratios: Sequence[float]
             lows = minfo.wheels.minSuspensionPosition
             highs = minfo.wheels.maxSuspensionPosition
             statics = minfo.wheels.staticSuspensionPosition

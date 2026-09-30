@@ -132,7 +132,7 @@ class Realtime(Overlay):
 
         # Last data
         self.last_in_pits = -1
-        self.last_compounds = ("", "", "", "")
+        self.last_compounds: tuple[str, ...] = ("", "", "", "")
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

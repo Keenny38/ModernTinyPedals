@@ -32,4 +32,4 @@ TRACKINFO_DEFAULT = MappingProxyType({
     "preset": "",  # primary preset name, auto loaded on this track
 })
 
-TRACKS_DEFAULT = {}
+TRACKS_DEFAULT: dict[str, dict] = {}

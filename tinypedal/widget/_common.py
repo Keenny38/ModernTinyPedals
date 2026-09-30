@@ -102,9 +102,12 @@ class MousePosition:
             return
         self._screen_name = screen.name()
         # Restricted screen area (excludes task bar, system menu, etc)
-        scr_x, scr_y, scr_width, scr_height = screen.availableGeometry().getRect()
+        scr = screen.availableGeometry()
+        scr_x, scr_y, scr_width, scr_height = scr.x(), scr.y(), scr.width(), scr.height()
         # Full screen area
-        scrfull_x, scrfull_y, scrfull_width, scrfull_height = screen.geometry().getRect()
+        scrfull = screen.geometry()
+        scrfull_x, scrfull_y = scrfull.x(), scrfull.y()
+        scrfull_width, scrfull_height = scrfull.width(), scrfull.height()
         # Update grid set (avoid duplicates)
         x_grid = {scr_x, scr_x + scr_width, scrfull_x, scrfull_x + scrfull_width}
         y_grid = {scr_y, scr_y + scr_height, scrfull_y, scrfull_y + scrfull_height}
@@ -121,7 +124,8 @@ class MousePosition:
                     or screen is not other_widget.screen()
                 ):
                     continue
-                other_x, other_y, other_width, other_height = other_widget.geometry().getRect()
+                other = other_widget.geometry()
+                other_x, other_y, other_width, other_height = other.x(), other.y(), other.width(), other.height()
                 x_grid.add(other_x)
                 x_grid.add(other_x + other_width)
                 y_grid.add(other_y)

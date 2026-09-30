@@ -128,10 +128,10 @@ class RestAPIConnector:
         self._taskset = taskset
         self._dataset = dataset
 
-        self._cfg: dict = None
+        self._cfg: dict = {}
         self._task_cancel = False
         self._updating = False
-        self._update_thread = None
+        self._update_thread: threading.Thread | None = None
         self._active_interval = 0.2
         self._event = threading.Event()
 
@@ -172,7 +172,7 @@ class RestAPIConnector:
         reset = False
         update_interval = 0.5
 
-        active_task_sim = {}
+        active_task_sim: dict[str, Any] = {}
 
         while not _event_wait(update_interval):
             if realtime_state.active:

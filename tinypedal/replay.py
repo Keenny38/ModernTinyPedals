@@ -50,6 +50,10 @@ DEFAULT_RATE = 30  # recorded frames per second
 SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
 
 
+def no_update() -> None:
+    """Update placeholder while replay is not feeding frames"""
+
+
 def xor_bytes(data: bytes, base: bytes) -> bytes:
     """XOR two equal size byte strings"""
     size = len(data)
@@ -217,7 +221,7 @@ class ReplayMMap:
         self._struct = data_struct
         self._player = player
         self._buffer = bytearray(player.current_frame())
-        self.update: Callable[[], None] | None = None
+        self.update: Callable[[], None] = no_update
         self.data: Any = data_struct.from_buffer(self._buffer)
 
     def create(self, access_mode: int = 0) -> None:
@@ -228,7 +232,7 @@ class ReplayMMap:
     def close(self) -> None:
         """Keep a final copy, same as MMapControl"""
         self.data = self._struct.from_buffer_copy(self._buffer)
-        self.update = None
+        self.update = no_update
 
     def __update(self) -> None:
         self._buffer[:] = self._player.current_frame()

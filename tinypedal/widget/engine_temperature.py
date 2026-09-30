@@ -177,10 +177,10 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.last_lap_etime = 0
-        self.last_lap_stime = 0
-        self.last_temp_oil = 0
-        self.last_temp_water = 0
+        self.last_lap_etime = 0.0
+        self.last_lap_stime = 0.0
+        self.last_temp_oil = 0.0
+        self.last_temp_water = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

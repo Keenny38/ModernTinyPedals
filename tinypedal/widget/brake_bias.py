@@ -104,7 +104,7 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.baseline_bias = 0
+        self.baseline_bias = 0.0
         self.brake_bmigt = brake_migration(self.wcfg["electric_braking_allocation"])
 
     def post_update(self):

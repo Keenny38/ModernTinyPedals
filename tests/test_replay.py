@@ -113,7 +113,7 @@ def test_replay_mmap_feeds_structure(tmp_path):
     shmm.update()
     assert shmm.data.value == 3
     shmm.close()
-    assert shmm.update is None
+    shmm.update()  # no-op after close, keeps last frame
     assert shmm.data.value == 3
 
 

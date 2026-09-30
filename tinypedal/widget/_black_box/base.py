@@ -32,6 +32,8 @@ from .common import FONT_CACHE_SIZE
 class PaintBase:
     """Shared painting helpers: cached background, fitted text, units"""
 
+    static_layer: QPixmap | None
+
     def unit_name(self, name: str) -> str:
         """Unit set in widget, or the one in Units setting"""
         value = self.wcfg[f"override_unit_{name}"]

@@ -69,7 +69,7 @@ class Realtime(Overlay):
             self.pen_led.setColor(self.wcfg["led_outline_color"])
             self.pen_led.setWidth(self.wcfg["led_outline_width"])
         else:
-            self.pen_led = Qt.PenStyle.NoPen
+            self.pen_led = QPen(Qt.PenStyle.NoPen)
 
         self.brush_led = (
             QBrush(self.wcfg["rpm_color_off"], Qt.BrushStyle.SolidPattern),
@@ -91,14 +91,14 @@ class Realtime(Overlay):
         # Last data
         self.flicker = False
         self.limiter = 0
-        self.rpm_max = 0
+        self.rpm_max = 0.0
         self.rpm_low = 0
         self.rpm_safe = 0
         self.rpm_redline = 0
         self.rpm_critical = 0
         self.rpm_overrev = 0
-        self.rpm_scale = 0
-        self.rpm = -1
+        self.rpm_scale = 0.0
+        self.rpm = -1.0
         self.gear_max = 0
 
     def timerEvent(self, event):

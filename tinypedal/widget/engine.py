@@ -189,8 +189,8 @@ class Realtime(Overlay):
         self.post_update()
 
     def post_update(self):
-        self.ema_power = 0
-        self.max_power_kw = 0
+        self.ema_power = 0.0
+        self.max_power_kw = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

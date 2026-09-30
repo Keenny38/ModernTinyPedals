@@ -374,7 +374,7 @@ class Realtime(
         self.sign_text = "°" if wcfg["show_degree_sign"] else ""
         self.tyre_temp_source = wcfg["tyre_temperature_source"]
         self.heatmap_tyre = 4 * [self.load_tyre_heatmap(wcfg["heatmap_name_tyre"])]
-        self.heatmap_brake = 4 * [self.load_brake_heatmap(wcfg["heatmap_name_brake"])]
+        self.heatmap_brake: list = 4 * [self.load_brake_heatmap(wcfg["heatmap_name_brake"])]
 
     def config_thresholds(self, wcfg):
         """Warning thresholds, targets, trends"""
@@ -396,8 +396,10 @@ class Realtime(
         self.default_brake_window = (
             wcfg["brake_temperature_cold_threshold"], wcfg["brake_temperature_hot_threshold"])
         self.brake_class_targets = parse_class_targets(wcfg["brake_target_by_class"])
+        self.brake_cold: float
+        self.brake_hot: float
         self.brake_cold, self.brake_hot = self.default_brake_window
-        self.brake_class = None
+        self.brake_class: str | None = None
         # Trends: needed for arrows, and for warming phase of cold tyres
         self.show_temp_trend = bool(wcfg["show_tyre_temperature_trend"])
         self.show_pres_trend = bool(wcfg["show_tyre_pressure_trend"])
@@ -442,7 +444,7 @@ class Realtime(
         self.event_log = EventLog(max(len(self.event_rows), 1), damage_threshold)
         restore_records(self.widget_name, self.recorder, self.event_log)
         self.export_format = wcfg["incident_export_format"]
-        self.browse_seen = IncidentBrowse.requests  # hotkey requests already handled
+        self.browse_seen: int = IncidentBrowse.requests  # hotkey requests already handled
         self.browse_incident = None  # incident picked with hotkey, shown instead of the last one
         self.browse_since = 0.0
         self.incident_display_time = max(wcfg["incident_display_duration"], 0)
@@ -488,8 +490,8 @@ class Realtime(
         self.damage_detached: tuple = (False,) * 4
         self.damage_puncture: tuple = (False,) * 4
         self.damage_suspension: tuple = (0.0,) * 4
-        self.impact_time = None
-        self.recorder_impact_time = None  # last game impact time seen by incident recorder
+        self.impact_time: float | None = None
+        self.recorder_impact_time: float | None = None  # last game impact time seen by incident recorder
         self.impact_position: tuple = (0.0, 0.0)
         self.impact_visible = False  # last impact cone shown
         self.abs_active = False
@@ -501,7 +503,7 @@ class Realtime(
         # Car has ABS/TC if game reports a level (LMU), or once seen active (rF2 does not report level)
         self.abs_seen = False
         self.tc_seen = False
-        self.last_vehicle_name = None
+        self.last_vehicle_name: str | None = None
         self.brake_bias = 0.0
         self.locking_front = 0.0  # percent of lap distance spent locking a front wheel
         self.locking_rear = 0.0
@@ -532,8 +534,8 @@ class Realtime(
         self.throttle = 0.0
         self.brake = 0.0
         self.clutch = 0.0
-        self.last_in_pits = -1
-        self.last_vehicle = ("", "")
+        self.last_in_pits: int = -1
+        self.last_vehicle: tuple[str, str] = ("", "")
         self.last_compounds: tuple = ("", "", "", "")
         self.battery_charge = 0.0  # percent
         self.battery_state = 0  # 0 n/a, 1 off, 2 drain, 3 regen
@@ -541,26 +543,26 @@ class Realtime(
         self.battery_highlight = True  # warning color shown now (flash phase, or flash disabled)
         self.stint = StintTracker()
         self.susp_travels = [SuspensionTravel() for _ in range(4)]
-        self.tyre_diameters = (TYRE_DIAMETER_MM,) * 4  # millimeters, from Wheels module once learned
+        self.tyre_diameters: tuple[float, ...] = (TYRE_DIAMETER_MM,) * 4  # millimeters, from Wheels module once learned
         self.vehicle_name = ""
         self.steer_convention = SteerConvention()
-        self.steer_vehicle = None
+        self.steer_vehicle: str | None = None
         self.susp_bumps = [BumpStop() for _ in range(4)]
         self.pressure_ranges = [PressureRange() for _ in range(4)]
         self.brake_peaks = [BrakePeak() for _ in range(4)]
         self.lap_stats = [LapStats() for _ in range(4)]
         self.stats_lap = None  # lap of lap statistics
-        self.last_fast_time = 0.0
-        self.last_session_elapsed = 0.0
-        self.last_pits_state = None
+        self.last_fast_time: float = 0.0
+        self.last_session_elapsed: float = 0.0
+        self.last_pits_state: bool | None = None
         self.brake_heat_balance = 0.0  # average front minus rear disc temperature (Celsius)
-        self.impact_direction = ""  # arrow toward last impact reported by game
-        self.susp_vehicle = None
+        self.impact_direction: str = ""  # arrow toward last impact reported by game
+        self.susp_vehicle: str | None = None
         self.stint_wear = self.stint_wear_delta = 0.0
         self.stint_pressure = self.stint_pressure_delta = 0.0
         self.stint_has_previous = False
         self.trace_version = 0  # changes when recorder adds a sample, so the trace repaints
-        self.pause_start = None  # recorder clock stopped at (game paused), see recorder_now
+        self.pause_start: float | None = None  # recorder clock stopped at (game paused), see recorder_now
         self.paused_total = 0.0
         self.position_unsaved = False  # position moved by auto resize, not written to file yet
 

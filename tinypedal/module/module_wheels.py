@@ -647,8 +647,8 @@ def calc_vehicle_weight(output: WheelsInfo, g_accel: float, unsprung_weight: flo
     update_static_weight = False
 
     vehicle_name = ""
-    static_load_tyre = WHEELS_ZERO
-    static_load_susp = WHEELS_ZERO
+    static_load_tyre: tuple[float, ...] = WHEELS_ZERO
+    static_load_susp: tuple[float, ...] = WHEELS_ZERO
     static_load_fuel = 0.0
     load_tyre_available = False
 

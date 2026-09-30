@@ -71,11 +71,10 @@ check_untyped_defs = true
 exclude = ["pyLMUSharedMemory/", "pyRfactor2SharedMemory/", "tests/"]
 follow_imports = "silent"
 # Blocking checks only for high-signal errors, other categories are reported by `mypy --enable-error-code`
-# Re-enabled so far: arg-type, call-overload, index, operator, override, return-value, union-attr
-disable_error_code = [
-    "assignment", "attr-defined", "misc", "has-type",
-    "var-annotated", "type-arg", "no-redef",
-]
+# Re-enabled so far: arg-type, assignment, call-overload, has-type, index, misc, no-redef, operator,
+# override, return-value, type-arg, union-attr, var-annotated
+# attr-defined stays off: widget mixins (Black box parts) read attributes set by the widget class
+disable_error_code = ["attr-defined"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

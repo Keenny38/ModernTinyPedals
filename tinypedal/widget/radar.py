@@ -156,7 +156,7 @@ class Realtime(Overlay):
 
         # Last data
         self.last_veh_data_version = None
-        self.autohide_timer_start = 1
+        self.autohide_timer_start = 1.0
         self.show_radar = True
         self.always_show = True
 
@@ -446,7 +446,7 @@ class Realtime(Overlay):
         if self.autohide_timer_start > lap_etime:
             self.autohide_timer_start = lap_etime
         if lap_etime - self.autohide_timer_start > self.wcfg["auto_hide_time_threshold"]:
-            self.autohide_timer_start = 0
+            self.autohide_timer_start = 0.0
             return False
         return True
 
@@ -513,7 +513,7 @@ class Realtime(Overlay):
             pen.setWidth(width)
             pen.setColor(color)
         else:
-            pen = Qt.PenStyle.NoPen
+            pen = QPen(Qt.PenStyle.NoPen)
         return pen
 
     def set_brush_style(self, color: str):

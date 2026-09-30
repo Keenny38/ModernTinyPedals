@@ -211,9 +211,9 @@ class PluginManager(BaseDialog):
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to save plugin trust:<br>{error}"))
             return
         if name in wctrl.names:
-            error = reload_plugin(name)
-            if error:
-                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{error}"))
+            load_error = reload_plugin(name)
+            if load_error:
+                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{load_error}"))
         self.refresh()
         self.show_detail()
 

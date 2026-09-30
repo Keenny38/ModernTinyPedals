@@ -183,7 +183,10 @@ class Realtime(Overlay):
             self.max_brake_pres = brake_pres
         return brake_pres / self.max_brake_pres
 
-    def set_pedal_size(self, font_m):
+    def set_pedal_size(self, font_m) -> tuple[
+        int, int, tuple[int, int, int, int], tuple[int, int, int, int],
+        tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int],
+    ]:
         """Set pedal size"""
         max_gap = max(self.wcfg["inner_gap"], 0)
         pedal_length = max(int(self.wcfg["bar_length"]), 10)

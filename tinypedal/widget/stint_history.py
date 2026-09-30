@@ -424,6 +424,7 @@ class Realtime(Overlay):
     def update_stint_history(self, dataset: Sequence[StintDataSet]):
         """Stint history data"""
         show_energy = self.wcfg["show_virtual_energy_if_available"]
+        data: StintData | StintDataSet
         for index in range(self.stint_slot):
             if index < len(dataset):
                 data = dataset[index]

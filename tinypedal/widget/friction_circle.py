@@ -108,8 +108,8 @@ class Realtime(Overlay):
         self.draw_dot()
 
         # Last data
-        self.gforce_raw = 0,0
-        self.data_gforce = deque(maxlen=max(self.wcfg["trace_maximum_samples"], 5))
+        self.gforce_raw: tuple[float, float] = (0.0, 0.0)
+        self.data_gforce: deque[QPointF] = deque(maxlen=max(self.wcfg["trace_maximum_samples"], 5))
         self.last_x = self.area_center
         self.last_y = self.area_center
 
@@ -257,9 +257,9 @@ class Realtime(Overlay):
             self.pixmap_trace.fill(Qt.GlobalColor.transparent)
         painter.setPen(self.pen_trace)
         if self.wcfg["trace_style"]:
-            painter.drawPoints(self.data_gforce)
+            painter.drawPoints(list(self.data_gforce))
         else:
-            painter.drawPolyline(self.data_gforce)
+            painter.drawPolyline(list(self.data_gforce))
 
     def draw_dot(self):
         """Draw dot image (one time)"""

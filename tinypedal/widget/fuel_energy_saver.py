@@ -147,8 +147,8 @@ class Realtime(Overlay):
         # Last data
         self.reset_stint = True  # reset stint stats
         self.start_laps = 0  # laps number at start of current stint
-        self.last_tyre_life = 0
-        self.last_fuel_curr = 0
+        self.last_tyre_life = 0.0
+        self.last_fuel_curr = 0.0
 
     def post_update(self):
         self.reset_stint = True

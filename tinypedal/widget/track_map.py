@@ -622,7 +622,7 @@ class Realtime(Overlay):
             pen.setWidth(width)
             pen.setColor(color)
         else:
-            pen = Qt.PenStyle.NoPen
+            pen = QPen(Qt.PenStyle.NoPen)
         return pen
 
     def set_brush_style(self, color: str):

@@ -156,8 +156,8 @@ def calc_delta_time(
     last_reset = None  # reset check
 
     last_session_id = ("",-1,-1,-1)
-    delta_array_session = DELTA_DEFAULT
-    delta_array_stint = DELTA_DEFAULT
+    delta_array_session: tuple[tuple[float, float], ...] = DELTA_DEFAULT
+    delta_array_stint: tuple[tuple[float, float], ...] = DELTA_DEFAULT
     laptime_session_best = MAX_SECONDS
     laptime_stint_best = MAX_SECONDS
 
@@ -176,7 +176,7 @@ def calc_delta_time(
 
             # Load data
             recording = False
-            validating = 0
+            validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
 
             combo_name = api.read.session.combo_name()
@@ -194,8 +194,8 @@ def calc_delta_time(
                 defaults=(DELTA_DEFAULT, MAX_SECONDS)
             )
             output.deltaBestData = delta_array_best
-            delta_array_raw: list[tuple[float, ...]] = [DELTA_ZERO]  # distance, laptime
-            delta_array_last = DELTA_DEFAULT  # last lap
+            delta_array_raw: list[tuple[float, float]] = [DELTA_ZERO]  # distance, laptime
+            delta_array_last: tuple[tuple[float, float], ...] = DELTA_DEFAULT  # last lap
 
             delta_ema_best = 0.0
             delta_ema_last = 0.0

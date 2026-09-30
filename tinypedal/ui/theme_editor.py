@@ -65,7 +65,7 @@ def theme_color(theme: dict, classic: str) -> str:
     """Resulting color of custom theme for classic color"""
     if classic in theme["colors"]:
         return theme["colors"][classic]
-    base = OVERLAY_THEMES.get(theme["base"]) or {}
+    base: Mapping[str, str] = OVERLAY_THEMES.get(theme["base"]) or {}
     return base.get(classic, classic)
 
 
@@ -236,7 +236,7 @@ class ThemeEditor(BaseEditor):
         if theme is None:
             return
         classic = self.classic_colors[row]
-        base = OVERLAY_THEMES.get(theme["base"]) or {}
+        base: Mapping[str, str] = OVERLAY_THEMES.get(theme["base"]) or {}
         if rgb == base.get(classic, classic):
             theme["colors"].pop(classic, None)  # same as base, no override needed
         else:

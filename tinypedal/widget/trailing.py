@@ -99,7 +99,7 @@ class Realtime(Overlay):
             self.data_steering = self.create_data_samples(max_samples)
         if self.wcfg["show_speed"]:
             self.data_speed = self.create_data_samples(max_samples)
-            self.max_speed = 0
+            self.max_speed = 0.0
         if self.wcfg["show_wheel_lock"]:
             self.data_wheel_lock = self.create_data_samples(max_samples)
         if self.wcfg["show_wheel_slip"]:
@@ -111,7 +111,7 @@ class Realtime(Overlay):
         self.draw_background()
 
         # Last data
-        self.last_lap_etime = -1
+        self.last_lap_etime = -1.0
         self.update_plot = 0
 
     def timerEvent(self, event):

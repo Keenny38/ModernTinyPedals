@@ -211,7 +211,7 @@ class SyncData:
 
     def __init__(self) -> None:
         self._updating = False
-        self._update_thread = None
+        self._update_thread: threading.Thread | None = None
         self._event = threading.Event()
         self._tele_indexes = {_index: _index for _index in range(128)}
 
@@ -320,7 +320,8 @@ class SyncData:
         if self._updating:
             self._event.set()
             self._updating = False
-            self._update_thread.join()
+            if self._update_thread is not None:
+                self._update_thread.join()
             # Make final copy before close, otherwise mmap won't close if using direct access
             self.player_scor = copy_struct(self.player_scor)
             self.player_tele = copy_struct(self.player_tele)

@@ -257,12 +257,12 @@ class Realtime(Overlay):
         for index in range(1, self.total_slot):
             # Predicate player
             if not player_valid:
-                lap_final, player_hi_range, full_laps_left = -MAX_SECONDS, 0, 0
+                lap_final, player_hi_range, full_laps_left = -MAX_SECONDS, 0, 0.0
             elif finish_as_lap and index > 1:
                 lap_final = calc.lap_progress_offset(  # relative lap offset based on 0s column
                     player_laptime_pace, self.relative_lap_offset, self.player_pit_time_set[index])
                 player_hi_range = self.set_highlight_range(player_laptime_pace, lap_final % 1)
-                full_laps_left = 0
+                full_laps_left = 0.0
             else:  # time-type race
                 lap_into_offset = calc.lap_progress_offset(
                     player_laptime_pace, player_lap_into, self.player_pit_time_set[index])

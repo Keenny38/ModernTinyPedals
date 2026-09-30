@@ -741,7 +741,7 @@ class Realtime(Overlay):
             # Set row state: 0 - show, 1 - draw gap, 2 - hide
             if std_idx >= -1:
                 self.row_visible[idx] = True
-                state = (std_idx == -1)
+                state = int(std_idx == -1)
             elif not self.row_visible[idx]:
                 continue  # skip update if already empty
             else:

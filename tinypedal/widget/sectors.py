@@ -122,7 +122,7 @@ class Realtime(Overlay):
         # Last data
         self.last_sector_idx = -1  # previous recorded sector index value
         self.last_target_time = MAX_SECONDS
-        self.freeze_timer_start = 0  # sector timer start
+        self.freeze_timer_start = 0.0  # sector timer start
 
     def post_update(self):
         self.last_sector_idx = -1

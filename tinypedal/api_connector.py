@@ -69,8 +69,9 @@ class Connector(ABC):
 
     def close(self):
         """Dereference all instances"""
-        for var in self.__slots__:
-            setattr(self, var, None)
+        name: str
+        for name in self.__slots__:
+            setattr(self, name, None)
 
 
 class SimLMU(Connector):

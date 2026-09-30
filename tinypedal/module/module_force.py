@@ -142,7 +142,7 @@ def calc_force(
             calc_max_transient_rate.send(None)
             calc_max_braking_rate.send(None)
 
-            avg_lat_gforce_ema = 0
+            avg_lat_gforce_ema = 0.0
             max_braking_rate = 0
             delta_braking_rate = 0
 

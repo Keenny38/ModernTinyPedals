@@ -113,7 +113,7 @@ class Realtime(Overlay):
         # Last data
         self.last_notes_index = None
         self.last_auto_hide = False
-        self.last_etime = 0
+        self.last_etime = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

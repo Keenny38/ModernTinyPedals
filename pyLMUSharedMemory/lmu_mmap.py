@@ -10,6 +10,7 @@ import ctypes
 import logging
 import mmap
 import platform
+from collections.abc import Callable
 from typing import Any
 
 try:
@@ -32,6 +33,10 @@ def get_root_logger_name():
 
 
 logger = logging.getLogger(get_root_logger_name())
+
+
+def no_update() -> None:
+    """Update placeholder while mmap is not created"""
 
 
 def platform_mmap(name: str, size: int) -> mmap.mmap:
@@ -80,7 +85,7 @@ class MMapControl:
         self._struct = data_struct
         self._buffer = bytearray()
         self._realtime = None
-        self.update = None
+        self.update: Callable[[], None] = no_update
         self.data: Any = None
 
     def __del__(self):
@@ -121,7 +126,7 @@ class MMapControl:
             logger.info("sharedmemory: CLOSED: %s", self._mmap_name)
         except BufferError:
             logger.error("sharedmemory: buffer error while closing %s", self._mmap_name)
-        self.update = None  # unassign update method (for proper garbage collection)
+        self.update = no_update  # unassign update method (for proper garbage collection)
 
     def __buffer_share(self) -> None:
         """Share buffer access, may result data desync"""

@@ -198,7 +198,7 @@ class LEDBar(QWidget):
             self.pen_led.setColor(led_outline_color)
             self.pen_led.setWidth(led_outline_width)
         else:
-            self.pen_led = Qt.PenStyle.NoPen
+            self.pen_led = QPen(Qt.PenStyle.NoPen)
 
         self.brush_led = (
             QBrush(lift_and_coast_color_off, Qt.BrushStyle.SolidPattern),

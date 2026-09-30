@@ -121,13 +121,13 @@ class MapView(QWidget):
 
         self.map_filename = ""
         self.map_length = 0
-        self.map_scale = 1
+        self.map_scale = 1.0
         self.map_seek_dist = 0
         self.map_seek_index = 0
         self.map_nodes = 0
         self.curve_nodes = 10
-        self.center_x = 0
-        self.center_y = 0
+        self.center_x = 0.0
+        self.center_y = 0.0
         self.marked_dists = set()
         self.marked_coords = []
         self.highlighted_coords = None

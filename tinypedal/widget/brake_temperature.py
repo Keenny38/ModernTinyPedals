@@ -127,8 +127,8 @@ class Realtime(Overlay):
         # Last data
         self.last_in_pits = -1
         self.last_vehicle_name = None
-        self.last_lap_etime = 0
-        self.off_brake_timer = 0
+        self.last_lap_etime = 0.0
+        self.off_brake_timer = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

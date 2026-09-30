@@ -68,7 +68,7 @@ def rename_car_setup_file(filepath: str, old_filename: str, new_filename: str, e
 
 
 def save_car_setup_file(
-    filepath: str, filename: str, dataset: tuple[str],
+    filepath: str, filename: str, dataset: tuple[str, ...],
     extension: str = FileExt.SVM
 ) -> None:
     """Save car setup file"""
