@@ -129,17 +129,24 @@ jobs:
     needs: [linux, windows]
 
     steps:
-    - name: Checkout master
+    - name: Checkout master with full history and tags
       uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
 
-    - name: Get latest change log
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Release notes from commits since previous release
       run: |
-        prev_line_num=$(grep -n "^\----*$" "./docs/changelog.txt" | sed -n "2,2p" | sed 's/[\:\-]//g')
-        sed -n "1,$(expr $prev_line_num - 2)p" "./docs/changelog.txt" >> release.txt
-        echo "Hash sum" >> release.txt
-        echo "---" >> release.txt
-        echo "SHA256:" ${{ needs.linux.outputs.sha256 }} >> release.txt
-        echo "SHA256:" ${{ needs.windows.outputs.sha256 }} >> release.txt
+        python tools/gen_changelog.py --release v${{ needs.linux.outputs.app_ver }} > release.txt
+        echo "" >> release.txt
+        echo "### SHA256" >> release.txt
+        echo "" >> release.txt
+        echo "- \`${{ needs.linux.outputs.sha256 }}\`" >> release.txt
+        echo "- \`${{ needs.windows.outputs.sha256 }}\`" >> release.txt
         cat release.txt
 
     - name: Update release notes

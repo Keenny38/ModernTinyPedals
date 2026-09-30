@@ -1,304 +1,192 @@
-# TinyPedal - racing simulation overlay
+# Modern Tiny Pedals
 
-TinyPedal is a Free and Open Source telemetry overlay application for racing simulation.
+**Overlay de télémétrie pour Le Mans Ultimate et rFactor 2**, libre et gratuit. Une centaine de widgets configurables (pneus, freins, carburant, delta, classement, radar, météo…), des outils d'analyse et une interface en français.
 
-Focuses on minimalist design, light-weight and efficiency, extensive customization and data analysis. Features a large collection of highly configurable overlay widgets and data modules, advanced fuel calculator and editing tools.
+Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com/TinyPedal/TinyPedal) : même base solide, avec une nouvelle interface, de nouveaux outils et beaucoup de travail sur la fiabilité.
 
-Currently supports `rFactor 2` and `Le Mans Ultimate`, and runs on `Windows` and `Linux`.
+[Télécharger](https://github.com/Keenny38/overlays/releases/latest) ·
+[Démarrage rapide](#démarrage-rapide) ·
+[Nouveautés](#ce-que-cette-version-apporte) ·
+[Guide des réglages](docs/customization.md) ·
+[Changelog](CHANGELOG.md) ·
+[Feuille de route](docs/ROADMAP.md)
 
-[Download](https://github.com/TinyPedal/TinyPedal/releases) -
-[Quick Start](#quick-start) -
-[FAQ](https://github.com/TinyPedal/TinyPedal/wiki/Frequently-Asked-Questions) -
-[User Guide](https://github.com/TinyPedal/TinyPedal/wiki/User-Guide) -
-[Run on Linux](#running-on-linux) -
-[License](#license)
+![Aperçu](https://user-images.githubusercontent.com/21177177/282278970-b806bf02-a83d-4baa-8b45-0ca10f28f775.png)
+
 ---
 
-![preview](https://user-images.githubusercontent.com/21177177/282278970-b806bf02-a83d-4baa-8b45-0ca10f28f775.png)
+## Démarrage rapide
 
-### What's new in this modernized fork
+1. **Télécharge** `ModernTinyPedals-<version>-windows-setup.exe` sur la page [Releases](https://github.com/Keenny38/overlays/releases/latest) et lance-le. Pas besoin de droits administrateur : l'app s'installe dans ton profil (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
+2. **Prépare le jeu** : mode d'affichage `Sans bordure` ou `Fenêtré` (le plein écran exclusif cache l'overlay), puis le réglage de ton jeu ci-dessous.
+3. **Au premier lancement**, l'assistant te demande la langue, le jeu, le thème et les widgets de départ.
+4. **Lance une session** : l'overlay apparaît dès que la voiture est en piste et se cache sinon.
 
-* Qt 6 (PySide6), modern overlay style (themes, rounded corners, bundled JetBrains Mono font), custom themes editor and per widget theme.
-* French interface (`Config` > `Application` > `Language`), switched live, including all option names; option descriptions from the documentation shown as tooltips.
-* First launch setup wizard, global option search (`Ctrl+F`), live widget preview, undo & redo in editors, layout guides.
-* New `Black box` widget: tyres, brake discs, wheel rotation, lock & spin, ABS & TC activation.
-* Telemetry recorder (CSV per lap) and lap telemetry viewer, preset comparison, preset packages (zip).
-* Remote control for Stream Deck & co, web dashboard for phone or tablet, experimental SteamVR overlay.
-* Widget plugins with plugin manager, bug report generator, widget & thread performance monitor.
-* Robustness: thread supervisor, automatic preset backups, atomic file writing, safer networking; 295 automated tests.
+Ensuite :
 
-See [customization guide](docs/customization.md) for details.
+- **Déplacer les widgets** : déverrouille l'overlay (menu de l'icône dans la zone de notification > `Verrouiller l'overlay`) puis fais-les glisser, ou utilise `Outils > Éditeur de disposition` sur une capture du jeu.
+- **Régler un widget** : onglet `Widgets` de la fenêtre principale, ou `Ctrl+F` pour chercher une option par son nom.
+- **Mises à jour** : l'app te prévient d'une nouvelle version et peut la télécharger et l'installer (`Télécharger et installer`).
 
-## Requirements
+Une version ZIP portable existe aussi. Ne l'extrais pas dans `Program Files` ni dans le dossier du jeu : l'app enregistre ses réglages à côté de l'exécutable.
 
-### Supported Sims
+### Réglage du jeu
 
-| API | Windows | Linux |
-|:-:|:-:|:-:|
-| Le Mans Ultimate | No plugin required | Requires third-party plugin |
-| rFactor 2 | rF2SharedMemoryMapPlugin | rF2SharedMemoryMapPlugin(Wine) |
+| Jeu | Windows | Linux |
+|---|---|---|
+| **Le Mans Ultimate** | Rien à installer. Active `Paramètres > Gameplay > Activer les plugins`. | Nécessite un plugin tiers, voir [cette discussion](https://github.com/TinyPedal/TinyPedal/issues/9). |
+| **rFactor 2** | Plugin [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download). | [Version Wine du plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build). |
 
-### Display Mode
+Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin64\Plugins` (crée le dossier s'il manque), active-le dans `Paramètres > Gameplay > Plugins`, puis redémarre le jeu. Si le plugin n'apparaît pas, installe le runtime `Visual C++ 2013` fourni dans `Support\Runtimes` du jeu.
 
-Game display mode must be set to `Borderless` or `Windowed` to show overlay. `Fullscreen` mode is not supported.
+## Ce que cette version apporte
 
-### Setup for Le Mans Ultimate
+**Interface**
+- Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
+- Assistant de premier lancement, recherche globale d'option (`Ctrl+F`), aperçu en direct des widgets, annuler/rétablir dans les éditeurs.
+- Style d'overlay moderne : thèmes (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par widget.
+- Éditeur de disposition avec guides d'alignement et magnétisme.
 
-#### Windows
+**Widgets et données**
+- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents.
+- Enregistreur de tours et visionneuse de télémétrie (superposer deux tours), export **MoTeC `.ld`**.
+- **Rejeu de télémétrie** : enregistre une session LMU et rejoue-la dans tous les widgets, sans lancer le jeu.
 
-* There is no plugin required for accessing LMU's built-in API on Windows. However, make sure `Enable Plugins` option is turned `ON` from in game `Settings` -> `Gameplay` page.
+**Connexions**
+- Contrôle à distance pour Stream Deck, Companion ou SimHub, et flux de télémétrie en direct par WebSocket.
+- Tableau de bord web pour téléphone ou tablette, avec code d'accès et HTTPS en option.
+- Overlay SteamVR expérimental.
 
-#### Linux
+**Fiabilité**
+- Installeur Windows et mises à jour vérifiées (SHA-256) depuis l'app.
+- Sauvegardes automatiques des presets, écriture de fichiers atomique, redémarrage automatique des threads plantés.
+- Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
+- Plus de 800 tests automatisés, vérification de types et lint en intégration continue.
 
-* LMU's built-in API can be selected on Linux, but may require third-party plugin to access, see [discussion #9](https://github.com/TinyPedal/TinyPedal/issues/9) for info.
+Tout est détaillé dans le [guide des réglages](docs/customization.md), et chaque changement dans le [changelog](CHANGELOG.md).
 
-### Setup for rFactor 2
+## Lancer depuis le code source
 
-TheIronWolf's [rF2 Shared Memory Map Plugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin) is required for accessing `rFactor 2` API.
+Nécessite [Python](https://www.python.org/) 3.10 ou plus récent.
 
-#### Windows
-
-* Download the plugin from:\
-https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download
-
-#### Linux
-
-* Download the forked plugin for Wine from:\
-https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build
-
-#### Install plugin
-
-The plugin file is named `rFactor2SharedMemoryMapPlugin64.dll` and should be placed in `rFactor 2\Bin64\Plugins` folder.
-
-Note, manually create this `Plugins` folder if it is missing.
-
-#### Enable plugin in game
-
-In game `Settings` -> `Gameplay` page, find `Plugins` section and toggle on `rFactor2SharedMemoryMapPlugin64.dll`.
-
-After plugin enabled, must `restart game` to take effect.
-
-Note, if game cannot generate `rFactor2SharedMemoryMapPlugin64.dll` entry in `CustomPluginVariables.JSON` file, make sure `VC12 (Visual C++ 2013) runtime` is installed, which can be found in game's `Support\Runtimes` folder.
-
-## Quick Start
-
-> [!IMPORTANT]
-> Make sure required plugins for specific game are installed according to [Requirements](#requirements).
->
-> DO NOT extract TinyPedal into `system` or `game` folder, such as `Program Files` or `rFactor 2` folder, otherwise it may fail to run.
->
-> See [Frequently Asked Questions](https://github.com/TinyPedal/TinyPedal/wiki/Frequently-Asked-Questions) for common issues, and [User Guide](https://github.com/TinyPedal/TinyPedal/wiki/User-Guide) for usage info.
->
-> For Linux user, please follow [Running on Linux](#running-on-linux) section for instruction.
-
-1. Download latest TinyPedal version from [Releases](https://github.com/TinyPedal/TinyPedal/releases) page, extract it into a clean folder, and run `tinypedal.exe`.
-
-2. A tray icon will appear at system tray. If not shown, check hidden tray icon. `Right Click` on tray icon will bring up context menu.
-
-3. Launch game, overlay will appear once vehicle is on track, and auto-hide otherwise. Auto-hide can be toggled On and Off by clicking `Auto Hide` from tray menu.
-
-4. Overlay can be Locked or Unlocked by clicking `Lock Overlay` from tray menu. While Unlocked, click on overlay to drag around.
-
-5. Widgets can be Enabled or Disabled from `Widget` panel in main window. `Right Click` on tray icon and select `Config` to show main window if it is hidden.
-
-6. To quit APP, `Right Click` on tray icon and select `Quit`; or, click `Overlay` menu from main window and select `Quit`.
-
-## Run from Source
-
-### Dependencies:
-* [Python](https://www.python.org/) 3.10 or higher
-* PySide6 (Qt 6)
-* pyLMUSharedMemory
-* pyRfactor2SharedMemory
-* psutil
-
-### Download source code
-
-#### Method 1
-
-Download TinyPedal source code from [Releases](https://github.com/TinyPedal/TinyPedal/releases) page; or click `Code` button at the top of repository and select `Download ZIP`.
-
-Download submodule source code from following links:
-- pyLMUSharedMemory: https://github.com/TinyPedal/pyLMUSharedMemory
-- pyRfactor2SharedMemory: https://github.com/TinyPedal/pyRfactor2SharedMemory
-
-Extract TinyPedal source code ZIP file. Then extract submodule ZIP files and put them in corresponding folder in the root folder of TinyPedal.
-
-#### Method 2
-
-Use [Git](https://git-scm.com/) tool and run following command to clone TinyPedal source code alongside required submodules:
-```
-git clone --recursive https://github.com/TinyPedal/TinyPedal.git
+```bash
+git clone https://github.com/Keenny38/overlays.git
 ```
 
-To update submodules, run command:
-```
-git submodule update --init
-```
-
-Since `master` branch is the development branch, it may not be stable for normal use. You may switch to specific released version instead, such as `v2.45.0`, run command:
-```
-git checkout tags/v2.45.0
+```bash
+cd overlays
 ```
 
-And to switch back to development branch, run:
-```
-git checkout master
-```
+Crée un environnement virtuel, active-le, puis installe les dépendances (PySide6, psutil, cryptography) :
 
-### Setup development environment
-
-It is recommended to setup an isolated development environment for running and testing code, especially useful if multiple different versions of Python are installed.
-
-To start, make sure required Python version was installed. Python `3.12` is used in this example.
-
-First, we need to create a [Python virtual environment](https://docs.python.org/3/library/venv.html). On windows, run following command in `Powershell` from project root folder:
-
-```
+```bash
 py -3.12 -m venv .venv
 ```
 
-Then run following command to activate this virtual environment:
-
-```
-.venv\Scripts\activate.ps1
+```bash
+.venv\Scripts\activate
 ```
 
-Once activated, you can continue with [Install dependencies](#install-dependencies) section to install required package for this virtual environment, and running or building TinyPedal inside this virtual environment.
-
-Finally, remember to activate this virtual environment (if haven't already) before installing packages or running the code.
-
-### Install dependencies
-
-Install additional dependencies by using command:
-```
+```bash
 pip install -r requirements.txt
 ```
 
-To start TinyPedal, type command from project root folder:
-```
+```bash
 python run.py
 ```
 
-To install development tools (linter, type checker, tests with coverage), and run checks:
-```
+Les bibliothèques de mémoire partagée (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) sont incluses dans le dépôt : pas de sous-module à récupérer. Pour des versions exactes testées, utilise `requirements-lock.txt`.
+
+### Développement
+
+```bash
 pip install -r requirements-dev.txt
+```
+
+Contrôles lancés en intégration continue (et avant chaque commit avec `pre-commit install`) :
+
+```bash
 ruff check .
+```
+
+```bash
 mypy tinypedal
+```
+
+```bash
 pytest --cov=tinypedal
 ```
 
-Optional: run checks automatically before each commit with `pre-commit install`.
-For reproducible builds, `requirements-lock.txt` pins the tested versions.
+Le benchmark des widgets se lance à part avec `pytest -m benchmark`.
 
-After adding options or editing documentation, regenerate French option names and tooltips:
+Après avoir ajouté des options ou modifié la documentation, régénère les libellés et les bulles d'aide :
+
+```bash
+python tools/gen_fr_options.py
 ```
-python tools/gen_fr_options.py  # writes tinypedal/i18n/data/fr_options.json
-python tools/gen_option_help.py  # writes tinypedal/i18n/data/option_help.json
+
+```bash
+python tools/gen_option_help.py
 ```
 
-## Build Executable for Windows
+Le second script signale les bulles d'aide qui n'ont pas encore de traduction française (`tinypedal/i18n/data/fr_option_help.json`).
 
-Executable file can be built with [PyInstaller](https://pyinstaller.org).
+### Changelog automatique
 
-To install PyInstaller, run command:
+`CHANGELOG.md` est régénéré depuis l'historique Git à chaque push sur `master` (workflow `Changelog`), et chaque release reprend les commits depuis la précédente comme notes de version. Il suffit d'écrire des titres de commit clairs : ceux qui commencent par `Add` vont dans **Added**, `Fix` dans **Fixed**, le reste dans **Changed**. Pour voir le résultat en local :
+
+```bash
+python tools/gen_changelog.py
 ```
+
+### Compiler pour Windows
+
+```bash
 pip install pyinstaller
 ```
 
-To build executable file, run command:
-```
+```bash
 python build_pyinstaller.py
 ```
 
-After building completed, executable file can be found in `dist\TinyPedal` folder.
+L'exécutable est créé dans `dist\TinyPedal`. Pour l'installeur, installe [Inno Setup 6](https://jrsoftware.org/isinfo.php) puis (en remplaçant la version) :
 
-To build Windows installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run command (replace version):
-```
+```bash
 iscc /DAppVersion=2.50.0 installer\tinypedal.iss
 ```
 
-Installer is saved in `dist` folder. It installs for current user in `%LOCALAPPDATA%\Programs\TinyPedal` (no admin rights needed), keeps presets and user data when updating, and can be uninstalled from Windows settings. Installed version can download and install new releases from notification bar (`Download And Install`), after verifying installer SHA256 hash.
+Pour publier une version, augmente `__version__` dans `tinypedal/version.py`, pousse, puis lance le workflow `Build and Release` depuis l'onglet Actions de GitHub. Il crée la release avec le ZIP, l'installeur, son fichier `.sha256` et les notes de version.
 
-## Running on Linux
+> Le nom affiché est « Modern Tiny Pedals », mais le nom interne reste `TinyPedal` (dossier de configuration `%APPDATA%\TinyPedal`, `tinypedal.exe`, en-tête `X-TinyPedal` du contrôle à distance), pour garder les réglages existants et la compatibilité des outils.
 
-The procedure described in the [Run from Source](#run-from-source) section is mostly valid,
-except some differences in the dependencies, and that no executable can be
-built. The differences are explained here.
+## Linux
 
-Configuration and data files will be stored in the defined user-specific
-directories, default to:
-```
-$HOME/.config/TinyPedal/
-$HOME/.local/share/TinyPedal/
-```
+Lance l'app depuis le code source comme ci-dessus (pas d'exécutable). Paquets nécessaires : `PySide6`, `psutil`, `cryptography` et `pyxdg`, par exemple `python3-pyside6`, `python3-psutil`, `python3-cryptography`, `python3-pyxdg` selon ta distribution. Certaines distributions découpent PySide6 : installe alors `python3-pyside6.qtgui`, `python3-pyside6.qtwidgets` et `python3-pyside6.qtmultimedia`.
 
-The required Python packages are `PySide6`, `psutil` and `pyxdg`. Most distros
-name the package with a prefix, like `python3-pyside6`, `python3-psutil` and
-`python3-pyxdg`.
-
-Some distros split `PySide6` in subpackages. If you don't find
-`python3-pyside6` then you should install `python3-pyside6.qtgui`,
-`python3-pyside6.qtwidgets` and `python3-pyside6.qtmultimedia`.
-
-Alternatively, you can install them using `pip` but this will bypass your
-system package manager and it isn't the recommended option. The command to
-install the dependencies with this method is:
-```
-pip install -r requirements.txt pyxdg
-```
-
-To start TinyPedal type the following command:
-```
+```bash
 ./run.py
 ```
 
-### Installation
+Les réglages sont dans `$HOME/.config/TinyPedal/` et les données dans `$HOME/.local/share/TinyPedal/`.
 
-Once you have a working instance of TinyPedal, created using the git command or
-by unpacking the Linux release file, you can run the install script to install
-or update TinyPedal on your system.
+Pour installer un lanceur et la commande `TinyPedal` dans `/usr/local/` :
 
-The install script will create a desktop launcher and will make `TinyPedal`
-available as a command from the terminal.
-
-The files will be installed at the `/usr/local/` prefix. You'll need
-appropriate permissions to write there, for example, by using `sudo`.
-
-You can run the script as (it doesn't support any arguments or options):
-```sh
+```bash
 sudo ./install.sh
 ```
 
-If you need persistent launch arguments (for example, to write log to file), create
-`~/.config/TinyPedal/launcher.conf` with:
+Des arguments de lancement permanents se mettent dans `~/.config/TinyPedal/launcher.conf`, par exemple `TINYPEDAL_RUN_ARGS="--log-level 2"`.
 
-```sh
-TINYPEDAL_RUN_ARGS="--log-level 2"
-```
+Problèmes connus :
+- Sous KDE, les widgets n'apparaissent pas au-dessus du jeu : active `Activer contourner le gestionnaire de fenêtres` dans `Config > Compatibilité`.
+- La transparence ne marche pas sans compositing : active la composition de fenêtres de ton environnement de bureau.
 
-The installed launcher and desktop entry will read this file automatically.
+## Contribuer
 
-### Known issues
+Signale un problème ou propose une idée dans les [issues](https://github.com/Keenny38/overlays/issues). Les règles de contribution sont dans [CONTRIBUTING.md](CONTRIBUTING.md), et ce qui reste à faire dans la [feuille de route](docs/ROADMAP.md).
 
-- Some features may not be available on Linux currently.
-- Widgets don't appear over the game window in KDE. Workaround: enable `Bypass Window Manager` option in `Compatibility` dialog from `Config` menu in main window.
-- Transparency of widgets doesn't work when desktop compositing is disabled. Workaround: enable `window manager compositing` in your Desktop Environment.
+## Licence et crédits
 
-## Contributing
+Modern Tiny Pedals est dérivé de [TinyPedal](https://github.com/TinyPedal/TinyPedal), Copyright (C) 2022-2026 TinyPedal developers. Voir [docs/contributors.md](docs/contributors.md) pour la liste des développeurs et contributeurs.
 
-Please follow [Contributing Guidelines](CONTRIBUTING.md) for how to report issue, request feature, or contribute code.
-
-## License
-
-Copyright (C) 2022-2026 TinyPedal developers
-
-TinyPedal is free software and licensed under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. TinyPedal is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY. See [LICENSE.txt](./LICENSE.txt) for more info.
-
-TinyPedal icon, as well as image files located in `images` folder, are licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
-
-Licenses and notices file for third-party software are located in `docs\licenses` folder, see [THIRDPARTYNOTICES.txt](./docs/licenses/THIRDPARTYNOTICES.txt) file for details.
-
-## Credits
-
-See [docs\contributors.md](./docs/contributors.md) file for full list of developers and contributors.
+Logiciel libre sous licence [GNU GPL v3](LICENSE.txt) ou toute version ultérieure, distribué SANS AUCUNE GARANTIE. L'icône et les images du dossier `images` sont sous licence [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Les licences des logiciels tiers sont dans [docs/licenses](docs/licenses/THIRDPARTYNOTICES.txt).
