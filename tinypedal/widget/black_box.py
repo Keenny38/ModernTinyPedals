@@ -47,6 +47,7 @@ from ._black_box.panels import PanelPainter
 from ._black_box.reader import DataReader
 from ._black_box.recorder import EventLog, IncidentBrowse, Recorder
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
+from ._black_box.status import StatusPainter
 from ._black_box.state import (
     BrakePeak,
     BumpStop,
@@ -70,7 +71,7 @@ from ._style import StyledConfig
 
 
 class Realtime(
-    DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter,
+    DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter, StatusPainter,
     PaintBase, Overlay,
 ):
     """Draw widget
@@ -142,6 +143,8 @@ class Realtime(
         # so every value in the column lines up on the right edge instead of each being centered.
         self.justify_center = wcfg["center_column_alignment"] == "Justified"
         self.need_limiter = "pit_limiter" in shown
+        self.need_lights = bool(wcfg["show_headlights_indicator"])
+        self.need_engine = bool(wcfg["show_engine_status"])
         self.need_gear = "gear" in shown or self.show_recorder
         self.need_pedals = "pedals" in shown or self.show_recorder
         self.need_rpm = "rpm" in shown or bool(wcfg["show_rpm_leds"]) or (
@@ -436,6 +439,10 @@ class Realtime(
         self.laptime_current = 0.0  # seconds
         self.in_pits = False
         self.limiter = False
+        self.headlights = False
+        self.ignition = 0  # 0 off, 1 ignition on & engine stopped, 2 engine running
+        self.oil_temp = 0.0  # Celsius
+        self.water_temp = 0.0
         self.gear = 0
         self.speed = 0.0
         self.rpm = 0.0
@@ -507,6 +514,7 @@ class Realtime(
                 self.draw_suspension(painter, self.rects_susp[index], wheel, index)
         if not self.rect_center.isNull():
             self.draw_center(painter, self.rect_center)
+        self.draw_status_icons(painter)
         if self.row_battery:
             self.draw_battery_bar(painter, self.rect_battery)
         self.draw_bottom_rows(painter)

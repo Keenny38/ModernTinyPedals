@@ -45,10 +45,11 @@ def widget(ui_env, monkeypatch):
         ),
         inputs=SimpleNamespace(
             brake_raw=lambda: 0.9, throttle=lambda: 0.0, brake=lambda: 0.9, steering=lambda: 0.0),
-        engine=SimpleNamespace(gear=lambda: -1, rpm=lambda: 6000.0, rpm_max=lambda: 8000.0),
+        engine=SimpleNamespace(gear=lambda: -1, rpm=lambda: 6000.0, rpm_max=lambda: 8000.0,
+                             oil_temperature=lambda: 100.0, water_temperature=lambda: 85.0),
         switch=SimpleNamespace(
             abs_active=lambda: True, tc_active=lambda: False, abs_level=lambda: 4, tc_level=lambda: -1,
-            tc_cut_level=lambda: -1, tc_slip_level=lambda: -1, speed_limiter=lambda: 1,
+            tc_cut_level=lambda: -1, tc_slip_level=lambda: -1, speed_limiter=lambda: 1, headlights=lambda: 1, ignition_starter=lambda: 1,
         ),
     )
     monkeypatch.setattr(api, "read", fake)

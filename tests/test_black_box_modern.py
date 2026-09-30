@@ -1382,6 +1382,27 @@ def test_brake_imbalance_and_heat_balance(ui_env, monkeypatch):
         widget.deleteLater()
 
 
+
+def test_lights_and_engine_rows(ui_env, monkeypatch):
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.switch, "headlights", lambda: 1)
+    monkeypatch.setattr(api.read.switch, "ignition_starter", lambda: 1)
+    monkeypatch.setattr(api.read.engine, "rpm", lambda: 6000.0)
+    monkeypatch.setattr(api.read.engine, "oil_temperature", lambda: 130.0)
+    monkeypatch.setattr(api.read.engine, "water_temperature", lambda: 90.0)
+    widget = new_widget({})
+    try:
+        widget.timerEvent(None)
+        assert widget.headlights and widget.ignition == 2
+        assert widget.oil_temp == pytest.approx(130.0)
+        widget.grab()
+        for state in (0, 1):
+            widget.ignition = state
+            widget.grab()
+    finally:
+        widget.deleteLater()
+
 # --- Suspension: lap statistics, damper histogram
 def test_lap_stats_counts_and_resets():
     from tinypedal.widget._black_box.state import LapStats

@@ -306,6 +306,13 @@ class DataReader:
         self.in_pits = bool(in_pits)
         if self.need_limiter:
             self.limiter = bool(api.read.switch.speed_limiter())
+        if self.need_lights:
+            self.headlights = bool(api.read.switch.headlights())
+        if self.need_engine:
+            self.ignition = api.read.switch.ignition_starter() * (
+                1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"]))
+            self.oil_temp = api.read.engine.oil_temperature()
+            self.water_temp = api.read.engine.water_temperature()
         if self.need_gear:
             self.gear = api.read.engine.gear()
         self.speed = speed
@@ -584,7 +591,8 @@ class DataReader:
             self.tc_cut_level, self.tc_slip_level, self.abs_seen, self.tc_seen,
             rounded(self.brake_bias, 4), rounded(self.locking_front, 0), rounded(self.locking_rear, 0),
             rounded(self.brake_migration, 1), rounded(self.delta_best, 3), rounded(self.laptime_current, 2),
-            self.in_pits, self.limiter, self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
+            self.in_pits, self.limiter, self.headlights, self.ignition,
+            rounded(self.oil_temp, 0), rounded(self.water_temp, 0), self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
             rounded(self.throttle, 3), rounded(self.brake, 3), rounded(self.clutch, 3),
             rounded(self.refuel, 1), rounded(self.refill, 1), rounded(self.fuel, 1), rounded(self.fuel_laps, 1),
             rounded(self.fuel_capacity, 1), rounded(self.fuel_start, 1),

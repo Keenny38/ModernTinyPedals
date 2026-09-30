@@ -239,6 +239,12 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_brake_temperature_trend": ("brake_trend_duration", "brake_heat_trend_threshold"),
     "show_ride_height_minimum": ("ride_height_bottoming_threshold",),
     "show_brake_heat_balance": ("text_brake_heat",),
+    "show_headlights_indicator": ("headlights_active_color", "status_icons_side", "status_icon_scale"),
+    "show_engine_status": (
+        "stalling_rpm_threshold", "engine_oil_warning_temperature", "engine_water_warning_temperature",
+        "engine_running_color", "engine_warning_color", "engine_off_color", "engine_ignition_color",
+        "text_oil", "text_water", "text_engine_off", "text_ignition",
+    ),
     "show_tyre_wear_end_stint": ("tyre_wear_forecast_laps",),
     "show_tyre_load": ("tyre_load_display",),
     "show_brake_wear": ("brake_wear_warning_threshold", "font_color_brake_wear_warning", "brake_wear_display"),
