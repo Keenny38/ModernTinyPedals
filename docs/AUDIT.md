@@ -1,4 +1,6 @@
-# Audit & feuille de route — TinyPedal 2.50.0 (fork modernisé)
+# Audit — TinyPedal 2.50.0 (fork modernisé)
+
+> Ce fichier garde l'historique des audits et de ce qui a été fait. Ce qui reste à faire est dans [ROADMAP.md](ROADMAP.md).
 
 Date : 27/09/2026 · Périmètre : tout le code `tinypedal/` (~60 000 lignes), `run.py`, build, CI.
 
@@ -369,3 +371,22 @@ Chaque lot a été vérifié **par mutation du code source**, pas seulement au v
 Deux de mes attentes initiales étaient fausses et c'est le code qui avait raison : le rayon de roue n'est pas établi aux premières trames, et une remise à zéro de tour est suivie de l'accumulation de la trame courante.
 
 Réalisé (28/09/2026) : A, B, C, D — intégralement.
+
+---
+
+## F. Réalisé (30/09/2026)
+
+- Sous-modules `pyLMUSharedMemory` et `pyRfactor2SharedMemory` intégrés au dépôt (leurs corrections de typage ne pouvaient pas être poussées vers les dépôts officiels).
+- Projet publié sur GitHub : [Keenny38/overlays](https://github.com/Keenny38/overlays). Les mises à jour sont vérifiées sur ce dépôt par défaut.
+- Sauvegarde : plus d'attente active au redémarrage ni au rechargement (événement avec délai maximal).
+- Rejeu de télémétrie LMU (`Outils > Rejeu de télémétrie`) : enregistre la mémoire partagée et la rejoue dans tous les widgets, sans le jeu.
+- Export MoTeC `.ld` depuis la visionneuse de télémétrie.
+- Éditeur de disposition (`Outils > Éditeur de disposition`) : placer les widgets sur une capture du jeu, avec magnétisme.
+- Flux de télémétrie en direct par WebSocket (`ws://127.0.0.1:8337/stream`) sur le serveur de contrôle à distance.
+- Installeur Windows (Inno Setup, par utilisateur) et installation des mises à jour depuis l'app, avec vérification SHA-256.
+- Bulles d'aide des options traduites en français (996 textes).
+- mypy : `misc`, `has-type`, `var-annotated`, `type-arg`, `no-redef` et `assignment` réactivés. Seul `attr-defined` reste masqué.
+- Tests des modules Sectors, Stint, Hybrid et Force (couverture de 10-14 % à 71-84 %).
+- Moniteur de performance : le temps de mise à jour du Black box n'était jamais mesuré (méthode venant d'un mixin), corrigé.
+- Tableau de bord web en HTTPS (certificat auto-signé, empreinte affichée).
+
