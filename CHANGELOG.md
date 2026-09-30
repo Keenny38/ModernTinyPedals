@@ -20,6 +20,7 @@ The changelog of the original TinyPedal releases (2.50.0 and older) is in [docs/
 
 ### Fixed
 
+- Fix local host probe picking a host that refused the connection ([24ffc95](https://github.com/Keenny38/overlays/commit/24ffc95))
 - Fix installer path in README ([e60e2cd](https://github.com/Keenny38/overlays/commit/e60e2cd))
 - Fix more arg-type errors, including two that hid real looseness ([ad379b7](https://github.com/Keenny38/overlays/commit/ad379b7))
 - Fix the mechanical half of the arg-type errors ([1c8ddac](https://github.com/Keenny38/overlays/commit/1c8ddac))
