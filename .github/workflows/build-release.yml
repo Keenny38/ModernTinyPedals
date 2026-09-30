@@ -93,12 +93,24 @@ jobs:
         $file_name="TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip"
         Compress-Archive -Path ./dist/TinyPedal -DestinationPath ./$file_name
 
+    - name: Build Windows installer
+      shell: pwsh
+      run: |
+        $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+        if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+        & $iscc /DAppVersion=${{ needs.linux.outputs.app_ver }} installer\tinypedal.iss
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Move-Item ./dist/TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe .
+
     - name: Check hash sum
       id: get_hash
       run: |
+        setup_name=TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
+        sha256sum $setup_name | sed 's/\*//g' > $setup_name.sha256
         sha256hash=$(sha256sum TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip | sed 's/\*//g')
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
+        cat $setup_name.sha256
 
     - name: Upload release files
       uses: softprops/action-gh-release@v2
@@ -108,6 +120,8 @@ jobs:
         tag_name: v${{ needs.linux.outputs.app_ver }}
         files: |
           TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip
+          TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
+          TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe.sha256
 
   # Generate release notes
   release-notes:

@@ -112,3 +112,4 @@ def test_set_header_get():
     request = set_header_get("/rest/garage", "127.0.0.1", "Accept: application/json")
     assert request == (
         b"GET /rest/garage HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\r\n")
+

@@ -22,18 +22,24 @@ Notification
 
 from __future__ import annotations
 
-from PySide6.QtCore import Slot
+import logging
+import threading
+
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QMenu,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..setting import cfg
-from ..update import release_url, update_checker
+from ..update import can_auto_update, download_installer, release_url, run_installer, update_checker
+
+logger = logging.getLogger(__name__)
 
 
 class NotifyBar(QWidget):
@@ -128,9 +134,16 @@ class NotifyBar(QWidget):
 class UpdatesNotifyButton(QPushButton):
     """Updates notify button"""
 
+    downloaded = Signal(str, str)  # installer path, error message
+
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
         version_menu = QMenu(self)
+
+        self.install_update = version_menu.addAction(tr("Download And Install"))
+        self.install_update.triggered.connect(self.download_update)
+        self.install_update.setVisible(False)
+        self.downloaded.connect(self.install_downloaded)
 
         view_update = version_menu.addAction(tr("View Updates On GitHub"))
         view_update.triggered.connect(self.open_release)
@@ -156,3 +169,43 @@ class UpdatesNotifyButton(QPushButton):
             # Hide message if no unpdates and not manual checking
             self.setText(update_checker.message())
             self.setVisible(update_checker.is_manual() or update_checker.is_updates())
+            self.install_update.setVisible(
+                can_auto_update() and update_checker.is_updates() and update_checker.installer is not None
+            )
+
+    def download_update(self):
+        """Download installer in background thread"""
+        asset = update_checker.installer
+        if asset is None:
+            return
+        self.install_update.setEnabled(False)
+        self.setText(tr("Downloading Update..."))
+
+        def download():
+            try:
+                self.downloaded.emit(download_installer(asset), "")
+            except (OSError, ValueError) as error:
+                logger.error("UPDATES: download failed: %s", error)
+                self.downloaded.emit("", str(error))
+
+        threading.Thread(target=download, daemon=True, name="Update download").start()
+
+    @Slot(str, str)  # type: ignore[operator]
+    def install_downloaded(self, path: str, error: str):
+        """Run installer and quit, installer restarts TinyPedal when done"""
+        self.install_update.setEnabled(True)
+        self.setText(update_checker.message())
+        if not path:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to download update: {error}"))
+            return
+        confirm = QMessageBox.question(
+            self, tr("Download And Install"),
+            tr("Update downloaded. Close TinyPedal and install it now?"),
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        run_installer(path)
+        window = self.window()
+        quit_app = getattr(window, "quit_app", None)
+        if callable(quit_app):
+            quit_app()

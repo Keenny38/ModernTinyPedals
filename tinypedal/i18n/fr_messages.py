@@ -172,4 +172,5 @@ MESSAGE_RULES = (
     (r"Exported: (.+)", r"Exporté : \1"),
     (r"^(\d+) widgets moved$", r"\1 widget(s) déplacé(s)"),
     (r"^(\d+) widgets$", r"\1 widget(s)"),
+    (r"Unable to download update: (.+)", r"Impossible de télécharger la mise à jour : \1"),
 )

@@ -23,10 +23,17 @@ Check for updates
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import threading
+import urllib.request
+from typing import NamedTuple
 
 from . import app_signal, version
 from .async_request import get_response, set_header_get
@@ -68,6 +75,66 @@ def request_latest_release(repo: str):
     return get_response(request_header, host, port, timeout, ssl=True)
 
 
+class InstallerAsset(NamedTuple):
+    """Windows installer attached to a release"""
+
+    name: str
+    url: str
+    sha256_url: str
+
+
+INSTALLER_SUFFIX = "-windows-setup.exe"
+DOWNLOAD_HOSTS = ("https://github.com/", "https://objects.githubusercontent.com/")
+
+
+def parse_installer(data: bytes) -> InstallerAsset | None:
+    """Find Windows installer & its sha256 file in github Rest API release response"""
+    try:
+        release = json.loads(data[data.index(b"{"):].decode("utf-8"))
+        assets = {str(asset["name"]): str(asset["browser_download_url"]) for asset in release["assets"]}
+    except (AttributeError, TypeError, IndexError, KeyError, ValueError):
+        return None
+    for name, url in assets.items():
+        sha256_url = assets.get(f"{name}.sha256", "")
+        if name.endswith(INSTALLER_SUFFIX) and sha256_url and url.startswith(DOWNLOAD_HOSTS):
+            return InstallerAsset(name, url, sha256_url)
+    return None
+
+
+def can_auto_update() -> bool:
+    """Installer update only applies to installed Windows executable"""
+    return sys.platform == "win32" and bool(getattr(sys, "frozen", False))
+
+
+def parse_sha256(text: str) -> str:
+    """Hash from sha256sum output ("<hash>  <name>")"""
+    value = text.strip().split(" ")[0].lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("invalid sha256 file")
+    return value
+
+
+def download_installer(asset: InstallerAsset, folder: str = "", timeout: float = 30) -> str:
+    """Download installer, verify sha256, return file path (raise OSError or ValueError)"""
+    with urllib.request.urlopen(asset.sha256_url, timeout=timeout) as response:
+        expected = parse_sha256(response.read(1024).decode("utf-8", "replace"))
+    path = os.path.join(folder or tempfile.gettempdir(), os.path.basename(asset.name))
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(asset.url, timeout=timeout) as response, open(path, "wb") as file:
+        while chunk := response.read(1 << 16):
+            digest.update(chunk)
+            file.write(chunk)
+    if digest.hexdigest() != expected:
+        os.remove(path)
+        raise ValueError("downloaded installer does not match its sha256 hash")
+    return path
+
+
+def run_installer(path: str) -> None:
+    """Start installer silently, it closes TinyPedal and starts it again when done"""
+    subprocess.Popen([path, "/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS"], close_fds=True)
+
+
 def parse_release(data: bytes) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
     """Parse release version & date from github Rest API response"""
     try:
@@ -95,6 +162,7 @@ class UpdateChecker:
         "_last_checked_version",
         "_last_checked_date",
         "_disabled",
+        "installer",
     )
 
     def __init__(self):
@@ -104,6 +172,7 @@ class UpdateChecker:
         self._last_checked_version = VERSION_NA
         self._last_checked_date = DATE_NA
         self._disabled = False
+        self.installer: InstallerAsset | None = None
 
     def is_manual(self) -> bool:
         """Is manual checking"""
@@ -133,6 +202,7 @@ class UpdateChecker:
         """Fetch version info from github Rest API"""
         raw_bytes = asyncio.run(request_latest_release(repo))
         checked_version, checked_date = parse_release(raw_bytes)
+        self.installer = parse_installer(raw_bytes)
         current_version = parse_version_string(version.__version__)
         self._update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
         # Save info
