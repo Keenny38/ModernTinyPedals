@@ -77,3 +77,22 @@ def test_render_widget(default_setting, name):
     # Modern font is narrower, size should never collapse or explode compared to classic
     assert 0.4 < modern.width() / classic.width() < 2.0
     assert 0.4 < modern.height() / classic.height() < 2.0
+
+
+def test_perf_monitor_wraps_mixin_events_once():
+    """Update time of widgets whose timerEvent comes from a mixin (Black box) is recorded, once"""
+    from tinypedal.widget._base import Overlay
+
+    class Mixin:
+        def timerEvent(self, event):
+            return "mixin"
+
+    class Widget(Mixin, Overlay):
+        pass
+
+    class SubWidget(Widget):
+        pass
+
+    assert getattr(Widget.timerEvent, "timed", False)
+    assert Widget.timerEvent.__wrapped__ is Mixin.timerEvent
+    assert SubWidget.timerEvent is Widget.timerEvent  # not wrapped twice

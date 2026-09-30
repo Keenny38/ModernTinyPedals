@@ -292,9 +292,15 @@ class Overlay(Base):
         """Record update & paint time of each widget class (only while performance monitor is enabled)"""
         super().__init_subclass__(**kwargs)
         for method_name, event in (("timerEvent", "update"), ("paintEvent", "paint")):
-            method = cls.__dict__.get(method_name)
-            if method is not None:
-                setattr(cls, method_name, timed_event(method, event))
+            # Also wrap methods from mixins (ex. Black box parts), which come before Overlay
+            for klass in cls.__mro__:
+                if klass is Overlay:
+                    break
+                method = klass.__dict__.get(method_name)
+                if method is not None:
+                    if not getattr(method, "timed", False):  # not wrapped by a parent widget already
+                        setattr(cls, method_name, timed_event(method, event))
+                    break
 
     def config_font(self, name: str = "", size: float = 1, weight: str = "") -> QFont:
         """Config font

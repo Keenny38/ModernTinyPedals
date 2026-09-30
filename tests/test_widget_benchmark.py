@@ -227,6 +227,12 @@ def test_black_box_all_options_frame_time(live_api):
     update = stats.get(("black_box", "update"))
     paint_total = sum(item.total for (owner, event_name), item in stats.items()
                       if owner == "black_box" and event_name == "paint")
-    frame_avg = (update.average if update else 0.0) + paint_total / FRAMES
-    RESULTS["black_box (all options)"] = {"frame_avg_ms": round(frame_avg, 3)}
+    assert update is not None, "black_box update (mixin timerEvent) not measured"
+    frame_avg = update.average + paint_total / FRAMES
+    RESULTS["black_box (all options)"] = {
+        "frame_avg_ms": round(frame_avg, 3),
+        "update_avg_ms": round(update.average, 3),
+        "update_max_ms": round(update.maximum, 3),
+        "paint_avg_ms": round(paint_total / FRAMES, 3),
+    }
     assert frame_avg < FRAME_BUDGET_MS, f"black_box all options: {frame_avg:.2f} ms per frame"

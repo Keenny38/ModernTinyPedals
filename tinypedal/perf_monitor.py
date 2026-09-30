@@ -116,6 +116,7 @@ def timed_event(func: Callable, event: str) -> Callable:
         finally:
             PerfMonitor.record(_owner_name(self), event, perf_counter() - start)
 
+    wrapper.timed = True  # type: ignore[attr-defined]
     return wrapper
 
 
