@@ -234,3 +234,16 @@ def test_snapshot_dict_is_deep():
     copied["a"]["b"].append(2)
     assert original == {"a": {"b": [1]}}
     assert copy_setting(original)["a"] is not original["a"]
+
+
+def test_flush_waits_for_queued_save(config):
+    config.load_user()
+    config.user.setting["overlay"]["fixed_position"] = True
+    config.save(delay=500)  # would take ~5 seconds without flush
+    assert config.flush(timeout=5)
+    assert not config.is_saving
+    assert read_json(f"{config.path.settings}default.json")["overlay"]["fixed_position"] is True
+
+
+def test_flush_without_pending_save(config):
+    assert config.flush(timeout=0.1)

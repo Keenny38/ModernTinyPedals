@@ -200,6 +200,7 @@ class Setting:
         "_save_delay",
         "_save_queue",
         "_save_lock",
+        "_save_done",
         "_setting_to_load",
         "is_saving",
         "version_update",
@@ -214,6 +215,8 @@ class Setting:
         self._save_delay = 0
         self._save_queue = {}
         self._save_lock = threading.Lock()
+        self._save_done = threading.Event()
+        self._save_done.set()
         self._setting_to_load = ""
         self.is_saving = False
         self.version_update = 0
@@ -510,7 +513,22 @@ class Setting:
         with self._save_lock:
             if self._save_queue and not self.is_saving:
                 self.is_saving = True
+                self._save_done.clear()
                 threading.Thread(target=self.__saving, name="Setting saver").start()
+
+    def flush(self, timeout: float = 10.0) -> bool:
+        """Save queued files now and wait (without polling) until done
+
+        Returns:
+            True if all saving finished within timeout.
+        """
+        if not self.is_saving:
+            return True
+        self.save(next_task=True)  # skip remaining save delay
+        if self._save_done.wait(timeout):
+            return True
+        logger.error("USERDATA: saving not finished after %ss, continue anyway", timeout)
+        return False
 
     def __saving(self):
         """Saving thread"""
@@ -527,6 +545,7 @@ class Setting:
                 with self._save_lock:
                     if not self._save_queue:
                         self.is_saving = False  # set within lock, so new task can start new thread
+                        self._save_done.set()
                         break
                     filename = next(iter(self._save_queue))  # get next file in queue
                     filepath, dict_user = self._save_queue[filename]
@@ -548,6 +567,7 @@ class Setting:
         except BaseException:
             with self._save_lock:
                 self.is_saving = False
+                self._save_done.set()
             raise
         finally:
             self.version_update += 1

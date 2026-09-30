@@ -27,7 +27,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 
 from .api_control import api
 from .command_server import cmdserver
@@ -99,11 +98,7 @@ def restart():
     # 0 must close first
     close()
     # 1 wait unfinished saving
-    if cfg.is_saving:
-        # Trigger immediate saving from queue
-        cfg.save(next_task=True)
-        while cfg.is_saving:
-            time.sleep(0.01)
+    cfg.flush()
     # 2 set restart env for skipping single instance check
     os.environ["TINYPEDAL_RESTART"] = "TRUE"
     command = restart_command()
@@ -134,11 +129,7 @@ def reload(reload_preset: bool = False):
     """
     logger.info("RELOADING............")
     # 0 wait unfinished saving
-    if cfg.is_saving:
-        # Trigger immediate saving from queue
-        cfg.save(next_task=True)
-        while cfg.is_saving:
-            time.sleep(0.01)
+    cfg.flush()
     # 1 unload modules
     unload_modules()
     # 2 reload user preset from file
