@@ -41,13 +41,13 @@ jobs:
 
     - name: ZIP Linux file
       run: |
-        file_name=TinyPedal-${{ steps.get_ver.outputs.app_ver }}-linux.zip
+        file_name=ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip
         zip -r $file_name . -x *.git/* -x *.github/*
 
     - name: Check hash sum
       id: get_hash
       run: |
-        sha256hash=$(sha256sum TinyPedal-${{ steps.get_ver.outputs.app_ver }}-linux.zip)
+        sha256hash=$(sha256sum ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip)
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
 
@@ -58,7 +58,7 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_name: v${{ steps.get_ver.outputs.app_ver }}
         files: |
-          TinyPedal-${{ steps.get_ver.outputs.app_ver }}-linux.zip
+          ModernTinyPedals-${{ steps.get_ver.outputs.app_ver }}-linux.zip
 
   # Create windows release file
   windows:
@@ -90,7 +90,7 @@ jobs:
     - name: ZIP Windows file
       shell: pwsh
       run: |
-        $file_name="TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip"
+        $file_name="ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip"
         Compress-Archive -Path ./dist/TinyPedal -DestinationPath ./$file_name
 
     - name: Build Windows installer
@@ -100,14 +100,14 @@ jobs:
         if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
         & $iscc /DAppVersion=${{ needs.linux.outputs.app_ver }} installer\tinypedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        Move-Item ./dist/TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe .
+        Move-Item ./dist/ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe .
 
     - name: Check hash sum
       id: get_hash
       run: |
-        setup_name=TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
+        setup_name=ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
         sha256sum $setup_name | sed 's/\*//g' > $setup_name.sha256
-        sha256hash=$(sha256sum TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip | sed 's/\*//g')
+        sha256hash=$(sha256sum ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip | sed 's/\*//g')
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
         cat $setup_name.sha256
@@ -119,9 +119,9 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         tag_name: v${{ needs.linux.outputs.app_ver }}
         files: |
-          TinyPedal-${{ needs.linux.outputs.app_ver }}-windows.zip
-          TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
-          TinyPedal-${{ needs.linux.outputs.app_ver }}-windows-setup.exe.sha256
+          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows.zip
+          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe
+          ModernTinyPedals-${{ needs.linux.outputs.app_ver }}-windows-setup.exe.sha256
 
   # Generate release notes
   release-notes:

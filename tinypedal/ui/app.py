@@ -318,7 +318,7 @@ class StatusButtonBar(QStatusBar):
             state = "Enable"
             desc = "be auto-scaled according to system DPI scaling setting."
         msg_text = (
-            f"{state} <b>High DPI Scaling</b> and restart <b>TinyPedal</b>?<br><br>"
+            f"{state} <b>High DPI Scaling</b> and restart <b>Modern Tiny Pedals</b>?<br><br>"
             f"<b>Window</b> and <b>Overlay</b> size and position will {desc}"
         )
         restart_msg = QMessageBox.question(

@@ -13,12 +13,12 @@ from glob import glob
 import PyInstaller.__main__
 
 from tinypedal import version_check
-from tinypedal.const_app import APP_NAME, PLATFORM, VERSION
+from tinypedal.const_app import APP_ID, PLATFORM, VERSION
 
 DIST_FOLDER = "dist"
 WORK_FOLDER = "build"
-APP_FOLDER = os.path.join(DIST_FOLDER, APP_NAME)
-EXE_NAME = APP_NAME.lower()  # "tinypedal.exe" is checked for restart & cli arguments
+APP_FOLDER = os.path.join(DIST_FOLDER, APP_ID)
+EXE_NAME = APP_ID.lower()  # "tinypedal.exe" is checked for restart & cli arguments
 
 EXCLUDE_MODULES = [
     "difflib",

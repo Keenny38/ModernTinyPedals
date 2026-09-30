@@ -127,7 +127,7 @@ class VROverlay(QObject):
             openvr.init(openvr.VRApplication_Overlay)
             self._openvr = openvr
             self._overlay = openvr.IVROverlay()
-            self._handle = self._overlay.createOverlay("tinypedal.overlay", "TinyPedal")
+            self._handle = self._overlay.createOverlay("tinypedal.overlay", "Modern Tiny Pedals")
             self._overlay.setOverlayWidthInMeters(self._handle, max(float(setting["overlay_width_meters"]), 0.05))
             self.__set_transform(openvr, self._overlay, setting)
             self._overlay.showOverlay(self._handle)

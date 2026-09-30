@@ -33,7 +33,7 @@ from typing import Any
 
 from . import app_signal
 from .const_api import API_MAP_CONFIG
-from .const_app import APP_NAME
+from .const_app import APP_ID
 from .const_common import EMPTY_DICT
 from .const_file import ConfigType, FileExt
 from .setting_validator import PresetValidator, StyleValidator
@@ -102,7 +102,7 @@ class FilePath:
 
     def __init__(self):
         # Global path, should not be modified
-        self.config = set_global_config_path(APP_NAME)
+        self.config = set_global_config_path(APP_ID)
         # User setting path
         self.settings = ""
         # User data path

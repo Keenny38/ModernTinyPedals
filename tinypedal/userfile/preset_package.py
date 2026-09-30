@@ -127,7 +127,7 @@ def read_manifest(package: zipfile.ZipFile) -> dict:
     if not isinstance(manifest, dict) or manifest.get("format") != PACKAGE_FORMAT:
         raise ValueError("not a TinyPedal preset package")
     if manifest.get("version", 0) > PACKAGE_VERSION:
-        raise ValueError("package made by newer TinyPedal version")
+        raise ValueError("package made by newer Modern Tiny Pedals version")
     return manifest
 
 

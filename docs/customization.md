@@ -1,9 +1,9 @@
 **Note: following guide is updated to match latest released version.**
 
-TinyPedal offers a wide range of customization options for `widget` and `module` controls, which can be accessed from corresponding tabs in main window.
+Modern Tiny Pedals offers a wide range of customization options for `widget` and `module` controls, which can be accessed from corresponding tabs in main window.
 
 # Global user configuration
-TinyPedal stores global user configuration in `config.json` file, which is used for none-preset specific options.
+Modern Tiny Pedals stores global user configuration in `config.json` file, which is used for none-preset specific options.
 
 * For Windows, `config.json` is stored under `username\AppData\Roaming\TinyPedal` folder.
 * For Linux, `config.json` is stored under `home/username/.config/TinyPedal` folder.
@@ -21,13 +21,13 @@ Reload or Restart:
 
 * To reload all presets, select `Reload` from `Overlay` menu in main window.
 * To restart game API, select `Restart API` from `API` menu in main window.
-* To restart TinyPedal, select `Restart TinyPedal` from `Window` menu in main window.
+* To restart Modern Tiny Pedals, select `Restart TinyPedal` from `Window` menu in main window.
 
 [**`Back to Top`**](#)
 
 
 # Preset management
-TinyPedal stores all customization options in `JSON` format preset files, and can be managed from `Preset` tab in main window.
+Modern Tiny Pedals stores all customization options in `JSON` format preset files, and can be managed from `Preset` tab in main window.
 
 All user preset files, by default, are located in `TinyPedal\settings` folder. Those `JSON` files can also be manually edited with text editor.
 
@@ -43,7 +43,7 @@ Click `Restore` button to restore preset from backups. see [Restore Backup](#res
 
 * Lock Preset
 
-    Lock selected preset, which prevents any changes that made through TinyPedal from saving to locked preset file. APP `version` tag will be attached to the preset that is locked with.
+    Lock selected preset, which prevents any changes that made through Modern Tiny Pedals from saving to locked preset file. APP `version` tag will be attached to the preset that is locked with.
 
     Note, this feature does not prevent user from modifying or deleting locked preset file by other means. Locked preset file info is stored in `config.lock` file in [Global User Configuration](#global-user-configuration) folder.
 
@@ -93,13 +93,13 @@ Click `Restore` button to restore preset from backups. see [Restore Backup](#res
 
 
 ## Saving JSON file
-TinyPedal automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Config` dialog, or `Restart` APP.
+Modern Tiny Pedals automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Config` dialog, or `Restart` APP.
 
 [**`Back to Top`**](#)
 
 
 ## Backup JSON file
-TinyPedal will automatically create backup file with time stamp suffix if old setting file fails to load, and new default `JSON` with same filename will be generated.
+Modern Tiny Pedals will automatically create backup file with time stamp suffix if old setting file fails to load, and new default `JSON` with same filename will be generated.
 
 A newer released version will auto-update old setting and add new setting after loading. It may still be a good idea to manually backup files before upgrading to newer version.
 
@@ -251,7 +251,7 @@ Shortcuts preset can be customized by accessing [Hotkey Tab](#hotkey) in main wi
 
 
 # User files
-TinyPedal generates and saves user session data in specific folders defined in `User path`. Session data can be reset by accessing `Reset data` menu from `Overlay` menu in main window; or, delete data file from corresponding folder.
+Modern Tiny Pedals generates and saves user session data in specific folders defined in `User path`. Session data can be reset by accessing `Reset data` menu from `Overlay` menu in main window; or, delete data file from corresponding folder.
 
 [**`Back to Top`**](#)
 
@@ -345,9 +345,9 @@ To allow `auto notes loading` function to work, track notes file name must match
 
 
 ## Brand logo
-TinyPedal supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
+Modern Tiny Pedals supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
 
-Note: TinyPedal does not provide brand logo image assets, it is up to user to prepare images. Maximum `PNG` file size is limited to `5MB`.
+Note: Modern Tiny Pedals does not provide brand logo image assets, it is up to user to prepare images. Maximum `PNG` file size is limited to `5MB`.
 
 How to prepare brand logo image:
 1. Brand logo image should have all transparent borders cropped. For example, in `GIMP` this can be done by selecting `Image` > `Crop to Content`.
@@ -389,9 +389,9 @@ Default logging output level is set on `1` if argument is not set.
 Usage: `python .\run.py -l 2` or `.\tinypedal.exe --log-level 2`
 
     -s, --single-instance
-Set running mode. `0` allows running multiple instances (copies) of TinyPedal. `1` allows only single instance (default).
+Set running mode. `0` allows running multiple instances (copies) of Modern Tiny Pedals. `1` allows only single instance (default).
 
-To run multiple copies of TinyPedal at same time: `python .\run.py -s 0` or `.\tinypedal.exe --single-instance 0`
+To run multiple copies of Modern Tiny Pedals at same time: `python .\run.py -s 0` or `.\tinypedal.exe --single-instance 0`
 
 Single instance mode saves `pid.log` file in the same folder as `tinypedal.log`, which is used for instance identification.
 
@@ -672,7 +672,7 @@ Remember main window last position.
 Remember main window last size.
 
     enable_high_dpi_scaling
-Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting TinyPedal to take effect. This option is enabled by default.
+Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default.
 
 High DPI scaling mode can be quickly toggled via `Scale` button on main window status bar.
 
@@ -762,7 +762,7 @@ Set `false` to disable translucent background.
 Set `true` to enable main application window position correction, which is used to correct window-off-screen issue with multi-screen. This option is enabled by default.
 
     enable_x11_platform_plugin_override
-Set Qt platform plugin type to `X11` via environment variable on Linux. This option may help work around some issues with overlay dragging and position on `Wayland`. This option requires restarting TinyPedal to take effect. This option is enabled by default on Linux.
+Set Qt platform plugin type to `X11` via environment variable on Linux. This option may help work around some issues with overlay dragging and position on `Wayland`. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default on Linux.
 
     background_color_global
 Sets global background color for all widgets.
@@ -786,13 +786,13 @@ Set overlay color theme, applied to default colors only (alpha channel is kept):
 * `Modern Dark`: slate neutrals with softer accent colors (default).
 * `High Contrast`: darker backgrounds and brighter text, for bright rooms or VR.
 * `Colorblind Safe`: Okabe-Ito palette, red / green pairs become orange / blue.
-* `Classic`: original TinyPedal colors.
+* `Classic`: original Modern Tiny Pedals colors.
 
     enable_modern_font
 Replace default widget font with `modern_font_name`. Width of text bar is calculated from digit width to avoid clipping numbers. Default is enabled.
 
     modern_font_name
-Set modern font name. Default is `JetBrains Mono`, which is bundled with TinyPedal (`fonts` folder), and works on all platforms. Ligatures are disabled.
+Set modern font name. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Ligatures are disabled.
 
     corner_radius_scale
 Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
@@ -823,13 +823,13 @@ User folders can be opened in File Manager via `Open Folder` sub-menu from `Conf
 
 **Notes to relative and absolute path**
 
-User path that sets inside TinyPedal root folder will be automatically converted to relative path. Relative path is not considered global path, and does not share data between multiple copies of TinyPedal. This is done to retain portability and compatibility with old version.
+User path that sets inside Modern Tiny Pedals root folder will be automatically converted to relative path. Relative path is not considered global path, and does not share data between multiple copies of Modern Tiny Pedals. This is done to retain portability and compatibility with old version.
 
-To share user path across multiple copies of TinyPedal, user must set path to place outside TinyPedal APP root folder.
+To share user path across multiple copies of Modern Tiny Pedals, user must set path to place outside Modern Tiny Pedals APP root folder.
 
 **Default user path**
 
-* On windows, all user paths are set inside TinyPedal root folder as relative paths:
+* On windows, all user paths are set inside Modern Tiny Pedals root folder as relative paths:
 
         brandlogo/
         deltabest/
@@ -839,7 +839,7 @@ To share user path across multiple copies of TinyPedal, user must set path to pl
         tracknotes/
         carsetups/
 
-* On Linux, all user paths are set outside TinyPedal root folder as absolute paths:
+* On Linux, all user paths are set outside Modern Tiny Pedals root folder as absolute paths:
 
         home/username/.config/TinyPedal/brandlogo/
         home/username/.config/TinyPedal/settings/
@@ -885,7 +885,7 @@ Web dashboard shows live data (gear, speed, RPM, delta, lap times, position, fue
 Enable web dashboard server.
 
     enable_lan_access
-Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow TinyPedal the first time.
+Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow Modern Tiny Pedals the first time.
 
     enable_https
 Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: `Web Dashboard Address...` shows its SHA-256 fingerprint to check before accepting it. Disabled by default.
@@ -1059,7 +1059,7 @@ Enable `Manually Select Pace Notes File` check box to disable auto-file-name mat
 ## Hotkey
 **Hotkey control panel can be accessed from `Hotkey` tab in main window.**
 
-Note, hotkey bindings are non-exclusive in TinyPedal, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. Currently global hotkey feature is not supported on Linux.
+Note, hotkey bindings are non-exclusive in Modern Tiny Pedals, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. Currently global hotkey feature is not supported on Linux.
 
 Click `Enabled` or `Disabled` button to toggle global hotkey on and off. Note, global hotkey can also be enabled by setting `enable_global_hotkey` option to `true` in [Application](#application) dialog.
 
@@ -1116,10 +1116,10 @@ Show the next older incident in the Black box incident recorder (back to the new
 Open the `blackbox` folder of the configuration folder, where the Black box incident recorder saves incidents. Also in the Black box right click menu (`Open Incident Folder`) while incident file export is enabled.
 
     restart_application
-Restart TinyPedal.
+Restart Modern Tiny Pedals.
 
     quit_application
-Quit TinyPedal.
+Quit Modern Tiny Pedals.
 
 ### Preset keybinding
 
@@ -1481,7 +1481,7 @@ To restore all heatmap settings back to default, just delete `heatmap.json` pres
 ## Track map viewer
 **Track map viewer can be accessed from `Tools` menu in main window.**
 
-To load a track map, click `Load Map` button. Map file name will be displayed alongside if file is successfully loaded. Note, only track map files (.svg extension) that generated from TinyPedal [Mapping Module](#mapping-module) are supported.
+To load a track map, click `Load Map` button. Map file name will be displayed alongside if file is successfully loaded. Note, only track map files (.svg extension) that generated from Modern Tiny Pedals [Mapping Module](#mapping-module) are supported.
 
 To customize map display, click `Config` button. Note, some display options may require reload track map file to be updated.
 
@@ -1554,7 +1554,7 @@ To create or open track notes, click `File` and select `New Track Notes` or `Ope
 
 To save notes file, click `Save`. Note, notes file name should exactly match with track name from track map file name for `auto notes loading` function to work. The editor will try to retrieve track name automatically in an active session, or from an opened track map in `Track Map Viewer`.
 
-To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `TinyPedal` notes file formats are supported for used in TinyPedal.
+To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `TinyPedal` notes file formats are supported for used in Modern Tiny Pedals.
 
 To hide map viewer, click `Hide Map`. To show map viewer, click `Show Map`.
 
@@ -1668,7 +1668,7 @@ Select track, reference lap and compared lap. Charts show time delta, speed, thr
 
 Requires `Le Mans Ultimate` API. Click `Start Recording` while in game, and `Stop Recording` when done. Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute).
 
-Click `Open Replay...` to load a recording: TinyPedal reads from it instead of the game until `Back to Game` is clicked. Replay can be paused, sped up or slowed down, looped, and moved with the position slider. REST API data (tyre setup, virtual energy details) is not recorded.
+Click `Open Replay...` to load a recording: Modern Tiny Pedals reads from it instead of the game until `Back to Game` is clicked. Replay can be paused, sped up or slowed down, looped, and moved with the position slider. REST API data (tyre setup, virtual energy details) is not recorded.
 
 [**`Back to Top`**](#)
 
@@ -1700,7 +1700,7 @@ Select `Preset A` and `Preset B`. Widget positions can be ignored. Select one or
 ## Plugin manager
 **Plugin manager lists widget plugins, which can be accessed from `Tools` menu in main window.**
 
-Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting TinyPedal (`Reload Code`), and new plugins can be installed from `.zip` package (`Install...`). See [Widget plugins](#widget-plugins) section for details.
+Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting Modern Tiny Pedals (`Reload Code`), and new plugins can be installed from `.zip` package (`Install...`). See [Widget plugins](#widget-plugins) section for details.
 
 [**`Back to Top`**](#)
 
@@ -1708,7 +1708,7 @@ Shows each plugin loading status and error message. Plugins can be enabled or di
 ## Other tools
 * `Find Option...` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its config dialog, filtered on this option.
 * `Setup Wizard` (`Help` menu): first launch setup (language, game, themes, preset, starter widgets).
-* `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of TinyPedal, modules and game connection.
+* `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of Modern Tiny Pedals, modules and game connection.
 * `Create Bug Report...` (`Help` menu): creates a `.zip` file with logs, settings and system info to attach to a bug report. User folder name, access codes and repository names are removed.
 
 [**`Back to Top`**](#)
@@ -4474,7 +4474,7 @@ Show current suspension position (millimeter) relative to static position instea
 Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by `update_interval` setting.
 
     show_tinypedal_performance
-Show TinyPedal's CPU utilization (percent) and memory usage (MB).
+Show Modern Tiny Pedals's CPU utilization (percent) and memory usage (MB).
 
     average_samples
 Set number of samples for average CPU utilization calculation. Lower value may result more fluctuated reading. Set `1` to disable averaging.
@@ -5594,14 +5594,14 @@ Set number of samples for reducing data fluctuation. Lower value may result more
 
 
 # Widget plugins
-**Custom widgets can be added without changing TinyPedal code.**
+**Custom widgets can be added without changing Modern Tiny Pedals code.**
 
-Each plugin is a folder in `plugins` folder (next to TinyPedal), named with lowercase letters, digits or `_`:
+Each plugin is a folder in `plugins` folder (next to Modern Tiny Pedals), named with lowercase letters, digits or `_`:
 
     plugins/<name>/setting.json   default options of the widget
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 
-Plugin appears as `plugin_<name>` widget in `Widget` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping TinyPedal; error details are shown in [Plugin manager](#plugin-manager) and log. See `plugins/example_speed` for a complete example.
+Plugin appears as `plugin_<name>` widget in `Widget` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log. See `plugins/example_speed` for a complete example.
 
 Important: plugins run as normal Python code with full access to your computer, only install plugins from trusted sources.
 

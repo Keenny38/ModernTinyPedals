@@ -87,8 +87,8 @@ def single_instance_check(is_single_instance: bool):
         return
     # Show warning to console and popup dialog
     warning_text = (
-        "TinyPedal is already running.\n\n"
-        "Only one TinyPedal may be run at a time.\n"
+        "Modern Tiny Pedals is already running.\n\n"
+        "Only one Modern Tiny Pedals may be run at a time.\n"
         "Check system tray for hidden icon."
     )
     logger.warning(warning_text)
@@ -100,7 +100,7 @@ def single_instance_check(is_single_instance: bool):
 
 def get_version():
     """Get version info"""
-    logger.info("TinyPedal: %s", VERSION)
+    logger.info("Modern Tiny Pedals: %s", VERSION)
     logger.info("Python: %s", version_check.python())
     logger.info("Qt: %s", version_check.qt())
     logger.info("PySide: %s", version_check.pyside())

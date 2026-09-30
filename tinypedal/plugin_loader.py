@@ -19,7 +19,7 @@
 """
 Widget plugin loader
 
-Plugin layout (in "plugins" folder next to TinyPedal):
+Plugin layout (in "plugins" folder next to Modern Tiny Pedals):
     plugins/<name>/setting.json   default options (merged with PLUGIN_BASE_DEFAULT)
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 

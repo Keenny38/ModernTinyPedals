@@ -78,7 +78,7 @@
             "check_for_updates_on_startup": "Enable automatically checking for updates on startup, and display notification message in main window. This option is enabled by default.\n\nClick on the notification message will bring up a menu, where user can click View Updates On GitHub to open Latest Releases page in web browser, or Dismiss the message.\n\nNote, this option is checked only once per startup, and notification message will only be displayed if new updates is available. With the Windows installer version, notification menu also offers Download And Install, which downloads the new installer, verifies its SHA256 hash and installs it.\n\nUser can also manually check for updates any time by accessing Check for Updates option from…",
             "enable_auto_load_preset": "Enable Auto load preset system to allow auto loading user-defined game-specific preset depends on active game (currently supports RF2 and LMU).\n\nAuto loading preset is triggered when a new or different game is started and active. Auto loading will only trigger once per game change. A preset must be tagged as primary for specific game before it can be auto loaded. See Preset Management section for details.\n\nThis option is disabled by default.",
             "enable_global_hotkey": "Enable Global Hotkey support. This option can be toggled from Hotkey Tab in main window.",
-            "enable_high_dpi_scaling": "Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting TinyPedal to take effect. This option is enabled by default.\n\nHigh DPI scaling mode can be quickly toggled via Scale button on main window status bar.\n\nOn Windows, scaling is determined by percentage value set in Display > Scale and Layout setting. For example, 200% scale in windows setting will double the size of main window dialog and also every widget.\n\nOn Linux, DPI scaling may already be forced ON in some system, which this option may not have effect.",
+            "enable_high_dpi_scaling": "Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default.\n\nHigh DPI scaling mode can be quickly toggled via Scale button on main window status bar.\n\nOn Windows, scaling is determined by percentage value set in Display > Scale and Layout setting. For example, 200% scale in windows setting will double the size of main window dialog and also every widget.\n\nOn Linux, DPI scaling may already be forced ON in some system, which this option may not have effect.",
             "grid_move_size": "Set grid size for grid move, value in pixel. Default is 8 pixel. Minimum value is limited to 1.",
             "language": "Set user interface language: English or Français. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names and descriptions (tooltips) in config dialogs are also translated.",
             "maximum_loading_attempts": "Set maximum retry attempts for preset loading. Default value is 5. Minimum value is limited to 1 maximum attempt.\n\nNote, each attempt has a roughly 50ms delay. If all loading attempts failed, a backup copy will be created in settings folder, and preset will be reset to default. See How to restore your preset from backups for details.\n\nThis option does not affect global config preset, which always has 5 maximum loading attempts.",
@@ -422,7 +422,7 @@
             "enable_bypass_window_manager": "Set true to bypass window manager on Linux. This option does not affect windows system. This option is enabled by default on Linux. Note, while this option is enabled, OBS may not be able to capture overlay widgets in streaming on Linux.",
             "enable_translucent_background": "Set false to disable translucent background.",
             "enable_window_position_correction": "Set true to enable main application window position correction, which is used to correct window-off-screen issue with multi-screen. This option is enabled by default.",
-            "enable_x11_platform_plugin_override": "Set Qt platform plugin type to X11 via environment variable on Linux. This option may help work around some issues with overlay dragging and position on Wayland. This option requires restarting TinyPedal to take effect. This option is enabled by default on Linux."
+            "enable_x11_platform_plugin_override": "Set Qt platform plugin type to X11 via environment variable on Linux. This option may help work around some issues with overlay dragging and position on Wayland. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default on Linux."
         },
         "cruise": {
             "odometer_maximum_digits": "Set maximum number of display digits.",
@@ -716,10 +716,10 @@
             "overlay_lock": "Lock or unlock overlay.",
             "overlay_visibility": "Show or hide overlay.",
             "pace_notes_playback": "Enable or disable pace notes playback.",
-            "quit_application": "Quit TinyPedal.",
+            "quit_application": "Quit Modern Tiny Pedals.",
             "reload_preset": "Reload current preset.",
             "restart_api": "Restart current Telemetry API.",
-            "restart_application": "Restart TinyPedal.",
+            "restart_application": "Restart Modern Tiny Pedals.",
             "select_next_api": "Select next or previous Telemetry API from available API list.",
             "select_previous_api": "Select next or previous Telemetry API from available API list.",
             "spectate_mode": "Enable or disable spectate mode.",
@@ -919,8 +919,8 @@
             "enable_modern_font": "Replace default widget font with modern_font_name. Width of text bar is calculated from digit width to avoid clipping numbers. Default is enabled.",
             "enable_modern_style": "Enable modern overlay style: rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Default is enabled.",
             "minimum_bar_gap": "Set minimum gap between bars in pixels, only applies to widget bar_gap option that uses default value. Default is 2.",
-            "modern_font_name": "Set modern font name. Default is JetBrains Mono, which is bundled with TinyPedal (fonts folder), and works on all platforms. Ligatures are disabled.",
-            "overlay_theme": "Set overlay color theme, applied to default colors only (alpha channel is kept):\n\n* Modern Dark: slate neutrals with softer accent colors (default). * High Contrast: darker backgrounds and brighter text, for bright rooms or VR. * Colorblind Safe: Okabe-Ito palette, red / green pairs become orange / blue. * Classic: original TinyPedal colors.",
+            "modern_font_name": "Set modern font name. Default is JetBrains Mono, which is bundled with Modern Tiny Pedals (fonts folder), and works on all platforms. Ligatures are disabled.",
+            "overlay_theme": "Set overlay color theme, applied to default colors only (alpha channel is kept):\n\n* Modern Dark: slate neutrals with softer accent colors (default). * High Contrast: darker backgrounds and brighter text, for bright rooms or VR. * Colorblind Safe: Okabe-Ito palette, red / green pairs become orange / blue. * Classic: original Modern Tiny Pedals colors.",
             "widget_theme": "Each widget has a widget_theme option. Global (default) uses overlay_theme; select any other theme (built-in or custom) to use it for this widget only, or Classic to keep classic colors on this widget."
         },
         "pace_notes": {
@@ -1274,7 +1274,7 @@
         "system_performance": {
             "average_samples": "Set number of samples for average CPU utilization calculation. Lower value may result more fluctuated reading. Set 1 to disable averaging.",
             "show_system_performance": "Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by update_interval setting.",
-            "show_tinypedal_performance": "Show TinyPedal's CPU utilization (percent) and memory usage (MB)."
+            "show_tinypedal_performance": "Show Modern Tiny Pedals's CPU utilization (percent) and memory usage (MB)."
         },
         "timing": {
             "layout": "2 layouts are available: 0 = vertical layout, 1 = horizontal layout.",
@@ -1513,7 +1513,7 @@
         "web_dashboard": {
             "access_code": "Access code required to open the dashboard. A random code is generated if empty. After 10 wrong codes, the device is blocked for 60 seconds.",
             "enable_https": "Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: Web Dashboard Address... shows its SHA-256 fingerprint to check before accepting it. Disabled by default.",
-            "enable_lan_access": "Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (127.0.0.1). Windows firewall may ask to allow TinyPedal the first time.",
+            "enable_lan_access": "Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (127.0.0.1). Windows firewall may ask to allow Modern Tiny Pedals the first time.",
             "enable_web_dashboard": "Enable web dashboard server.",
             "web_dashboard_port": "Set server port. Default is 8338."
         },

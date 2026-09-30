@@ -64,7 +64,7 @@ COLUMNS = ("Plugin", "Status", "Enabled")
 def plugin_status(widget_name: str) -> tuple[str, str]:
     """Plugin status text & detail"""
     if widget_name not in wctrl.names:
-        return tr("Restart required"), tr("Plugin found after start, restart TinyPedal to load it.")
+        return tr("Restart required"), tr("Plugin found after start, restart Modern Tiny Pedals to load it.")
     if PLUGIN_ERRORS.get(widget_name) == UNTRUSTED_ERROR:
         return tr("Not trusted"), tr(UNTRUSTED_ERROR)
     if widget_name in PLUGIN_ERRORS:
@@ -234,7 +234,7 @@ class PluginManager(BaseDialog):
             return
         QMessageBox.information(
             self, tr("Plugin Manager"),
-            trm(f"Plugin <b>{name[len(PLUGIN_PREFIX):]}</b> installed, restart TinyPedal to load it."),
+            trm(f"Plugin <b>{name[len(PLUGIN_PREFIX):]}</b> installed, restart Modern Tiny Pedals to load it."),
         )
         self.refresh()
 

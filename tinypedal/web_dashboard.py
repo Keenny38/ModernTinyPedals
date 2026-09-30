@@ -371,7 +371,7 @@ class WebDashboard:
 webdashboard = WebDashboard()
 
 LOGIN_HTML = """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>TinyPedal</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Modern Tiny Pedals</title>
 <style>body{background:#0e1116;color:#e9ecf1;font-family:system-ui,sans-serif;display:flex;
 align-items:center;justify-content:center;height:100vh;margin:0}form{display:flex;gap:8px}
 input,button{font-size:20px;padding:10px;border-radius:8px;border:1px solid #373e4c;background:#1b1f27;color:#e9ecf1}
@@ -380,7 +380,7 @@ autocomplete="off"><button>OK</button></form></body></html>"""
 
 DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0e1116"><title>TinyPedal Dashboard</title>
+<meta name="theme-color" content="#0e1116"><title>Modern Tiny Pedals Dashboard</title>
 <style>
 :root{--bg:#0e1116;--panel:#1b1f27;--line:#2a303c;--text:#e9ecf1;--muted:#9aa3b2;
 --green:#34c759;--red:#ff4d4f;--blue:#38bdf8;--yellow:#ffd43b}

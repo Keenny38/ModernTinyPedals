@@ -34,7 +34,8 @@ class PLATFORM:
 VERSION = version_check.tinypedal()
 
 # App info
-APP_NAME = "TinyPedal"
+APP_NAME = "Modern Tiny Pedals"  # displayed name
+APP_ID = "TinyPedal"  # config folder, data paths & build folder: unchanged to keep user data
 REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
 FORK_REPO_NAME = "Keenny38/overlays"  # this fork (releases, updates)
 COPYRIGHT = "Copyright (C) 2022-2026 TinyPedal developers"

@@ -175,7 +175,7 @@ class ReplayView(BaseDialog):
         if not self.check_lmu_api():
             return
         filename, _ = QFileDialog.getOpenFileName(
-            self, tr("Open Replay..."), cfg.path.telemetry, f"TinyPedal Replay (*{FILE_EXT})"
+            self, tr("Open Replay..."), cfg.path.telemetry, f"Modern Tiny Pedals Replay (*{FILE_EXT})"
         )
         if not filename:
             return

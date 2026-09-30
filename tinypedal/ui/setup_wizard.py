@@ -123,7 +123,7 @@ class LanguagePage(QWizardPage):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.setTitle(tr("Welcome to TinyPedal"))
+        self.setTitle(tr("Welcome to Modern Tiny Pedals"))
         self.setSubTitle(tr("A few questions to get you started. Every choice can be changed later."))
         self.language = QComboBox(self)
         self.language.addItems(tuple(LANGUAGES))
@@ -146,7 +146,7 @@ class GamePage(QWizardPage):
     def __init__(self, parent):
         super().__init__(parent)
         self.setTitle(tr("Which game do you play?"))
-        self.setSubTitle(tr("TinyPedal reads telemetry from the selected game."))
+        self.setSubTitle(tr("Modern Tiny Pedals reads telemetry from the selected game."))
         self.group = QButtonGroup(self)
         layout = QVBoxLayout()
         for api_class in api.available:

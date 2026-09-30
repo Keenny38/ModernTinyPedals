@@ -153,7 +153,7 @@ class PresetList(QWidget):
         zip_filename, _ = QFileDialog.getSaveFileName(
             self,
             dir=os.path.join(os.path.expanduser("~"), f"{preset_filename[:-5]}.zip"),
-            filter="TinyPedal preset package (*.zip)",
+            filter="Modern Tiny Pedals preset package (*.zip)",
         )
         if not zip_filename:
             return
@@ -168,7 +168,7 @@ class PresetList(QWidget):
     def import_package(self):
         """Import preset package"""
         zip_filename, _ = QFileDialog.getOpenFileName(
-            self, dir=os.path.expanduser("~"), filter="TinyPedal preset package (*.zip)"
+            self, dir=os.path.expanduser("~"), filter="Modern Tiny Pedals preset package (*.zip)"
         )
         if not zip_filename:
             return

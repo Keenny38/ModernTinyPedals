@@ -200,7 +200,7 @@ class UpdatesNotifyButton(QPushButton):
             return
         confirm = QMessageBox.question(
             self, tr("Download And Install"),
-            tr("Update downloaded. Close TinyPedal and install it now?"),
+            tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return

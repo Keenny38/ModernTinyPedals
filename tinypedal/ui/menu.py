@@ -810,7 +810,7 @@ class WindowMenu(QMenu):
         self.remember_size.triggered.connect(self.is_remember_size)
         self.addSeparator()
 
-        restart_app = self.addAction(tr("Restart TinyPedal"))
+        restart_app = self.addAction(tr("Restart Modern Tiny Pedals"))
         restart_app.triggered.connect(loader.restart)
 
         self.aboutToShow.connect(self.refresh_menu)

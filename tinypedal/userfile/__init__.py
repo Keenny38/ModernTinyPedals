@@ -29,7 +29,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from typing import TextIO
 
-from ..const_app import APP_NAME, PLATFORM
+from ..const_app import APP_ID, PLATFORM
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ def set_default_config_path(filepath: str) -> str:
         return filepath
     # Linux
     from xdg import BaseDirectory as BD
-    return BD.save_config_path(APP_NAME, filepath)
+    return BD.save_config_path(APP_ID, filepath)
 
 
 def set_default_data_path(filepath: str) -> str:
@@ -143,4 +143,4 @@ def set_default_data_path(filepath: str) -> str:
         return filepath
     # Linux
     from xdg import BaseDirectory as BD
-    return BD.save_data_path(APP_NAME, filepath)
+    return BD.save_data_path(APP_ID, filepath)

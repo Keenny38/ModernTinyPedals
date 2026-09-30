@@ -28,7 +28,7 @@ def test_create_report(ui_env, tmp_path):
         config = json.loads(package.read("settings/config.json"))
         assert config["web_dashboard"]["access_code"] == "<removed>"
         assert os.path.expanduser("~") not in package.read("logs/tinypedal.log").decode()
-        assert "TinyPedal" in package.read("system-info.txt").decode()
+        assert "Modern Tiny Pedals" in package.read("system-info.txt").decode()
 
 
 def test_process_monitor():

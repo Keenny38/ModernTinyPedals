@@ -95,7 +95,7 @@ TRANSLATION = MappingProxyType({
     "Minimize to Tray": "Réduire dans la zone de notification",
     "Remember Position": "Mémoriser la position",
     "Remember Size": "Mémoriser la taille",
-    "Restart TinyPedal": "Redémarrer TinyPedal",
+    "Restart Modern Tiny Pedals": "Redémarrer Modern Tiny Pedals",
 
     # Overlay menu
     "Lock Overlay": "Verrouiller l'overlay",
@@ -408,7 +408,7 @@ TRANSLATION = MappingProxyType({
     "CPU time (s)": "Temps CPU (s)",
     # Plugin manager
     "Restart required": "Redémarrage nécessaire",
-    "Plugin found after start, restart TinyPedal to load it.": "Plugin trouvé après le démarrage, redémarrez TinyPedal pour le charger.",
+    "Plugin found after start, restart Modern Tiny Pedals to load it.": "Plugin trouvé après le démarrage, redémarrez Modern Tiny Pedals pour le charger.",
     "Loaded": "Chargé",
     "Plugins run as normal Python code, only install plugins from trusted sources.": "Les plugins sont du code Python, n'installez que des plugins de sources de confiance.",
     "Enable / Disable": "Activer / Désactiver",
@@ -435,12 +435,12 @@ TRANSLATION = MappingProxyType({
     "Section": "Section",
     "Option": "Option",
     # Setup wizard
-    "Welcome to TinyPedal": "Bienvenue dans TinyPedal",
+    "Welcome to Modern Tiny Pedals": "Bienvenue dans Modern Tiny Pedals",
     "A few questions to get you started. Every choice can be changed later.": "Quelques questions pour bien démarrer. Tous les choix pourront être modifiés plus tard.",
     "Language": "Langue",
     "Window theme": "Thème de la fenêtre",
     "Which game do you play?": "À quel jeu jouez-vous ?",
-    "TinyPedal reads telemetry from the selected game.": "TinyPedal lit la télémétrie du jeu sélectionné.",
+    "Modern Tiny Pedals reads telemetry from the selected game.": "Modern Tiny Pedals lit la télémétrie du jeu sélectionné.",
     "Overlay style": "Apparence de l'overlay",
     "Colors of the in-game widgets.": "Couleurs des widgets en jeu.",
     "Modern font (JetBrains Mono)": "Police moderne (JetBrains Mono)",
@@ -485,5 +485,5 @@ TRANSLATION = MappingProxyType({
     "Unable to load image.": "Impossible de charger l'image.",
     "Download And Install": "Télécharger et installer",
     "Downloading Update...": "Téléchargement de la mise à jour...",
-    "Update downloaded. Close TinyPedal and install it now?": "Mise à jour téléchargée. Fermer TinyPedal et l'installer maintenant ?",
+    "Update downloaded. Close Modern Tiny Pedals and install it now?": "Mise à jour téléchargée. Fermer Modern Tiny Pedals et l'installer maintenant ?",
 })

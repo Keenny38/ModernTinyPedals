@@ -62,7 +62,7 @@ def test_page_requires_code(dashboard):
     status, body = get("/")
     assert status == 401 and b"Access code" in body
     status, body = get("/?code=TESTCODE", opener=browser())
-    assert status == 200 and b"TinyPedal Dashboard" in body
+    assert status == 200 and b"Modern Tiny Pedals Dashboard" in body
 
 
 def test_code_link_redirects_to_clean_url(dashboard):
@@ -78,7 +78,7 @@ def test_login_form_post(dashboard):
     assert status == 401 and b'method="post"' in body and b"code=" not in body.split(b"<form")[0]
     data = urllib.parse.urlencode({"code": "TESTCODE"}).encode()
     status, body, _ = request("/login", data=data, opener=opener)
-    assert status == 200 and b"TinyPedal Dashboard" in body
+    assert status == 200 and b"Modern Tiny Pedals Dashboard" in body
     assert b"X-Access-Code" not in body  # page script uses session cookie, no code
     # Session cookie grants API access
     assert get("/api/telemetry", opener=opener)[0] == 200
