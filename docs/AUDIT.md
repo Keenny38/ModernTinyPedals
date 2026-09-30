@@ -377,7 +377,7 @@ Réalisé (28/09/2026) : A, B, C, D — intégralement.
 ## F. Réalisé (30/09/2026)
 
 - Sous-modules `pyLMUSharedMemory` et `pyRfactor2SharedMemory` intégrés au dépôt (leurs corrections de typage ne pouvaient pas être poussées vers les dépôts officiels).
-- Projet publié sur GitHub : [Keenny38/overlays](https://github.com/Keenny38/overlays). Les mises à jour sont vérifiées sur ce dépôt par défaut.
+- Projet publié sur GitHub : [Keenny38/ModernTinyPedals](https://github.com/Keenny38/ModernTinyPedals). Les mises à jour sont vérifiées sur ce dépôt par défaut.
 - Sauvegarde : plus d'attente active au redémarrage ni au rechargement (événement avec délai maximal).
 - Rejeu de télémétrie LMU (`Outils > Rejeu de télémétrie`) : enregistre la mémoire partagée et la rejoue dans tous les widgets, sans le jeu.
 - Export MoTeC `.ld` depuis la visionneuse de télémétrie.

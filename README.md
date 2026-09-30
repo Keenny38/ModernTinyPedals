@@ -4,11 +4,11 @@
 
 Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com/TinyPedal/TinyPedal) : même base solide, avec une nouvelle interface, de nouveaux outils et beaucoup de travail sur la fiabilité.
 
-[Télécharger](https://github.com/Keenny38/overlays/releases/latest) ·
+[Télécharger](https://github.com/Keenny38/ModernTinyPedals/releases/latest) ·
 [Démarrage rapide](#démarrage-rapide) ·
 [Nouveautés](#ce-que-cette-version-apporte) ·
 [Guide des réglages](docs/customization.md) ·
-[Changelog](CHANGELOG.md) ·
+[Nouveautés](https://github.com/Keenny38/ModernTinyPedals/releases) ·
 [Feuille de route](docs/ROADMAP.md)
 
 ![Aperçu](https://user-images.githubusercontent.com/21177177/282278970-b806bf02-a83d-4baa-8b45-0ca10f28f775.png)
@@ -17,7 +17,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 
 ## Démarrage rapide
 
-1. **Télécharge** `ModernTinyPedals-<version>-windows-setup.exe` sur la page [Releases](https://github.com/Keenny38/overlays/releases/latest) et lance-le. Pas besoin de droits administrateur : l'app s'installe dans ton profil (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
+1. **Télécharge** `ModernTinyPedals-<version>-windows-setup.exe` sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) et lance-le. Pas besoin de droits administrateur : l'app s'installe dans ton profil (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
 2. **Prépare le jeu** : mode d'affichage `Sans bordure` ou `Fenêtré` (le plein écran exclusif cache l'overlay), puis le réglage de ton jeu ci-dessous.
 3. **Au premier lancement**, l'assistant te demande la langue, le jeu, le thème et les widgets de départ.
 4. **Lance une session** : l'overlay apparaît dès que la voiture est en piste et se cache sinon.
@@ -63,18 +63,18 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
 - Plus de 800 tests automatisés, vérification de types et lint en intégration continue.
 
-Tout est détaillé dans le [guide des réglages](docs/customization.md), et chaque changement dans le [changelog](CHANGELOG.md).
+Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans les [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
 ## Lancer depuis le code source
 
 Nécessite [Python](https://www.python.org/) 3.10 ou plus récent.
 
 ```bash
-git clone https://github.com/Keenny38/overlays.git
+git clone https://github.com/Keenny38/ModernTinyPedals.git
 ```
 
 ```bash
-cd overlays
+cd ModernTinyPedals
 ```
 
 Crée un environnement virtuel, active-le, puis installe les dépendances (PySide6, psutil, cryptography) :
@@ -131,12 +131,18 @@ python tools/gen_option_help.py
 
 Le second script signale les bulles d'aide qui n'ont pas encore de traduction française (`tinypedal/i18n/data/fr_option_help.json`).
 
-### Changelog automatique
+### Releases, mises à jour et changelog
 
-`CHANGELOG.md` est régénéré depuis l'historique Git à chaque push sur `master` (workflow `Changelog`), et chaque release reprend les commits depuis la précédente comme notes de version. Il suffit d'écrire des titres de commit clairs : ceux qui commencent par `Add` vont dans **Added**, `Fix` dans **Fixed**, le reste dans **Changed**. Pour voir le résultat en local :
+Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedals/releases) : il n'y a pas de fichier de changelog à tenir.
+
+1. Augmente `__version__` dans `tinypedal/version.py` et pousse.
+2. Lance le workflow `Build and Release` (onglet Actions). Il crée la release `v<version>` avec le ZIP, l'installeur, son `.sha256`, et des notes de version qui listent les commits depuis la release précédente : **Added** (titres qui commencent par `Add`), **Fixed** (`Fix`), **Changed** (le reste). Écris donc des titres de commit clairs.
+3. L'app installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
+
+Pour prévisualiser les notes en local :
 
 ```bash
-python tools/gen_changelog.py
+python tools/gen_release_notes.py v2.51.0
 ```
 
 ### Compiler pour Windows
@@ -154,8 +160,6 @@ L'exécutable est créé dans `dist\TinyPedal`. Pour l'installeur, installe [Inn
 ```bash
 iscc /DAppVersion=2.50.0 installer\tinypedal.iss
 ```
-
-Pour publier une version, augmente `__version__` dans `tinypedal/version.py`, pousse, puis lance le workflow `Build and Release` depuis l'onglet Actions de GitHub. Il crée la release avec le ZIP, l'installeur, son fichier `.sha256` et les notes de version.
 
 > Le nom affiché est « Modern Tiny Pedals », mais le nom interne reste `TinyPedal` (dossier de configuration `%APPDATA%\TinyPedal`, `tinypedal.exe`, en-tête `X-TinyPedal` du contrôle à distance), pour garder les réglages existants et la compatibilité des outils.
 
@@ -183,7 +187,7 @@ Problèmes connus :
 
 ## Contribuer
 
-Signale un problème ou propose une idée dans les [issues](https://github.com/Keenny38/overlays/issues). Les règles de contribution sont dans [CONTRIBUTING.md](CONTRIBUTING.md), et ce qui reste à faire dans la [feuille de route](docs/ROADMAP.md).
+Signale un problème ou propose une idée dans les [issues](https://github.com/Keenny38/ModernTinyPedals/issues). Les règles de contribution sont dans [CONTRIBUTING.md](CONTRIBUTING.md), et ce qui reste à faire dans la [feuille de route](docs/ROADMAP.md).
 
 ## Licence et crédits
 

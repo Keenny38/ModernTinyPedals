@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QMenu,
@@ -145,6 +145,10 @@ class UpdatesNotifyButton(QPushButton):
         self.install_update.setVisible(False)
         self.downloaded.connect(self.install_downloaded)
 
+        self.view_notes = version_menu.addAction(tr("What's New"))
+        self.view_notes.triggered.connect(self.show_release_notes)
+        self.view_notes.setVisible(False)
+
         view_update = version_menu.addAction(tr("View Updates On GitHub"))
         view_update.triggered.connect(self.open_release)
         version_menu.addSeparator()
@@ -169,9 +173,18 @@ class UpdatesNotifyButton(QPushButton):
             # Hide message if no unpdates and not manual checking
             self.setText(update_checker.message())
             self.setVisible(update_checker.is_manual() or update_checker.is_updates())
+            self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.release_notes))
             self.install_update.setVisible(
                 can_auto_update() and update_checker.is_updates() and update_checker.installer is not None
             )
+
+    def show_release_notes(self):
+        """Show release notes (changelog) of available update"""
+        message = QMessageBox(self)
+        message.setWindowTitle(tr("What's New"))
+        message.setTextFormat(Qt.TextFormat.MarkdownText)
+        message.setText(f"**{update_checker.message()}**\n\n{update_checker.release_notes}")
+        message.exec()
 
     def download_update(self):
         """Download installer in background thread"""

@@ -18,7 +18,7 @@ def release_body(assets):
 
 
 def test_parse_installer():
-    base = "https://github.com/Keenny38/overlays/releases/download/v2.60.0/"
+    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
     found = update.parse_installer(release_body([
         ("TinyPedal-2.60.0-windows.zip", base + "TinyPedal-2.60.0-windows.zip"),
         ("TinyPedal-2.60.0-windows-setup.exe", base + "TinyPedal-2.60.0-windows-setup.exe"),
@@ -84,3 +84,16 @@ def test_download_installer_verifies_hash(file_server, tmp_path, valid):
         with pytest.raises(ValueError):
             update.download_installer(asset, str(tmp_path))
         assert not (tmp_path / "setup.exe").exists()
+
+
+def test_parse_release_notes():
+    body = release_body([])[:-1] + b', "body": "### Added\\n\\n- Add replay"}'
+    assert update.parse_release_notes(body) == "### Added\n\n- Add replay"
+    assert update.parse_release_notes(b"") == ""
+
+
+def test_old_repository_name_is_migrated(ui_env):
+    from tinypedal.setting import cfg
+
+    cfg.application["update_repository"] = "Keenny38/overlays"
+    assert update.update_repository() == "Keenny38/ModernTinyPedals"

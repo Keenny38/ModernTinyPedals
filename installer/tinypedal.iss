@@ -14,7 +14,7 @@
 ; PyInstaller output folder (dist\TinyPedal), internal name kept for user data
 #define AppFolder "TinyPedal"
 #define AppExe "tinypedal.exe"
-#define RepoUrl "https://github.com/Keenny38/overlays"
+#define RepoUrl "https://github.com/Keenny38/ModernTinyPedals"
 
 [Setup]
 AppId={{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}

@@ -97,7 +97,7 @@
             "show_setup_wizard_at_startup": "Show setup wizard at next startup. The wizard asks for language, game, window & overlay theme, starting preset and widgets. It is shown once on first launch, and can be opened any time from Help menu.",
             "snap_distance": "The distance (in pixels) at which the widget will snap to screen edges or other widgets. Default 10. Hold Ctrl to enable snapping.",
             "snap_gap": "The gap (in pixels) to leave between the widget and the snapped widget edges. Default 0.",
-            "update_repository": "Set GitHub repository (owner/name) used by Check for Updates. Empty value disables update checks. Default is Keenny38/overlays (this fork), so updates never offer the upstream releases.",
+            "update_repository": "Set GitHub repository (owner/name) used by Check for Updates. Empty value disables update checks. Default is Keenny38/ModernTinyPedals (this fork), so updates never offer the upstream releases.",
             "window_color_theme": "Set color theme for main window and dialog. Default theme is Dark. This option does not affect overlay widget.\n\nColor theme can be quickly toggled via UI button on main window status bar.",
             "window_height": "Define main window size on screen in pixels. Those values will be auto updated and saved while remember_size option is enabled.",
             "window_width": "Define main window size on screen in pixels. Those values will be auto updated and saved while remember_size option is enabled."

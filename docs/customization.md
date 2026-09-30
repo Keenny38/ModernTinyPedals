@@ -738,7 +738,7 @@ Set user interface language: `English` or `Français`. Main window, menus and di
 Show setup wizard at next startup. The wizard asks for language, game, window & overlay theme, starting preset and widgets. It is shown once on first launch, and can be opened any time from `Help` menu.
 
     update_repository
-Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value disables update checks. Default is `Keenny38/overlays` (this fork), so updates never offer the upstream releases.
+Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value disables update checks. Default is `Keenny38/ModernTinyPedals` (this fork), so updates never offer the upstream releases.
 
     number_of_automatic_backups
 Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from `Restore Backup` dialog. Set `0` to disable. Default is `10`.

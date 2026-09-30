@@ -45,9 +45,14 @@ from .version_check import is_new_version, parse_version_string
 logger = logging.getLogger(__name__)
 
 
+RENAMED_REPOS = {"keenny38/overlays": FORK_REPO_NAME}
+
+
 def update_repository() -> str:
     """Get update repository ("owner/name"), empty if update checking is disabled"""
     repo = str(cfg.application["update_repository"]).strip().strip("/")
+    if repo.lower() in RENAMED_REPOS:  # saved before the repository was renamed
+        repo = RENAMED_REPOS[repo.lower()]
     if re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
         return repo
     return ""
@@ -99,6 +104,15 @@ def parse_installer(data: bytes) -> InstallerAsset | None:
         if name.endswith(INSTALLER_SUFFIX) and sha256_url and url.startswith(DOWNLOAD_HOSTS):
             return InstallerAsset(name, url, sha256_url)
     return None
+
+
+def parse_release_notes(data: bytes) -> str:
+    """Release notes (Markdown body of GitHub release), empty if unavailable"""
+    try:
+        release = json.loads(data[data.index(b"{"):].decode("utf-8"))
+        return str(release.get("body") or "").strip()
+    except (AttributeError, TypeError, IndexError, ValueError):
+        return ""
 
 
 def can_auto_update() -> bool:
@@ -163,6 +177,7 @@ class UpdateChecker:
         "_last_checked_date",
         "_disabled",
         "installer",
+        "release_notes",
     )
 
     def __init__(self):
@@ -173,6 +188,7 @@ class UpdateChecker:
         self._last_checked_date = DATE_NA
         self._disabled = False
         self.installer: InstallerAsset | None = None
+        self.release_notes = ""
 
     def is_manual(self) -> bool:
         """Is manual checking"""
@@ -203,6 +219,7 @@ class UpdateChecker:
         raw_bytes = asyncio.run(request_latest_release(repo))
         checked_version, checked_date = parse_release(raw_bytes)
         self.installer = parse_installer(raw_bytes)
+        self.release_notes = parse_release_notes(raw_bytes)
         current_version = parse_version_string(version.__version__)
         self._update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
         # Save info

@@ -2,7 +2,7 @@
 
 Ce fichier liste uniquement ce qui **reste à faire**. L'historique des audits et de ce qui a été fait est dans [AUDIT.md](AUDIT.md).
 
-Chaque entrée est rédigée pour être copiée telle quelle en issue GitHub sur [Keenny38/overlays](https://github.com/Keenny38/overlays/issues) : le titre en gras, puis le contexte et le résultat attendu. Une fois les issues créées, retirez les entrées d'ici et gardez seulement le lien vers les issues.
+Chaque entrée est rédigée pour être copiée telle quelle en issue GitHub sur [Keenny38/ModernTinyPedals](https://github.com/Keenny38/ModernTinyPedals/issues) : le titre en gras, puis le contexte et le résultat attendu. Une fois les issues créées, retirez les entrées d'ici et gardez seulement le lien vers les issues.
 
 Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 

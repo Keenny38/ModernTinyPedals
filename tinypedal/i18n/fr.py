@@ -486,4 +486,5 @@ TRANSLATION = MappingProxyType({
     "Download And Install": "Télécharger et installer",
     "Downloading Update...": "Téléchargement de la mise à jour...",
     "Update downloaded. Close Modern Tiny Pedals and install it now?": "Mise à jour téléchargée. Fermer Modern Tiny Pedals et l'installer maintenant ?",
+    "What's New": "Voir les nouveautés",
 })

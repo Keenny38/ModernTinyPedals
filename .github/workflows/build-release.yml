@@ -141,7 +141,7 @@ jobs:
 
     - name: Release notes from commits since previous release
       run: |
-        python tools/gen_changelog.py --release v${{ needs.linux.outputs.app_ver }} > release.txt
+        python tools/gen_release_notes.py v${{ needs.linux.outputs.app_ver }} > release.txt
         echo "" >> release.txt
         echo "### SHA256" >> release.txt
         echo "" >> release.txt
