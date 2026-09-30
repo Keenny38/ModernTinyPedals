@@ -76,7 +76,7 @@ def palette_light():
     """Set palette light"""
     return (
         #   Active   Inactive   Disabled  Role
-        ("#F3F4F6", "#F3F4F6", "#ECEDF0", QPalette.ColorRole.Window),
+        ("#F4F5F8", "#F4F5F8", "#ECEDF1", QPalette.ColorRole.Window),
         ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.WindowText),
         ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Base),
         ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
@@ -92,7 +92,7 @@ def palette_light():
         ("#A3A7AD", "#A3A7AD", "#A3A7AD", QPalette.ColorRole.Dark),
         ("#D0D3D8", "#D0D3D8", "#D0D3D8", QPalette.ColorRole.Mid),
         ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.Shadow),
-        ("#1A7FE0", "#2B6CB0", "#DADDE2", QPalette.ColorRole.Highlight),
+        ("#2F6FEB", "#2B63D1", "#DADDE2", QPalette.ColorRole.Highlight),
         ("#FFFFFF", "#FFFFFF", "#5F6368", QPalette.ColorRole.HighlightedText),
         ("#1A7FE0", "#1A7FE0", "#8C9096", QPalette.ColorRole.Link),
         ("#8E44AD", "#8E44AD", "#8C9096", QPalette.ColorRole.LinkVisited),
@@ -103,23 +103,23 @@ def palette_dark():
     """Set palette dark"""
     return (
         #   Active   Inactive   Disabled  Role
-        ("#202124", "#202124", "#1C1D20", QPalette.ColorRole.Window),
-        ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.WindowText),
-        ("#17181B", "#17181B", "#1C1D20", QPalette.ColorRole.Base),
-        ("#1D1E22", "#1D1E22", "#222327", QPalette.ColorRole.AlternateBase),
-        ("#2B2D31", "#2B2D31", "#2B2D31", QPalette.ColorRole.ToolTipBase),
+        ("#111318", "#111318", "#0F1115", QPalette.ColorRole.Window),
+        ("#E9ECF2", "#E9ECF2", "#7C828D", QPalette.ColorRole.WindowText),
+        ("#181B21", "#181B21", "#15171C", QPalette.ColorRole.Base),
+        ("#1C1F26", "#1C1F26", "#1A1C22", QPalette.ColorRole.AlternateBase),
+        ("#23262E", "#23262E", "#23262E", QPalette.ColorRole.ToolTipBase),
         ("#E8EAED", "#E8EAED", "#E8EAED", QPalette.ColorRole.ToolTipText),
         ("#8A8D93", "#8A8D93", "#8A8D93", QPalette.ColorRole.PlaceholderText),
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.Text),
-        ("#2B2D31", "#2B2D31", "#25262A", QPalette.ColorRole.Button),
+        ("#20232B", "#20232B", "#1A1C22", QPalette.ColorRole.Button),
         ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.ButtonText),
         ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.BrightText),
         ("#5A5D63", "#5A5D63", "#3A3C40", QPalette.ColorRole.Light),
-        ("#45484D", "#45484D", "#303236", QPalette.ColorRole.Midlight),
+        ("#262A33", "#262A33", "#20232A", QPalette.ColorRole.Midlight),
         ("#121315", "#121315", "#101113", QPalette.ColorRole.Dark),
-        ("#3A3C41", "#3A3C41", "#2A2B2F", QPalette.ColorRole.Mid),
+        ("#2E323C", "#2E323C", "#262931", QPalette.ColorRole.Mid),
         ("#0B0B0C", "#0B0B0C", "#0B0B0C", QPalette.ColorRole.Shadow),
-        ("#2D8CF0", "#1F6FC5", "#3A3C41", QPalette.ColorRole.Highlight),
+        ("#4C8DFF", "#3B78E7", "#2E323C", QPalette.ColorRole.Highlight),
         ("#FFFFFF", "#FFFFFF", "#9AA0A6", QPalette.ColorRole.HighlightedText),
         ("#5AAEFF", "#5AAEFF", "#7A7D83", QPalette.ColorRole.Link),
         ("#C58AF9", "#C58AF9", "#7A7D83", QPalette.ColorRole.LinkVisited),
@@ -136,8 +136,9 @@ def set_style_window(base_font_pt: int) -> str:
     font_pt_app_name = 1.4 * base_font_pt
 
     # Size
-    border_radius_button = 0.25  # em
+    border_radius_button = 0.4  # em
     border_radius_input = 4  # px
+    border_radius_card = 8  # px, list & search box
 
     # Color
     palette = QApplication.palette()
@@ -184,7 +185,7 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_button};
             border: 1px solid {color_active_mid};
             border-radius: {border_radius_button}em;
-            padding: 0.2em 0.5em;
+            padding: 0.3em 0.8em;
         }}
         QPushButton:hover {{
             border-color: {color_active_highlight};
@@ -310,7 +311,8 @@ def set_style_window(base_font_pt: int) -> str:
             background: transparent;
             border: none;
             border-bottom: 2px solid transparent;
-            padding: 0.35em 0.6em;
+            padding: 0.4em 0.5em;
+            font-weight: 600;
         }}
         QTabBar::tab:hover {{
             color: {color_active_window_text};
@@ -406,19 +408,52 @@ def set_style_window(base_font_pt: int) -> str:
             background: none;
         }}
 
-        /* Main status bar */
+        /* Main window (app only, overlay widgets keep their own fonts) */
+        AppWindow, AppWindow QWidget, AppWindow QMenu {{
+            font-family: "Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans", sans-serif;
+        }}
+        AppWindow QMenuBar {{
+            border-bottom: none;
+            padding: 0.25em 0.3em;
+        }}
+        AppWindow QMenuBar::item {{
+            padding: 0.3em 0.7em;
+            border-radius: {border_radius_card}px;
+        }}
+        AppWindow QMenu {{
+            border-radius: {border_radius_card}px;
+            padding: 0.3em;
+        }}
+        #navRail {{
+            background: {color_active_window};
+            border-right: 1px solid {color_active_midlight};
+        }}
+        #pageStack {{
+            background: {color_active_window};
+        }}
+
+        /* Main status bar: pills */
         AppWindow QStatusBar {{
-            border-top: 1px solid {color_active_mid};
+            border-top: 1px solid {color_active_midlight};
+            padding: 0.15em 0.3em;
         }}
         AppWindow QStatusBar > QPushButton {{
             font-size: {font_pt_text_browser}pt;
-            border: none;
+            color: {color_disabled_window_text};
+            border: 1px solid {color_active_mid};
             background: transparent;
-            padding: 0.1em 0.4em;
+            border-radius: 0.8em;
+            padding: 0.15em 0.7em;
+            margin: 0.15em 0.1em;
         }}
         AppWindow QStatusBar > QPushButton::hover {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
+            color: {color_active_window_text};
+            border-color: {color_active_highlight};
+            background: transparent;
+        }}
+        AppWindow QStatusBar > #pillApi[running="true"] {{
+            color: #3DDC84;
+            border-color: #2E7D52;
         }}
         AppWindow QStatusBar > QPushButton::menu-indicator {{
             image: none;
@@ -446,52 +481,71 @@ def set_style_window(base_font_pt: int) -> str:
             background: #638;
         }}
 
-        /* Module list (tab) */
+        /* Module list (tab): search, filter chips, rows with gear button & switch */
+        ModuleList #searchBox {{
+            font-size: {font_pt_item_button}pt;
+            padding: 0.3em 0.5em;
+            border-radius: {border_radius_card}px;
+            background: {color_active_base};
+        }}
+        ModuleList #filterChip {{
+            font-size: {font_pt_text_browser}pt;
+            color: {color_disabled_window_text};
+            background: transparent;
+            border: 1px solid {color_active_mid};
+            border-radius: 0.8em;
+            padding: 0.15em 0.8em;
+        }}
+        ModuleList #filterChip:hover {{
+            color: {color_active_window_text};
+            border-color: {color_active_highlight};
+        }}
+        ModuleList #filterChip:checked {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-color: {color_active_highlight};
+        }}
+        ModuleList #countBadge {{
+            font-size: {font_pt_text_browser}pt;
+            font-weight: bold;
+            color: {color_active_window_text};
+            background: {color_active_midlight};
+            border-radius: 0.7em;
+            padding: 0.1em 0.6em;
+        }}
         ModuleList > QListView {{
             font-size: {font_pt_item_name}pt;
             outline: none;
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_card}px;
+            background: {color_active_base};
+            padding: 0.2em;
         }}
         ModuleList > QListView::item {{
             border: none;
-            color: {color_active_window_text};
-            min-height: 1.25em;
-            padding: 0.25em 0.25em 0.25em 0;
+            border-radius: {border_radius_input}px;
+            min-height: 1.5em;
+            padding: 0.2em 0.25em 0.2em 0.5em;
+            margin: 1px 0;
         }}
         ModuleList > QListView::item:selected {{
             background: transparent;
         }}
         ModuleList > QListView::item:hover {{
-            background: {color_disabled_highlight};
-        }}
-        ModuleControlItem QPushButton {{
-            border-radius: {border_radius_button}em;
-            height: none;
-            border: none;
-            margin-left: 0.2em;
+            background: {color_active_midlight};
         }}
         ModuleControlItem #buttonConfig {{
-            font-size: {font_pt_item_button}pt;
+            font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif;
+            font-size: {font_pt_item_name}pt;
             color: {color_disabled_window_text};
-            padding: 0 0.2em;
+            background: transparent;
+            border: none;
+            border-radius: {border_radius_input}px;
+            padding: 0 0.25em;
         }}
-        ModuleControlItem #buttonToggle {{
-            font-size: {font_pt_item_toggle}pt;
-            font-weight: bold;
-            color: {color_disabled_highlighted_text};
-            background: {color_disabled_highlight};
-            min-width: 2em;
-        }}
-        ModuleControlItem #buttonToggle::checked,
-        ModuleControlItem #buttonConfig::checked {{
-            color: {color_inactive_highlighted_text};
-            background: {color_inactive_highlight};
-        }}
-        ModuleControlItem #buttonToggle::hover,
-        ModuleControlItem #buttonConfig::hover,
-        ModuleControlItem #buttonToggle::checked:hover,
-        ModuleControlItem #buttonConfig::checked:hover {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
+        ModuleControlItem #buttonConfig:hover {{
+            color: {color_active_highlight};
+            background: {color_active_mid};
         }}
 
         /* Preset list (tab) */
@@ -499,6 +553,10 @@ def set_style_window(base_font_pt: int) -> str:
         RestoreBackup > QListView {{
             font-size: {font_pt_item_name}pt;
             outline: none;
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_card}px;
+            background: {color_active_base};
+            padding: 0.2em;
         }}
         PresetList > QListView::item,
         RestoreBackup > QListView::item {{
@@ -560,6 +618,12 @@ def set_style_window(base_font_pt: int) -> str:
         }}
 
         /* Spectate list (tab) */
+        SpectateList > QListView,
+        HotkeyList > QListView {{
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_card}px;
+            background: {color_active_base};
+        }}
         SpectateList > QListView {{
             font-size: {font_pt_item_button}pt;
             outline: none;

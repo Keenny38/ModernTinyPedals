@@ -18,12 +18,19 @@
 
 """
 Module & widget list view
+
+Each row: name, settings (gear) button and an on/off switch. Search box and All / Active /
+Inactive filter on top, so a widget is found among dozens without scrolling.
 """
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Property, QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, Slot
+from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
+    QAbstractButton,
+    QButtonGroup,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -40,6 +47,94 @@ from ..setting import cfg
 from ._common import UIScaler
 from .config import UserConfig
 
+FILTER_ALL = 0
+FILTER_ACTIVE = 1
+FILTER_INACTIVE = 2
+GEAR_SYMBOL = "\u2699\ufe0e"  # gear, text style (not color emoji)
+
+
+class ToggleSwitch(QAbstractButton):
+    """On/off switch: rounded track, knob sliding to the right when on (animated)"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._position = 0.0  # knob, 0 left (off) to 1 right (on)
+        self._animation = QPropertyAnimation(self, b"position", self)
+        self._animation.setDuration(120)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.toggled.connect(self._animate)
+
+    def sizeHint(self) -> QSize:
+        height = round(self.fontMetrics().height() * 1.35)
+        return QSize(round(height * 1.9), height)
+
+    def setChecked(self, checked: bool):
+        """Set state without animation (initial state, refresh)"""
+        blocked = self.signalsBlocked()
+        super().setChecked(checked)
+        self._animation.stop()
+        self._position = 1.0 if checked else 0.0
+        self.update()
+        self.blockSignals(blocked)
+
+    def _animate(self, checked: bool):
+        self._animation.stop()
+        self._animation.setStartValue(self._position)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
+
+    def _get_position(self) -> float:
+        return self._position
+
+    def _set_position(self, value: float):
+        self._position = value
+        self.update()
+
+    position = Property(float, _get_position, _set_position)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        palette = self.palette()
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        radius = rect.height() / 2
+        # Off track: visible on both themes (darker than a light window, lighter than a dark one)
+        light_theme = palette.color(QPalette.ColorRole.Window).lightness() > 128
+        off = palette.color(QPalette.ColorGroup.Active,
+                            QPalette.ColorRole.Dark if light_theme else QPalette.ColorRole.Light)
+        on = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
+        ratio = self._position
+        track = QColor.fromRgbF(
+            off.redF() + (on.redF() - off.redF()) * ratio,
+            off.greenF() + (on.greenF() - off.greenF()) * ratio,
+            off.blueF() + (on.blueF() - off.blueF()) * ratio,
+        )
+        if self.underMouse():
+            track = track.lighter(115)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(track)
+        painter.drawRoundedRect(rect, radius, radius)
+        margin = rect.height() * 0.14
+        knob = rect.height() - margin * 2
+        x = rect.left() + margin + (rect.width() - knob - margin * 2) * ratio
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(QRectF(x, rect.top() + margin, knob, knob))
+        if self.hasFocus():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(on.lighter(130))
+            painter.drawRoundedRect(rect, radius, radius)
+
+    def enterEvent(self, event):
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.update()
+        super().leaveEvent(event)
+
 
 class ModuleList(QWidget):
     """Module & widget list view"""
@@ -52,13 +147,39 @@ class ModuleList(QWidget):
         """
         super().__init__(parent)
         self.module_control = module_control
+        self.items: dict[str, QListWidgetItem] = {}
 
-        # Label
+        # Search & filter bar
+        self.search_box = QLineEdit(self)
+        self.search_box.setObjectName("searchBox")
+        self.search_box.setPlaceholderText(f"{tr('Search')}...")
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.textChanged.connect(self.apply_filter)
+
+        self.filter_group = QButtonGroup(self)
+        self.filter_group.setExclusive(True)
+        layout_filter = QHBoxLayout()
+        layout_filter.setSpacing(UIScaler.pixel(4))
+        for filter_id, text in ((FILTER_ALL, "All"), (FILTER_ACTIVE, "Active"), (FILTER_INACTIVE, "Inactive")):
+            chip = QPushButton(tr(text))
+            chip.setObjectName("filterChip")
+            chip.setCheckable(True)
+            chip.setChecked(filter_id == FILTER_ALL)
+            chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.filter_group.addButton(chip, filter_id)
+            layout_filter.addWidget(chip)
+        self.filter_group.idClicked.connect(self.apply_filter)
+        layout_filter.addStretch(1)
         self.label_loaded = QLabel("")
+        self.label_loaded.setObjectName("countBadge")
+        layout_filter.addWidget(self.label_loaded)
 
         # List box
         self.listbox_module = QListWidget(self)
-        self.listbox_module.setAlternatingRowColors(True)
+        self.listbox_module.setUniformItemSizes(True)
+        # No selection: rows only carry their switch, a selected row would look enabled
+        self.listbox_module.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.listbox_module.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.create_list()
 
         # Button
@@ -75,22 +196,26 @@ class ModuleList(QWidget):
 
         # Layout
         layout_main = QVBoxLayout()
-        layout_main.addWidget(self.label_loaded)
+        layout_main.setSpacing(UIScaler.pixel(6))
+        layout_main.addWidget(self.search_box)
+        layout_main.addLayout(layout_filter)
         layout_main.addWidget(self.listbox_module)
         layout_main.addLayout(layout_button)
-        margin = UIScaler.pixel(6)
+        margin = UIScaler.pixel(8)
         layout_main.setContentsMargins(margin, margin, margin, margin)
         self.setLayout(layout_main)
 
     def create_list(self):
         """Create module list"""
         for _name in self.module_control.names:
-            module_item = ModuleControlItem(self, _name, self.module_control)
             item = QListWidgetItem()
             item.setText(module_label(_name))
+            item.setData(Qt.ItemDataRole.UserRole, _name)
+            self.items[_name] = item
             self.listbox_module.addItem(item)
+            module_item = ModuleControlItem(self, _name, self.module_control)
             self.listbox_module.setItemWidget(item, module_item)
-        self.listbox_module.setCurrentRow(0)
+            self.update_item_style(_name)
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
@@ -99,13 +224,42 @@ class ModuleList(QWidget):
         for row_index in range(listbox_module.count()):
             item = listbox_module.item(row_index)
             listbox_module.itemWidget(item).update_state()
+        self.apply_filter()
 
     def refresh_label(self):
-        """Refresh label text"""
+        """Refresh count badge"""
         self.label_loaded.setText(
-            f"Enabled: <b>{self.module_control.number_active}/"
-            f"{self.module_control.number_total}</b>"
-        )
+            f"{self.module_control.number_active} / {self.module_control.number_total}")
+        self.label_loaded.setToolTip(tr("Enabled"))
+
+    def is_enabled(self, name: str) -> bool:
+        return bool(cfg.user.setting[name]["enable"])
+
+    def update_item_style(self, name: str):
+        """Active rows in full color, inactive ones dimmed"""
+        item = self.items.get(name)
+        if item is None:
+            return
+        palette = self.palette()
+        group = QPalette.ColorGroup.Active if self.is_enabled(name) else QPalette.ColorGroup.Disabled
+        item.setForeground(palette.color(group, QPalette.ColorRole.WindowText))
+
+    def changeEvent(self, event):
+        """Theme switched: rows colored again from the new palette"""
+        if event.type() == QEvent.Type.PaletteChange:
+            for name in self.items:
+                self.update_item_style(name)
+        super().changeEvent(event)
+
+    def apply_filter(self, *_args):
+        """Show rows matching search text and All / Active / Inactive filter"""
+        text = self.search_box.text().strip().lower()
+        mode = self.filter_group.checkedId()
+        for name, item in self.items.items():
+            enabled = self.is_enabled(name)
+            visible = (not text or text in item.text().lower() or text in name.lower()) and (
+                mode == FILTER_ALL or (mode == FILTER_ACTIVE) == enabled)
+            item.setHidden(not visible)
 
     def module_button_enable_all(self):
         """Enable all modules"""
@@ -134,7 +288,7 @@ class ModuleList(QWidget):
 
 
 class ModuleControlItem(QWidget):
-    """Module control item"""
+    """Module control item: settings button & on/off switch, on the right of the row"""
 
     def __init__(self, parent, module_name: str, module_control: ModuleControl):
         """Initialize list box setting
@@ -148,21 +302,24 @@ class ModuleControlItem(QWidget):
         self.module_name = module_name
         self.module_control = module_control
 
-        self.button_toggle = QPushButton("")
+        self.button_toggle = ToggleSwitch(self)
         self.button_toggle.setObjectName("buttonToggle")
-        self.button_toggle.setCheckable(True)
         self.button_toggle.setChecked(self.is_enabled())
+        self.button_toggle.setToolTip(tr("Enable / Disable"))
         # Use "clicked" to avoid trigger with "setChecked"
         self.button_toggle.clicked.connect(self.toggle_state)
 
-        button_config = QPushButton(tr("Config"))
+        button_config = QPushButton(GEAR_SYMBOL)
         button_config.setObjectName("buttonConfig")
+        button_config.setToolTip(tr("Config"))
+        button_config.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_config.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         button_config.pressed.connect(self.open_config_dialog)
 
         layout_item = QHBoxLayout()
-        layout_item.setContentsMargins(0, 0, 0, 0)
+        layout_item.setContentsMargins(0, 0, UIScaler.pixel(4), 0)
         layout_item.addStretch(1)
-        layout_item.setSpacing(0)
+        layout_item.setSpacing(UIScaler.pixel(6))
         layout_item.addWidget(button_config)
         layout_item.addWidget(self.button_toggle)
         self.setLayout(layout_item)
@@ -175,6 +332,7 @@ class ModuleControlItem(QWidget):
         """Toggle button state"""
         self.module_control.toggle(self.module_name)
         self.update_button_text()
+        self._parent.apply_filter()
 
     def update_state(self):
         """Update button toggle state"""
@@ -182,8 +340,8 @@ class ModuleControlItem(QWidget):
         self.update_button_text()
 
     def update_button_text(self):
-        """Update button text"""
-        self.button_toggle.setText("ON" if self.is_enabled() else "OFF")
+        """Update row style & count badge"""
+        self._parent.update_item_style(self.module_name)
         self._parent.refresh_label()
 
     def open_config_dialog(self):

@@ -85,3 +85,27 @@ def test_unit_hint_handles_any_stored_number(value):
     from tinypedal.ui._option import unit_hint
 
     assert unit_hint("tyre_pressure_target_minimum", str(value), {"tyre_pressure_unit": "bar"})
+
+
+def test_module_list_search_filter_and_switch(ui_env):
+    from tinypedal.module_control import wctrl
+    from tinypedal.ui.module_view import FILTER_ACTIVE, FILTER_INACTIVE, ModuleList, ToggleSwitch
+
+    for name in wctrl.names:
+        cfg.user.setting[name]["enable"] = name == "flag"
+    view = ModuleList(None, wctrl)
+    try:
+        visible = lambda: {name for name, item in view.items.items() if not item.isHidden()}
+        assert len(visible()) == len(wctrl.names)
+        view.search_box.setText("brake")
+        assert visible() and all("brake" in name for name in visible())
+        view.search_box.clear()
+        view.filter_group.button(FILTER_ACTIVE).click()
+        assert visible() == {"flag"}
+        view.filter_group.button(FILTER_INACTIVE).click()
+        assert "flag" not in visible() and len(visible()) == len(wctrl.names) - 1
+        switch = view.listbox_module.itemWidget(view.items["flag"]).button_toggle
+        assert isinstance(switch, ToggleSwitch) and switch.isChecked()
+        view.grab()
+    finally:
+        view.deleteLater()

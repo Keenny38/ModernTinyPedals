@@ -23,16 +23,20 @@ Main application window
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Slot
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPalette
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
+    QButtonGroup,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QStatusBar,
     QSystemTrayIcon,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -57,8 +61,93 @@ from .spectate_view import SpectateList
 logger = logging.getLogger(__name__)
 
 
+# Navigation pages: (label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
+NAV_PAGES = (
+    ("Widget", "\ue71d", "W"),  # all apps grid
+    ("Module", "\ue9d9", "M"),  # diagnostic
+    ("Preset", "\ue8f1", "P"),  # library
+    ("Spectate", "\ue890", "S"),  # view
+    ("Pacenotes", "\ue70b", "N"),  # quick note
+    ("Hotkey", "\ue765", "H"),  # keyboard
+)
+ICON_FONTS = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
+
+
+def icon_font_family() -> str:
+    """Installed icon font (Windows 10 / 11), "" if none: letters are drawn instead"""
+    families = set(QFontDatabase.families())
+    return next((family for family in ICON_FONTS if family in families), "")
+
+
+class NavButton(QAbstractButton):
+    """Navigation rail entry: icon over a short label, accent pill when selected"""
+
+    def __init__(self, text: str, glyph: str, letter: str, icon_family: str, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(text)
+        self.glyph = glyph if icon_family else letter
+        self.icon_font = QFont(icon_family) if icon_family else QFont(self.font())
+        if not icon_family:
+            self.icon_font.setBold(True)
+
+    def sizeHint(self) -> QSize:
+        line = self.fontMetrics().height()
+        return QSize(round(line * 4.4), round(line * 3.4))
+
+    def enterEvent(self, event):
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        palette = self.palette()
+        accent = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
+        text = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
+        muted = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText)
+        area = QRectF(self.rect()).adjusted(4, 2, -4, -2)
+        radius = area.height() * 0.22
+        if self.isChecked():
+            fill = QColor(accent)
+            fill.setAlphaF(0.18)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(area, radius, radius)
+            bar_h = area.height() * 0.42
+            painter.setBrush(accent)
+            painter.drawRoundedRect(QRectF(area.left() - 3, area.center().y() - bar_h / 2, 3, bar_h), 1.5, 1.5)
+        elif self.underMouse():
+            fill = QColor(text)
+            fill.setAlphaF(0.07)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(area, radius, radius)
+        color = accent if self.isChecked() else (text if self.underMouse() else muted)
+        painter.setPen(color)
+        icon_font = QFont(self.icon_font)
+        icon_font.setPixelSize(round(area.height() * 0.34))
+        painter.setFont(icon_font)
+        icon_rect = QRectF(area.left(), area.top() + area.height() * 0.1, area.width(), area.height() * 0.5)
+        painter.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, self.glyph)
+        label_font = QFont(self.font())
+        label_font.setPixelSize(max(round(area.height() * 0.2), 8))
+        label_font.setBold(self.isChecked())
+        painter.setFont(label_font)
+        painter.setPen(text if self.isChecked() else color)
+        label_rect = QRectF(area.left(), area.top() + area.height() * 0.6, area.width(), area.height() * 0.32)
+        label = QFontMetricsF(label_font).elidedText(self.text(), Qt.TextElideMode.ElideRight, label_rect.width())
+        painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+
 class TabView(QWidget):
-    """Tab view"""
+    """Main view: navigation rail on the left, page on the right"""
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -69,28 +158,47 @@ class TabView(QWidget):
         notify_bar.pacenotes.clicked.connect(self.select_pacenotes_tab)
         notify_bar.hotkey.clicked.connect(self.select_hotkey_tab)
 
-        # Tabs
+        # Pages
         widget_tab = ModuleList(self, wctrl)
         module_tab = ModuleList(self, mctrl)
         preset_tab = PresetList(self)
         spectate_tab = SpectateList(self)
         pacenotes_tab = PaceNotesControl(self)
         hotkey_tab = HotkeyList(self)
+        self._pages = QStackedWidget(self)
+        self._pages.setObjectName("pageStack")
+        for page in (widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab):
+            self._pages.addWidget(page)
 
-        self._tabs = QTabWidget(self)
-        self._tabs.addTab(widget_tab, tr("Widget"))  # 0
-        self._tabs.addTab(module_tab, tr("Module"))  # 1
-        self._tabs.addTab(preset_tab, tr("Preset"))  # 2
-        self._tabs.addTab(spectate_tab, tr("Spectate"))  # 3
-        self._tabs.addTab(pacenotes_tab, tr("Pacenotes"))  # 4
-        self._tabs.addTab(hotkey_tab, tr("Hotkey"))  # 5
-        self._tabs.currentChanged.connect(self.refresh)
+        # Navigation rail
+        rail = QWidget(self)
+        rail.setObjectName("navRail")
+        layout_rail = QVBoxLayout(rail)
+        margin = UIScaler.pixel(6)
+        layout_rail.setContentsMargins(margin, margin, margin, margin)
+        layout_rail.setSpacing(UIScaler.pixel(2))
+        self._nav = QButtonGroup(self)
+        self._nav.setExclusive(True)
+        icon_family = icon_font_family()
+        for index, (label, glyph, letter) in enumerate(NAV_PAGES):
+            button = NavButton(tr(label), glyph, letter, icon_family, rail)
+            self._nav.addButton(button, index)
+            layout_rail.addWidget(button)
+        layout_rail.addStretch(1)
+        self._nav.idClicked.connect(self.set_current_index)
+        self._nav.button(0).setChecked(True)
+
+        layout_body = QHBoxLayout()
+        layout_body.setContentsMargins(0, 0, 0, 0)
+        layout_body.setSpacing(0)
+        layout_body.addWidget(rail)
+        layout_body.addWidget(self._pages, stretch=1)
 
         # Main view
         layout_main = QVBoxLayout()
         layout_main.setContentsMargins(0, 0, 0, 0)
         layout_main.setSpacing(0)
-        layout_main.addWidget(self._tabs)
+        layout_main.addLayout(layout_body, stretch=1)
         layout_main.addWidget(notify_bar)
         self.setLayout(layout_main)
 
@@ -105,37 +213,32 @@ class TabView(QWidget):
         app_signal.refresh.connect(pacenotes_tab.refresh)
         app_signal.refresh.connect(hotkey_tab.refresh)
 
-    def refresh(self):
-        """Refresh tab area"""
-        # Workaround to correct tab scroll area size after height changed
-        width = self.width()
-        height = self.height()
-        self.resize(width, height - 1)
-        self.resize(width, height + 1)
-
     def current_index(self) -> int:
-        """Current tab index"""
-        return self._tabs.currentIndex()
+        """Current page index"""
+        return self._pages.currentIndex()
 
     def set_current_index(self, index: int):
-        """Select tab by index"""
-        self._tabs.setCurrentIndex(index)
+        """Select page by index"""
+        self._pages.setCurrentIndex(index)
+        button = self._nav.button(index)
+        if button is not None and not button.isChecked():
+            button.setChecked(True)
 
     def select_preset_tab(self):
         """Select preset tab"""
-        self._tabs.setCurrentIndex(2)
+        self.set_current_index(2)
 
     def select_spectate_tab(self):
         """Select spectate tab"""
-        self._tabs.setCurrentIndex(3)
+        self.set_current_index(3)
 
     def select_pacenotes_tab(self):
         """Select pace notes tab"""
-        self._tabs.setCurrentIndex(4)
+        self.set_current_index(4)
 
     def select_hotkey_tab(self):
         """Select hotkey tab"""
-        self._tabs.setCurrentIndex(5)
+        self.set_current_index(5)
 
 
 class StatusButtonBar(QStatusBar):
@@ -144,14 +247,17 @@ class StatusButtonBar(QStatusBar):
     def __init__(self, parent):
         super().__init__(parent)
         self.button_api = QPushButton("")
+        self.button_api.setObjectName("pillApi")
         self.button_api.clicked.connect(self.refresh)
         self.button_api.setToolTip(tr("Config Telemetry API"))
 
         self.button_style = QPushButton("")
+        self.button_style.setObjectName("pill")
         self.button_style.clicked.connect(self.toggle_color_theme)
         self.button_style.setToolTip(tr("Toggle Window Color Theme"))
 
         self.button_dpiscale = QPushButton("")
+        self.button_dpiscale.setObjectName("pill")
         self.button_dpiscale.clicked.connect(self.toggle_dpi_scaling)
         self.button_dpiscale.setToolTip(tr("Toggle High DPI Scaling"))
         self._last_dpi_scaling = cfg.application["enable_high_dpi_scaling"]
@@ -181,9 +287,17 @@ class StatusButtonBar(QStatusBar):
             text_api_status = "overriding"
         else:
             text_api_status = api.read.state.version()
-        self.button_api.setText(f"API: {api.alias} ({text_api_status})")
+        # Dot: green while the game is running (API reports a version), grey otherwise
+        running = bool(text_api_status) and text_api_status not in ("not running", "0.0")
+        self.button_api.setProperty("running", running)
+        self.button_api.style().unpolish(self.button_api)
+        self.button_api.style().polish(self.button_api)
+        self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {text_api_status}")
 
-        self.button_style.setText(trm(f"UI: {cfg.application['window_color_theme']}"))
+        dark = cfg.application["window_color_theme"] == "Dark"
+        # Moon & sun glyphs without a color emoji form, so they stay monochrome like the text
+        glyph = "\u263e " if dark else "\u263c "
+        self.button_style.setText(glyph + trm(f"UI: {cfg.application['window_color_theme']}"))
 
         if cfg.application["enable_high_dpi_scaling"]:
             text_dpi = "Auto"
