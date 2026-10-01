@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, overload
 
-from PySide6.QtCore import QBasicTimer, QRect, Qt, Slot
+from PySide6.QtCore import QBasicTimer, QPropertyAnimation, QRect, Qt, Slot
 from PySide6.QtGui import QFont, QFontMetrics, QPalette, QPixmap
 from PySide6.QtWidgets import QGridLayout, QLayout, QMenu, QWidget
 
@@ -43,6 +43,25 @@ from ._style import StyledConfig, modern_overrides, scale_overrides
 
 logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
+FADE_MS = 250
+
+
+def context_visible(context: str) -> bool:
+    """Whether widget with visibility context is shown in current session & pit state"""
+    if context == "Always" or not realtime_state.active:
+        return True
+    session = realtime_state.session_type
+    if context == "Race":
+        return session == 4
+    if context == "Qualifying & Race":
+        return session in (2, 4)
+    if context == "Practice & Qualifying":
+        return session in (0, 1, 2, 3)
+    if context == "On Track":
+        return not realtime_state.in_pits
+    if context == "In Pits":
+        return realtime_state.in_pits
+    return True
 
 
 class Base(QWidget):
@@ -80,6 +99,12 @@ class Base(QWidget):
         self.setWindowTitle(f"{APP_NAME} - {widget_name.capitalize()}")
         self.move(self.wcfg["position_x"], self.wcfg["position_y"])
 
+        # Visibility: fade in & out
+        self._fade = QPropertyAnimation(self, b"windowOpacity", self)
+        self._fade.setDuration(FADE_MS)
+        self._fade.finished.connect(self.__fade_finished)
+        self._fade_enabled = bool(style.get("enable_fade_animation", True))
+
         # Set update timer
         self._update_timer = QBasicTimer()
         self._update_interval = max(
@@ -97,6 +122,7 @@ class Base(QWidget):
     def stop(self):
         """Stop and close widget"""
         widget_name = self.widget_name
+        self._fade.stop()
         self.__toggle_timer(True)
         self.__break_signal()
         self.__unload_resource()
@@ -158,15 +184,15 @@ class Base(QWidget):
     def __toggle_lock(self, locked: bool):
         """Toggle widget lock state"""
         self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, locked)
-        # Need re-check after lock/unlock
-        self.setHidden(self.cfg.overlay["auto_hide"] and not realtime_state.active)
+        # Need re-check after lock/unlock (setting window flag hides window)
+        self.__refresh_visibility(animate=False)
 
     @Slot(bool)  # type: ignore[operator]
     def __toggle_vr_compat(self, enabled: bool):
         """Toggle widget VR compatibility"""
         self.setWindowFlag(Qt.WindowType.Tool, not enabled)
         # Need re-check
-        self.setHidden(self.cfg.overlay["auto_hide"] and not realtime_state.active)
+        self.__refresh_visibility(animate=False)
 
     @Slot(bool)  # type: ignore[operator]
     def __toggle_timer(self, paused: bool):
@@ -177,17 +203,62 @@ class Base(QWidget):
         else:
             self._update_timer.start(self._update_interval, self)
 
+    def should_hide(self) -> bool:
+        """Hidden by auto hide, hotkey, or visibility context"""
+        if realtime_state.hidden:
+            return True
+        if not self.cfg.overlay["fixed_position"]:
+            return False  # unlocked: always visible for positioning
+        return not context_visible(self.wcfg.get("visibility_context", "Always"))
+
+    @Slot(bool)  # type: ignore[operator]
+    def __set_hidden(self, _hidden: bool):
+        self.__refresh_visibility()
+
+    @Slot()  # type: ignore[operator]
+    def __context_changed(self):
+        self.__refresh_visibility()
+
+    def __refresh_visibility(self, animate: bool = True):
+        """Show or hide widget, fade if enabled"""
+        hide = self.should_hide()
+        opacity = self.wcfg["opacity"]
+        self._fade.stop()
+        if not (animate and self._fade_enabled):
+            self.setWindowOpacity(opacity)
+            self.setHidden(hide)
+            return
+        if hide:
+            if self.isVisible():
+                self._fade.setStartValue(self.windowOpacity())
+                self._fade.setEndValue(0.0)
+                self._fade.start()
+        else:
+            if not self.isVisible():
+                self.setWindowOpacity(0.0)
+                self.show()
+            self._fade.setStartValue(self.windowOpacity())
+            self._fade.setEndValue(opacity)
+            self._fade.start()
+
+    def __fade_finished(self):
+        if self._fade.endValue() == 0.0:
+            self.hide()
+            self.setWindowOpacity(self.wcfg["opacity"])
+
     def __connect_signal(self):
         """Connect overlay lock and hide signal"""
         overlay_signal.locked.connect(self.__toggle_lock)
-        overlay_signal.hidden.connect(self.setHidden)
+        overlay_signal.hidden.connect(self.__set_hidden)
+        overlay_signal.context.connect(self.__context_changed)
         overlay_signal.paused.connect(self.__toggle_timer)
         overlay_signal.iconify.connect(self.__toggle_vr_compat)
 
     def __break_signal(self):
         """Disconnect overlay lock and hide signal"""
         overlay_signal.locked.disconnect(self.__toggle_lock)
-        overlay_signal.hidden.disconnect(self.setHidden)
+        overlay_signal.hidden.disconnect(self.__set_hidden)
+        overlay_signal.context.disconnect(self.__context_changed)
         overlay_signal.paused.disconnect(self.__toggle_timer)
         overlay_signal.iconify.disconnect(self.__toggle_vr_compat)
 

@@ -251,6 +251,7 @@ CHOICE_COMMON = MappingProxyType({
     CFG_STATS_CLASSIFICATION: ("Class - Brand", "Class", "Vehicle"),
     CFG_WINDOW_COLOR_THEME: ("Light", "Dark", "System"),
     CFG_LANGUAGE: ("English", "Français"),
+    "^visibility_context$": ("Always", "Race", "Qualifying & Race", "Practice & Qualifying", "On Track", "In Pits"),
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
     "^tyre_load_display$": ("Percent", "Kilogram", "Newton"),

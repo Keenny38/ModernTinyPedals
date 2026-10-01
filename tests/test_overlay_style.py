@@ -99,3 +99,28 @@ def test_overlay_scale_applied_to_widget(ui_env):
         widget.deleteLater()
     finally:
         cfg.user.config["overlay_style"]["overlay_scale"] = 1.0
+
+
+def test_visibility_context():
+    from tinypedal import realtime_state
+    from tinypedal.widget._base import context_visible
+
+    saved = realtime_state.active, realtime_state.session_type, realtime_state.in_pits
+    try:
+        realtime_state.active = False
+        assert context_visible("Race")  # not driving: auto hide decides
+        realtime_state.active = True
+        realtime_state.session_type, realtime_state.in_pits = 2, False
+        assert context_visible("Always") and context_visible("Qualifying & Race")
+        assert not context_visible("Race") and context_visible("On Track") and not context_visible("In Pits")
+        realtime_state.session_type, realtime_state.in_pits = 4, True
+        assert context_visible("Race") and context_visible("In Pits") and not context_visible("On Track")
+        assert not context_visible("Practice & Qualifying")
+    finally:
+        realtime_state.active, realtime_state.session_type, realtime_state.in_pits = saved
+
+
+def test_every_widget_has_visibility_context():
+    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+
+    assert all(setting["visibility_context"] == "Always" for setting in WIDGET_DEFAULT.values())

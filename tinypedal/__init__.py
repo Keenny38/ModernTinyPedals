@@ -39,6 +39,8 @@ class RealtimeState:
         paused: whether data stopped updating.
         resets: number of player vehicle resets.
         hidden: whether overlay is hidden.
+        session_type: session type of player, for widget visibility context.
+        in_pits: whether player is in pit lane or garage.
         overriding: whether is state override mode enabled.
         spectating: whether is spectate mode enabled.
         singleton: whether is single-instance mode enabled.
@@ -49,6 +51,8 @@ class RealtimeState:
         "paused",
         "resets",
         "hidden",
+        "session_type",
+        "in_pits",
         "overriding",
         "spectating",
         "singleton",
@@ -59,6 +63,8 @@ class RealtimeState:
         self.paused: bool = True
         self.resets: int = 0
         self.hidden: bool = False
+        self.session_type: int = -1  # 0 testday, 1 practice, 2 qualify, 3 warmup, 4 race, -1 unknown
+        self.in_pits: bool = False  # player in pit lane or garage
         self.overriding: bool = False
         self.spectating: bool = False
         self.singleton: bool = False
@@ -72,9 +78,11 @@ class OverlaySignal(QObject):
         locked: signal for toggling lock state.
         paused: signal for pausing and resuming overlay timer.
         iconify: signal for toggling taskbar icon visibility state (for VR compatibility).
+        context: signal for session type or pit state changed (widget visibility context).
     """
 
     hidden = Signal(bool)
+    context = Signal()
     locked = Signal(bool)
     paused = Signal(bool)
     iconify = Signal(bool)

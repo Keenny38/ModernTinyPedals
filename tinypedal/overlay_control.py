@@ -111,6 +111,11 @@ class OverlayControl:
             paused = api.read.state.paused()
             resets = api.read.state.resets()
             hidden = cfg.overlay["auto_hide"] and not active
+            if active:
+                session_type = api.read.session.session_type()
+                in_pits = api.read.vehicle.in_pits() or api.read.vehicle.in_garage()
+            else:
+                session_type, in_pits = -1, False
             # Update state
             realtime_state.active = active
             realtime_state.paused = paused
@@ -120,6 +125,11 @@ class OverlayControl:
                 self._last_hide_state = hidden
                 realtime_state.hidden = hidden
                 overlay_signal.hidden.emit(hidden)
+            # Visibility context check (per widget "visibility_context" option)
+            if realtime_state.session_type != session_type or realtime_state.in_pits != in_pits:
+                realtime_state.session_type = session_type
+                realtime_state.in_pits = in_pits
+                overlay_signal.context.emit()
             # Active state check
             if self._last_active_state != active:
                 self._last_active_state = active

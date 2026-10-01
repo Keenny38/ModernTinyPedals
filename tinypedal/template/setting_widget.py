@@ -38,7 +38,9 @@ if _widgets:  # widget added to a category but missing from display order
 WIDGET_DEFAULT.update(load_plugin_defaults())
 
 # Per widget overlay theme (common option), "Global" = use overlay style theme
+# Visibility context (common option): when widget is shown while driving, see widget._base
 for _widget_setting in WIDGET_DEFAULT.values():
     _widget_setting.setdefault("widget_theme", "Global")
+    _widget_setting.setdefault("visibility_context", "Always")
 
 WIDGET_FILENAME = tuple(WIDGET_DEFAULT)

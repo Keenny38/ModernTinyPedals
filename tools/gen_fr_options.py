@@ -740,6 +740,8 @@ FULL = {
     "show_setup_wizard_at_startup": "Assistant de configuration au démarrage",
     "last_page_index": "Dernière page ouverte",
     "overlay_scale": "Échelle de l'overlay",
+    "visibility_context": "Afficher pendant",
+    "enable_fade_animation": "Fondu à l'affichage et au masquage",
     "web_dashboard": "Tableau de bord web", "enable_web_dashboard": "Activer le tableau de bord web",
     "enable_lan_access": "Accès depuis le réseau local", "web_dashboard_port": "Port",
     "access_code": "Code d'accès",

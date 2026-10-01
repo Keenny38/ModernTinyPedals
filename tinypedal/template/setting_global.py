@@ -94,6 +94,7 @@ GLOBAL_DEFAULT = {
         "enable_depth_effects": True,
         "minimum_bar_gap": 2,
         "overlay_scale": 1.0,
+        "enable_fade_animation": True,
     },
     "telemetry": {
         "api_name": API_DEFAULT_NAME,
