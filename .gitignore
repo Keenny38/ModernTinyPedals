@@ -23,6 +23,7 @@ pylintrc
 *.json
 !/plugins/*/setting.json
 !/tinypedal/i18n/data/*.json
+!/tools/readme_preview_track.json
 *.csv
 *.fuel
 

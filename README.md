@@ -11,7 +11,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 [Nouveautés](https://github.com/Keenny38/ModernTinyPedals/releases) ·
 [Feuille de route](docs/ROADMAP.md)
 
-![Aperçu des overlays : relatif, delta, météo, radar, Black box, pédales et carburant](images/readme_preview.png)
+![Aperçu des 77 overlays (style modern) sur une course simulée à Road Atlanta](images/readme_preview.png)
 
 ---
 
