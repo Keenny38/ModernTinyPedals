@@ -68,12 +68,33 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     """Fill rect, with rounded corner & depth shading if enabled in overlay style"""
     radius = min(rect.width(), rect.height()) * OverlayStyle.corner_scale
     depth = OverlayStyle.depth_effects and min(rect.width(), rect.height()) >= _DEPTH_MIN_SIZE
+    if radius < 1 and not depth:
+        painter.fillRect(rect, color)
+        return
+    # Rounded & shaded fill is pre-rendered once per size & color (list widgets repaint
+    # hundreds of identical cells), then drawn as pixmap
+    rect = QRectF(rect)
+    ratio = painter.device().devicePixelRatioF()
+    if not (0 < rect.width() * ratio <= _CACHE_MAX_SIDE and 0 < rect.height() * ratio <= _CACHE_MAX_SIDE):
+        _fill_rect_direct(painter, rect, color, radius, depth)  # huge or invalid size, not cached
+        return
+    rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
+    pixmap = _background_pixmap(
+        max(round(rect.width() * ratio), 1), max(round(rect.height() * ratio), 1),
+        round(radius, 2) if radius >= 1 else 0.0, depth, rgba, ratio)
+    painter.drawPixmap(rect.topLeft(), pixmap)
+
+
+_CACHE_MAX_SIDE = 2048  # pixels, larger fills are drawn directly
+
+
+def _fill_rect_direct(painter: QPainter, rect: QRectF, color, radius: float, depth: bool) -> None:
+    """Fill rect without cache"""
     if radius < 1:
         painter.fillRect(rect, color)
         if depth:
-            _fill_depth(painter, QRectF(rect), None)
+            _fill_depth(painter, rect, None)
         return
-    rect = QRectF(rect)
     path = _rounded_path(rect.x(), rect.y(), rect.width(), rect.height(), radius)
     antialiased = painter.testRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -81,6 +102,34 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     if depth:
         _fill_depth(painter, rect, path)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, antialiased)
+
+
+@lru_cache(maxsize=256)
+def _color_rgba(color: str) -> int:
+    """Color name or hex to rgba integer"""
+    return QColor(color).rgba()
+
+
+@lru_cache(maxsize=512)
+def _background_pixmap(width: int, height: int, radius: float, depth: bool, rgba: int, ratio: float) -> QPixmap:
+    """Rounded and/or depth shaded fill, rendered at device pixel size"""
+    pixmap = QPixmap(width, height)
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    rect = QRectF(0, 0, width / ratio, height / ratio)
+    painter = QPainter(pixmap)
+    color = QColor.fromRgba(rgba)
+    if radius < 1:
+        painter.fillRect(rect, color)
+        path = None
+    else:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        path = _rounded_path(0.0, 0.0, rect.width(), rect.height(), radius)
+        painter.fillPath(path, color)
+    if depth:
+        _fill_depth(painter, rect, path)
+    painter.end()
+    return pixmap
 
 
 def _fill_depth(painter: QPainter, rect: QRectF, path: QPainterPath | None) -> None:

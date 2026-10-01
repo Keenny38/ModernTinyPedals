@@ -152,3 +152,33 @@ def test_edit_frame_resize(ui_env, monkeypatch):
     finally:
         cfg.user.setting["speedometer"]["font_size"] = font_size
         widget.stop()
+
+
+def test_cached_fill_matches_direct_fill(ui_env):
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainter, QPixmap
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
+    try:
+        for corner, depth in ((0.0, True), (0.2, False), (0.2, True)):
+            _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = corner, depth
+            images = []
+            for cached in (True, False):
+                pixmap = QPixmap(60, 30)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                rect = QRectF(2, 3, 50, 20)
+                if cached:
+                    _painter.fill_rect(painter, rect, "#336699")
+                else:
+                    radius = 20 * corner
+                    _painter._fill_rect_direct(painter, rect, "#336699", radius, depth)
+                painter.end()
+                images.append(pixmap.toImage())
+            differences = sum(
+                1 for x in range(60) for y in range(30) if images[0].pixel(x, y) != images[1].pixel(x, y))
+            assert differences == 0, (corner, depth, differences)
+    finally:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
