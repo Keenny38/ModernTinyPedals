@@ -70,6 +70,46 @@ def load_custom_themes(filepath: str, builtin_names: tuple[str, ...]) -> dict[st
         return {}
 
 
+THEME_FILE_FORMAT = "modern-tiny-pedals-overlay-theme"
+MAX_THEME_FILE_SIZE = 1024 * 1024
+
+
+def export_theme(filename: str, name: str, theme: dict) -> bool:
+    """Export one theme to shareable json file"""
+    data = {"format": THEME_FILE_FORMAT, "version": 1, "themes": {name: theme}}
+    return write_text_file(filename, json.dumps(data, indent=4, sort_keys=True))
+
+
+def import_themes(filename: str, builtin_names: tuple[str, ...]) -> dict[str, dict]:
+    """Read themes from exported file (or overlay_themes.json)
+
+    Raises:
+        ValueError: invalid or empty theme file.
+        OSError: file error.
+    """
+    with open(filename, encoding="utf-8") as file:
+        content = file.read(MAX_THEME_FILE_SIZE + 1)
+    if len(content) > MAX_THEME_FILE_SIZE:
+        raise ValueError("file too large")
+    data = json.loads(content)
+    if isinstance(data, dict) and data.get("format") == THEME_FILE_FORMAT:
+        data = data.get("themes")
+    themes = validate_themes(data, builtin_names)
+    if not themes:
+        raise ValueError("no valid theme found")
+    return themes
+
+
+def unique_theme_name(name: str, taken) -> str:
+    """Theme name not in taken names: name, name (2)..."""
+    candidate = name
+    index = 2
+    while candidate in taken:
+        candidate = f"{name} ({index})"
+        index += 1
+    return candidate
+
+
 def save_custom_themes(filepath: str, themes: dict[str, dict]) -> bool:
     """Save custom themes"""
     return write_text_file(f"{filepath}{FILENAME}", json.dumps(themes, indent=4, sort_keys=True))

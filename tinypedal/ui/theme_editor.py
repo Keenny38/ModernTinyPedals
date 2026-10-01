@@ -23,6 +23,7 @@ Overlay theme editor: create custom color palettes with live preview
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 from copy import deepcopy
 
@@ -31,6 +32,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -44,7 +46,7 @@ from PySide6.QtWidgets import (
 from .. import loader
 from ..i18n import tr, trm
 from ..setting import cfg
-from ..userfile.overlay_theme import save_custom_themes
+from ..userfile.overlay_theme import export_theme, import_themes, save_custom_themes, unique_theme_name
 from ..widget._style import (
     BUILTIN_THEMES,
     MODERN_PALETTE,
@@ -53,6 +55,7 @@ from ..widget._style import (
     set_custom_themes,
 )
 from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog, table_item
+from .toast import show_toast
 from .widget_preview import render_widget
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,12 @@ class ThemeEditor(BaseEditor):
         button_new.clicked.connect(self.new_theme)
         button_delete = CompactButton(tr("Delete"))
         button_delete.clicked.connect(self.delete_theme)
+        button_import = CompactButton(tr("Import"))
+        button_import.setToolTip(tr("Import theme file shared by someone else"))
+        button_import.clicked.connect(self.import_theme_file)
+        button_export = CompactButton(tr("Export"))
+        button_export.setToolTip(tr("Export selected theme to a file to share it"))
+        button_export.clicked.connect(self.export_theme_file)
         self.base_list = QComboBox(self)
         self.base_list.addItems([name for name in BUILTIN_THEMES if OVERLAY_THEMES[name] is not None])
         self.base_list.currentTextChanged.connect(self.change_base)
@@ -114,6 +123,8 @@ class ThemeEditor(BaseEditor):
         layout_theme.addWidget(self.theme_list, stretch=1)
         layout_theme.addWidget(button_new)
         layout_theme.addWidget(button_delete)
+        layout_theme.addWidget(button_import)
+        layout_theme.addWidget(button_export)
         layout_theme.addWidget(QLabel(tr("Based on")))
         layout_theme.addWidget(self.base_list)
 
@@ -198,6 +209,38 @@ class ThemeEditor(BaseEditor):
             self.themes.pop(name, None)
             self.refresh_theme_list()
             self.set_modified()
+
+    def export_theme_file(self):
+        name = self.theme_list.currentText()
+        theme = self.current_theme()
+        if not name or theme is None:
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, tr("Export"), os.path.join(os.path.expanduser("~"), f"{name}.json"), "JSON (*.json)")
+        if not filename:
+            return
+        if export_theme(filename, name, theme):
+            show_toast(self, trm(f"Theme exported to:<br><b>{filename}</b>"))
+        else:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to export theme to:<br>{filename}"))
+
+    def import_theme_file(self):
+        filename, _ = QFileDialog.getOpenFileName(self, tr("Import"), os.path.expanduser("~"), "JSON (*.json)")
+        if not filename:
+            return
+        try:
+            imported = import_themes(filename, (*BUILTIN_THEMES, "Global"))
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to import theme:<br>{error}"))
+            return
+        names = []
+        for name, theme in imported.items():
+            new_name = unique_theme_name(name, set(self.themes) | set(BUILTIN_THEMES))
+            self.themes[new_name] = theme
+            names.append(new_name)
+        self.refresh_theme_list(names[0])
+        self.set_modified()
+        show_toast(self, trm(f"Imported: <b>{', '.join(names)}</b> (Save to keep)"))
 
     def change_base(self, base: str):
         theme = self.current_theme()

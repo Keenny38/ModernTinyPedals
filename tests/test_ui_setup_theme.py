@@ -175,3 +175,19 @@ def test_preset_compare_dialog(ui_env, monkeypatch):
     finally:
         dialog.set_unmodified()
         dialog.close()
+
+
+def test_theme_export_import(tmp_path):
+    import pytest
+
+    from tinypedal.userfile.overlay_theme import export_theme, import_themes, unique_theme_name
+
+    builtin = ("Modern Dark", "Modern Light")
+    filename = str(tmp_path / "mine.json")
+    theme = {"base": "Modern Dark", "colors": {"FF2200": "CC0000"}}
+    assert export_theme(filename, "Mine", theme)
+    assert import_themes(filename, builtin) == {"Mine": theme}
+    (tmp_path / "bad.json").write_text('{"x": 1}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        import_themes(str(tmp_path / "bad.json"), builtin)
+    assert unique_theme_name("Mine", {"Mine", "Mine (2)"}) == "Mine (3)"

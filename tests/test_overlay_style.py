@@ -87,7 +87,6 @@ def test_overlay_scale_overrides():
 
 def test_overlay_scale_applied_to_widget(ui_env):
     from tinypedal.setting import cfg
-
     from tinypedal.widget import speedometer
 
     cfg.user.config["overlay_style"]["overlay_scale"] = 2.0
