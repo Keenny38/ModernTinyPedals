@@ -438,6 +438,17 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_window};
             border-right: 1px solid {color_active_midlight};
         }}
+        #homeCard {{
+            background: {color_active_base};
+            border: 1px solid {color_active_midlight};
+            border-radius: {border_radius_card}px;
+        }}
+        #homeValue {{
+            font-size: {font_pt_app_name}pt;
+        }}
+        #homeHeader {{
+            font-size: {font_pt_app_name}pt;
+        }}
         #toast {{
             color: {color_active_window_text};
             background: {color_active_base};

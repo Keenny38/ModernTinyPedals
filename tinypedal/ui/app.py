@@ -62,6 +62,7 @@ from ..overlay_control import octrl
 from ..setting import cfg
 from . import resolve_color_theme, set_style_palette, set_style_window
 from ._common import DialogSingleton, UIScaler
+from .home_view import HomeView
 from .hotkey_view import HotkeyList
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .module_view import ModuleList
@@ -77,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 # Navigation pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
 NAV_PAGES = (
+    ("home", "Home", "", "A"),  # home
     ("widget", "Widget", "\ue71d", "W"),  # all apps grid
     ("module", "Module", "\ue9d9", "M"),  # diagnostic
     ("preset", "Preset", "\ue8f1", "P"),  # library
@@ -197,6 +199,7 @@ class TabView(QWidget):
         notify_bar.hotkey.clicked.connect(self.select_hotkey_tab)
 
         # Pages
+        home_tab = HomeView(self, parent, lambda key: self.select_page(PAGE_INDEX[key]))
         widget_tab = ModuleList(self, wctrl)
         module_tab = ModuleList(self, mctrl)
         preset_tab = PresetList(self)
@@ -208,7 +211,7 @@ class TabView(QWidget):
         self.preset_tab = preset_tab
         self._pages = QStackedWidget(self)
         self._pages.setObjectName("pageStack")
-        for page in (widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab, tools_tab):
+        for page in (home_tab, widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab, tools_tab):
             self._pages.addWidget(page)
 
         # Navigation rail
@@ -280,6 +283,7 @@ class TabView(QWidget):
         app_signal.updates.connect(notify_bar.updates.checking)
         app_signal.refresh.connect(notify_bar.refresh)
 
+        app_signal.refresh.connect(home_tab.refresh)
         app_signal.refresh.connect(widget_tab.refresh)
         app_signal.refresh.connect(module_tab.refresh)
         app_signal.refresh.connect(preset_tab.refresh)

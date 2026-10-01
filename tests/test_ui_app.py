@@ -90,6 +90,9 @@ def test_navigation_rail(ui_env, monkeypatch):
             window.show()
             QCoreApplication.processEvents()
             window.grab().save(os.environ["RAIL_SHOT"])
+            view.set_current_index(app_module.PAGE_INDEX["home"])
+            QCoreApplication.processEvents()
+            window.grab().save(os.environ["RAIL_SHOT"].replace(".png", "_home.png"))
         view.select_page(app_module.PAGE_INDEX["preset"])
         assert cfg.application["last_page_index"] == app_module.PAGE_INDEX["preset"]
         lock = view._toggles["fixed_position"]
