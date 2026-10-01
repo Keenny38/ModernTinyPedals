@@ -146,7 +146,17 @@ def test_edit_frame_resize(ui_env, monkeypatch):
     widget = speedometer.Realtime(cfg, "speedometer")
     widget.start()
     try:
-        assert widget._edit_frame.handle.isVisibleTo(widget)
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        frame = widget._edit_frame
+        assert not frame.handle.isVisibleTo(widget)  # unlocked but not hovered: hidden while driving
+        QCoreApplication.sendEvent(widget, QEvent(QEvent.Type.Enter))
+        assert frame.handle.isVisibleTo(widget) and frame.outline.isVisibleTo(widget)
+        QCoreApplication.sendEvent(widget, QEvent(QEvent.Type.Leave))
+        assert not frame.handle.isVisibleTo(widget)
+        frame.set_visible(False)  # locked: never shown
+        QCoreApplication.sendEvent(widget, QEvent(QEvent.Type.Enter))
+        assert not frame.outline.isVisibleTo(widget)
         widget._edit_frame.handle.on_resized(2.0)
         assert cfg.user.setting["speedometer"]["font_size"] == font_size * 2
     finally:

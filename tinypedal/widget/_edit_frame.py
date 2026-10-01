@@ -125,6 +125,11 @@ class ResizeHandle(QWidget):
         self.setToolTip(f"{parent.windowTitle()}: drag to resize")
         self._press: QPoint | None = None
         self._ghost: ResizeGhost | None = None
+        self.on_released: Callable[[], None] = lambda: None
+
+    @property
+    def dragging(self) -> bool:
+        return self._press is not None
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -157,6 +162,7 @@ class ResizeHandle(QWidget):
             self._ghost.deleteLater()
             self._ghost = None
         event.accept()
+        self.on_released()
         if abs(factor - 1) >= 0.02:
             self.on_resized(factor)
 
@@ -176,20 +182,37 @@ class ResizeHandle(QWidget):
 
 
 class EditFrame(QObject):
-    """Outline & resize handle attached to widget, follows widget size"""
+    """Outline & resize handle attached to widget, follows widget size
+
+    Shown only while overlay is unlocked and mouse is over widget, so it never stays on screen
+    while driving with an unlocked overlay.
+    """
 
     def __init__(self, widget: QWidget, title: str, on_resized: Callable[[float], None]):
         super().__init__(widget)
         self.widget = widget
+        self.enabled = False  # overlay unlocked
+        self.hovered = False
         self.outline = EditOutline(widget, title)
         self.handle = ResizeHandle(widget, on_resized)
+        self.handle.on_released = self.refresh
         widget.installEventFilter(self)
         self.place()
+        self.refresh()
 
     def eventFilter(self, watched, event):
         widget = getattr(self, "widget", None)  # attribute gone while widget is being deleted
-        if widget is not None and watched is widget and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+        if widget is None or watched is not widget:
+            return False
+        event_type = event.type()
+        if event_type in (QEvent.Type.Resize, QEvent.Type.Show):
             self.place()
+        elif event_type == QEvent.Type.Enter:
+            self.hovered = True
+            self.refresh()
+        elif event_type in (QEvent.Type.Leave, QEvent.Type.Hide):
+            self.hovered = False
+            self.refresh()
         return False
 
     def place(self):
@@ -199,7 +222,18 @@ class EditFrame(QObject):
         self.outline.raise_()
         self.handle.raise_()
 
-    def set_visible(self, visible: bool):
+    def set_visible(self, enabled: bool):
+        """Enable edit mode (overlay unlocked), frame is shown on mouse hover"""
+        self.enabled = enabled
+        if not enabled:
+            self.hovered = False
+        self.refresh()
+
+    def refresh(self):
+        """Show frame while editable & hovered, or while resizing"""
+        visible = self.enabled and (self.hovered or self.handle.dragging)
+        if visible == self.outline.isVisibleTo(self.widget) == self.handle.isVisibleTo(self.widget):
+            return
         self.outline.setVisible(visible)
         self.handle.setVisible(visible)
         if visible:
