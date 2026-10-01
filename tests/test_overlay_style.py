@@ -182,3 +182,26 @@ def test_cached_fill_matches_direct_fill(ui_env):
             assert differences == 0, (corner, depth, differences)
     finally:
         _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
+
+
+def test_hidden_widget_does_not_update(ui_env):
+    from tinypedal import overlay_signal, realtime_state
+    from tinypedal.setting import cfg
+    from tinypedal.widget import speedometer
+
+    saved = realtime_state.active, realtime_state.hidden, cfg.overlay["fixed_position"]
+    realtime_state.active, realtime_state.hidden = True, False
+    cfg.overlay["fixed_position"] = True
+    widget = speedometer.Realtime(cfg, "speedometer")
+    widget.start()
+    try:
+        assert widget._update_timer.isActive()
+        realtime_state.hidden = True
+        overlay_signal.hidden.emit(True)
+        assert not widget._update_timer.isActive()
+        realtime_state.hidden = False
+        overlay_signal.hidden.emit(False)
+        assert widget._update_timer.isActive()
+    finally:
+        widget.stop()
+        realtime_state.active, realtime_state.hidden, cfg.overlay["fixed_position"] = saved

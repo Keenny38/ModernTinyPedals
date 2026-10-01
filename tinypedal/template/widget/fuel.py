@@ -339,7 +339,7 @@ WIDGET_FUEL = {
     },
     "onboard_setting": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 57,
         "position_y": 200,
         "font_name": "Consolas",

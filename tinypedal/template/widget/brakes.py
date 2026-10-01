@@ -163,7 +163,7 @@ WIDGET_BRAKES = {
     },
     "brake_wear": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 688,
         "position_y": 720,
         "font_name": "Consolas",

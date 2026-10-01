@@ -184,7 +184,7 @@ WIDGET_ENGINE = {
     },
     "engine_temperature": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 57,
         "position_y": 249,
         "font_name": "Consolas",

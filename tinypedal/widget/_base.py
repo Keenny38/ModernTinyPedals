@@ -217,7 +217,7 @@ class Base(QWidget):
         if paused:
             self._update_timer.stop()
             self.post_update()
-        else:
+        elif not self.should_hide():  # hidden widget resumes when shown
             self._update_timer.start(self._update_interval, self)
 
     def __resize_by_handle(self, factor: float):
@@ -247,6 +247,12 @@ class Base(QWidget):
         """Show or hide widget, fade if enabled"""
         hide = self.should_hide()
         opacity = self.wcfg["opacity"]
+        # No update while hidden (hotkey, visibility context), saves CPU while driving
+        if realtime_state.active:
+            if hide:
+                self._update_timer.stop()
+            elif not self._update_timer.isActive():
+                self._update_timer.start(self._update_interval, self)
         self._fade.stop()
         if not (animate and self._fade_enabled):
             self.setWindowOpacity(opacity)

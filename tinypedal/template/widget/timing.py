@@ -94,7 +94,7 @@ WIDGET_TIMING = {
     },
     "lap_time_history": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 523,
         "position_y": 393,
         "font_name": "Consolas",
@@ -245,7 +245,7 @@ WIDGET_TIMING = {
     },
     "stint_history": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 523,
         "position_y": 423,
         "font_name": "Consolas",

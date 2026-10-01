@@ -206,7 +206,7 @@ WIDGET_TYRES = {
     },
     "tyre_wear": {
         "enable": False,
-        "update_interval": 20,
+        "update_interval": 100,
         "position_x": 57,
         "position_y": 444,
         "font_name": "Consolas",
