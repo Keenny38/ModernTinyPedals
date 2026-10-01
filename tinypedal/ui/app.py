@@ -24,11 +24,21 @@ import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Slot
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QPainter, QPalette
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetricsF,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
     QButtonGroup,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -47,28 +57,39 @@ from ..const_app import APP_NAME, VERSION
 from ..const_file import ConfigType
 from ..i18n import install_qt_translation, set_language, tr, trm
 from ..module_control import mctrl, wctrl
+from ..overlay_control import octrl
 from ..setting import cfg
 from . import set_style_palette, set_style_window
 from ._common import DialogSingleton, UIScaler
 from .hotkey_view import HotkeyList
-from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu
+from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .module_view import ModuleList
 from .notification import NotifyBar
 from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
+from .tools_view import ToolsView
 
 logger = logging.getLogger(__name__)
 
 
-# Navigation pages: (label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
+# Navigation pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
 NAV_PAGES = (
-    ("Widget", "\ue71d", "W"),  # all apps grid
-    ("Module", "\ue9d9", "M"),  # diagnostic
-    ("Preset", "\ue8f1", "P"),  # library
-    ("Spectate", "\ue890", "S"),  # view
-    ("Pacenotes", "\ue70b", "N"),  # quick note
-    ("Hotkey", "\ue765", "H"),  # keyboard
+    ("widget", "Widget", "\ue71d", "W"),  # all apps grid
+    ("module", "Module", "\ue9d9", "M"),  # diagnostic
+    ("preset", "Preset", "\ue8f1", "P"),  # library
+    ("spectate", "Spectate", "\ue890", "S"),  # view
+    ("pacenotes", "Pacenotes", "\ue70b", "N"),  # quick note
+    ("hotkey", "Hotkey", "\ue765", "H"),  # keyboard
+    ("tools", "Tools", "\uec7a", "T"),  # developer tools
+)
+PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
+
+# Rail overlay toggles: (overlay option, tooltip, icon glyph, fallback letter)
+RAIL_TOGGLES = (
+    ("fixed_position", "Lock Overlay", "\ue72e", "L"),  # lock
+    ("auto_hide", "Auto Hide", "\ue7b3", "H"),  # red eye
+    ("vr_compatibility", "VR Compatibility", "\ue7f4", "V"),  # tv monitor
 )
 ICON_FONTS = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
 
@@ -82,8 +103,10 @@ def icon_font_family() -> str:
 class NavButton(QAbstractButton):
     """Navigation rail entry: icon over a short label, accent pill when selected"""
 
-    def __init__(self, text: str, glyph: str, letter: str, icon_family: str, parent=None):
+    def __init__(self, text: str, glyph: str, letter: str, icon_family: str, parent=None, compact: bool = False):
         super().__init__(parent)
+        self.compact = compact  # icon only, label in tooltip
+        self.dot_color: QColor | None = None  # status dot drawn at top right
         self.setText(text)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -95,6 +118,8 @@ class NavButton(QAbstractButton):
 
     def sizeHint(self) -> QSize:
         line = self.fontMetrics().height()
+        if self.compact:
+            return QSize(round(line * 2.2), round(line * 2.2))
         return QSize(round(line * 4.4), round(line * 3.4))
 
     def enterEvent(self, event):
@@ -120,9 +145,10 @@ class NavButton(QAbstractButton):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(fill)
             painter.drawRoundedRect(area, radius, radius)
-            bar_h = area.height() * 0.42
-            painter.setBrush(accent)
-            painter.drawRoundedRect(QRectF(area.left() - 3, area.center().y() - bar_h / 2, 3, bar_h), 1.5, 1.5)
+            if not self.compact:  # page marker, toggles only use the fill
+                bar_h = area.height() * 0.42
+                painter.setBrush(accent)
+                painter.drawRoundedRect(QRectF(area.left() - 3, area.center().y() - bar_h / 2, 3, bar_h), 1.5, 1.5)
         elif self.underMouse():
             fill = QColor(text)
             fill.setAlphaF(0.07)
@@ -132,6 +158,16 @@ class NavButton(QAbstractButton):
         color = accent if self.isChecked() else (text if self.underMouse() else muted)
         painter.setPen(color)
         icon_font = QFont(self.icon_font)
+        if self.compact:
+            icon_font.setPixelSize(round(area.height() * 0.44))
+            painter.setFont(icon_font)
+            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, self.glyph)
+            if self.dot_color is not None:
+                dot = area.height() * 0.22
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(self.dot_color)
+                painter.drawEllipse(QRectF(area.right() - dot * 1.4, area.top() + dot * 0.4, dot, dot))
+            return
         icon_font.setPixelSize(round(area.height() * 0.34))
         painter.setFont(icon_font)
         icon_rect = QRectF(area.left(), area.top() + area.height() * 0.1, area.width(), area.height() * 0.5)
@@ -165,9 +201,11 @@ class TabView(QWidget):
         spectate_tab = SpectateList(self)
         pacenotes_tab = PaceNotesControl(self)
         hotkey_tab = HotkeyList(self)
+        icon_family = icon_font_family()
+        tools_tab = ToolsView(self, icon_family, parent)
         self._pages = QStackedWidget(self)
         self._pages.setObjectName("pageStack")
-        for page in (widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab):
+        for page in (widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab, tools_tab):
             self._pages.addWidget(page)
 
         # Navigation rail
@@ -179,14 +217,43 @@ class TabView(QWidget):
         layout_rail.setSpacing(UIScaler.pixel(2))
         self._nav = QButtonGroup(self)
         self._nav.setExclusive(True)
-        icon_family = icon_font_family()
-        for index, (label, glyph, letter) in enumerate(NAV_PAGES):
+        for index, (_, label, glyph, letter) in enumerate(NAV_PAGES):
             button = NavButton(tr(label), glyph, letter, icon_family, rail)
+            button.setToolTip(f"{tr(label)} (Ctrl+{index + 1})")
             self._nav.addButton(button, index)
             layout_rail.addWidget(button)
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
+            shortcut.activated.connect(lambda page=index: self.select_page(page))
         layout_rail.addStretch(1)
-        self._nav.idClicked.connect(self.set_current_index)
-        self._nav.button(0).setChecked(True)
+        self._nav.idClicked.connect(self.select_page)
+
+        # Quick actions: overlay toggles, settings, API status
+        layout_quick = QGridLayout()
+        layout_quick.setSpacing(UIScaler.pixel(2))
+        self._toggles: dict[str, NavButton] = {}
+        for index, (option, label, glyph, letter) in enumerate(RAIL_TOGGLES):
+            button = NavButton(tr(label), glyph, letter, icon_family, rail, compact=True)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, name=option: self.toggle_overlay(name))
+            self._toggles[option] = button
+            layout_quick.addWidget(button, index // 2, index % 2)
+        button_config = NavButton(tr("Application"), "\ue713", "C", icon_family, rail, compact=True)  # settings
+        button_config.setCheckable(False)
+        button_config.clicked.connect(lambda: open_config_application(parent))
+        layout_quick.addWidget(button_config, 1, 1)
+        self._button_api = NavButton(tr("API"), "\ue968", "A", icon_family, rail, compact=True)  # network
+        self._button_api.setCheckable(False)
+        self._button_api.clicked.connect(self.show_api_menu)
+        self._menu_api = APIMenu(tr("API"), parent)
+        layout_quick.addWidget(self._button_api, 2, 0, 1, 2)
+        layout_rail.addLayout(layout_quick)
+        self._rail_timer = QTimer(self)
+        self._rail_timer.timeout.connect(self.refresh_rail)
+        self._rail_timer.start(1000)  # also follows changes from hotkeys, tray menu & API
+        self.refresh_rail()
+
+        last_page = cfg.application["last_page_index"]
+        self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0)
 
         layout_body = QHBoxLayout()
         layout_body.setContentsMargins(0, 0, 0, 0)
@@ -212,10 +279,51 @@ class TabView(QWidget):
         app_signal.refresh.connect(spectate_tab.refresh)
         app_signal.refresh.connect(pacenotes_tab.refresh)
         app_signal.refresh.connect(hotkey_tab.refresh)
+        app_signal.refresh.connect(self.refresh_rail)
 
     def current_index(self) -> int:
         """Current page index"""
         return self._pages.currentIndex()
+
+    @Slot(bool)  # type: ignore[operator]
+    def refresh_rail(self):
+        """Sync quick action states with config & API"""
+        for option, button in self._toggles.items():
+            if button.isChecked() != cfg.overlay[option]:
+                button.setChecked(cfg.overlay[option])
+        if cfg.api["enable_active_state_override"]:
+            api_state = "overriding"
+        else:
+            api_state = api.read.state.version()
+        running = bool(api_state) and api_state not in ("not running", "0.0")
+        dot_color = QColor("#3DDC84") if running else QColor("#808080")
+        tooltip = f"{api.alias} \u00b7 {api_state}"
+        if self._button_api.dot_color != dot_color or self._button_api.toolTip() != tooltip:
+            self._button_api.dot_color = dot_color
+            self._button_api.setToolTip(tooltip)
+            self._button_api.update()
+
+    def toggle_overlay(self, option: str):
+        """Toggle overlay option from rail"""
+        if option == "fixed_position":
+            octrl.toggle.lock()
+        elif option == "auto_hide":
+            octrl.toggle.hide()
+        elif option == "vr_compatibility":
+            octrl.toggle.vr()
+        self.refresh_rail()
+
+    def show_api_menu(self):
+        """Show API menu next to API button"""
+        button = self._button_api
+        self._menu_api.exec(button.mapToGlobal(button.rect().topRight()))
+
+    def select_page(self, index: int):
+        """Select page from rail or shortcut, remembered for next launch"""
+        self.set_current_index(index)
+        if cfg.application["last_page_index"] != index:
+            cfg.application["last_page_index"] = index
+            cfg.save(config_type=ConfigType.CONFIG)
 
     def set_current_index(self, index: int):
         """Select page by index"""
@@ -226,19 +334,19 @@ class TabView(QWidget):
 
     def select_preset_tab(self):
         """Select preset tab"""
-        self.set_current_index(2)
+        self.set_current_index(PAGE_INDEX["preset"])
 
     def select_spectate_tab(self):
         """Select spectate tab"""
-        self.set_current_index(3)
+        self.set_current_index(PAGE_INDEX["spectate"])
 
     def select_pacenotes_tab(self):
         """Select pace notes tab"""
-        self.set_current_index(4)
+        self.set_current_index(PAGE_INDEX["pacenotes"])
 
     def select_hotkey_tab(self):
         """Select hotkey tab"""
-        self.set_current_index(5)
+        self.set_current_index(PAGE_INDEX["hotkey"])
 
 
 class StatusButtonBar(QStatusBar):
@@ -380,6 +488,9 @@ class AppWindow(QMainWindow):
         """Open first launch setup wizard"""
         from .setup_wizard import SetupWizard
 
+        # Only shown on first launch, regardless of how the wizard is closed
+        cfg.application["show_setup_wizard_at_startup"] = False
+        cfg.save(0, config_type=ConfigType.CONFIG)
         self.show_app()
         SetupWizard(self).open()
 

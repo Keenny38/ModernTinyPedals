@@ -56,6 +56,7 @@ GLOBAL_DEFAULT = {
         "window_color_theme": "Dark",
         "language": "English",
         "show_setup_wizard_at_startup": True,
+        "last_page_index": 0,
     },
     "compatibility": {
         "enable_bypass_window_manager": (not PLATFORM.WINDOWS),

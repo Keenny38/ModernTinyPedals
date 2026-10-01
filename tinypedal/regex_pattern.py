@@ -138,6 +138,7 @@ CFG_INTEGER = (
     "^tyre_compound_spacing$|"
     "^window_width$|"
     "^window_height$|"
+    "^last_page_index$|"
     # Partial match
     "area_margin|"
     "area_size|"

@@ -67,3 +67,43 @@ def test_live_language_switch(ui_env, monkeypatch):
                 signal.disconnect()
         window.deleteLater()
         QCoreApplication.processEvents()
+
+
+def test_navigation_rail(ui_env, monkeypatch):
+    """Tools page, quick toggles & remembered page"""
+    import os
+
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui.tools_view import TOOL_SECTIONS, ToolCard
+
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    cfg.application["show_setup_wizard_at_startup"] = False
+    cfg.application["last_page_index"] = app_module.PAGE_INDEX["tools"]
+    window = app_module.AppWindow()
+    try:
+        view = window.centralWidget()
+        assert view.current_index() == app_module.PAGE_INDEX["tools"]  # restored
+        cards = view.findChildren(ToolCard)
+        assert len(cards) == sum(len(tools) for _, tools in TOOL_SECTIONS)
+        if os.environ.get("RAIL_SHOT"):
+            window.resize(560, 820)
+            window.show()
+            QCoreApplication.processEvents()
+            window.grab().save(os.environ["RAIL_SHOT"])
+        view.select_page(app_module.PAGE_INDEX["preset"])
+        assert cfg.application["last_page_index"] == app_module.PAGE_INDEX["preset"]
+        lock = view._toggles["fixed_position"]
+        state = cfg.overlay["fixed_position"]
+        lock.click()
+        assert cfg.overlay["fixed_position"] is (not state)
+        assert lock.isChecked() is (not state)
+    finally:
+        cfg.application["last_page_index"] = 0
+        tray = window.findChild(QSystemTrayIcon)
+        if tray:
+            tray.hide()
+        for signal in (app_signal.hotkey, app_signal.refresh, app_signal.quitapp, app_signal.reload, app_signal.updates):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect()
+        window.deleteLater()
+        QCoreApplication.processEvents()

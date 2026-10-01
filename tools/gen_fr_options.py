@@ -738,6 +738,7 @@ FULL = {
     "show_pedal_bars": "Afficher les barres de pédales", "heatmap_name_tyre": "Palette thermique des pneus",
     "heatmap_name_brake": "Palette thermique des freins", "widget_theme": "Thème du widget",
     "show_setup_wizard_at_startup": "Assistant de configuration au démarrage",
+    "last_page_index": "Dernière page ouverte",
     "web_dashboard": "Tableau de bord web", "enable_web_dashboard": "Activer le tableau de bord web",
     "enable_lan_access": "Accès depuis le réseau local", "web_dashboard_port": "Port",
     "access_code": "Code d'accès",

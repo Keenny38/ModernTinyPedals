@@ -39,29 +39,13 @@ from ..update import update_checker
 from ..userfile.tls_cert import fingerprint as certificate_fingerprint
 from ..web_dashboard import webdashboard
 from .about import About
-from .brake_editor import BrakeEditor
 from .bug_report_view import BugReport
 from .config import FontConfig, UserConfig
-from .driver_stats_viewer import DriverStatsViewer
-from .fuel_calculator import FuelCalculator
-from .heatmap_editor import HeatmapEditor
-from .lap_viewer import LapViewer
-from .layout_editor import LayoutEditor
 from .log_info import LogInfo
 from .option_finder import OptionFinder
 from .perf_view import PerformanceView
-from .plugin_manager import PluginManager
-from .preset_compare import PresetCompare
-from .replay_view import ReplayView
 from .setup_wizard import SetupWizard
-from .theme_editor import ThemeEditor
-from .track_info_editor import TrackInfoEditor
-from .track_map_viewer import TrackMapViewer
-from .track_notes_editor import TrackNotesEditor
-from .tyre_compound_editor import TyreCompoundEditor
-from .tyre_strategy_planner import TyreStrategyPlanner
-from .vehicle_brand_editor import VehicleBrandEditor
-from .vehicle_class_editor import VehicleClassEditor
+from .tools_view import TOOL_SECTIONS, open_tool
 
 
 # Define menu command
@@ -86,6 +70,20 @@ def menu_restart_api():
     """Command - restart api"""
     api.restart()
     app_signal.refresh.emit(True)
+
+
+def open_config_application(parent):
+    """Config global application"""
+    _dialog = UserConfig(
+        parent=parent,
+        key_name="application",
+        preset_name=cfg.filename.config,
+        config_type=ConfigType.CONFIG,
+        user_setting=cfg.user.config,
+        default_setting=cfg.default.config,
+        reload_func=menu_reload_preset,
+    )
+    _dialog.open()
 
 
 class OverlayMenu(QMenu):
@@ -385,16 +383,7 @@ class ConfigMenu(QMenu):
 
     def open_config_application(self):
         """Config global application"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="application",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent)
 
     def open_config_compatibility(self):
         """Config global compatibility"""
@@ -644,148 +633,17 @@ class APIMenu(QMenu):
 
 
 class ToolsMenu(QMenu):
-    """Tools menu"""
+    """Tools menu, same entries as tools page"""
 
     def __init__(self, title, parent):
         super().__init__(title, parent)
         self._parent = parent
-
-        utility_fuelcalc = self.addAction(tr("Fuel Calculator"))
-        utility_fuelcalc.triggered.connect(self.open_utility_fuelcalc)
-
-        utility_tyreplanner = self.addAction(tr("Tyre Strategy Planner"))
-        utility_tyreplanner.triggered.connect(self.open_utility_tyreplanner)
-
-        utility_driverstats = self.addAction(tr("Driver Stats Viewer"))
-        utility_driverstats.triggered.connect(self.open_utility_driverstats)
-
-        utility_mapviewer = self.addAction(tr("Track Map Viewer"))
-        utility_mapviewer.triggered.connect(self.open_utility_mapviewer)
-
-        utility_lapviewer = self.addAction(tr("Lap Telemetry Viewer"))
-        utility_lapviewer.triggered.connect(self.open_utility_lapviewer)
-
-        utility_replay = self.addAction(tr("Telemetry Replay"))
-        utility_replay.triggered.connect(self.open_utility_replay)
-        self.addSeparator()
-
-        editor_heatmap = self.addAction(tr("Heatmap Editor"))
-        editor_heatmap.triggered.connect(self.open_editor_heatmap)
-
-        editor_brakes = self.addAction(tr("Brake Editor"))
-        editor_brakes.triggered.connect(self.open_editor_brakes)
-
-        editor_compounds = self.addAction(tr("Tyre Compound Editor"))
-        editor_compounds.triggered.connect(self.open_editor_compounds)
-
-        editor_brands = self.addAction(tr("Vehicle Brand Editor"))
-        editor_brands.triggered.connect(self.open_editor_brands)
-
-        editor_classes = self.addAction(tr("Vehicle Class Editor"))
-        editor_classes.triggered.connect(self.open_editor_classes)
-
-        editor_trackinfo = self.addAction(tr("Track Info Editor"))
-        editor_trackinfo.triggered.connect(self.open_editor_trackinfo)
-
-        editor_tracknotes = self.addAction(tr("Track Notes Editor"))
-        editor_tracknotes.triggered.connect(self.open_editor_tracknotes)
-
-        editor_layout = self.addAction(tr("Layout Editor"))
-        editor_layout.triggered.connect(self.open_editor_layout)
-
-        editor_theme = self.addAction(tr("Overlay Theme Editor"))
-        editor_theme.triggered.connect(self.open_editor_theme)
-
-        utility_compare = self.addAction(tr("Preset Comparison"))
-        utility_compare.triggered.connect(self.open_preset_compare)
-
-        utility_plugins = self.addAction(tr("Plugin Manager"))
-        utility_plugins.triggered.connect(self.open_plugin_manager)
-
-    def open_utility_replay(self):
-        """Telemetry replay"""
-        _dialog = ReplayView(self._parent)
-        _dialog.show()
-
-    def open_utility_fuelcalc(self):
-        """Fuel calculator"""
-        _dialog = FuelCalculator(self._parent)
-        _dialog.show()
-
-    def open_utility_tyreplanner(self):
-        """Tyre strategy planner"""
-        _dialog = TyreStrategyPlanner(self._parent)
-        _dialog.show()
-
-    def open_utility_driverstats(self):
-        """Track driver stats viewer"""
-        _dialog = DriverStatsViewer(self._parent)
-        _dialog.show()
-
-    def open_utility_mapviewer(self):
-        """Track map viewer"""
-        _dialog = TrackMapViewer(self._parent)
-        _dialog.show()
-
-    def open_editor_heatmap(self):
-        """Edit heatmap preset"""
-        _dialog = HeatmapEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_brakes(self):
-        """Edit brakes preset"""
-        _dialog = BrakeEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_compounds(self):
-        """Edit compounds preset"""
-        _dialog = TyreCompoundEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_brands(self):
-        """Edit brands preset"""
-        _dialog = VehicleBrandEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_classes(self):
-        """Edit classes preset"""
-        _dialog = VehicleClassEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_trackinfo(self):
-        """Edit track info"""
-        _dialog = TrackInfoEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_tracknotes(self):
-        """Edit track notes"""
-        _dialog = TrackNotesEditor(self._parent)
-        _dialog.show()
-
-    def open_utility_lapviewer(self):
-        """Recorded lap viewer"""
-        _dialog = LapViewer(self._parent)
-        _dialog.show()
-
-    def open_plugin_manager(self):
-        """Manage widget plugins"""
-        _dialog = PluginManager(self._parent)
-        _dialog.show()
-
-    def open_preset_compare(self):
-        """Compare presets"""
-        _dialog = PresetCompare(self._parent)
-        _dialog.show()
-
-    def open_editor_layout(self):
-        """Layout editor"""
-        _dialog = LayoutEditor(self._parent)
-        _dialog.show()
-
-    def open_editor_theme(self):
-        """Edit custom overlay themes"""
-        _dialog = ThemeEditor(self._parent)
-        _dialog.show()
+        for index, (_, tools) in enumerate(TOOL_SECTIONS):
+            if index:
+                self.addSeparator()
+            for label, _, dialog_class in tools:
+                action = self.addAction(tr(label))
+                action.triggered.connect(lambda _=False, cls=dialog_class: open_tool(cls, self._parent))
 
 
 class WindowMenu(QMenu):

@@ -359,6 +359,9 @@ TRANSLATION = MappingProxyType({
     "Overlay": "Overlay",
     "API": "API",
     "Tools": "Outils",
+    "Utilities": "Utilitaires",
+    "Editors": "Éditeurs",
+    "Management": "Gestion",
     "Window": "Fenêtre",
     "Help": "Aide",
     # Performance view
