@@ -9,25 +9,21 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 ## Distribution
 
 - 🟠 **Vérifier la première release avec l'installeur Windows.** Le workflow `Build and Release` compile maintenant `ModernTinyPedals-<version>-windows-setup.exe` et son fichier `.sha256`, mais n'a encore jamais tourné (Inno Setup n'est pas installé en local). Installer la release 0.10.0, puis tester `Télécharger et installer` depuis une version plus ancienne.
-- 🟡 **Signer l'exécutable et l'installeur.** Sans signature, Windows SmartScreen avertit à chaque installation.
+- 🟡 **Acheter un certificat de signature de code.** Le workflow `Build and Release` signe l'exécutable et l'installeur dès que les secrets `WINDOWS_CERT_PFX_BASE64` (fichier .pfx en base64) et `WINDOWS_CERT_PASSWORD` sont définis. Sans certificat, Windows SmartScreen avertit à chaque installation.
 
 ## Télémétrie
 
-- 🟡 **Rejeu de télémétrie pour rFactor 2.** `Outils > Rejeu de télémétrie` enregistre et rejoue seulement la mémoire partagée de Le Mans Ultimate. rF2 utilise plusieurs zones mémoire (`rf2_connector`) : il faut enregistrer chaque zone dans la même image.
-- 🟡 **Enregistrer aussi les données de la Rest API dans le rejeu.** Réglages de pneus, détails d'énergie virtuelle et météo à venir manquent pendant un rejeu.
 - 💡 **Autres simulateurs** via l'architecture d'adaptateurs : Automobilista 2 / Project CARS (mémoire partagée), Assetto Corsa / ACC, iRacing.
 
 ## Qualité du code
 
-- 🟡 **Réactiver `attr-defined` dans mypy.** C'est la dernière catégorie masquée (environ 790 erreurs). La plupart viennent des mixins du Black box et des widgets qui lisent des attributs définis par la classe du widget : déclarer ces attributs dans chaque mixin, comme `DataReader` le fait déjà.
 - 🟡 **Tester les modules Mapping, Notes et Stats** (couverture entre 10 et 20 %), avec le lecteur de télémétrie scripté de `tests/test_module_timing.py`.
-- 💡 **Test de régression visuelle en CI** : comparer le rendu des widgets (`tests/_render`) à des images de référence.
 
 ## Performance
 
-- 💡 **Alléger le widget Standings**, le plus coûteux avec une grille de 20 voitures (environ 5 ms par image, contre moins de 3 ms pour les autres ; budget 15 ms).
+- 💡 **Alléger encore le widget Standings** : 4,7 ms par image avec 20 voitures depuis la mise en cache des fonds de cellule (8,5 ms avant). Le coût restant est le texte (`drawText`) de chaque cellule.
 
 ## Interface
 
-- 💡 **Traductions communautaires** : fichiers de langue JSON dans un dossier `i18n/`, pour ajouter une langue sans toucher au code (aujourd'hui, le français est dans `fr.py` et `fr_messages.py`).
-- 💡 **Overlay VR natif** (OpenXR) au lieu de l'overlay VR expérimental actuel.
+- 💡 **Overlay VR OpenXR natif.** Demande une « API layer » OpenXR en C++ injectée dans le jeu, impossible en Python. En attendant, la fenêtre miroir VR (`Config > VR Overlay`) s'affiche dans le casque avec OpenKneeboard, OVR Toolkit, XSOverlay ou Desktop+.
+- 🟡 **Tester en VR** l'overlay SteamVR et la fenêtre miroir avec OpenKneeboard, sur un vrai casque.
