@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetricsF,
+    QGuiApplication,
     QKeySequence,
     QPainter,
     QPalette,
@@ -59,7 +60,7 @@ from ..i18n import install_qt_translation, set_language, tr, trm
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
-from . import set_style_palette, set_style_window
+from . import resolve_color_theme, set_style_palette, set_style_window
 from ._common import DialogSingleton, UIScaler
 from .hotkey_view import HotkeyList
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
@@ -402,7 +403,7 @@ class StatusButtonBar(QStatusBar):
         self.button_api.style().polish(self.button_api)
         self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {text_api_status}")
 
-        dark = cfg.application["window_color_theme"] == "Dark"
+        dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
         # Moon & sun glyphs without a color emoji form, so they stay monochrome like the text
         glyph = "\u263e " if dark else "\u263c "
         self.button_style.setText(glyph + trm(f"UI: {cfg.application['window_color_theme']}"))
@@ -442,11 +443,11 @@ class StatusButtonBar(QStatusBar):
         loader.restart()
 
     def toggle_color_theme(self):
-        """Toggle color theme"""
-        if cfg.application["window_color_theme"] == "Dark":
-            cfg.application["window_color_theme"] = "Light"
-        else:
-            cfg.application["window_color_theme"] = "Dark"
+        """Toggle color theme: Dark, Light, System"""
+        themes = ("Dark", "Light", "System")
+        current = cfg.application["window_color_theme"]
+        index = themes.index(current) if current in themes else -1
+        cfg.application["window_color_theme"] = themes[(index + 1) % len(themes)]
         cfg.save(config_type=ConfigType.CONFIG)
         app_signal.refresh.emit(True)
 
@@ -476,6 +477,8 @@ class AppWindow(QMainWindow):
         # Window state
         self.set_window_state()
         self.__connect_signal()
+        # Follow OS light / dark switch when window color theme is "System"
+        QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
 
         # Refresh GUI
         app_signal.refresh.emit(True)
@@ -498,7 +501,7 @@ class AppWindow(QMainWindow):
     def refresh(self):
         """Refresh GUI"""
         # Window style
-        style = cfg.application["window_color_theme"]
+        style = resolve_color_theme(cfg.application["window_color_theme"])
         if self.last_style != style:
             self.last_style = style
             set_style_palette(self.last_style)
@@ -580,7 +583,6 @@ class AppWindow(QMainWindow):
     def set_window_state(self):
         """Set initial window state"""
         self.setMinimumSize(UIScaler.size(23), UIScaler.size(36))
-        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)  # disable maximize
 
         if cfg.application["remember_size"]:
             self.resize(
@@ -630,6 +632,8 @@ class AppWindow(QMainWindow):
 
     def save_window_state(self):
         """Save window state"""
+        if self.isMaximized() or self.isFullScreen():
+            return  # keep last normal size & position
         save_changes = False
 
         if cfg.application["remember_position"]:

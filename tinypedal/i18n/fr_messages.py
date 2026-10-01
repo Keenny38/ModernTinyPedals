@@ -97,6 +97,7 @@ MESSAGE_RULES = (
     # Status texts
     (r"^UI: Dark$", "Thème : sombre"),
     (r"^UI: Light$", "Thème : clair"),
+    (r"^UI: System$", "Thème : système"),
     (r"^Scale: Auto(\*?)$", r"Échelle : auto\1"),
     (r"^Scale: Off(\*?)$", r"Échelle : désactivée\1"),
     (r"^Playback Volume: (\d+)%$", r"Volume : \1%"),

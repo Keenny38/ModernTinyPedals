@@ -107,3 +107,23 @@ def test_navigation_rail(ui_env, monkeypatch):
                 signal.disconnect()
         window.deleteLater()
         QCoreApplication.processEvents()
+
+
+def test_tool_paths_resolve():
+    """Every lazily imported tool dialog exists"""
+    from importlib import import_module
+
+    from tinypedal.ui.tools_view import TOOL_SECTIONS
+
+    for _, tools in TOOL_SECTIONS:
+        for _, _, dialog_path in tools:
+            module_name, class_name = dialog_path.rsplit(".", 1)
+            assert hasattr(import_module(f"tinypedal.ui.{module_name}"), class_name), dialog_path
+
+
+def test_system_color_theme(ui_env):
+    from tinypedal.ui import resolve_color_theme
+
+    assert resolve_color_theme("Dark") == "Dark"
+    assert resolve_color_theme("Light") == "Light"
+    assert resolve_color_theme("System") in ("Dark", "Light")

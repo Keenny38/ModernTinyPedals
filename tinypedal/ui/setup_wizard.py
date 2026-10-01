@@ -129,7 +129,7 @@ class LanguagePage(QWizardPage):
         self.language.addItems(tuple(LANGUAGES))
         self.language.setCurrentText(cfg.application["language"])
         self.window_theme = QComboBox(self)
-        self.window_theme.addItems(("Dark", "Light"))
+        self.window_theme.addItems(("Dark", "Light", "System"))
         self.window_theme.setCurrentText(cfg.application["window_color_theme"])
         layout = QGridLayout()
         layout.addWidget(QLabel(tr("Language")), 0, 0)

@@ -249,7 +249,7 @@ CHOICE_COMMON = MappingProxyType({
     CFG_TARGET_LAPTIME: ("Theoretical", "Personal"),
     CFG_TEXT_ALIGNMENT: ("Left", "Center", "Right"),
     CFG_STATS_CLASSIFICATION: ("Class - Brand", "Class", "Vehicle"),
-    CFG_WINDOW_COLOR_THEME: ("Light", "Dark"),
+    CFG_WINDOW_COLOR_THEME: ("Light", "Dark", "System"),
     CFG_LANGUAGE: ("English", "Français"),
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),

@@ -641,9 +641,9 @@ class ToolsMenu(QMenu):
         for index, (_, tools) in enumerate(TOOL_SECTIONS):
             if index:
                 self.addSeparator()
-            for label, _, dialog_class in tools:
+            for label, _, dialog_path in tools:
                 action = self.addAction(tr(label))
-                action.triggered.connect(lambda _=False, cls=dialog_class: open_tool(cls, self._parent))
+                action.triggered.connect(lambda _=False, path=dialog_path: open_tool(path, self._parent))
 
 
 class WindowMenu(QMenu):

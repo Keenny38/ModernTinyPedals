@@ -20,62 +20,49 @@
 Tools page: utilities & editors as a grid of cards
 """
 
+from importlib import import_module
+
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPalette
 from PySide6.QtWidgets import QAbstractButton, QGridLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from ..i18n import tr
 from ._common import UIScaler
-from .brake_editor import BrakeEditor
-from .driver_stats_viewer import DriverStatsViewer
-from .fuel_calculator import FuelCalculator
-from .heatmap_editor import HeatmapEditor
-from .lap_viewer import LapViewer
-from .layout_editor import LayoutEditor
-from .perf_view import PerformanceView
-from .plugin_manager import PluginManager
-from .preset_compare import PresetCompare
-from .replay_view import ReplayView
-from .theme_editor import ThemeEditor
-from .track_info_editor import TrackInfoEditor
-from .track_map_viewer import TrackMapViewer
-from .track_notes_editor import TrackNotesEditor
-from .tyre_compound_editor import TyreCompoundEditor
-from .tyre_strategy_planner import TyreStrategyPlanner
-from .vehicle_brand_editor import VehicleBrandEditor
-from .vehicle_class_editor import VehicleClassEditor
 
-# Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, dialog class), ...))
+# Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, "module.DialogClass"), ...))
+# Dialog modules are imported when first opened, to keep startup light
 TOOL_SECTIONS = (
     ("Utilities", (
-        ("Fuel Calculator", "", FuelCalculator),  # calculator
-        ("Tyre Strategy Planner", "", TyreStrategyPlanner),  # flag
-        ("Driver Stats Viewer", "", DriverStatsViewer),  # contact
-        ("Track Map Viewer", "", TrackMapViewer),  # map pin
-        ("Lap Telemetry Viewer", "", LapViewer),  # area chart
-        ("Telemetry Replay", "", ReplayView),  # play
+        ("Fuel Calculator", "", "fuel_calculator.FuelCalculator"),  # calculator
+        ("Tyre Strategy Planner", "", "tyre_strategy_planner.TyreStrategyPlanner"),  # flag
+        ("Driver Stats Viewer", "", "driver_stats_viewer.DriverStatsViewer"),  # contact
+        ("Track Map Viewer", "", "track_map_viewer.TrackMapViewer"),  # map pin
+        ("Lap Telemetry Viewer", "", "lap_viewer.LapViewer"),  # area chart
+        ("Telemetry Replay", "", "replay_view.ReplayView"),  # play
     )),
     ("Editors", (
-        ("Heatmap Editor", "", HeatmapEditor),  # color
-        ("Brake Editor", "", BrakeEditor),  # edit
-        ("Tyre Compound Editor", "", TyreCompoundEditor),  # edit
-        ("Vehicle Brand Editor", "", VehicleBrandEditor),  # tag
-        ("Vehicle Class Editor", "", VehicleClassEditor),  # car
-        ("Track Info Editor", "", TrackInfoEditor),  # info
-        ("Track Notes Editor", "", TrackNotesEditor),  # quick note
-        ("Layout Editor", "", LayoutEditor),  # view all
-        ("Overlay Theme Editor", "", ThemeEditor),  # personalize
+        ("Heatmap Editor", "", "heatmap_editor.HeatmapEditor"),  # color
+        ("Brake Editor", "", "brake_editor.BrakeEditor"),  # edit
+        ("Tyre Compound Editor", "", "tyre_compound_editor.TyreCompoundEditor"),  # edit
+        ("Vehicle Brand Editor", "", "vehicle_brand_editor.VehicleBrandEditor"),  # tag
+        ("Vehicle Class Editor", "", "vehicle_class_editor.VehicleClassEditor"),  # car
+        ("Track Info Editor", "", "track_info_editor.TrackInfoEditor"),  # info
+        ("Track Notes Editor", "", "track_notes_editor.TrackNotesEditor"),  # quick note
+        ("Layout Editor", "", "layout_editor.LayoutEditor"),  # view all
+        ("Overlay Theme Editor", "", "theme_editor.ThemeEditor"),  # personalize
     )),
     ("Management", (
-        ("Preset Comparison", "", PresetCompare),  # switch
-        ("Plugin Manager", "", PluginManager),  # puzzle
-        ("Widget Performance", "", PerformanceView),  # speed
+        ("Preset Comparison", "", "preset_compare.PresetCompare"),  # switch
+        ("Plugin Manager", "", "plugin_manager.PluginManager"),  # puzzle
+        ("Widget Performance", "", "perf_view.PerformanceView"),  # speed
     )),
 )
 
 
-def open_tool(dialog_class, parent):
-    """Open tool dialog"""
+def open_tool(dialog_path: str, parent):
+    """Open tool dialog from "module.DialogClass" path relative to ui package"""
+    module_name, class_name = dialog_path.rsplit(".", 1)
+    dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
     _dialog = dialog_class(parent)
     _dialog.show()
 
@@ -160,9 +147,9 @@ class ToolsView(QWidget):
             layout_content.addWidget(header)
             grid = QGridLayout()
             grid.setSpacing(UIScaler.pixel(6))
-            for index, (label, glyph, dialog_class) in enumerate(tools):
+            for index, (label, glyph, dialog_path) in enumerate(tools):
                 card = ToolCard(tr(label), glyph, icon_family, content)
-                card.clicked.connect(lambda _=False, cls=dialog_class: open_tool(cls, dialog_parent))
+                card.clicked.connect(lambda _=False, path=dialog_path: open_tool(path, dialog_parent))
                 grid.addWidget(card, index // 2, index % 2)
             layout_content.addLayout(grid)
             layout_content.addSpacing(UIScaler.pixel(4))

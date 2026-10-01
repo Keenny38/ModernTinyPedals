@@ -22,6 +22,7 @@ Application UI, style
 
 import re
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -54,9 +55,18 @@ class UIScaler:
         return round(cls.FONT_DPI_SCALE * pixel)
 
 
+def resolve_color_theme(color_theme: str) -> str:
+    """Window color theme in use: "Dark" or "Light", "System" follows OS setting"""
+    if color_theme != "System":
+        return color_theme
+    if QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Light:
+        return "Light"
+    return "Dark"
+
+
 def set_style_palette(color_theme: str):
     """Set style palette"""
-    if color_theme == "Dark":
+    if resolve_color_theme(color_theme) == "Dark":
         palette_theme = palette_dark()
     else:
         palette_theme = palette_light()
