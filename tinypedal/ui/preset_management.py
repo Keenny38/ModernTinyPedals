@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import shutil
+from contextlib import suppress
 from types import MappingProxyType
 
 from PySide6.QtGui import QColor
@@ -53,6 +54,7 @@ from ..i18n.options import module_label
 from ..setting import cfg, load_setting_json_file, save_and_verify_json_file
 from ..template.setting_shortcuts import SHORTCUTS_PRESET
 from ..userfile.json_setting import rename_preset_backups, verify_json_file
+from ..userfile.layout_profile import profile_filename
 from ..validator import is_allowed_filename
 from ._common import QVAL_FILENAME, BaseDialog, BaseEditor, CompactButton, UIScaler
 from .toast import show_toast
@@ -154,6 +156,8 @@ class CreatePreset(BaseDialog):
             return
         if self.edit_mode == "rename":
             rename_preset_backups(filepath, source_filename, new_filename)
+            with suppress(OSError):  # layout profiles of screen setups, if any
+                os.replace(profile_filename(filepath, source_filename), profile_filename(filepath, new_filename))
             update_preset_references(source_filename[:-len(FileExt.JSON)], entered_filename)
             # Reload if renamed file was loaded
             if cfg.is_loaded(source_filename):

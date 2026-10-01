@@ -60,6 +60,7 @@ from ..i18n import install_qt_translation, set_language, tr, trm
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
+from ..userfile.layout_profile import screen_key
 from . import resolve_color_theme, set_style_palette, set_style_window
 from ._common import DialogSingleton, UIScaler
 from .home_view import HomeView
@@ -490,6 +491,12 @@ class AppWindow(QMainWindow):
         # Import preset, preset package or plugin by drag & drop
         self.setAcceptDrops(True)
 
+        # Screen setup changed (screen plugged, resolution changed): reload widget positions
+        self._screen_key = screen_key()
+        self._screen_timer = QTimer(self)
+        self._screen_timer.timeout.connect(self.check_screen_setup)
+        self._screen_timer.start(3000)
+
         # Window state
         self.set_window_state()
         self.__connect_signal()
@@ -502,6 +509,17 @@ class AppWindow(QMainWindow):
         # First launch setup
         if cfg.application["show_setup_wizard_at_startup"]:
             QTimer.singleShot(600, self.open_setup_wizard)
+
+    def check_screen_setup(self):
+        """Reload overlay with positions of new screen setup"""
+        key = screen_key()
+        if key == self._screen_key:
+            return
+        self._screen_key = key
+        if cfg.application["enable_layout_per_screen_setup"]:
+            logger.info("LAYOUT: screen setup changed to %s", key)
+            loader.reload()
+            app_signal.refresh.emit(True)
 
     def dragEnterEvent(self, event):
         """Accept preset & zip files"""

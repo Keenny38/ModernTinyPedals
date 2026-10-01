@@ -963,6 +963,7 @@
     "enable_incident_file_export": "Activer l'export des incidents en fichier",
     "enable_incident_replay": "Activer le rejeu de l'incident",
     "enable_lan_access": "Accès depuis le réseau local",
+    "enable_layout_per_screen_setup": "Disposition mémorisée par configuration d'écrans",
     "enable_legacy_api_selection": "Activer sélection des anciennes API",
     "enable_manual_file_selector": "Activer sélecteur fichier manuel",
     "enable_modern_font": "Police moderne",

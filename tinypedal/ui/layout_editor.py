@@ -37,6 +37,7 @@ from ..formatter import format_module_name
 from ..i18n import tr, trm
 from ..module_control import wctrl
 from ..setting import cfg
+from ..widget._base import store_screen_layout
 from ..widget._layout_guide import COLOR_GUIDE, alignment_lines
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 
@@ -331,6 +332,7 @@ class LayoutEditor(BaseDialog):
                 moved += 1
         if moved:
             cfg.save()
+            store_screen_layout(cfg)
         self.label_info.setText(trm(f"{moved} widgets moved"))
         return moved
 

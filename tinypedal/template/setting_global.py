@@ -57,6 +57,7 @@ GLOBAL_DEFAULT = {
         "language": "English",
         "show_setup_wizard_at_startup": True,
         "last_page_index": 0,
+        "enable_layout_per_screen_setup": True,
     },
     "compatibility": {
         "enable_bypass_window_manager": (not PLATFORM.WINDOWS),

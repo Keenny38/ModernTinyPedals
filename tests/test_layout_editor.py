@@ -57,3 +57,21 @@ def test_apply_moves_widgets_and_saves(ui_env, monkeypatch):
         assert dialog.apply() == 0
     finally:
         dialog.close()
+
+
+def test_layout_profiles_per_screen_setup(tmp_path):
+    from tinypedal.userfile.layout_profile import load_profiles, profile_filename, sync_layout
+
+    filename = profile_filename(str(tmp_path), "race.json")
+    assert filename.endswith("race.layouts")
+    names = ("speedometer", "gear")
+    setting = {"speedometer": {"position_x": 10, "position_y": 20}, "gear": {"position_x": 1, "position_y": 2}}
+    # First time on single screen: nothing restored, positions stored
+    assert not sync_layout(setting, names, filename, "1920x1080+0+0")
+    # Move widgets for triple screen
+    setting["speedometer"]["position_x"] = 2500
+    assert not sync_layout(setting, names, filename, "5760x1080+0+0")
+    # Back to single screen: single screen positions restored
+    assert sync_layout(setting, names, filename, "1920x1080+0+0")
+    assert setting["speedometer"]["position_x"] == 10
+    assert set(load_profiles(filename)) == {"1920x1080+0+0", "5760x1080+0+0"}

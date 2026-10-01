@@ -22,6 +22,7 @@ Preset list view
 
 import os
 import zipfile
+from contextlib import suppress
 
 from PySide6.QtCore import QPoint, Qt, Slot
 from PySide6.QtWidgets import (
@@ -44,6 +45,7 @@ from ..const_file import ConfigType, FileExt
 from ..i18n import tr, trm, untr
 from ..setting import cfg
 from ..userfile.json_setting import create_backup_file, set_backup_timestamp
+from ..userfile.layout_profile import profile_filename
 from ..userfile.preset_package import export_preset_package, import_preset_package
 from ._common import UIScaler
 from .preset_compare import PresetCompare
@@ -334,6 +336,8 @@ class PresetList(QWidget):
                 full_path = f"{cfg.path.settings}{selected_filename}"
                 if os.path.exists(full_path):
                     os.remove(full_path)
+                with suppress(OSError):  # layout profiles of screen setups, if any
+                    os.remove(profile_filename(cfg.path.settings, selected_filename))
         # Refresh
         app_signal.refresh.emit(True)
 

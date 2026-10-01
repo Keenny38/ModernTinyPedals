@@ -46,6 +46,18 @@ mousepos = MousePosition()  # single instance shared by all widgets
 FADE_MS = 250
 
 
+def store_screen_layout(config: Setting):
+    """Remember widget positions for current screen setup"""
+    if not config.application.get("enable_layout_per_screen_setup", False):
+        return
+    from ..template.setting_widget import WIDGET_FILENAME
+    from ..userfile.layout_profile import profile_filename, screen_key, store_layout
+
+    store_layout(
+        config.user.setting, WIDGET_FILENAME,
+        profile_filename(config.path.settings, config.filename.setting), screen_key())
+
+
 def context_visible(context: str) -> bool:
     """Whether widget with visibility context is shown in current session & pit state"""
     if context == "Always" or not realtime_state.active:
@@ -179,6 +191,7 @@ class Base(QWidget):
             save_changes = True
         if save_changes:
             self.cfg.save()
+            store_screen_layout(self.cfg)
 
     @Slot(bool)  # type: ignore[operator]
     def __toggle_lock(self, locked: bool):

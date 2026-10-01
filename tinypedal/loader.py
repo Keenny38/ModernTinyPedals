@@ -55,6 +55,7 @@ def start():
     # 1 load user preset
     cfg.set_next_to_load(f"{cfg.preset_files()[0]}{FileExt.JSON}")
     cfg.load_user()
+    sync_screen_layout()
     cfg.save()
     # 2 start api
     api.connect()
@@ -136,10 +137,24 @@ def reload(reload_preset: bool = False):
     if reload_preset:
         cfg.load_user()
         cfg.save(0)  # save new changes in case preset was edited externally
-    # 3 restart api
+    # 3 widget positions of current screen setup
+    sync_screen_layout()
+    # 4 restart api
     api.restart()
-    # 4 load modules
+    # 5 load modules
     load_modules()
+
+
+def sync_screen_layout():
+    """Restore widget positions saved for current screen setup (single, triple screen...)"""
+    if not cfg.application["enable_layout_per_screen_setup"]:
+        return
+    from .template.setting_widget import WIDGET_FILENAME
+    from .userfile.layout_profile import profile_filename, screen_key, sync_layout
+
+    filename = profile_filename(cfg.path.settings, cfg.filename.setting)
+    if sync_layout(cfg.user.setting, WIDGET_FILENAME, filename, screen_key()):
+        cfg.save(0)
 
 
 def load_modules():
