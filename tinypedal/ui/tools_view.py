@@ -20,14 +20,26 @@
 Tools page: utilities & editors as a grid of cards
 """
 
+import logging
 from importlib import import_module
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPalette
-from PySide6.QtWidgets import QAbstractButton, QApplication, QGridLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QApplication,
+    QGridLayout,
+    QLabel,
+    QMessageBox,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..i18n import tr
 from ._common import UIScaler
+
+logger = logging.getLogger(__name__)
 
 # Sections: (title, ((label, icon glyph in Segoe Fluent Icons / MDL2 Assets, "module.DialogClass"), ...))
 # Dialog modules are imported when first opened, to keep startup light
@@ -69,7 +81,12 @@ def open_tool(dialog_path: str, parent):
             widget.raise_()
             widget.activateWindow()
             return
-    dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
+    try:
+        dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
+    except (ImportError, AttributeError):  # slot exceptions are silent in the windowed build
+        logger.exception("TOOLS: unable to open %s", dialog_path)
+        QMessageBox.warning(parent, tr("Error"), tr("Unable to open tool, see log for details."))
+        return
     _dialog = dialog_class(parent)
     _dialog.show()
 

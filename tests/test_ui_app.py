@@ -124,6 +124,17 @@ def test_tool_paths_resolve():
             assert hasattr(import_module(f"tinypedal.ui.{module_name}"), class_name), dialog_path
 
 
+def test_lazy_imported_packages_bundled():
+    """PyInstaller only follows static imports: packages imported by name must be collected,
+    or their dialogs and widgets are missing from the release build and fail silently"""
+    import os
+
+    with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "build_pyinstaller.py"), encoding="utf-8") as file:
+        build_script = file.read()
+    for package in ("tinypedal.ui", "tinypedal.widget", "tinypedal.module"):
+        assert f'"--collect-submodules={package}"' in build_script, package
+
+
 def test_system_color_theme(ui_env):
     from tinypedal.ui import resolve_color_theme
 

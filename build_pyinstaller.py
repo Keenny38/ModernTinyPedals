@@ -97,6 +97,8 @@ def build_exe():
         # Widget & module packages import submodules dynamically via __all__
         "--collect-submodules=tinypedal.widget",
         "--collect-submodules=tinypedal.module",
+        # Tool dialogs are imported by name when first opened (ui.tools_view.open_tool)
+        "--collect-submodules=tinypedal.ui",
         *(f"--exclude-module={name}" for name in EXCLUDE_MODULES),
     ])
     shutil.move(os.path.join(temp_dist, EXE_NAME), APP_FOLDER)

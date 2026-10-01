@@ -20,8 +20,8 @@ import os
 import pkgutil
 import sys
 from collections import deque
-from itertools import chain
 from importlib import import_module
+from itertools import chain
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
