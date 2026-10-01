@@ -387,3 +387,27 @@ def test_live_preview_right_of_option_list(ui_env):
             assert dialog.preview.height() > dialog.height() // 2, name  # as tall as the list
         finally:
             close_dialog(dialog)
+
+
+def test_config_dialog_undo_redo(ui_env):
+    dialog = open_config("speedometer", [])
+    try:
+        history = dialog.history
+        font_size = dialog.option_edit["font_size"]
+        original = font_size.text()
+        assert not dialog.button_undo.isEnabled()
+        font_size.setText("3")
+        font_size.setText("30")  # typing grouped into one step
+        history.record()
+        dialog.option_edit["enable"].setChecked(not dialog.option_edit["enable"].isChecked())
+        history.record()
+        assert len(history.undo_stack) == 2 and dialog.button_undo.isEnabled()
+        history.undo()
+        history.undo()
+        assert font_size.text() == original
+        assert dialog.button_redo.isEnabled()
+        history.redo()
+        assert font_size.text() == "30"
+        assert cfg.user.setting["speedometer"]["font_size"] != 30  # not applied
+    finally:
+        close_dialog(dialog)

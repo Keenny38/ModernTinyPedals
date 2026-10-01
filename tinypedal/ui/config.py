@@ -27,8 +27,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import islice, zip_longest
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -252,6 +252,87 @@ class FontConfig(BaseDialog):
         run_after_saving(self.reloading)
 
 
+class EditorHistory:
+    """Undo & redo of option editors (raw editor contents), changes grouped while typing"""
+
+    MAX_UNDO = 100
+    GROUP_MS = 500
+
+    def __init__(self, editors: dict, on_change: Callable[[], None]):
+        self.editors = editors
+        self.on_change = on_change  # undo or redo state changed
+        self.undo_stack: list[dict] = []
+        self.redo_stack: list[dict] = []
+        self.state = self.capture()
+        self.busy = False
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(self.GROUP_MS)
+        self.timer.timeout.connect(self.record)
+        for editor in editors.values():
+            if isinstance(editor, QCheckBox):
+                editor.toggled.connect(self.changed)
+            elif isinstance(editor, QComboBox):
+                editor.currentTextChanged.connect(self.changed)
+            else:
+                editor.textChanged.connect(self.changed)
+
+    def capture(self) -> dict:
+        state = {}
+        for key, editor in self.editors.items():
+            if isinstance(editor, QCheckBox):
+                state[key] = editor.isChecked()
+            elif isinstance(editor, QComboBox):
+                state[key] = editor.currentText()
+            else:
+                state[key] = editor.text()
+        return state
+
+    def restore(self, state: dict):
+        self.busy = True
+        try:
+            for key, value in state.items():
+                editor = self.editors[key]
+                if isinstance(editor, QCheckBox):
+                    editor.setChecked(value)
+                elif isinstance(editor, QComboBox):
+                    editor.setCurrentText(value)
+                else:
+                    editor.setText(value)
+        finally:
+            self.busy = False
+        self.state = state
+        self.on_change()
+
+    def changed(self, *_):
+        if not self.busy:
+            self.timer.start()
+
+    def record(self):
+        """Store previous state if changed"""
+        self.timer.stop()
+        new_state = self.capture()
+        if new_state == self.state:
+            return
+        self.undo_stack.append(self.state)
+        del self.undo_stack[:-self.MAX_UNDO]
+        self.redo_stack.clear()
+        self.state = new_state
+        self.on_change()
+
+    def undo(self):
+        self.record()  # pending typing
+        if self.undo_stack:
+            self.redo_stack.append(self.state)
+            self.restore(self.undo_stack.pop())
+
+    def redo(self):
+        self.record()
+        if self.redo_stack:
+            self.undo_stack.append(self.state)
+            self.restore(self.redo_stack.pop())
+
+
 @singleton_dialog(ConfigType.CONFIG)
 class UserConfig(BaseDialog):
     """User configuration"""
@@ -348,8 +429,23 @@ class UserConfig(BaseDialog):
         button_cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         button_cancel.rejected.connect(self.reject)
 
+        # Undo & redo of edited (not yet applied) values
+        self.history = EditorHistory(self.option_edit, self.refresh_history_buttons)
+        self.button_undo = CompactButton(tr("Undo"))
+        self.button_undo.setToolTip(tr("Undo (Ctrl+Z)"))
+        self.button_undo.clicked.connect(self.history.undo)
+        self.button_redo = CompactButton(tr("Redo"))
+        self.button_redo.setToolTip(tr("Redo (Ctrl+Y)"))
+        self.button_redo.clicked.connect(self.history.redo)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self, self.history.undo)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.history.redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.history.redo)
+        self.refresh_history_buttons()
+
         layout_button = QHBoxLayout()
         layout_button.addWidget(button_reset)
+        layout_button.addWidget(self.button_undo)
+        layout_button.addWidget(self.button_redo)
         layout_button.addStretch(1)
         layout_button.addWidget(button_apply)
         layout_button.addWidget(button_save)
@@ -375,6 +471,11 @@ class UserConfig(BaseDialog):
         self.setMinimumWidth(self.sizeHint().width() + UIScaler.size(2))
         self.refresh_state()
         self.refresh_visibility()
+
+    def refresh_history_buttons(self):
+        """Enable undo & redo buttons when history is available"""
+        self.button_undo.setEnabled(bool(self.history.undo_stack) or self.history.timer.isActive())
+        self.button_redo.setEnabled(bool(self.history.redo_stack))
 
     # Options tools: simple / advanced mode, color theme
     def create_option_tools(self, layout: QHBoxLayout):
