@@ -69,6 +69,7 @@ from .notification import NotifyBar
 from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
+from .toast import show_toast
 from .tools_view import ToolsView
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,7 @@ class TabView(QWidget):
         hotkey_tab = HotkeyList(self)
         icon_family = icon_font_family()
         tools_tab = ToolsView(self, icon_family, parent)
+        self.preset_tab = preset_tab
         self._pages = QStackedWidget(self)
         self._pages.setObjectName("pageStack")
         for page in (widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab, tools_tab):
@@ -481,6 +483,9 @@ class AppWindow(QMainWindow):
         # Command palette
         QShortcut(QKeySequence("Ctrl+K"), self, self.open_command_palette)
 
+        # Import preset, preset package or plugin by drag & drop
+        self.setAcceptDrops(True)
+
         # Window state
         self.set_window_state()
         self.__connect_signal()
@@ -493,6 +498,25 @@ class AppWindow(QMainWindow):
         # First launch setup
         if cfg.application["show_setup_wizard_at_startup"]:
             QTimer.singleShot(600, self.open_setup_wizard)
+
+    def dragEnterEvent(self, event):
+        """Accept preset & zip files"""
+        from .file_drop import dropped_files
+
+        if dropped_files(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Import dropped files"""
+        from .file_drop import dropped_files, handle_drop
+
+        paths = dropped_files(event.mimeData())
+        if not paths:
+            return
+        event.acceptProposedAction()
+        messages = handle_drop(self, paths)
+        if messages:
+            show_toast(self, "<br>".join(messages))
 
     def open_command_palette(self):
         """Open command palette, search & run anything"""

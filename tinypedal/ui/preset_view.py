@@ -48,6 +48,7 @@ from ..userfile.preset_package import export_preset_package, import_preset_packa
 from ._common import UIScaler
 from .preset_compare import PresetCompare
 from .preset_management import CreatePreset, PresetTransfer, RestoreBackup
+from .toast import show_toast
 
 
 class PresetList(QWidget):
@@ -163,15 +164,18 @@ class PresetList(QWidget):
         except OSError as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to export package:<br>{error}"))
             return
-        QMessageBox.information(self, tr("Export Package"), trm(f"Exported <b>{count}</b> file(s) to:<br>{zip_filename}"))
+        show_toast(self, trm(f"Exported <b>{count}</b> file(s) to:<br>{zip_filename}"))
 
     def import_package(self):
         """Import preset package"""
         zip_filename, _ = QFileDialog.getOpenFileName(
             self, dir=os.path.expanduser("~"), filter="Modern Tiny Pedals preset package (*.zip)"
         )
-        if not zip_filename:
-            return
+        if zip_filename:
+            self.import_package_file(zip_filename)
+
+    def import_package_file(self, zip_filename: str):
+        """Import preset package file"""
         overwrite_styles = QMessageBox.question(
             self, tr("Import Package"),
             tr("Also import style presets (brakes, brands, classes, compounds, heatmap, tracks)?<br><br>"
@@ -293,7 +297,7 @@ class PresetList(QWidget):
                 backup_extension = set_backup_timestamp()
                 if create_backup_file(selected_filename, cfg.path.settings, backup_extension, show_log=True):
                     msg_text = f"Backup saved as:<br><b>{selected_filename}{backup_extension}</b>"
-                    QMessageBox.information(self, tr("Backup Preset"), trm(msg_text))
+                    show_toast(self, trm(msg_text))
                 else:
                     msg_text = "Failed to create backup, please try again."
                     QMessageBox.warning(self, tr("Backup Preset"), trm(msg_text))

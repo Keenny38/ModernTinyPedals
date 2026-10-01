@@ -176,3 +176,53 @@ def test_widget_categories(ui_env):
     shown = [name for name, item in view.items.items() if not item.isHidden()]
     assert shown and all(name.startswith("brake_") for name in shown)
     view.deleteLater()
+
+
+def test_toast(ui_env):
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.ui.toast import show_toast
+
+    window = QWidget()
+    window.resize(400, 300)
+    toast = show_toast(window, "Saved <b>file</b>", duration=10)
+    assert toast is not None and toast.parentWidget() is window
+    assert toast.y() + toast.height() <= window.height()
+    assert show_toast(None, "nothing") is None
+    window.deleteLater()
+    QCoreApplication.processEvents()
+
+
+def test_file_drop(ui_env, tmp_path):
+    import json
+    import os
+    import zipfile
+
+    import pytest
+
+    from tinypedal.ui import file_drop
+
+    preset = tmp_path / "My Preset.json"
+    preset.write_text(json.dumps({"speedometer": {"enable": True}}), encoding="utf-8")
+    assert file_drop.classify(str(preset)) == file_drop.DROP_PRESET
+    folder = cfg.path.settings
+    assert file_drop.import_preset_file(str(preset), folder) == "My Preset.json"
+    assert file_drop.import_preset_file(str(preset), folder) == "My Preset (2).json"  # never overwrite
+    assert os.path.exists(os.path.join(folder, "My Preset (2).json"))
+    bad = tmp_path / "bad.json"
+    bad.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError):
+        file_drop.import_preset_file(str(bad), folder)
+    plugin = tmp_path / "plugin.zip"
+    with zipfile.ZipFile(plugin, "w") as package:
+        package.writestr("plugin_x/widget.py", "")
+        package.writestr("plugin_x/setting.json", "{}")
+    assert file_drop.classify(str(plugin)) == file_drop.DROP_PLUGIN
+    package_zip = tmp_path / "package.zip"
+    with zipfile.ZipFile(package_zip, "w") as package:
+        package.writestr("manifest.json", "{}")
+    assert file_drop.classify(str(package_zip)) == file_drop.DROP_PACKAGE
+    other = tmp_path / "other.zip"
+    with zipfile.ZipFile(other, "w") as package:
+        package.writestr("readme.txt", "")
+    assert file_drop.classify(str(other)) == ""

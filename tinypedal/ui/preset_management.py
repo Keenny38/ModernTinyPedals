@@ -55,6 +55,7 @@ from ..template.setting_shortcuts import SHORTCUTS_PRESET
 from ..userfile.json_setting import rename_preset_backups, verify_json_file
 from ..validator import is_allowed_filename
 from ._common import QVAL_FILENAME, BaseDialog, BaseEditor, CompactButton, UIScaler
+from .toast import show_toast
 
 logger = logging.getLogger(__name__)
 
@@ -442,7 +443,7 @@ class PresetTransfer(BaseEditor):
             f"Settings are transferred from <b>{loaded_preset_name}</b>"
             f" to <b>{dest_preset_name}</b>."
         )
-        QMessageBox.information(self, tr("Transfer Completed"), trm(msg_text))
+        show_toast(self, trm(msg_text))
 
     def copy_setting(self, dest_dict: dict, setting_selection: tuple[str, ...], options_selection: tuple[str, ...]):
         """Copy setting"""

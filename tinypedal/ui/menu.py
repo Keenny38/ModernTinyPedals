@@ -45,6 +45,7 @@ from .log_info import LogInfo
 from .option_finder import OptionFinder
 from .perf_view import PerformanceView
 from .setup_wizard import SetupWizard
+from .toast import show_toast
 from .tools_view import TOOL_SECTIONS, open_tool
 
 
@@ -293,11 +294,7 @@ class ResetDataMenu(QMenu):
             return False
         # Delete file
         os.remove(filename_full)
-        QMessageBox.information(
-            self._parent,
-            trm(f"Reset {data_type.title()}"),
-            trm(f"{data_type.capitalize()} data has been reset for<br><b>{filename}</b>"),
-        )
+        show_toast(self._parent, trm(f"{data_type.capitalize()} data has been reset for<br><b>{filename}</b>"))
         return True
 
 

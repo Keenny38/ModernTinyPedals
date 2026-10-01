@@ -53,6 +53,7 @@ from ._common import (
     run_after_saving,
     table_item,
 )
+from .toast import show_toast
 
 HEADER_BRANDS = "Vehicle name","Brand name"
 
@@ -247,7 +248,7 @@ class VehicleBrandEditor(BaseEditor):
         brands_db.update(self.brands_temp)
         self.brands_temp = brands_db
         self.refresh_table()
-        QMessageBox.information(self, tr("Data Imported"), tr("Vehicle brand data imported."))
+        show_toast(self, tr("Vehicle brand data imported."))
 
     def open_replace_dialog(self):
         """Open replace dialog"""

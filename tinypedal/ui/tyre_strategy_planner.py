@@ -76,6 +76,7 @@ from ._common import (
     table_item,
 )
 from .config import UserConfig
+from .toast import show_toast
 
 
 def set_tyre_strategy_file_path(filename: str = "") -> str:
@@ -968,7 +969,7 @@ class TyreStrategyPlanner(BaseEditor):
         self.tyre_plan_panel.set_filename(os.path.splitext(filename)[0])
         self.set_unmodified()
         msg_text = f"Tyre strategy file saved at:<br><b>{filename_full}</b>"
-        QMessageBox.information(self, tr("Saved"), trm(msg_text))
+        show_toast(self, trm(msg_text))
 
     def export_as_csv(self):
         """Export tyre strategy as spreadsheet (CSV)"""
@@ -1034,7 +1035,7 @@ class TyreStrategyPlanner(BaseEditor):
         )
         save_tyre_strategy_file_path(filepath)
         msg_text = f"Tyre strategy file exported at:<br><b>{filename_full}</b>"
-        QMessageBox.information(self, tr("Exported"), trm(msg_text))
+        show_toast(self, trm(msg_text))
 
     # Context menu
     def open_context_menu_tyre_list(self, position: QPoint):

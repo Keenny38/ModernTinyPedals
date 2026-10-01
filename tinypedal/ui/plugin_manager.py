@@ -57,6 +57,7 @@ from ..plugin_loader import (
 )
 from ..setting import cfg
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from .toast import show_toast
 
 COLUMNS = ("Plugin", "Status", "Enabled")
 
@@ -219,8 +220,11 @@ class PluginManager(BaseDialog):
 
     def install(self):
         filename, _ = QFileDialog.getOpenFileName(self, tr("Install..."), "", "Zip (*.zip)")
-        if not filename:
-            return
+        if filename:
+            self.install_file(filename)
+
+    def install_file(self, filename: str):
+        """Install plugin package file, after confirmation"""
         if not self.confirm_operation(
             tr("Install..."),
             "Plugins run as normal Python code, only install plugins from trusted sources.<br><br>Install plugin?",
@@ -232,10 +236,8 @@ class PluginManager(BaseDialog):
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to install plugin:<br>{error}"))
             return
-        QMessageBox.information(
-            self, tr("Plugin Manager"),
-            trm(f"Plugin <b>{name[len(PLUGIN_PREFIX):]}</b> installed, restart Modern Tiny Pedals to load it."),
-        )
+        show_toast(
+            self, trm(f"Plugin <b>{name[len(PLUGIN_PREFIX):]}</b> installed, restart Modern Tiny Pedals to load it."))
         self.refresh()
 
     @staticmethod

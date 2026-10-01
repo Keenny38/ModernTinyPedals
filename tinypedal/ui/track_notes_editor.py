@@ -74,6 +74,7 @@ from ._common import (
     UIScaler,
     table_item,
 )
+from .toast import show_toast
 from .track_map_viewer import MapView
 
 DECIMALS = 2
@@ -546,7 +547,7 @@ class TrackNotesEditor(BaseEditor):
         self.filename_entry.setText(filename)
         self.set_unmodified()
         msg_text = f"Notes saved at:<br><b>{filename_full}</b>"
-        QMessageBox.information(self, tr("Saved"), trm(msg_text))
+        show_toast(self, trm(msg_text))
 
     def column_selection_count(self, column_index: int = 0) -> int:
         """Column selection count"""

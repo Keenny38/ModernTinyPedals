@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
-    QMessageBox,
     QTextBrowser,
     QVBoxLayout,
 )
@@ -35,6 +34,7 @@ from ..const_file import FileFilter
 from ..i18n import tr
 from ..main import log_stream
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from .toast import show_toast
 
 
 @singleton_dialog("log", show_error=False)
@@ -125,7 +125,7 @@ class LogInfo(BaseDialog):
         """Copy log"""
         self.log_view.selectAll()
         self.log_view.copy()
-        QMessageBox.information(self, tr("Copy"), tr("Copied all log to Clipboard."))
+        show_toast(self, tr("Copied all log to Clipboard."))
 
     def save_log(self):
         """Save log"""
