@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, overload
 
-from PySide6.QtCore import QBasicTimer, QPropertyAnimation, QRect, Qt, Slot
+from PySide6.QtCore import QBasicTimer, QPropertyAnimation, QRect, Qt, QTimer, Slot
 from PySide6.QtGui import QFont, QFontMetrics, QPalette, QPixmap
 from PySide6.QtWidgets import QGridLayout, QLayout, QMenu, QWidget
 
@@ -37,6 +37,7 @@ from ..perf_monitor import timed_event
 from ..regex_pattern import FONT_WEIGHT_MAP
 from ..setting import Setting
 from ._common import FontMetrics, MousePosition
+from ._edit_frame import EditFrame, scale_widget_setting
 from ._layout_guide import layout_guide
 from ._painter import OverlayStyle, RawImage, RawText
 from ._style import StyledConfig, modern_overrides, scale_overrides
@@ -128,6 +129,7 @@ class Base(QWidget):
         """Set initial widget state in orders, and start update"""
         self.__connect_signal()
         self.__set_window_attributes()  # 1
+        self._edit_frame = EditFrame(self, format_module_name(self.widget_name), self.__resize_by_handle)
         self.__set_window_flags()  # 2
         self.__toggle_timer(not realtime_state.active)
 
@@ -197,6 +199,8 @@ class Base(QWidget):
     def __toggle_lock(self, locked: bool):
         """Toggle widget lock state"""
         self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, locked)
+        # Visual edit mode while unlocked
+        self._edit_frame.set_visible(not locked)
         # Need re-check after lock/unlock (setting window flag hides window)
         self.__refresh_visibility(animate=False)
 
@@ -215,6 +219,13 @@ class Base(QWidget):
             self.post_update()
         else:
             self._update_timer.start(self._update_interval, self)
+
+    def __resize_by_handle(self, factor: float):
+        """Scale widget pixel sizes (saved to preset), then reload widget"""
+        setting = self.cfg.user.setting[self.widget_name]
+        if scale_widget_setting(setting, factor):
+            self.cfg.save()
+            QTimer.singleShot(0, lambda name=self.widget_name: reload_widget(name))
 
     def should_hide(self) -> bool:
         """Hidden by auto hide, hotkey, or visibility context"""

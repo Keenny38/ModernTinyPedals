@@ -124,3 +124,31 @@ def test_every_widget_has_visibility_context():
     from tinypedal.template.setting_widget import WIDGET_DEFAULT
 
     assert all(setting["visibility_context"] == "Always" for setting in WIDGET_DEFAULT.values())
+
+
+def test_edit_frame_resize(ui_env, monkeypatch):
+    from PySide6.QtCore import QPoint
+
+    from tinypedal.setting import cfg
+    from tinypedal.widget import _base, speedometer
+    from tinypedal.widget._edit_frame import drag_factor, scale_widget_setting
+
+    assert drag_factor((100, 50), QPoint(50, 0)) == 1.5
+    assert drag_factor((100, 50), QPoint(0, -25)) == 0.5
+    assert drag_factor((100, 50), QPoint(-1000, 0)) == 0.3  # clamped
+    setting = {"font_size": 10, "bar_height": 4, "driver_name_width": 18}
+    assert scale_widget_setting(setting, 2) == {"font_size": 20, "bar_height": 8}
+
+    reloads = []
+    monkeypatch.setattr(_base, "reload_widget", reloads.append)
+    cfg.overlay["fixed_position"] = False
+    font_size = cfg.user.setting["speedometer"]["font_size"]
+    widget = speedometer.Realtime(cfg, "speedometer")
+    widget.start()
+    try:
+        assert widget._edit_frame.handle.isVisibleTo(widget)
+        widget._edit_frame.handle.on_resized(2.0)
+        assert cfg.user.setting["speedometer"]["font_size"] == font_size * 2
+    finally:
+        cfg.user.setting["speedometer"]["font_size"] = font_size
+        widget.stop()
