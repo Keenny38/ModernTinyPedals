@@ -126,7 +126,7 @@ class Realtime(Overlay):
         if self.wcfg["show_delta_bar"]:
             self.rect_deltapos.setLeft(delta_pos)
             fill_rect(painter, self.rect_deltabar, self.wcfg["background_color_delta_bar"])
-            painter.fillRect(self.rect_deltapos, highlight_color)
+            fill_rect(painter, self.rect_deltapos, highlight_color)
 
             if self.wcfg["enable_animated_deltabest"]:
                 pos_x = calc.zero_max(

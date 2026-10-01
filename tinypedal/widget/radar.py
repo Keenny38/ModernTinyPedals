@@ -178,7 +178,7 @@ class Realtime(Overlay):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             # Draw circle background
             if self.wcfg["show_circle_background"]:
-                painter.fillRect(self.rect_radar, self.wcfg["background_color_circle"])
+                fill_rect(painter, self.rect_radar, self.wcfg["background_color_circle"])
             # Draw marks
             painter.drawPixmap(0, 0, self.pixmap_marks)
             # Draw vehicles
@@ -200,7 +200,7 @@ class Realtime(Overlay):
                         radar_alpha = 0
                     self.radar_fade_color.setAlphaF(radar_alpha)
                     painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    painter.fillRect(self.rect_radar, self.radar_fade_color)
+                    fill_rect(painter, self.rect_radar, self.radar_fade_color)
 
     def draw_radar_mask(self):
         """Draw radar mask"""
@@ -404,7 +404,7 @@ class Realtime(Overlay):
                 coll_color = self.wcfg["collision_course_critical_color"]
             else:
                 coll_color = self.wcfg["collision_course_nearby_color"]
-            painter.fillRect(self.coll_shape, coll_color)
+            fill_rect(painter, self.coll_shape, coll_color)
 
     # Additional methods
     def color_lap_diff(self, veh_info):

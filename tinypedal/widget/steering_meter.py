@@ -116,7 +116,7 @@ class Realtime(Overlay):
         # Draw steering
         steer_pos = self.steer_position(self.raw_steering, self.bar_width * 2)
         self.rect_steerpos.setLeft(self.bar_edge + steer_pos)
-        painter.fillRect(self.rect_steerpos, self.wcfg["steering_color"])
+        fill_rect(painter, self.rect_steerpos, self.wcfg["steering_color"])
 
         # Draw edge & scale marks
         painter.drawPixmap(0, 0, self.pixmap_mark)
@@ -140,9 +140,9 @@ class Realtime(Overlay):
                 painter.fillRect(offset + gap, 0, 1, self.bar_height, mark_color)
         # Edge center mark
         edge_color = self.wcfg["bar_edge_color"]
-        painter.fillRect(self.rect_edge_l, edge_color)
-        painter.fillRect(self.rect_edge_r, edge_color)
-        painter.fillRect(self.rect_center, edge_color)
+        fill_rect(painter, self.rect_edge_l, edge_color)
+        fill_rect(painter, self.rect_edge_r, edge_color)
+        fill_rect(painter, self.rect_center, edge_color)
 
     # Additional methods
     def scale_mark(self, degree, rot_range, width):

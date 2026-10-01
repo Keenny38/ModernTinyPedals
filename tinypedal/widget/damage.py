@@ -198,7 +198,7 @@ class Realtime(Overlay):
     def draw_damage_body(self, painter):
         """Draw damage body"""
         for rect_part, damage_body in zip(self.rects_parts, self.damage_body):
-            painter.fillRect(rect_part, self.color_damage_body(damage_body))
+            fill_rect(painter, rect_part, self.color_damage_body(damage_body))
 
     def draw_damage_wheel(self, painter):
         """Draw damage wheel"""
@@ -209,7 +209,7 @@ class Realtime(Overlay):
                 painter.setPen(self.pen_puncture)
                 painter.drawRect(rect_wheel)
             else:
-                painter.fillRect(rect_wheel, self.color_damage_wheel(damage_wheel, damage_susp))
+                fill_rect(painter, rect_wheel, self.color_damage_wheel(damage_wheel, damage_susp))
 
     def draw_impact_cone(self, painter):
         """Draw impact cone"""
