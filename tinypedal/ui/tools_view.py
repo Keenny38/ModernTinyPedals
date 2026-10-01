@@ -33,28 +33,28 @@ from ._common import UIScaler
 # Dialog modules are imported when first opened, to keep startup light
 TOOL_SECTIONS = (
     ("Utilities", (
-        ("Fuel Calculator", "", "fuel_calculator.FuelCalculator"),  # calculator
-        ("Tyre Strategy Planner", "", "tyre_strategy_planner.TyreStrategyPlanner"),  # flag
-        ("Driver Stats Viewer", "", "driver_stats_viewer.DriverStatsViewer"),  # contact
-        ("Track Map Viewer", "", "track_map_viewer.TrackMapViewer"),  # map pin
-        ("Lap Telemetry Viewer", "", "lap_viewer.LapViewer"),  # area chart
-        ("Telemetry Replay", "", "replay_view.ReplayView"),  # play
+        ("Fuel Calculator", "\ue8ef", "fuel_calculator.FuelCalculator"),  # calculator
+        ("Tyre Strategy Planner", "\ue7c1", "tyre_strategy_planner.TyreStrategyPlanner"),  # flag
+        ("Driver Stats Viewer", "\ue77b", "driver_stats_viewer.DriverStatsViewer"),  # contact
+        ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
+        ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
+        ("Telemetry Replay", "\ue768", "replay_view.ReplayView"),  # play
     )),
     ("Editors", (
-        ("Heatmap Editor", "", "heatmap_editor.HeatmapEditor"),  # color
-        ("Brake Editor", "", "brake_editor.BrakeEditor"),  # edit
-        ("Tyre Compound Editor", "", "tyre_compound_editor.TyreCompoundEditor"),  # edit
-        ("Vehicle Brand Editor", "", "vehicle_brand_editor.VehicleBrandEditor"),  # tag
-        ("Vehicle Class Editor", "", "vehicle_class_editor.VehicleClassEditor"),  # car
-        ("Track Info Editor", "", "track_info_editor.TrackInfoEditor"),  # info
-        ("Track Notes Editor", "", "track_notes_editor.TrackNotesEditor"),  # quick note
-        ("Layout Editor", "", "layout_editor.LayoutEditor"),  # view all
-        ("Overlay Theme Editor", "", "theme_editor.ThemeEditor"),  # personalize
+        ("Heatmap Editor", "\ue790", "heatmap_editor.HeatmapEditor"),  # color
+        ("Brake Editor", "\ue70f", "brake_editor.BrakeEditor"),  # edit
+        ("Tyre Compound Editor", "\ue70f", "tyre_compound_editor.TyreCompoundEditor"),  # edit
+        ("Vehicle Brand Editor", "\ue8ec", "vehicle_brand_editor.VehicleBrandEditor"),  # tag
+        ("Vehicle Class Editor", "\ue804", "vehicle_class_editor.VehicleClassEditor"),  # car
+        ("Track Info Editor", "\ue946", "track_info_editor.TrackInfoEditor"),  # info
+        ("Track Notes Editor", "\ue70b", "track_notes_editor.TrackNotesEditor"),  # quick note
+        ("Layout Editor", "\ue8a9", "layout_editor.LayoutEditor"),  # view all
+        ("Overlay Theme Editor", "\ue771", "theme_editor.ThemeEditor"),  # personalize
     )),
     ("Management", (
-        ("Preset Comparison", "", "preset_compare.PresetCompare"),  # switch
-        ("Plugin Manager", "", "plugin_manager.PluginManager"),  # puzzle
-        ("Widget Performance", "", "perf_view.PerformanceView"),  # speed
+        ("Preset Comparison", "\ue8ab", "preset_compare.PresetCompare"),  # switch
+        ("Plugin Manager", "\uea86", "plugin_manager.PluginManager"),  # puzzle
+        ("Widget Performance", "\uec4a", "perf_view.PerformanceView"),  # speed
     )),
 )
 

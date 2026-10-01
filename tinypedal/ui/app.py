@@ -249,7 +249,7 @@ class TabView(QWidget):
         self._button_api.clicked.connect(self.show_api_menu)
         self._menu_api = APIMenu(tr("API"), parent)
         layout_quick.addWidget(self._button_api, 2, 1)
-        button_search = NavButton(f"{tr('Command Palette')} (Ctrl+K)", "", "K", icon_family, rail, compact=True)
+        button_search = NavButton(f"{tr('Command Palette')} (Ctrl+K)", "\ue721", "K", icon_family, rail, compact=True)
         button_search.setCheckable(False)
         button_search.clicked.connect(parent.open_command_palette)
         layout_quick.addWidget(button_search, 2, 0)
