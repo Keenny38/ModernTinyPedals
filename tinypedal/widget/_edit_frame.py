@@ -30,19 +30,19 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from ._style import SCALED_OPTION
+from ._style import is_scaled_option
 
 EDIT_COLOR = QColor("#2F8CFF")
 HANDLE_SIZE = 14
 SCALE_RANGE = (0.3, 4.0)
 
 
-def scale_widget_setting(setting: dict, factor: float) -> dict:
+def scale_widget_setting(setting: dict, factor: float, widget_name: str = "") -> dict:
     """Pixel size options of widget setting multiplied by factor, returns changed options"""
     factor = min(max(factor, SCALE_RANGE[0]), SCALE_RANGE[1])
     changed = {}
     for key, value in setting.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not SCALED_OPTION.search(key):
+        if not is_scaled_option(widget_name, key, value):
             continue
         new_value = max(round(value * factor), 1) if isinstance(value, int) else round(value * factor, 3)
         if new_value != value:

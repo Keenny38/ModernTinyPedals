@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from .. import app_signal
 from ..api_control import api
-from ..const_api import API_LMU_NAME
+from ..const_api import API_LMU_NAME, API_RF2_NAME
 from ..i18n import tr, trm
 from ..replay import FILE_EXT, REPLAY_FAMILIES, SPEEDS, replay, replay_compatible
 from ..setting import cfg
@@ -230,6 +230,6 @@ class ReplayView(BaseDialog):
         if any(api.name in family for family in REPLAY_FAMILIES):
             return True
         QMessageBox.information(
-            self, tr("Telemetry Replay"), trm(f"Select {API_LMU_NAME} API to record or replay telemetry.")
+            self, tr("Telemetry Replay"), trm(f"Select {API_LMU_NAME} / {API_RF2_NAME} API to record or replay telemetry.")
         )
         return False

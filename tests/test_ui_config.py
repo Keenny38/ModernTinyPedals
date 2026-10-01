@@ -411,3 +411,13 @@ def test_config_dialog_undo_redo(ui_env):
         assert cfg.user.setting["speedometer"]["font_size"] != 30  # not applied
     finally:
         close_dialog(dialog)
+
+
+def test_undo_timer_deleted_with_dialog(ui_env):
+    dialog = open_config("speedometer", [])
+    timer = dialog.history.timer
+    assert timer.parent() is dialog
+    dialog.option_edit["font_size"].setText("33")
+    assert timer.isActive()
+    close_dialog(dialog)  # pending undo record must not run on deleted editors
+    QCoreApplication.processEvents()

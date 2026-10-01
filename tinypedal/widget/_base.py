@@ -80,6 +80,9 @@ def context_visible(context: str) -> bool:
 class Base(QWidget):
     """Base window"""
 
+    # Keep updating while hidden: widget records its own data (incidents, input history)
+    update_while_hidden = False
+
     def __init__(self, config: Setting, widget_name: str):
         super().__init__()
         self.widget_name = widget_name
@@ -104,7 +107,7 @@ class Base(QWidget):
             OverlayStyle.corner_scale = 0
             OverlayStyle.depth_effects = False
         # Global overlay scale
-        scaled = scale_overrides(self.wcfg, style.get("overlay_scale", 1.0))
+        scaled = scale_overrides(self.wcfg, style.get("overlay_scale", 1.0), widget_name)
         if scaled:
             self.wcfg = StyledConfig(self.wcfg, scaled)
 
@@ -217,13 +220,13 @@ class Base(QWidget):
         if paused:
             self._update_timer.stop()
             self.post_update()
-        elif not self.should_hide():  # hidden widget resumes when shown
+        elif self.update_while_hidden or not self.should_hide():  # hidden widget resumes when shown
             self._update_timer.start(self._update_interval, self)
 
     def __resize_by_handle(self, factor: float):
         """Scale widget pixel sizes (saved to preset), then reload widget"""
         setting = self.cfg.user.setting[self.widget_name]
-        if scale_widget_setting(setting, factor):
+        if scale_widget_setting(setting, factor, self.widget_name):
             self.cfg.save()
             QTimer.singleShot(0, lambda name=self.widget_name: reload_widget(name))
 
@@ -249,7 +252,7 @@ class Base(QWidget):
         opacity = self.wcfg["opacity"]
         # No update while hidden (hotkey, visibility context), saves CPU while driving
         if realtime_state.active:
-            if hide:
+            if hide and not self.update_while_hidden:
                 self._update_timer.stop()
             elif not self._update_timer.isActive():
                 self._update_timer.start(self._update_interval, self)

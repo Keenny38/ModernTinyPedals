@@ -259,14 +259,14 @@ class EditorHistory:
     MAX_UNDO = 100
     GROUP_MS = 500
 
-    def __init__(self, editors: dict, on_change: Callable[[], None]):
+    def __init__(self, editors: dict, on_change: Callable[[], None], parent):
         self.editors = editors
         self.on_change = on_change  # undo or redo state changed
         self.undo_stack: list[dict] = []
         self.redo_stack: list[dict] = []
         self.state = self.capture()
         self.busy = False
-        self.timer = QTimer()
+        self.timer = QTimer(parent)  # deleted with dialog, never fires on deleted editors
         self.timer.setSingleShot(True)
         self.timer.setInterval(self.GROUP_MS)
         self.timer.timeout.connect(self.record)
@@ -431,7 +431,7 @@ class UserConfig(BaseDialog):
         button_cancel.rejected.connect(self.reject)
 
         # Undo & redo of edited (not yet applied) values
-        self.history = EditorHistory(self.option_edit, self.refresh_history_buttons)
+        self.history = EditorHistory(self.option_edit, self.refresh_history_buttons, self)
         self.button_undo = CompactButton(tr("Undo"))
         self.button_undo.setToolTip(tr("Undo (Ctrl+Z)"))
         self.button_undo.clicked.connect(self.history.undo)

@@ -239,14 +239,28 @@ SCALED_OPTION = re.compile(
     r"|^(icon|dot|area|vehicle|brake_input)_size$"
 )
 OVERLAY_SCALE_RANGE = (0.5, 3.0)
+# Widgets whose "bar_width" is a number of characters (already follows font size)
+CHARACTER_BAR_WIDTH = frozenset((
+    "acceleration", "fuel", "fuel_energy_saver", "pit_stop_estimate", "relative_finish_order",
+))
 
 
-def scale_overrides(wcfg: dict, scale: float) -> dict:
+def is_scaled_option(widget_name: str, key: str, value: Any) -> bool:
+    """Whether option is a pixel size, scaled with widget"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if key == "bar_width" and widget_name in CHARACTER_BAR_WIDTH:
+        return False
+    return SCALED_OPTION.search(key) is not None
+
+
+def scale_overrides(wcfg: dict, scale: float, widget_name: str = "") -> dict:
     """Pixel size options multiplied by global overlay scale
 
     Args:
         wcfg: widget setting (with style overrides).
         scale: global overlay scale, 1 = unchanged.
+        widget_name: widget name.
 
     Returns:
         Dictionary of scaled options.
@@ -256,7 +270,7 @@ def scale_overrides(wcfg: dict, scale: float) -> dict:
         return {}
     overrides: dict[str, Any] = {}
     for key, value in wcfg.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not SCALED_OPTION.search(key):
+        if not is_scaled_option(widget_name, key, value):
             continue
         if isinstance(value, int):
             overrides[key] = max(round(value * scale), 1)

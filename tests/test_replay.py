@@ -218,3 +218,27 @@ def test_replay_compatibility():
 def test_old_replay_file_is_lmu(tmp_path):
     replay = ReplayFile(write_replay(tmp_path, make_frames(3)))
     assert replay.source == "Le Mans Ultimate" and replay.zone_offset("shmm") == 0
+
+
+def test_rest_snapshot_lookup(tmp_path):
+    filename = str(tmp_path / "rest.tpreplay")
+    with open(filename, "wb") as file:
+        writer = ReplayWriter(file, 4, 10)
+        for index in range(5):
+            writer.write(index * 1.0, b"abcd")
+            writer.write_rest(index * 1.0, {"timeScale": index})
+    replay = ReplayFile(filename)
+    assert replay.rest_at(-1) == -1 and replay.rest_at(0) == 0 and replay.rest_at(2.5) == 2 and replay.rest_at(99) == 4
+
+
+def test_secondary_zone_reads_same_frame(tmp_path):
+    clock = Clock()
+    player = ReplayPlayer(ReplayFile(write_replay(tmp_path, make_frames(20, 8))), clock=clock)
+    primary = ReplayMMap(ctypes.c_char * 4, player, 0)
+    secondary = ReplayMMap(ctypes.c_char * 4, player, 4, primary=False)
+    primary.create()
+    secondary.create()
+    primary.update()
+    clock.now = 1.0  # time moves between zone updates
+    secondary.update()
+    assert bytes(primary.data) + bytes(secondary.data) == player.replay.frame(0)

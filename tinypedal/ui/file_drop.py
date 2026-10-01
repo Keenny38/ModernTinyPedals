@@ -33,6 +33,7 @@ from .. import app_signal
 from ..const_file import FileExt
 from ..i18n import trm
 from ..setting import cfg
+from ..validator import is_allowed_filename
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,11 @@ def import_preset_file(path: str, folder: str) -> str:
             raise ValueError("invalid json file") from error
     if not isinstance(data, dict) or not all(isinstance(value, dict) for value in data.values()):
         raise ValueError("not a preset file")
+    from ..template.setting_widget import WIDGET_FILENAME
+
+    base = os.path.splitext(os.path.basename(path))[0]
+    if not is_allowed_filename(base) or not any(name in data for name in WIDGET_FILENAME):
+        raise ValueError("not a widget preset (global config & style presets are not imported)")
     filename = unique_preset_name(folder, os.path.basename(path))
     target = os.path.join(folder, filename)
     temp = f"{target}.tmp"

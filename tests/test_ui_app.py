@@ -251,3 +251,19 @@ def test_widget_hover_preview(ui_env):
     finally:
         view.deleteLater()
         QCoreApplication.processEvents()
+
+
+def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
+    import json
+
+    import pytest
+
+    from tinypedal.ui import file_drop
+
+    classes = tmp_path / "classes.json"
+    classes.write_text(json.dumps({"GT3": {"alias": "GT3"}}), encoding="utf-8")
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"something": {"a": 1}}), encoding="utf-8")
+    for path in (classes, other):
+        with pytest.raises(ValueError):
+            file_drop.import_preset_file(str(path), cfg.path.settings)

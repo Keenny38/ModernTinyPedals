@@ -36,7 +36,7 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
 
 from .. import units
-from ._base import Overlay
+from ._base import Overlay, store_screen_layout
 from ._black_box.base import PaintBase
 from ._black_box.center import CenterPainter
 from ._black_box.common import LAYOUT_COMPACT
@@ -79,6 +79,8 @@ class Realtime(
 
     Data reading and each painted part live in their own mixin, see _black_box package.
     """
+
+    update_while_hidden = True  # incident recorder & event log keep recording
 
     # Geometry copied from layout (see set_layout)
     rect_main: QRectF
@@ -297,6 +299,7 @@ class Realtime(
         if self.__dict__ and self.position_unsaved:
             self.position_unsaved = False
             self.cfg.save()
+            store_screen_layout(self.cfg)
 
     def post_update(self):
         self.save_position()

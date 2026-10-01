@@ -40,6 +40,7 @@ import struct
 import threading
 import time
 import zlib
+from bisect import bisect_right
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
@@ -218,12 +219,7 @@ class ReplayFile:
 
     def rest_at(self, elapsed: float) -> int:
         """Index of last Rest API snapshot at elapsed time, -1 if none"""
-        index = -1
-        for position, rest_time in enumerate(self.rest_times):
-            if rest_time > elapsed:
-                break
-            index = position
-        return index
+        return bisect_right(self.rest_times, elapsed) - 1
 
     def frame(self, index: int) -> bytes:
         """Get decoded frame, sequential access is fast, seeking starts from nearest keyframe"""
@@ -255,6 +251,7 @@ class ReplayPlayer:
         self.speed = 1.0
         self.paused = False
         self.loop = True
+        self.last_frame = b""  # frame of current update, read by every shared memory zone
 
     @property
     def position(self) -> float:
@@ -295,7 +292,8 @@ class ReplayPlayer:
     def current_frame(self) -> bytes:
         """Frame at current replay time"""
         with self._lock:
-            return self.replay.frame(self.replay.index_at(self._current()))
+            self.last_frame = self.replay.frame(self.replay.index_at(self._current()))
+            return self.last_frame
 
     def current_rest(self) -> int:
         """Index of Rest API snapshot at current replay time, -1 if none"""
@@ -310,9 +308,18 @@ class ReplayMMap:
     also updated from recorded snapshots.
     """
 
-    __slots__ = ("_struct", "_buffer", "_player", "_offset", "_end", "_rest_target", "_rest_index", "update", "data")
+    __slots__ = (
+        "_primary", "_struct", "_buffer", "_player", "_offset", "_end", "_rest_target", "_rest_index", "update", "data",
+    )
 
-    def __init__(self, data_struct: Any, player: ReplayPlayer, offset: int = 0, rest_target: Any = None):
+    def __init__(
+        self, data_struct: Any, player: ReplayPlayer, offset: int = 0, rest_target: Any = None, primary: bool = True,
+    ):
+        """
+        Args:
+            primary: first zone updated each cycle reads new frame, others reuse it (all zones from same frame).
+        """
+        self._primary = primary
         self._struct = data_struct
         self._player = player
         self._offset = offset
@@ -336,7 +343,9 @@ class ReplayMMap:
         self.update = no_update
 
     def __update(self) -> None:
-        self._buffer[:] = self._player.current_frame()[self._offset:self._end]
+        player = self._player
+        frame = player.current_frame() if self._primary or not player.last_frame else player.last_frame
+        self._buffer[:] = frame[self._offset:self._end]
         if self._rest_target is not None:
             index = self._player.current_rest()
             if index != self._rest_index and index >= 0:

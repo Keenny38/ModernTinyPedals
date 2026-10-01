@@ -442,7 +442,8 @@ class RF2Info:
             zones = []
             for name, data_struct in REPLAY_ZONES:
                 zones.append(ReplayMMap(
-                    data_struct, player, player.replay.zone_offset(name), rest_target if name == "scor" else None))
+                    data_struct, player, player.replay.zone_offset(name), rest_target if name == "scor" else None,
+                    primary=name == "scor"))  # scoring updated first
             dataset.set_zones(tuple(zones), True)
         self._scor, self._tele, self._ext, self._ffb, self._rule = dataset.zones()
 

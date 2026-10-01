@@ -22,6 +22,7 @@ Overlay base painter class.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Any
 
@@ -75,17 +76,36 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     # hundreds of identical cells), then drawn as pixmap
     rect = QRectF(rect)
     ratio = painter.device().devicePixelRatioF()
-    if not (0 < rect.width() * ratio <= _CACHE_MAX_SIDE and 0 < rect.height() * ratio <= _CACHE_MAX_SIDE):
-        _fill_rect_direct(painter, rect, color, radius, depth)  # huge or invalid size, not cached
+    width, height = rect.width() * ratio, rect.height() * ratio
+    if not (width > 0 and height > 0 and width * height <= _CACHE_MAX_PIXELS):
+        _fill_rect_direct(painter, rect, color, radius, depth)  # large or invalid size, not cached
         return
     rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
-    pixmap = _background_pixmap(
-        max(round(rect.width() * ratio), 1), max(round(rect.height() * ratio), 1),
-        round(radius, 2) if radius >= 1 else 0.0, depth, rgba, ratio)
+    key = (max(round(width), 1), max(round(height), 1), round(radius, 2) if radius >= 1 else 0.0, depth, rgba, ratio)
+    pixmap = _background_cache.get(key)
+    if pixmap is None:
+        if key not in _background_seen:
+            # First time this size: animated bars change size every frame, caching them would
+            # only churn the cache, so a size is cached once it is drawn again
+            _background_seen[key] = None
+            if len(_background_seen) > _SEEN_SIZE:
+                _background_seen.popitem(last=False)
+            _fill_rect_direct(painter, rect, color, radius, depth)
+            return
+        pixmap = _background_pixmap(*key)
+        _background_cache[key] = pixmap
+        if len(_background_cache) > _CACHE_SIZE:
+            _background_cache.popitem(last=False)
+    else:
+        _background_cache.move_to_end(key)
     painter.drawPixmap(rect.topLeft(), pixmap)
 
 
-_CACHE_MAX_SIDE = 2048  # pixels, larger fills are drawn directly
+_CACHE_MAX_PIXELS = 512 * 512  # larger fills are drawn directly
+_CACHE_SIZE = 512
+_SEEN_SIZE = 2048
+_background_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+_background_seen: OrderedDict[tuple, None] = OrderedDict()
 
 
 def _fill_rect_direct(painter: QPainter, rect: QRectF, color, radius: float, depth: bool) -> None:
@@ -110,7 +130,6 @@ def _color_rgba(color: str) -> int:
     return QColor(color).rgba()
 
 
-@lru_cache(maxsize=512)
 def _background_pixmap(width: int, height: int, radius: float, depth: bool, rgba: int, ratio: float) -> QPixmap:
     """Rounded and/or depth shaded fill, rendered at device pixel size"""
     pixmap = QPixmap(width, height)

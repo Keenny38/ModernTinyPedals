@@ -32,6 +32,8 @@ from ._painter import fill_pixmap
 class Realtime(Overlay):
     """Draw widget"""
 
+    update_while_hidden = True  # input history keeps recording
+
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)

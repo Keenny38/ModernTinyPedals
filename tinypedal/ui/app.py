@@ -516,6 +516,8 @@ class AppWindow(QMainWindow):
         key = screen_key()
         if key == self._screen_key:
             return
+        if DialogSingleton.is_opened(ConfigType.CONFIG):
+            return  # retried once config dialog is closed
         self._screen_key = key
         if cfg.application["enable_layout_per_screen_setup"]:
             logger.info("LAYOUT: screen setup changed to %s", key)

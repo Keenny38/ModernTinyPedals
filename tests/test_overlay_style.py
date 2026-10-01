@@ -171,7 +171,12 @@ def test_cached_fill_matches_direct_fill(ui_env):
                 painter = QPainter(pixmap)
                 rect = QRectF(2, 3, 50, 20)
                 if cached:
-                    _painter.fill_rect(painter, rect, "#336699")
+                    scratch = QPixmap(60, 30)
+                    scratch_painter = QPainter(scratch)
+                    _painter.fill_rect(scratch_painter, rect, "#336699")  # first draw of size: direct
+                    scratch_painter.end()
+                    _painter.fill_rect(painter, rect, "#336699")  # drawn again: cached pixmap
+                    assert _painter._background_cache
                 else:
                     radius = 20 * corner
                     _painter._fill_rect_direct(painter, rect, "#336699", radius, depth)
@@ -205,3 +210,43 @@ def test_hidden_widget_does_not_update(ui_env):
     finally:
         widget.stop()
         realtime_state.active, realtime_state.hidden, cfg.overlay["fixed_position"] = saved
+
+
+def test_character_bar_width_not_scaled():
+    from tinypedal.widget._edit_frame import scale_widget_setting
+    from tinypedal.widget._style import scale_overrides
+
+    wcfg = {"font_size": 10, "bar_width": 5}
+    assert scale_overrides(wcfg, 2.0, "fuel") == {"font_size": 20}  # bar_width = characters
+    assert scale_overrides(wcfg, 2.0, "brake_pressure") == {"font_size": 20, "bar_width": 10}  # pixels
+    setting = dict(wcfg)
+    scale_widget_setting(setting, 2.0, "acceleration")
+    assert setting == {"font_size": 20, "bar_width": 5}
+
+
+def test_animated_fill_not_cached(ui_env):
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainter, QPixmap
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale
+    _painter.OverlayStyle.corner_scale = 0.2
+    _painter._background_cache.clear()
+    try:
+        pixmap = QPixmap(300, 30)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        for width in range(100, 200):  # bar growing every frame
+            _painter.fill_rect(painter, QRectF(0, 0, width, 20), "#FF0000")
+        painter.end()
+        assert not _painter._background_cache
+    finally:
+        _painter.OverlayStyle.corner_scale = saved
+
+
+def test_black_box_updates_while_hidden():
+    from tinypedal.widget import black_box, speedometer, trailing
+
+    assert black_box.Realtime.update_while_hidden and trailing.Realtime.update_while_hidden
+    assert not speedometer.Realtime.update_while_hidden
