@@ -30,6 +30,7 @@ from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -53,6 +54,39 @@ FILTER_ALL = 0
 FILTER_ACTIVE = 1
 FILTER_INACTIVE = 2
 GEAR_SYMBOL = "\u2699\ufe0e"  # gear, text style (not color emoji)
+
+# Widget categories: (name, widget name prefixes), first match wins, unmatched (plugins) are "Other"
+WIDGET_CATEGORIES = (
+    ("Timing", (
+        "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "relative", "rivals",
+        "sectors", "session", "standings", "stint_history", "timing", "track_clock",
+    )),
+    ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
+    ("Brakes", ("brake_",)),
+    ("Driver Inputs", ("pedal", "steering_", "trailing")),
+    ("Engine & Energy", (
+        "battery", "cruise", "drs", "electric_motor", "engine", "fuel", "gear", "instrument", "lift_and_coast",
+        "push_to_pass", "rpm_led", "speedometer", "virtual_energy",
+    )),
+    ("Chassis", (
+        "acceleration", "damage", "differential", "force", "rake_angle", "ride_height", "roll_angle",
+        "suspension_", "weight_distribution",
+    )),
+    ("Track & Traffic", (
+        "black_box", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
+        "weather",
+    )),
+)
+CATEGORY_ALL = "All Categories"
+CATEGORY_OTHER = "Other"
+
+
+def widget_category(name: str) -> str:
+    """Category of widget, by name prefix"""
+    for category, prefixes in WIDGET_CATEGORIES:
+        if name.startswith(prefixes):
+            return category
+    return CATEGORY_OTHER
 
 
 class ToggleSwitch(QAbstractButton):
@@ -177,6 +211,14 @@ class ModuleList(QWidget):
             self.filter_group.addButton(chip, filter_id)
             layout_filter.addWidget(chip)
         self.filter_group.idClicked.connect(self.apply_filter)
+        # Category filter, widgets only
+        self.category_box = QComboBox(self)
+        self.category_box.setVisible(module_control.type_id == "widget")
+        self.category_box.addItem(tr(CATEGORY_ALL), CATEGORY_ALL)
+        for category in (*(category for category, _ in WIDGET_CATEGORIES), CATEGORY_OTHER):
+            self.category_box.addItem(tr(category), category)
+        self.category_box.currentIndexChanged.connect(self.apply_filter)
+        layout_filter.addWidget(self.category_box)
         layout_filter.addStretch(1)
         self.label_loaded = QLabel("")
         self.label_loaded.setObjectName("countBadge")
@@ -263,10 +305,14 @@ class ModuleList(QWidget):
         """Show rows matching search text and All / Active / Inactive filter"""
         text = self.search_box.text().strip().lower()
         mode = self.filter_group.checkedId()
+        category = self.category_box.currentData() if self.module_control.type_id == "widget" else CATEGORY_ALL
         for name, item in self.items.items():
             enabled = self.is_enabled(name)
-            visible = (not text or text in item.text().lower() or text in name.lower()) and (
-                mode == FILTER_ALL or (mode == FILTER_ACTIVE) == enabled)
+            visible = (
+                (not text or text in item.text().lower() or text in name.lower())
+                and (mode == FILTER_ALL or (mode == FILTER_ACTIVE) == enabled)
+                and category in (CATEGORY_ALL, widget_category(name))
+            )
             item.setHidden(not visible)
 
     def module_button_enable_all(self):

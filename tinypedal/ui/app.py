@@ -246,7 +246,11 @@ class TabView(QWidget):
         self._button_api.setCheckable(False)
         self._button_api.clicked.connect(self.show_api_menu)
         self._menu_api = APIMenu(tr("API"), parent)
-        layout_quick.addWidget(self._button_api, 2, 0, 1, 2)
+        layout_quick.addWidget(self._button_api, 2, 1)
+        button_search = NavButton(f"{tr('Command Palette')} (Ctrl+K)", "", "K", icon_family, rail, compact=True)
+        button_search.setCheckable(False)
+        button_search.clicked.connect(parent.open_command_palette)
+        layout_quick.addWidget(button_search, 2, 0)
         layout_rail.addLayout(layout_quick)
         self._rail_timer = QTimer(self)
         self._rail_timer.timeout.connect(self.refresh_rail)
@@ -474,6 +478,9 @@ class AppWindow(QMainWindow):
         # Tray icon
         self.set_tray_icon()
 
+        # Command palette
+        QShortcut(QKeySequence("Ctrl+K"), self, self.open_command_palette)
+
         # Window state
         self.set_window_state()
         self.__connect_signal()
@@ -486,6 +493,13 @@ class AppWindow(QMainWindow):
         # First launch setup
         if cfg.application["show_setup_wizard_at_startup"]:
             QTimer.singleShot(600, self.open_setup_wizard)
+
+    def open_command_palette(self):
+        """Open command palette, search & run anything"""
+        from .command_palette import CommandPalette
+
+        self.show_app()
+        CommandPalette(self).open()
 
     def open_setup_wizard(self):
         """Open first launch setup wizard"""

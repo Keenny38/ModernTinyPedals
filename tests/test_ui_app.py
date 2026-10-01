@@ -127,3 +127,52 @@ def test_system_color_theme(ui_env):
     assert resolve_color_theme("Dark") == "Dark"
     assert resolve_color_theme("Light") == "Light"
     assert resolve_color_theme("System") in ("Dark", "Light")
+
+
+def test_command_palette(ui_env, monkeypatch):
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui.command_palette import CommandPalette, match_commands
+
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    cfg.application["show_setup_wizard_at_startup"] = False
+    window = app_module.AppWindow()
+    try:
+        palette = CommandPalette(window)
+        titles = [command.title for command in palette.commands]
+        assert "Fuel Calculator" in titles and "Tools" in titles
+        # Accent & case insensitive, words in any order
+        assert match_commands(palette.commands, "calculator FUEL")[0].title == "Fuel Calculator"
+        palette.edit_search.setText("hotkey")
+        assert palette.list_results.count() >= 1
+        palette.edit_search.setText("font color speed")  # options found too
+        assert any("\u2192" in palette.list_results.item(row).text() for row in range(palette.list_results.count()))
+        palette.edit_search.setText("Tools")
+        palette.run_selected()  # first match is the page
+        assert window.centralWidget().current_index() == app_module.PAGE_INDEX["tools"]
+    finally:
+        cfg.application["last_page_index"] = 0
+        tray = window.findChild(QSystemTrayIcon)
+        if tray:
+            tray.hide()
+        for signal in (app_signal.hotkey, app_signal.refresh, app_signal.quitapp, app_signal.reload, app_signal.updates):
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect()
+        window.deleteLater()
+        QCoreApplication.processEvents()
+
+
+def test_widget_categories(ui_env):
+    from tinypedal.module_control import wctrl
+    from tinypedal.template.setting_widget import WIDGET_FILENAME
+    from tinypedal.ui.module_view import CATEGORY_OTHER, ModuleList, widget_category
+
+    assert widget_category("tyre_pressure") == "Tyres & Wheels"
+    assert widget_category("brake_wear") == "Brakes"
+    assert widget_category("plugin_xyz") == CATEGORY_OTHER
+    others = [name for name in WIDGET_FILENAME if widget_category(name) == CATEGORY_OTHER]
+    assert len(others) <= 3  # new built-in widgets belong to a category
+    view = ModuleList(None, wctrl)
+    view.category_box.setCurrentIndex(view.category_box.findData("Brakes"))
+    shown = [name for name, item in view.items.items() if not item.isHidden()]
+    assert shown and all(name.startswith("brake_") for name in shown)
+    view.deleteLater()
