@@ -22,6 +22,7 @@ Hotkey list view
 
 import os
 from collections.abc import Callable
+from typing import Any, cast
 
 from PySide6.QtCore import QBasicTimer, Qt, Slot
 from PySide6.QtWidgets import (
@@ -111,7 +112,7 @@ class HotkeyList(QWidget):
         listbox_hotkey = self.listbox_hotkey
         for item in self.options_preset:
             item_config = listbox_hotkey.itemWidget(item)
-            option_name = item_config.option_name
+            option_name = cast(Any, item_config).option_name
             preset_name = cfg.user.shortcuts[option_name]["preset"]
             # Verify if file exists
             if not preset_name:

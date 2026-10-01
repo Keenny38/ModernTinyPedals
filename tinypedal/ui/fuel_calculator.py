@@ -391,7 +391,7 @@ class HistoryPanel(QWidget):
     def _add_table_item(self, header: str, text: str, flags: Qt.ItemFlag, highlight_color=None):
         """Add table item"""
         item = QTableWidgetItem()
-        item.header = header
+        item.setData(Qt.ItemDataRole.UserRole, header)
         item.setText(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setFlags(flags)
@@ -478,7 +478,7 @@ class CalculatorPanel(QWidget):
         data_capacity = []
 
         for data in selected_data:
-            header = data.header
+            header = data.data(Qt.ItemDataRole.UserRole)
             if header == "time":
                 data_laptime.append(laptime_string_to_seconds(data.text()))
             elif header == "fuel":

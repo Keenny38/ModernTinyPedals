@@ -23,6 +23,7 @@ Command palette (Ctrl+K): find & run anything, pages, widgets, modules, tools, p
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import NamedTuple
 
 from PySide6.QtCore import QEvent, Qt
@@ -90,10 +91,10 @@ def module_commands(control: ModuleControl, kind: str, parent) -> list[Command]:
         state = tr("On") if cfg.user.setting[name]["enable"] else tr("Off")
         commands.append(Command(
             f"{label}  ({state})", tr(kind), search_text(label, name, kind, "toggle enable disable"),
-            lambda name=name: toggle(name)))
+            partial(toggle, name)))
         commands.append(Command(
             f"{label}  {chr(0x2699)}", tr("Config"), search_text(label, name, kind, "config settings"),
-            lambda name=name: configure(name)))
+            partial(configure, name)))
     return commands
 
 
@@ -108,7 +109,7 @@ def build_commands(window) -> list[Command]:
     for index, (key, label, *_) in enumerate(NAV_PAGES):
         commands.append(Command(
             tr(label), tr("Page"), search_text(tr(label), label, key, "page go"),
-            lambda index=index: tab_view.select_page(index)))
+            partial(tab_view.select_page, index)))
     actions = (
         ("Lock Overlay", "fixed_position", octrl.toggle.lock),
         ("Auto Hide", "auto_hide", octrl.toggle.hide),
@@ -128,11 +129,11 @@ def build_commands(window) -> list[Command]:
         for label, _, dialog_path in tools:
             commands.append(Command(
                 tr(label), tr("Tools"), search_text(tr(label), label, "tool"),
-                lambda path=dialog_path: open_tool(path, window)))
+                partial(open_tool, dialog_path, window)))
     for preset_name in cfg.preset_files():
         commands.append(Command(
             preset_name, tr("Preset"), search_text(preset_name, tr("Preset"), "preset load"),
-            lambda name=preset_name: load_preset(name)))
+            partial(load_preset, preset_name)))
     commands += module_commands(wctrl, "Widget", window)
     commands += module_commands(mctrl, "Module", window)
     return commands
@@ -197,7 +198,7 @@ class CommandPalette(QDialog):
             for entry in search_options(self.options, text)[:MAX_OPTIONS]:
                 self.add_item(
                     f"{module_label(entry.section)}  →  {option_label(entry.key)}", tr("Option"),
-                    lambda entry=entry: open_option(self._window, entry))
+                    partial(open_option, self._window, entry))
         if self.list_results.count():
             self.list_results.setCurrentRow(0)
 

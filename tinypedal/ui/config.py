@@ -26,6 +26,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import islice, zip_longest
+from typing import Any, cast
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut
@@ -278,7 +279,7 @@ class EditorHistory:
                 editor.textChanged.connect(self.changed)
 
     def capture(self) -> dict:
-        state = {}
+        state: dict[str, bool | str] = {}
         for key, editor in self.editors.items():
             if isinstance(editor, QCheckBox):
                 state[key] = editor.isChecked()
@@ -536,7 +537,7 @@ class UserConfig(BaseDialog):
         if self.confirm_operation(title=tr("Reset Options"), message=msg_text):
             for row in self.rows:
                 if row.section == title and row.key != "enable":
-                    row.editor.reset_to_default()
+                    cast(Any, row.editor).reset_to_default()
 
     def refresh_visibility(self):
         """Show rows matching search; without search, rows of expanded sections, in current mode

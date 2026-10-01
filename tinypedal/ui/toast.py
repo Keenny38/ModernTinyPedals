@@ -35,6 +35,7 @@ class Toast(QLabel):
 
     def __init__(self, window: QWidget, text: str, duration: int = 0):
         super().__init__(text, window)
+        self._window = window
         self.setObjectName("toast")
         self.setTextFormat(Qt.TextFormat.RichText)
         self.setWordWrap(True)
@@ -64,7 +65,7 @@ class Toast(QLabel):
 
     def place(self):
         """Bottom center of window"""
-        window = self.parentWidget()
+        window = self._window
         margin = UIScaler.pixel(16)
         self.move((window.width() - self.width()) // 2, window.height() - self.height() - margin * 3)
 

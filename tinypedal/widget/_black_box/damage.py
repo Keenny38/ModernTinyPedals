@@ -28,7 +28,7 @@ toward the last impact for a few seconds. Sits at the bottom right.
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
@@ -112,6 +112,27 @@ def faded(color: QColor, alpha: int) -> QColor:
 
 class DamagePainter:
     """Draw damage panel"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    body_damage: Any
+    damage_aero: Any
+    damage_detached: Any
+    damage_puncture: Any
+    damage_shapes: Any
+    damage_suspension: Any
+    depth_effects: Any
+    draw_fit_text: Any
+    font: Any
+    font_label: Any
+    grown_font: Any
+    impact_position: Any
+    impact_visible: Any
+    pen_info_label: Any
+    pulse: Any
+    pulsed_color: Any
+    text: Any
+    unit: Any
+    wcfg: Any
 
     def draw_damage_panel(self, painter: QPainter, rect: QRectF):
         wcfg = self.wcfg

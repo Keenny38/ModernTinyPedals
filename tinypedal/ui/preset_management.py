@@ -28,6 +28,7 @@ import re
 import shutil
 from contextlib import suppress
 from types import MappingProxyType
+from typing import cast
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -60,6 +61,23 @@ from ._common import QVAL_FILENAME, BaseDialog, BaseEditor, CompactButton, UISca
 from .toast import show_toast
 
 logger = logging.getLogger(__name__)
+
+
+class BackupItem(QListWidgetItem):
+    """Backup file list item"""
+
+    def __init__(self):
+        super().__init__()
+        self.is_valid = False
+        self.is_style = False
+
+
+class KeyCheckBox(QCheckBox):
+    """Check box of a setting key"""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.key_name = ""
 
 
 def update_preset_references(old_name: str, new_name: str) -> list[str]:
@@ -224,7 +242,7 @@ class RestoreBackup(BaseEditor):
             basename = backup_name[:backup_name.find(FileExt.JSON)]
             if not basename:  # ignore empty file
                 continue
-            item = QListWidgetItem()
+            item = BackupItem()
             item.setText(backup_name)
             item.is_valid = verify_json_file(None, backup_name, cfg.path.settings)
             item.is_style = not is_allowed_filename(basename)
@@ -264,7 +282,7 @@ class RestoreBackup(BaseEditor):
         if not self.is_selected():
             return
 
-        selected_item = self.listbox_backup.currentItem()
+        selected_item = cast(BackupItem, self.listbox_backup.currentItem())
         if not selected_item.is_valid:
             msg_text = "Selected backup file is invalid and cannot be restored."
             QMessageBox.warning(self, tr("Error"), trm(msg_text))
@@ -390,7 +408,7 @@ class PresetTransfer(BaseEditor):
         for setting_name in settings:
             item = QListWidgetItem()
             listbox.addItem(item)
-            checkbox_item = QCheckBox(self)
+            checkbox_item = KeyCheckBox(self)
             checkbox_item.setText(module_label(setting_name))
             checkbox_item.key_name = setting_name
             listbox.setItemWidget(item, checkbox_item)
@@ -399,7 +417,7 @@ class PresetTransfer(BaseEditor):
         """Get setting selection"""
         for row_index in range(listbox.count()):
             item = listbox.item(row_index)
-            checkbox = listbox.itemWidget(item)
+            checkbox = cast(KeyCheckBox, listbox.itemWidget(item))
             if checkbox.isChecked():
                 yield checkbox.key_name
 
@@ -550,4 +568,4 @@ class ListHeader(QFrame):
         """Set check box"""
         for row_index in range(listbox.count()):
             item = listbox.item(row_index)
-            listbox.itemWidget(item).setChecked(checked)
+            cast(QCheckBox, listbox.itemWidget(item)).setChecked(checked)

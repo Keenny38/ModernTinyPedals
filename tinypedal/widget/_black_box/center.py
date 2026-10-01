@@ -23,6 +23,7 @@ Black box widget, draw RPM LEDs and center column items
 from __future__ import annotations
 
 from time import monotonic
+from typing import Any
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
@@ -37,6 +38,61 @@ from .state import (
 
 class CenterPainter:
     """Draw RPM LEDs and center column items"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    abs_active: Any
+    abs_level: Any
+    brake: Any
+    brake_bias: Any
+    brake_heat_balance: Any
+    brake_migration: Any
+    center_order: Any
+    clutch: Any
+    delta_best: Any
+    depth_effects: Any
+    draw_fit_text: Any
+    draw_info_row: Any
+    font: Any
+    font_cache: Any
+    font_gear: Any
+    font_label: Any
+    font_rpm: Any
+    font_speed: Any
+    gear: Any
+    gear_scale: Any
+    gear_speed_cluster: Any
+    has_abs: Any
+    has_tc: Any
+    in_pits: Any
+    justify_center: Any
+    laptime_current: Any
+    layout_mode: Any
+    limiter: Any
+    locking_front: Any
+    locking_rear: Any
+    pen_indicator: Any
+    pen_indicator_active: Any
+    pen_info_label: Any
+    pen_text: Any
+    rpm: Any
+    rpm_max: Any
+    rpm_scale: Any
+    sign_text: Any
+    speed: Any
+    speed_label: Any
+    speed_scale: Any
+    tc_active: Any
+    tc_cut_level: Any
+    tc_level: Any
+    tc_slip_level: Any
+    text: Any
+    throttle: Any
+    unit: Any
+    unit_speed: Any
+    unit_temp: Any
+    use_delta: Any
+    use_wheels: Any
+    wcfg: Any
 
     def ordered_center_items(self) -> list[str]:
         """Enabled center items sorted by display order"""

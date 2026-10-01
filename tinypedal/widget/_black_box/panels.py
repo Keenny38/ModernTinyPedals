@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 from time import monotonic
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter
@@ -52,6 +52,55 @@ class Gauge(NamedTuple):
 
 class PanelPainter:
     """Draw battery gauge and bottom info rows"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    battery_charge: Any
+    battery_highlight: Any
+    battery_scale: Any
+    battery_state: Any
+    battery_warning: Any
+    bottom_rows: Any
+    depth_effects: Any
+    draw_fit_text: Any
+    energy: Any
+    energy_available: Any
+    energy_capacity: Any
+    energy_laps: Any
+    energy_start: Any
+    font: Any
+    font_battery: Any
+    font_label: Any
+    font_small: Any
+    fuel: Any
+    fuel_capacity: Any
+    fuel_label: Any
+    fuel_laps: Any
+    fuel_start: Any
+    has_hybrid: Any
+    need_energy_rows: Any
+    need_fuel_rows: Any
+    pen_info_label: Any
+    pen_text: Any
+    pres_decimals: Any
+    pulse: Any
+    pulsed_color: Any
+    refill: Any
+    refuel: Any
+    row_damper: Any
+    row_energy: Any
+    row_fuel: Any
+    row_stint: Any
+    stint_has_previous: Any
+    stint_pressure: Any
+    stint_pressure_delta: Any
+    stint_wear: Any
+    stint_wear_delta: Any
+    text: Any
+    unit: Any
+    unit_fuel: Any
+    unit_pres: Any
+    wcfg: Any
+    wheels: Any
 
     def draw_battery_bar(self, painter: QPainter, rect: QRectF):
         """Full-height battery charge gauge, with a flowing highlight while charging or draining"""

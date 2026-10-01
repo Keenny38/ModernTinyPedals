@@ -118,6 +118,7 @@ class ResizeHandle(QWidget):
 
     def __init__(self, parent: QWidget, on_resized: Callable[[float], None]):
         super().__init__(parent)
+        self.target = parent
         self.on_resized = on_resized
         self.setCursor(Qt.CursorShape.SizeFDiagCursor)
         self.setFixedSize(HANDLE_SIZE, HANDLE_SIZE)
@@ -160,13 +161,12 @@ class ResizeHandle(QWidget):
             self.on_resized(factor)
 
     def parent_size(self) -> tuple[int, int]:
-        parent = self.parentWidget()
-        return parent.width(), parent.height()
+        return self.target.width(), self.target.height()
 
     def update_ghost(self, offset: QPoint):
         if self._ghost is None:
             return
-        parent = self.parentWidget()
+        parent = self.target
         factor = drag_factor(self.parent_size(), offset)
         self._ghost.factor = factor
         top_left = parent.mapToGlobal(QPoint(0, 0))

@@ -21,6 +21,7 @@ Brake editor
 """
 
 import logging
+from typing import cast
 
 from PySide6.QtWidgets import (
     QComboBox,
@@ -232,9 +233,8 @@ class BrakeEditor(BaseEditor):
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
-        item = table_item(self.table_brakes, row_index, column_index)
         if column_index == 1:  # failure thickness column
-            item.validate()
+            table_item(self.table_brakes, row_index, column_index, FloatTableItem).validate()
 
     def update_brakes_temp(self):
         """Update temporary changes to brakes temp first"""
@@ -242,7 +242,7 @@ class BrakeEditor(BaseEditor):
         for index in range(self.table_brakes.rowCount()):
             class_name = table_item(self.table_brakes, index, 0).text()
             failure_thickness = table_item(self.table_brakes, index, 1, FloatTableItem).value()
-            heatmap_name = self.table_brakes.cellWidget(index, 2).currentText()
+            heatmap_name = cast(QComboBox, self.table_brakes.cellWidget(index, 2)).currentText()
             self.brakes_temp[class_name] = {
                 "failure_thickness": failure_thickness,
                 "heatmap": heatmap_name,

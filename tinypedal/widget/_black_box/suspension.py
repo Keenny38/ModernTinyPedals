@@ -33,6 +33,8 @@ while the bump rubber is loaded, or airborne color while the wheel is in the air
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
@@ -77,6 +79,22 @@ def spring_frame(rect: QRectF) -> tuple[float, float, float]:
 
 class SuspensionPainter:
     """Draw suspension beside brakes"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    brake_bar_w: Any
+    damage_wheel_color: Any
+    pulse: Any
+    pulsed_color: Any
+    rects_disc: Any
+    rects_susp: Any
+    rects_tyre: Any
+    show_susp_damage: Any
+    susp_full_speed: Any
+    susp_low_speed: Any
+    susp_pixels_per_mm: Any
+    unit: Any
+    wcfg: Any
+    wheel_suspension_motion: Any
 
     def draw_suspension(self, painter: QPainter, rect: QRectF, wheel: WheelState, index: int = 0):
         """Coilover anchored to its wheel: turns with the wheel around the tyre center, like the

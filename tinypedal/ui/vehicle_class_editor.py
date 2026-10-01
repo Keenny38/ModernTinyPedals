@@ -21,6 +21,7 @@ Vehicle class editor
 """
 
 import random
+from typing import cast
 
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -211,7 +212,7 @@ class VehicleClassEditor(BaseEditor):
         for index in range(self.table_classes.rowCount()):
             class_name = table_item(self.table_classes, index, 0).text()
             abbr_name = table_item(self.table_classes, index, 1).text()
-            color_string = self.table_classes.cellWidget(index, 2).text()
+            color_string = cast(ColorEdit, self.table_classes.cellWidget(index, 2)).text()
             self.classes_temp[class_name] = {
                 "alias": abbr_name,
                 "color": color_string,

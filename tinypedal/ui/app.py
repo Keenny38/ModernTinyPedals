@@ -22,6 +22,7 @@ Main application window
 
 import logging
 from collections.abc import Callable
+from typing import cast
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
@@ -569,7 +570,7 @@ class AppWindow(QMainWindow):
             # style even if not a visual child of AppWindow at the time it is shown, including
             # QMessageBox, QColorDialog and other Qt-built top-level windows.
             app_instance = QApplication.instance()
-            if app_instance is not None:
+            if isinstance(app_instance, QApplication):
                 app_instance.setStyleSheet(set_style_window(QApplication.font().pointSize()))
             logger.info("GUI: loading window color theme: %s", style)
         # Language
@@ -608,7 +609,7 @@ class AppWindow(QMainWindow):
         # API menu
         menu_api = APIMenu(tr("API"), self)
         menu.addMenu(menu_api)
-        self.statusBar().button_api.setMenu(menu_api)
+        cast(StatusButtonBar, self.statusBar()).button_api.setMenu(menu_api)
         # Config menu
         menu_config = ConfigMenu(tr("Config"), self)
         menu.addMenu(menu_config)

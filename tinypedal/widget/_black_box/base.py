@@ -22,6 +22,8 @@ Black box widget, shared painting helpers: cached background, fitted text, units
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
@@ -31,6 +33,28 @@ from .common import FONT_CACHE_SIZE
 
 class PaintBase:
     """Shared painting helpers: cached background, fitted text, units"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    cfg: Any
+    devicePixelRatioF: Any
+    fit: Any
+    font: Any
+    font_cache: Any
+    font_label: Any
+    font_small: Any
+    height: Any
+    modules: Any
+    path_bg: Any
+    pen_caption: Any
+    rect_caption: Any
+    rect_car_view: Any
+    rect_trace: Any
+    sign_text: Any
+    size: Any
+    unit: Any
+    unit_temp: Any
+    wcfg: Any
+    width: Any
 
     static_layer: QPixmap | None
 

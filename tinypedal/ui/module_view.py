@@ -25,6 +25,7 @@ Inactive filter on top, so a widget is found among dozens without scrolling.
 
 import logging
 import unicodedata
+from typing import cast
 
 from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, Slot
 from PySide6.QtGui import QColor, QPainter, QPalette, QPixmap
@@ -364,7 +365,7 @@ class ModuleList(QWidget):
         listbox_module = self.listbox_module
         for row_index in range(listbox_module.count()):
             item = listbox_module.item(row_index)
-            listbox_module.itemWidget(item).update_state()
+            cast(ModuleControlItem, listbox_module.itemWidget(item)).update_state()
         self.apply_filter()
 
     def refresh_label(self):

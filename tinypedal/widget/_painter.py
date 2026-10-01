@@ -255,6 +255,7 @@ class WheelGaugeBar(QWidget):
     ):
         super().__init__(parent)
         self.last = -1
+        self.offset = 0.0  # set by widget (ex. bottoming height)
         self.display_range = display_range
         self.decimals = max(decimals, 0)
         self.width_scale = bar_width / self.display_range
@@ -433,6 +434,7 @@ class ProgressBar(QWidget):
     ):
         super().__init__(parent)
         self.last = -1
+        self.state: Any = None  # set by widget
         self.text = text
         if show_reading and font is not None:
             height = max(font.pixelSize(), height)
@@ -604,6 +606,7 @@ class RawText(QWidget):
 
         self.state = None
         self.last: Any = last
+        self.decimals = 0  # set by widget for number formatting
         self.text = text
         self.fg = fg_color if fg_color else Qt.GlobalColor.transparent
         self.bg = bg_color if bg_color else Qt.GlobalColor.transparent

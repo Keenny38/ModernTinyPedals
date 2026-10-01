@@ -40,8 +40,8 @@ BINDING_PRESET = MappingProxyType({
 def generate_shortcut_setting(source: Sequence[str], binding: Mapping, prefix: str = "") -> dict:
     """Generate shortcut setting"""
     if not prefix:
-        return {name: binding.copy() for name in source}
-    return {f"{prefix}_{name}": binding.copy() for name in source}
+        return {name: dict(binding) for name in source}
+    return {f"{prefix}_{name}": dict(binding) for name in source}
 
 
 SHORTCUTS_WIDGET = generate_shortcut_setting(WIDGET_FILENAME, BINDING_GENERAL, "widget")

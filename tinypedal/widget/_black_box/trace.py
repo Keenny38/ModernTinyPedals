@@ -28,6 +28,8 @@ the values under it) and compared with the previous one (its speed drawn behind,
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 
@@ -61,6 +63,25 @@ def translucent(name: str, alpha: int) -> QColor:
 
 class TracePainter:
     """Draw incident trace & event log"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    browse_incident: Any
+    browse_since: Any
+    displayed_incident: Any
+    draw_fit_text: Any
+    event_log: Any
+    event_rows: Any
+    font_label: Any
+    font_small: Any
+    incident_replay: Any
+    recorder: Any
+    recorder_now: Any
+    show_previous_incident: Any
+    speed_label: Any
+    text: Any
+    unit: Any
+    unit_speed: Any
+    wcfg: Any
 
     def draw_trace(self, painter: QPainter, rect: QRectF):
         wcfg = self.wcfg

@@ -22,6 +22,8 @@ Black box widget, headlights & engine status icons between front and rear wheels
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 
@@ -67,6 +69,25 @@ def engine_path(box: QRectF) -> QPainterPath:
 
 class StatusPainter:
     """Headlights & engine icons stacked between front and rear wheels, on one side"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    draw_fit_text: Any
+    font_label: Any
+    grown_font: Any
+    headlights: Any
+    ignition: Any
+    oil_temp: Any
+    pen_text: Any
+    rect_center: Any
+    rects_disc: Any
+    rects_susp: Any
+    rects_tyre: Any
+    sign_text: Any
+    text: Any
+    unit: Any
+    unit_temp: Any
+    water_temp: Any
+    wcfg: Any
 
     def side_gap(self, right: bool) -> QRectF:
         """Free room between front and rear wheel on one side (null if too small)"""

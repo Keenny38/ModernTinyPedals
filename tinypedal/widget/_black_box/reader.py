@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from time import monotonic
+from typing import Any
 
 from ... import calculation as calc
 from ...api_control import api
@@ -67,6 +68,111 @@ def is_new_impact(impact_time: float, last_time: float) -> bool:
 
 class DataReader:
     """Read telemetry into widget state, decide when to repaint"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    alert_pulse: Any
+    auto_resize: Any
+    battery_flash: Any
+    battery_high: Any
+    battery_low: Any
+    bottoming_threshold: Any
+    brake_class_targets: Any
+    brake_fades: Any
+    brake_imbalance_threshold: Any
+    brake_peaks: Any
+    brake_trends: Any
+    center_order: Any
+    compound_targets: Any
+    default_brake_window: Any
+    default_targets: Any
+    default_targets_rear: Any
+    event_labels: Any
+    event_log: Any
+    export_folder: Any
+    export_format: Any
+    gauge_low: Any
+    heatmap_tyre: Any
+    incident_display_time: Any
+    incident_replay: Any
+    lap_stats: Any
+    led_h: Any
+    lock_threshold: Any
+    locked_threshold: Any
+    log_engine_events: Any
+    log_flag_events: Any
+    log_penalty_events: Any
+    log_pit_events: Any
+    log_race_events: Any
+    match_heatmap: Any
+    max_steer: Any
+    min_speed: Any
+    module_check_every: Any
+    modules: Any
+    need_brake_bias: Any
+    need_brake_heat: Any
+    need_brake_migration: Any
+    need_compound: Any
+    need_damage_total: Any
+    need_delta: Any
+    need_energy_rows: Any
+    need_engine: Any
+    need_fuel_rows: Any
+    need_gear: Any
+    need_lap_stats: Any
+    need_laptime: Any
+    need_lights: Any
+    need_limiter: Any
+    need_locking: Any
+    need_pedals: Any
+    need_pressure: Any
+    need_rpm: Any
+    need_slip: Any
+    need_switches: Any
+    need_temp_trend: Any
+    paused_total: Any
+    pres_trends: Any
+    presence: Any
+    pressure_ranges: Any
+    recorder: Any
+    relayout: Any
+    resize_debounce: Any
+    show_battery_bar: Any
+    show_brake_peak: Any
+    show_brake_trend: Any
+    show_camber_spread: Any
+    show_damage_panel: Any
+    show_event_log: Any
+    show_heave: Any
+    show_pres_trend: Any
+    show_pressure_range: Any
+    show_recorder: Any
+    show_stint: Any
+    show_surface_overheat: Any
+    show_susp_damage: Any
+    show_suspension: Any
+    show_tyre_wear: Any
+    sign_text: Any
+    slow_every: Any
+    smooth_transition: Any
+    spin_threshold: Any
+    steer_convention: Any
+    stint: Any
+    susp_bump_margin: Any
+    susp_bumps: Any
+    susp_low_speed: Any
+    susp_travels: Any
+    suspension_totaled: Any
+    temp_trends: Any
+    tick: Any
+    trace_version: Any
+    tyre_fades: Any
+    tyre_temp_source: Any
+    unit_temp: Any
+    update: Any
+    wcfg: Any
+    wear_forecast_laps: Any
+    wheel_targets: Any
+    wheels: Any
 
     # Widget state written here, initialized by BlackBox (declared for type checking)
     browse_seen: int

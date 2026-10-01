@@ -21,6 +21,8 @@ Heatmap editor
 """
 
 
+from typing import cast
+
 from PySide6.QtWidgets import (
     QComboBox,
     QDialogButtonBox,
@@ -162,7 +164,7 @@ class HeatmapEditor(BaseEditor):
     def capture_table(self) -> tuple[tuple[float, str], ...]:
         """Capture table rows (temperature, color) for undo history, no side effect"""
         return tuple(
-            (table_item(self.table_heatmap, index, 0, FloatTableItem).value(), self.table_heatmap.cellWidget(index, 1).text())
+            (table_item(self.table_heatmap, index, 0, FloatTableItem).value(), cast(ColorEdit, self.table_heatmap.cellWidget(index, 1)).text())
             for index in range(self.table_heatmap.rowCount())
         )
 
@@ -228,14 +230,13 @@ class HeatmapEditor(BaseEditor):
         """Verify input value"""
         if self._verify_enabled:
             self.set_modified()
-            item = table_item(self.table_heatmap, row_index, column_index)
             if column_index == 0:
-                item.validate()
+                table_item(self.table_heatmap, row_index, column_index, FloatTableItem).validate()
 
     def apply_batch_offset(self, offset: int, is_scale_mode: bool):
         """Apply batch offset"""
         self._verify_enabled = False
-        for item in self.table_heatmap.selectedItems():
+        for item in cast(list[FloatTableItem], self.table_heatmap.selectedItems()):
             value = item.value()
             if is_scale_mode:
                 value *= offset
@@ -338,7 +339,7 @@ class HeatmapEditor(BaseEditor):
         self.selected_heatmap_dict.clear()
         for index in range(self.table_heatmap.rowCount()):
             temperature = f"{table_item(self.table_heatmap, index, 0, FloatTableItem).value():.1f}"
-            color_string = self.table_heatmap.cellWidget(index, 1).text()
+            color_string = cast(ColorEdit, self.table_heatmap.cellWidget(index, 1)).text()
             self.selected_heatmap_dict[temperature] = color_string
         # Apply changes to heatmap preset dictionary
         self.heatmap_temp[self.selected_heatmap_key] = self.selected_heatmap_dict

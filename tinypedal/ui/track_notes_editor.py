@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from typing import cast
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
@@ -402,7 +403,7 @@ class TrackNotesEditor(BaseEditor):
     def apply_batch_offset(self, offset: float, is_scale_mode: bool):
         """Apply batch offset"""
         self._verify_enabled = False
-        for item in self.table_notes.selectedItems():
+        for item in cast(list[FloatTableItem], self.table_notes.selectedItems()):
             value = item.value()
             if is_scale_mode:
                 value *= offset
@@ -564,8 +565,7 @@ class TrackNotesEditor(BaseEditor):
         if self._verify_enabled:
             self.set_modified()
             if column_index == 0:
-                item = table_item(self.table_notes, row_index, column_index)
-                item.validate()
+                table_item(self.table_notes, row_index, column_index, FloatTableItem).validate()
                 self.mark_positions_on_map()
 
     def set_context_menu(self):

@@ -21,6 +21,7 @@ Tyre compound editor
 """
 
 import logging
+from typing import cast
 
 from PySide6.QtWidgets import (
     QComboBox,
@@ -260,8 +261,8 @@ class TyreCompoundEditor(BaseEditor):
         for index in range(self.table_compounds.rowCount()):
             compound_name = table_item(self.table_compounds, index, 0).text()
             symbol_name = table_item(self.table_compounds, index, 1).text()
-            color = self.table_compounds.cellWidget(index, 2).text()
-            heatmap_name = self.table_compounds.cellWidget(index, 3).currentText()
+            color = cast(ColorEdit, self.table_compounds.cellWidget(index, 2)).text()
+            heatmap_name = cast(QComboBox, self.table_compounds.cellWidget(index, 3)).currentText()
             self.compounds_temp[compound_name] = {
                 "symbol": symbol_name,
                 "color": color,

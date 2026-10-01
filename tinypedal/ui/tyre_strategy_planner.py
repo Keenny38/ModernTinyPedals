@@ -23,6 +23,7 @@ Tyre strategy planner
 from __future__ import annotations
 
 import os
+from typing import cast
 
 from PySide6.QtCore import QPoint, QStandardPaths, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
@@ -105,6 +106,7 @@ class TyreNameListItem(QListWidgetItem):
         super().__init__(tyre_name)
         # Sort reference
         self.compound = decode_tyre_name(tyre_name)
+        self.stints = 0  # number of planned stints using this tyre set
         self.stints = 0
 
     def __lt__(self, other):
@@ -410,14 +412,14 @@ class TyreSetList(QListWidget):
     def update_uses(self, tyre_name_list: list[str]):
         """Update number of stints for each tyre"""
         for row in range(self.count()):
-            item = self.item(row)
+            item = cast(TyreNameListItem, self.item(row))
             tyre_name = item.text()
             if tyre_name in tyre_name_list:
                 count_stints = tyre_name_list.count(tyre_name)
             else:
                 count_stints = 0
             item.stints = count_stints
-            self.itemWidget(item).set_uses(count_stints)
+            cast(TyreSetItemTag, self.itemWidget(item)).set_uses(count_stints)
 
     def count_stock(self, tyre_set_data: dict) -> int:
         """Count stock tyres"""
@@ -436,7 +438,7 @@ class TyreSetList(QListWidget):
         """Count used tyres"""
         count = 0
         for row in range(self.count()):
-            item = self.item(row)
+            item = cast(TyreNameListItem, self.item(row))
             if item.stints > 0:
                 count += 1
         return count
@@ -992,9 +994,9 @@ class TyreStrategyPlanner(BaseEditor):
         ]
         # Tyre stock list
         tyre_set = self.tyre_set
-        tyre_stock_data = [["Tyre Stock", "Stints"]]
+        tyre_stock_data: list[list[str | int]] = [["Tyre Stock", "Stints"]]
         for row in range(tyre_set.count()):
-            item = tyre_set.item(row)
+            item = cast(TyreNameListItem, tyre_set.item(row))
             tyre_stock_data.append([item.text(), item.stints])
         # Tyre plan table
         tyre_plan_header = ["Stint"]
@@ -1016,7 +1018,7 @@ class TyreStrategyPlanner(BaseEditor):
                     tyre_name = ""
                 column_list.append(tyre_name)
                 if column_index < 4:
-                    item_tag = tyre_plan.cellWidget(row_index, column_index)
+                    item_tag = cast(TyrePlanItemTag | None, tyre_plan.cellWidget(row_index, column_index))
                     if item_tag:
                         tyre_remaining = f"{item_tag.remaining * 100:.2f} - {max(item_tag.end, 0.0) * 100:.2f}"
                     else:
@@ -1153,7 +1155,7 @@ class TyreStrategyPlanner(BaseEditor):
                 if not tyre_key:
                     continue
                 # Calculate wear
-                tyre_item = table.cellWidget(row_index, column_index)
+                tyre_item = cast(TyrePlanItemTag | None, table.cellWidget(row_index, column_index))
                 if not tyre_item:
                     continue
                 tyre_setting = tyre_set_data.get(tyre_key, DEFAULT_TYRE_SETTING)

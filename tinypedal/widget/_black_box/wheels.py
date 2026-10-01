@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 from time import monotonic
+from typing import Any
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
@@ -120,6 +121,49 @@ class ColorFade:
 
 class WheelPainter:
     """Draw tyres & brakes"""
+
+    # Attributes set by black box widget class (widget/black_box.py) or other parts
+    alert_pulse: Any
+    brake_bar_gap: Any
+    brake_bar_w: Any
+    brake_cold: Any
+    brake_fades: Any
+    brake_hot: Any
+    brake_wear_laps: Any
+    brush_gloss: Any
+    depth_effects: Any
+    draw_fit_text: Any
+    fitted_font: Any
+    font: Any
+    font_small: Any
+    format_temp: Any
+    local_tyre: Any
+    path_tyre: Any
+    pen_detached: Any
+    pen_lock: Any
+    pen_locked: Any
+    pen_spin: Any
+    pen_temp: Any
+    pres_decimals: Any
+    pulse_frequency: Any
+    rects_tyre: Any
+    shadow_offset: Any
+    show_brake_peak: Any
+    show_brake_trend: Any
+    show_camber_spread: Any
+    show_heave: Any
+    show_lap_stats: Any
+    show_pres_trend: Any
+    show_pressure_range: Any
+    show_ride_min: Any
+    show_temp_trend: Any
+    susp_extra: Any
+    text: Any
+    tyre_fades: Any
+    unit: Any
+    unit_pres: Any
+    wcfg: Any
+    wheel_targets: Any
 
     def pulse(self, now: float | None = None) -> float:
         """Alert intensity, 0.35 to 1, pulsing at alert_pulse_frequency (1 if frequency is 0)"""

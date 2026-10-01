@@ -22,6 +22,7 @@ Track info editor
 
 import logging
 from collections.abc import Mapping
+from typing import Any, cast
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
@@ -228,7 +229,7 @@ class TrackInfoEditor(BaseEditor):
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
-        item = table_item(self.table_tracks, row_index, column_index)
+        item = cast(Any, table_item(self.table_tracks, row_index, column_index))
         if column_index >= 1:
             item.validate()
 
@@ -294,7 +295,7 @@ class TrackInfoEditor(BaseEditor):
         for row_index in range(self.table_tracks.rowCount()):
             track_name = table_item(self.table_tracks, row_index, 0).text()
             self.tracks_temp[track_name] = {
-                key: table_item(self.table_tracks, row_index, column_index).value()
+                key: cast(Any, table_item(self.table_tracks, row_index, column_index)).value()
                 for column_index, key in enumerate(TRACKINFO_DEFAULT, start=1)
             }
 

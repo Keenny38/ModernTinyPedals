@@ -80,6 +80,12 @@ class Realtime(
     Data reading and each painted part live in their own mixin, see _black_box package.
     """
 
+    # Geometry copied from layout (see set_layout)
+    rect_main: QRectF
+    rect_leds: QRectF
+    rect_battery: QRectF
+    rect_damage: QRectF
+
     def __init__(self, config, widget_name):
         # Assign base setting
         super().__init__(config, widget_name)

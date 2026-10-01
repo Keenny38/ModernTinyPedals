@@ -26,7 +26,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from functools import wraps
 from math import isfinite
 from time import monotonic
@@ -148,7 +148,7 @@ def valid_delta_set(data: tuple) -> tuple:
     return data
 
 
-def valid_delta_raw(dataset: Sequence[tuple[float, ...]], final: float, column: int) -> bool:
+def valid_delta_raw(dataset: list[Any], final: float, column: int) -> bool:
     """Validate raw delta data set"""
     try:
         if len(dataset) <= 1:
