@@ -5609,3 +5609,26 @@ Plugin appears as `plugin_<name>` widget in `Widget` tab, with the same common o
 Important: plugins run as normal Python code with full access to your computer, only install plugins from trusted sources.
 
 [**`Back to Top`**](#)
+
+
+# Language packs
+
+A new UI language can be added without changing code, with a JSON language pack:
+
+1. Create a template (from repository root): `python tools/make_language_template.py de Deutsch`. This writes `de.json` with every UI text, dialog message, option label and option description to translate, plus French text in `_reference` as a guide.
+2. Fill the empty values. Empty values stay in English, so a partial translation works. `messages` entries are regular expressions: keep the pattern (first item) as is, translate the replacement (second item), `\1`, `\2`... insert the matched parts.
+3. Copy the file to the `languages` folder of the global config folder (`Config` > `Open Folder` > `Config`), restart, then select the language in `Config` > `Application` > `Language`.
+
+Language pack format:
+
+    {
+        "format": "modern-tiny-pedals-language",
+        "code": "de",
+        "name": "Deutsch",
+        "ui": {"Config": "Konfiguration", ...},
+        "messages": [["^Preset imported: ", "Preset importiert: "], ...],
+        "options": {"font_size": "Schriftgröße", ...},
+        "option_help": {"English description": "Übersetzung", ...}
+    }
+
+Invalid files are skipped and reported in the log. A language pack cannot replace English or French.

@@ -36,7 +36,7 @@ from fnmatch import fnmatchcase
 from functools import lru_cache
 
 from ..formatter import format_module_name, format_option_name
-from . import current_language
+from . import current_language, language_pack
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _labels(code: str) -> dict[str, str]:
     """Option labels of language"""
     if code in LABEL_LANGUAGES:
         return load_data(f"{code}_options.json")
-    return {}
+    return dict(language_pack(code).get("options", {}))
 
 
 def option_label(key: str) -> str:
@@ -101,7 +101,7 @@ def _help_translations(code: str) -> dict[str, str]:
     """Translated option help of language: English text -> translation"""
     if code in LABEL_LANGUAGES:
         return load_data(f"{code}_option_help.json")
-    return {}
+    return dict(language_pack(code).get("option_help", {}))
 
 
 def option_help(section: str, key: str) -> str:

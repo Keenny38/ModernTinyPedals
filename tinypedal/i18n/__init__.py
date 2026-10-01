@@ -26,17 +26,29 @@ Qt built-in dialogs & standard buttons use Qt's own translation files.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 from types import MappingProxyType
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Display name: language code
-LANGUAGES = MappingProxyType({
+# Display name: language code (built-in, then language packs found by load_language_packs)
+_LANGUAGES = {
     "English": "en",
     "Français": "fr",
-})
+}
+LANGUAGES = MappingProxyType(_LANGUAGES)
+BUILTIN_CODES = frozenset(_LANGUAGES.values())
+
+# Language pack: JSON file "<code>.json" in languages folder (see docs/customization.md)
+LANGUAGE_PACK_FORMAT = "modern-tiny-pedals-language"
+LANGUAGE_PACK_FOLDER = "languages"
+MAX_PACK_SIZE = 5 * 1024 * 1024
+_valid_code = re.compile(r"^[a-z]{2,3}(_[A-Za-z]{2,4})?$")
+_packs: dict[str, dict] = {}
 
 _translation: dict[str, str] = {}
 _reverse: dict[str, str] = {}
@@ -50,12 +62,83 @@ def current_language() -> str:
     return _current_code
 
 
+def read_language_pack(filename: str) -> dict:
+    """Read & validate language pack file
+
+    Raises:
+        ValueError: invalid language pack.
+        OSError: file error.
+    """
+    with open(filename, encoding="utf-8") as file:
+        content = file.read(MAX_PACK_SIZE + 1)
+    if len(content) > MAX_PACK_SIZE:
+        raise ValueError("file too large")
+    data = json.loads(content)
+    if not isinstance(data, dict) or data.get("format") != LANGUAGE_PACK_FORMAT:
+        raise ValueError("not a language pack")
+    name, code = data.get("name"), data.get("code")
+    if not isinstance(name, str) or not name.strip() or not isinstance(code, str) or not _valid_code.match(code):
+        raise ValueError("invalid language name or code")
+    pack: dict[str, Any] = {"name": name.strip(), "code": code}
+    for section in ("ui", "options", "option_help"):
+        values = data.get(section, {})
+        if not isinstance(values, dict):
+            raise ValueError(f"invalid {section} section")
+        # Untranslated (empty) entries fall back to English
+        pack[section] = {str(key): value for key, value in values.items() if isinstance(value, str) and value}
+    rules = []
+    for rule in data.get("messages", []):
+        if isinstance(rule, list) and len(rule) == 2 and all(isinstance(part, str) for part in rule) and rule[1]:
+            try:
+                re.compile(rule[0])
+            except re.error:
+                continue
+            rules.append((rule[0], rule[1]))
+    pack["messages"] = tuple(rules)
+    return pack
+
+
+def load_language_packs(*folders: str) -> list[str]:
+    """Register language packs found in folders, returns names of loaded languages"""
+    loaded = []
+    for folder in folders:
+        if not folder or not os.path.isdir(folder):
+            continue
+        for filename in sorted(os.listdir(folder)):
+            if not filename.lower().endswith(".json"):
+                continue
+            try:
+                pack = read_language_pack(os.path.join(folder, filename))
+            except (OSError, ValueError, UnicodeDecodeError) as error:
+                logger.error("I18N: invalid language pack %s: %s", filename, error)
+                continue
+            code, name = pack["code"], pack["name"]
+            if code in BUILTIN_CODES or (name in _LANGUAGES and _LANGUAGES[name] != code):
+                logger.warning("I18N: language pack %s skipped, %s already exists", filename, name)
+                continue
+            _packs[code] = pack
+            _LANGUAGES[name] = code
+            loaded.append(name)
+            logger.info("I18N: language pack loaded: %s (%s)", name, code)
+    from ..regex_pattern import LANGUAGE_NAMES
+
+    LANGUAGE_NAMES[:] = list(_LANGUAGES)
+    return loaded
+
+
+def language_pack(code: str) -> dict:
+    """Loaded language pack data, empty if not a pack"""
+    return _packs.get(code, {})
+
+
 def load_translation(code: str) -> dict[str, str]:
     """Load translation dictionary by language code"""
     if code == "fr":
         from .fr import TRANSLATION
 
         return dict(TRANSLATION)
+    if code in _packs:
+        return dict(_packs[code]["ui"])
     return {}
 
 
@@ -81,6 +164,8 @@ def _load_message_rules(code: str):
         from .fr_messages import MESSAGE_RULES
 
         rules = MESSAGE_RULES
+    elif code in _packs:
+        rules = _packs[code]["messages"]
     _message_rules = tuple(
         (re.compile(pattern, flags=re.MULTILINE), replacement) for pattern, replacement in rules
     )

@@ -34,7 +34,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from . import realtime_state, version_check
 from .const_app import APP_NAME, PLATFORM, VERSION
 from .const_file import ConfigType, FontFile, ImageFile, LogFile
-from .i18n import install_qt_translation, set_language
+from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language
 from .log_handler import set_logging_level
 from .setting import cfg
 
@@ -119,6 +119,10 @@ def init_gui() -> QApplication:
     QApplication.setStyle("Fusion")
     root = QApplication(sys.argv)
     # Set UI language (main window is rebuilt when changed later)
+    load_language_packs(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "i18n", "data", LANGUAGE_PACK_FOLDER),
+        os.path.join(cfg.path.config, LANGUAGE_PACK_FOLDER),
+    )
     language_code = set_language(cfg.application["language"])
     install_qt_translation(root, language_code)
     root.setQuitOnLastWindowClosed(False)

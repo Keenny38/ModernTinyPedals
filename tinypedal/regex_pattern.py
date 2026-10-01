@@ -239,6 +239,9 @@ CHOICE_UNITS = MappingProxyType({
     "tyre_pressure_unit": ("kPa", "psi", "bar"),
     "weight_unit": ("Kilogram", "Pound"),
 })
+# Built-in languages, language packs are added when loaded (see i18n.load_language_packs)
+LANGUAGE_NAMES: list[str] = ["English", "Français"]
+
 CHOICE_COMMON = MappingProxyType({
     CFG_API_NAME: tuple(API_MAP_ALIAS),
     CFG_BAR_POSITION: ("Left", "Right"),
@@ -250,7 +253,7 @@ CHOICE_COMMON = MappingProxyType({
     CFG_TEXT_ALIGNMENT: ("Left", "Center", "Right"),
     CFG_STATS_CLASSIFICATION: ("Class - Brand", "Class", "Vehicle"),
     CFG_WINDOW_COLOR_THEME: ("Light", "Dark", "System"),
-    CFG_LANGUAGE: ("English", "Français"),
+    CFG_LANGUAGE: LANGUAGE_NAMES,
     "^visibility_context$": ("Always", "Race", "Qualifying & Race", "Practice & Qualifying", "On Track", "In Pits"),
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
