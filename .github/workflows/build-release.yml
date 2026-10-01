@@ -98,6 +98,12 @@ jobs:
     needs: version
     if: needs.version.outputs.app_ver != ''
     runs-on: windows-latest
+    env:
+      # Code signing (optional): base64 of a .pfx code signing certificate & its password as repository
+      # secrets. Without them, executable & installer are built unsigned (SmartScreen warning).
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      HAS_SIGNING_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
     outputs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
     steps:
@@ -124,6 +130,21 @@ jobs:
     - name: Build Windows executable
       run: python build_pyinstaller.py -c
 
+    - name: Sign executable
+      if: env.HAS_SIGNING_CERT == 'true'
+      shell: pwsh
+      run: |
+        $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+          Where-Object { $_.FullName -match "\\x64\\" } | Sort-Object FullName -Descending | Select-Object -First 1
+        $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+        try {
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally {
+          Remove-Item $pfx -ErrorAction SilentlyContinue
+        }
+
     - name: ZIP Windows file
       shell: pwsh
       run: |
@@ -137,6 +158,21 @@ jobs:
         & $iscc /DAppVersion=${{ needs.version.outputs.app_ver }} installer\tinypedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Move-Item ./dist/ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe .
+
+    - name: Sign installer
+      if: env.HAS_SIGNING_CERT == 'true'
+      shell: pwsh
+      run: |
+        $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+          Where-Object { $_.FullName -match "\\x64\\" } | Sort-Object FullName -Descending | Select-Object -First 1
+        $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+        try {
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ./ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally {
+          Remove-Item $pfx -ErrorAction SilentlyContinue
+        }
 
     - name: Check hash sum
       id: get_hash
