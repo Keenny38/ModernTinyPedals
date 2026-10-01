@@ -74,3 +74,60 @@ jobs:
         name: widget-renders-${{ matrix.os }}-py${{ matrix.python-version }}
         path: tests/_render/
         if-no-files-found: ignore
+
+  visual-regression:
+    # Compare widget renders with the base commit, rendered on the same runner (fonts & platform match)
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libgl1 libpulse0
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt pytest
+
+    - name: Find base commit
+      id: base
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "sha=$(git rev-parse HEAD~1 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Render widgets (changed)
+      if: steps.base.outputs.sha != ''
+      run: |
+        pytest tests/test_widget_render.py -q -p no:cacheprovider
+        mv tests/_render ../renders_new
+
+    - name: Render widgets (base)
+      if: steps.base.outputs.sha != ''
+      run: |
+        git worktree add ../base "${{ steps.base.outputs.sha }}"
+        cd ../base && pytest tests/test_widget_render.py -q -p no:cacheprovider || true
+
+    - name: Compare renders
+      if: steps.base.outputs.sha != ''
+      run: python tools/visual_diff.py ../base/tests/_render ../renders_new ../visual_diff
+
+    - name: Upload visual diff
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: widget-visual-diff
+        path: |
+          ../visual_diff/
+          ../renders_new/
+        if-no-files-found: ignore

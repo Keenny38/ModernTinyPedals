@@ -96,3 +96,32 @@ def test_perf_monitor_wraps_mixin_events_once():
     assert getattr(Widget.timerEvent, "timed", False)
     assert Widget.timerEvent.__wrapped__ is Mixin.timerEvent
     assert SubWidget.timerEvent is Widget.timerEvent  # not wrapped twice
+
+
+def test_visual_diff_tool(tmp_path):
+    import sys
+
+    from PySide6.QtGui import QColor, QImage
+
+    sys.path.insert(0, "tools")
+    from visual_diff import compare_folders, summary
+
+    base, new, diff = tmp_path / "base", tmp_path / "new", tmp_path / "diff"
+    base.mkdir()
+    new.mkdir()
+    for folder, color in ((base, "#000000"), (new, "#000000")):
+        image = QImage(20, 10, QImage.Format.Format_ARGB32)
+        image.fill(QColor(color))
+        image.save(str(folder / "same.png"))
+    changed = QImage(20, 10, QImage.Format.Format_ARGB32)
+    changed.fill(QColor("#000000"))
+    changed.save(str(base / "changed.png"))
+    for x in range(10):
+        changed.setPixelColor(x, 5, QColor("#FFFFFF"))
+    changed.save(str(new / "changed.png"))
+    QImage(30, 10, QImage.Format.Format_ARGB32).save(str(new / "added.png"))
+    differences, added, removed = compare_folders(str(base), str(new), str(diff))
+    assert [result.name for result in differences] == ["changed.png"]
+    assert added == ["added.png"] and removed == []
+    assert (diff / "changed.png").exists()
+    assert "changed.png" in summary(differences, added, removed)
