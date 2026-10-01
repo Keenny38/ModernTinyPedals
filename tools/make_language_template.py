@@ -14,10 +14,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tinypedal.i18n import LANGUAGE_PACK_FORMAT  # noqa: E402
-from tinypedal.i18n.fr import TRANSLATION  # noqa: E402
-from tinypedal.i18n.fr_messages import MESSAGE_RULES  # noqa: E402
-from tinypedal.i18n.options import load_data  # noqa: E402
+from tinypedal.i18n import LANGUAGE_PACK_FORMAT
+from tinypedal.i18n.fr import TRANSLATION
+from tinypedal.i18n.fr_messages import MESSAGE_RULES
+from tinypedal.i18n.options import load_data
 
 
 def build_template(code: str, name: str) -> dict:
