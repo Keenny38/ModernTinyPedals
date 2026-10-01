@@ -32,6 +32,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import zlib
+from collections.abc import Callable
 from typing import NamedTuple
 
 from PySide6.QtCore import QObject, QRect, Qt, QTimer
@@ -51,8 +52,9 @@ MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window captu
 class MirrorWindow(QWidget):
     """Desktop window showing composed overlay image, captured by VR window overlay apps"""
 
-    def __init__(self, background: str):
+    def __init__(self, background: str, on_closed: Callable[[], None]):
         super().__init__(None, Qt.WindowType.Window)
+        self.on_closed = on_closed
         self.setWindowTitle(MIRROR_TITLE)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.background = QColor(background) if QColor.isValidColorName(background) else QColor("#000000")
@@ -76,7 +78,7 @@ class MirrorWindow(QWidget):
         """Closing window turns mirror off until next reload, so window is not shown again unexpectedly"""
         cfg.user.config["vr_overlay"]["enable_vr_mirror_window"] = False
         cfg.save(config_type=ConfigType.CONFIG)
-        vroverlay().disable_mirror()
+        self.on_closed()
         super().closeEvent(event)
 
 
@@ -156,7 +158,7 @@ class VROverlay(QObject):
         """Start SteamVR overlay and/or VR mirror window if enabled in setting"""
         setting = cfg.user.config["vr_overlay"]
         if setting.get("enable_vr_mirror_window", False) and self._mirror is None:
-            self._mirror = MirrorWindow(str(setting.get("mirror_background_color", "#000000")))
+            self._mirror = MirrorWindow(str(setting.get("mirror_background_color", "#000000")), self.disable_mirror)
             self._mirror.show()
             logger.info("ENABLED: VR mirror window")
         if self._mirror is not None and not self._timer.isActive():
