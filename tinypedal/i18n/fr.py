@@ -362,6 +362,7 @@ TRANSLATION = MappingProxyType({
     "Utilities": "Utilitaires",
     "Editors": "Éditeurs",
     "Management": "Gestion",
+    "Preview not available": "Aperçu non disponible",
     "Home": "Accueil",
     "Game": "Jeu",
     "Version": "Version",

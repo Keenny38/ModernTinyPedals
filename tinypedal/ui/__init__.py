@@ -449,6 +449,11 @@ def set_style_window(base_font_pt: int) -> str:
         #homeHeader {{
             font-size: {font_pt_app_name}pt;
         }}
+        #previewPopup {{
+            background: {color_active_window};
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_card}px;
+        }}
         #toast {{
             color: {color_active_window_text};
             background: {color_active_base};

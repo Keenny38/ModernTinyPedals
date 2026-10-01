@@ -229,3 +229,25 @@ def test_file_drop(ui_env, tmp_path):
     with zipfile.ZipFile(other, "w") as package:
         package.writestr("readme.txt", "")
     assert file_drop.classify(str(other)) == ""
+
+
+def test_widget_hover_preview(ui_env):
+    from PySide6.QtCore import QPoint
+
+    from tinypedal.module_control import wctrl
+    from tinypedal.ui.module_view import ModuleList
+
+    view = ModuleList(None, wctrl)
+    try:
+        popup = view.preview_popup
+        assert popup is not None
+        popup.show_widget("speedometer", QPoint(100, 100))
+        assert popup.isVisible() and popup.pixmap() is not None and not popup.pixmap().isNull()
+        assert "speedometer" in popup._cache
+        popup.hide_preview()
+        assert not popup.isVisible()
+        view.refresh()
+        assert not popup._cache
+    finally:
+        view.deleteLater()
+        QCoreApplication.processEvents()

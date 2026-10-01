@@ -23,10 +23,11 @@ Each row: name, settings (gear) button and an on/off switch. Search box and All 
 Inactive filter on top, so a widget is found among dozens without scrolling.
 """
 
+import logging
 import unicodedata
 
-from PySide6.QtCore import Property, QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, Slot
-from PySide6.QtGui import QColor, QPainter, QPalette
+from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, Slot
+from PySide6.QtGui import QColor, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
@@ -49,6 +50,8 @@ from ..module_control import ModuleControl
 from ..setting import cfg
 from ._common import UIScaler
 from .config import UserConfig
+
+logger = logging.getLogger(__name__)
 
 FILTER_ALL = 0
 FILTER_ACTIVE = 1
@@ -178,6 +181,64 @@ def sort_key(text: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
+class PreviewPopup(QLabel):
+    """Widget preview shown next to cursor while hovering a widget row"""
+
+    def __init__(self):
+        super().__init__(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setObjectName("previewPopup")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setMargin(UIScaler.pixel(6))
+        self._cache: dict[str, QPixmap | str] = {}
+        self._name = ""
+
+    def clear_cache(self):
+        self._cache.clear()
+
+    def show_widget(self, name: str, global_pos: QPoint):
+        """Render (cached) & show preview of widget"""
+        if name != self._name:
+            self._name = name
+            preview = self._cache.get(name)
+            if preview is None:
+                preview = self._render(name)
+                self._cache[name] = preview
+            if isinstance(preview, QPixmap):
+                self.setPixmap(preview)
+            else:
+                self.setText(preview)
+            self.adjustSize()
+        offset = UIScaler.pixel(18)
+        screen = self.screen().availableGeometry() if self.screen() else None
+        x, y = global_pos.x() + offset, global_pos.y() + offset
+        if screen is not None:
+            x = min(x, screen.right() - self.width())
+            y = min(y, screen.bottom() - self.height())
+            if x < global_pos.x() < x + self.width() and y < global_pos.y() < y + self.height():
+                y = global_pos.y() - self.height() - offset  # never under cursor
+        self.move(x, y)
+        self.show()
+
+    def hide_preview(self):
+        self._name = ""
+        self.hide()
+
+    @staticmethod
+    def _render(name: str) -> QPixmap | str:
+        from .widget_preview import render_widget
+
+        try:
+            pixmap = render_widget(cfg, name, dict(cfg.user.setting[name]))
+        except Exception as error:  # plugins & widgets that need live data
+            logger.debug("Preview error: %s", error, exc_info=True)
+            return tr("Preview not available")
+        limit = UIScaler.size(30)
+        if pixmap.width() > limit or pixmap.height() > limit:
+            pixmap = pixmap.scaled(limit, limit, Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+        return pixmap
+
+
 class ModuleList(QWidget):
     """Module & widget list view"""
 
@@ -231,6 +292,13 @@ class ModuleList(QWidget):
         self.listbox_module.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.listbox_module.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.create_list()
+        # Widget preview on hover
+        self.preview_popup: PreviewPopup | None = None
+        if module_control.type_id == "widget":
+            self.preview_popup = PreviewPopup()
+            self.destroyed.connect(self.preview_popup.deleteLater)
+            self.listbox_module.setMouseTracking(True)
+            self.listbox_module.viewport().installEventFilter(self)
 
         # Button
         button_enable = QPushButton(tr("Enable All"))
@@ -267,9 +335,32 @@ class ModuleList(QWidget):
             self.listbox_module.setItemWidget(item, module_item)
             self.update_item_style(_name)
 
+    def eventFilter(self, watched, event):
+        """Show widget preview while hovering row name"""
+        popup = self.preview_popup
+        if popup is not None and watched is self.listbox_module.viewport():
+            event_type = event.type()
+            if event_type == QEvent.Type.MouseMove:
+                item = self.listbox_module.itemAt(event.position().toPoint())
+                # Only over the name, not over switch & settings button
+                if item is not None and event.position().x() < self.listbox_module.viewport().width() * 0.55:
+                    popup.show_widget(item.data(Qt.ItemDataRole.UserRole), event.globalPosition().toPoint())
+                else:
+                    popup.hide_preview()
+            elif event_type in (QEvent.Type.Leave, QEvent.Type.Hide, QEvent.Type.Wheel):
+                popup.hide_preview()
+        return super().eventFilter(watched, event)
+
+    def hideEvent(self, event):
+        if self.preview_popup is not None:
+            self.preview_popup.hide_preview()
+        super().hideEvent(event)
+
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
         """Refresh module & button toggle state"""
+        if self.preview_popup is not None:
+            self.preview_popup.clear_cache()  # setting or preset changed
         listbox_module = self.listbox_module
         for row_index in range(listbox_module.count()):
             item = listbox_module.item(row_index)
