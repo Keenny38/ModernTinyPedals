@@ -172,7 +172,6 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
 
 def test_rf2_replay_reads_every_zone(tmp_path):
     from pyRfactor2SharedMemory import rF2data
-
     from tinypedal.adapter import rf2_connector, rf2_restapi
 
     info = rf2_connector.RF2Info()
