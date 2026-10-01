@@ -68,3 +68,23 @@ def test_lap_viewer_dialog(ui_env, tmp_path, monkeypatch):
         assert " m " in viewer.label_cursor.text()
     finally:
         viewer.close()
+
+
+def test_trajectory_map(ui_env):
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.ui.lap_viewer import TrajectoryMap
+    from tinypedal.userfile.telemetry_lap import LapData
+
+    distance = [float(index) for index in range(0, 101, 10)]
+    lap_a = LapData("a", {"distance": distance, "pos_x": [d * 2 for d in distance], "pos_y": [d for d in distance]})
+    lap_b = LapData("b", {"distance": distance, "pos_x": [d * 2 + 1 for d in distance], "pos_y": distance})
+    parent = QWidget()
+    view = TrajectoryMap(parent)
+    view.resize(300, 300)
+    view.set_laps(lap_a, lap_b)
+    view.set_cursor(50.0, (20.0, 60.0))
+    assert len(view.positions(lap_a)) == 10  # (0, 0) means position not recorded
+    assert not view.grab().isNull()
+    assert view.positions(LapData("c", {"distance": distance})) == []  # positions not recorded
+    parent.deleteLater()

@@ -362,6 +362,7 @@ TRANSLATION = MappingProxyType({
     "Utilities": "Utilitaires",
     "Editors": "Éditeurs",
     "Management": "Gestion",
+    "No position recorded": "Aucune position enregistrée",
     "Export": "Exporter",
     "Import theme file shared by someone else": "Importer un fichier de thème partagé",
     "Export selected theme to a file to share it": "Exporter le thème sélectionné dans un fichier pour le partager",

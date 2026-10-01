@@ -228,6 +228,9 @@ class TracePlot(QWidget):
             start, end = 0.0, max_distance
         self.view_start, self.view_end = max(start, 0.0), min(end, max_distance)
         self.update()
+        update_cursor_info = getattr(self.parent(), "update_cursor_info", None)
+        if update_cursor_info is not None:
+            update_cursor_info(self.cursor_values())
 
     def mouseDoubleClickEvent(self, event):
         self.reset_view()
@@ -247,6 +250,101 @@ class TracePlot(QWidget):
             if values:
                 texts.append(f"{tr(channel.title)}: {' / '.join(values)}")
         return "   ".join(texts)
+
+
+class TrajectoryMap(QWidget):
+    """Driving line of both laps from recorded positions, with cursor position of each lap
+
+    Zoomed part of trace plot is highlighted, so braking points & lines can be compared.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setMinimumSize(UIScaler.size(16), UIScaler.size(16))
+        self.lap_a: LapData | None = None
+        self.lap_b: LapData | None = None
+        self.cursor_distance: float | None = None
+        self.view: tuple[float, float] = (0.0, 0.0)
+
+    def set_laps(self, lap_a: LapData | None, lap_b: LapData | None):
+        self.lap_a, self.lap_b = lap_a, lap_b
+        self.update()
+
+    def set_cursor(self, distance: float | None, view: tuple[float, float]):
+        if (distance, view) != (self.cursor_distance, self.view):
+            self.cursor_distance, self.view = distance, view
+            self.update()
+
+    @staticmethod
+    def positions(lap: LapData | None) -> list[tuple[float, float, float]]:
+        """(distance, x, y) of lap, empty if positions not recorded"""
+        if lap is None:
+            return []
+        xs, ys = lap.columns.get("pos_x"), lap.columns.get("pos_y")
+        if not xs or not ys:
+            return []
+        return [(distance, x, y) for distance, x, y in zip(lap.distance, xs, ys) if x or y]
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        laps = [(self.positions(self.lap_a), COLOR_A), (self.positions(self.lap_b), COLOR_B)]
+        points = [point for line, _ in laps for point in line]
+        if not points:
+            painter.setPen(self.palette().color(self.foregroundRole()))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                             tr("No position recorded"))
+            return
+        min_x, max_x = min(p[1] for p in points), max(p[1] for p in points)
+        min_y, max_y = min(p[2] for p in points), max(p[2] for p in points)
+        margin = UIScaler.pixel(10)
+        scale = min((self.width() - margin * 2) / max(max_x - min_x, 1e-6),
+                    (self.height() - margin * 2) / max(max_y - min_y, 1e-6))
+        offset_x = (self.width() - (max_x - min_x) * scale) / 2
+        offset_y = (self.height() - (max_y - min_y) * scale) / 2
+
+        def to_screen(x: float, y: float) -> QPointF:
+            # Game Y (forward) axis points up on screen
+            return QPointF(offset_x + (x - min_x) * scale, self.height() - offset_y - (y - min_y) * scale)
+
+        view_start, view_end = self.view
+        zoomed = view_end - view_start > 0
+        for line, color in laps:
+            if len(line) < 2:
+                continue
+            for highlight in (False, True):
+                if highlight and not zoomed:
+                    continue
+                path = QPainterPath()
+                started = False
+                for distance, x, y in line:
+                    inside = view_start <= distance <= view_end
+                    if highlight and not inside:
+                        started = False
+                        continue
+                    point = to_screen(x, y)
+                    if started:
+                        path.lineTo(point)
+                    else:
+                        path.moveTo(point)
+                        started = True
+                faded = QColor(color)
+                if zoomed and not highlight:
+                    faded.setAlphaF(0.35)
+                painter.setPen(QPen(faded, 3 if highlight else 1.5))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(path)
+        # Cursor position of each lap at same distance
+        if self.cursor_distance is not None:
+            for line, color in laps:
+                if not line:
+                    continue
+                distances = [p[0] for p in line]
+                x = interpolate(distances, [p[1] for p in line], self.cursor_distance)
+                y = interpolate(distances, [p[2] for p in line], self.cursor_distance)
+                painter.setPen(QPen(QColor("#FFFFFF"), 1.5))
+                painter.setBrush(color)
+                painter.drawEllipse(to_screen(x, y), 5, 5)
 
 
 @singleton_dialog("lap_viewer")
@@ -272,6 +370,7 @@ class LapViewer(BaseDialog):
         self.label_cursor = QLabel(self)
         self.label_cursor.setMinimumHeight(UIScaler.size(1.6))
         self.plot = TracePlot(self)
+        self.trajectory = TrajectoryMap(self)
 
         layout_select = QGridLayout()
         layout_select.addWidget(QLabel(tr("Track")), 0, 0)
@@ -299,7 +398,10 @@ class LapViewer(BaseDialog):
         layout_main = QVBoxLayout()
         layout_main.addLayout(layout_select)
         layout_main.addWidget(self.label_cursor)
-        layout_main.addWidget(self.plot, stretch=1)
+        layout_plots = QHBoxLayout()
+        layout_plots.addWidget(self.plot, stretch=3)
+        layout_plots.addWidget(self.trajectory, stretch=1)
+        layout_main.addLayout(layout_plots, stretch=1)
         layout_main.addLayout(layout_button)
         layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
         self.setLayout(layout_main)
@@ -356,6 +458,7 @@ class LapViewer(BaseDialog):
         self.label_a.setText(self.lap_info(lap_a))
         self.label_b.setText(self.lap_info(lap_b))
         self.plot.set_laps(lap_a, lap_b)
+        self.trajectory.set_laps(lap_a, lap_b)
 
     def export_motec(self):
         """Export reference lap to MoTeC .ld file"""
@@ -386,3 +489,6 @@ class LapViewer(BaseDialog):
 
     def update_cursor_info(self, text: str):
         self.label_cursor.setText(text)
+        plot = self.plot
+        zoomed = plot.view_end - plot.view_start < plot.max_distance() - 1
+        self.trajectory.set_cursor(plot.cursor_distance, (plot.view_start, plot.view_end) if zoomed else (0.0, 0.0))
