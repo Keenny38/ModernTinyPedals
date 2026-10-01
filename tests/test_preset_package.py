@@ -82,3 +82,38 @@ def test_invalid_package(tmp_path):
         zf.writestr("readme.txt", "hello")
     with pytest.raises(ValueError):
         import_preset_package(str(package), f"{tmp_path}/")
+
+
+def test_preset_share_code():
+    import pytest
+
+    from tinypedal.userfile.preset_share import decode_preset, encode_preset, summarize_preset
+
+    preset = {"speedometer": {"enable": True, "font_size": 15}, "gear": {"enable": False}, "module_delta": {"enable": True}}
+    code = encode_preset(preset)
+    assert code.startswith("MTP1:") and "\n" not in code
+    # Line breaks added by chat apps are ignored
+    assert decode_preset(code[:20] + "\n" + code[20:]) == preset
+    summary = summarize_preset(preset, ("speedometer", "gear"), ("module_delta",))
+    assert summary.widgets == ("speedometer",) and summary.modules == ("module_delta",)
+    for bad in ("hello", "MTP1:!!!", encode_preset({"a": 1})[:-4], "MTP1:" + code[5:15]):
+        with pytest.raises(ValueError):
+            decode_preset(bad)
+
+
+def test_import_share_code_dialog(ui_env, monkeypatch):
+    import os
+
+    from PySide6.QtWidgets import QApplication, QInputDialog
+
+    from tinypedal.setting import cfg
+    from tinypedal.ui.preset_view import PresetList
+    from tinypedal.userfile.preset_share import encode_preset
+
+    QApplication.clipboard().setText(encode_preset({"speedometer": {"enable": True}}))
+    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *args, **kwargs: (args[3], True))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("My: shared", True))
+    view = PresetList(None)
+    view.import_share_code()
+    assert os.path.exists(os.path.join(cfg.path.settings, "My shared.json"))
+    view.deleteLater()
