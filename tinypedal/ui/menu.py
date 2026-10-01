@@ -21,6 +21,7 @@ Menu
 """
 
 import os
+import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QActionGroup, QDesktopServices, QKeySequence
@@ -357,7 +358,8 @@ class ConfigMenu(QMenu):
         if PLATFORM.WINDOWS:
             try:
                 filepath = filepath.replace("/", "\\")
-                os.startfile(filepath)
+                if sys.platform == "win32":  # platform check also read by type checker
+                    os.startfile(filepath)
             except (FileNotFoundError, RuntimeError):
                 error = True
         else:  # Linux

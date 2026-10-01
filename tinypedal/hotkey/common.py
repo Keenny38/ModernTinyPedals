@@ -22,6 +22,7 @@ Hotkey function
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable, Iterable, Mapping
 from itertools import chain
 
@@ -62,7 +63,7 @@ def modifier_priority(key: str) -> int:
 
 def get_key_state_function() -> Callable[[int], int]:
     """Platform specific 'get key state' function"""
-    if PLATFORM.WINDOWS:
+    if PLATFORM.WINDOWS and sys.platform == "win32":  # platform check also read by type checker
         from ctypes import windll
 
         return windll.user32.GetAsyncKeyState

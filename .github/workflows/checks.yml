@@ -95,7 +95,7 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libgl1 libpulse0
         python -m pip install --upgrade pip
-        pip install -r requirements.txt pytest
+        pip install -r requirements.txt pytest pyxdg
 
     - name: Find base commit
       id: base
@@ -110,24 +110,22 @@ jobs:
       if: steps.base.outputs.sha != ''
       run: |
         pytest tests/test_widget_render.py -q -p no:cacheprovider
-        mv tests/_render ../renders_new
+        mkdir -p visual && mv tests/_render visual/renders_new
 
     - name: Render widgets (base)
       if: steps.base.outputs.sha != ''
       run: |
-        git worktree add ../base "${{ steps.base.outputs.sha }}"
-        cd ../base && pytest tests/test_widget_render.py -q -p no:cacheprovider || true
+        git worktree add "$RUNNER_TEMP/base" "${{ steps.base.outputs.sha }}"
+        cd "$RUNNER_TEMP/base" && pytest tests/test_widget_render.py -q -p no:cacheprovider || true
 
     - name: Compare renders
       if: steps.base.outputs.sha != ''
-      run: python tools/visual_diff.py ../base/tests/_render ../renders_new ../visual_diff
+      run: python tools/visual_diff.py "$RUNNER_TEMP/base/tests/_render" visual/renders_new visual/diff
 
     - name: Upload visual diff
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: widget-visual-diff
-        path: |
-          ../visual_diff/
-          ../renders_new/
+        path: visual/
         if-no-files-found: ignore
