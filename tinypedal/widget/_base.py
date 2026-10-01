@@ -39,7 +39,7 @@ from ..setting import Setting
 from ._common import FontMetrics, MousePosition
 from ._layout_guide import layout_guide
 from ._painter import OverlayStyle, RawImage, RawText
-from ._style import StyledConfig, modern_overrides
+from ._style import StyledConfig, modern_overrides, scale_overrides
 
 logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
@@ -71,6 +71,10 @@ class Base(QWidget):
         else:
             OverlayStyle.corner_scale = 0
             OverlayStyle.depth_effects = False
+        # Global overlay scale
+        scaled = scale_overrides(self.wcfg, style.get("overlay_scale", 1.0))
+        if scaled:
+            self.wcfg = StyledConfig(self.wcfg, scaled)
 
         # Base setting
         self.setWindowTitle(f"{APP_NAME} - {widget_name.capitalize()}")

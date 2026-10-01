@@ -93,6 +93,7 @@ GLOBAL_DEFAULT = {
         "corner_radius_scale": 0.05,
         "enable_depth_effects": True,
         "minimum_bar_gap": 2,
+        "overlay_scale": 1.0,
     },
     "telemetry": {
         "api_name": API_DEFAULT_NAME,

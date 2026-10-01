@@ -25,6 +25,7 @@ any user customized option is kept as it is.
 
 from __future__ import annotations
 
+import re
 from types import MappingProxyType
 from typing import Any
 
@@ -226,6 +227,41 @@ def modern_overrides(wcfg: dict, default: dict, style: dict) -> dict:
             overrides[key] = style["modern_font_name"]
         elif key == "bar_gap" and isinstance(value, int) and value < min_gap:
             overrides[key] = min_gap
+    return overrides
+
+
+# Pixel size options scaled by global overlay scale (other geometry derives from them)
+SCALED_OPTION = re.compile(
+    r"(^|_)font_size$"
+    r"|^display_(size|width|height)$"
+    r"|(^|_)bar_(height|width)$"
+    r"|^(led|wheel)_(width|height)$"
+    r"|^(icon|dot|area|vehicle|brake_input)_size$"
+)
+OVERLAY_SCALE_RANGE = (0.5, 3.0)
+
+
+def scale_overrides(wcfg: dict, scale: float) -> dict:
+    """Pixel size options multiplied by global overlay scale
+
+    Args:
+        wcfg: widget setting (with style overrides).
+        scale: global overlay scale, 1 = unchanged.
+
+    Returns:
+        Dictionary of scaled options.
+    """
+    scale = min(max(scale, OVERLAY_SCALE_RANGE[0]), OVERLAY_SCALE_RANGE[1])
+    if scale == 1:
+        return {}
+    overrides: dict[str, Any] = {}
+    for key, value in wcfg.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not SCALED_OPTION.search(key):
+            continue
+        if isinstance(value, int):
+            overrides[key] = max(round(value * scale), 1)
+        else:
+            overrides[key] = value * scale
     return overrides
 
 

@@ -72,3 +72,31 @@ def test_theme_palettes():
         style = dict(STYLE, overlay_theme=theme)
         assert modern_overrides(dict(default), default, style) == {"font_color": expected}
     assert modern_overrides(dict(default), default, dict(STYLE, overlay_theme="Classic")) == {}
+
+
+def test_overlay_scale_overrides():
+    from tinypedal.widget._style import scale_overrides
+
+    wcfg = {"font_size": 15, "bar_height": 10, "update_interval": 20, "driver_name_width": 18, "show_x": True,
+            "display_scale": 1.0, "inner_gap": 2}
+    assert scale_overrides(wcfg, 1.0) == {}
+    scaled = scale_overrides(wcfg, 1.5)
+    assert scaled == {"font_size": 22, "bar_height": 15}  # character counts & intervals untouched
+    assert scale_overrides({"font_size": 15}, 10)["font_size"] == 45  # clamped to 3x
+
+
+def test_overlay_scale_applied_to_widget(ui_env):
+    from tinypedal.setting import cfg
+
+    from tinypedal.widget import speedometer
+
+    cfg.user.config["overlay_style"]["overlay_scale"] = 2.0
+    try:
+        widget = speedometer.Realtime(cfg, "speedometer")
+        assert widget.wcfg["font_size"] == round(cfg.user.setting["speedometer"]["font_size"] * 2)
+        widget.wcfg["position_x"] = 123  # saved through to user setting
+        assert cfg.user.setting["speedometer"]["position_x"] == 123
+        assert cfg.user.setting["speedometer"]["font_size"] != widget.wcfg["font_size"]  # scale never saved
+        widget.deleteLater()
+    finally:
+        cfg.user.config["overlay_style"]["overlay_scale"] = 1.0

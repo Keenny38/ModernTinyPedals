@@ -1685,6 +1685,7 @@
     "overlay": "Overlay",
     "overlay_auto_hide": "Masquage auto de l'overlay",
     "overlay_lock": "Verrouillage de l'overlay",
+    "overlay_scale": "Échelle de l'overlay",
     "overlay_style": "Style de l'overlay",
     "overlay_theme": "Thème de l'overlay",
     "overlay_visibility": "Visibilité de l'overlay",
