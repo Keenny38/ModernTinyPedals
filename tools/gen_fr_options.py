@@ -742,6 +742,8 @@ FULL = {
     "enable_layout_per_screen_setup": "Disposition mémorisée par configuration d'écrans",
     "overlay_scale": "Échelle de l'overlay",
     "visibility_context": "Afficher pendant",
+    "enable_vr_mirror_window": "Fenêtre miroir VR (OpenKneeboard, OVR Toolkit...)",
+    "mirror_background_color": "Couleur de fond de la fenêtre miroir",
     "enable_fade_animation": "Fondu à l'affichage et au masquage",
     "web_dashboard": "Tableau de bord web", "enable_web_dashboard": "Activer le tableau de bord web",
     "enable_lan_access": "Accès depuis le réseau local", "web_dashboard_port": "Port",

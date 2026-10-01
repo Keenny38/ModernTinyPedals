@@ -17,11 +17,14 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Native VR overlay (SteamVR / OpenVR), experimental
+VR overlay, experimental
 
-Compose all visible overlay widgets into one image (same layout as on desktop),
-and show it as SteamVR overlay, fixed in seated space or attached to headset.
-Requires optional "openvr" package (pip install openvr) and running SteamVR.
+Compose all visible overlay widgets into one image (same layout as on desktop), then:
+- SteamVR overlay: fixed in seated space or attached to headset. Requires optional "openvr"
+  package (pip install openvr) and running SteamVR.
+- VR mirror window: one desktop window showing the composed image, for OpenXR games on any
+  runtime (Meta, Virtual Desktop, WMR...) through a window capture overlay such as OpenKneeboard
+  (an OpenXR API layer), OVR Toolkit, XSOverlay or Desktop+.
 """
 
 from __future__ import annotations
@@ -32,15 +35,49 @@ import zlib
 from typing import NamedTuple
 
 from PySide6.QtCore import QObject, QRect, Qt, QTimer
-from PySide6.QtGui import QImage, QPainter
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_signal
+from .const_file import ConfigType
 from .setting import cfg
 
 logger = logging.getLogger(__name__)
 
 MAX_PIXELS = 1024 * 1024  # setOverlayRaw data size limit, image is scaled down above this
+MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window capture apps
+
+
+class MirrorWindow(QWidget):
+    """Desktop window showing composed overlay image, captured by VR window overlay apps"""
+
+    def __init__(self, background: str):
+        super().__init__(None, Qt.WindowType.Window)
+        self.setWindowTitle(MIRROR_TITLE)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.background = QColor(background) if QColor.isValidColorName(background) else QColor("#000000")
+        self.pixmap = QPixmap()
+        self.resize(640, 360)
+
+    def set_image(self, image: QImage | None):
+        """Show image, empty (background only) if None"""
+        self.pixmap = QPixmap.fromImage(image) if image is not None else QPixmap()
+        if not self.pixmap.isNull() and self.size() != self.pixmap.size():
+            self.resize(self.pixmap.size())
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.background)
+        if not self.pixmap.isNull():
+            painter.drawPixmap(0, 0, self.pixmap)
+
+    def closeEvent(self, event):
+        """Closing window turns mirror off until next reload, so window is not shown again unexpectedly"""
+        cfg.user.config["vr_overlay"]["enable_vr_mirror_window"] = False
+        cfg.save(config_type=ConfigType.CONFIG)
+        vroverlay().disable_mirror()
+        super().closeEvent(event)
 
 
 def compose_widgets(widgets: list) -> QImage | None:
@@ -108,15 +145,23 @@ class VROverlay(QObject):
         self._buffer = None
         self._checksum: int | None = None
         self._visible = False
+        self._mirror: MirrorWindow | None = None
+        self._mirror_checksum: int | None = None
 
     @property
     def running(self) -> bool:
-        return self._handle is not None
+        return self._handle is not None or self._mirror is not None
 
     def enable(self):
-        """Start VR overlay if enabled in setting"""
+        """Start SteamVR overlay and/or VR mirror window if enabled in setting"""
         setting = cfg.user.config["vr_overlay"]
-        if not setting["enable_vr_overlay"] or self.running:
+        if setting.get("enable_vr_mirror_window", False) and self._mirror is None:
+            self._mirror = MirrorWindow(str(setting.get("mirror_background_color", "#000000")))
+            self._mirror.show()
+            logger.info("ENABLED: VR mirror window")
+        if self._mirror is not None and not self._timer.isActive():
+            self._timer.start(max(int(setting["update_interval"]), 20))
+        if not setting["enable_vr_overlay"] or self._handle is not None:
             return
         try:
             import openvr  # optional dependency
@@ -158,12 +203,19 @@ class VROverlay(QObject):
             overlay.setOverlayTransformAbsolute(self._handle, openvr.TrackingUniverseSeated, matrix)
 
     def update_overlay(self):
-        """Send composed widgets image to SteamVR, only if changed"""
+        """Send composed widgets image to SteamVR & mirror window, only if changed"""
         overlay = self._overlay
-        if overlay is None:  # timer tick queued after disable()
+        if overlay is None and self._mirror is None:  # timer tick queued after disable()
             return
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
         image = compose_widgets(widgets)
+        if self._mirror is not None:
+            checksum = image_frame(image).checksum if image is not None else None
+            if checksum != self._mirror_checksum:
+                self._mirror_checksum = checksum
+                self._mirror.set_image(image)
+        if overlay is None:
+            return
         try:
             if image is None:  # all widgets hidden (auto hide, out of session), hide VR overlay too
                 if self._visible:
@@ -184,8 +236,20 @@ class VROverlay(QObject):
             self.__fail(f"VR overlay stopped: {error}")
             self.disable()
 
+    def disable_mirror(self):
+        """Close VR mirror window"""
+        mirror, self._mirror = self._mirror, None
+        self._mirror_checksum = None
+        if mirror is not None:
+            mirror.hide()
+            mirror.deleteLater()
+            logger.info("DISABLED: VR mirror window")
+        if self._overlay is None:
+            self._timer.stop()
+
     def disable(self):
-        """Stop VR overlay"""
+        """Stop VR overlay & mirror window"""
+        self.disable_mirror()
         self._timer.stop()
         if self._overlay is not None and self._handle is not None:
             try:

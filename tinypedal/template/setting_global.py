@@ -74,6 +74,8 @@ GLOBAL_DEFAULT = {
         "distance_meters": 1.0,
         "vertical_offset_meters": -0.2,
         "horizontal_offset_meters": 0.0,
+        "enable_vr_mirror_window": False,
+        "mirror_background_color": "#000000",
     },
     "remote_control": {
         "enable_remote_control": False,

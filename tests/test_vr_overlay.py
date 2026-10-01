@@ -94,3 +94,27 @@ def test_update_hides_and_skips_unchanged(monkeypatch):
     assert fake.calls == ["hideOverlay", "setOverlayRaw", "showOverlay"]
     widget.close()
     control._overlay = control._handle = None
+
+
+def test_mirror_window(ui_env, monkeypatch):
+    from tinypedal.vr_overlay import MIRROR_TITLE
+
+    saved = copy_setting(cfg.user.config["vr_overlay"])
+    cfg.user.config["vr_overlay"].update(enable_vr_overlay=False, enable_vr_mirror_window=True)
+    control = VROverlay()
+    try:
+        control.enable()
+        mirror = control._mirror
+        assert mirror is not None and mirror.isVisible() and mirror.windowTitle() == MIRROR_TITLE
+        assert control.running and control._timer.isActive()
+        widget = make_widget(10, 10, 80, 40)
+        monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget]))
+        control.update_overlay()
+        assert mirror.size().width() >= 80 and not mirror.pixmap.isNull()  # widget frame included
+        widget.close()
+        mirror.close()  # closing window turns mirror off
+        assert control._mirror is None and not cfg.user.config["vr_overlay"]["enable_vr_mirror_window"]
+    finally:
+        control.disable()
+        cfg.user.config["vr_overlay"] = saved
+        QCoreApplication.processEvents()
