@@ -866,7 +866,7 @@ Remote control allows other programs (Stream Deck, Companion, SimHub, button box
 
 * `GET http://127.0.0.1:8337/commands` lists available commands.
 * `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-TinyPedal` header (any value).
-* `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). Browser pages from other sites are refused (`Origin` check).
+* `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). `?fields=speed,gear,rpm` only sends these fields, `?changes=1` only sends fields changed since last message (nothing if none changed). Client can change both at any time by sending a text message such as `{"fields": ["speed", "gear"], "changes": true}` (`"fields": null` for every field). Browser pages from other sites are refused (`Origin` check).
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
 
@@ -1657,11 +1657,15 @@ Note, all setting and data are saved per file as [Tyre strategy](#tyre-strategy)
 
 
 ## Lap telemetry viewer
-**Lap telemetry viewer compares two laps recorded by [Recorder module](#recorder-module), which can be accessed from `Tools` menu in main window.**
+**Lap telemetry viewer compares laps recorded by [Recorder module](#recorder-module), which can be accessed from `Telemetry` button of navigation bar (`Ctrl+9`), or `Tools` menu in main window.**
 
-Select track, reference lap and compared lap. Charts show time delta, speed, throttle, brake, gear and steering along lap distance. Move mouse over charts to read values at a given distance, use mouse wheel to zoom, and double-click to reset zoom.
+Select track, then check laps to compare in lap list (one color per lap). Fastest valid lap is the reference lap by default, double-click a lap (or right click, `Set as Reference`) to change it. Lap list shows lap time, sector times (fastest sector of track in purple) and lap info (invalid, out lap, in lap, session, vehicle). Theoretical best (sum of fastest sectors) is shown below the list, and a warning appears when compared laps come from different vehicles. `Add File...` adds laps from another folder or track.
 
-`Export MoTeC...` saves reference lap as MoTeC i2 log file (`.ld`), resampled at recording rate, with speed, pedals (in percent), steering, gear, RPM, fuel, tyre temperatures & pressures and position channels.
+Charts show values along lap distance, time delta of each lap against reference lap, and sector limits of reference lap. `Channels` selects shown charts: delta, speed, pedals, gear, steering, RPM, fuel, accelerations, TC & ABS activity, battery, elevation, and per wheel tyre temperature, pressure & wear, brake temperature, wheel speed, ride height and suspension (laps recorded by older versions only have the first channels). Move mouse over charts to read values at a given distance. Mouse wheel zooms, drag moves, `Shift` + drag zooms to selected area, and double-click resets zoom. Keyboard: `+` / `-` zoom, `Left` / `Right` move, `Home` resets. Drag a channel name (left of charts) up or down to reorder channels, order is kept.
+
+`Track Map` tab shows driving line of each lap (zoomed part highlighted) and car position at cursor. Circuit is drawn under driving lines (12 meters wide, start line marked), from track map file of [Mapping module](#mapping-module) when recorded, else from reference lap line. Mouse wheel zooms track map and G circle around mouse, drag moves zoomed view, double-click resets. `G Circle` tab shows lateral vs longitudinal acceleration of each lap (zoomed part only when zoomed).
+
+`Export MoTeC...` saves reference lap, displayed laps, or every lap of track as MoTeC i2 log files (`.ld`), resampled at recording rate, with every recorded channel (pedals in percent), and vehicle, track & session from lap info.
 
 [**`Back to Top`**](#)
 
@@ -1669,9 +1673,13 @@ Select track, reference lap and compared lap. Charts show time delta, speed, thr
 ## Telemetry replay
 **Telemetry replay records Le Mans Ultimate shared memory while driving, and plays it back through every widget and module without the game, which can be accessed from `Tools` menu in main window.**
 
-Requires `Le Mans Ultimate` API. Click `Start Recording` while in game, and `Stop Recording` when done. Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute).
+Requires `Le Mans Ultimate`, `rFactor 2` or `Le Mans Ultimate (legacy)` API. Click `Start Recording` while in game, and `Stop Recording` when done, or enable `enable_auto_replay_recording` in [Recorder module](#recorder-module). Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute). Frames outside driving are skipped (see `enable_replay_skip_inactive_frames`). Recordings keep track, vehicle and session, lap changes, and incidents detected by Black box incident recorder. REST API data is recorded when it changes.
 
-Click `Open Replay...` to load a recording: Modern Tiny Pedals reads from it instead of the game until `Back to Game` is clicked. Replay can be paused, sped up or slowed down, looped, and moved with the position slider. REST API data (tyre setup, virtual energy details) is not recorded.
+Replays of telemetry folder are listed with date, track, vehicle, session, duration and size. Double-click one (or `Open`), or use `Open Replay...` to pick a file elsewhere: Modern Tiny Pedals reads from it instead of the game until `Back to Game` is clicked. Frames are read from file when needed, so long replays use little memory.
+
+Replay can be paused, sped up or slowed down, looped, and moved with the position slider, which shows lap changes (top ticks) and incidents (red bottom ticks). `Go to lap` jumps to a lap, `◀ Incident` / `Incident ▶` jump to 3 seconds before previous or next incident, and `|◀` / `▶|` move one frame. Keyboard: `Space` play/pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame.
+
+`Set Start` and `Set End` select part of replay at current position, `Save Section...` saves it to a new replay file, to share an incident for example.
 
 [**`Back to Top`**](#)
 
@@ -1817,9 +1825,19 @@ Enable notes module.
 
 
 ## Recorder module
-**This module records player telemetry of each complete lap to CSV file. Disabled by default.**
+**This module records player telemetry of each complete lap to CSV file. Enabled by default.**
 
 Files are saved in `telemetry_path` folder, one sub folder per track & class: `<date time> lap<number> <lap time>.csv`. Laps are verified with game lap time 1 to 10 seconds after crossing start line; laps that are not confirmed (track limits, invalid lap) are marked `invalid` in file name. Recorded laps can be compared in [Lap telemetry viewer](#lap-telemetry-viewer).
+
+First line of each file is lap info (`# ` followed by JSON): track, vehicle, class, session, track length, track & air temperature, wetness, fuel at start & end, official sector times, lap kind (`lap`, `out` or `in`) and app version. Then comes the CSV header and one row per sample: time, lap time, distance, speed, pedals, steering, gear, RPM, fuel, tyre temperatures & pressures, position (X, Y, Z), lateral & longitudinal acceleration (G), sector, TC & ABS activity, battery charge, and per wheel brake temperature, tyre wear (remaining percentage, 100 = new tyre), wheel speed (requires Wheels module, which learns wheel radius), ride height & suspension deflection (millimeters). Throttle & brake are unfiltered pedal positions (driver input, without throttle blip or cut from car electronics on gear shifts). Samples are only added when game data has changed. A lap is dropped if game time goes backward (replay looping or rewound).
+
+The module can also record [Telemetry replay](#telemetry-replay) files automatically while driving.
+
+    enable_lap_recording
+Record laps to CSV files. Default is enabled.
+
+    enable_lap_recording_during_replay
+Record laps while a telemetry replay is playing. Laps are named after the time they were driven, and lap info tells which replay they come from. Default is disabled, as replayed laps were already recorded while driving.
 
     minimum_lap_distance_percentage
 Minimum lap distance (percentage of track length) that must be recorded for a lap to be saved. Default is `90`.
@@ -1827,8 +1845,26 @@ Minimum lap distance (percentage of track length) that must be recorded for a la
     number_of_saved_laps_per_track
 Maximum number of laps kept per track & class folder, oldest laps are removed. Default is `50`.
 
+    number_of_best_laps_kept_per_track
+Number of fastest valid laps never removed from track & class folder, even when they are the oldest. Default is `3`.
+
     save_invalid_laps
 Save laps that are not confirmed as valid (marked `invalid`). Default is enabled.
+
+    enable_out_and_in_lap_recording
+Also save out laps (started in pit lane) and in laps (ended in pit lane), marked as such in lap info. Out laps are saved when start line is crossed in pit lane. Default is disabled.
+
+    enable_compressed_lap_files
+Save laps as compressed CSV files (`.csv.gz`, about 5 times smaller). Lap telemetry viewer reads both. Default is disabled.
+
+    enable_auto_replay_recording
+Start recording a telemetry replay when driving starts, and stop it 10 seconds after leaving driving (requires `Le Mans Ultimate` or `rFactor 2` API). Automatic recordings are named `replay-auto-<date time>.tpreplay`. A recording stopped from Telemetry replay window is not restarted until next driving. Default is disabled.
+
+    enable_replay_skip_inactive_frames
+Do not record replay frames outside driving (menus, garage, monitor), so replays only contain driving. Also applies to recordings started from Telemetry replay window. Default is enabled.
+
+    number_of_saved_replays
+Maximum number of automatic replay recordings kept, oldest are removed. Manual recordings are never removed. Default is `20`.
 
 [**`Back to Top`**](#)
 

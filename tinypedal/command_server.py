@@ -22,7 +22,10 @@ Remote control command server (Stream Deck, button box, SimHub, Companion...)
 Local HTTP server, disabled by default, only listens on 127.0.0.1:
     GET  /commands         -> list available command names (JSON)
     POST /command/<name>   -> run command, requires "X-TinyPedal" request header
-    GET  /stream           -> WebSocket, pushes live telemetry JSON (query: interval=ms)
+    GET  /stream           -> WebSocket, pushes live telemetry JSON
+                              query: interval=ms, fields=speed,gear (only these fields),
+                              changes=1 (only fields changed since last message, nothing if none)
+                              client text message {"fields": [...] or null, "changes": bool} updates options
 
 The required header prevents web pages opened in browser from triggering commands,
 as browsers cannot send custom header to other site without CORS approval.
@@ -137,6 +140,50 @@ def stream_interval(path: str) -> float:
     return min(max(interval, low), high) / 1000
 
 
+class StreamOptions:
+    """Stream subscription: selected fields, changes only"""
+
+    __slots__ = ("fields", "changes", "last")
+
+    def __init__(self, fields: list[str] | None = None, changes: bool = False):
+        self.fields = set(fields) if fields else None
+        self.changes = changes
+        self.last: dict = {}
+
+    @classmethod
+    def from_path(cls, path: str) -> StreamOptions:
+        """Options from ?fields=a,b&changes=1 query"""
+        query = parse_qs(urlsplit(path).query)
+        fields = [name for value in query.get("fields", []) for name in value.split(",") if name]
+        changes = query.get("changes", ["0"])[0].lower() in ("1", "true", "yes")
+        return cls(fields, changes)
+
+    def update(self, message: bytes) -> None:
+        """Update options from client JSON message, ignore invalid message"""
+        try:
+            data = json.loads(message)
+        except ValueError:
+            return
+        if not isinstance(data, dict):
+            return
+        if "fields" in data:
+            fields = data["fields"]
+            self.fields = {str(name) for name in fields} if isinstance(fields, list) and fields else None
+        if "changes" in data:
+            self.changes = bool(data["changes"])
+        self.last = {}  # send full data after change
+
+    def payload(self, data: dict) -> dict | None:
+        """Data to send, None if nothing changed (changes only)"""
+        if self.fields is not None:
+            data = {name: value for name, value in data.items() if name in self.fields}
+        if not self.changes:
+            return data
+        changed = {name: value for name, value in data.items() if self.last.get(name, ...) != value}
+        self.last = data
+        return changed or None
+
+
 def default_snapshot() -> dict:
     """Live telemetry, same data as web dashboard"""
     from .web_dashboard import telemetry_snapshot
@@ -208,6 +255,7 @@ class CommandHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
         self.close_connection = True
         interval = stream_interval(self.path)
+        options = StreamOptions.from_path(self.path)
         sock = self.connection
         logger.info("REMOTE CONTROL: stream client connected (%sms)", round(interval * 1000))
         try:
@@ -217,11 +265,15 @@ class CommandHandler(BaseHTTPRequestHandler):
                 except Exception:  # never break stream on bad telemetry
                     logger.debug("REMOTE CONTROL: snapshot error", exc_info=True)
                     data = {"active": False}
-                sock.sendall(websocket_frame(json.dumps(data).encode("utf-8")))
+                message = options.payload(data)
+                if message is not None:
+                    sock.sendall(websocket_frame(json.dumps(message).encode("utf-8")))
                 readable, _, _ = select.select([sock], [], [], interval)
                 if readable:
                     opcode, payload = read_websocket_frame(sock)
-                    if opcode == WS_OP_CLOSE:
+                    if opcode == WS_OP_TEXT:
+                        options.update(payload)
+                    elif opcode == WS_OP_CLOSE:
                         sock.sendall(websocket_frame(payload[:2], WS_OP_CLOSE))
                         break
                     if opcode == WS_OP_PING:

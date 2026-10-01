@@ -20,10 +20,13 @@
 Telemetry replay control
 """
 
+from __future__ import annotations
+
 import os
 import time
 
-from PySide6.QtCore import QBasicTimer, Qt
+from PySide6.QtCore import QBasicTimer, QRect, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -35,6 +38,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QStyle,
+    QStyleOptionSlider,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
@@ -42,15 +49,27 @@ from .. import app_signal
 from ..api_control import api
 from ..const_api import API_LMU_NAME, API_RF2_NAME
 from ..i18n import tr, trm
-from ..replay import FILE_EXT, REPLAY_FAMILIES, SPEEDS, replay, replay_compatible
+from ..replay import FILE_EXT, SPEEDS, list_replays, replay, replay_compatible
+from ..replay_session import api_supported, start_api_recording
 from ..setting import cfg
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
+SLIDER_SCALE = 10  # slider steps per second
+SEEK_STEP = 5.0  # seconds, arrow keys
+
 
 def format_time(seconds: float) -> str:
-    """Format seconds as m:ss"""
+    """Format seconds as m:ss (h:mm:ss over an hour)"""
     minutes, seconds = divmod(int(seconds), 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
+
+
+def format_size(size: int) -> str:
+    """File size in MB"""
+    return f"{size / 1048576:.1f} MB"
 
 
 def restart_api():
@@ -59,14 +78,56 @@ def restart_api():
     app_signal.refresh.emit(True)
 
 
+class MarkerSlider(QSlider):
+    """Position slider showing lap & incident markers, and section to save"""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.laps: list[float] = []
+        self.incidents: list[float] = []
+        self.section: tuple[float | None, float | None] = (None, None)
+
+    def groove(self) -> QRect:
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        return self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, self)
+
+    def x_of(self, seconds: float, groove: QRect) -> float:
+        span = max(self.maximum() - self.minimum(), 1)
+        handle = self.style().pixelMetric(QStyle.PixelMetric.PM_SliderLength, None, self)
+        left = groove.left() + handle / 2
+        return left + (seconds * SLIDER_SCALE - self.minimum()) / span * (groove.width() - handle)
+
+    def paintEvent(self, event):
+        groove = self.groove()
+        painter = QPainter(self)
+        start, end = self.section
+        if start is not None or end is not None:
+            left = self.x_of(start or 0.0, groove)
+            right = self.x_of(end if end is not None else self.maximum() / SLIDER_SCALE, groove)
+            painter.fillRect(int(left), 0, max(int(right - left), 1), self.height(), QColor(56, 189, 248, 60))
+        painter.setPen(QPen(QColor(150, 150, 150), 1))
+        for seconds in self.laps:
+            x = int(self.x_of(seconds, groove))
+            painter.drawLine(x, 0, x, self.height() // 4)
+        painter.setPen(QPen(QColor("#F43F5E"), 2))
+        for seconds in self.incidents:
+            x = int(self.x_of(seconds, groove))
+            painter.drawLine(x, self.height() * 3 // 4, x, self.height())
+        painter.end()
+        super().paintEvent(event)
+
+
 @singleton_dialog("replay", show_error=False)
 class ReplayView(BaseDialog):
-    """Record LMU shared memory, and replay it through all widgets without the game"""
+    """Record shared memory, and replay it through all widgets without the game"""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.set_utility_title(tr("Telemetry Replay"))
         self._update_timer = QBasicTimer()
+        self._loaded_file = ""
 
         # Recording
         self.button_record = QPushButton(self)
@@ -78,13 +139,40 @@ class ReplayView(BaseDialog):
         layout_record.addWidget(self.button_record)
         layout_record.addWidget(self.label_record)
 
-        # Replay
+        # Replay list
+        self.replay_list = QTreeWidget(self)
+        self.replay_list.setRootIsDecorated(False)
+        self.replay_list.setHeaderLabels(
+            [tr("Date"), tr("Track"), tr("Vehicle"), tr("Session"), tr("Duration"), tr("Size")])
+        self.replay_list.itemDoubleClicked.connect(self.open_selected)
+        self.replay_list.setMinimumHeight(UIScaler.size(8))
+        button_open = QPushButton(tr("Open"), self)
+        button_open.clicked.connect(self.open_selected)
         self.button_open = QPushButton(tr("Open Replay..."), self)
         self.button_open.clicked.connect(self.open_replay)
+        button_refresh = QPushButton(tr("Refresh"), self)
+        button_refresh.clicked.connect(self.refresh_list)
+        button_folder = QPushButton(tr("Open Folder"), self)
+        button_folder.clicked.connect(self.open_folder)
+        box_list = QGroupBox(tr("Replays"), self)
+        layout_list = QVBoxLayout(box_list)
+        layout_list.addWidget(self.replay_list)
+        layout_list_buttons = QHBoxLayout()
+        for button in (button_open, self.button_open, button_refresh, button_folder):
+            layout_list_buttons.addWidget(button)
+        layout_list.addLayout(layout_list_buttons)
+
+        # Playback
         self.button_stop = QPushButton(tr("Back to Game"), self)
         self.button_stop.clicked.connect(self.stop_replay)
+        self.button_prev = QPushButton("|◀", self)
+        self.button_prev.setToolTip(tr("Previous frame (Shift+Left)"))
+        self.button_prev.clicked.connect(lambda: self.step(-1))
         self.button_play = QPushButton(self)
         self.button_play.clicked.connect(self.toggle_pause)
+        self.button_next = QPushButton("▶|", self)
+        self.button_next.setToolTip(tr("Next frame (Shift+Right)"))
+        self.button_next.clicked.connect(lambda: self.step(1))
         self.combo_speed = QComboBox(self)
         for speed in SPEEDS:
             self.combo_speed.addItem(f"{speed:g}x", speed)
@@ -93,30 +181,74 @@ class ReplayView(BaseDialog):
         self.check_loop = QCheckBox(tr("Loop"), self)
         self.check_loop.setChecked(True)
         self.check_loop.toggled.connect(self.set_loop)
-        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider = MarkerSlider(self)
         self.slider.setMinimumWidth(UIScaler.size(24))
         self.slider.sliderMoved.connect(self.seek)
         self.label_position = QLabel(self)
         self.label_file = QLabel(self)
 
+        self.combo_lap = QComboBox(self)
+        self.combo_lap.activated.connect(self.goto_lap)
+        self.button_prev_incident = QPushButton(tr("◀ Incident"), self)
+        self.button_prev_incident.clicked.connect(lambda: self.goto_incident(-1))
+        self.button_next_incident = QPushButton(tr("Incident ▶"), self)
+        self.button_next_incident.clicked.connect(lambda: self.goto_incident(1))
+
+        self.button_section_start = QPushButton(tr("Set Start"), self)
+        self.button_section_start.clicked.connect(lambda: self.set_section(0))
+        self.button_section_end = QPushButton(tr("Set End"), self)
+        self.button_section_end.clicked.connect(lambda: self.set_section(1))
+        self.button_section_save = QPushButton(tr("Save Section..."), self)
+        self.button_section_save.setToolTip(tr("Save part of replay between start & end to a new file"))
+        self.button_section_save.clicked.connect(self.save_section)
+
         box_replay = QGroupBox(tr("Replay"), self)
         layout_replay = QGridLayout(box_replay)
-        layout_files = QHBoxLayout()
-        layout_files.addWidget(self.button_open)
-        layout_files.addWidget(self.button_stop)
-        layout_replay.addLayout(layout_files, 0, 0, 1, 4)
-        layout_replay.addWidget(self.label_file, 1, 0, 1, 4)
-        layout_replay.addWidget(self.button_play, 2, 0)
-        layout_replay.addWidget(self.combo_speed, 2, 1)
-        layout_replay.addWidget(self.check_loop, 2, 2)
-        layout_replay.addWidget(self.label_position, 2, 3)
-        layout_replay.addWidget(self.slider, 3, 0, 1, 4)
+        layout_top = QHBoxLayout()
+        layout_top.addWidget(self.label_file, stretch=1)
+        layout_top.addWidget(self.button_stop)
+        layout_replay.addLayout(layout_top, 0, 0, 1, 6)
+        layout_replay.addWidget(self.button_prev, 1, 0)
+        layout_replay.addWidget(self.button_play, 1, 1)
+        layout_replay.addWidget(self.button_next, 1, 2)
+        layout_replay.addWidget(self.combo_speed, 1, 3)
+        layout_replay.addWidget(self.check_loop, 1, 4)
+        layout_replay.addWidget(self.label_position, 1, 5)
+        layout_replay.addWidget(self.slider, 2, 0, 1, 6)
+        layout_jump = QHBoxLayout()
+        layout_jump.addWidget(QLabel(tr("Go to lap"), self))
+        layout_jump.addWidget(self.combo_lap, stretch=1)
+        layout_jump.addWidget(self.button_prev_incident)
+        layout_jump.addWidget(self.button_next_incident)
+        layout_replay.addLayout(layout_jump, 3, 0, 1, 6)
+        layout_section = QHBoxLayout()
+        layout_section.addWidget(self.button_section_start)
+        layout_section.addWidget(self.button_section_end)
+        layout_section.addWidget(self.button_section_save)
+        layout_replay.addLayout(layout_section, 4, 0, 1, 6)
+        layout_replay.addWidget(
+            QLabel(tr("Space: play/pause, Left/Right: 5 s, Shift+Left/Right: one frame."), self), 5, 0, 1, 6)
 
         layout_main = QVBoxLayout(self)
         layout_main.addWidget(box_record)
+        layout_main.addWidget(box_list, stretch=1)
         layout_main.addWidget(box_replay)
         layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
 
+        for keys, action in (
+            ("Space", self.toggle_pause),
+            ("Left", lambda: self.seek_relative(-SEEK_STEP)),
+            ("Right", lambda: self.seek_relative(SEEK_STEP)),
+            ("Shift+Left", lambda: self.step(-1)),
+            ("Shift+Right", lambda: self.step(1)),
+        ):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(action)
+
+        self.section: list[float | None] = [None, None]
+        self.resize(UIScaler.size(44), UIScaler.size(40))
+        self.refresh_list()
         self.refresh()
         self._update_timer.start(200, self)
 
@@ -143,41 +275,103 @@ class ReplayView(BaseDialog):
         self.button_record.setEnabled(not replay.active)
 
         player = replay.player
-        for widget in (self.button_stop, self.button_play, self.combo_speed, self.check_loop, self.slider):
+        for widget in (
+            self.button_stop, self.button_play, self.button_prev, self.button_next, self.combo_speed,
+            self.check_loop, self.slider, self.combo_lap, self.button_section_start, self.button_section_end,
+        ):
             widget.setEnabled(player is not None)
+        has_incidents = player is not None and bool(self.slider.incidents)
+        self.button_prev_incident.setEnabled(has_incidents)
+        self.button_next_incident.setEnabled(has_incidents)
+        self.button_section_save.setEnabled(player is not None and None not in self.section)
         if player is None:
             self.label_file.setText(tr("Not replaying, reading from game."))
             self.label_position.setText("")
             self.button_play.setText(tr("Pause"))
+            if self._loaded_file:
+                self.load_markers()
             return
+        if player.replay.filename != self._loaded_file:
+            self.load_markers()
         duration = player.replay.duration
         position = player.position
         self.label_file.setText(os.path.basename(player.replay.filename))
         self.label_position.setText(f"{format_time(position)} / {format_time(duration)}")
         self.button_play.setText(tr("Play") if player.paused else tr("Pause"))
         if not self.slider.isSliderDown():
-            self.slider.setRange(0, int(duration * 10))
-            self.slider.setValue(int(position * 10))
+            self.slider.setRange(0, int(duration * SLIDER_SCALE))
+            self.slider.setValue(int(position * SLIDER_SCALE))
 
+    def load_markers(self):
+        """Lap & incident markers of loaded replay"""
+        player = replay.player
+        self._loaded_file = player.replay.filename if player is not None else ""
+        self.section = [None, None]
+        self.combo_lap.clear()
+        if player is None:
+            self.slider.laps, self.slider.incidents = [], []
+        else:
+            laps = player.replay.markers_of("lap")
+            self.slider.laps = [marker.time for marker in laps]
+            self.slider.incidents = [marker.time for marker in player.replay.markers_of("incident")]
+            for marker in laps:
+                self.combo_lap.addItem(trm(f"Lap {marker.text} ({format_time(marker.time)})"), marker.time)
+        self.slider.section = (None, None)
+        self.slider.update()
+
+    # Replay list
+    def refresh_list(self):
+        """List replay files in telemetry folder"""
+        self.replay_list.clear()
+        for item_info in list_replays(cfg.path.telemetry or "."):
+            info = item_info.info
+            item = QTreeWidgetItem(self.replay_list, [
+                time.strftime("%Y-%m-%d %H:%M", time.localtime(item_info.created)),
+                str(info.get("track", "")),
+                str(info.get("vehicle", "")),
+                tr(str(info.get("session", ""))) if info.get("session") else "",
+                format_time(item_info.duration) if item_info.duration >= 0 else "?",
+                format_size(item_info.size),
+            ])
+            item.setData(0, Qt.ItemDataRole.UserRole, item_info.filename)
+            item.setToolTip(0, os.path.basename(item_info.filename))
+        for column in range(self.replay_list.columnCount()):
+            self.replay_list.resizeColumnToContents(column)
+
+    def open_selected(self, *_):
+        item = self.replay_list.currentItem()
+        if item is not None:
+            self.open_file(item.data(0, Qt.ItemDataRole.UserRole))
+
+    def open_folder(self):
+        folder = os.path.abspath(cfg.path.telemetry or ".")
+        os.makedirs(folder, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+    # Recording
     def toggle_recording(self):
         """Start or stop recording"""
         if replay.recording:
             replay.stop_recording()
+            self.refresh_list()
         elif self.check_lmu_api():
-            filename = os.path.join(
-                cfg.path.telemetry or ".", time.strftime(f"replay-%Y-%m-%d-%H-%M-%S{FILE_EXT}")
-            )
-            replay.start_recording(filename, api.raw_data, rest_source=api.rest_data, header_extra=api.replay_header())
+            start_api_recording()
         self.refresh()
 
+    # Playback
     def open_replay(self):
-        """Load replay file and switch API to it"""
+        """Choose replay file and switch API to it"""
         if not self.check_lmu_api():
             return
         filename, _ = QFileDialog.getOpenFileName(
             self, tr("Open Replay..."), cfg.path.telemetry, f"Modern Tiny Pedals Replay (*{FILE_EXT})"
         )
-        if not filename:
+        if filename:
+            self.open_file(filename)
+
+    def open_file(self, filename: str):
+        """Load replay file and switch API to it"""
+        if not self.check_lmu_api():
             return
         if replay.recording:
             replay.stop_recording()
@@ -187,14 +381,16 @@ class ReplayView(BaseDialog):
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to open replay file: {error}"))
             return
         if not replay_compatible(player.replay.source, api.name):
+            source = player.replay.source
             replay.unload()
             QMessageBox.warning(
                 self, tr("Error"),
-                trm(f"Replay recorded with {player.replay.source} API, select {player.replay.source} API to play it."))
+                trm(f"Replay recorded with {source} API, select {source} API to play it."))
             return
         restart_api()
         self.set_speed()
         self.set_loop(self.check_loop.isChecked())
+        self.load_markers()
         self.refresh()
 
     def stop_replay(self):
@@ -207,6 +403,17 @@ class ReplayView(BaseDialog):
         """Pause or resume replay"""
         if replay.player is not None:
             replay.player.set_paused(not replay.player.paused)
+            self.refresh()
+
+    def step(self, frames: int):
+        """Pause and move by frames"""
+        if replay.player is not None:
+            replay.player.step(frames)
+            self.refresh()
+
+    def seek_relative(self, seconds: float):
+        if replay.player is not None:
+            replay.player.seek(replay.player.position + seconds)
             self.refresh()
 
     def set_speed(self, *_):
@@ -222,12 +429,66 @@ class ReplayView(BaseDialog):
     def seek(self, value: int):
         """Jump to slider position"""
         if replay.player is not None:
-            replay.player.seek(value / 10)
+            replay.player.seek(value / SLIDER_SCALE)
             self.refresh()
+
+    def goto_lap(self, index: int):
+        if replay.player is not None and index >= 0:
+            replay.player.seek(float(self.combo_lap.itemData(index)))
+            self.refresh()
+
+    def goto_incident(self, direction: int):
+        """Jump to next or previous incident (3 seconds before it)"""
+        player = replay.player
+        if player is None or not self.slider.incidents:
+            return
+        position = player.position
+        if direction > 0:
+            later = [t for t in self.slider.incidents if t - 3 > position + 0.5]
+            target = later[0] if later else self.slider.incidents[0]
+        else:
+            earlier = [t for t in self.slider.incidents if t - 3 < position - 0.5]
+            target = earlier[-1] if earlier else self.slider.incidents[-1]
+        player.seek(max(target - 3, 0.0))
+        self.refresh()
+
+    def set_section(self, index: int):
+        """Set section start or end at current position"""
+        if replay.player is None:
+            return
+        self.section[index] = replay.player.position
+        start, end = self.section
+        if start is not None and end is not None and end < start:
+            self.section = [end, start]
+        self.slider.section = (self.section[0], self.section[1])
+        self.slider.update()
+        self.refresh()
+
+    def save_section(self):
+        """Save replay section to new file"""
+        player = replay.player
+        start, end = self.section
+        if player is None or start is None or end is None:
+            return
+        default = os.path.splitext(player.replay.filename)[0] + f"-{int(start)}-{int(end)}{FILE_EXT}"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, tr("Save Section..."), default, f"Modern Tiny Pedals Replay (*{FILE_EXT})")
+        if not filename:
+            return
+        if os.path.abspath(filename) == os.path.abspath(player.replay.filename):
+            QMessageBox.warning(self, tr("Error"), tr("Choose another file name than the open replay."))
+            return
+        try:
+            frames = player.replay.export(filename, start, end)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save replay section: {error}"))
+            return
+        self.label_record.setText(trm(f"{frames} frames: {os.path.basename(filename)}"))
+        self.refresh_list()
 
     def check_lmu_api(self) -> bool:
         """Replay supports LMU, rF2 & LMU legacy shared memory APIs"""
-        if any(api.name in family for family in REPLAY_FAMILIES):
+        if api_supported():
             return True
         QMessageBox.information(
             self, tr("Telemetry Replay"), trm(f"Select {API_LMU_NAME} / {API_RF2_NAME} API to record or replay telemetry.")

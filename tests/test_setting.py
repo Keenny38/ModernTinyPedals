@@ -261,3 +261,22 @@ def test_app_version_does_not_drive_setting_migrations(monkeypatch):
     user = {"preset": {"version": version.SETTING_VERSION}}
     setting_validator.PresetValidator.user_preset(user, {"preset": {"version": ""}})
     assert calls == []
+
+
+def test_recorder_module_enabled_in_existing_presets_once():
+    from tinypedal import setting_validator, version
+    from tinypedal.setting import cfg
+    from tinypedal.userfile.json_setting import copy_setting
+
+    cfg.default.set_default()
+    default = copy_setting(dict(cfg.default.setting))
+    assert default["module_recorder"]["enable"] is True  # new presets
+    old = copy_setting(default)
+    old["preset"]["version"] = "2.50.0"
+    old["module_recorder"]["enable"] = False
+    updated = setting_validator.PresetValidator.user_preset(old, default)
+    assert updated["module_recorder"]["enable"] is True  # existing preset, saved before 2.50.2
+    assert updated["preset"]["version"] == version.SETTING_VERSION
+    updated["module_recorder"]["enable"] = False  # disabled again by user afterwards: kept
+    again = setting_validator.PresetValidator.user_preset(updated, default)
+    assert again["module_recorder"]["enable"] is False

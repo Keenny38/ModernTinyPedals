@@ -833,8 +833,16 @@
             "module_notes": "Enable notes module."
         },
         "module_recorder": {
+            "enable_auto_replay_recording": "Start recording a telemetry replay when driving starts, and stop it 10 seconds after leaving driving (requires Le Mans Ultimate or rFactor 2 API). Automatic recordings are named replay-auto-<date time>.tpreplay. A recording stopped from Telemetry replay window is not restarted until next driving. Default is disabled.",
+            "enable_compressed_lap_files": "Save laps as compressed CSV files (.csv.gz, about 5 times smaller). Lap telemetry viewer reads both. Default is disabled.",
+            "enable_lap_recording": "Record laps to CSV files. Default is enabled.",
+            "enable_lap_recording_during_replay": "Record laps while a telemetry replay is playing. Laps are named after the time they were driven, and lap info tells which replay they come from. Default is disabled, as replayed laps were already recorded while driving.",
+            "enable_out_and_in_lap_recording": "Also save out laps (started in pit lane) and in laps (ended in pit lane), marked as such in lap info. Out laps are saved when start line is crossed in pit lane. Default is disabled.",
+            "enable_replay_skip_inactive_frames": "Do not record replay frames outside driving (menus, garage, monitor), so replays only contain driving. Also applies to recordings started from Telemetry replay window. Default is enabled.",
             "minimum_lap_distance_percentage": "Minimum lap distance (percentage of track length) that must be recorded for a lap to be saved. Default is 90.",
+            "number_of_best_laps_kept_per_track": "Number of fastest valid laps never removed from track & class folder, even when they are the oldest. Default is 3.",
             "number_of_saved_laps_per_track": "Maximum number of laps kept per track & class folder, oldest laps are removed. Default is 50.",
+            "number_of_saved_replays": "Maximum number of automatic replay recordings kept, oldest are removed. Manual recordings are never removed. Default is 20.",
             "save_invalid_laps": "Save laps that are not confirmed as valid (marked invalid). Default is enabled."
         },
         "module_relative": {

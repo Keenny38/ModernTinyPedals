@@ -127,10 +127,16 @@ def fake_reader(sim: LapSim) -> SimpleNamespace:
             tank_capacity=lambda: 100.0,
         ),
         emotor=_Group(),
-        inputs=_Group(throttle=lambda index=None: 1.0, brake=lambda index=None: 0.0),
+        inputs=_Group(
+            throttle=lambda index=None: 1.0, brake=lambda index=None: 0.0,
+            throttle_raw=lambda index=None: 0.8, brake_raw=lambda index=None: 0.1,
+        ),
         tyre=_Group(
             surface_temperature_avg=lambda index=None: (80.0, 81.0, 78.0, 79.0),
             pressure=lambda index=None: (170.0, 171.0, 165.0, 166.0),
         ),
         state=_Group(active=lambda: True, paused=lambda: False),
+        brake=_Group(temperature=lambda index=None: (400.0, 410.0, 300.0, 310.0)),
+        wheel=_Group(),
+        switch=_Group(),
     )

@@ -4,6 +4,7 @@ import ctypes
 import io
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 
 from pyLMUSharedMemory import lmu_data
 from tinypedal.adapter import lmu_connector
@@ -168,6 +169,7 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
     finally:
         replay.unload()
         dialog.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_rf2_replay_reads_every_zone(tmp_path):
@@ -242,3 +244,202 @@ def test_secondary_zone_reads_same_frame(tmp_path):
     clock.now = 1.0  # time moves between zone updates
     secondary.update()
     assert bytes(primary.data) + bytes(secondary.data) == player.replay.frame(0)
+
+
+def test_markers_summary_and_quick_info(tmp_path):
+    from tinypedal.replay import list_replays, read_replay_info
+
+    filename = str(tmp_path / "replay-a.tpreplay")
+    with open(filename, "wb") as file:
+        writer = ReplayWriter(file, 4, 10, {"source": "Le Mans Ultimate", "info": {"track": "Spa"}})
+        for index in range(30):
+            writer.write(index * 0.1, b"abcd")
+            if index == 10:
+                writer.write_marker(index * 0.1, "lap", "2")
+        writer.write_marker(0.5, "incident", "8.0g")  # written later, earlier time
+        writer.finish()
+    replay = ReplayFile(filename)
+    assert [marker.kind for marker in replay.markers] == ["incident", "lap"]  # sorted by time
+    assert replay.markers_of("lap")[0].text == "2"
+    assert replay.summary["frames"] == 30
+    assert replay.info == {"track": "Spa"}
+    replay.close()
+    info = read_replay_info(filename)
+    assert info.duration == pytest.approx(2.9) and info.info["track"] == "Spa"
+    assert [item.filename for item in list_replays(str(tmp_path))] == [filename]
+
+
+def test_interrupted_recording_has_unknown_duration(tmp_path):
+    from tinypedal.replay import read_replay_info
+
+    assert read_replay_info(write_replay(tmp_path, make_frames(5))).duration == -1
+
+
+def test_rest_snapshot_written_only_when_changed():
+    writer = ReplayWriter(io.BytesIO(), 4, 10)
+    assert writer.write_rest(0.0, {"a": 1})
+    assert not writer.write_rest(1.0, {"a": 1})
+    assert writer.write_rest(2.0, {"a": 2})
+
+
+def test_frames_read_from_file_on_demand(tmp_path):
+    frames = make_frames(KEYFRAME_INTERVAL + 20)
+    replay = ReplayFile(write_replay(tmp_path, frames))
+    assert not hasattr(replay, "_payloads")  # only frame positions in memory
+    section = [frame for _, frame in replay.iter_frames(KEYFRAME_INTERVAL + 5, KEYFRAME_INTERVAL + 7)]
+    assert section == frames[KEYFRAME_INTERVAL + 5:KEYFRAME_INTERVAL + 8]
+    replay.close()
+
+
+def test_export_section(tmp_path):
+    frames = make_frames(KEYFRAME_INTERVAL * 2)
+    filename = str(tmp_path / "full.tpreplay")
+    with open(filename, "wb") as file:
+        writer = ReplayWriter(file, len(frames[0]), 10, {"source": "Le Mans Ultimate"})
+        for index, frame in enumerate(frames):
+            writer.write(index * 0.1, frame)
+            if index % 50 == 0:
+                writer.write_rest(index * 0.1, {"timeScale": index})
+        writer.write_marker(12.0, "incident", "x")
+        writer.finish()
+    replay = ReplayFile(filename)
+    section = str(tmp_path / "section.tpreplay")
+    count = replay.export(section, 11.0, 13.0)
+    assert count == 21
+    part = ReplayFile(section)
+    assert len(part) == 21 and part.times[0] == 0.0
+    assert [part.frame(index) for index in range(21)] == frames[110:131]  # first frame re-keyed
+    assert part.rest_data[0] == {"timeScale": 100}  # snapshot in effect at section start
+    assert part.markers[0].time == pytest.approx(1.0)
+    assert part.header["trimmed_from"] == "full.tpreplay"
+    part.close()
+    replay.close()
+
+
+def test_player_step(tmp_path):
+    clock = Clock()
+    player = ReplayPlayer(ReplayFile(write_replay(tmp_path, make_frames(10))), clock=clock)
+    player.seek(0.5)
+    player.step(1)
+    assert player.paused and player.position == pytest.approx(0.6)
+    player.step(-3)
+    assert player.position == pytest.approx(0.3)
+    player.step(-99)
+    assert player.position == 0.0
+
+
+def test_recording_skips_inactive_frames_and_writes_markers(tmp_path):
+    import time
+
+    from tinypedal.replay import RecordingSources
+
+    control = ReplayControl()
+    state = {"active": True, "lap": 1}
+    filename = str(tmp_path / "rec.tpreplay")
+    sources = RecordingSources(
+        frame=lambda: b"abcd", active=lambda: state["active"], lap=lambda: state["lap"],
+        info=lambda: {"track": "Spa"})
+    control.start_recording(filename, sources, rate=100)
+    while control.recorded_frames < 5:
+        time.sleep(0.005)
+    state["active"] = False
+    time.sleep(1.3)  # inactive gap removed from replay time
+    state["active"] = True
+    state["lap"] = 2
+    assert control.add_marker("incident", "9g", ago=0.0)
+    frames = control.recorded_frames
+    while control.recorded_frames < frames + 5:
+        time.sleep(0.005)
+    control.stop_recording()
+    assert not control.add_marker("incident")  # not recording
+    replay = ReplayFile(filename)
+    assert replay.duration < 1.0
+    assert [marker.text for marker in replay.markers_of("lap")] == ["1", "2"]
+    assert replay.markers_of("incident")[0].text == "9g"
+    assert replay.info == {"track": "Spa"} and replay.summary
+    replay.close()
+
+
+def test_recording_without_frame_leaves_no_file(tmp_path):
+    import time
+
+    control = ReplayControl()
+    filename = str(tmp_path / "empty.tpreplay")
+    control.start_recording(filename, lambda: None, rate=100)
+    time.sleep(0.05)
+    control.stop_recording()
+    assert not (tmp_path / "empty.tpreplay").exists()
+
+
+def test_remove_old_replays(tmp_path):
+    import os
+
+    from tinypedal.replay import remove_old_replays
+
+    for index in range(4):
+        path = tmp_path / f"replay-auto-{index}.tpreplay"
+        path.write_bytes(b"x")
+        os.utime(path, (1000 + index, 1000 + index))
+    (tmp_path / "replay-manual.tpreplay").write_bytes(b"x")
+    removed = remove_old_replays(str(tmp_path), "replay-auto-", 2)
+    assert sorted(removed) == ["replay-auto-0.tpreplay", "replay-auto-1.tpreplay"]
+    assert (tmp_path / "replay-manual.tpreplay").exists()  # manual recordings never removed
+
+
+def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
+    from tinypedal.api_control import api
+    from tinypedal.replay import replay
+    from tinypedal.ui import replay_view
+
+    size = ctypes.sizeof(lmu_data.LMUObjectOut)
+    filename = str(tmp_path / "markers.tpreplay")
+    with open(filename, "wb") as file:
+        writer = ReplayWriter(file, size, 10, {"info": {"track": "Spa"}})
+        frame = bytes(size)
+        for index in range(100):
+            writer.write(index * 0.1, frame)
+        writer.write_marker(2.0, "lap", "3")
+        writer.write_marker(6.0, "incident", "9g")
+        writer.finish()
+    monkeypatch.setattr(replay_view, "restart_api", lambda: None)
+    monkeypatch.setattr(type(api), "name", property(lambda self: replay_view.API_LMU_NAME))
+    monkeypatch.setattr(replay_view.cfg.path, "telemetry", str(tmp_path))
+    dialog = replay_view.ReplayView(None)
+    try:
+        assert dialog.replay_list.topLevelItemCount() == 1
+        assert dialog.replay_list.topLevelItem(0).text(1) == "Spa"
+        dialog.replay_list.setCurrentItem(dialog.replay_list.topLevelItem(0))
+        dialog.open_selected()
+        assert replay.active
+        assert dialog.slider.laps == [2.0] and dialog.slider.incidents == [6.0]
+        assert dialog.combo_lap.count() == 1
+        replay.player.set_paused(True)
+        dialog.goto_lap(0)
+        assert replay.player.position == pytest.approx(2.0)
+        dialog.goto_incident(1)
+        assert replay.player.position == pytest.approx(3.0)  # 3 seconds before incident
+        dialog.step(1)
+        assert replay.player.position == pytest.approx(3.1)
+        dialog.set_section(0)
+        replay.player.seek(5.0)
+        dialog.set_section(1)
+        assert dialog.button_section_save.isEnabled()
+        target = str(tmp_path / "part.tpreplay")
+        monkeypatch.setattr(replay_view.QFileDialog, "getSaveFileName", lambda *args: (target, ""))
+        dialog.save_section()
+        part = ReplayFile(target)
+        assert part.duration == pytest.approx(1.9)
+        part.close()
+        dialog.stop_replay()
+    finally:
+        replay.unload()
+        dialog.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_unload_keeps_frames_readable_until_api_restarts(tmp_path):
+    """Back to Game: API reads frames until restarted, file closing must not break it"""
+    control = ReplayControl()
+    player = control.load(write_replay(tmp_path, make_frames(5)))
+    control.unload()
+    assert player.current_frame()  # was "seek of closed file" in API thread

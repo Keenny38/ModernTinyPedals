@@ -42,7 +42,22 @@ def test_write_read_roundtrip(tmp_path):
     write_ld(filename, channels, LdInfo(driver="Me", vehicle="Car", venue="Spa", session="Race", comment="c"))
     info, result = read_ld(filename)
     assert (info.driver, info.vehicle, info.venue, info.session, info.comment) == ("Me", "Car", "Spa", "Race", "c")
-    assert result == channels
+    assert [(c.name, c.unit, c.frequency, c.values) for c in result] ==         [(c.name, c.unit, c.frequency, c.values) for c in channels]
+    assert result[0].short_name == "km/h"  # unit also in short name field, like MoTeC files seen in the wild
+
+
+def test_unit_field_layout(tmp_path):
+    """Unit at byte 64 of channel descriptor (as real MoTeC files), and in documented unit field"""
+    import struct
+
+    filename = str(tmp_path / "out.ld")
+    write_ld(filename, [Channel("Ground Speed", "Spd", "km/h", 10, [1.0])], LdInfo())
+    with open(filename, "rb") as file:
+        data = file.read()
+    meta_ptr = struct.unpack_from("<I4xI", data, 0)[1]
+    assert data[meta_ptr + 32:meta_ptr + 44].rstrip(b"\0") == b"Ground Speed"
+    assert data[meta_ptr + 64:meta_ptr + 68] == b"km/h"
+    assert data[meta_ptr + 72:meta_ptr + 76] == b"km/h"
 
 
 def test_sample_rate():

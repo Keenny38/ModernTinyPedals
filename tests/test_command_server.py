@@ -176,3 +176,32 @@ def test_stream_interval_bounds():
     assert command_server.stream_interval("/stream?interval=1") == 0.02
     assert command_server.stream_interval("/stream?interval=abc") == 0.1
     assert command_server.stream_interval("/stream?interval=99999") == 5.0
+
+
+def test_stream_options_fields_and_changes():
+    options = command_server.StreamOptions.from_path("/stream?fields=speed,gear&changes=1")
+    assert options.fields == {"speed", "gear"} and options.changes
+    assert options.payload({"speed": 100, "gear": 3, "rpm": 7000}) == {"speed": 100, "gear": 3}  # first: full
+    assert options.payload({"speed": 100, "gear": 3, "rpm": 7100}) is None  # nothing changed
+    assert options.payload({"speed": 101, "gear": 3}) == {"speed": 101}
+    options.update(b'{"fields": null, "changes": false}')
+    assert options.fields is None and not options.changes
+    assert options.payload({"speed": 101, "rpm": 1}) == {"speed": 101, "rpm": 1}
+    options.update(b"not json")  # ignored
+    assert options.fields is None
+    plain = command_server.StreamOptions.from_path("/stream")
+    assert plain.fields is None and not plain.changes
+
+
+def test_stream_subscription_message(server, monkeypatch):
+    monkeypatch.setattr(
+        command_server.CommandHandler, "snapshot", staticmethod(lambda: {"speed": 100, "gear": 3}))
+    sock, _, _ = ws_connect("/stream?interval=20&fields=speed")
+    with sock:
+        assert json.loads(ws_read(sock)[1]) == {"speed": 100}
+        ws_send(sock, command_server.WS_OP_TEXT, b'{"fields": ["gear"]}')
+        for _ in range(20):
+            if json.loads(ws_read(sock)[1]) == {"gear": 3}:
+                break
+        else:
+            pytest.fail("subscription not updated")

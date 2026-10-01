@@ -73,7 +73,7 @@ from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
 from .toast import show_toast
-from .tools_view import ToolsView
+from .tools_view import ToolsView, open_tool
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,11 @@ NAV_PAGES = (
     ("tools", "Tools", "\uec7a", "T"),  # developer tools
 )
 PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
+
+# Rail tools, opened in their own window: (label, tooltip, icon glyph, fallback letter, "module.DialogClass")
+RAIL_TOOLS = (
+    ("Telemetry", "Lap Telemetry Viewer", "\ue9d2", "T", "lap_viewer.LapViewer"),  # area chart
+)
 
 # Rail overlay toggles: (overlay option, tooltip, icon glyph, fallback letter)
 RAIL_TOGGLES = (
@@ -232,6 +237,16 @@ class TabView(QWidget):
             layout_rail.addWidget(button)
             shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
             shortcut.activated.connect(lambda page=index: self.select_page(page))
+        # Tools opened from rail (dialogs, not pages): (label, tooltip, icon glyph, fallback letter, dialog)
+        for shortcut_index, (label, tooltip, glyph, letter, dialog_path) in enumerate(RAIL_TOOLS, len(NAV_PAGES) + 1):
+            button = NavButton(tr(label), glyph, letter, icon_family, rail)
+            button.setCheckable(False)
+            button.setToolTip(f"{tr(tooltip)} (Ctrl+{shortcut_index})")
+            button.clicked.connect(lambda _=False, path=dialog_path: open_tool(path, parent))
+            button.setObjectName(f"railTool:{dialog_path}")
+            layout_rail.addWidget(button)
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{shortcut_index}"), self)
+            shortcut.activated.connect(lambda path=dialog_path: open_tool(path, parent))
         layout_rail.addStretch(1)
         self._nav.idClicked.connect(self.select_page)
 

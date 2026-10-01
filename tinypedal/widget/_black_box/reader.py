@@ -31,6 +31,7 @@ from ... import calculation as calc
 from ...api_control import api
 from ...const_common import WHEELS_ZERO
 from ...module_info import minfo
+from ...replay import replay
 from ...userfile.heatmap import (
     HEATMAP_DEFAULT_BRAKE,
     HEATMAP_DEFAULT_TYRE,
@@ -604,6 +605,9 @@ class DataReader:
             f"{self.event_labels['impact']} {incident.peak_g:.1f}g{direction}", incident.peak_g >= 10,
         )
         self.browse_incident = None  # a new incident is shown first
+        # Marker at trigger time in replay being recorded, see Telemetry replay window
+        latest = incident.samples[-1].time if incident.samples else incident.time
+        replay.add_marker("incident", f"{incident.peak_g:.1f}g", latest - incident.time)
         if self.export_folder:
             EXPORT_QUEUE.submit(incident, self.export_folder, self.export_format)
 

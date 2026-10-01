@@ -24,7 +24,7 @@ from importlib import import_module
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPalette
-from PySide6.QtWidgets import QAbstractButton, QGridLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractButton, QApplication, QGridLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from ..i18n import tr
 from ._common import UIScaler
@@ -62,6 +62,13 @@ TOOL_SECTIONS = (
 def open_tool(dialog_path: str, parent):
     """Open tool dialog from "module.DialogClass" path relative to ui package"""
     module_name, class_name = dialog_path.rsplit(".", 1)
+    for widget in QApplication.topLevelWidgets():  # already open: bring to front instead of warning
+        if type(widget).__name__ == class_name and widget.isVisible():
+            if widget.isMinimized():
+                widget.showNormal()
+            widget.raise_()
+            widget.activateWindow()
+            return
     dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
     _dialog = dialog_class(parent)
     _dialog.show()

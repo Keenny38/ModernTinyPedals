@@ -390,3 +390,53 @@ Réalisé (28/09/2026) : A, B, C, D — intégralement.
 - Moniteur de performance : le temps de mise à jour du Black box n'était jamais mesuré (méthode venant d'un mixin), corrigé.
 - Tableau de bord web en HTTPS (certificat auto-signé, empreinte affichée).
 
+
+---
+
+## H. Télémétrie : enregistreur, visionneuse, rejeu, flux (01/10/2026)
+
+Corrections :
+- L'enregistreur de tours ne tourne plus pendant un rejeu (option `enable_lap_recording_during_replay` pour le permettre ; les tours portent alors l'heure où ils ont été roulés et le nom du rejeu). Avant, rejouer créait des doublons datés du rejeu et la rotation supprimait de vrais tours.
+- Un tour est abandonné quand le temps de jeu recule (rejeu en boucle ou rembobiné), au lieu d'être enregistré avec une durée fausse.
+- La rotation garde les `number_of_best_laps_kept_per_track` meilleurs tours valides (3 par défaut), même s'ils sont les plus anciens.
+- Rejeu : les images sont lues dans le fichier à la demande (seules leurs positions restent en mémoire), au lieu de charger tout le fichier (~430 Mo pour une heure).
+
+Enregistreur de tours :
+- 26 canaux de plus : altitude, accélérations latérale et longitudinale (G), secteur, TC et ABS actifs, batterie, et par roue : température des freins, usure des pneus, vitesse de roue, hauteur de caisse, débattement.
+- Première ligne d'infos du tour (JSON) : circuit, véhicule, catégorie, session, températures, humidité, carburant, temps intermédiaires officiels, type de tour, version.
+- Échantillons ignorés quand les données du jeu n'ont pas changé.
+- Options : tours de sortie et de rentrée, fichiers compressés `.csv.gz`, désactivation de l'enregistrement des tours.
+
+Visionneuse :
+- Plusieurs tours à la fois (une couleur par tour), meilleur tour valide en référence par défaut, ajout de fichiers d'autres dossiers.
+- Choix des canaux (menu `Canaux`, mémorisé), secteurs sur les courbes, temps par secteur, meilleur tour théorique, alerte si les véhicules diffèrent.
+- Courbes dessinées une fois dans une image en cache (le curseur ne redessine plus tout), réduction min/max par pixel (les pics de freinage restent visibles).
+- Glisser pour déplacer, Maj+glisser pour zoomer sur une zone, raccourcis clavier.
+- Onglet `Cercle G`. Export MoTeC de tous les canaux, du tour de référence, des tours affichés ou de tout le circuit, avec véhicule et session.
+
+Rejeu :
+- Enregistrement automatique en option (`enable_auto_replay_recording`), avec limite du nombre de fichiers automatiques.
+- Images hors conduite ignorées (option), trous de plus d'une seconde retirés du temps du rejeu.
+- En-tête avec circuit, véhicule et session ; résumé en fin de fichier pour lister durée et taille sans tout lire.
+- Liste des rejeux, repères des tours et des incidents de la Black box sur la barre de progression, aller au tour N, incident précédent/suivant, image par image, raccourcis clavier, enregistrement d'une section.
+- Données de l'API REST écrites seulement quand elles changent.
+
+Flux WebSocket `/stream` : `?fields=` pour choisir les champs, `?changes=1` pour n'envoyer que ce qui a changé, modifiables par message du client.
+
+### Audit de la télémétrie (01/10/2026)
+
+Corrigé :
+- 🔴 « Revenir au jeu » fermait le fichier de rejeu alors que le fil de l'API lisait encore des images : `ValueError: seek of closed file`, fil de mise à jour arrêté. Le fichier se ferme maintenant quand le lecteur n'est plus utilisé.
+- 🟠 Distance du tour remise à zéro en retard par le jeu : les premiers échantillons gardaient la distance du tour précédent. La visionneuse n'affichait qu'un point, et un faux tour de 6,8 s passait le contrôle des 90 % de distance. Échantillons écartés à la lecture et pour le contrôle.
+- 🟠 Distance mise à jour 5 fois par seconde : courbes en escalier (412 distances pour 4 000 échantillons). Distance interpolée dans le temps entre deux mises à jour.
+- 🟠 Enregistrement du tour dans le fil d'échantillonnage : trou de données au début du tour suivant. Enregistrement en arrière-plan.
+- 🟡 Tour confirmé par le jeu mais marqué `invalid` si on rentre au garage moins d'une seconde après la ligne. Le temps du jeu est vérifié avant d'abandonner.
+- 🟡 Visionneuse : meilleur tour théorique et meilleurs secteurs mélangeaient les fichiers ajoutés d'autres circuits ; cache de tours sans limite (plusieurs Mo par tour, export de tout un circuit) ; plan du circuit et cercle G entièrement redessinés à chaque mouvement de souris.
+- 🟡 Accélérateur et frein enregistrés après l'électronique de la voiture (coups de gaz et coupures aux passages de rapports). Valeurs non filtrées des pédales.
+
+Restant (mineur) : un tour aberrant élargit l'échelle du delta pour tous ; la vitesse de roue vaut 0 si le module Wheels est désactivé ; l'indice de secteur n'est mis à jour qu'à 5 Hz (limites de secteur à ±10 m).
+
+Suite (01/10/2026) :
+- Unités vérifiées en rejouant un enregistrement LMU réel : usure des pneus en fraction restante, rotation des roues négative en marche avant (valeur absolue utilisée), hauteur de caisse et débattement en mm, freins en °C. La distance du tour est négative dans la voie des stands avant la ligne, sans effet sur le découpage des tours.
+- MoTeC : un vrai fichier `.ld` place l'unité dans le champ documenté comme « nom court ». L'unité est maintenant écrite dans les deux champs.
+- Visionneuse : échelle du delta robuste aux tours aberrants, légende des tours sur les courbes. Rendu avec les vraies polices : boutons tronqués, libellés coupés à gauche, colonne Temps tronquée et rapport affiché « 2.00 » corrigés.

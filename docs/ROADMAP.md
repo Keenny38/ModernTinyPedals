@@ -13,6 +13,8 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 
 ## Télémétrie
 
+- 🟠 **Vérifier les nouveaux canaux de l'enregistreur en jeu** (LMU et rF2) : signe et unités de l'usure des pneus (fraction restante ?), de la vitesse de roue (rayon appris par le module Wheels, 0 si le module est désactivé), de la hauteur de caisse et du débattement, et le temps du secteur (indice de secteur mis à jour à 5 Hz seulement). Vérifier aussi qu'un tour de sortie est bien reconnu sur un circuit où la ligne de départ passe dans la voie des stands.
+- 🟡 **Tester l'enregistrement automatique des rejeux** sur une vraie session (démarrage en piste, arrêt 10 s après le retour au garage, rotation des fichiers `replay-auto-`).
 - 💡 **Autres simulateurs** via l'architecture d'adaptateurs : Automobilista 2 / Project CARS (mémoire partagée), Assetto Corsa / ACC, iRacing.
 
 ## Qualité du code

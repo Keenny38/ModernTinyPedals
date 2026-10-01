@@ -42,6 +42,7 @@ VENUE = struct.Struct("<64s1034xH")
 VEHICLE = struct.Struct("<64s128xI32s32s")
 CHANNEL = struct.Struct("<IIIIHHHHhhhh32s8s12s40x")
 
+WHEELS = ("fl", "fr", "rl", "rr")
 LD_MARKER = 0x40
 DTYPE_FLOAT = 0x07
 DTYPE_SIZE_32 = 4
@@ -68,6 +69,18 @@ CHANNEL_MAP = (
     ("tyre_pres_rr", "Tyre Pres RR", "TPRR", "kPa", 1.0),
     ("pos_x", "Pos X", "PosX", "m", 1.0),
     ("pos_y", "Pos Y", "PosY", "m", 1.0),
+    ("pos_z", "Pos Z", "PosZ", "m", 1.0),
+    ("accel_lat", "G Force Lat", "GLat", "G", 1.0),
+    ("accel_long", "G Force Long", "GLong", "G", 1.0),
+    ("sector", "Sector", "Sect", "", 1.0),
+    ("tc_active", "TC Active", "TCAct", "", 1.0),
+    ("abs_active", "ABS Active", "ABSAct", "", 1.0),
+    ("battery", "Battery Charge", "Batt", "%", 1.0),
+    *((f"brake_temp_{wheel}", f"Brake Temp {wheel.upper()}", f"BT{wheel.upper()}", "C", 1.0) for wheel in WHEELS),
+    *((f"tyre_wear_{wheel}", f"Tyre Wear {wheel.upper()}", f"TW{wheel.upper()}", "%", 1.0) for wheel in WHEELS),
+    *((f"wheel_speed_{wheel}", f"Wheel Speed {wheel.upper()}", f"WS{wheel.upper()}", "km/h", 1.0) for wheel in WHEELS),
+    *((f"ride_height_{wheel}", f"Ride Height {wheel.upper()}", f"RH{wheel.upper()}", "mm", 1.0) for wheel in WHEELS),
+    *((f"susp_defl_{wheel}", f"Damper Pos {wheel.upper()}", f"DP{wheel.upper()}", "mm", 1.0) for wheel in WHEELS),
 )
 
 
@@ -126,7 +139,9 @@ def write_ld(filename: str, channels: list[Channel], info: LdInfo) -> None:
                 prev_ptr, next_ptr, offset, len(channel.values),
                 0x2EE1 + index, DTYPE_FLOAT, DTYPE_SIZE_32, channel.frequency,
                 0, 1, 1, 0,  # shift, multiplier, scale, decimal places: value = raw
-                encode(channel.name, 32), encode(channel.short_name, 8), encode(channel.unit, 12),
+                # Unit in both fields: MoTeC files seen in the wild store it in the 8 bytes field
+                # documented as short name, community docs place it in the next 12 bytes field
+                encode(channel.name, 32), encode(channel.unit, 8), encode(channel.unit, 12),
             ))
             offset += len(channel.values) * DTYPE_SIZE_32
         for channel in channels:
@@ -153,7 +168,8 @@ def read_ld(filename: str) -> tuple[LdInfo, list[Channel]]:
         chan = CHANNEL.unpack_from(data, meta_ptr)
         values = array("f")
         values.frombytes(data[chan[2]:chan[2] + chan[3] * DTYPE_SIZE_32])
-        channels.append(Channel(text(chan[12]), text(chan[13]), text(chan[14]), chan[7], values.tolist()))
+        unit = text(chan[14]) or text(chan[13])
+        channels.append(Channel(text(chan[12]), text(chan[13]), unit, chan[7], values.tolist()))
         meta_ptr = chan[1]
     return info, channels
 
@@ -191,5 +207,13 @@ def lap_channels(lap: LapData) -> list[Channel]:
 
 
 def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 0.0) -> None:
-    """Export recorded lap to MoTeC .ld file"""
-    write_ld(filename, lap_channels(lap), LdInfo(venue=venue, comment=lap.name, timestamp=timestamp))
+    """Export recorded lap to MoTeC .ld file, vehicle & session from lap info if recorded"""
+    meta = lap.meta
+    info = LdInfo(
+        vehicle=str(meta.get("vehicle", "")),
+        venue=str(meta.get("track") or venue),
+        session=str(meta.get("session", "")),
+        comment=lap.name,
+        timestamp=timestamp,
+    )
+    write_ld(filename, lap_channels(lap), info)

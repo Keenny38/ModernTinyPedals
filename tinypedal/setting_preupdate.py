@@ -45,6 +45,7 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 50, 2), _user_prior_2_50_2),  # 2026-10-01
         ((2, 50, 1), _user_prior_2_50_1),  # 2026-09-28
         ((2, 49, 9), _user_prior_2_49_9),  # 2026-08-30
         ((2, 49, 2), _user_prior_2_49_2),  # 2026-08-09
@@ -74,6 +75,13 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_50_2(dict_user: dict):
+    # Telemetry recorder module enabled by default, also in existing presets (once)
+    recorder = dict_user.get("module_recorder")
+    if isinstance(recorder, dict):
+        recorder["enable"] = True
+
+
 def _user_prior_2_50_1(dict_user: dict):
     # Rename wheel_status widget to black_box
     wheel_status = dict_user.get("wheel_status")
