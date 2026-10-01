@@ -144,6 +144,8 @@ class UpdatesNotifyButton(QPushButton):
         self.install_update.triggered.connect(self.download_update)
         self.install_update.setVisible(False)
         self.downloaded.connect(self.install_downloaded)
+        self._auto_install = False
+        self._prompted_version = ""
 
         self.view_notes = version_menu.addAction(tr("What's New"))
         self.view_notes.triggered.connect(self.show_release_notes)
@@ -177,6 +179,26 @@ class UpdatesNotifyButton(QPushButton):
             self.install_update.setVisible(
                 can_auto_update() and update_checker.is_updates() and update_checker.installer is not None
             )
+            if self.install_update.isVisible():
+                self.prompt_update()
+
+    def prompt_update(self):
+        """Ask once per version to install available update, yes downloads and installs it"""
+        version_text = update_checker.message()
+        if self._prompted_version == version_text:
+            return
+        self._prompted_version = version_text
+        message = QMessageBox(self)
+        message.setWindowTitle(tr("Download And Install"))
+        message.setTextFormat(Qt.TextFormat.MarkdownText)
+        message.setText(
+            f"**{version_text}**\n\n{tr('Install update now? Modern Tiny Pedals restarts when done.')}"
+            + (f"\n\n{update_checker.release_notes}" if update_checker.release_notes else "")
+        )
+        message.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if message.exec() == QMessageBox.StandardButton.Yes:
+            self._auto_install = True
+            self.download_update()
 
     def show_release_notes(self):
         """Show release notes (changelog) of available update"""
@@ -208,15 +230,17 @@ class UpdatesNotifyButton(QPushButton):
         """Run installer and quit, installer restarts TinyPedal when done"""
         self.install_update.setEnabled(True)
         self.setText(update_checker.message())
+        auto_install, self._auto_install = self._auto_install, False
         if not path:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to download update: {error}"))
             return
-        confirm = QMessageBox.question(
-            self, tr("Download And Install"),
-            tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
+        if not auto_install:
+            confirm = QMessageBox.question(
+                self, tr("Download And Install"),
+                tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
         run_installer(path)
         window = self.window()
         quit_app = getattr(window, "quit_app", None)
