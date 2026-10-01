@@ -42,7 +42,7 @@ from .. import app_signal
 from ..api_control import api
 from ..const_api import API_LMU_NAME
 from ..i18n import tr, trm
-from ..replay import FILE_EXT, SPEEDS, replay
+from ..replay import FILE_EXT, REPLAY_FAMILIES, SPEEDS, replay, replay_compatible
 from ..setting import cfg
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
@@ -167,7 +167,7 @@ class ReplayView(BaseDialog):
             filename = os.path.join(
                 cfg.path.telemetry or ".", time.strftime(f"replay-%Y-%m-%d-%H-%M-%S{FILE_EXT}")
             )
-            replay.start_recording(filename, api.raw_data)
+            replay.start_recording(filename, api.raw_data, rest_source=api.rest_data, header_extra=api.replay_header())
         self.refresh()
 
     def open_replay(self):
@@ -182,9 +182,15 @@ class ReplayView(BaseDialog):
         if replay.recording:
             replay.stop_recording()
         try:
-            replay.load(filename)
+            player = replay.load(filename)
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to open replay file: {error}"))
+            return
+        if not replay_compatible(player.replay.source, api.name):
+            replay.unload()
+            QMessageBox.warning(
+                self, tr("Error"),
+                trm(f"Replay recorded with {player.replay.source} API, select {player.replay.source} API to play it."))
             return
         restart_api()
         self.set_speed()
@@ -220,8 +226,8 @@ class ReplayView(BaseDialog):
             self.refresh()
 
     def check_lmu_api(self) -> bool:
-        """Replay only supports LMU native API"""
-        if api.name == API_LMU_NAME:
+        """Replay supports LMU, rF2 & LMU legacy shared memory APIs"""
+        if any(api.name in family for family in REPLAY_FAMILIES):
             return True
         QMessageBox.information(
             self, tr("Telemetry Replay"), trm(f"Select {API_LMU_NAME} API to record or replay telemetry.")

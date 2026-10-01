@@ -19,17 +19,20 @@
 """
 Shared memory recording & replay
 
-Records raw LMU shared memory frames to a file, and plays them back through
-the regular LMU API, so every widget & module can run without the game.
+Records raw shared memory frames (LMU, or rF2 & LMU legacy) to a file, and plays them back
+through the regular API, so every widget & module can run without the game.
 
 File format (.tpreplay):
-    header line: b"TPREPLAY1 " + json (frame size, rate, created) + b"\\n"
-    frames: struct FRAME_HEADER (elapsed seconds, keyframe flag, payload size) + payload
-    payload: zlib of full frame (keyframe), or zlib of frame XOR previous frame.
+    header line: b"TPREPLAY1 " + json (frame size, rate, created, source API, zone layout) + b"\\n"
+    frames: struct FRAME_HEADER (elapsed seconds, frame type, payload size) + payload
+    frame type 0 or 1 (keyframe): zlib of frame XOR previous frame, or of full frame (keyframe).
+    frame type 2: zlib of json Rest API data snapshot (weather forecast, damage...), about once a second.
+A frame is every shared memory zone back to back, as listed in header "layout" ([name, size], ...).
 """
 
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import os
@@ -40,18 +43,61 @@ import zlib
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
+from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
+
 logger = logging.getLogger(__name__)
 
 MAGIC = b"TPREPLAY1 "
 FILE_EXT = ".tpreplay"
 FRAME_HEADER = struct.Struct("<dBI")
 KEYFRAME_INTERVAL = 100  # frames between full frames, bounds seeking cost
+REST_FRAME = 2  # frame type of Rest API data snapshot
+REST_INTERVAL = 1.0  # seconds between Rest API data snapshots
 DEFAULT_RATE = 30  # recorded frames per second
 SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
 
 
+# Replay source API names that share shared memory structures
+REPLAY_FAMILIES = (
+    (API_LMU_NAME,),
+    (API_RF2_NAME, API_LMULEGACY_NAME),
+)
+
+
+def replay_compatible(source: str, api_name: str) -> bool:
+    """Whether replay recorded from source API can be played with API"""
+    if source == api_name:
+        return True
+    return any(source in family and api_name in family for family in REPLAY_FAMILIES)
+
+
 def no_update() -> None:
     """Update placeholder while replay is not feeding frames"""
+
+
+def rest_snapshot(dataset: Any) -> dict:
+    """Rest API data set to json compatible dict (tuples & named tuples to lists)"""
+    def plain(value):
+        if isinstance(value, (tuple, list)):
+            return [plain(item) for item in value]
+        return value
+
+    return {name: plain(getattr(dataset, name)) for name in getattr(type(dataset), "__slots__", ())}
+
+
+def apply_rest_snapshot(dataset: Any, data: dict) -> None:
+    """Set Rest API data set from snapshot, keeping value types (named tuples, tuples)"""
+    for name in getattr(type(dataset), "__slots__", ()):
+        if name not in data:
+            continue
+        current, value = getattr(dataset, name), data[name]
+        if isinstance(current, tuple) and isinstance(value, list):
+            if current and isinstance(current[0], tuple) and hasattr(current[0], "_fields"):
+                node_type = type(current[0])
+                value = tuple(node_type(*item) for item in value)
+            else:
+                value = tuple(value)
+        setattr(dataset, name, value)
 
 
 def xor_bytes(data: bytes, base: bytes) -> bytes:
@@ -63,12 +109,12 @@ def xor_bytes(data: bytes, base: bytes) -> bytes:
 class ReplayWriter:
     """Write frames to replay file"""
 
-    def __init__(self, file: BinaryIO, frame_size: int, rate: int):
+    def __init__(self, file: BinaryIO, frame_size: int, rate: int, header_extra: dict | None = None):
         self._file = file
         self._frame_size = frame_size
         self._last = b""
         self._count = 0
-        header = {"frame_size": frame_size, "rate": rate, "created": time.time()}
+        header = {"frame_size": frame_size, "rate": rate, "created": time.time(), **(header_extra or {})}
         file.write(MAGIC + json.dumps(header).encode("utf-8") + b"\n")
 
     @property
@@ -88,6 +134,12 @@ class ReplayWriter:
         self._last = frame
         self._count += 1
 
+    def write_rest(self, elapsed: float, data: dict) -> None:
+        """Write Rest API data snapshot"""
+        payload = zlib.compress(json.dumps(data).encode("utf-8"), 1)
+        self._file.write(FRAME_HEADER.pack(elapsed, REST_FRAME, len(payload)))
+        self._file.write(payload)
+
 
 class ReplayFile:
     """Read replay file, frames are kept compressed in memory"""
@@ -101,9 +153,16 @@ class ReplayFile:
             header = json.loads(line[len(MAGIC):])
             self.frame_size = int(header["frame_size"])
             self.rate = int(header.get("rate", DEFAULT_RATE))
+            self.source = str(header.get("source", API_LMU_NAME))  # API name, older files are LMU
+            self.layout: list[tuple[str, int]] = [
+                (str(name), int(size)) for name, size in header.get("layout", [["shmm", self.frame_size]])]
+            if sum(size for _, size in self.layout) != self.frame_size:
+                raise ValueError("invalid zone layout")
             self.times: list[float] = []
             self.keyframes: list[bool] = []
             self._payloads: list[bytes] = []
+            self.rest_times: list[float] = []
+            self.rest_data: list[dict] = []
             while True:
                 head = file.read(FRAME_HEADER.size)
                 if len(head) < FRAME_HEADER.size:
@@ -112,6 +171,15 @@ class ReplayFile:
                 payload = file.read(size)
                 if len(payload) < size:
                     break
+                if keyframe == REST_FRAME:
+                    try:
+                        data = json.loads(zlib.decompress(payload))
+                    except (zlib.error, ValueError):
+                        continue
+                    if isinstance(data, dict):
+                        self.rest_times.append(elapsed)
+                        self.rest_data.append(data)
+                    continue
                 self.times.append(elapsed)
                 self.keyframes.append(bool(keyframe))
                 self._payloads.append(payload)
@@ -138,6 +206,24 @@ class ReplayFile:
             else:
                 hi = mid - 1
         return lo
+
+    def zone_offset(self, name: str) -> int:
+        """Byte offset of shared memory zone in frame"""
+        offset = 0
+        for zone, size in self.layout:
+            if zone == name:
+                return offset
+            offset += size
+        raise ValueError(f"zone {name} not in replay")
+
+    def rest_at(self, elapsed: float) -> int:
+        """Index of last Rest API snapshot at elapsed time, -1 if none"""
+        index = -1
+        for position, rest_time in enumerate(self.rest_times):
+            if rest_time > elapsed:
+                break
+            index = position
+        return index
 
     def frame(self, index: int) -> bytes:
         """Get decoded frame, sequential access is fast, seeking starts from nearest keyframe"""
@@ -211,20 +297,35 @@ class ReplayPlayer:
         with self._lock:
             return self.replay.frame(self.replay.index_at(self._current()))
 
+    def current_rest(self) -> int:
+        """Index of Rest API snapshot at current replay time, -1 if none"""
+        with self._lock:
+            return self.replay.rest_at(self._current())
+
 
 class ReplayMMap:
-    """Drop-in replacement of shared memory MMapControl, fed by replay player"""
+    """Drop-in replacement of shared memory MMapControl, fed by replay player
 
-    __slots__ = ("_struct", "_buffer", "_player", "update", "data")
+    Reads one zone of recorded frame (at offset). If rest_target is set, Rest API data set is
+    also updated from recorded snapshots.
+    """
 
-    def __init__(self, data_struct: Any, player: ReplayPlayer):
+    __slots__ = ("_struct", "_buffer", "_player", "_offset", "_end", "_rest_target", "_rest_index", "update", "data")
+
+    def __init__(self, data_struct: Any, player: ReplayPlayer, offset: int = 0, rest_target: Any = None):
         self._struct = data_struct
         self._player = player
-        self._buffer = bytearray(player.current_frame())
+        self._offset = offset
+        self._end = offset + ctypes.sizeof(data_struct)
+        if self._end > player.replay.frame_size:
+            raise ValueError("replay frame smaller than shared memory structure")
+        self._buffer = bytearray(player.current_frame()[offset:self._end])
+        self._rest_target = rest_target
+        self._rest_index = -1
         self.update: Callable[[], None] = no_update
         self.data: Any = data_struct.from_buffer(self._buffer)
 
-    def create(self, access_mode: int = 0) -> None:
+    def create(self, *_args) -> None:
         """Start feeding frames"""
         self.update = self.__update
         logger.info("replay: ACTIVE: %s", os.path.basename(self._player.replay.filename))
@@ -235,7 +336,12 @@ class ReplayMMap:
         self.update = no_update
 
     def __update(self) -> None:
-        self._buffer[:] = self._player.current_frame()
+        self._buffer[:] = self._player.current_frame()[self._offset:self._end]
+        if self._rest_target is not None:
+            index = self._player.current_rest()
+            if index != self._rest_index and index >= 0:
+                apply_rest_snapshot(self._rest_target, self._player.replay.rest_data[index])
+            self._rest_index = index
 
 
 class ReplayControl:
@@ -270,15 +376,29 @@ class ReplayControl:
         """Is recording"""
         return self._rec_thread is not None and self._rec_thread.is_alive()
 
-    def start_recording(self, filename: str, source: Callable[[], Any], rate: int = DEFAULT_RATE) -> None:
-        """Record frames from source (returns ctypes structure or None) until stopped"""
+    def start_recording(
+        self,
+        filename: str,
+        source: Callable[[], Any],
+        rate: int = DEFAULT_RATE,
+        rest_source: Callable[[], dict | None] | None = None,
+        header_extra: dict | None = None,
+    ) -> None:
+        """Record frames from source until stopped
+
+        Args:
+            source: returns ctypes structure or bytes of every zone, or None if unavailable.
+            rest_source: returns Rest API data snapshot, or None.
+            header_extra: source API name & zone layout.
+        """
         if self.recording:
             return
         self._rec_event.clear()
         self.recording_file = filename
         self.recorded_frames = 0
         self._rec_thread = threading.Thread(
-            target=self.__recording, args=(filename, source, rate), daemon=True, name="Replay recorder"
+            target=self.__recording, args=(filename, source, rate, rest_source, header_extra),
+            daemon=True, name="Replay recorder",
         )
         self._rec_thread.start()
 
@@ -289,9 +409,13 @@ class ReplayControl:
             self._rec_thread.join(5)
             self._rec_thread = None
 
-    def __recording(self, filename: str, source: Callable[[], Any], rate: int) -> None:
+    def __recording(
+        self, filename: str, source: Callable[[], Any], rate: int,
+        rest_source: Callable[[], dict | None] | None, header_extra: dict | None,
+    ) -> None:
         interval = 1 / max(rate, 1)
         start = time.monotonic()
+        last_rest = -REST_INTERVAL
         writer = None
         try:
             with open(filename, "wb") as file:
@@ -301,10 +425,16 @@ class ReplayControl:
                         continue
                     frame = bytes(data)
                     if writer is None:
-                        writer = ReplayWriter(file, len(frame), rate)
+                        writer = ReplayWriter(file, len(frame), rate, header_extra)
                         start = time.monotonic()
-                    writer.write(time.monotonic() - start, frame)
+                    elapsed = time.monotonic() - start
+                    writer.write(elapsed, frame)
                     self.recorded_frames = writer.frames
+                    if rest_source is not None and elapsed - last_rest >= REST_INTERVAL:
+                        last_rest = elapsed
+                        rest = rest_source()
+                        if rest is not None:
+                            writer.write_rest(elapsed, rest)
         except (OSError, ValueError):
             logger.exception("replay: recording failed, %s", filename)
         logger.info("replay: recorded %s frames to %s", self.recorded_frames, filename)

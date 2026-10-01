@@ -36,7 +36,7 @@ from .adapter import (
     rf2_restapi,
 )
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
-from .replay import replay
+from .replay import replay, rest_snapshot
 from .validator import bytes_to_str
 
 
@@ -67,6 +67,14 @@ class Connector(ABC):
         """Raw shared memory structure for replay recording, None if unsupported"""
         return None
 
+    def rest_data(self) -> dict | None:
+        """Rest API data snapshot for replay recording, None if unsupported"""
+        return None
+
+    def replay_header(self) -> dict:
+        """Replay file header: source API & shared memory zone layout"""
+        return {"source": self.NAME}
+
     def close(self):
         """Dereference all instances"""
         name: str
@@ -96,7 +104,8 @@ class SimLMU(Connector):
 
     def start(self):
         self._replaying = replay.active
-        self._shmmapi.setReplay(replay.player)  # recorded frames instead of game shared memory
+        # Recorded frames & Rest API data instead of game
+        self._shmmapi.setReplay(replay.player, self._restapi_dataset)
         self._shmmapi.start()  # 1 load first
         if not self._replaying:
             self._restapi.start()  # 2
@@ -110,6 +119,11 @@ class SimLMU(Connector):
         if self._replaying or self._shmmapi.isPaused:
             return None
         return self._shmmapi.rawData
+
+    def rest_data(self) -> dict | None:
+        if self._replaying:
+            return None
+        return rest_snapshot(self._restapi_dataset)
 
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi
@@ -145,6 +159,7 @@ class SimRF2(Connector):
     __slots__ = (
         # Primary API
         "_shmmapi",
+        "_replaying",
         # Secondary API
         "_restapi",
         "_restapi_dataset",
@@ -154,16 +169,35 @@ class SimRF2(Connector):
 
     def __init__(self):
         self._shmmapi = rf2_connector.RF2Info()
+        self._replaying = False
         self._restapi_dataset = rf2_restapi.RestAPIData()
         self._restapi = restapi_connector.RestAPIConnector(rf2_restapi.rf2_restapi_tasks(), self._restapi_dataset)
 
     def start(self):
+        self._replaying = replay.active
+        # Recorded frames & Rest API data instead of game
+        self._shmmapi.setReplay(replay.player, self._restapi_dataset)
         self._shmmapi.start()  # 1 load first
-        self._restapi.start()  # 2
+        if not self._replaying:
+            self._restapi.start()  # 2
 
     def stop(self):
-        self._restapi.stop()  # 1 unload first
+        if not self._replaying:
+            self._restapi.stop()  # 1 unload first
         self._shmmapi.stop()  # 2
+
+    def raw_data(self) -> Any:
+        if self._replaying or self._shmmapi.isPaused:
+            return None
+        return self._shmmapi.rawData
+
+    def rest_data(self) -> dict | None:
+        if self._replaying:
+            return None
+        return rest_snapshot(self._restapi_dataset)
+
+    def replay_header(self) -> dict:
+        return {"source": self.NAME, "layout": rf2_connector.replay_layout()}
 
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi

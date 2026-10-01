@@ -461,12 +461,12 @@ class LMUInfo:
         """
         self._access_mode = mode
 
-    def setReplay(self, player: ReplayPlayer | None = None) -> None:
+    def setReplay(self, player: ReplayPlayer | None = None, rest_target: Any = None) -> None:
         """Read frames from replay player, or live shared memory if None. Call before start()"""
         if player is None:
             shmm: Any = self._live_shmm
         else:
-            shmm = ReplayMMap(lmu_data.LMUObjectOut, player)
+            shmm = ReplayMMap(lmu_data.LMUObjectOut, player, player.replay.zone_offset("shmm"), rest_target)
         self._sync.dataset.shmm = shmm
         self._shmm = shmm
 

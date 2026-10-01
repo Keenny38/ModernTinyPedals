@@ -159,6 +159,16 @@ class APIControl:
             return None
         return self._api.raw_data()
 
+    def rest_data(self) -> dict | None:
+        """Rest API data snapshot of connected API for replay recording, None if unavailable"""
+        if self._api is None:
+            return None
+        return self._api.rest_data()
+
+    def replay_header(self) -> dict:
+        """Replay file header of connected API (source name, zone layout)"""
+        return self._connected.replay_header()
+
     @property
     def available(self):
         """Available API"""

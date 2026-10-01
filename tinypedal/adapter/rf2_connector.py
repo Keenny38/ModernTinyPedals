@@ -40,9 +40,24 @@ from pyRfactor2SharedMemory.rF2MMap import (
     rFactor2Constants,
 )
 
+from ..replay import ReplayMMap, ReplayPlayer
 from ..thread_guard import run_supervised
 
 logger = logging.getLogger(__name__)
+
+# Shared memory zones recorded in replay frame, in order: (name, structure)
+REPLAY_ZONES: tuple[tuple[str, Any], ...] = (
+    ("scor", rF2data.rF2Scoring),
+    ("tele", rF2data.rF2Telemetry),
+    ("ext", rF2data.rF2Extended),
+    ("ffb", rF2data.rF2ForceFeedback),
+    ("rule", rF2data.rF2Rules),
+)
+
+
+def replay_layout() -> list[list]:
+    """Replay zone layout: [name, size], ..."""
+    return [[name, ctypes.sizeof(data_struct)] for name, data_struct in REPLAY_ZONES]
 
 
 def copy_struct(struct_data):
@@ -88,6 +103,8 @@ class MMapDataSet:
         "ext",
         "ffb",
         "rule",
+        "live",
+        "replaying",
     )
 
     def __init__(self) -> None:
@@ -96,6 +113,8 @@ class MMapDataSet:
         self.ext = MMapControl(rFactor2Constants.MM_EXTENDED_FILE_NAME, rF2data.rF2Extended)
         self.ffb = MMapControl(rFactor2Constants.MM_FORCE_FEEDBACK_FILE_NAME, rF2data.rF2ForceFeedback)
         self.rule = MMapControl(rFactor2Constants.MM_RULES_FILE_NAME, rF2data.rF2Rules)
+        self.live = (self.scor, self.tele, self.ext, self.ffb, self.rule)
+        self.replaying = False
 
     def __del__(self):
         if logger is not None:  # module globals are cleared at interpreter exit
@@ -126,6 +145,19 @@ class MMapDataSet:
         """Update mmap data"""
         self.scor.update()
         self.tele.update()
+        if self.replaying:  # live ext, ffb & rule use direct access, replay copies every zone
+            self.ext.update()
+            self.ffb.update()
+            self.rule.update()
+
+    def zones(self) -> tuple:
+        """Mmap instances in replay frame order"""
+        return self.scor, self.tele, self.ext, self.ffb, self.rule
+
+    def set_zones(self, zones: tuple, replaying: bool) -> None:
+        """Replace mmap instances (replay or live)"""
+        self.scor, self.tele, self.ext, self.ffb, self.rule = zones
+        self.replaying = replaying
 
 
 class SyncData:
@@ -400,6 +432,24 @@ class RF2Info:
     def start(self) -> None:
         """Start data updating thread"""
         self._sync.start(self._access_mode, self._rf2_pid)
+
+    def setReplay(self, player: ReplayPlayer | None = None, rest_target: Any = None) -> None:
+        """Read frames from replay player, or live shared memory if None. Call before start()"""
+        dataset = self._sync.dataset
+        if player is None:
+            dataset.set_zones(dataset.live, False)
+        else:
+            zones = []
+            for name, data_struct in REPLAY_ZONES:
+                zones.append(ReplayMMap(
+                    data_struct, player, player.replay.zone_offset(name), rest_target if name == "scor" else None))
+            dataset.set_zones(tuple(zones), True)
+        self._scor, self._tele, self._ext, self._ffb, self._rule = dataset.zones()
+
+    @property
+    def rawData(self) -> bytes:
+        """Every shared memory zone back to back, for replay recording"""
+        return b"".join(bytes(zone.data) for zone in self._sync.dataset.zones())
 
     def stop(self) -> None:
         """Stop data updating thread"""

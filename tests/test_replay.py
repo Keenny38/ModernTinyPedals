@@ -168,3 +168,54 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
     finally:
         replay.unload()
         dialog.close()
+
+
+def test_rf2_replay_reads_every_zone(tmp_path):
+    from pyRfactor2SharedMemory import rF2data
+
+    from tinypedal.adapter import rf2_connector, rf2_restapi
+
+    info = rf2_connector.RF2Info()
+    zones = []
+    for name, data_struct in rf2_connector.REPLAY_ZONES:
+        zone = data_struct()
+        if name == "scor":
+            zone.mScoringInfo.mCurrentET = 12.5
+        elif name == "rule":
+            zone.mTrackRules.mStage = 3
+        zones.append(bytes(zone))
+    frame = b"".join(zones)
+    filename = str(tmp_path / "rf2.tpreplay")
+    rest = rf2_restapi.RestAPIData()
+    with open(filename, "wb") as file:
+        writer = ReplayWriter(file, len(frame), 10, {"source": "rFactor 2", "layout": rf2_connector.replay_layout()})
+        writer.write(0.0, frame)
+        writer.write_rest(0.0, {"timeScale": 4, "forecastRace": [[0.0, 2, 21.5, 0.3]]})
+        writer.write(0.1, frame)
+    replay = ReplayFile(filename)
+    assert replay.source == "rFactor 2" and len(replay) == 2 and len(replay.rest_data) == 1
+    player = ReplayPlayer(replay)
+    info.setReplay(player, rest)
+    for zone in info._sync.dataset.zones():
+        zone.create()
+    info._sync.dataset.update_mmap()
+    assert info.rf2ScorInfo.mCurrentET == 12.5
+    assert info.rf2Rule.mTrackRules.mStage == 3
+    assert rest.timeScale == 4 and rest.forecastRace[0].temperature == 21.5  # Rest API snapshot applied
+    assert len(info.rawData) == len(frame)
+    info.setReplay(None)
+    assert not info._sync.dataset.replaying
+    assert isinstance(info._sync.dataset.scor.data, rF2data.rF2Scoring) or info._sync.dataset.scor.data is None
+
+
+def test_replay_compatibility():
+    from tinypedal.replay import replay_compatible
+
+    assert replay_compatible("Le Mans Ultimate", "Le Mans Ultimate")
+    assert replay_compatible("rFactor 2", "Le Mans Ultimate (legacy)")
+    assert not replay_compatible("Le Mans Ultimate", "rFactor 2")
+
+
+def test_old_replay_file_is_lmu(tmp_path):
+    replay = ReplayFile(write_replay(tmp_path, make_frames(3)))
+    assert replay.source == "Le Mans Ultimate" and replay.zone_offset("shmm") == 0
