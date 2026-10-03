@@ -496,3 +496,18 @@ def test_lap_viewer_opened_from_navigation_rail(ui_env, monkeypatch):
     finally:
         window.deleteLater()
         QCoreApplication.processEvents()
+
+
+def test_sector_lines_at_official_sector_times():
+    """Sector column changes late (scoring data at 5 Hz): official times place sector lines exactly"""
+    from tinypedal.userfile.telemetry_lap import LapData, sector_bounds
+
+    distance = [float(index) for index in range(0, 3001, 10)]
+    columns = {
+        "distance": distance,
+        "lap_time": [d / 30 for d in distance],  # 30 m/s
+        "sector": [0 if d < 1015 else 1 if d < 2015 else 2 for d in distance],  # 15 m late
+    }
+    assert sector_bounds(LapData("a", columns)) == [1020.0, 2020.0]
+    assert sector_bounds(LapData("b", columns, {"sectors": [33.0, 34.0, 33.0]})) == pytest.approx([990.0, 2010.0])
+    assert sector_bounds(LapData("c", columns, {"sectors": [33.0, "x", 33.0]})) == [1020.0, 2020.0]  # invalid info

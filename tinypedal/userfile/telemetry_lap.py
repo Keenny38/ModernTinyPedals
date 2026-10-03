@@ -291,8 +291,26 @@ def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, flo
     ]
 
 
+def official_sector_times(lap: LapData) -> list[float]:
+    """Sector times from game, recorded in lap info, empty if none"""
+    official = lap.meta.get("sectors")
+    if isinstance(official, list) and len(official) == 3 and all(
+            isinstance(value, (int, float)) and value > 0 for value in official):
+        return [float(value) for value in official]
+    return []
+
+
 def sector_bounds(lap: LapData) -> list[float]:
-    """Lap distances where sector 2 & 3 start (from recorded sector column), empty if unknown"""
+    """Lap distances where sector 2 & 3 start, empty if unknown
+
+    Distance at official sector times if recorded: the sector column comes from scoring data,
+    updated about 5 times per second, so it changes up to 0.2s (10-15 meters) after the line.
+    """
+    official = official_sector_times(lap)
+    if official and "lap_time" in lap.columns and len(lap) >= 2:
+        distances, times = monotonic_distance(lap)
+        if len(times) >= 2:
+            return [interpolate(times, distances, official[0]), interpolate(times, distances, official[0] + official[1])]
     sectors = lap.columns.get("sector")
     if not sectors:
         return []
@@ -307,10 +325,9 @@ def sector_bounds(lap: LapData) -> list[float]:
 
 def sector_times(lap: LapData) -> list[float]:
     """Sector 1, 2, 3 times, official times from lap info if recorded, else from samples"""
-    official = lap.meta.get("sectors")
-    if isinstance(official, list) and len(official) == 3 and all(
-            isinstance(value, (int, float)) and value > 0 for value in official):
-        return [float(value) for value in official]
+    official = official_sector_times(lap)
+    if official:
+        return official
     bounds = sector_bounds(lap)
     if not bounds or len(lap) < 2:
         return []
