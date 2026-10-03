@@ -19,7 +19,7 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 
 ## Performance
 
-- 💡 **Alléger encore le widget Standings** : 4,7 ms par image avec 20 voitures depuis la mise en cache des fonds de cellule (8,5 ms avant). Le coût restant est le texte (`drawText`) de chaque cellule.
+- 💡 **Alléger encore le widget Standings** : fonds de cellule (8,5 → 4,7 ms) puis mise en page du texte (`QStaticText`, environ −8 % sur Standings et −20 % sur Relative) mis en cache. Le coût restant est l'appel Python `paintEvent` de chaque cellule (un widget par cellule) : dessiner chaque ligne dans un seul widget le réduirait encore.
 
 ## Interface
 

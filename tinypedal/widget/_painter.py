@@ -26,16 +26,18 @@ from collections import OrderedDict
 from functools import lru_cache
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetricsF,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
+    QStaticText,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -634,6 +636,11 @@ class RawText(QWidget):
         self._pen_text = QPen()
         self._width = self.width()
         self._height = self.height()
+        # Text layout cache: cells keep the same text for many frames (names, positions...)
+        self._static_text = QStaticText()
+        self._static_text.setTextFormat(Qt.TextFormat.PlainText)
+        self._static_source: str | None = None  # text of laid out static text
+        self._static_pos = QPointF()
 
     def clear(self):
         """Clear display"""
@@ -645,6 +652,43 @@ class RawText(QWidget):
         """Update size info"""
         self._width = self.width()
         self._height = self.height()
+        self._static_source = None
+
+    def changeEvent(self, event):
+        """Lay text out again after font change"""
+        if event.type() == QEvent.Type.FontChange:
+            self._static_source = None
+        super().changeEvent(event)
+
+    def _layout_text(self, text: str) -> None:
+        """Lay out text once, aligned in widget rect as drawText(rect, alignment) does"""
+        font = self.font()
+        static_text = self._static_text
+        static_text.setText(text)
+        static_text.prepare(font=font)
+        # Place text as drawText(rect, alignment) does (pixel identical): static text size is exact
+        # for plain ASCII, font metrics are needed for symbols from fallback fonts (●, ▲)
+        if text.isascii():
+            size = static_text.size()
+            text_width, text_height = size.width(), size.height()
+        else:
+            metrics = QFontMetricsF(font)
+            text_width, text_height = metrics.horizontalAdvance(text), metrics.height()
+        alignment = self._alignment
+        if alignment & Qt.AlignmentFlag.AlignRight:
+            pos_x = self._width - text_width
+        elif alignment & Qt.AlignmentFlag.AlignHCenter:
+            pos_x = (self._width - text_width) / 2
+        else:
+            pos_x = 0.0
+        if alignment & Qt.AlignmentFlag.AlignBottom:
+            pos_y = self._height - text_height
+        elif alignment & Qt.AlignmentFlag.AlignVCenter:
+            pos_y = (self._height - text_height) / 2
+        else:
+            pos_y = 0.0
+        self._static_pos = QPointF(pos_x, pos_y + self._offset_y)
+        self._static_source = text
 
     def paintEvent(self, event):
         """Draw"""
@@ -652,7 +696,15 @@ class RawText(QWidget):
         self._pen_text.setColor(self.fg)
         painter.setPen(self._pen_text)
         fill_rect(painter, QRectF(0, 0, self._width, self._height), self.bg)
-        painter.drawText(0, self._offset_y, self._width, self._height, self._alignment, self.text)
+        text = self.text
+        if not text:
+            return
+        if "\n" in text:  # multi-line text keeps rect based layout
+            painter.drawText(0, self._offset_y, self._width, self._height, self._alignment, text)
+            return
+        if text != self._static_source:
+            self._layout_text(text)
+        painter.drawStaticText(self._static_pos, self._static_text)
 
 
 class RawImage(QWidget):

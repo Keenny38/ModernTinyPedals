@@ -260,3 +260,88 @@ def test_black_box_updates_while_hidden():
 
     assert black_box.Realtime.update_while_hidden and trailing.Realtime.update_while_hidden
     assert not speedometer.Realtime.update_while_hidden
+
+
+def render_raw_text(text: str, alignment, font, offset_y: int = 0, static: bool = True):
+    """Render RawText cell, or the same cell drawn with drawText(rect) as before layout cache"""
+    from PySide6.QtCore import QPoint, QRectF
+    from PySide6.QtGui import QImage, QPainter, QRegion
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.widget._painter import RawText, fill_rect
+
+    class DrawTextCell(RawText):
+        def paintEvent(self, event):
+            painter = QPainter(self)
+            self._pen_text.setColor(self.fg)
+            painter.setPen(self._pen_text)
+            fill_rect(painter, QRectF(0, 0, self._width, self._height), self.bg)
+            painter.drawText(0, self._offset_y, self._width, self._height, self._alignment, self.text)
+
+    cell = (RawText if static else DrawTextCell)(
+        None, font=font, text=text, offset_y=offset_y, fg_color="#FFFFFF", alignment=alignment)  # no background: text only
+    cell.resize(70, 20)
+    image = QImage(70, 20, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    cell.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)  # no window background
+    return cell, image
+
+
+def test_raw_text_cached_layout_matches_draw_text():
+    """Cached text layout (QStaticText) draws text at the same pixels as drawText(rect, alignment)"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from tinypedal.main import load_bundled_fonts
+    from tinypedal.widget._painter import OverlayStyle
+
+    load_bundled_fonts()  # same glyphs on every platform
+    app = QApplication.instance()
+    saved = app.styleSheet(), OverlayStyle.corner_scale, OverlayStyle.depth_effects
+    # Text only: app style (set by UI tests) & overlay cell style (set by widget tests) left out
+    app.setStyleSheet("")
+    OverlayStyle.corner_scale, OverlayStyle.depth_effects = 0.0, False
+    try:
+        compare_raw_text_layouts(Qt.AlignmentFlag)
+    finally:
+        app.setStyleSheet(saved[0])
+        OverlayStyle.corner_scale, OverlayStyle.depth_effects = saved[1:]
+
+
+def compare_raw_text_layouts(align):
+    from PySide6.QtGui import QFont
+
+    from tinypedal.const_file import FontFile
+
+    for bold in (False, True):
+        font = QFont(FontFile.MODERN_FAMILY)
+        font.setPixelSize(15)
+        font.setBold(bold)
+        for alignment in (align.AlignCenter, align.AlignLeft | align.AlignVCenter, align.AlignRight | align.AlignVCenter):
+            for text in ("P12", "1:23.456 ", " -0.5", "21°C", "WWWWWWWWWWWW"):
+                for offset_y in (0, 2):
+                    _, image = render_raw_text(text, alignment, font, offset_y)
+                    _, reference = render_raw_text(text, alignment, font, offset_y, static=False)
+                    assert image == reference, (bold, int(alignment), text, offset_y)
+
+
+def test_raw_text_layout_cache_invalidated():
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+
+    font = QFont("Consolas")
+    font.setPixelSize(15)
+    cell, _ = render_raw_text("P1", Qt.AlignmentFlag.AlignCenter, font)
+    assert cell._static_source == "P1"
+    position = cell._static_pos
+    bigger = QFont(font)
+    bigger.setPixelSize(18)
+    cell.setFont(bigger)  # font change: laid out again on next paint
+    assert cell._static_source is None
+    cell.text = "P10"
+    cell.grab()
+    assert cell._static_source == "P10" and cell._static_pos != position
+    position = cell._static_pos
+    cell.resize(90, 20)
+    cell.grab()
+    assert cell._static_pos.x() > position.x()  # centered in wider cell
