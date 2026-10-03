@@ -3,7 +3,7 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
-## 0.13.0 (2026-10-04)
+## 0.14.0 (2026-10-04)
 
 ### Tout dans la fenêtre de l'app
 
@@ -31,7 +31,7 @@ La liste détaillée des commits de chaque version est aussi sur la page [Releas
 
 ### Overlay
 
-- **Black box** : ABS, TC, répartition de freinage et carte moteur en pastilles entre les roues droites, et pressions cibles des pneus en psi ou bar.
+- **Black box** : pressions cibles des pneus en psi ou bar.
 - **Standings et Relative plus rapides à dessiner** (mise en cache du texte et des fonds de cellules).
 - **Cellules transparentes** : plus d'effet de relief sur les cellules au fond entièrement transparent.
 
@@ -51,7 +51,13 @@ La liste détaillée des commits de chaque version est aussi sur la page [Releas
 - **1200 tests automatisés**, 85 % du code couvert (seuil minimum relevé à 81 %, identique sous Linux et Windows).
 - Nouveaux tests pour la migration des réglages, les modules Relative et Wheels, le widget Track Map, les pages Presets et Raccourcis, le Fuel Calculator, les connecteurs REST API et rF2, le démarrage de l'app.
 - Signature de la release avec Azure Artifact Signing quand elle est configurée.
+- Le changelog de chaque version s'affiche en tête des notes de release et dans `Voir les nouveautés` de l'app.
+
+## 0.13.0 (2026-10-03)
+
+- **Black box** : ABS, TC, répartition de freinage et carte moteur en pastilles entre les roues droites.
 - Notes de release avec images avant / après des changements d'overlay.
+- Correction de la vérification de types avec mypy 2.4.
 
 ## 0.12.2 (2026-10-01)
 

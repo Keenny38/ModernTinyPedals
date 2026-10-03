@@ -41,7 +41,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 ## Ce que cette version apporte
 
-> **Nouveau dans la 0.13.0** : tout s'ouvre dans la fenêtre de l'app, barre de navigation personnalisable, tours de la visionneuse regroupés par session, comparaison virage par virage, trajectoire colorée selon le temps gagné ou perdu, import et bibliothèque de tours MoTeC. Détails dans le [changelog](CHANGELOG.md).
+> **Nouveau dans la 0.14.0** : tout s'ouvre dans la fenêtre de l'app, barre de navigation personnalisable, tours de la visionneuse regroupés par session, comparaison virage par virage, trajectoire colorée selon le temps gagné ou perdu, import et bibliothèque de tours MoTeC. Détails dans le [changelog](CHANGELOG.md).
 
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
