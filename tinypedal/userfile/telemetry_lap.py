@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 LAP_EXTS = (".csv.gz", ".csv")
 INFO_PREFIX = "# "
+IMPORT_FOLDER = ".imported"  # laps imported from other files (MoTeC), not a track folder
 _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
 
 
@@ -105,11 +106,11 @@ class LapData(NamedTuple):
 
 
 def list_tracks(filepath: str) -> list[str]:
-    """Track & class folders with recorded laps"""
+    """Track & class folders with recorded laps (hidden folders left out, see IMPORT_FOLDER)"""
     try:
         return sorted(
             name for name in os.listdir(filepath)
-            if os.path.isdir(os.path.join(filepath, name))
+            if not name.startswith(".") and os.path.isdir(os.path.join(filepath, name))
         )
     except OSError:
         return []

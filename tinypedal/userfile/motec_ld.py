@@ -17,11 +17,12 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-MoTeC i2 log file (.ld) export of recorded laps
+MoTeC i2 log file (.ld) export of recorded laps, and reading of .ld files
 
 Layout follows the community documented .ld format (see "ldparser" project):
 header, event, venue, vehicle, then linked list of channel descriptors, then
-channel data as little endian float32 at a fixed rate per channel.
+channel data at a fixed rate per channel. Written as little endian float32, read as
+float or integer (LMU & rF2 built-in loggers store scaled integers).
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ CHANNEL = struct.Struct("<IIIIHHHHhhhh32s8s12s40x")
 WHEELS = ("fl", "fr", "rl", "rr")
 LD_MARKER = 0x40
 DTYPE_FLOAT = 0x07
+DTYPE_INTEGERS = (0x00, 0x03, 0x05)  # scaled by shift, multiplier, scale & decimal places
 DTYPE_SIZE_32 = 4
 
 # Recorder CSV column: MoTeC channel name, short name, unit, scale factor
@@ -148,29 +150,59 @@ def write_ld(filename: str, channels: list[Channel], info: LdInfo) -> None:
             file.write(array("f", channel.values).tobytes())
 
 
+def raw_typecode(dtype_a: int, size: int) -> str:
+    """Array type code of channel samples, "" if not supported"""
+    if dtype_a == DTYPE_FLOAT:
+        return {2: "e", 4: "f", 8: "d"}.get(size, "")
+    if dtype_a in DTYPE_INTEGERS:
+        return {2: "h", 4: "i"}.get(size, "")
+    return ""
+
+
 def read_ld(filename: str) -> tuple[LdInfo, list[Channel]]:
-    """Read MoTeC .ld file written by write_ld (float channels only)"""
+    """Read MoTeC .ld file: float & integer channels, integers scaled to their unit
+
+    Raises OSError or ValueError if not a readable .ld file. Channels of unknown type are skipped.
+    """
     with open(filename, "rb") as file:
         data = file.read()
-    head = HEAD.unpack_from(data, 0)
+    try:
+        head = HEAD.unpack_from(data, 0)
+    except struct.error as error:
+        raise ValueError("not a MoTeC ld file") from error
     if head[0] != LD_MARKER:
         raise ValueError("not a MoTeC ld file")
     meta_ptr, event_ptr = head[1], head[3]
 
     def text(raw: bytes) -> str:
-        return raw.rstrip(b"\0").decode("latin-1")
+        return raw.split(b"\0", 1)[0].decode("latin-1").strip()
 
-    event = EVENT.unpack_from(data, event_ptr)
+    session = ""
+    if 0 < event_ptr <= len(data) - EVENT.size:
+        session = text(EVENT.unpack_from(data, event_ptr)[1])
     info = LdInfo(driver=text(head[14]), vehicle=text(head[15]), venue=text(head[16]),
-                  session=text(event[1]), comment=text(head[18]))
+                  session=session, comment=text(head[18]))
     channels = []
-    while meta_ptr:
+    seen = set()
+    while meta_ptr and meta_ptr not in seen and meta_ptr <= len(data) - CHANNEL.size:
+        seen.add(meta_ptr)  # corrupted list could loop
         chan = CHANNEL.unpack_from(data, meta_ptr)
-        values = array("f")
-        values.frombytes(data[chan[2]:chan[2] + chan[3] * DTYPE_SIZE_32])
-        unit = text(chan[14]) or text(chan[13])
-        channels.append(Channel(text(chan[12]), text(chan[13]), unit, chan[7], values.tolist()))
         meta_ptr = chan[1]
+        data_ptr, count, dtype_a, size, frequency = chan[2], chan[3], chan[5], chan[6], chan[7]
+        typecode = raw_typecode(dtype_a, size)
+        end = data_ptr + count * size
+        if not typecode or frequency <= 0 or end > len(data):
+            continue
+        raw = array(typecode)
+        raw.frombytes(data[data_ptr:end])
+        shift, multiplier, scale, decimals = chan[8], chan[9], chan[10], chan[11]
+        if (shift, multiplier, scale, decimals) == (0, 1, 1, 0) or not scale:
+            values = [float(sample) for sample in raw]
+        else:  # value = raw * multiplier * 10^-decimals / scale + shift
+            factor = multiplier * 10.0 ** -decimals / scale
+            values = [sample * factor + shift for sample in raw]
+        unit = text(chan[14]) or text(chan[13])
+        channels.append(Channel(text(chan[12]), text(chan[13]), unit, frequency, values))
     return info, channels
 
 

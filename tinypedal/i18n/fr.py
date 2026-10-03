@@ -509,7 +509,7 @@ TRANSLATION = MappingProxyType({
     "Start Recording": "Démarrer l'enregistrement",
     "Not replaying, reading from game.": "Pas de rejeu, lecture depuis le jeu.",
     "Add File...": "Ajouter un fichier...",
-    "Add laps from another folder or track": "Ajouter des tours d'un autre dossier ou circuit",
+    "Add laps from another folder or track, or import a MoTeC log (.ld)": "Ajouter des tours d'un autre dossier ou circuit, ou importer un journal MoTeC (.ld)",
     "Lap": "Tour",
     "Time": "Temps",
     "Check laps to compare, double-click to set reference lap.": "Cochez les tours à comparer, double-cliquez pour choisir le tour de référence.",

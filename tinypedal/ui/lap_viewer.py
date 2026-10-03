@@ -46,8 +46,10 @@ from PySide6.QtWidgets import (
 
 from ..i18n import tr, trm
 from ..setting import cfg
+from ..userfile.motec_import import import_ld_file
 from ..userfile.motec_ld import export_lap
 from ..userfile.telemetry_lap import (
+    IMPORT_FOLDER,
     LapData,
     LapFile,
     best_laps,
@@ -948,7 +950,7 @@ class LapViewer(BaseDialog):
         button_refresh = QPushButton(tr("Refresh"))
         button_refresh.clicked.connect(self.refresh_tracks)
         button_add = QPushButton(tr("Add File..."))
-        button_add.setToolTip(tr("Add laps from another folder or track"))
+        button_add.setToolTip(tr("Add laps from another folder or track, or import a MoTeC log (.ld)"))
         button_add.clicked.connect(self.add_files)
         layout_track = QHBoxLayout()
         layout_track.addWidget(QLabel(tr("Track")))
@@ -1265,19 +1267,40 @@ class LapViewer(BaseDialog):
 
     def add_files(self):
         filenames, _ = QFileDialog.getOpenFileNames(
-            self, tr("Add File..."), self.filepath, "Modern Tiny Pedals Lap (*.csv *.csv.gz)")
+            self, tr("Add File..."), self.filepath,
+            f"{tr('Laps')} (*.csv *.csv.gz *.ld);;Modern Tiny Pedals Lap (*.csv *.csv.gz);;MoTeC i2 (*.ld)")
         known = {entry.file.path for entry in self.all_entries()}
         added = set()
+        imported: list[str] = []
         for filename in filenames:
-            path = os.path.normpath(filename)
-            if path in known:
-                continue
-            name = os.path.basename(path)
-            self.external.append(LapEntry(
-                LapFile(name, path, is_valid_name(name), lap_time_of(name)), read_lap_info(path), external=True))
-            added.add(path)
+            paths = [filename]
+            if filename.lower().endswith(".ld"):  # MoTeC log: complete laps converted to lap files
+                paths = self.import_motec(filename)
+                imported.extend(os.path.normpath(path) for path in paths)
+            for lap_path in paths:
+                path = os.path.normpath(lap_path)
+                if path in known:
+                    continue
+                name = os.path.basename(path)
+                self.external.append(LapEntry(
+                    LapFile(name, path, is_valid_name(name), lap_time_of(name)), read_lap_info(path), external=True))
+                added.add(path)
+        if imported:  # compare own laps with fastest imported lap
+            self.reference_key = min(imported, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
         if added:
             self.fill_list(set(self.checked_paths()) | added)
+
+    def import_motec(self, filename: str) -> list[str]:
+        """Import complete laps of MoTeC .ld file, returns lap file paths"""
+        try:
+            paths = import_ld_file(filename, os.path.join(self.filepath, IMPORT_FOLDER))
+        except (OSError, ValueError) as error:
+            logger.error("LAP VIEWER: unable to import %s: %s", filename, error)
+            self.label_cursor.setText(trm(f"Unable to import MoTeC file: {error}"))
+            return []
+        if not paths:
+            self.label_cursor.setText(trm(f"No complete lap in: {os.path.basename(filename)}"))
+        return paths
 
     # Export
     def export_motec(self, path: str = ""):

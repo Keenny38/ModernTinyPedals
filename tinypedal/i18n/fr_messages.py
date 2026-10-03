@@ -184,6 +184,8 @@ MESSAGE_RULES = (
     (r"Select (.+?) API to record or replay telemetry\.", r"Sélectionnez l'API \1 pour enregistrer ou rejouer la télémétrie."),
     (r"Unable to export lap: (.+)", r"Impossible d'exporter le tour : \1"),
     (r"Exported: (.+)", r"Exporté : \1"),
+    (r"Unable to import MoTeC file: (.+)", r"Impossible d'importer le fichier MoTeC : \1"),
+    (r"No complete lap in: (.+)", r"Aucun tour complet dans : \1"),
     (r"^Theoretical best: (.+)$", r"Meilleur tour théorique : \1"),
     (r"^Laps from different vehicles: (.+)$", r"Tours de véhicules différents : \1"),
     (r"^Lap (\d+) \((.+)\)$", r"Tour \1 (\2)"),
