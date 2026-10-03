@@ -3,6 +3,26 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.15.0 (2026-10-04)
+
+### Visionneuse de télémétrie (Telemetry)
+
+- **Unités de tes réglages** : vitesse (km/h, mph), températures (°C, °F), pressions (kPa, psi, bar) et carburant (litres, gallons). Pédales et volant en pourcentage.
+- **Axes gradués** : distance sous les courbes, valeurs haute et basse de chaque courbe.
+- **Valeurs au curseur dans chaque courbe**, une étiquette colorée par tour, et la ligne du haut colorée comme les tours.
+- **Virages numérotés (T1, T2…)** sur les courbes et sur la carte.
+- **Clic sur la carte** pour placer le curseur à cet endroit dans les courbes.
+- **Rapport engagé dessiné en marches d'escalier.**
+- **Courbe « Gain/Perte de temps »** : où le temps se perd ou se gagne face au tour de référence, en secondes par 100 m.
+- **Axe en temps** (au lieu de la distance), la partie zoomée du tour est conservée.
+- **Analyse de pilotage par virage** (onglet Virages) : freinage dégressif, roue libre et chevauchement gaz / frein des deux tours.
+- **Noms de tours clairs partout** : « Tour 12 · 1:11.525 · Course 03/10 » dans la légende.
+- **Liste des tours** : étoile sur le meilleur tour de chaque session, option pour masquer les tours invalides, de sortie et de rentrée, tours ajoutés regroupés par log.
+- **Garder un tour** (jamais supprimé par l'enregistreur), **note par tour** et **suppression** depuis le clic droit.
+- **Tours cochés et tour de référence mémorisés** par circuit.
+- **Export CSV pour Excel** des courbes affichées (virgule décimale et point-virgule si Windows est en français).
+- **Plus fluide** : à partir de 3 tours à lire, chargement en arrière-plan sans figer la fenêtre, et « Actualiser » ne relit que les tours modifiés.
+
 ## 0.14.0 (2026-10-04)
 
 ### Tout dans la fenêtre de l'app

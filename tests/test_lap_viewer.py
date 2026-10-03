@@ -19,6 +19,19 @@ def write_lap(folder, lap_number, lap_time, samples=300, length=3000.0):
     module_recorder.save_lap(f"{folder}/", "Track - GT3", lap_number, lap_time, rows, max_saved_laps=10)
 
 
+def wait_loaded(viewer, timeout: float = 10.0):
+    """Process events until background lap loading is done"""
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    end = time.monotonic() + timeout
+    while viewer.is_loading() and time.monotonic() < end:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert not viewer.is_loading()
+
+
 def flush_deleted():
     """Delete closed dialogs now (singleton dialog is released on destroy)"""
     from PySide6.QtCore import QCoreApplication, QEvent
@@ -612,7 +625,7 @@ def test_lap_list_shows_sessions(ui_env):
         assert [item.text(0) for item in sessions] == ["Race  03/10 15:56", "Practice  03/10 14:00"]
         race, practice = sessions
         assert race.text(1) == "1:29.500" and race.text(5) == "2 laps, Porsche 963"
-        assert [practice.child(i).text(0) for i in range(3)] == ["Lap 1", "Lap 2", "Lap 3"]
+        assert [practice.child(i).text(0) for i in range(3)] == ["Lap 1", "★ Lap 2", "Lap 3"]  # fastest starred
         assert practice.child(0).text(5) == ""  # vehicle shown once, on session row
         assert "invalid" in race.child(0).text(5)
         assert race.isExpanded()  # reference (best lap) inside

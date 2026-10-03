@@ -344,6 +344,18 @@ def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, flo
     ]
 
 
+def delta_rate(distances: list[float], deltas: list[float], window: float = 40.0) -> list[float]:
+    """Time lost (positive) or gained per 100 m along delta, measured over window meters"""
+    if len(distances) < 2:
+        return [0.0] * len(distances)
+    half = window / 2
+    return [
+        (interpolate(distances, deltas, distance + half) - interpolate(distances, deltas, distance - half))
+        / window * 100
+        for distance in distances
+    ]
+
+
 def official_sector_times(lap: LapData) -> list[float]:
     """Sector times from game, recorded in lap info, empty if none"""
     official = lap.meta.get("sectors")

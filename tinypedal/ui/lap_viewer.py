@@ -22,14 +22,29 @@ Lap telemetry viewer: compare recorded laps along distance
 
 from __future__ import annotations
 
+import csv
+import html
 import json
 import logging
+import math
 import os
+import threading
 import time
+from collections.abc import Callable
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtCore import QLocale, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -47,6 +62,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import units
 from ..i18n import tr, trm
 from ..setting import cfg
 from ..userfile.corner_analysis import (
@@ -56,6 +72,7 @@ from ..userfile.corner_analysis import (
     lap_time_delta,
     straights_delta,
 )
+from ..userfile.lap_marks import load_marks, remove_mark, set_mark
 from ..userfile.motec_import import import_ld_file
 from ..userfile.motec_ld import export_lap
 from ..userfile.telemetry_lap import (
@@ -65,6 +82,7 @@ from ..userfile.telemetry_lap import (
     best_laps,
     compute_delta,
     decimate_minmax,
+    delta_rate,
     group_sessions,
     interpolate,
     is_valid_name,
@@ -81,7 +99,7 @@ from ..userfile.telemetry_lap import (
     theoretical_best,
 )
 from ..userfile.track_map import load_track_map_file
-from ._common import BaseDialog, UIScaler, singleton_dialog
+from ._common import BaseDialog, TextInputDialog, UIScaler, singleton_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +116,7 @@ GAIN_FULL_SCALE = 0.002  # seconds lost or gained per meter shown with full colo
 GAIN_COLOR = QColor("#22C55E")
 LOSS_COLOR = QColor("#EF4444")
 RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
+BACKGROUND_LOAD_COUNT = 3  # laps to read at once loaded in background (window stays responsive)
 
 
 class Channel(NamedTuple):
@@ -109,36 +128,38 @@ class Channel(NamedTuple):
     weight: float  # relative panel height
     fixed_range: tuple[float, float] | None = None
     group: str = ""  # menu group (per wheel channels)
+    quantity: str = ""  # converted to user unit: speed, temperature, pressure, fuel (see display_units)
 
 
-def wheel_channels(prefix: str, title: str, unit: str) -> tuple[Channel, ...]:
+def wheel_channels(prefix: str, title: str, unit: str, quantity: str = "") -> tuple[Channel, ...]:
     return tuple(
-        Channel(f"{prefix}_{wheel}", f"{title} {wheel.upper()}", unit, 0.8, group=title)
+        Channel(f"{prefix}_{wheel}", f"{title} {wheel.upper()}", unit, 0.8, group=title, quantity=quantity)
         for wheel in ("fl", "fr", "rl", "rr")
     )
 
 
 CHANNELS = (
     Channel("delta", "Delta", "s", 1.2),
-    Channel("speed_kph", "Speed", "km/h", 2.0),
+    Channel("delta_rate", "Time Gain/Loss", "s/100m", 1.0),
+    Channel("speed_kph", "Speed", "km/h", 2.0, quantity="speed"),
     Channel("throttle", "Throttle", "", 1.0, (0.0, 1.0)),
     Channel("brake", "Brake", "", 1.0, (0.0, 1.0)),
     Channel("gear", "Gear", "", 0.8),
     Channel("steering", "Steering", "", 1.0, (-1.0, 1.0)),
     Channel("rpm", "RPM", "rpm", 1.0),
     Channel("clutch", "Clutch", "", 0.6, (0.0, 1.0)),
-    Channel("fuel", "Fuel", "l", 0.8),
+    Channel("fuel", "Fuel", "l", 0.8, quantity="fuel"),
     Channel("accel_lat", "Lateral G", "G", 1.0),
     Channel("accel_long", "Longitudinal G", "G", 1.0),
     Channel("tc_active", "TC Active", "", 0.5, (0.0, 1.0)),
     Channel("abs_active", "ABS Active", "", 0.5, (0.0, 1.0)),
     Channel("battery", "Battery", "%", 0.8),
     Channel("pos_z", "Elevation", "m", 0.8),
-    *wheel_channels("tyre_temp", "Tyre Temp", "°C"),
-    *wheel_channels("tyre_pres", "Tyre Pressure", "kPa"),
+    *wheel_channels("tyre_temp", "Tyre Temp", "°C", "temperature"),
+    *wheel_channels("tyre_pres", "Tyre Pressure", "kPa", "pressure"),
     *wheel_channels("tyre_wear", "Tyre Wear", "%"),
-    *wheel_channels("brake_temp", "Brake Temp", "°C"),
-    *wheel_channels("wheel_speed", "Wheel Speed", "km/h"),
+    *wheel_channels("brake_temp", "Brake Temp", "°C", "temperature"),
+    *wheel_channels("wheel_speed", "Wheel Speed", "km/h", "speed"),
     *wheel_channels("ride_height", "Ride Height", "mm"),
     *wheel_channels("susp_defl", "Suspension", "mm"),
 )
@@ -147,6 +168,58 @@ MAP_MAX_ZOOM = 40.0  # track map & G circle zoom limit
 TRACK_WIDTH = 12.0  # meters, circuit drawn under driving lines
 ROAD_COLOR = QColor(128, 128, 128, 80)
 DEFAULT_CHANNELS = ("delta", "speed_kph", "throttle", "brake", "gear", "steering")
+PERCENT_RANGES = ((0.0, 1.0), (-1.0, 1.0))  # pedals & steering fractions shown in percent
+DELTA_CHANNELS = ("delta", "delta_rate")  # computed against reference lap, symmetric range
+
+
+def display_units() -> dict[str, tuple[Callable[[float], float] | None, str]]:
+    """Conversion (None if same unit) & symbol of each quantity, from user units setting
+
+    Lap files store km/h, °C, kPa & liters.
+    """
+    speed = cfg.units["speed_unit"]
+    if speed == "MPH":
+        speed_unit: tuple[Callable[[float], float] | None, str] = (lambda value: value / 1.609344, "mph")
+    elif speed == "m/s":
+        speed_unit = (lambda value: value / 3.6, "m/s")
+    else:
+        speed_unit = (None, "km/h")
+    temperature = cfg.units["temperature_unit"]
+    pressure = cfg.units["tyre_pressure_unit"]
+    fuel = cfg.units["fuel_unit"]
+    return {
+        "speed": speed_unit,
+        "temperature": (
+            units.set_unit_temperature(temperature) if temperature == "Fahrenheit" else None,
+            units.set_symbol_temperature(temperature)),
+        "pressure": (
+            units.set_unit_pressure(pressure) if pressure in ("psi", "bar") else None,
+            units.set_symbol_pressure(pressure)),
+        "fuel": (units.set_unit_fuel(fuel) if fuel == "Gallon" else None, units.set_symbol_fuel(fuel)),
+    }
+
+
+def nice_step(span: float, count: float) -> float:
+    """Round axis step (1, 2 or 5 x 10^n) giving about count steps over span"""
+    raw = max(span / max(count, 1.0), 1e-9)
+    magnitude = 10 ** math.floor(math.log10(raw))
+    for multiple in (1, 2, 5, 10):
+        if raw <= multiple * magnitude:
+            return multiple * magnitude
+    return 10 * magnitude
+
+
+def format_axis_time(seconds: float) -> str:
+    """Time axis label: 45s, 1:05"""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes, seconds = divmod(seconds, 60)
+    return f"{int(minutes)}:{seconds:02.0f}"
+
+
+def corner_label(number: int) -> str:
+    """Short corner name: T1 (V1 in French)"""
+    return trm(f"T{number}")
 
 
 class PlotLap(NamedTuple):
@@ -159,9 +232,13 @@ class PlotLap(NamedTuple):
 
 
 def lap_label(filename: str) -> str:
-    """Short lap name from file name: "lap012 1m30.123s" """
-    parts = lap_stem(filename).split(" ")
-    return " ".join(parts[2:]) if len(parts) > 2 else filename
+    """Short lap name from file name: "Lap 12 · 1:30.123" (file name if not a recorded lap name)"""
+    number = lap_number_of(filename)
+    if not number:
+        return lap_stem(filename)
+    text = trm(f"Lap {number}")
+    lap_time = lap_time_of(filename)
+    return f"{text} · {format_laptime(lap_time)}" if lap_time > 0 else text
 
 
 def channel_title(channel: Channel) -> str:
@@ -175,6 +252,30 @@ def format_value(value: float) -> str:
     """Cursor value, 2 decimals, none for whole numbers (gear)"""
     text = f"{value:.2f}"
     return text[:-3] if text.endswith(".00") else text
+
+
+def format_channel_value(channel: Channel, value: float) -> str:
+    """Value of channel for cursor & axis labels: pedals & steering in percent, signed deltas"""
+    if channel.fixed_range in PERCENT_RANGES:
+        return f"{value * 100:.0f}%"
+    if channel.column == "delta":
+        return f"{value:+.3f}"
+    if channel.column == "delta_rate":
+        return f"{value:+.2f}"
+    if channel.column == "gear":
+        return f"{value:.0f}"
+    return format_value(value)
+
+
+def format_axis_value(channel: Channel, value: float, span: float) -> str:
+    """Value range label of channel panel"""
+    if channel.fixed_range in PERCENT_RANGES or channel.column in DELTA_CHANNELS or channel.column == "gear":
+        return format_channel_value(channel, value)
+    if span >= 20:
+        return f"{value:.0f}"
+    if span >= 2:
+        return f"{value:.1f}"
+    return f"{value:.2f}"
 
 
 def format_laptime(seconds: float) -> str:
@@ -229,6 +330,9 @@ class TracePlot(QWidget):
     Mouse: wheel = zoom, drag = move, shift + drag = zoom to selection, double-click = reset,
     drag channel name (left margin) = move channel up or down.
     Keyboard: +/- zoom, left/right move, Home or 0 reset.
+
+    Horizontal axis is lap distance, or lap time (time_axis): view & cursor are in axis units,
+    track distance of reference lap is used for maps & corners (see distance_at_x).
     """
 
     cursor_changed = Signal()
@@ -246,9 +350,13 @@ class TracePlot(QWidget):
         self.sector_lines: list[float] = []
         self.view_start = 0.0
         self.view_end = 1.0
-        self.cursor_distance: float | None = None
+        self.cursor_distance: float | None = None  # cursor position in axis units (distance or time)
         self.margin_left = UIScaler.size(5)
-        self._series: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
+        self.time_axis = False
+        self.units = display_units()
+        self.corner_marks: list[tuple[int, float]] = []  # corner number & apex distance of reference lap
+        self._times: dict[str, tuple[list[float], list[float]]] = {}  # lap key: distances & lap times
+        self._series: dict[tuple[str, str, bool], tuple[list[float], list[float]]] = {}
         self._ranges: dict[str, tuple[float, float]] = {}
         self._cache: QPixmap | None = None
         self._cache_key: tuple = ()
@@ -288,8 +396,89 @@ class TracePlot(QWidget):
                     self.deltas[lap.key] = ([point[0] for point in points], [point[1] for point in points])
         self.sector_lines = sector_bounds(self.reference.data) if self.reference else []
         self._series = {}
+        self._times = {}
+        self.units = display_units()
         self.invalidate()
         self.reset_view()
+
+    def set_corner_marks(self, marks: list[tuple[int, float]]):
+        """Corner numbers at apex distance, shown on charts"""
+        if marks != self.corner_marks:
+            self.corner_marks = marks
+            self.invalidate()
+            self.update()
+
+    def set_time_axis(self, enabled: bool):
+        """Lap time or distance horizontal axis, same part of lap kept in view"""
+        if enabled == self.time_axis:
+            return
+        zoomed = self.zoomed()
+        start, end = self.distance_at_x(self.view_start), self.distance_at_x(self.view_end)
+        self.time_axis = enabled
+        self._series = {}
+        self.invalidate()
+        self.cursor_distance = None
+        if zoomed:
+            self.set_view_distance(start, end)
+        else:
+            self.reset_view()
+
+    # Axis conversion (time axis)
+    def lap_times(self, lap: PlotLap) -> tuple[list[float], list[float]]:
+        """Distances & lap times of lap, increasing distance"""
+        cached = self._times.get(lap.key)
+        if cached is None:
+            if "lap_time" in lap.data.columns:
+                cached = monotonic_distance(lap.data, "lap_time")
+            else:  # no time recorded: distance used
+                distances = monotonic_distance(lap.data, "distance")[0]
+                cached = (distances, list(distances))
+            self._times[lap.key] = cached
+        return cached
+
+    def x_at_distance(self, distance: float) -> float:
+        """Axis position of reference lap distance"""
+        if not self.time_axis or self.reference is None:
+            return distance
+        distances, times = self.lap_times(self.reference)
+        return interpolate(distances, times, distance) if distances else distance
+
+    def distance_at_x(self, x: float) -> float:
+        """Reference lap distance at axis position"""
+        if not self.time_axis or self.reference is None:
+            return x
+        distances, times = self.lap_times(self.reference)
+        return interpolate(times, distances, x) if times else x
+
+    def cursor_track_distance(self) -> float | None:
+        """Reference lap distance at cursor, for maps"""
+        return None if self.cursor_distance is None else self.distance_at_x(self.cursor_distance)
+
+    def view_track_range(self) -> tuple[float, float]:
+        """Reference lap distances of zoomed part, (0, 0) if not zoomed"""
+        if not self.zoomed():
+            return 0.0, 0.0
+        return self.distance_at_x(self.view_start), self.distance_at_x(self.view_end)
+
+    def set_view_distance(self, start: float, end: float):
+        """Zoom on lap distances (corner)"""
+        self.set_view(self.x_at_distance(start), self.x_at_distance(end))
+
+    def show_distance(self, distance: float):
+        """Cursor at reference lap distance (clicked on map), view moved to it if outside"""
+        x = self.x_at_distance(distance)
+        self.cursor_distance = x
+        if not self.view_start <= x <= self.view_end:
+            span = self.view_end - self.view_start
+            self.set_view(x - span / 2, x + span / 2)
+        self.update()
+        self.cursor_changed.emit()
+
+    def unit_of(self, channel: Channel) -> str:
+        """Unit symbol of channel in user units"""
+        if channel.quantity in self.units:
+            return self.units[channel.quantity][1]
+        return channel.unit
 
     def set_channels(self, columns: list[str]):
         self.channels = [CHANNEL_MAP[column] for column in columns if column in CHANNEL_MAP]
@@ -306,6 +495,10 @@ class TracePlot(QWidget):
         self._cache = None
 
     def max_distance(self) -> float:
+        """End of horizontal axis: longest lap distance, or lap time"""
+        if self.time_axis:
+            return max((self.lap_times(lap)[1][-1] for lap in self.laps if self.lap_times(lap)[1]),
+                       default=1.0) or 1.0
         return max((lap.data.distance[-1] for lap in self.laps if len(lap.data)), default=1.0) or 1.0
 
     def reset_view(self):
@@ -327,8 +520,13 @@ class TracePlot(QWidget):
         return self.view_end - self.view_start < self.max_distance() - 1
 
     # Coordinates
+    def axis_height(self) -> float:
+        """Room for horizontal axis labels below charts"""
+        return self.fontMetrics().height() + 4
+
     def plot_rect(self) -> QRectF:
-        return QRectF(self.margin_left, 4, max(self.width() - self.margin_left - 6, 1), max(self.height() - 8, 1))
+        return QRectF(self.margin_left, 4, max(self.width() - self.margin_left - 6, 1),
+                      max(self.height() - 8 - self.axis_height(), 1))
 
     def x_of(self, distance: float, rect: QRectF) -> float:
         span = max(self.view_end - self.view_start, 1e-6)
@@ -339,18 +537,35 @@ class TracePlot(QWidget):
         return self.view_start + (x - rect.left()) / max(rect.width(), 1) * span
 
     # Data
-    def series(self, channel: Channel, lap: PlotLap) -> tuple[list[float], list[float]]:
-        """Channel samples of lap by increasing distance, cached"""
-        if channel.column == "delta":
-            return self.deltas.get(lap.key, ([], []))
-        key = (lap.key, channel.column)
+    def series(self, channel: Channel, lap: PlotLap, time_axis: bool | None = None,
+               ) -> tuple[list[float], list[float]]:
+        """Channel samples of lap by increasing axis position (distance or time), in user units, cached"""
+        use_time = self.time_axis if time_axis is None else time_axis
+        key = (lap.key, channel.column, use_time)
         cached = self._series.get(key)
-        if cached is None:
-            if channel.column in lap.data.columns:
-                cached = monotonic_distance(lap.data, channel.column)
+        if cached is not None:
+            return cached
+        if channel.column == "delta":
+            distances, values = self.deltas.get(lap.key, ([], []))
+        elif channel.column == "delta_rate":
+            distances, deltas = self.deltas.get(lap.key, ([], []))
+            values = delta_rate(distances, deltas)
+        elif channel.column in lap.data.columns:
+            distances, values = monotonic_distance(lap.data, channel.column)
+        else:
+            distances, values = [], []
+        convert = self.units.get(channel.quantity, (None, ""))[0] if channel.quantity else None
+        if convert is not None:
+            values = [convert(value) for value in values]
+        xs = distances
+        if use_time and distances:
+            lap_distances, times = self.lap_times(lap)
+            if len(lap_distances) == len(distances):  # same samples
+                xs = times
             else:
-                cached = ([], [])
-            self._series[key] = cached
+                xs = [interpolate(lap_distances, times, distance) for distance in distances]
+        cached = (xs, values)
+        self._series[key] = cached
         return cached
 
     def value_range(self, channel: Channel) -> tuple[float, float]:
@@ -359,7 +574,7 @@ class TracePlot(QWidget):
         cached = self._ranges.get(channel.column)
         if cached is not None:
             return cached
-        if channel.column == "delta":
+        if channel.column in DELTA_CHANNELS:
             limit = delta_limit([self.series(channel, lap)[1] for lap in self.compared()])
             self._ranges[channel.column] = (-limit, limit)
             return -limit, limit
@@ -412,6 +627,40 @@ class TracePlot(QWidget):
             x = self.x_of(self.cursor_distance, rect)
             painter.setPen(QPen(text_color, 1, Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+            self.paint_cursor_values(painter, rect, x)
+
+    def values_at(self, channel: Channel, x: float) -> list[tuple[PlotLap, str]]:
+        """Value text of each lap at axis position (none past end of lap)"""
+        values = []
+        for lap in self.laps:
+            xs, ys = self.series(channel, lap)
+            if xs and xs[0] <= x <= xs[-1]:
+                values.append((lap, format_channel_value(channel, interpolate(xs, ys, x))))
+        return values
+
+    def paint_cursor_values(self, painter: QPainter, rect: QRectF, x: float):
+        """Value of each lap next to cursor, in each chart, colored like its lap"""
+        if self.cursor_distance is None:
+            return
+        font = QFont(self.font())
+        font.setPointSizeF(max(font.pointSizeF() * 0.85, 6))
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        line = metrics.height()
+        background = QColor(self.palette().window().color())
+        background.setAlphaF(0.85)
+        for channel, panel in self.panels(rect):
+            values = self.values_at(channel, self.cursor_distance)
+            rows = min(len(values), int((panel.height() - 2) // line))
+            if rows <= 0:
+                continue
+            width = max(metrics.horizontalAdvance(text) for _, text in values[:rows]) + 8
+            left = x + 6 if x + 6 + width <= rect.right() else x - 6 - width
+            box = QRectF(left, panel.top() + 2, width, rows * line + 2)
+            painter.fillRect(box, background)
+            for row, (lap, text) in enumerate(values[:rows]):
+                painter.setPen(lap.color)
+                painter.drawText(QPointF(left + 4, box.top() + 1 + row * line + metrics.ascent()), text)
 
     def render_charts(self, rect: QRectF, text_color: QColor, ratio: float) -> QPixmap:
         pixmap = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
@@ -419,19 +668,60 @@ class TracePlot(QWidget):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.paint_axis(painter, rect, text_color)
         for channel, panel in self.panels(rect):
             self.paint_channel(painter, channel, panel, text_color)
         self.paint_legend(painter, rect, text_color)
+        ascent = painter.fontMetrics().ascent()
         # Sector lines of reference lap
         if self.sector_lines:
             painter.setPen(QPen(COLOR_GRID.lighter(160), 1, Qt.PenStyle.DotLine))
             for index, distance in enumerate(self.sector_lines):
-                if self.view_start <= distance <= self.view_end:
-                    x = self.x_of(distance, rect)
+                position = self.x_at_distance(distance)
+                if self.view_start <= position <= self.view_end:
+                    x = self.x_of(position, rect)
                     painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-                    painter.drawText(QPointF(x + 3, rect.top() + painter.fontMetrics().ascent()), f"S{index + 2}")
+                    painter.drawText(QPointF(x + 3, rect.top() + ascent), f"S{index + 2}")
+        # Corner numbers at apex of reference lap
+        if self.corner_marks:
+            corner_pen = QPen(COLOR_GRID, 1, Qt.PenStyle.DotLine)
+            label_color = QColor(text_color)
+            label_color.setAlphaF(0.7)
+            top = rect.top() + painter.fontMetrics().height() + ascent  # below sector labels
+            for number, apex in self.corner_marks:
+                position = self.x_at_distance(apex)
+                if self.view_start <= position <= self.view_end:
+                    x = self.x_of(position, rect)
+                    painter.setPen(corner_pen)
+                    painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+                    painter.setPen(label_color)
+                    painter.drawText(QPointF(x + 3, top), corner_label(number))
         painter.end()
         return pixmap
+
+    def paint_axis(self, painter: QPainter, rect: QRectF, text_color: QColor):
+        """Distance (m) or lap time ticks below charts, faint grid lines across charts"""
+        span = self.view_end - self.view_start
+        if span <= 0:
+            return
+        metrics = painter.fontMetrics()
+        sample = "0:00" if self.time_axis else "0000 m"
+        step = nice_step(span, rect.width() / max(metrics.horizontalAdvance(sample) * 2.2, 1))
+        grid = QColor(COLOR_GRID)
+        grid.setAlphaF(grid.alphaF() * 0.5)
+        label = QColor(text_color)
+        label.setAlphaF(0.75)
+        value = math.ceil(self.view_start / step) * step
+        while value <= self.view_end + 1e-9:
+            x = self.x_of(value, rect)
+            painter.setPen(QPen(grid, 1))
+            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+            text = format_axis_time(value) if self.time_axis else f"{value:.0f} m"
+            width = metrics.horizontalAdvance(text)
+            left = min(max(x - width / 2, rect.left()), rect.right() - width)
+            painter.setPen(label)
+            painter.drawText(QPointF(left, rect.bottom() + 2 + metrics.ascent()), text)
+            value += step
 
     def paint_move(self, painter: QPainter, rect: QRectF, text_color: QColor):
         """Moved channel highlighted, line where it will be placed"""
@@ -488,28 +778,56 @@ class TracePlot(QWidget):
             painter.drawLine(QPointF(panel.left(), y_of(0)), QPointF(panel.right(), y_of(0)))
         painter.setPen(text_color)
         title = channel_title(channel)
+        unit = self.unit_of(channel)
         painter.drawText(
             QRectF(0, panel.top(), self.margin_left - 4, panel.height()),
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
-            f"{title}\n{channel.unit}" if channel.unit else title,
+            f"{title}\n{unit}" if unit else title,
         )
+        self.paint_value_range(painter, channel, panel, low, high, text_color)
         painter.save()
         painter.setClipRect(panel)
         buckets = max(int(panel.width()), 1)
+        steps = channel.column == "gear"  # gear changes at once: drawn as steps
         for lap in self.laps:
             xs, ys = self.series(channel, lap)
             if not xs:
                 continue
             points = decimate_minmax(xs, ys, self.view_start, self.view_end, buckets)
             path = QPainterPath()
+            last_y = 0.0
             for index, (distance, value) in enumerate(points):
                 point = QPointF(self.x_of(distance, panel), y_of(value))
-                if index:
+                if not index:
+                    path.moveTo(point)
+                elif steps:
+                    path.lineTo(point.x(), last_y)
                     path.lineTo(point)
                 else:
-                    path.moveTo(point)
+                    path.lineTo(point)
+                last_y = point.y()
             painter.setPen(QPen(lap.color, 1.5))
             painter.drawPath(path)
+        painter.restore()
+
+    def paint_value_range(self, painter: QPainter, channel: Channel, panel: QRectF, low: float, high: float,
+                          text_color: QColor):
+        """Highest & lowest value of chart, small, inside its top & bottom left corners"""
+        font = QFont(painter.font())
+        font.setPointSizeF(max(font.pointSizeF() * 0.8, 6))
+        metrics = QFontMetricsF(font)
+        if panel.height() < metrics.height() * 2.2:
+            return
+        painter.save()
+        painter.setFont(font)
+        color = QColor(text_color)
+        color.setAlphaF(0.55)
+        painter.setPen(color)
+        span = high - low
+        painter.drawText(QPointF(panel.left() + 3, panel.top() + 1 + metrics.ascent()),
+                         format_axis_value(channel, high, span))
+        painter.drawText(QPointF(panel.left() + 3, panel.bottom() - 2 - metrics.descent()),
+                         format_axis_value(channel, low, span))
         painter.restore()
 
     # Mouse & keyboard
@@ -611,21 +929,20 @@ class TracePlot(QWidget):
         self.reset_view()
 
     def cursor_values(self) -> str:
-        """Values of each channel at cursor distance"""
-        distance = self.cursor_distance
-        if distance is None:
+        """Values of each channel at cursor, each value colored like its lap (rich text)"""
+        position = self.cursor_distance
+        if position is None:
             return ""
-        texts = [f"{distance:.0f} m"]
+        distance = self.distance_at_x(position)
+        where = f"{format_axis_time(position)} · {distance:.0f} m " if self.time_axis else f"{distance:.0f} m "
+        texts = [where]
         for channel in self.channels:
-            values = []
-            for lap in self.laps:
-                xs, ys = self.series(channel, lap)
-                if xs and xs[0] <= distance <= xs[-1]:  # no value past end of lap
-                    values.append(format_value(interpolate(xs, ys, distance)))
+            values = self.values_at(channel, position)
             if values:
-                title = channel_title(channel)
-                texts.append(f"{title}: {' / '.join(values)}")
-        return "   ".join(texts)
+                colored = " / ".join(
+                    f"<span style='color:{lap.color.name()}'>{html.escape(text)}</span>" for lap, text in values)
+                texts.append(f"<b>{html.escape(channel_title(channel))}</b> {colored}")
+        return " &nbsp;&nbsp; ".join(texts)
 
 
 def delta_limit(series: list[list[float]]) -> float:
@@ -666,6 +983,7 @@ class LapMapBase(QWidget):
         self.zoom = 1.0  # view zoom (mouse wheel), 1 = whole map
         self.pan = QPointF()  # view offset (drag)
         self._pan_drag: tuple[QPointF, QPointF] | None = None  # press position, pan at press
+        self._press: QPointF | None = None  # left press position, a click if released near it
 
     def apply_zoom(self, point: QPointF) -> QPointF:
         """Screen position of unzoomed point"""
@@ -691,7 +1009,10 @@ class LapMapBase(QWidget):
         self.update()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.zoom > 1.0:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._press = event.position()
+        if self.zoom > 1.0:
             self._pan_drag = (event.position(), QPointF(self.pan))
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
@@ -702,10 +1023,17 @@ class LapMapBase(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        press, self._press = self._press, None
         self._pan_drag = None
         self.unsetCursor()
+        if press is not None and (event.position() - press).manhattanLength() < 4 and self.has_data():
+            self.map_clicked(event.position())
+
+    def map_clicked(self, position: QPointF):
+        """Clicked without moving"""
 
     def mouseDoubleClickEvent(self, event):
+        self._press = None
         self.reset_zoom()
 
     def set_laps(self, laps: list[PlotLap]):
@@ -766,9 +1094,12 @@ class TrajectoryMap(LapMapBase):
     """
 
     empty_text = "No position recorded"
+    distance_clicked = Signal(float)  # reference lap distance nearest to clicked point
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setToolTip(tr("Click the driving line to show this point in charts"))
+        self.corner_marks: list[tuple[int, float]] = []  # corner number & apex distance of reference lap
         self._lines: list[tuple[list[float], list[float], list[float], QColor]] = []
         self._bounds = (0.0, 0.0, 1.0, 1.0)
         self._outline: list[tuple[float, float]] = []  # circuit from track map file
@@ -804,6 +1135,46 @@ class TrajectoryMap(LapMapBase):
 
     def has_data(self) -> bool:
         return bool(self._lines)
+
+    def set_corner_marks(self, marks: list[tuple[int, float]]):
+        if marks != self.corner_marks:
+            self.corner_marks = marks
+            self._version += 1
+            self.update()
+
+    def map_clicked(self, position: QPointF):
+        """Reference lap distance nearest to clicked point"""
+        distances, xs, ys, _ = self._lines[0]
+        nearest = min(
+            range(len(distances)),
+            key=lambda index: (self.to_screen(xs[index], ys[index]) - position).manhattanLength(),
+            default=-1)
+        if nearest >= 0:
+            self.distance_clicked.emit(distances[nearest])
+
+    def draw_corner_marks(self, painter: QPainter):
+        """Corner numbers next to reference line at apex"""
+        if not self.corner_marks or not self._lines:
+            return
+        distances, xs, ys, _ = self._lines[0]
+        if len(distances) < 2:
+            return
+        font = QFont(painter.font())
+        font.setPointSizeF(max(font.pointSizeF() * 0.8, 6))
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        text_color = self.palette().color(self.foregroundRole())
+        background = QColor(self.palette().window().color())
+        background.setAlphaF(0.75)
+        for number, apex in self.corner_marks:
+            point = self.to_screen(interpolate(distances, xs, apex), interpolate(distances, ys, apex))
+            text = corner_label(number)
+            box = QRectF(point.x() + 4, point.y() - metrics.height() - 2,
+                         metrics.horizontalAdvance(text) + 6, metrics.height())
+            painter.fillRect(box, background)
+            painter.setPen(text_color)
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
     def set_show_gain(self, enabled: bool):
         self.show_gain = enabled
@@ -932,6 +1303,7 @@ class TrajectoryMap(LapMapBase):
         self.draw_road(painter)
         if self._gain:
             self.draw_gain(painter)
+            self.draw_corner_marks(painter)
             return
         for distances, xs, ys, color in self._lines:
             if len(distances) < 2:
@@ -956,6 +1328,7 @@ class TrajectoryMap(LapMapBase):
                     faded.setAlphaF(0.35)
                 painter.setPen(QPen(faded, 3 if highlight else 1.5))
                 painter.drawPath(path)
+        self.draw_corner_marks(painter)
 
     def cursor_points(self, distance: float) -> list[tuple[QPointF, QColor]]:
         return [
@@ -1040,8 +1413,9 @@ class CornerTable(QWidget):
     """
 
     corner_selected = Signal(float, float)  # corner start & end distance
+    corners_changed = Signal(list)  # (corner number, apex distance) of reference lap
 
-    COLUMNS = ("Corner", "Time", "Min Speed", "Braking", "Full Throttle")
+    COLUMNS = ("Corner", "Time", "Min Speed", "Braking", "Full Throttle", "Trail Braking", "Coasting", "Overlap")
     COLOR_GAIN = QColor("#22C55E")
     COLOR_LOSS = QColor("#EF4444")
 
@@ -1066,9 +1440,15 @@ class CornerTable(QWidget):
         self.table = QTreeWidget(self)
         self.table.setRootIsDecorated(False)
         self.table.setHeaderLabels([tr(text) for text in self.COLUMNS])
-        self.table.headerItem().setToolTip(2, tr("Minimum speed (km/h): reference lap, compared lap"))
+        self.speed_convert, self.speed_unit = display_units()["speed"]
+        self.table.headerItem().setToolTip(2, trm(f"Minimum speed ({self.speed_unit}): reference lap, compared lap"))
         self.table.headerItem().setToolTip(3, tr("Braking point of compared lap: positive = brakes later"))
         self.table.headerItem().setToolTip(4, tr("Full throttle point of compared lap: negative = earlier"))
+        self.table.headerItem().setToolTip(5, tr("Seconds braking while turning: reference lap, compared lap"))
+        self.table.headerItem().setToolTip(
+            6, tr("Seconds without throttle nor brake: reference lap, compared lap (red: more than reference)"))
+        self.table.headerItem().setToolTip(
+            7, tr("Seconds with throttle & brake together: reference lap, compared lap (red: more than reference)"))
         self.table.itemClicked.connect(self.select_row)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1083,9 +1463,11 @@ class CornerTable(QWidget):
 
     def set_laps(self, reference: LapData | None, compared: LapData | None):
         self.laps = (reference, compared)
+        self.speed_convert, self.speed_unit = display_units()["speed"]  # follows units setting
         self.rows = (
             compare_corners(reference, compared, self.spin_hysteresis.value()) if reference is not None else [])
         self.table.clear()
+        self.corners_changed.emit([(row.corner.number, row.corner.apex) for row in self.rows])
         if not self.rows:
             self.label.setText(tr("No corner found: speed not recorded."))
             return
@@ -1110,21 +1492,26 @@ class CornerTable(QWidget):
         for column in range(self.table.columnCount()):
             self.table.resizeColumnToContents(column)
 
+    def speed(self, value: float) -> float:
+        return self.speed_convert(value) if self.speed_convert is not None else value
+
     def make_item(self, row: CornerComparison) -> QTreeWidgetItem:
         ref, other = row.reference, row.compared
         item = QTreeWidgetItem()
-        item.setText(0, f"{row.corner.number}  ({row.corner.apex:.0f} m)")
+        item.setText(0, f"{corner_label(row.corner.number)}  ({row.corner.apex:.0f} m)")
         if other is None:  # reference lap values only
             item.setText(1, f"{ref.time:.2f}")
-            item.setText(2, f"{ref.min_speed:.0f}")
+            item.setText(2, f"{self.speed(ref.min_speed):.0f}")
             item.setText(3, f"{ref.brake_point:.0f} m" if ref.brake_point >= 0 else "—")
             item.setText(4, f"{ref.throttle_point:.0f} m" if ref.throttle_point >= 0 else "—")
+            for column, value in ((5, ref.trail_braking), (6, ref.coasting), (7, ref.overlap)):
+                item.setText(column, f"{value:.1f} s")
             return item
         delta = other.time - ref.time
         item.setText(1, signed(delta, 2))
         item.setForeground(1, self.COLOR_LOSS if delta > 0.005 else self.COLOR_GAIN if delta < -0.005 else QColor())
-        speed_delta = other.min_speed - ref.min_speed
-        item.setText(2, f"{ref.min_speed:.0f} / {other.min_speed:.0f}  ({signed(speed_delta)})")
+        speed_delta = self.speed(other.min_speed) - self.speed(ref.min_speed)
+        item.setText(2, f"{self.speed(ref.min_speed):.0f} / {self.speed(other.min_speed):.0f}  ({signed(speed_delta)})")
         if speed_delta <= -1 or speed_delta >= 1:
             item.setForeground(2, self.COLOR_GAIN if speed_delta > 0 else self.COLOR_LOSS)
         for column, ref_point, other_point in ((3, ref.brake_point, other.brake_point),
@@ -1133,6 +1520,16 @@ class CornerTable(QWidget):
                 item.setText(column, signed(other_point - ref_point, 0, " m"))
             else:
                 item.setText(column, "—")
+        # Driving: trail braking (no judgement), coasting & overlap (more = time lost)
+        for column, ref_value, other_value, lower_better in (
+                (5, ref.trail_braking, other.trail_braking, False),
+                (6, ref.coasting, other.coasting, True),
+                (7, ref.overlap, other.overlap, True)):
+            item.setText(column, f"{ref_value:.1f} / {other_value:.1f} s")
+            if lower_better and other_value - ref_value >= 0.1:
+                item.setForeground(column, self.COLOR_LOSS)
+            elif lower_better and ref_value - other_value >= 0.1:
+                item.setForeground(column, self.COLOR_GAIN)
         return item
 
     def select_row(self, item: QTreeWidgetItem, *_):
@@ -1193,6 +1590,17 @@ class LapViewer(BaseDialog):
         self._release_timer.setInterval(RELEASE_DELAY)
         self._release_timer.timeout.connect(self.release_laps)
         self._outline_cache: dict[str, list[tuple[float, float]]] = {}  # track name: circuit
+        self._cache_mtime: dict[str, float] = {}  # loaded lap: file time, reloaded if file changed
+        self._info_cache: dict[str, tuple[float, dict]] = {}  # lap info: file time & info
+        self._marks: dict[str, dict[str, dict]] = {}  # folder: lap marks (kept, note)
+        self._saved_selection: tuple = ()  # last saved checked laps & reference of track
+        self._loader: threading.Thread | None = None  # background lap loading
+        self._loaded: dict[str, LapData | None] = {}
+        self._load_pending = False
+        self._load_timer = QTimer(self)
+        self._load_timer.setInterval(50)
+        self._load_timer.timeout.connect(self.check_background_load)
+        setting = load_viewer_setting(self.filepath)
 
         # Track selection
         self.combo_track = QComboBox(self)
@@ -1232,7 +1640,11 @@ class LapViewer(BaseDialog):
         layout_laps.setContentsMargins(0, 0, 0, 0)
         label_help = QLabel(tr("Check laps to compare, double-click to set reference lap."))
         label_help.setWordWrap(True)
+        self.check_clean = QCheckBox(tr("Hide invalid, out & in laps").replace("&", "&&"), self)  # & is not a shortcut
+        self.check_clean.setChecked(bool(setting.get("hide_unclean_laps", False)))
+        self.check_clean.toggled.connect(self.toggle_clean_laps)
         layout_laps.addWidget(label_help)
+        layout_laps.addWidget(self.check_clean)
         layout_laps.addWidget(self.lap_list, stretch=1)
         layout_laps.addWidget(self.label_best)
         layout_laps.addWidget(self.label_warning)
@@ -1241,11 +1653,13 @@ class LapViewer(BaseDialog):
         self.label_cursor = QLabel(self)
         self.label_cursor.setMinimumHeight(UIScaler.size(1.6))
         self.label_cursor.setWordWrap(True)
+        self.label_cursor.setTextFormat(Qt.TextFormat.RichText)
         self.plot = TracePlot(self)
         self.plot.cursor_changed.connect(self.update_cursor_info)
         self.plot.channels_reordered.connect(self.reorder_channels)
         self.trajectory = TrajectoryMap(self)
-        self.trajectory.show_gain = bool(load_viewer_setting(self.filepath).get("map_time_gain", False))
+        self.trajectory.distance_clicked.connect(self.plot.show_distance)
+        self.trajectory.show_gain = bool(setting.get("map_time_gain", False))
         self.check_gain = QCheckBox(tr("Color by time gained / lost"), self)
         self.check_gain.setToolTip(tr(
             "First compared lap line colored against reference lap: red where losing time, green where gaining"))
@@ -1261,7 +1675,8 @@ class LapViewer(BaseDialog):
         self.side_tabs.addTab(panel_map, tr("Track Map"))
         self.side_tabs.addTab(self.gcircle, tr("G Circle"))
         self.corners = CornerTable(self, self.filepath)
-        self.corners.corner_selected.connect(lambda start, end: self.plot.set_view(start, end))
+        self.corners.corner_selected.connect(lambda start, end: self.plot.set_view_distance(start, end))
+        self.corners.corners_changed.connect(self.set_corner_marks)
         self.side_tabs.addTab(self.corners, tr("Corners"))
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -1276,23 +1691,31 @@ class LapViewer(BaseDialog):
         # Buttons
         self.visible_channels = load_visible_channels(self.filepath)
         self.plot.set_channels(self.visible_channels)
+        self.check_time_axis = QCheckBox(tr("Time axis"), self)
+        self.check_time_axis.setToolTip(tr("Charts along lap time instead of lap distance"))
+        self.check_time_axis.setChecked(bool(setting.get("time_axis", False)))
+        self.plot.set_time_axis(self.check_time_axis.isChecked())
+        self.check_time_axis.toggled.connect(self.toggle_time_axis)
         button_channels = QPushButton(tr("Channels"))
         button_channels.setMenu(self.channel_menu())
-        button_export = QPushButton(tr("Export MoTeC..."))
+        button_export = QPushButton(tr("Export"))
         menu_export = QMenu(button_export)
-        menu_export.addAction(tr("Reference Lap...")).triggered.connect(self.export_motec)
-        menu_export.addAction(tr("Displayed Laps...")).triggered.connect(lambda: self.export_motec_many(False))
-        menu_export.addAction(tr("All Laps of Track...")).triggered.connect(lambda: self.export_motec_many(True))
+        menu_motec = menu_export.addMenu("MoTeC i2 (.ld)")
+        menu_motec.addAction(tr("Reference Lap...")).triggered.connect(self.export_motec)
+        menu_motec.addAction(tr("Displayed Laps...")).triggered.connect(lambda: self.export_motec_many(False))
+        menu_motec.addAction(tr("All Laps of Track...")).triggered.connect(lambda: self.export_motec_many(True))
+        menu_export.addAction(tr("CSV, Displayed Laps...")).triggered.connect(self.export_csv)
         button_export.setMenu(menu_export)
-        button_export.setToolTip(tr("Export laps to MoTeC i2 log files (.ld)"))
+        button_export.setToolTip(tr("Export laps to MoTeC i2 log files (.ld), or displayed charts to CSV (Excel)"))
         button_close = QPushButton(tr("Close"))
         button_close.clicked.connect(self.close)
         layout_button = QHBoxLayout()
         label_help = QLabel(tr(
             "Wheel: zoom, drag: move, Shift+drag: zoom area, double-click: reset (charts & map). "
-            "Drag a channel name to reorder."))
+            "Drag a channel name to reorder. Click the map to show a point."))
         label_help.setWordWrap(True)
         layout_button.addWidget(label_help, stretch=1)
+        layout_button.addWidget(self.check_time_axis)
         layout_button.addWidget(button_channels)
         layout_button.addWidget(button_export)
         layout_button.addWidget(button_close)
@@ -1363,22 +1786,92 @@ class LapViewer(BaseDialog):
         self.combo_track.blockSignals(False)
         if current:
             self.combo_track.setCurrentText(current)
-        self._lap_cache.clear()
+        self.drop_changed_laps()
+        self._marks.clear()
         self.load_track(self.combo_track.currentText())
         if not self.combo_track.count() and not self.external:
             self.label_cursor.setText(tr("No recorded lap. Enable the Recorder module, then drive a few laps."))
 
     def load_track(self, track: str):
         laps = list_laps(self.filepath, track) if track else []
-        self.entries = [LapEntry(lap, read_lap_info(lap.path)) for lap in laps]
-        best = best_laps(laps, 1)
-        self.reference_key = best[0].path if best else (laps[0].path if laps else "")
-        # Compare reference with newest other lap by default
-        checked = {self.reference_key}
-        newest = next((lap.path for lap in laps if lap.valid and lap.path != self.reference_key), "")
-        if newest:
-            checked.add(newest)
+        self.entries = [LapEntry(lap, self.lap_info(lap.path)) for lap in laps]
+        # Laps shown last time on this track, else fastest lap compared with newest other lap
+        saved = load_viewer_setting(self.filepath).get("selections", {})
+        saved = saved.get(track, {}) if isinstance(saved, dict) else {}
+        paths = {lap.filename: lap.path for lap in laps}
+        checked = {paths[name] for name in saved.get("checked", []) if name in paths}
+        reference = paths.get(saved.get("reference", ""), "")
+        if checked and reference in checked:
+            self.reference_key = reference
+        else:
+            best = best_laps(laps, 1)
+            self.reference_key = best[0].path if best else (laps[0].path if laps else "")
+            checked = {self.reference_key}
+            newest = next((lap.path for lap in laps if lap.valid and lap.path != self.reference_key), "")
+            if newest:
+                checked.add(newest)
+        self._saved_selection = (track, tuple(sorted(os.path.basename(path) for path in checked)),
+                                 os.path.basename(self.reference_key))
         self.fill_list(checked)
+
+    def lap_info(self, path: str) -> dict:
+        """Lap info (first line of file), read again only if file changed"""
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0.0
+        cached = self._info_cache.get(path)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        info = read_lap_info(path)
+        self._info_cache[path] = (mtime, info)
+        return info
+
+    def drop_changed_laps(self):
+        """Forget loaded laps whose file changed or was removed (refresh)"""
+        for path in list(self._lap_cache):
+            try:
+                changed = os.path.getmtime(path) != self._cache_mtime.get(path)
+            except OSError:
+                changed = True
+            if changed:
+                self._lap_cache.pop(path, None)
+                self._cache_mtime.pop(path, None)
+
+    def lap_marks(self, path: str) -> dict:
+        """Kept state & note of lap"""
+        folder, name = os.path.split(path)
+        if folder not in self._marks:
+            self._marks[folder] = load_marks(folder)
+        return self._marks[folder].get(name, {})
+
+    def save_selection(self, paths: list[str]):
+        """Remember checked laps & reference of current track"""
+        track = self.combo_track.currentText()
+        track_paths = {entry.file.path for entry in self.entries}
+        names = tuple(sorted(os.path.basename(path) for path in paths if path in track_paths))
+        reference = os.path.basename(self.reference_key) if self.reference_key in track_paths else ""
+        selection = (track, names, reference)
+        if not track or not names or selection == self._saved_selection:
+            return
+        self._saved_selection = selection
+        selections = load_viewer_setting(self.filepath).get("selections", {})
+        if not isinstance(selections, dict):
+            selections = {}
+        selections[track] = {"checked": list(names), "reference": reference}
+        save_viewer_setting(self.filepath, selections=selections)
+
+    def toggle_clean_laps(self, enabled: bool):
+        save_viewer_setting(self.filepath, hide_unclean_laps=enabled)
+        self.fill_list(set(self.checked_paths()))
+
+    def toggle_time_axis(self, enabled: bool):
+        save_viewer_setting(self.filepath, time_axis=enabled)
+        self.plot.set_time_axis(enabled)
+
+    def set_corner_marks(self, marks: list):
+        self.plot.set_corner_marks(marks)
+        self.trajectory.set_corner_marks(marks)
 
     def all_entries(self) -> list[LapEntry]:
         return self.entries + self.external
@@ -1394,16 +1887,28 @@ class LapViewer(BaseDialog):
         # Added files may come from other tracks: theoretical best & best sectors of current track only
         sectors = [self.entry_sectors(entry) for entry in self.entries if entry.file.valid]
         best_total, best_sectors = theoretical_best(sectors)
-        groups = group_sessions(self.entries, lambda entry: entry.file.filename, lambda entry: entry.info)
-        if self.external:
-            groups.insert(0, self.external)
-        for index, group in enumerate(groups):
-            is_added = group is self.external
+        hide_unclean = self.check_clean.isChecked()
+        entries = [
+            entry for entry in self.entries
+            if not hide_unclean or entry.file.path in checked or entry.file.path == self.reference_key
+            or (entry.file.valid and entry.info.get("kind") not in ("out", "in"))
+        ]
+        groups: list[tuple[list[LapEntry], bool]] = [
+            (group, False)
+            for group in group_sessions(entries, lambda entry: entry.file.filename, lambda entry: entry.info)
+        ]
+        added: dict[str, list[LapEntry]] = {}  # added laps by folder (imported log, other track)
+        for entry in self.external:
+            added.setdefault(os.path.dirname(entry.file.path), []).append(entry)
+        groups[:0] = [(group, True) for group in added.values()]
+        for index, (group, is_added) in enumerate(groups):
             header = self.add_session_item(group, is_added)
             key = header.data(self.COL_LAP, Qt.ItemDataRole.UserRole + 1)
             vehicle = str(group[0].info.get("vehicle", ""))
+            fastest = min((entry for entry in group if entry.file.valid and entry.file.lap_time > 0),
+                          key=lambda entry: entry.file.lap_time, default=None)
             for entry in group:
-                self.add_lap_item(header, entry, checked, best_sectors, vehicle, is_added)
+                self.add_lap_item(header, entry, checked, best_sectors, vehicle, entry is fastest)
             has_checked = any(entry.file.path in checked for entry in group)
             header.setExpanded(has_checked or key in expanded or (index == 0 and not expanded))
         self.lap_list.blockSignals(False)
@@ -1418,9 +1923,10 @@ class LapViewer(BaseDialog):
         header = QTreeWidgetItem(self.lap_list)
         header.setFlags(Qt.ItemFlag.ItemIsEnabled)  # not checkable nor selectable
         first = group[0]
-        if is_added:
-            title = tr("Added Laps")
-            key = "added"
+        if is_added:  # imported log or other folder
+            folder = os.path.dirname(first.file.path)
+            title = os.path.basename(folder)
+            key = f"added {folder}"
         else:
             session = str(first.info.get("session", "")) or tr("Session")
             start = first.info.get("session_start")  # recorded, else when first lap started
@@ -1435,7 +1941,9 @@ class LapViewer(BaseDialog):
         header.setText(self.COL_TIME, format_laptime(best))
         details = [trm(f"{len(group)} laps") if len(group) > 1 else tr("1 lap")]
         vehicle = str(first.info.get("vehicle", ""))
-        if vehicle and not is_added:
+        if is_added:
+            details.append(tr("added"))
+        if vehicle:
             details.append(vehicle)
         header.setText(self.COL_INFO, ", ".join(details))
         font = QFont(header.font(self.COL_LAP))
@@ -1446,14 +1954,14 @@ class LapViewer(BaseDialog):
         return header
 
     def add_lap_item(self, header: QTreeWidgetItem, entry: LapEntry, checked: set[str], best_sectors,
-                     vehicle: str, is_added: bool):
-        """Lap row: number, time, sectors (best in purple), info; invalid laps dimmed"""
+                     vehicle: str, is_fastest: bool):
+        """Lap row: number (star on fastest of session), time, sectors (best in purple), info; invalid laps dimmed"""
         item = QTreeWidgetItem(header)
         number = lap_number_of(entry.file.filename)
-        if is_added:
-            label = f"{os.path.basename(os.path.dirname(entry.file.path))}: {lap_label(entry.file.filename)}"
-        else:
-            label = trm(f"Lap {number}") if number else lap_label(entry.file.filename)
+        label = trm(f"Lap {number}") if number else lap_stem(entry.file.filename)
+        if is_fastest:
+            label = f"★ {label}"
+            item.setToolTip(self.COL_LAP, tr("Fastest valid lap of session"))
         item.setText(self.COL_LAP, label)
         item.setText(self.COL_TIME, format_laptime(entry.file.lap_time))
         item.setData(self.COL_LAP, Qt.ItemDataRole.UserRole, entry.file.path)
@@ -1465,7 +1973,15 @@ class LapViewer(BaseDialog):
             item.setText(column, format_laptime(value))
             if value > 0 and abs(value - best) < 0.0005 and entry.file.valid and not entry.external:
                 item.setForeground(column, QColor("#A855F7"))  # best sector
-        item.setText(self.COL_INFO, self.entry_text(entry, vehicle))
+        info = self.entry_text(entry, vehicle)
+        if not entry.external:
+            mark = self.lap_marks(entry.file.path)
+            extra = [tr("kept")] if mark.get("kept") else []
+            if mark.get("note"):
+                extra.append(f"“{mark['note']}”")
+                item.setToolTip(self.COL_INFO, str(mark["note"]))
+            info = ", ".join(filter(None, [info, *extra]))
+        item.setText(self.COL_INFO, info)
         if not entry.file.valid or entry.info.get("kind") in ("out", "in"):
             dimmed = self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
             for column in (self.COL_TIME, self.COL_INFO):
@@ -1534,11 +2050,57 @@ class LapViewer(BaseDialog):
         item = self.lap_list.itemAt(position)
         if item is None or not item.data(self.COL_LAP, Qt.ItemDataRole.UserRole):  # no lap (session header)
             return
+        path = item.data(self.COL_LAP, Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
         menu.addAction(tr("Set as Reference")).triggered.connect(lambda: self.set_reference_item(item))
-        menu.addAction(tr("Export MoTeC...")).triggered.connect(
-            lambda: self.export_motec(item.data(self.COL_LAP, Qt.ItemDataRole.UserRole)))
+        menu.addAction(tr("Export MoTeC...")).triggered.connect(lambda: self.export_motec(path))
+        if path in {entry.file.path for entry in self.entries}:  # recorded lap of track
+            menu.addSeparator()
+            mark = self.lap_marks(path)
+            action_keep = menu.addAction(tr("Keep Lap"))
+            action_keep.setCheckable(True)
+            action_keep.setChecked(bool(mark.get("kept")))
+            action_keep.setToolTip(tr("Kept lap is never removed by the recorder"))
+            action_keep.toggled.connect(lambda checked: self.keep_lap(path, checked))
+            menu.addAction(tr("Note...")).triggered.connect(lambda: self.edit_note(path))
+            menu.addSeparator()
+            menu.addAction(tr("Delete Lap")).triggered.connect(lambda: self.delete_lap(path))
         menu.exec(self.lap_list.viewport().mapToGlobal(position))
+
+    def keep_lap(self, path: str, keep: bool):
+        """Kept lap is never removed by recorder (oldest laps over limit are)"""
+        set_mark(path, kept=keep)
+        self._marks.pop(os.path.dirname(path), None)
+        self.fill_list(set(self.checked_paths()))
+
+    def edit_note(self, path: str):
+        """Free text note of lap, shown in lap list"""
+        def saving(text: str) -> bool:
+            set_mark(path, note=text)
+            self._marks.pop(os.path.dirname(path), None)
+            self.fill_list(set(self.checked_paths()))
+            return True
+
+        TextInputDialog(self, tr("Lap Note"), tr("Note for this lap (empty to remove):"), saving,
+                        str(self.lap_marks(path).get("note", ""))).show()
+
+    def delete_lap(self, path: str):
+        """Delete recorded lap file after confirmation"""
+        if not self.confirm_operation("Delete Lap", f"Delete <b>{os.path.basename(path)}</b> permanently?"):
+            return
+        try:
+            os.remove(path)
+        except OSError as error:
+            logger.error("LAP VIEWER: unable to delete %s: %s", path, error)
+            self.label_cursor.setText(trm(f"Unable to delete lap: {error}"))
+            return
+        remove_mark(path)
+        self._marks.pop(os.path.dirname(path), None)
+        self._lap_cache.pop(path, None)
+        self.entries = [entry for entry in self.entries if entry.file.path != path]
+        if self.reference_key == path:
+            self.reference_key = ""
+        self.fill_list(set(self.checked_paths()) - {path})
 
     def read_lap(self, path: str) -> LapData | None:
         if not path:
@@ -1552,10 +2114,58 @@ class LapViewer(BaseDialog):
             logger.error("LAP VIEWER: unable to load %s: %s", path, error)
             self.label_cursor.setText(trm(f"Unable to load lap: {error}"))
             lap = None
-        self._lap_cache[path] = lap
-        while len(self._lap_cache) > LAP_CACHE_SIZE:  # a lap takes several MB in memory
-            self._lap_cache.pop(next(iter(self._lap_cache)))
+        self.store_lap(path, lap)
         return lap
+
+    def store_lap(self, path: str, lap: LapData | None):
+        """Keep loaded lap, oldest laps forgotten over cache size (a lap takes several MB in memory)"""
+        self._lap_cache[path] = lap
+        try:
+            self._cache_mtime[path] = os.path.getmtime(path)
+        except OSError:
+            self._cache_mtime.pop(path, None)
+        limit = max(LAP_CACHE_SIZE, len(self.checked_paths()))
+        while len(self._lap_cache) > limit:
+            oldest = next(iter(self._lap_cache))
+            self._lap_cache.pop(oldest)
+            self._cache_mtime.pop(oldest, None)
+
+    def load_in_background(self, paths: list[str]):
+        """Read laps in a thread, charts updated once all are loaded (window stays responsive)"""
+        if self._loader is not None:
+            self._load_pending = True  # selection changed meanwhile: shown when current loading ends
+            return
+        results: dict[str, LapData | None] = {}
+
+        def loading():
+            for path in paths:
+                try:
+                    results[path] = load_lap(path)
+                except (OSError, ValueError) as error:
+                    logger.error("LAP VIEWER: unable to load %s: %s", path, error)
+                    results[path] = None
+
+        self._loaded = results
+        self._loader = threading.Thread(target=loading, daemon=True, name="Lap viewer loading")
+        self._loader.start()
+        self._load_timer.start()
+        self.label_cursor.setText(trm(f"Loading {len(paths)} laps..."))
+
+    def check_background_load(self):
+        """Background loading finished: laps kept, charts updated"""
+        if self._loader is None or self._loader.is_alive():
+            return
+        self._load_timer.stop()
+        self._loader = None
+        self._load_pending = False
+        for path, lap in self._loaded.items():
+            self.store_lap(path, lap)
+        self._loaded = {}
+        self.label_cursor.setText("")
+        self.load_laps()
+
+    def is_loading(self) -> bool:
+        return self._loader is not None
 
     def hideEvent(self, event):
         """Page left in background: loaded laps (several MB each) released after a while"""
@@ -1572,10 +2182,11 @@ class LapViewer(BaseDialog):
 
     def release_laps(self):
         """Free memory of loaded laps while hidden, see showEvent"""
-        if self.isVisible() or self._released:
+        if self.isVisible() or self._released or self._loader is not None:
             return
         self._released_view = self.plot.view_start, self.plot.view_end
         self._lap_cache.clear()
+        self._cache_mtime.clear()
         self.plot.set_laps([])
         self.trajectory.set_laps([])
         self.gcircle.set_laps([])
@@ -1588,11 +2199,17 @@ class LapViewer(BaseDialog):
         if paths and self.reference_key not in paths:
             self.reference_key = paths[0]
         ordered = sorted(paths, key=lambda path: path != self.reference_key)  # reference first
+        missing = [path for path in ordered if path not in self._lap_cache]
+        if self._loader is not None or len(missing) >= BACKGROUND_LOAD_COUNT:
+            self.load_in_background(missing)
+            return
+        self.save_selection(paths)
+        entries = {entry.file.path: entry for entry in self.all_entries()}
         laps: list[PlotLap] = []
         for path in ordered:
             data = self.read_lap(path)
             if data is not None:
-                label = lap_label(os.path.basename(path))
+                label = self.entry_label(entries.get(path), path)
                 laps.append(PlotLap(path, label, data, LAP_COLORS[len(laps) % len(LAP_COLORS)]))
         self.plot.set_laps(laps, self.reference_key)
         self.trajectory.set_laps(laps, self.track_outline(laps))
@@ -1604,6 +2221,18 @@ class LapViewer(BaseDialog):
             self.label_warning.setText(trm(f"Laps from different vehicles: {', '.join(vehicles)}"))
         else:
             self.label_warning.setText("")
+
+    @staticmethod
+    def entry_label(entry: LapEntry | None, path: str) -> str:
+        """Lap name in charts legend: "Lap 12 · 1:11.525 · Race 03/10", or "log: Lap 3 · 2:18.200" """
+        label = lap_label(os.path.basename(path))
+        if entry is None or entry.external:
+            return f"{os.path.basename(os.path.dirname(path))}: {label}"
+        session = str(entry.info.get("session", ""))
+        timestamp = lap_timestamp_of(entry.file.filename)
+        date = time.strftime("%d/%m", time.localtime(timestamp)) if timestamp > 0 else ""
+        where = " ".join(filter(None, [tr(session) if session else "", date]))
+        return f"{label} · {where}" if where else label
 
     def track_outline(self, laps: list[PlotLap]) -> list[tuple[float, float]]:
         """Circuit coordinates from track map file (recorded by Mapping module), empty if none"""
@@ -1657,7 +2286,7 @@ class LapViewer(BaseDialog):
                 continue
             name = os.path.basename(path)
             self.external.append(LapEntry(
-                LapFile(name, path, is_valid_name(name), lap_time_of(name)), read_lap_info(path), external=True))
+                LapFile(name, path, is_valid_name(name), lap_time_of(name)), self.lap_info(path), external=True))
             added.add(path)
         if reference_from:  # compare own laps with fastest imported lap
             self.reference_key = min(
@@ -1758,7 +2387,62 @@ class LapViewer(BaseDialog):
 
     def update_cursor_info(self):
         plot = self.plot
-        self.label_cursor.setText(plot.cursor_values())
-        view = (plot.view_start, plot.view_end) if plot.zoomed() else (0.0, 0.0)
-        self.trajectory.set_cursor(plot.cursor_distance, view)
-        self.gcircle.set_cursor(plot.cursor_distance, view)
+        if not self.is_loading():
+            self.label_cursor.setText(plot.cursor_values())
+        view = plot.view_track_range()
+        distance = plot.cursor_track_distance()
+        self.trajectory.set_cursor(distance, view)
+        self.gcircle.set_cursor(distance, view)
+
+    # CSV export
+    def export_csv(self):
+        """Displayed charts of displayed laps to CSV, every meter"""
+        if not self.plot.laps:
+            self.label_cursor.setText(tr("Check laps to export first."))
+            return
+        default = os.path.join(self.filepath, f"{self.combo_track.currentText() or 'laps'}.csv")
+        filename, _ = QFileDialog.getSaveFileName(self, tr("Export CSV..."), default, "CSV (*.csv)")
+        if filename and self.write_csv(filename):
+            self.label_cursor.setText(trm(f"Exported: {html.escape(os.path.basename(filename))}"))
+
+    def write_csv(self, filename: str, decimal_point: str = "") -> bool:
+        """Distance, then each displayed channel of each displayed lap, resampled every meter
+
+        Number format follows system locale (decimal comma & semicolon separator in French), for Excel.
+        """
+        plot = self.plot
+        decimal = decimal_point or QLocale.system().decimalPoint() or "."
+        delimiter = ";" if decimal == "," else ","
+        length = max((lap.data.distance[-1] for lap in plot.laps if len(lap.data)), default=0.0)
+        grid = [float(meter) for meter in range(int(length) + 1)]
+        header = [f"{tr('Distance')} (m)"]
+        columns: list[list[str]] = []
+        for lap in plot.laps:
+            for channel in plot.channels:
+                unit = plot.unit_of(channel)
+                header.append(f"{lap.label} - {channel_title(channel)}" + (f" ({unit})" if unit else ""))
+                xs, ys = plot.series(channel, lap, time_axis=False)
+                columns.append([
+                    format_csv_number(interpolate(xs, ys, distance), decimal)
+                    if xs and xs[0] <= distance <= xs[-1] else ""
+                    for distance in grid
+                ])
+        try:
+            with open(filename, "w", newline="", encoding="utf-8-sig") as file:  # BOM: Excel reads UTF-8
+                writer = csv.writer(file, delimiter=delimiter)
+                writer.writerow(header)
+                for index, distance in enumerate(grid):
+                    writer.writerow([format_csv_number(distance, decimal), *(column[index] for column in columns)])
+        except OSError as error:
+            logger.error("LAP VIEWER: unable to export %s: %s", filename, error)
+            self.label_cursor.setText(trm(f"Unable to export lap: {error}"))
+            return False
+        return True
+
+
+def format_csv_number(value: float, decimal: str) -> str:
+    """Number with up to 4 decimals, locale decimal separator"""
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    if text in ("-0", ""):
+        text = "0"
+    return text.replace(".", decimal) if decimal != "." else text

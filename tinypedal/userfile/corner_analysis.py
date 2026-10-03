@@ -35,6 +35,9 @@ SMOOTH_POINTS = 5  # moving average width (25 m), removes speed noise
 SPEED_HYSTERESIS = 10.0  # km/h, speed drop & rise needed to count a corner
 BRAKE_ON = 0.1  # brake pedal fraction counted as braking
 FULL_THROTTLE = 0.9  # throttle pedal fraction counted as full throttle
+PEDAL_OFF = 0.05  # pedal fraction counted as released (coasting)
+PEDAL_ON = 0.1  # pedal fraction counted as pressed (overlap)
+STEERING_ON = 0.05  # steering fraction counted as turning (trail braking)
 
 
 class Corner(NamedTuple):
@@ -54,6 +57,9 @@ class CornerStats(NamedTuple):
     brake_point: float  # first braking before minimum speed
     throttle_point: float  # first full throttle after minimum speed
     time: float  # seconds from corner start to end
+    trail_braking: float = 0.0  # seconds braking while turning
+    coasting: float = 0.0  # seconds with no pedal pressed
+    overlap: float = 0.0  # seconds with throttle & brake pressed together
 
 
 class CornerComparison(NamedTuple):
@@ -155,7 +161,30 @@ def corner_stats(lap: LapData, corner: Corner) -> CornerStats | None:
     if throttle:
         throttle_point = next(
             (grid[index] for index in range(lowest, len(grid)) if throttle[index] >= FULL_THROTTLE), -1.0)
-    return CornerStats(speeds[lowest], grid[lowest], brake_point, throttle_point, times[1] - times[0])
+    trail, coast, overlap = driving_times(lap, grid, brake, throttle)
+    return CornerStats(
+        speeds[lowest], grid[lowest], brake_point, throttle_point, times[1] - times[0], trail, coast, overlap)
+
+
+def driving_times(
+    lap: LapData, grid: list[float], brake: list[float] | None, throttle: list[float] | None,
+) -> tuple[float, float, float]:
+    """Seconds of trail braking, coasting & pedal overlap along grid (0 if pedals not recorded)"""
+    times = resample(lap, "lap_time", grid)
+    if not times or brake is None or throttle is None:
+        return 0.0, 0.0, 0.0
+    steering = resample(lap, "steering", grid) or [0.0] * len(grid)
+    trail = coast = overlap = 0.0
+    for index in range(len(grid) - 1):
+        step = max(times[index + 1] - times[index], 0.0)
+        pressed_brake, pressed_throttle = brake[index], throttle[index]
+        if pressed_brake >= BRAKE_ON and abs(steering[index]) >= STEERING_ON:
+            trail += step
+        if pressed_brake < PEDAL_OFF and pressed_throttle < PEDAL_OFF:
+            coast += step
+        if pressed_brake >= PEDAL_ON and pressed_throttle >= PEDAL_ON:
+            overlap += step
+    return trail, coast, overlap
 
 
 def compare_corners(

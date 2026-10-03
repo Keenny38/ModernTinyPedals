@@ -41,7 +41,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 ## Ce que cette version apporte
 
-> **Nouveau dans la 0.14.0** : tout s'ouvre dans la fenêtre de l'app, barre de navigation personnalisable, tours de la visionneuse regroupés par session, comparaison virage par virage, trajectoire colorée selon le temps gagné ou perdu, import et bibliothèque de tours MoTeC. Détails dans le [changelog](CHANGELOG.md).
+> **Nouveau dans la 0.15.0** : visionneuse de télémétrie plus lisible et plus complète (unités, axes, valeurs au curseur, virages numérotés, analyse de pilotage, axe en temps, export CSV, tours gardés et notes). Détails dans le [changelog](CHANGELOG.md).
 
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
@@ -56,7 +56,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 **Widgets et données**
 - Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites. Plages de pression cible saisies en kPa, psi ou bar.
-- Enregistreur de tours et visionneuse de télémétrie (tours regroupés par session, superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**, import d'un journal MoTeC (celui de LMU par exemple) pour se comparer au tour d'un autre pilote (bibliothèque des tours importés : importer, rechercher, afficher, renommer, supprimer ; un `.ld` déposé sur l'app est importé directement), comparaison virage par virage (temps, vitesse mini, points de freinage et de plein gaz), et trajectoire colorée selon le temps gagné ou perdu.
+- Enregistreur de tours et visionneuse de télémétrie (tours regroupés par session, superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**, import d'un journal MoTeC (celui de LMU par exemple) pour se comparer au tour d'un autre pilote (bibliothèque des tours importés : importer, rechercher, afficher, renommer, supprimer ; un `.ld` déposé sur l'app est importé directement), comparaison virage par virage (temps, vitesse mini, points de freinage et de plein gaz, freinage dégressif, roue libre, chevauchement des pédales), trajectoire colorée selon le temps gagné ou perdu, courbe de gain/perte de temps, axe en temps, virages numérotés, export CSV pour Excel, tours gardés et notes par tour.
 - **Rejeu de télémétrie** : enregistre une session LMU ou rFactor 2 et rejoue-la dans tous les widgets, sans lancer le jeu.
 
 **Connexions**

@@ -46,6 +46,7 @@ from ..const_app import VERSION
 from ..module_info import minfo
 from ..replay import replay
 from ..userfile import write_text_file
+from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files
 from ..validator import generator_init
 from ._base import DataModule
@@ -448,12 +449,13 @@ def save_lap(
 
 
 def remove_old_laps(folder: str, max_saved_laps: int, keep_best: int = 0):
-    """Remove oldest recorded laps over limit (per track & class folder), fastest valid laps are kept"""
+    """Remove oldest recorded laps over limit (per track & class folder), fastest valid laps & kept laps are kept"""
     try:
         laps = lap_files(folder)
         if len(laps) <= max_saved_laps:
             return
-        protected = {lap.path for lap in best_laps(laps, keep_best)}
+        kept = kept_laps(folder)  # kept by user in lap viewer
+        protected = {lap.path for lap in best_laps(laps, keep_best)} | {lap.path for lap in laps if lap.filename in kept}
         laps.sort(key=lambda lap: os.path.getmtime(lap.path))
         excess = len(laps) - max_saved_laps
         for lap in laps:
