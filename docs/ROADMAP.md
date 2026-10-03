@@ -9,7 +9,7 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 ## Distribution
 
 - 🟠 **Tester l'installeur Windows et la mise à jour depuis l'app.** Le workflow `Build and Release` publie bien `ModernTinyPedals-<version>-windows-setup.exe` et son `.sha256` (vérifié sur la release 0.13.0). Reste à l'essayer sur une vraie machine : installer la 0.13.0, puis lancer `Télécharger et installer` depuis une version plus ancienne (la 0.12.2 par exemple).
-- 🟡 **Acheter un certificat de signature de code.** Le workflow `Build and Release` signe l'exécutable et l'installeur dès que les secrets `WINDOWS_CERT_PFX_BASE64` (fichier .pfx en base64) et `WINDOWS_CERT_PASSWORD` sont définis. Sans certificat, Windows SmartScreen avertit à chaque installation.
+- 🟡 **Signer l'exécutable et l'installeur.** Sans signature, Windows SmartScreen avertit à chaque installation. Le workflow `Build and Release` sait signer de deux façons, il suffit de fournir l'une d'elles : un certificat .pfx (secrets `WINDOWS_CERT_PFX_BASE64` et `WINDOWS_CERT_PASSWORD`), ou Azure Artifact Signing, sans fichier de certificat et environ 10 $ par mois (variables `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` et secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` d'une application Entra ID ayant le rôle « Artifact Signing Certificate Profile Signer »). Pour un projet libre, SignPath Foundation signe gratuitement sur demande. Reste à souscrire l'une de ces offres.
 
 ## Télémétrie
 
@@ -23,5 +23,5 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 
 ## Interface
 
-- 💡 **Overlay VR OpenXR natif.** Demande une « API layer » OpenXR en C++ injectée dans le jeu, impossible en Python. En attendant, la fenêtre miroir VR (`Config > VR Overlay`) s'affiche dans le casque avec OpenKneeboard, OVR Toolkit, XSOverlay ou Desktop+.
+- 💡 **Overlay VR OpenXR natif.** Demande une « API layer » OpenXR en C++ (DLL chargée par le jeu), impossible en Python. Architecture prévue : l'app écrit l'image de l'overlay (déjà produite pour la fenêtre miroir) dans une mémoire partagée nommée avec un compteur d'images ; la couche intercepte `xrCreateSession` (pour créer sa swapchain avec l'API graphique du jeu, D3D11 pour LMU et rF2), copie l'image dans la swapchain à chaque `xrEndFrame` quand le compteur change, et ajoute un `XrCompositionLayerQuad` (position, taille et opacité lues dans la mémoire partagée). L'installeur enregistre la couche comme « implicit API layer » (clé `HKLM\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, avec variable d'environnement pour la désactiver). La DLL peut être compilée par la CI (MSVC sur `windows-latest`), mais doit être testée sur un vrai casque avant toute release : une erreur dans la couche fait planter le jeu. En attendant, la fenêtre miroir VR (`Config > VR Overlay`) s'affiche dans le casque avec OpenKneeboard, OVR Toolkit, XSOverlay ou Desktop+.
 - 🟡 **Tester en VR** l'overlay SteamVR et la fenêtre miroir avec OpenKneeboard, sur un vrai casque.

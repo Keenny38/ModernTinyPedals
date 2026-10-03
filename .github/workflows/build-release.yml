@@ -104,6 +104,10 @@ jobs:
       WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
       WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
       HAS_SIGNING_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
+      # Or Azure Artifact Signing (no .pfx file, about 10 USD a month): repository variables AZURE_SIGNING_ENDPOINT,
+      # AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE & secrets AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET.
+      # Used only without .pfx certificate.
+      USE_AZURE_SIGNING: ${{ secrets.WINDOWS_CERT_PFX_BASE64 == '' && vars.AZURE_SIGNING_ACCOUNT != '' && secrets.AZURE_CLIENT_SECRET != '' }}
     outputs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
     steps:
@@ -145,6 +149,22 @@ jobs:
           Remove-Item $pfx -ErrorAction SilentlyContinue
         }
 
+    - name: Sign executable (Azure Artifact Signing)
+      if: env.USE_AZURE_SIGNING == 'true'
+      uses: azure/artifact-signing-action@v2
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files-folder: ${{ github.workspace }}/dist/TinyPedal
+        files-folder-filter: exe
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+
     - name: ZIP Windows file
       shell: pwsh
       run: |
@@ -173,6 +193,21 @@ jobs:
         } finally {
           Remove-Item $pfx -ErrorAction SilentlyContinue
         }
+
+    - name: Sign installer (Azure Artifact Signing)
+      if: env.USE_AZURE_SIGNING == 'true'
+      uses: azure/artifact-signing-action@v2
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files: ${{ github.workspace }}/ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
 
     - name: Check hash sum
       id: get_hash

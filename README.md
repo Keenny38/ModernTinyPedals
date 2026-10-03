@@ -188,6 +188,8 @@ L'exécutable est créé dans `dist\TinyPedal`. Pour l'installeur, installe [Inn
 iscc /DAppVersion=0.10.0 installer\tinypedal.iss
 ```
 
+Le workflow `Build and Release` signe l'exécutable et l'installeur si un certificat `.pfx` ou un compte Azure Artifact Signing est configuré dans les secrets et variables du dépôt (détail dans `.github/workflows/build-release.yml`), sinon il les publie sans signature.
+
 > Le nom affiché est « Modern Tiny Pedals », mais le nom interne reste `TinyPedal` (dossier de configuration `%APPDATA%\TinyPedal`, `tinypedal.exe`, en-tête `X-TinyPedal` du contrôle à distance), pour garder les réglages existants et la compatibilité des outils.
 
 ## Linux
