@@ -214,8 +214,7 @@ class TrackInfoEditor(BaseEditor):
         )
         if self.confirm_operation(message=msg_text):
             self.tracks_temp = copy_setting(cfg.default.tracks)
-            self.set_modified()
-            self.refresh_table()
+            self.replace_table_data(self.refresh_table)
 
     def applying(self):
         """Save & apply"""

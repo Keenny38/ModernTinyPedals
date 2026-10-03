@@ -268,7 +268,7 @@ class BaseEditor(BaseDialog):
             return None
         try:
             return self._undo_capture()
-        except (AttributeError, TypeError, ValueError):  # table partially filled
+        except (AttributeError, LookupError, TypeError, ValueError):  # table partially filled
             return None
 
     def __record_change(self):
@@ -295,6 +295,19 @@ class BaseEditor(BaseDialog):
             self._undo_busy = False
         self._undo_state = state
         self._is_modified = True
+
+    def replace_table_data(self, refresh_table: Callable[[], None]):
+        """Rebuild table from replaced temp data (reset, import), recorded as one undo step
+
+        Cell changes while rebuilding are not recorded, as recording reads the partially
+        filled table back into temp data that the rebuild is reading from.
+        """
+        self._undo_busy = True
+        try:
+            refresh_table()
+        finally:
+            self._undo_busy = False
+        self.set_modified()
 
     def reset_undo(self):
         """Clear undo history, use current state as start point"""

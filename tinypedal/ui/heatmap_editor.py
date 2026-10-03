@@ -276,7 +276,9 @@ class HeatmapEditor(BaseEditor):
     def sort_temperature(self):
         """Sort temperature"""
         if self.table_heatmap.rowCount() > 1:
+            self._verify_enabled = False  # cells are empty while moving
             self.table_heatmap.sortItems(0)
+            self._verify_enabled = True
             self.set_modified()
 
     def select_heatmap(self):
@@ -323,6 +325,7 @@ class HeatmapEditor(BaseEditor):
         if self.confirm_operation(message=msg_text):
             self.selected_heatmap_dict = cfg.default.heatmap[self.selected_heatmap_key].copy()
             self.refresh_table()
+            self.set_modified()
 
     def applying(self):
         """Save & apply"""

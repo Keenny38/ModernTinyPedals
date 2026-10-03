@@ -247,7 +247,7 @@ class VehicleBrandEditor(BaseEditor):
         self.update_brands_temp()
         brands_db.update(self.brands_temp)
         self.brands_temp = brands_db
-        self.refresh_table()
+        self.replace_table_data(self.refresh_table)
         show_toast(self, tr("Vehicle brand data imported."))
 
     def open_replace_dialog(self):
@@ -307,8 +307,7 @@ class VehicleBrandEditor(BaseEditor):
         )
         if self.confirm_operation(message=msg_text):
             self.brands_temp = copy_setting(cfg.default.brands)
-            self.set_modified()
-            self.refresh_table()
+            self.replace_table_data(self.refresh_table)
 
     def applying(self):
         """Save & apply"""

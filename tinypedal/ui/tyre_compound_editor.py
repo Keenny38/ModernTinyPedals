@@ -232,8 +232,7 @@ class TyreCompoundEditor(BaseEditor):
         )
         if self.confirm_operation(message=msg_text):
             self.compounds_temp = copy_setting(cfg.default.compounds)
-            self.set_modified()
-            self.refresh_table()
+            self.replace_table_data(self.refresh_table)
 
     def applying(self):
         """Save & apply"""
