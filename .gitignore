@@ -11,6 +11,7 @@ __pycache__/
 /pacenotes/
 /tracknotes/
 /carsetups/
+/telemetry/
 
 # pipenv stuff
 Pipfile

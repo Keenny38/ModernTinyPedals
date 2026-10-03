@@ -1,6 +1,6 @@
 # Modern Tiny Pedals
 
-**Overlay de télémétrie pour Le Mans Ultimate et rFactor 2**, libre et gratuit. Une centaine de widgets configurables (pneus, freins, carburant, delta, classement, radar, météo…), des outils d'analyse et une interface en français.
+**Overlay de télémétrie pour Le Mans Ultimate et rFactor 2**, libre et gratuit. 77 widgets configurables (pneus, freins, carburant, delta, classement, radar, météo…), des outils d'analyse et une interface en français.
 
 Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com/TinyPedal/TinyPedal) : même base solide, avec une nouvelle interface, de nouveaux outils et beaucoup de travail sur la fiabilité.
 
@@ -8,7 +8,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 [Démarrage rapide](#démarrage-rapide) ·
 [Nouveautés](#ce-que-cette-version-apporte) ·
 [Guide des réglages](docs/customization.md) ·
-[Nouveautés](https://github.com/Keenny38/ModernTinyPedals/releases) ·
+[Historique des versions](https://github.com/Keenny38/ModernTinyPedals/releases) ·
 [Feuille de route](docs/ROADMAP.md)
 
 ![Aperçu des 77 overlays (style modern) sur une course simulée à Road Atlanta](images/readme_preview.png)
@@ -44,24 +44,26 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
 - Assistant de premier lancement, recherche globale d'option (`Ctrl+F`), aperçu en direct des widgets, annuler/rétablir dans les éditeurs.
-- Style d'overlay moderne : thèmes (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par widget.
-- Éditeur de disposition avec guides d'alignement et magnétisme.
+- Style d'overlay moderne : thèmes (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par widget, export et import de thèmes en fichier.
+- Éditeur de disposition avec guides d'alignement et magnétisme, échelle globale de l'overlay, positions mémorisées par configuration d'écran.
+- Affichage des widgets selon la session (essais, qualif, course) et le passage aux stands, avec fondu.
+- Code de partage de preset : copier un preset en texte, l'importer avec un aperçu.
 
 **Widgets et données**
 - Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites.
-- Enregistreur de tours et visionneuse de télémétrie (superposer deux tours), export **MoTeC `.ld`**.
-- **Rejeu de télémétrie** : enregistre une session LMU et rejoue-la dans tous les widgets, sans lancer le jeu.
+- Enregistreur de tours et visionneuse de télémétrie (superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**.
+- **Rejeu de télémétrie** : enregistre une session LMU ou rFactor 2 et rejoue-la dans tous les widgets, sans lancer le jeu.
 
 **Connexions**
 - Contrôle à distance pour Stream Deck, Companion ou SimHub, et flux de télémétrie en direct par WebSocket.
 - Tableau de bord web pour téléphone ou tablette, avec code d'accès et HTTPS en option.
-- Overlay SteamVR expérimental.
+- Overlay SteamVR expérimental, et fenêtre miroir VR pour les jeux OpenXR (à afficher dans le casque avec OpenKneeboard, OVR Toolkit, XSOverlay ou Desktop+).
 
 **Fiabilité**
 - Installeur Windows et mises à jour vérifiées (SHA-256) depuis l'app.
 - Sauvegardes automatiques des presets, écriture de fichiers atomique, redémarrage automatique des threads plantés.
 - Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
-- Plus de 800 tests automatisés, vérification de types et lint en intégration continue.
+- Plus de 900 tests automatisés, vérification de types et lint en intégration continue.
 
 Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans les [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 

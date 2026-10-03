@@ -510,7 +510,7 @@ def set_style_window(base_font_pt: int) -> str:
             width: 0;
         }}
         NotifyBar UpdatesNotifyButton {{
-            background: #638;
+            background: {color_active_highlight};
         }}
 
         /* Module list (tab): search, filter chips, rows with gear button & switch */
@@ -606,6 +606,9 @@ def set_style_window(base_font_pt: int) -> str:
             color: {color_active_highlighted_text};
             border-radius: {border_radius_button}em;
             margin-left: 0.2em;
+        }}
+        PresetTagItem #trackTag {{
+            background: {color_active_highlight};
         }}
 
         /* Preset transfer (dialog) */

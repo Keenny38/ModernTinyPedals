@@ -433,14 +433,17 @@ class PresetTagItem(QWidget):
             if preset_name == track_data.get("preset", ""):
                 label_track_name = QLabel(f"⚑ {track_name}")
                 label_track_name.setToolTip(tr("Primary preset for track"))
-                label_track_name.setStyleSheet("background: #2A6EC2;")
+                label_track_name.setObjectName("trackTag")
                 layout_item.addWidget(label_track_name)
 
         # File lock tag
         preset_filename = f"{preset_name}{FileExt.JSON}"
         if preset_filename in cfg.user.filelock:
             label_locked = QLabel(f"{cfg.user.filelock[preset_filename]['version']}")
-            label_locked.setStyleSheet("background: #777;")
+            label_locked.setStyleSheet(  # same colors as "Preset Locked" notification
+                f"color: {cfg.notification['font_color_locked_preset']};"
+                f"background: {cfg.notification['background_color_locked_preset']};"
+            )
             layout_item.addWidget(label_locked)
 
         self.setLayout(layout_item)
