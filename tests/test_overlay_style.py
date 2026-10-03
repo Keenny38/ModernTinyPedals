@@ -345,3 +345,25 @@ def test_raw_text_layout_cache_invalidated():
     cell.resize(90, 20)
     cell.grab()
     assert cell._static_pos.x() > position.x()  # centered in wider cell
+
+
+def test_transparent_cell_not_shaded():
+    """Depth shading & rounded corners only on visible panels, transparent cells draw nothing"""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QImage, QPainter
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
+    _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
+    try:
+        image = QImage(40, 20, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        for _ in range(2):  # direct, then cached size
+            _painter.fill_rect(painter, QRectF(0, 0, 40, 20), Qt.GlobalColor.transparent)
+            _painter.fill_rect(painter, QRectF(0, 0, 40, 20), "#00000000")
+        painter.end()
+        assert all(image.pixel(x, y) == 0 for x in range(40) for y in range(20))
+    finally:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved

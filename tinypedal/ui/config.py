@@ -87,6 +87,13 @@ from .widget_preview import WidgetPreview
 
 COLUMN_LABEL = 0  # grid layout column index
 COLUMN_OPTION = 1
+# Global options kept up to date by app itself, not shown in config dialog (still in config file)
+HIDDEN_OPTIONS = {
+    "application": (
+        "position_x", "position_y", "window_width", "window_height", "last_page_index", "rail_items",
+        "open_pages",
+    ),
+}
 
 
 @dataclass
@@ -442,6 +449,7 @@ class UserConfig(BaseDialog):
         QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.history.redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.history.redo)
         self.refresh_history_buttons()
+        self.saved_state = self.history.capture()  # editor contents last saved, see is_modified
 
         layout_button = QHBoxLayout()
         layout_button.addWidget(button_reset)
@@ -650,9 +658,31 @@ class UserConfig(BaseDialog):
             self.accept()
 
     def saving(self):
-        """Save & close"""
-        self.save_setting()
-        self.accept()
+        """Save & close, stays open if a value is invalid"""
+        if self.save_setting():
+            self.accept()
+
+    def is_modified(self) -> bool:
+        """Whether options were edited since opened or last saved"""
+        return self.history.capture() != self.saved_state
+
+    def reject(self):
+        """Cancel, Esc or close button: ask before losing edited options"""
+        self.close()
+
+    def closeEvent(self, event):
+        if not self.is_modified():
+            event.accept()
+            return
+        confirm = QMessageBox.question(
+            self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+            buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel)
+        if confirm == QMessageBox.StandardButton.Cancel or (
+                confirm == QMessageBox.StandardButton.Save and not self.save_setting()):
+            event.ignore()
+            return
+        event.accept()
 
     def reset_setting(self):
         """Reset setting"""
@@ -665,15 +695,18 @@ class UserConfig(BaseDialog):
                 if key != "enable":
                     editor.reset_to_default()
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if a value is invalid (nothing saved)"""
         user_setting = self.user_setting[self.key_name]
+        values = {}
         for key, editor in self.option_edit.items():
             value = editor.validate()
             if value is None:  # abort if error found
                 self.value_error_message(key)
-                return
-            user_setting[key] = value
+                return False
+            values[key] = value
+        user_setting.update(values)
+        self.saved_state = self.history.capture()
         # Check saving type
         if self.config_type:
             # Save global settings
@@ -685,6 +718,7 @@ class UserConfig(BaseDialog):
                 cfg.save(0)
         # Reload once saving finished
         run_after_saving(self.reloading)
+        return True
 
     def read_edited_values(self) -> dict | None:
         """Read edited (unsaved) values, None if any value is invalid"""
@@ -715,6 +749,8 @@ class UserConfig(BaseDialog):
         group_label: QWidget | None = None
         pending: list[tuple[str, QLabel, str, QWidget | None]] = []
 
+        hidden = HIDDEN_OPTIONS.get(self.key_name, ()) if self.config_type == ConfigType.CONFIG else ()
+        option_keys = [key for key in option_keys if key not in hidden]
         for key, next_key in zip_longest(option_keys, islice(option_keys, 1, None), fillvalue=""):
             row_index += 1
             # Section title, for widgets with many options

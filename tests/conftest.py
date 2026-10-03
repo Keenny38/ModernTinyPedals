@@ -16,6 +16,26 @@ QT_APP = QApplication.instance() or QApplication(sys.argv)
 
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_user_paths(tmp_path_factory):
+    """Every user data path in a temp folder for whole test session
+
+    Tests without ui_env (benchmark, widgets) may still save presets (new brake or compound
+    found...): never in repository folder or real user config.
+    """
+    from tinypedal.setting import FilePath, cfg
+
+    root = tmp_path_factory.mktemp("user_paths")
+    saved = {name: getattr(cfg.path, name) for name in FilePath.__slots__}
+    for name in FilePath.__slots__:
+        folder = root / name
+        folder.mkdir()
+        setattr(cfg.path, name, f"{folder.as_posix()}/")
+    yield root
+    for name, value in saved.items():
+        setattr(cfg.path, name, value)
+
+
 @pytest.fixture
 def ui_env(monkeypatch, tmp_path):
     """Isolated setting for UI tests: default presets, data paths in tmp folder, saving disabled"""

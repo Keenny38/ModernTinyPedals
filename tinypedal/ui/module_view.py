@@ -28,6 +28,7 @@ import unicodedata
 from functools import lru_cache
 from typing import cast
 
+import shiboken6
 from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, Slot
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -372,7 +373,7 @@ class ModuleList(QWidget):
 
     def eventFilter(self, watched, event):
         """Show widget preview while hovering row name"""
-        popup = self.preview_popup
+        popup = self.popup()
         if popup is not None and watched is self.listbox_module.viewport():
             event_type = event.type()
             if event_type == QEvent.Type.MouseMove:
@@ -386,16 +387,25 @@ class ModuleList(QWidget):
                 popup.hide_preview()
         return super().eventFilter(watched, event)
 
+    def popup(self) -> PreviewPopup | None:
+        """Widget preview popup, None if none or already deleted (app closing)"""
+        popup = self.preview_popup
+        if popup is None or not shiboken6.isValid(popup):
+            return None
+        return popup
+
     def hideEvent(self, event):
-        if self.preview_popup is not None:
-            self.preview_popup.hide_preview()
+        popup = self.popup()
+        if popup is not None:
+            popup.hide_preview()
         super().hideEvent(event)
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
         """Refresh module & button toggle state"""
-        if self.preview_popup is not None:
-            self.preview_popup.clear_cache()  # setting or preset changed
+        popup = self.popup()
+        if popup is not None:
+            popup.clear_cache()  # setting or preset changed
         listbox_module = self.listbox_module
         for row_index in range(listbox_module.count()):
             item = listbox_module.item(row_index)

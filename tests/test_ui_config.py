@@ -19,7 +19,9 @@ def no_message_box(monkeypatch):
 
 
 def close_dialog(dialog):
-    """Close & delete dialog now, so singleton dialog can be opened again"""
+    """Discard edits, close & delete dialog now, so singleton dialog can be opened again"""
+    if hasattr(dialog, "history"):
+        dialog.saved_state = dialog.history.capture()  # no "save changes?" question
     dialog.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -421,3 +423,60 @@ def test_undo_timer_deleted_with_dialog(ui_env):
     assert timer.isActive()
     close_dialog(dialog)  # pending undo record must not run on deleted editors
     QCoreApplication.processEvents()
+
+
+def test_unsaved_edits_asked_before_closing(ui_env, monkeypatch):
+    answers = []
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: answers.pop(0)))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: None))
+    dialog = open_config("speedometer", [])
+    dialog.show()
+    try:
+        dialog.close()  # nothing edited: closes without question
+        assert not dialog.isVisible()
+        dialog.show()
+        dialog.option_edit["font_size"].setText("23")
+        assert dialog.is_modified()
+        answers.append(QMessageBox.StandardButton.Cancel)
+        dialog.reject()  # Esc / Cancel button: asked, cancelled, stays open
+        assert dialog.isVisible()
+        answers.append(QMessageBox.StandardButton.Save)
+        dialog.close()  # asked, saved then closed
+        assert not dialog.isVisible() and cfg.user.setting["speedometer"]["font_size"] == 23
+    finally:
+        close_dialog(dialog)
+
+
+def test_invalid_value_keeps_dialog_open(ui_env, monkeypatch):
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: errors.append(args)))
+    dialog = open_config("speedometer", [])
+    dialog.show()
+    try:
+        font_size = cfg.user.setting["speedometer"]["font_size"]
+        dialog.option_edit["font_size"].setText("")  # invalid
+        dialog.option_edit["update_interval"].setText("77")
+        dialog.saving()
+        assert errors and dialog.isVisible()  # Save & close aborted, edits kept
+        assert cfg.user.setting["speedometer"]["font_size"] == font_size
+        assert cfg.user.setting["speedometer"]["update_interval"] != 77  # nothing saved
+    finally:
+        close_dialog(dialog)
+
+
+def test_internal_application_options_hidden(ui_env):
+    from tinypedal.const_file import ConfigType
+    from tinypedal.ui.config import UserConfig
+
+    dialog = UserConfig(
+        parent=None, key_name="application", preset_name="config.json", config_type=ConfigType.CONFIG,
+        user_setting=cfg.user.config, default_setting=cfg.default.config, reload_func=lambda: None)
+    try:
+        for key in ("position_x", "window_width", "last_page_index", "rail_items"):
+            assert key not in dialog.option_edit
+        assert "show_at_startup" in dialog.option_edit
+        cfg.user.config["application"]["rail_items"] = "home"
+        dialog.save_setting()
+        assert cfg.user.config["application"]["rail_items"] == "home"  # hidden options kept as is
+    finally:
+        close_dialog(dialog)

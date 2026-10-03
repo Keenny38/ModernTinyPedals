@@ -74,6 +74,9 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     if radius < 1 and not depth:
         painter.fillRect(rect, color)
         return
+    rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
+    if not rgba >> 24:  # fully transparent: no panel to round or shade
+        return
     # Rounded & shaded fill is pre-rendered once per size & color (list widgets repaint
     # hundreds of identical cells), then drawn as pixmap
     rect = QRectF(rect)
@@ -82,7 +85,6 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     if not (width > 0 and height > 0 and width * height <= _CACHE_MAX_PIXELS):
         _fill_rect_direct(painter, rect, color, radius, depth)  # large or invalid size, not cached
         return
-    rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
     key = (max(round(width), 1), max(round(height), 1), round(radius, 2) if radius >= 1 else 0.0, depth, rgba, ratio)
     pixmap = _background_cache.get(key)
     if pixmap is None:

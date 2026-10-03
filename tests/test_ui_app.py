@@ -325,3 +325,19 @@ def test_plugin_manager_status_badges(ui_env, monkeypatch):
         dialog.close()
         dialog.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # frees single instance dialog
+
+
+def test_module_list_hide_after_preview_deleted(ui_env):
+    """App closing: preview popup may be deleted before widget list is hidden"""
+    import shiboken6
+
+    from tinypedal.module_control import wctrl
+    from tinypedal.ui.module_view import ModuleList
+
+    view = ModuleList(None, wctrl)
+    view.show()
+    shiboken6.delete(view.preview_popup)
+    assert view.popup() is None
+    view.hide()  # was RuntimeError: Internal C++ object (PreviewPopup) already deleted
+    view.refresh()
+    view.deleteLater()
