@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 
 from ..i18n import tr, trm
 from ..setting import cfg
+from ..userfile.corner_analysis import CornerComparison, compare_corners
 from ..userfile.motec_import import import_ld_file
 from ..userfile.motec_ld import export_lap
 from ..userfile.telemetry_lap import (
@@ -920,6 +921,88 @@ class GCircle(LapMapBase):
         ]
 
 
+def signed(value: float, decimals: int = 0, unit: str = "") -> str:
+    """Signed number text, minus sign as typeset"""
+    return f"{value:+.{decimals}f}{unit}".replace("-", chr(0x2212))  # minus sign
+
+
+class CornerTable(QWidget):
+    """Corner by corner comparison of first compared lap with reference lap
+
+    Time: positive = compared lap slower. Braking: positive = brakes later.
+    Full throttle: negative = full throttle earlier. Click a corner to zoom charts on it.
+    """
+
+    corner_selected = Signal(float, float)  # corner start & end distance
+
+    COLUMNS = ("Corner", "Time", "Min Speed", "Braking", "Full Throttle")
+    COLOR_GAIN = QColor("#22C55E")
+    COLOR_LOSS = QColor("#EF4444")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.rows: list[CornerComparison] = []
+        self.label = QLabel(self)
+        self.label.setWordWrap(True)
+        self.table = QTreeWidget(self)
+        self.table.setRootIsDecorated(False)
+        self.table.setHeaderLabels([tr(text) for text in self.COLUMNS])
+        self.table.headerItem().setToolTip(2, tr("Minimum speed (km/h): reference lap, compared lap"))
+        self.table.headerItem().setToolTip(3, tr("Braking point of compared lap: positive = brakes later"))
+        self.table.headerItem().setToolTip(4, tr("Full throttle point of compared lap: negative = earlier"))
+        self.table.itemClicked.connect(self.select_row)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.label)
+        layout.addWidget(self.table, stretch=1)
+
+    def set_laps(self, reference: LapData | None, compared: LapData | None):
+        self.rows = compare_corners(reference, compared) if reference is not None else []
+        self.table.clear()
+        if not self.rows:
+            self.label.setText(tr("No corner found: speed not recorded."))
+            return
+        if compared is None:
+            self.label.setText(tr("Check a second lap to compare it with reference lap, corner by corner."))
+        else:
+            self.label.setText(tr("Compared lap against reference lap. Click a corner to zoom on it."))
+        for row in self.rows:
+            self.table.addTopLevelItem(self.make_item(row))
+        for column in range(self.table.columnCount()):
+            self.table.resizeColumnToContents(column)
+
+    def make_item(self, row: CornerComparison) -> QTreeWidgetItem:
+        ref, other = row.reference, row.compared
+        item = QTreeWidgetItem()
+        item.setText(0, f"{row.corner.number}  ({row.corner.apex:.0f} m)")
+        if other is None:  # reference lap values only
+            item.setText(1, f"{ref.time:.2f}")
+            item.setText(2, f"{ref.min_speed:.0f}")
+            item.setText(3, f"{ref.brake_point:.0f} m" if ref.brake_point >= 0 else "—")
+            item.setText(4, f"{ref.throttle_point:.0f} m" if ref.throttle_point >= 0 else "—")
+            return item
+        delta = other.time - ref.time
+        item.setText(1, signed(delta, 2))
+        item.setForeground(1, self.COLOR_LOSS if delta > 0.005 else self.COLOR_GAIN if delta < -0.005 else QColor())
+        speed_delta = other.min_speed - ref.min_speed
+        item.setText(2, f"{ref.min_speed:.0f} / {other.min_speed:.0f}  ({signed(speed_delta)})")
+        if speed_delta <= -1 or speed_delta >= 1:
+            item.setForeground(2, self.COLOR_GAIN if speed_delta > 0 else self.COLOR_LOSS)
+        for column, ref_point, other_point in ((3, ref.brake_point, other.brake_point),
+                                               (4, ref.throttle_point, other.throttle_point)):
+            if ref_point >= 0 and other_point >= 0:
+                item.setText(column, signed(other_point - ref_point, 0, " m"))
+            else:
+                item.setText(column, "—")
+        return item
+
+    def select_row(self, item: QTreeWidgetItem, *_):
+        index = self.table.indexOfTopLevelItem(item)
+        if 0 <= index < len(self.rows):
+            corner = self.rows[index].corner
+            self.corner_selected.emit(corner.start, corner.end)
+
+
 class LapEntry(NamedTuple):
     """Lap list entry"""
 
@@ -994,6 +1077,9 @@ class LapViewer(BaseDialog):
         self.side_tabs = QTabWidget(self)
         self.side_tabs.addTab(self.trajectory, tr("Track Map"))
         self.side_tabs.addTab(self.gcircle, tr("G Circle"))
+        self.corners = CornerTable(self)
+        self.corners.corner_selected.connect(lambda start, end: self.plot.set_view(start, end))
+        self.side_tabs.addTab(self.corners, tr("Corners"))
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(panel_laps)
@@ -1228,6 +1314,7 @@ class LapViewer(BaseDialog):
         self.plot.set_laps(laps, self.reference_key)
         self.trajectory.set_laps(laps, self.track_outline(laps))
         self.gcircle.set_laps(laps)
+        self.corners.set_laps(self.plot.lap_a, self.plot.lap_b)
         self.update_list_colors(laps)
         vehicles = sorted({str(lap.data.meta.get("vehicle")) for lap in laps if lap.data.meta.get("vehicle")})
         if len(vehicles) > 1:
