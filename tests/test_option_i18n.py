@@ -114,3 +114,13 @@ def test_unit_hint_stays_silent_when_it_would_mislead():
     assert unit_hint("tyre_pressure_target_minimum", "abc", units) == ""  # mid-edit
     # Nothing to convert when the user already types in the unit they read
     assert unit_hint("tyre_pressure_target_minimum", "160", {"tyre_pressure_unit": "kPa"}) == ""
+
+
+def test_unit_hint_pressure_target_typed_in_psi_or_bar():
+    from tinypedal.ui._option import unit_hint
+
+    # Pressure targets read kPa, psi or bar from the value: the hint confirms how it is read
+    assert unit_hint("tyre_pressure_target_minimum", "23", {"tyre_pressure_unit": "psi"}) == "23 psi"
+    assert unit_hint("tyre_pressure_target_minimum", "1.6", {"tyre_pressure_unit": "psi"}) == "23.21 psi"
+    assert unit_hint("tyre_pressure_target_minimum", "23", {"tyre_pressure_unit": "kPa"}) == "158.6 kPa"
+    assert unit_hint("tyre_pressure_target_minimum", "160", {"tyre_pressure_unit": "bar"}) == "1.6 bar"

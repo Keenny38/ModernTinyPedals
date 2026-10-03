@@ -299,7 +299,7 @@ Résultat mesuré (benchmark `pytest -m benchmark`) : **0,785 ms → 0,585 ms pa
 
 ### 🟡 Corrigé
 16. ✅ Colonne centrale en disposition verticale : l'espace des éléments masqués (ABS/TC/PIT-LIM inactifs) est maintenant partagé au-dessus et en dessous au lieu de laisser un vide en bas.
-17. Conversion des seuils de pression cible selon l'unité choisie (psi) — pas fait, mineur, les seuils restent en kPa comme documenté.
+17. ✅ Seuils de pression cible en psi (03/10/2026) : les plages (avant, arrière, par gomme) se saisissent en kPa, psi ou bar, l'unité étant reconnue à la valeur (moins de 10 : bar, de 10 à 60 : psi, au-delà : kPa), sans dépendre de l'unité affichée, donc sans réinterpréter les presets existants.
 
 ### 🧪 Tests
 - Couverture 94 % → **98 %**. 13 nouveaux tests couvrant chaque bug corrigé (régression) et chaque ajout.

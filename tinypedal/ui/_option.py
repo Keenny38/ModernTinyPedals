@@ -49,7 +49,12 @@ from PySide6.QtWidgets import (
 
 from ..const_file import FileFilter
 from ..i18n import tr
-from ..template.widget.black_box_ui import format_compound_targets, parse_compound_targets
+from ..template.widget.black_box_ui import (
+    PRESSURE_TARGET_PREFIX,
+    format_compound_targets,
+    parse_compound_targets,
+    pressure_target_kpa,
+)
 from ..userfile import set_relative_path, set_user_data_path
 from ..validator import image_exists, is_clock_format, is_hex_color, is_string_number
 
@@ -81,14 +86,20 @@ def unit_hint(key: str, text: str, units: Mapping[str, str]) -> str:
 
     if not is_string_number(text):
         return ""
+    value = float(text)
     for subject, unit_key, converter_name, base_unit in _UNIT_HINTS:
         if subject not in key:
             continue
         unit_name = units.get(unit_key, base_unit)
-        if unit_name == base_unit:
+        if key.startswith(PRESSURE_TARGET_PREFIX):  # typed in kPa, psi or bar, see pressure_target_kpa
+            value_kpa = pressure_target_kpa(value)
+            if unit_name == base_unit:
+                return "" if value_kpa == value else f"{value_kpa:.4g} kPa"
+            value = value_kpa
+        elif unit_name == base_unit:
             return ""  # already typing in the unit they read
         converter = getattr(unit_module, converter_name)(unit_name)
-        return f"{converter(float(text)):.4g} {_UNIT_SUFFIX.get(unit_name, unit_name)}"
+        return f"{converter(value):.4g} {_UNIT_SUFFIX.get(unit_name, unit_name)}"
     return ""
 
 

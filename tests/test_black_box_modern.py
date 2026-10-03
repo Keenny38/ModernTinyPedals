@@ -1645,3 +1645,24 @@ def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
     finally:
         persist.MEMORY.clear()
         big.deleteLater()
+
+
+def test_pressure_target_in_kpa_psi_or_bar(ui_env):
+    from tinypedal.template.widget.black_box_ui import pressure_target_kpa
+
+    assert pressure_target_kpa(160) == 160  # kPa
+    assert pressure_target_kpa(23.2) == pytest.approx(160, abs=0.1)  # psi
+    assert pressure_target_kpa(1.6) == pytest.approx(160)  # bar
+    assert pressure_target_kpa(0) == 0  # not set (rear window: same as front)
+    widget = new_widget({"tyre_pressure_target_minimum": 23, "tyre_pressure_target_maximum": 27.5,
+                         "tyre_pressure_target_rear_minimum": 1.7, "tyre_pressure_target_rear_maximum": 2.0,
+                         "tyre_target_by_compound": "S=22-26; W=150-175"})
+    try:
+        assert widget.wheel_targets[0][:2] == pytest.approx((158.6, 189.6), abs=0.1)
+        assert widget.wheel_targets[2][:2] == pytest.approx((170, 200))
+        assert widget.pressure_color(150, 0) == widget.wcfg["tyre_pressure_low_color"]  # kPa reading
+        assert widget.pressure_color(175, 0) == ""
+        assert widget.compound_target("Soft", "S")[:2] == pytest.approx((151.7, 179.3), abs=0.1)
+        assert widget.compound_target("Wet", "W")[:2] == (150, 175)
+    finally:
+        widget.deleteLater()

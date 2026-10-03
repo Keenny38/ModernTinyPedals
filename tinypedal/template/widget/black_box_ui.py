@@ -30,6 +30,8 @@ import re
 from collections.abc import Callable, Mapping
 from typing import NamedTuple
 
+from ...units import kpa_to_bar, kpa_to_psi
+
 # Config dialog sections: title shown before the first option of each section
 BLACK_BOX_SECTIONS = {
     "enable": "General",
@@ -66,7 +68,25 @@ BLACK_BOX_BASIC = frozenset((
 ))
 
 
-# Compound targets: "S=160-190/75-100; W=150-175" (pressure kPa, then optional temperature Celsius)
+PRESSURE_TARGET_PREFIX = "tyre_pressure_target_"  # options read by pressure_target_kpa
+
+
+def pressure_target_kpa(value: float) -> float:
+    """Tyre pressure target in kPa, entered in kPa, psi or bar
+
+    Unit is found from value, as tyre pressure ranges never overlap: bar 1-5, psi 10-60,
+    kPa 70 and more. 0 (not set) is kept.
+    """
+    if value <= 0:
+        return value
+    if value < 10:
+        return value / kpa_to_bar(1)
+    if value < 60:
+        return value / kpa_to_psi(1)
+    return value
+
+
+# Compound targets: "S=160-190/75-100; W=150-175" (pressure kPa, psi or bar, then optional temperature Celsius)
 _rex_target = re.compile(
     r"^\s*([^=\s]+)\s*=\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)"
     r"(?:\s*/\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?))?\s*$"

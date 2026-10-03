@@ -61,6 +61,7 @@ from ._black_box.state import (
     display_overrides,
     parse_class_targets,
     parse_compound_targets,
+    pressure_target_kpa,
 )
 from ._black_box.status import StatusPainter
 from ._black_box.suspension import TYRE_DIAMETER_MM, SuspensionPainter
@@ -162,7 +163,10 @@ class Realtime(
         self.need_slip = bool(wcfg["show_slip_warning"])
         self.show_stint = bool(wcfg["show_stint_comparison"])
         self.need_pressure = bool(wcfg["show_tyre_pressure"]) or self.show_stint
-        self.compound_targets = parse_compound_targets(wcfg["tyre_target_by_compound"])
+        self.compound_targets = {  # pressure in kPa, entered in kPa, psi or bar
+            symbol: (pressure_target_kpa(p_min), pressure_target_kpa(p_max), t_min, t_max)
+            for symbol, (p_min, p_max, t_min, t_max) in parse_compound_targets(wcfg["tyre_target_by_compound"]).items()
+        }
         self.need_compound = self.match_heatmap or bool(wcfg["show_tyre_compound"]) or bool(self.compound_targets)
         self.need_fuel_rows = bool(wcfg["show_fuel_gauge"])
         self.need_energy_rows = bool(wcfg["show_energy_gauge"])
@@ -385,15 +389,17 @@ class Realtime(
     def config_thresholds(self, wcfg):
         """Warning thresholds, targets, trends"""
         self.temp_warning = wcfg["tyre_temperature_warning_threshold"]  # Celsius, 0 disables
-        # Per wheel (pressure min, pressure max, cold, hot), replaced by compound targets if set
+        # Per wheel (pressure min, pressure max, cold, hot), replaced by compound targets if set,
+        # pressure in kPa, entered in kPa, psi or bar
         self.default_targets = (
-            wcfg["tyre_pressure_target_minimum"], wcfg["tyre_pressure_target_maximum"],
+            pressure_target_kpa(wcfg["tyre_pressure_target_minimum"]),
+            pressure_target_kpa(wcfg["tyre_pressure_target_maximum"]),
             wcfg["tyre_temperature_cold_threshold"], self.temp_warning,
         )
         # Rear axle: own pressure window if set (0 = same as front)
         self.default_targets_rear = (
-            wcfg["tyre_pressure_target_rear_minimum"] or wcfg["tyre_pressure_target_minimum"],
-            wcfg["tyre_pressure_target_rear_maximum"] or wcfg["tyre_pressure_target_maximum"],
+            pressure_target_kpa(wcfg["tyre_pressure_target_rear_minimum"]) or self.default_targets[0],
+            pressure_target_kpa(wcfg["tyre_pressure_target_rear_maximum"]) or self.default_targets[1],
             *self.default_targets[2:],
         )
         self.wheel_targets = [self.default_targets] * 2 + [self.default_targets_rear] * 2

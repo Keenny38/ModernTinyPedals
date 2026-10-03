@@ -5285,10 +5285,10 @@ Show inner minus outer tread surface temperature on each tyre (`Δ+8`, Celsius):
 Draw a hot strip across the top of a tyre (pulsing, `font_color_tyre_temperature_warning`) while its surface is above the hot threshold but the rubber below is not: the tyre is sliding and wearing, even though its working temperature is fine. Needs a hot threshold (`tyre_temperature_warning_threshold` or compound target). Enabled by default.
 
     enable_tyre_pressure_target, tyre_pressure_target_minimum, tyre_pressure_target_maximum
-Highlight tyre pressure below minimum (`tyre_pressure_low_color`) or above maximum (`tyre_pressure_high_color`). Values in kPa. Defaults are `160` and `190`.
+Highlight tyre pressure below minimum (`tyre_pressure_low_color`) or above maximum (`tyre_pressure_high_color`). Values in kPa, psi or bar, the unit is found from the value (under `10` is bar, `10` to `60` is psi, above is kPa), so `23-27` works as psi and `1.6-1.9` as bar whatever pressure unit is displayed. Defaults are `160` and `190` (kPa).
 
     tyre_pressure_target_rear_minimum, tyre_pressure_target_rear_maximum
-Own pressure window (kPa) for rear tyres, front and rear usually differ. `0` (default) uses the front window. In `tyre_target_by_compound`, an entry named `symbol:R` (for example `S:R=165-195`) sets the rear window of that compound.
+Own pressure window (kPa, psi or bar) for rear tyres, front and rear usually differ. `0` (default) uses the front window. In `tyre_target_by_compound`, an entry named `symbol:R` (for example `S:R=165-195`) sets the rear window of that compound.
 
     show_tyre_pressure_range
 Show lowest and highest hot pressure of the current stint on each tyre (`171-184`), reset when leaving the pits: what the cold pressure is set from at the next stop. Disabled by default.
@@ -5524,7 +5524,7 @@ Tyre temperature text turns cold color below this temperature (Celsius), or warm
 Append an arrow to tyre temperature or pressure: `↑` rising, `↓` falling, compared with the value `tyre_trend_duration` seconds ago (default `10`). A change smaller than the threshold (`2` Celsius degrees, `1` kPa by default) shows no arrow.
 
     tyre_target_by_compound
-Pressure target (kPa) and optional temperature window (Celsius) per tyre compound, replacing `tyre_pressure_target_minimum`, `tyre_pressure_target_maximum`, `tyre_temperature_cold_threshold` and `tyre_temperature_warning_threshold` for that compound. Format: `symbol=min-max/cold-hot`, entries separated by `;`, for example `S=160-190/75-105; W=150-175/40-70`. The symbol is the compound symbol (see `Tyre Compound Editor`) or the full compound name. Invalid entries are ignored. Empty by default.
+Pressure target (kPa, psi or bar, as `tyre_pressure_target_minimum`) and optional temperature window (Celsius) per tyre compound, replacing `tyre_pressure_target_minimum`, `tyre_pressure_target_maximum`, `tyre_temperature_cold_threshold` and `tyre_temperature_warning_threshold` for that compound. Format: `symbol=min-max/cold-hot`, entries separated by `;`, for example `S=160-190/75-105; W=150-175/40-70`. The symbol is the compound symbol (see `Tyre Compound Editor`) or the full compound name. Invalid entries are ignored. Empty by default.
 
     brake_temperature_cold_threshold, brake_temperature_hot_threshold, font_color_brake_temperature_cold, font_color_brake_temperature_hot
 Brake temperature text turns cold color below the cold threshold, hot color above the hot threshold (Celsius), instead of heatmap color. `0` disables (default). Used for car classes not found in `brake_target_by_class`.

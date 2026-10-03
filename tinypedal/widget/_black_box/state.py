@@ -32,6 +32,7 @@ from ...template.widget.black_box_ui import (  # noqa: F401  re-exported for wid
     display_overrides,
     parse_class_targets,
     parse_compound_targets,
+    pressure_target_kpa,
 )
 
 # Tyre readings, in priority order: the lowest-numbered one is dropped first when the tyre

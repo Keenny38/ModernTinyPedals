@@ -51,7 +51,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Code de partage de preset : copier un preset en texte, l'importer avec un aperçu.
 
 **Widgets et données**
-- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites.
+- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites. Plages de pression cible saisies en kPa, psi ou bar.
 - Enregistreur de tours et visionneuse de télémétrie (superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**.
 - **Rejeu de télémétrie** : enregistre une session LMU ou rFactor 2 et rejoue-la dans tous les widgets, sans lancer le jeu.
 
