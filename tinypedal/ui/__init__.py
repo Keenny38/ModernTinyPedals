@@ -438,6 +438,15 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_window};
             border-right: 1px solid {color_active_midlight};
         }}
+        #navRailScroll, #navRailList {{
+            background: transparent;
+        }}
+        #navRailScroll QScrollBar:vertical {{
+            width: 6px;
+        }}
+        #navRailScroll QScrollBar::handle:vertical {{
+            margin: 1px;
+        }}
         #homeCard {{
             background: {color_active_base};
             border: 1px solid {color_active_midlight};

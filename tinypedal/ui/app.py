@@ -108,6 +108,8 @@ class NavButton(QAbstractButton):
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(text)
+        # Same size whatever window height: rail entries scroll instead of shrinking
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.glyph = glyph if icon_family else letter
         self.icon_font = QFont(icon_family) if icon_family else QFont(self.font())
         if not icon_family:
@@ -301,14 +303,33 @@ class TabView(QWidget):
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
         self._rail = rail
+        # Rail entries scrolled (wheel or thin scroll bar) when window is too short, quick actions stay below
+        rail_list = QWidget()
+        rail_list.setObjectName("navRailList")
+        layout_list = QVBoxLayout(rail_list)
+        layout_list.setContentsMargins(0, 0, 0, 0)
+        layout_list.setSpacing(0)
         self._rail_items = QVBoxLayout()
         self._rail_items.setSpacing(UIScaler.pixel(2))
+        layout_list.addLayout(self._rail_items)
+        layout_list.addStretch(1)
+        self._rail_list = rail_list
+        self._rail_scroll = QScrollArea(rail)
+        self._rail_scroll.setObjectName("navRailScroll")
+        self._rail_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._rail_scroll.setWidgetResizable(True)
+        self._rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._rail_scroll.setWidget(rail_list)
+        self._rail_scroll.viewport().setAutoFillBackground(False)
+        rail_list.setAutoFillBackground(False)
         self._rail_shortcuts: list[QShortcut] = []
-        layout_rail.addLayout(self._rail_items)
         self.build_rail_items()
-        rail.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        rail.customContextMenuRequested.connect(self.show_rail_menu)
-        layout_rail.addStretch(1)
+        for widget in (rail, rail_list):
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            widget.customContextMenuRequested.connect(
+                lambda position, source=widget: self.show_rail_menu(source.mapTo(rail, position)))
+        layout_rail.addWidget(self._rail_scroll, stretch=1)
         self._nav.idClicked.connect(self.select_page)
 
         # Quick actions: overlay toggles, settings, API status
@@ -411,6 +432,9 @@ class TabView(QWidget):
         button = self._nav.button(self._pages.currentIndex())
         if button is not None:
             button.setChecked(True)
+        # Rail keeps its width when scroll bar shows (entries never squeezed)
+        scroll_bar = self._rail_scroll.verticalScrollBar().sizeHint().width()
+        self._rail_scroll.setMinimumWidth(self._rail_list.sizeHint().width() + scroll_bar)
         if hasattr(self, "_button_pages"):
             self.refresh_open_pages()
 
@@ -650,6 +674,8 @@ class TabView(QWidget):
         button = self._nav.button(index)
         if button is not None and not button.isChecked():
             button.setChecked(True)
+        if button is not None:
+            self._rail_scroll.ensureWidgetVisible(button, 0, 0)  # selected entry scrolled into view
 
     def select_preset_tab(self):
         """Select preset tab"""

@@ -322,3 +322,28 @@ def test_language_change_keeps_open_pages(window):
     open_tool("fuel_calculator.FuelCalculator", window)
     window.retranslate()
     assert [type(page.dialog).__name__ for page in window.centralWidget().dialog_pages()] == ["FuelCalculator"]
+
+
+def test_rail_entries_keep_size_and_scroll(window):
+    from tinypedal.ui.app import NavButton
+    from tinypedal.ui.nav_rail import PAGE_INDEX
+
+    view = window.centralWidget()
+    window.resize(700, 900)
+    window.show()
+    QApplication.processEvents()
+    buttons = [view._rail_items.itemAt(index).widget() for index in range(view._rail_items.count())]
+    heights = {button.height() for button in buttons if isinstance(button, NavButton)}
+    width = view._rail.width()
+    window.resize(700, 420)  # too short for every entry
+    QApplication.processEvents()
+    assert {button.height() for button in buttons if isinstance(button, NavButton)} == heights
+    assert view._rail.width() == width  # no squeeze when scroll bar shows
+    bar = view._rail_scroll.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(0)
+    view.set_current_index(PAGE_INDEX["tools"])  # selected entry scrolled into view
+    QApplication.processEvents()
+    tools = view._nav.button(PAGE_INDEX["tools"])
+    top = tools.mapTo(view._rail_scroll.viewport(), tools.rect().topLeft()).y()
+    assert 0 <= top <= view._rail_scroll.viewport().height() - tools.height()
