@@ -25,10 +25,11 @@ Inactive filter on top, so a widget is found among dozens without scrolling.
 
 import logging
 import unicodedata
+from functools import lru_cache
 from typing import cast
 
 from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, Slot
-from PySide6.QtGui import QColor, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
@@ -83,6 +84,17 @@ WIDGET_CATEGORIES = (
 )
 CATEGORY_ALL = "All Categories"
 CATEGORY_OTHER = "Other"
+# Category color dot on each widget row & in category filter (legend), readable on light & dark theme
+CATEGORY_COLORS = {
+    "Timing": "#4C8DFF",
+    "Tyres & Wheels": "#A371F7",
+    "Brakes": "#E5534B",
+    "Driver Inputs": "#3FB950",
+    "Engine & Energy": "#F0883E",
+    "Chassis": "#22B8C8",
+    "Track & Traffic": "#D4A72C",
+    CATEGORY_OTHER: "#8B949E",
+}
 
 
 def widget_category(name: str) -> str:
@@ -91,6 +103,23 @@ def widget_category(name: str) -> str:
         if name.startswith(prefixes):
             return category
     return CATEGORY_OTHER
+
+
+@lru_cache(maxsize=16)
+def category_icon(category: str, size: int) -> QIcon:
+    """Round color dot of widget category"""
+    ratio = 2  # sharp on high DPI screens
+    pixmap = QPixmap(size * ratio, size * ratio)
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(CATEGORY_COLORS.get(category, CATEGORY_COLORS[CATEGORY_OTHER])))
+    dot = size * 0.6
+    painter.drawEllipse(QRectF((size - dot) / 2, (size - dot) / 2, dot, dot))
+    painter.end()
+    return QIcon(pixmap)
 
 
 class ToggleSwitch(QAbstractButton):
@@ -277,8 +306,9 @@ class ModuleList(QWidget):
         self.category_box = QComboBox(self)
         self.category_box.setVisible(module_control.type_id == "widget")
         self.category_box.addItem(tr(CATEGORY_ALL), CATEGORY_ALL)
+        icon_size = self.fontMetrics().height()
         for category in (*(category for category, _ in WIDGET_CATEGORIES), CATEGORY_OTHER):
-            self.category_box.addItem(tr(category), category)
+            self.category_box.addItem(category_icon(category, icon_size), tr(category), category)
         self.category_box.currentIndexChanged.connect(self.apply_filter)
         layout_filter.addWidget(self.category_box)
         layout_filter.addStretch(1)
@@ -326,10 +356,14 @@ class ModuleList(QWidget):
 
     def create_list(self):
         """Create module list"""
+        is_widget = self.module_control.type_id == "widget"
+        icon_size = self.fontMetrics().height()
         for _name in sorted(self.module_control.names, key=lambda name: sort_key(module_label(name))):
             item = QListWidgetItem()
             item.setText(module_label(_name))
             item.setData(Qt.ItemDataRole.UserRole, _name)
+            if is_widget:  # category at a glance, colors listed in category filter
+                item.setIcon(category_icon(widget_category(_name), icon_size))
             self.items[_name] = item
             self.listbox_module.addItem(item)
             module_item = ModuleControlItem(self, _name, self.module_control)

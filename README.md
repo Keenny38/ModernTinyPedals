@@ -44,6 +44,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
 - Assistant de premier lancement, recherche globale d'option (`Ctrl+F`), aperçu en direct des widgets, annuler/rétablir dans les éditeurs.
+- Liste des widgets avec filtre et pastille de couleur par catégorie, statut des plugins en badges.
 - Style d'overlay moderne : thèmes (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par widget, export et import de thèmes en fichier.
 - Éditeur de disposition avec guides d'alignement et magnétisme, échelle globale de l'overlay, positions mémorisées par configuration d'écran.
 - Affichage des widgets selon la session (essais, qualif, course) et le passage aux stands, avec fondu.

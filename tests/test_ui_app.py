@@ -278,3 +278,50 @@ def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
     for path in (classes, other):
         with pytest.raises(ValueError):
             file_drop.import_preset_file(str(path), cfg.path.settings)
+
+
+def test_widget_rows_show_category_color(ui_env):
+    from tinypedal.module_control import mctrl, wctrl
+    from tinypedal.ui.module_view import CATEGORY_COLORS, CATEGORY_OTHER, WIDGET_CATEGORIES, ModuleList
+
+    assert set(CATEGORY_COLORS) == {category for category, _ in WIDGET_CATEGORIES} | {CATEGORY_OTHER}
+    widgets = ModuleList(None, wctrl)
+    modules = ModuleList(None, mctrl)
+    try:
+        assert all(not item.icon().isNull() for item in widgets.items.values())
+        assert all(item.icon().isNull() for item in modules.items.values())  # modules have no category
+        assert not widgets.category_box.itemIcon(1).isNull()  # legend in category filter
+    finally:
+        widgets.deleteLater()
+        modules.deleteLater()
+
+
+def test_plugin_manager_status_badges(ui_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from tinypedal.plugin_loader import PLUGIN_ERRORS, UNTRUSTED_ERROR
+    from tinypedal.ui import plugin_manager
+
+    names = ["plugin_ok", "plugin_bad", "plugin_new", "plugin_unsafe"]
+    monkeypatch.setattr(plugin_manager, "discover_plugins", lambda: names)
+    monkeypatch.setattr(plugin_manager, "wctrl", SimpleNamespace(names=["plugin_ok", "plugin_bad", "plugin_unsafe"]))
+    monkeypatch.setitem(PLUGIN_ERRORS, "plugin_bad", "SyntaxError")
+    monkeypatch.setitem(PLUGIN_ERRORS, "plugin_unsafe", UNTRUSTED_ERROR)
+    dialog = plugin_manager.PluginManager(None)
+    try:
+        rows = {dialog.table.item(row, 0).text(): row for row in range(dialog.table.rowCount())}
+        badge = {name: dialog.table.item(row, 1).data(plugin_manager.ROLE_BADGE) for name, row in rows.items()}
+        colors = plugin_manager.BADGE_COLORS
+        assert badge == {"ok": colors["loaded"], "bad": colors["error"], "new": colors["restart"],
+                         "unsafe": colors["untrusted"]}
+        assert dialog.table.item(rows["ok"], 0).data(plugin_manager.ROLE_BADGE) is None  # name: plain text
+        dialog.table.selectRow(rows["bad"])
+        assert dialog.selected_name() == "plugin_bad"
+        assert dialog.label_detail.text() == "SyntaxError"
+        assert not dialog.grab().isNull()  # badges painted
+    finally:
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        dialog.close()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # frees single instance dialog

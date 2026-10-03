@@ -25,15 +25,19 @@ from __future__ import annotations
 import html
 import os
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtCore import QRectF, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetricsF, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -60,17 +64,62 @@ from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 from .toast import show_toast
 
 COLUMNS = ("Plugin", "Status", "Enabled")
+ROLE_NAME = Qt.ItemDataRole.UserRole
+ROLE_BADGE = Qt.ItemDataRole.UserRole + 1  # badge color of status & enabled cells
+BADGE_COLORS = {
+    "loaded": "#2DA44E",
+    "error": "#D1242F",
+    "untrusted": "#BF8700",
+    "restart": "#6E7781",
+    "off": "#6E7781",
+}
 
 
 def plugin_status(widget_name: str) -> tuple[str, str]:
     """Plugin status text & detail"""
+    return plugin_status_kind(widget_name)[1:]
+
+
+def plugin_status_kind(widget_name: str) -> tuple[str, str, str]:
+    """Plugin status kind (badge color key), text & detail"""
     if widget_name not in wctrl.names:
-        return tr("Restart required"), tr("Plugin found after start, restart Modern Tiny Pedals to load it.")
+        return "restart", tr("Restart required"), tr("Plugin found after start, restart Modern Tiny Pedals to load it.")
     if PLUGIN_ERRORS.get(widget_name) == UNTRUSTED_ERROR:
-        return tr("Not trusted"), tr(UNTRUSTED_ERROR)
+        return "untrusted", tr("Not trusted"), tr(UNTRUSTED_ERROR)
     if widget_name in PLUGIN_ERRORS:
-        return tr("Error"), PLUGIN_ERRORS[widget_name]
-    return tr("Loaded"), ""
+        return "error", tr("Error"), PLUGIN_ERRORS[widget_name]
+    return "loaded", tr("Loaded"), ""
+
+
+class BadgeDelegate(QStyledItemDelegate):
+    """Draw cell text as a filled pill badge (status at a glance), color from ROLE_BADGE"""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        color = index.data(ROLE_BADGE)
+        if not color:
+            super().paint(painter, option, index)
+            return
+        # Row selection & hover background, without text
+        style_option = QStyleOptionViewItem(option)
+        self.initStyleOption(style_option, index)
+        style_option.text = ""
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, style_option, painter, widget)
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        metrics = QFontMetricsF(option.font)
+        height = metrics.height() + 4
+        width = metrics.horizontalAdvance(text) + height
+        cell = QRectF(option.rect)
+        pill = QRectF(cell.center().x() - width / 2, cell.center().y() - height / 2, width, height)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(pill, height / 2, height / 2)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
 
 
 def reload_plugin(widget_name: str) -> str:
@@ -97,6 +146,7 @@ class PluginManager(BaseDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setMinimumSize(UIScaler.size(34), UIScaler.size(14))
         self.table.cellDoubleClicked.connect(lambda row, column: self.toggle_selected())
+        self.table.setItemDelegate(BadgeDelegate(self.table))
         self.label_detail = QLabel(self)
         self.label_detail.setWordWrap(True)
         self.table.itemSelectionChanged.connect(self.show_detail)
@@ -141,15 +191,20 @@ class PluginManager(BaseDialog):
         selected = self.selected_name()
         names = self.plugin_names()
         self.table.setRowCount(len(names))
+        accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight).name()
         for row, name in enumerate(names):
-            status, _ = plugin_status(name)
+            kind, status, _ = plugin_status_kind(name)
             enabled = bool(cfg.user.setting.get(name, {}).get("enable", False))
-            cells = (name[len(PLUGIN_PREFIX):], status, tr("On") if enabled else tr("Off"))
-            for column, text in enumerate(cells):
+            cells = (
+                (name[len(PLUGIN_PREFIX):], ""),
+                (status, BADGE_COLORS[kind]),
+                (tr("On") if enabled else tr("Off"), accent if enabled else BADGE_COLORS["off"]),
+            )
+            for column, (text, badge) in enumerate(cells):
                 item = QTableWidgetItem(text)
-                item.setData(0x0100, name)
-                if column == 1 and name in PLUGIN_ERRORS:
-                    item.setForeground(QColor("#E05050"))
+                item.setData(ROLE_NAME, name)
+                if badge:
+                    item.setData(ROLE_BADGE, badge)
                 self.table.setItem(row, column, item)
             if name == selected:
                 self.table.selectRow(row)
@@ -158,7 +213,7 @@ class PluginManager(BaseDialog):
 
     def selected_name(self) -> str:
         items = self.table.selectedItems()
-        return items[0].data(0x0100) if items else ""
+        return items[0].data(ROLE_NAME) if items else ""
 
     def show_detail(self):
         name = self.selected_name()

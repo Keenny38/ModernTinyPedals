@@ -327,6 +327,8 @@ Contexte : l'app a deux couches de style bien distinctes. Les **widgets overlay*
 
 Réalisé (28/09/2026) : F1, F2. Non traités : F3, F4 (mineurs), F5 à F8 (nécessitent des ressources ou une refonte plus large, proposés comme prochaine étape).
 
+Suite (03/10/2026) : F3 (étiquettes de preset et bouton de mise à jour suivent la palette ou les couleurs de notification), F6 (recherche et filtres de la liste, en place), F7 (pastille de couleur par catégorie sur chaque ligne, légende dans le filtre de catégorie), F8 (statut et activation des plugins en badges pleins). F5 en partie : icônes de la barre de navigation et de l'onglet Outils (police Segoe Fluent Icons, lettres sans cette police). Non traité : F4.
+
 ## E (suite, 28/09/2026) — Modernisation visuelle du widget « Black box »
 
 Suite à la demande explicite de pousser plus loin le style de `black_box`, sans toucher au reste de la suite de widgets (dont le rendu reste volontairement plus sobre, cf. section F sur le style applicatif général).
