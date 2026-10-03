@@ -73,8 +73,8 @@ class PaceNotesPlayer(QMediaPlayer):
 
         # Last data
         self._vehicle_resets = None
-        self._last_notes_index = None
-        self._last_pit_notes_index = None
+        self._last_notes_index: int | None = None
+        self._last_pit_notes_index: int | None = None
         self._play_queue: list[str] = []
 
         overlay_signal.paused.connect(self.__toggle_timer)

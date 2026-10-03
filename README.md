@@ -119,6 +119,12 @@ pytest --cov=tinypedal
 
 Le benchmark des widgets se lance à part avec `pytest -m benchmark`.
 
+L'intégration continue installe toujours les dernières versions de `ruff` et `mypy`. Si un contrôle échoue en CI alors qu'il passe chez toi, mets-les à jour :
+
+```bash
+pip install -U ruff mypy
+```
+
 Après avoir ajouté des options ou modifié la documentation, régénère les libellés et les bulles d'aide :
 
 ```bash
