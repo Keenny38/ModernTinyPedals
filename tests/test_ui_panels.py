@@ -109,3 +109,18 @@ def test_module_list_search_filter_and_switch(ui_env):
         view.grab()
     finally:
         view.deleteLater()
+
+
+def test_pace_notes_player_ticks_in_background(ui_env):
+    """Audio player is not a page: it keeps queueing notes while no window shows (no visibility check)"""
+    from tinypedal.module_info import minfo
+    from tinypedal.setting import cfg
+    from tinypedal.ui.pace_notes_view import PaceNotesPlayer
+
+    player = PaceNotesPlayer(None, cfg.user.setting["pace_notes_playback"])
+    try:
+        player.reset_playback()
+        player.timerEvent(None)  # was AttributeError (isVisible) after hidden page refresh change
+        assert player._last_notes_index == minfo.pacenotes.out.currentIndex
+    finally:
+        player.deleteLater()
