@@ -630,5 +630,9 @@ TRANSLATION = MappingProxyType({
     "Import MoTeC...": "Importer MoTeC...",
     "Import complete laps of MoTeC logs (.ld), also by dropping them on the app": "Importer les tours complets de logs MoTeC (.ld), aussi en les déposant sur l'app",
     "Imported": "Importé",
+    "Color by time gained / lost": "Colorer selon le temps gagné / perdu",
+    "First compared lap line colored against reference lap: red where losing time, green where gaining": "Ligne du premier tour comparé colorée face au tour de référence : rouge où il perd du temps, vert où il en gagne",
+    "Losing time": "Perd du temps",
+    "Gaining time": "Gagne du temps",
     "Unable to open tool, see log for details.": "Impossible d'ouvrir l'outil, voir le journal.",
 })

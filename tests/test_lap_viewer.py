@@ -509,3 +509,52 @@ def test_hidden_viewer_releases_laps_and_reloads(ui_env):
     finally:
         viewer.close()
         flush_deleted()
+
+
+def test_trajectory_colored_by_time_gain(ui_env):
+    import math
+
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR, PlotLap, TrajectoryMap
+    from tinypedal.userfile.telemetry_lap import LapData
+
+    distance = [float(index) for index in range(0, 2001, 10)]
+    xs = [500 * math.cos(d / 2000 * math.tau) for d in distance]
+    ys = [500 * math.sin(d / 2000 * math.tau) for d in distance]
+    reference = LapData("ref", {"distance": distance, "lap_time": [d / 50 for d in distance], "pos_x": xs, "pos_y": ys})
+    # Compared: slower on first half (40 m/s), faster on second half (60 m/s)
+    times = [d / 40 if d <= 1000 else 25 + (d - 1000) / 60 for d in distance]
+    compared = LapData("cmp", {"distance": distance, "lap_time": times, "pos_x": xs, "pos_y": ys})
+    parent = QWidget()
+    view = TrajectoryMap(parent)
+    view.resize(300, 300)
+    laps = [PlotLap("ref", "ref", reference, QColor("white")), PlotLap("cmp", "cmp", compared, QColor("cyan"))]
+    view.set_laps(laps)
+    assert not view._gain  # off by default
+    view.set_show_gain(True)
+    rates = {round(d): rate for d, _, _, rate in view._gain}
+    assert rates[500] > 0 > rates[1500]  # losing then gaining
+    assert view.gain_color(rates[500]) == LOSS_COLOR and view.gain_color(rates[1500]) == GAIN_COLOR
+    assert view.gain_color(0.0) == QColor("#9CA3AF")
+    image = view.grab().toImage()
+    colors = {image.pixelColor(x, y).name() for x in range(0, 300, 2) for y in range(0, 300, 2)}
+    assert LOSS_COLOR.name() in colors and GAIN_COLOR.name() in colors
+    view.set_laps(laps[:1])  # reference only: plain line
+    assert not view._gain
+    parent.deleteLater()
+
+
+def test_viewer_time_gain_option_saved(ui_env):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import LapViewer, load_viewer_setting
+
+    viewer = LapViewer(None)
+    try:
+        viewer.check_gain.setChecked(True)
+        assert viewer.trajectory.show_gain
+        assert load_viewer_setting(cfg.path.telemetry)["map_time_gain"] is True
+    finally:
+        viewer.close()
+        flush_deleted()

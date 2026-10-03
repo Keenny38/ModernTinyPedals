@@ -30,6 +30,7 @@ from typing import NamedTuple
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -88,6 +89,10 @@ COLOR_B = LAP_COLORS[1]  # first compared lap
 COLOR_GRID = QColor(128, 128, 128, 70)
 VIEWER_SETTING = ".lap_viewer.json"  # visible channels, in telemetry folder
 LAP_CACHE_SIZE = 12  # loaded laps kept in memory
+GAIN_WINDOW = 40.0  # meters, time gain/loss rate measured over this distance (smooths sampling noise)
+GAIN_FULL_SCALE = 0.002  # seconds lost or gained per meter shown with full color
+GAIN_COLOR = QColor("#22C55E")
+LOSS_COLOR = QColor("#EF4444")
 RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
 
 
@@ -764,6 +769,8 @@ class TrajectoryMap(LapMapBase):
         self._bounds = (0.0, 0.0, 1.0, 1.0)
         self._outline: list[tuple[float, float]] = []  # circuit from track map file
         self.road: list[tuple[float, float]] = []  # drawn circuit: track map, or reference lap line
+        self.show_gain = False  # first compared lap line colored by time gained / lost against reference
+        self._gain: list[tuple[float, float, float, float]] = []  # distance, x, y, delta rate (s/m)
 
     def set_laps(self, laps: list[PlotLap], outline: list[tuple[float, float]] | None = None):
         """Set laps, and circuit outline from track map file (reference lap line if none)"""
@@ -783,6 +790,7 @@ class TrajectoryMap(LapMapBase):
             self.road = list(zip(self._lines[0][1], self._lines[0][2]))
         else:
             self.road = []
+        self._gain = self.gain_points() if self.show_gain else []
         coords = self.road + [coord for line in self._lines for coord in zip(line[1], line[2])]
         if coords:
             self._bounds = (
@@ -792,6 +800,72 @@ class TrajectoryMap(LapMapBase):
 
     def has_data(self) -> bool:
         return bool(self._lines)
+
+    def set_show_gain(self, enabled: bool):
+        self.show_gain = enabled
+        self.set_laps(self.laps, self._outline)
+
+    def gain_points(self) -> list[tuple[float, float, float, float]]:
+        """Positions of first compared lap with rate of time lost (positive) or gained against reference"""
+        if len(self.laps) < 2:
+            return []
+        reference, compared = self.laps[0].data, self.laps[1].data
+        points = self.positions(compared)
+        delta = compute_delta(reference, compared)
+        if len(points) < 2 or len(delta) < 2:
+            return []
+        distances = [point[0] for point in delta]
+        deltas = [point[1] for point in delta]
+        half = GAIN_WINDOW / 2
+        return [
+            (distance, x, y,
+             (interpolate(distances, deltas, distance + half) - interpolate(distances, deltas, distance - half))
+             / GAIN_WINDOW)
+            for distance, x, y in points
+        ]
+
+    @staticmethod
+    def gain_color(rate: float) -> QColor:
+        """Red when losing time, green when gaining, neutral grey when even"""
+        amount = min(abs(rate) / GAIN_FULL_SCALE, 1.0)
+        target = LOSS_COLOR if rate > 0 else GAIN_COLOR
+        neutral = QColor("#9CA3AF")
+        return QColor(
+            round(neutral.red() + (target.red() - neutral.red()) * amount),
+            round(neutral.green() + (target.green() - neutral.green()) * amount),
+            round(neutral.blue() + (target.blue() - neutral.blue()) * amount),
+        )
+
+    def draw_gain(self, painter: QPainter):
+        """Reference line thin, compared lap line colored by time gained / lost, legend"""
+        view_start, view_end = self.view
+        zoomed = view_end - view_start > 0
+        _, xs, ys, color = self._lines[0]
+        path = QPainterPath(self.to_screen(xs[0], ys[0]))
+        for x, y in zip(xs[1:], ys[1:]):
+            path.lineTo(self.to_screen(x, y))
+        reference_color = QColor(color)
+        reference_color.setAlphaF(0.5)
+        painter.setPen(QPen(reference_color, 1.2))
+        painter.drawPath(path)
+        for (distance, x0, y0, rate), (_, x1, y1, _) in zip(self._gain, self._gain[1:]):
+            line_color = self.gain_color(rate)
+            if zoomed and not view_start <= distance <= view_end:
+                line_color.setAlphaF(0.35)
+            pen = QPen(line_color, 3.5)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(self.to_screen(x0, y0), self.to_screen(x1, y1))
+        margin = UIScaler.pixel(6)
+        line = self.fontMetrics().height()
+        for row, (text, legend_color) in enumerate(((tr("Losing time"), LOSS_COLOR), (tr("Gaining time"), GAIN_COLOR))):
+            top = self.height() - margin - line * (2 - row)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(legend_color)
+            painter.drawEllipse(QRectF(margin, top + line * 0.3, line * 0.4, line * 0.4))
+            painter.setPen(self.palette().color(self.foregroundRole()))
+            painter.drawText(QPointF(margin + line * 0.6, top + line * 0.75), text)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
 
     @staticmethod
     def positions(lap: LapData | None) -> list[tuple[float, float, float]]:
@@ -852,6 +926,9 @@ class TrajectoryMap(LapMapBase):
         zoomed = view_end - view_start > 0
         painter.setBrush(Qt.BrushStyle.NoBrush)
         self.draw_road(painter)
+        if self._gain:
+            self.draw_gain(painter)
+            return
         for distances, xs, ys, color in self._lines:
             if len(distances) < 2:
                 continue
@@ -1163,9 +1240,20 @@ class LapViewer(BaseDialog):
         self.plot.cursor_changed.connect(self.update_cursor_info)
         self.plot.channels_reordered.connect(self.reorder_channels)
         self.trajectory = TrajectoryMap(self)
+        self.trajectory.show_gain = bool(load_viewer_setting(self.filepath).get("map_time_gain", False))
+        self.check_gain = QCheckBox(tr("Color by time gained / lost"), self)
+        self.check_gain.setToolTip(tr(
+            "First compared lap line colored against reference lap: red where losing time, green where gaining"))
+        self.check_gain.setChecked(self.trajectory.show_gain)
+        self.check_gain.toggled.connect(self.toggle_time_gain)
+        panel_map = QWidget(self)
+        layout_map = QVBoxLayout(panel_map)
+        layout_map.setContentsMargins(0, 0, 0, 0)
+        layout_map.addWidget(self.check_gain)
+        layout_map.addWidget(self.trajectory, stretch=1)
         self.gcircle = GCircle(self)
         self.side_tabs = QTabWidget(self)
-        self.side_tabs.addTab(self.trajectory, tr("Track Map"))
+        self.side_tabs.addTab(panel_map, tr("Track Map"))
         self.side_tabs.addTab(self.gcircle, tr("G Circle"))
         self.corners = CornerTable(self, self.filepath)
         self.corners.corner_selected.connect(lambda start, end: self.plot.set_view(start, end))
@@ -1587,6 +1675,10 @@ class LapViewer(BaseDialog):
             self.label_cursor.setText(trm(f"Unable to export lap: {error}"))
             return False
         return True
+
+    def toggle_time_gain(self, enabled: bool):
+        self.trajectory.set_show_gain(enabled)
+        save_viewer_setting(self.filepath, map_time_gain=enabled)
 
     def update_cursor_info(self):
         plot = self.plot
