@@ -264,3 +264,61 @@ def test_hidden_tool_page_skips_refresh(window, monkeypatch):
     view.set_current_index(0)  # other page: tool kept open, hidden
     page.dialog.timerEvent(None)
     assert calls == [1]  # no work while hidden
+
+
+# --- Open pages reopened at startup
+def test_open_pages_saved_and_reopened(window, monkeypatch):
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui.config import UserConfig
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("brake_editor.BrakeEditor", window)
+    UserConfig(parent=window, key_name="speedometer", preset_name="test", config_type="widget",
+               user_setting=cfg.user.setting, default_setting=cfg.default.setting,
+               reload_func=lambda: None).open()  # config dialogs are not tools: never reopened
+    view.show_page_widget(view.dialog_pages()[0])
+    assert view.open_page_paths() == ["*fuel_calculator.FuelCalculator", "brake_editor.BrakeEditor"]
+    window.save_open_pages()
+    assert cfg.application["open_pages"] == "*fuel_calculator.FuelCalculator,brake_editor.BrakeEditor"
+
+    # Next startup: same pages, shown page shown again, window not brought to front
+    cfg.application["open_pages"] += ",unknown.Tool"
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    other = app_module.AppWindow()
+    try:
+        other_view = other.centralWidget()
+        assert [page.title for page in other_view.dialog_pages()] == ["Fuel Calculator", "Brake Editor"]
+        assert other_view._pages.currentWidget() is other_view.dialog_pages()[0]
+        assert not other.isVisible()
+    finally:
+        for page in other.centralWidget().dialog_pages():
+            page.dialog.close()
+        other.deleteLater()
+
+
+def test_open_pages_current_app_page_kept(window):
+    from tinypedal.ui.nav_rail import PAGE_INDEX
+
+    view = window.centralWidget()
+    view.set_current_index(PAGE_INDEX["preset"])
+    view.restore_pages(["track_map_viewer.TrackMapViewer"])  # no page was shown at quit
+    assert len(view.dialog_pages()) == 1 and view.current_index() == PAGE_INDEX["preset"]
+
+
+def test_open_pages_not_remembered_when_disabled(window, monkeypatch):
+    from tinypedal.ui.tools_view import open_tool
+
+    open_tool("fuel_calculator.FuelCalculator", window)
+    monkeypatch.setitem(cfg.application, "remember_open_pages", False)
+    window.save_open_pages()
+    assert cfg.application["open_pages"] == ""
+
+
+def test_language_change_keeps_open_pages(window):
+    from tinypedal.ui.tools_view import open_tool
+
+    open_tool("fuel_calculator.FuelCalculator", window)
+    window.retranslate()
+    assert [type(page.dialog).__name__ for page in window.centralWidget().dialog_pages()] == ["FuelCalculator"]

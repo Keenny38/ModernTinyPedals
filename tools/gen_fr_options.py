@@ -470,6 +470,7 @@ INFIX = (
 
 # Full key overrides
 FULL = {
+    "remember_open_pages": "Rouvrir les pages au démarrage", "open_pages": "Pages ouvertes",
     "enable": "Activer", "update_interval": "Intervalle de mise à jour (ms)",
     "idle_update_interval": "Intervalle au repos (ms)", "position_x": "Position X", "position_y": "Position Y",
     "opacity": "Opacité", "bar_gap": "Espacement", "inner_gap": "Espacement interne", "bar_padding": "Marge interne",

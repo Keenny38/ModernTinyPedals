@@ -34,6 +34,7 @@ GLOBAL_DEFAULT = {
         "minimize_to_tray": PLATFORM.WINDOWS,
         "remember_position": True,
         "remember_size": True,
+        "remember_open_pages": True,
         "enable_high_dpi_scaling": True,
         "enable_auto_load_preset": False,
         "enable_global_hotkey": False,
@@ -63,6 +64,8 @@ GLOBAL_DEFAULT = {
             "lap_viewer,driver_stats_viewer,fuel_calculator,tyre_strategy_planner"
         ),
         "enable_layout_per_screen_setup": True,
+        # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
+        "open_pages": "",
     },
     "compatibility": {
         "enable_bypass_window_manager": (not PLATFORM.WINDOWS),

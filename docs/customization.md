@@ -650,7 +650,7 @@ Set amount decimal places to keep.
 ## Application
 **Application options can be accessed from `Config` and `Window` menu in main window.**
 
-Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Inputs (preset name, key binding, share code, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups.
+Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Inputs (preset name, key binding, share code, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups. Tool pages left open at quit (or restart, or language change) are opened again at next startup, see `remember_open_pages`.
 
     show_at_startup
 Show main window at startup, otherwise hides to tray icon.
@@ -747,6 +747,9 @@ Set number of automatic backups kept per preset file. A backup is created before
 
     rail_items
 Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `fuel_calculator`, `tyre_strategy_planner`). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Pages left out stay in command palette (`Ctrl+K`). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer, Fuel Calculator and Tyre Strategy Planner.
+
+    remember_open_pages
+Reopen tool pages (fuel calculator, editors, telemetry viewer...) left open at quit or restart, page shown at quit shown again. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
 
     show_layout_guides
 Show alignment guides (grid, other widget edges and centers) while dragging a widget. Widgets also snap to centers while snapping is active. Default is enabled.

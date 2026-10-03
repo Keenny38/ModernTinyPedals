@@ -54,6 +54,7 @@ CFG_BOOL = (
     "^global$|"
     "^minimize_to_tray$|"
     "^remember_position$|"
+    "^remember_open_pages$|"
     "^remember_size$|"
     "^save_invalid_laps$|"
     "^vr_compatibility$|"
@@ -98,6 +99,7 @@ CFG_STRING = (
     "^bind$|"
     "^preset$|"
     "^process_id$|"
+    "^open_pages$|"
     "^rail_items$|"
     "^version$|"
     # Partial match

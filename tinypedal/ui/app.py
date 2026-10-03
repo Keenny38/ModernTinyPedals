@@ -77,7 +77,7 @@ from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
 from .toast import show_toast
-from .tools_view import ToolsView, open_tool
+from .tools_view import TOOL_SECTIONS, ToolsView, open_tool
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +297,7 @@ class TabView(QWidget):
         self._icon_family = icon_family
         self._dialog_parent = parent
         self._return_index = 0  # page shown again when last dialog page closes
+        self._restoring_pages = False  # reopening pages: window not brought to front
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
         self._rail = rail
@@ -517,6 +518,42 @@ class TabView(QWidget):
         button = self._button_pages
         menu.exec(button.mapToGlobal(button.rect().topRight()))
 
+    def open_page_paths(self) -> list[str]:
+        """Tool dialog paths of open pages in order, shown page marked with leading "*" """
+        tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+        current = self._pages.currentWidget()
+        paths = []
+        for page in self.dialog_pages():
+            path = tools.get(type(page.dialog).__name__) if page.dialog is not None else None
+            if path:
+                paths.append(f"*{path}" if page is current else path)
+        return paths
+
+    def restore_pages(self, paths: list[str]):
+        """Reopen tool pages (unknown tools skipped), shown page shown again, else current page kept"""
+        known = {path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+        index = self._pages.currentIndex()
+        shown = None
+        self._restoring_pages = True
+        try:
+            for entry in paths:
+                path = entry.strip().removeprefix("*")
+                if path not in known:
+                    continue
+                try:
+                    open_tool(path, self._dialog_parent)
+                except Exception:  # never block startup
+                    logger.exception("GUI: unable to reopen %s", path)
+                    continue
+                if entry.strip().startswith("*"):
+                    shown = self._pages.currentWidget()
+        finally:
+            self._restoring_pages = False
+        if isinstance(shown, DialogPage):
+            self.show_page_widget(shown, bring_to_front=False)
+        elif isinstance(self._pages.currentWidget(), DialogPage):
+            self.set_current_index(index if index < len(NAV_PAGES) else self._return_index)
+
     def close_all_pages(self) -> bool:
         """Close every dialog page (each may ask to save), True if all closed"""
         for page in reversed(self.dialog_pages()):
@@ -525,7 +562,7 @@ class TabView(QWidget):
                 return False
         return True
 
-    def show_page_widget(self, page: QWidget):
+    def show_page_widget(self, page: QWidget, bring_to_front: bool = True):
         """Show dialog page, main window brought to front"""
         current = self._pages.currentWidget()
         if not isinstance(current, DialogPage):
@@ -537,6 +574,8 @@ class TabView(QWidget):
         for button in self._nav.buttons():
             button.setChecked(False)
         self._nav.setExclusive(True)
+        if not bring_to_front or self._restoring_pages:
+            return
         window = self.window()
         if not window.isVisible():
             window.show()
@@ -719,7 +758,11 @@ class StatusButtonBar(QStatusBar):
 
         cfg.application["enable_high_dpi_scaling"] = not cfg.application["enable_high_dpi_scaling"]
         cfg.save(config_type=ConfigType.CONFIG)
-        loader.restart()
+        window = self.window()
+        if isinstance(window, AppWindow):
+            window.restart_app()  # tool pages reopened
+        else:
+            loader.restart()
 
     def toggle_color_theme(self):
         """Toggle color theme: Dark, Light, System"""
@@ -768,6 +811,8 @@ class AppWindow(QMainWindow):
         # Window state
         self.set_window_state()
         self.__connect_signal()
+        if cfg.application["remember_open_pages"]:
+            self.restore_open_pages()
         # Follow OS light / dark switch when window color theme is "System"
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
 
@@ -853,12 +898,14 @@ class AppWindow(QMainWindow):
         install_qt_translation(QApplication.instance(), language_code)
         tab_view = self.centralWidget()
         tab_index = tab_view.current_index() if isinstance(tab_view, TabView) else 0
+        open_pages = tab_view.open_page_paths() if isinstance(tab_view, TabView) else []
         self.setStatusBar(StatusButtonBar(self))  # old widgets are deleted by Qt
         self.menuBar().clear()
         self.set_menu_bar()
         tab_view = TabView(self)
         self.setCentralWidget(tab_view)
         tab_view.set_current_index(tab_index)
+        tab_view.restore_pages(open_pages)  # tool pages reopened in new language
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:
             old_menu = tray_icon.contextMenu()
@@ -999,11 +1046,35 @@ class AppWindow(QMainWindow):
                 view.window_resized_by_user()
         super().resizeEvent(event)
 
+    def save_open_pages(self):
+        """Remember tool pages left open, reopened at next startup"""
+        view = self.centralWidget()
+        if not isinstance(view, TabView):
+            return
+        open_pages = ",".join(view.open_page_paths()) if cfg.application["remember_open_pages"] else ""
+        if cfg.application["open_pages"] != open_pages:
+            cfg.application["open_pages"] = open_pages
+            cfg.save(0, config_type=ConfigType.CONFIG)
+
+    def restore_open_pages(self):
+        """Reopen tool pages left open at last quit"""
+        view = self.centralWidget()
+        paths = [path for path in cfg.application["open_pages"].split(",") if path.strip()]
+        if isinstance(view, TabView) and paths:
+            view.restore_pages(paths)
+
+    def restart_app(self):
+        """Restart app, tool pages left open reopened"""
+        self.save_open_pages()
+        loader.restart()
+
     def quit_app(self):
         """Quit manager, open pages with unsaved changes are asked first (cancel keeps app open)"""
         view = self.centralWidget()
-        if isinstance(view, TabView) and not view.close_all_pages():
-            return
+        if isinstance(view, TabView):
+            self.save_open_pages()
+            if not view.close_all_pages():
+                return
         loader.close()  # must close this first
         self.save_window_state()
         self.__break_signal()

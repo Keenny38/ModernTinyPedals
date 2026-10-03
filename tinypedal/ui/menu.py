@@ -665,10 +665,14 @@ class WindowMenu(QMenu):
         self.remember_size = self.addAction(tr("Remember Size"))
         self.remember_size.setCheckable(True)
         self.remember_size.triggered.connect(self.is_remember_size)
+
+        self.remember_open_pages = self.addAction(tr("Reopen Pages at Startup"))
+        self.remember_open_pages.setCheckable(True)
+        self.remember_open_pages.triggered.connect(self.is_remember_open_pages)
         self.addSeparator()
 
         restart_app = self.addAction(tr("Restart Modern Tiny Pedals"))
-        restart_app.triggered.connect(loader.restart)
+        restart_app.triggered.connect(getattr(parent, "restart_app", loader.restart))
 
         self.aboutToShow.connect(self.refresh_menu)
 
@@ -678,6 +682,7 @@ class WindowMenu(QMenu):
         self.minimize_to_tray.setChecked(cfg.application["minimize_to_tray"])
         self.remember_position.setChecked(cfg.application["remember_position"])
         self.remember_size.setChecked(cfg.application["remember_size"])
+        self.remember_open_pages.setChecked(cfg.application["remember_open_pages"])
 
     def is_show_at_startup(self):
         """Toggle config window startup state"""
@@ -694,6 +699,10 @@ class WindowMenu(QMenu):
     def is_remember_size(self):
         """Toggle config window remember size state"""
         self.__toggle_option("remember_size")
+
+    def is_remember_open_pages(self):
+        """Toggle reopening tool pages left open at quit"""
+        self.__toggle_option("remember_open_pages")
 
     @staticmethod
     def __toggle_option(option_name: str):

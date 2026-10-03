@@ -95,6 +95,8 @@ TRANSLATION = MappingProxyType({
     "Minimize to Tray": "Réduire dans la zone de notification",
     "Remember Position": "Mémoriser la position",
     "Remember Size": "Mémoriser la taille",
+    "Reopen Pages at Startup": "Rouvrir les pages au démarrage",
+    "Remember Open Pages": "Mémoriser les pages ouvertes",
     "Restart Modern Tiny Pedals": "Redémarrer Modern Tiny Pedals",
 
     # Overlay menu
