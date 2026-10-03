@@ -106,6 +106,8 @@ def update_preset_references(old_name: str, new_name: str) -> list[str]:
 class CreatePreset(BaseDialog):
     """Create preset"""
 
+    EMBED_IN_APP = False  # short name input, stays a small popup
+
     def __init__(self, parent, title: str = "", mode: str = "", source_filename: str = ""):
         """Initialize create preset dialog setting
 

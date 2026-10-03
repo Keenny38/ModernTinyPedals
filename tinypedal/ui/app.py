@@ -24,7 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Slot
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QStatusBar,
     QSystemTrayIcon,
@@ -64,7 +65,7 @@ from ..overlay_control import octrl
 from ..setting import cfg
 from ..userfile.layout_profile import screen_key
 from . import resolve_color_theme, set_style_palette, set_style_window
-from ._common import DialogSingleton, UIScaler
+from ._common import BaseDialog, DialogSingleton, UIScaler
 from .home_view import HomeView
 from .hotkey_view import HotkeyList
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
@@ -177,6 +178,66 @@ class NavButton(QAbstractButton):
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
 
+class DialogPage(QWidget):
+    """Dialog shown as page inside app: title & close button, then dialog (scrolled if larger than page)
+
+    Emits closed when dialog closes itself (close button, Save & close, Esc): page is then removed.
+    """
+
+    closed = Signal(QWidget)
+
+    def __init__(self, dialog: BaseDialog, parent=None):
+        super().__init__(parent)
+        self.setObjectName("dialogPage")
+        self.dialog = dialog
+        self._closed = False
+        title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
+        label_title = QLabel(title, self)
+        label_title.setObjectName("dialogPageTitle")
+        font = label_title.font()
+        font.setBold(True)
+        font.setPointSizeF(font.pointSizeF() * 1.15)
+        label_title.setFont(font)
+        button_close = QPushButton(tr("Close"), self)
+        button_close.setToolTip(tr("Close and go back to previous page"))
+        button_close.clicked.connect(dialog.close)
+        layout_title = QHBoxLayout()
+        layout_title.setContentsMargins(UIScaler.pixel(10), UIScaler.pixel(6), UIScaler.pixel(10), 0)
+        layout_title.addWidget(label_title, stretch=1)
+        layout_title.addWidget(button_close)
+
+        dialog.in_app_page = True  # shown as page, see embedded_host
+        dialog.setWindowFlags(Qt.WindowType.Widget)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(dialog)
+        dialog.installEventFilter(self)
+        dialog.destroyed.connect(self._dialog_destroyed)
+        dialog.show()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addLayout(layout_title)
+        layout.addWidget(scroll, stretch=1)
+
+    def eventFilter(self, watched, event):
+        # Hidden by itself (not because page is hidden): dialog closed
+        if watched is self.dialog and event.type() == QEvent.Type.Hide and self.dialog.isHidden():
+            self.notify_closed()
+        return super().eventFilter(watched, event)
+
+    def _dialog_destroyed(self, *_):
+        self.dialog = None  # type: ignore[assignment]
+        self.notify_closed()
+
+    def notify_closed(self):
+        if not self._closed:
+            self._closed = True
+            self.closed.emit(self)
+
+
 class TabView(QWidget):
     """Main view: navigation rail on the left, page on the right"""
 
@@ -216,6 +277,7 @@ class TabView(QWidget):
         self._nav.setExclusive(True)
         self._icon_family = icon_family
         self._dialog_parent = parent
+        self._return_index = 0  # page shown again when last dialog page closes
         self._rail = rail
         self._rail_items = QVBoxLayout()
         self._rail_items.setSpacing(UIScaler.pixel(2))
@@ -330,6 +392,65 @@ class TabView(QWidget):
 
     def open_rail_editor(self):
         RailEditor(self, self.build_rail_items).open()
+
+    # Dialogs shown as pages inside app (tools, config, about...), see BaseDialog.show
+    def dialog_pages(self) -> list["DialogPage"]:
+        """Open dialog pages"""
+        return [
+            page for page in (self._pages.widget(index) for index in range(self._pages.count()))
+            if isinstance(page, DialogPage)
+        ]
+
+    def activate_dialog_page(self, class_name: str, title: str = "") -> bool:
+        """Show open dialog page of class (and title if set), True if found"""
+        for page in self.dialog_pages():
+            dialog = page.dialog
+            if dialog is not None and type(dialog).__name__ == class_name and (not title or dialog.windowTitle() == title):
+                self.show_page_widget(page)
+                return True
+        return False
+
+    def show_dialog_page(self, dialog) -> bool:
+        """Show dialog as page, same dialog already open is shown instead, True if shown in app"""
+        if self.activate_dialog_page(type(dialog).__name__, dialog.windowTitle()):
+            dialog.deleteLater()  # second copy of open dialog: never shown
+            return True
+        page = DialogPage(dialog, self._pages)
+        page.closed.connect(self.close_dialog_page)
+        self._pages.addWidget(page)
+        self.show_page_widget(page)
+        return True
+
+    def show_page_widget(self, page: QWidget):
+        """Show dialog page, main window brought to front"""
+        current = self._pages.currentWidget()
+        if not isinstance(current, DialogPage):
+            self._return_index = self._pages.currentIndex()  # back to this page when closed
+        self._pages.setCurrentWidget(page)
+        self._nav.setExclusive(False)  # no rail page selected while dialog page shows
+        for button in self._nav.buttons():
+            button.setChecked(False)
+        self._nav.setExclusive(True)
+        window = self.window()
+        if not window.isVisible():
+            window.show()
+        if window.isMinimized():
+            window.showNormal()
+        window.raise_()
+        window.activateWindow()
+
+    @Slot(QWidget)  # type: ignore[operator]
+    def close_dialog_page(self, page: QWidget):
+        """Dialog closed itself: remove its page, back to previous page"""
+        was_current = self._pages.currentWidget() is page
+        self._pages.removeWidget(page)
+        page.deleteLater()
+        if was_current:
+            pages = self.dialog_pages()
+            if pages:
+                self.show_page_widget(pages[-1])
+            else:
+                self.set_current_index(min(self._return_index, len(NAV_PAGES) - 1))
 
     def current_index(self) -> int:
         """Current page index"""

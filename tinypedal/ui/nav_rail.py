@@ -152,7 +152,7 @@ class RailEditor(BaseDialog):
         button_reset.clicked.connect(lambda: self.fill(default_rail_items()))
         button_save = QPushButton(tr("Save"))
         button_save.clicked.connect(self.saving)
-        button_cancel = QPushButton(tr("Cancel"))
+        button_cancel = QPushButton(tr("Close"))
         button_cancel.clicked.connect(self.reject)
         layout_button = QHBoxLayout()
         for button in (button_up, button_down, button_reset):

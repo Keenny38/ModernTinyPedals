@@ -650,6 +650,8 @@ Set amount decimal places to keep.
 ## Application
 **Application options can be accessed from `Config` and `Window` menu in main window.**
 
+Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Small inputs (preset name, key binding, theme name) and dialogs opened from a tool stay small popups.
+
     show_at_startup
 Show main window at startup, otherwise hides to tray icon.
 
@@ -742,6 +744,9 @@ Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value di
 
     number_of_automatic_backups
 Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from `Restore Backup` dialog. Set `0` to disable. Default is `10`.
+
+    rail_items
+Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `fuel_calculator`, `tyre_strategy_planner`). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Pages left out stay in command palette (`Ctrl+K`). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer, Fuel Calculator and Tyre Strategy Planner.
 
     show_layout_guides
 Show alignment guides (grid, other widget edges and centers) while dragging a widget. Widgets also snap to centers while snapping is active. Default is enabled.

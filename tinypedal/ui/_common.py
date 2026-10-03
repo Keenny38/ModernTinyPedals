@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..const_app import APP_NAME
@@ -93,6 +94,10 @@ def singleton_dialog(dialog_type: str, show_error: bool = True):
             DialogSingleton.remove(dialog_type)
 
         def wrapper(*args, **kwargs):
+            parent = kwargs.get("parent", args[0] if args else None)
+            if page_host(parent, dialog_class) is not None:
+                # Shown as page in app: one page per dialog, opening the same one shows its page again
+                return dialog_class(*args, **kwargs)
             if DialogSingleton.new(dialog_type):
                 instance = dialog_class(*args, **kwargs)
                 instance.destroyed.connect(unset_dialog_state)
@@ -169,15 +174,64 @@ class CompactButton(QPushButton):
         )
 
 
+def find_dialog_host(widget: QWidget | None):
+    """Main window page host (shows dialogs as pages inside app), None if no main window"""
+    if widget is None:
+        return None
+    central = getattr(widget.window(), "centralWidget", None)
+    host = central() if callable(central) else None
+    return host if hasattr(host, "show_dialog_page") else None
+
+
+def page_host(parent, dialog_class: type):
+    """Page host for dialog class opened from parent, None if dialog stays a separate window
+
+    Dialogs opened from another dialog (offset, rename, file info...) stay small popups over it.
+    """
+    if not getattr(dialog_class, "EMBED_IN_APP", False) or not isinstance(parent, QWidget):
+        return None
+    ancestor: QWidget | None = parent
+    while ancestor is not None:
+        if isinstance(ancestor, QDialog):
+            return None
+        ancestor = ancestor.parentWidget()
+    return find_dialog_host(parent)
+
+
+def embedded_host(dialog: QDialog):
+    """Page host of dialog, None if already shown as page or staying a separate window"""
+    if getattr(dialog, "in_app_page", False):
+        return None
+    return page_host(dialog.parentWidget(), type(dialog))
+
+
 # Dialog class
 class BaseDialog(QDialog):
-    """Base dialog class"""
+    """Base dialog class
+
+    Opened with show() or open() from main window, dialog is shown as a page inside app
+    (see TabView.show_dialog_page), unless EMBED_IN_APP is False. exec() keeps a modal window.
+    """
     MARGIN = UIScaler.pixel(6)
+    EMBED_IN_APP = True
+    in_app_page = False  # set when shown as page
 
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+    def show(self):
+        host = embedded_host(self)
+        if host is not None and not self.isVisible() and host.show_dialog_page(self):
+            return
+        super().show()
+
+    def open(self):
+        host = embedded_host(self)
+        if host is not None and not self.isVisible() and host.show_dialog_page(self):
+            return
+        super().open()
 
     def set_config_title(self, option_name: str, preset_name: str):
         """Set config dialog title"""

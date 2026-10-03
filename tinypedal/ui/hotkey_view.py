@@ -246,6 +246,8 @@ class HotkeyConfigItem(QWidget):
 class ConfigHotkey(BaseDialog):
     """Configure hotkey dialog"""
 
+    EMBED_IN_APP = False  # key capture, stays a small popup
+
     def __init__(self, parent, option_name: str, hotkey_name: str, reload_func: Callable):
         super().__init__(parent)
         self.setWindowTitle(trm(f"Key Binding - {option_label(option_name)}"))

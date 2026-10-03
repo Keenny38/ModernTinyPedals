@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr
-from ._common import UIScaler
+from ._common import UIScaler, find_dialog_host
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,9 @@ TOOL_SECTIONS = (
 def open_tool(dialog_path: str, parent):
     """Open tool dialog from "module.DialogClass" path relative to ui package"""
     module_name, class_name = dialog_path.rsplit(".", 1)
+    host = find_dialog_host(parent)
+    if host is not None and host.activate_dialog_page(class_name):  # already open as page in app
+        return
     for widget in QApplication.topLevelWidgets():  # already open: bring to front instead of warning
         if type(widget).__name__ == class_name and widget.isVisible():
             if widget.isMinimized():
