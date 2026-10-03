@@ -57,6 +57,11 @@ GLOBAL_DEFAULT = {
         "language": "English",
         "show_setup_wizard_at_startup": True,
         "last_page_index": 0,
+        # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
+        "rail_items": (
+            "home,widget,module,preset,spectate,hotkey,tools,"
+            "lap_viewer,driver_stats_viewer,fuel_calculator,tyre_strategy_planner"
+        ),
         "enable_layout_per_screen_setup": True,
     },
     "compatibility": {

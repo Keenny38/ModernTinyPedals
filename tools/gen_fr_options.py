@@ -752,6 +752,7 @@ FULL = {
     "heatmap_name_brake": "Palette thermique des freins", "widget_theme": "Thème du widget",
     "show_setup_wizard_at_startup": "Assistant de configuration au démarrage",
     "last_page_index": "Dernière page ouverte",
+    "rail_items": "Éléments de la barre de navigation",
     "enable_layout_per_screen_setup": "Disposition mémorisée par configuration d'écrans",
     "overlay_scale": "Échelle de l'overlay",
     "visibility_context": "Afficher pendant",

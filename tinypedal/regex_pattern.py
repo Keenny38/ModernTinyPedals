@@ -98,6 +98,7 @@ CFG_STRING = (
     "^bind$|"
     "^preset$|"
     "^process_id$|"
+    "^rail_items$|"
     "^version$|"
     # Partial match
     "by_class|"

@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QStackedWidget,
@@ -68,6 +69,7 @@ from .home_view import HomeView
 from .hotkey_view import HotkeyList
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .module_view import ModuleList
+from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
 from .notification import NotifyBar
 from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
@@ -77,24 +79,6 @@ from .tools_view import ToolsView, open_tool
 
 logger = logging.getLogger(__name__)
 
-
-# Navigation pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
-NAV_PAGES = (
-    ("home", "Home", "", "A"),  # home
-    ("widget", "Widget", "\ue71d", "W"),  # all apps grid
-    ("module", "Module", "\ue9d9", "M"),  # diagnostic
-    ("preset", "Preset", "\ue8f1", "P"),  # library
-    ("spectate", "Spectate", "\ue890", "S"),  # view
-    ("pacenotes", "Pacenotes", "\ue70b", "N"),  # quick note
-    ("hotkey", "Hotkey", "\ue765", "H"),  # keyboard
-    ("tools", "Tools", "\uec7a", "T"),  # developer tools
-)
-PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
-
-# Rail tools, opened in their own window: (label, tooltip, icon glyph, fallback letter, "module.DialogClass")
-RAIL_TOOLS = (
-    ("Telemetry", "Lap Telemetry Viewer", "\ue9d2", "T", "lap_viewer.LapViewer"),  # area chart
-)
 
 # Rail overlay toggles: (overlay option, tooltip, icon glyph, fallback letter)
 RAIL_TOGGLES = (
@@ -230,23 +214,16 @@ class TabView(QWidget):
         layout_rail.setSpacing(UIScaler.pixel(2))
         self._nav = QButtonGroup(self)
         self._nav.setExclusive(True)
-        for index, (_, label, glyph, letter) in enumerate(NAV_PAGES):
-            button = NavButton(tr(label), glyph, letter, icon_family, rail)
-            button.setToolTip(f"{tr(label)} (Ctrl+{index + 1})")
-            self._nav.addButton(button, index)
-            layout_rail.addWidget(button)
-            shortcut = QShortcut(QKeySequence(f"Ctrl+{index + 1}"), self)
-            shortcut.activated.connect(lambda page=index: self.select_page(page))
-        # Tools opened from rail (dialogs, not pages): (label, tooltip, icon glyph, fallback letter, dialog)
-        for shortcut_index, (label, tooltip, glyph, letter, dialog_path) in enumerate(RAIL_TOOLS, len(NAV_PAGES) + 1):
-            button = NavButton(tr(label), glyph, letter, icon_family, rail)
-            button.setCheckable(False)
-            button.setToolTip(f"{tr(tooltip)} (Ctrl+{shortcut_index})")
-            button.clicked.connect(lambda _=False, path=dialog_path: open_tool(path, parent))
-            button.setObjectName(f"railTool:{dialog_path}")
-            layout_rail.addWidget(button)
-            shortcut = QShortcut(QKeySequence(f"Ctrl+{shortcut_index}"), self)
-            shortcut.activated.connect(lambda path=dialog_path: open_tool(path, parent))
+        self._icon_family = icon_family
+        self._dialog_parent = parent
+        self._rail = rail
+        self._rail_items = QVBoxLayout()
+        self._rail_items.setSpacing(UIScaler.pixel(2))
+        self._rail_shortcuts: list[QShortcut] = []
+        layout_rail.addLayout(self._rail_items)
+        self.build_rail_items()
+        rail.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        rail.customContextMenuRequested.connect(self.show_rail_menu)
         layout_rail.addStretch(1)
         self._nav.idClicked.connect(self.select_page)
 
@@ -308,6 +285,51 @@ class TabView(QWidget):
         app_signal.refresh.connect(pacenotes_tab.refresh)
         app_signal.refresh.connect(hotkey_tab.refresh)
         app_signal.refresh.connect(self.refresh_rail)
+
+    def build_rail_items(self):
+        """(Re)create rail entries from setting, Ctrl+1..9 open the first 9 entries"""
+        for button in self._nav.buttons():
+            self._nav.removeButton(button)
+        while self._rail_items.count():
+            item = self._rail_items.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        for shortcut in self._rail_shortcuts:
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self._rail_shortcuts = []
+        entries = rail_entries()
+        for position, key in enumerate(current_rail_items(), 1):
+            entry = entries[key]
+            button = NavButton(tr(entry.label), entry.glyph, entry.letter, self._icon_family, self._rail)
+            hint = f" (Ctrl+{position})" if position <= 9 else ""
+            button.setToolTip(f"{tr(entry.tooltip)}{hint}")
+            if entry.page >= 0:
+                self._nav.addButton(button, entry.page)
+                action = (lambda page=entry.page: self.select_page(page))
+            else:
+                button.setCheckable(False)
+                button.setObjectName(f"railTool:{entry.dialog}")
+                action = (lambda path=entry.dialog: open_tool(path, self._dialog_parent))
+                button.clicked.connect(lambda _=False, run=action: run())
+            self._rail_items.addWidget(button)
+            if position <= 9:
+                shortcut = QShortcut(QKeySequence(f"Ctrl+{position}"), self)
+                shortcut.activated.connect(action)
+                self._rail_shortcuts.append(shortcut)
+        button = self._nav.button(self._pages.currentIndex())
+        if button is not None:
+            button.setChecked(True)
+
+    def show_rail_menu(self, position):
+        """Rail context menu: customize entries"""
+        menu = QMenu(self)
+        menu.addAction(tr("Customize Navigation Bar...")).triggered.connect(self.open_rail_editor)
+        menu.exec(self._rail.mapToGlobal(position))
+
+    def open_rail_editor(self):
+        RailEditor(self, self.build_rail_items).open()
 
     def current_index(self) -> int:
         """Current page index"""
