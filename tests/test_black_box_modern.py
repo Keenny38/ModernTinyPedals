@@ -1559,19 +1559,21 @@ def test_every_new_option_draws(ui_env):
         widget.deleteLater()
 
 
-# --- Center column: merged brake bias & migration, delta source, pedal source
+# --- Right side chips: merged brake bias & migration; center column: delta source, pedal source
 def test_brake_bias_and_migration_merged(ui_env):
-    widget = new_widget({"show_brake_bias": True, "show_brake_migration": True})
+    widget = new_widget({"show_brake_bias": True, "show_brake_migration": True, "show_motor_map": False,
+                         "show_abs_indicator": False, "show_tc_indicator": False})
     try:
-        assert "brake_bias" in widget.center_order and "brake_migration" not in widget.center_order
-        assert widget.need_brake_migration  # still read, drawn in the brake bias row
+        assert widget.side_rows() == ["brake_bias"]
+        assert widget.need_brake_migration  # still read, drawn in the brake bias chip
         widget.grab()
     finally:
         widget.deleteLater()
     separate = new_widget({"show_brake_bias": True, "show_brake_migration": True,
-                           "enable_brake_bias_migration_merge": False})
+                           "enable_brake_bias_migration_merge": False, "show_motor_map": False,
+                           "show_abs_indicator": False, "show_tc_indicator": False})
     try:
-        assert "brake_migration" in separate.center_order
+        assert separate.side_rows() == ["brake_bias", "brake_migration"]
     finally:
         separate.deleteLater()
 
@@ -1609,7 +1611,9 @@ def test_pedal_source(ui_env, monkeypatch, source, expected):
 
 
 def test_status_icons_reserve_room_between_axles(ui_env):
-    hidden = new_widget({"show_headlights_indicator": False, "show_engine_status": False, "font_scale_engine": 1.0})
+    hidden = new_widget({"show_headlights_indicator": False, "show_engine_status": False, "font_scale_engine": 1.0,
+                         "show_brake_bias": False, "show_motor_map": False,
+                         "show_abs_indicator": False, "show_tc_indicator": False})
     shown = new_widget({"show_headlights_indicator": True, "show_engine_status": True, "font_scale_engine": 3.0,
                          "status_icon_scale": 4.0})
     try:

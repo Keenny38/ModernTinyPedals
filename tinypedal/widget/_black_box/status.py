@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Black box widget, headlights & engine status icons between front and rear wheels
+Black box widget, headlights & engine status icons, brake bias & motor map between front and rear wheels
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 
 from .common import qcolor
+from .state import level_text
 
 
 def headlight_path(box: QRectF) -> tuple[QPainterPath, list[tuple[QPointF, QPointF]]]:
@@ -68,14 +69,22 @@ def engine_path(box: QRectF) -> QPainterPath:
 
 
 class StatusPainter:
-    """Headlights & engine icons stacked between front and rear wheels, on one side"""
+    """Headlights & engine icons, brake bias & motor map rows, between front and rear wheels on one side"""
 
     # Attributes set by black box widget class (widget/black_box.py) or other parts
+    abs_active: Any
+    abs_level: Any
+    brake_bias: Any
+    brake_migration: Any
     draw_fit_text: Any
+    draw_indicator: Any
     font_label: Any
     grown_font: Any
+    has_abs: Any
+    has_tc: Any
     headlights: Any
     ignition: Any
+    motor_map_level: Any
     oil_temp: Any
     pen_text: Any
     rect_center: Any
@@ -83,6 +92,10 @@ class StatusPainter:
     rects_susp: Any
     rects_tyre: Any
     sign_text: Any
+    tc_active: Any
+    tc_cut_level: Any
+    tc_level: Any
+    tc_slip_level: Any
     text: Any
     unit: Any
     unit_temp: Any
@@ -115,11 +128,23 @@ class StatusPainter:
         return QRectF(left, top, width, bottom - top)
 
     def status_height(self) -> float:
-        """Height the icons & engine text need between front and rear wheels (0 if hidden)
+        """Height the icons, engine text & side rows need between front and rear wheels (0 if hidden)
 
         Layout makes the gap between axles at least this tall (plus margins), so icons
         never vanish, and the widget grows or shrinks when they are toggled or rescaled.
         """
+        icons = self.icons_height()
+        rows = self.side_rows_height()
+        if not (icons or rows):
+            return 0.0
+        if icons and rows and self.side_rows_share_icons():  # stacked: icons above rows
+            height = icons + self.unit * 0.2 + rows
+        else:
+            height = max(icons, rows)
+        return height + self.unit * 0.5  # margins above & below
+
+    def icons_height(self) -> float:
+        """Height of headlights & engine icons with engine text (0 if hidden)"""
         wcfg = self.wcfg
         show_lights = wcfg["show_headlights_indicator"]
         show_engine = wcfg["show_engine_status"]
@@ -129,7 +154,91 @@ class StatusPainter:
         height = unit * 1.2 * max(wcfg["status_icon_scale"], 0.2)
         if show_engine:
             height += unit * 0.5 * max(wcfg["font_scale_engine"], 0.2) * 2 + unit * 0.1
-        return height + unit * 0.5  # margins above & below
+        return height
+
+    def merged_brake_bias(self) -> bool:
+        """Brake migration shown inside the brake bias chip"""
+        wcfg = self.wcfg
+        return bool(wcfg["enable_brake_bias_migration_merge"] and wcfg["show_brake_bias"] and wcfg["show_brake_migration"])
+
+    def side_rows(self) -> list[str]:
+        """Chips stacked between right wheels, top to bottom: ABS, TC, brake bias & migration, motor map
+
+        ABS & TC dropped once layout knows car has none (presence), so no empty room is left.
+        """
+        wcfg = self.wcfg
+        presence = getattr(self, "presence", None)
+        rows = [
+            name for name in ("abs", "tc")
+            if wcfg[f"show_{name}_indicator"] and (presence is None or getattr(presence, name))
+        ]
+        if self.merged_brake_bias():
+            rows.append("brake_bias")  # one chip: "BB/BMIG 56.0/2.5"
+        else:
+            rows.extend(name for name in ("brake_bias", "brake_migration") if wcfg[f"show_{name}"])
+        if wcfg["show_motor_map"]:
+            rows.append("motor_map")
+        return rows
+
+    def side_rows_height(self) -> float:
+        """Height of side rows block (0 if none)"""
+        count = len(self.side_rows())
+        return self.unit * (1.05 * count + 0.2 * (count - 1)) if count else 0.0
+
+    def side_rows_share_icons(self) -> bool:
+        """Headlights & engine icons also between right wheels"""
+        return self.wcfg["status_icons_side"] == "Right"
+
+    def draw_side_rows(self, painter: QPainter):
+        """ABS, TC, brake bias & motor map chips between right wheels, below the icons if they share the side
+
+        ABS, TC & motor map chips hidden if car has none, room kept until next relayout.
+        """
+        rows = self.side_rows()
+        if not self.rects_tyre or not rows:
+            return
+        gap = self.side_gap(True)
+        if gap.isNull():
+            return
+        wcfg = self.wcfg
+        unit = self.unit
+        block = min(self.side_rows_height(), gap.height())
+        scale = block / self.side_rows_height()
+        row_h = unit * 1.05 * scale
+        spacing = unit * 0.2 * scale
+        if self.icons_height() and self.side_rows_share_icons():
+            top = gap.bottom() - block
+        else:
+            top = gap.center().y() - block / 2
+        # Chips all the same width: ABS & TC lit while active, brake bias & motor map always lit
+        chip_w = gap.width() - unit * 0.4
+        left = gap.center().x() - chip_w / 2
+        for name in rows:
+            rect = QRectF(left, top, chip_w, row_h)
+            if name == "abs":
+                if self.has_abs:
+                    self.draw_indicator(painter, rect, level_text(self.text["abs"], self.abs_level),
+                                        self.abs_active, wcfg["abs_active_color"])
+            elif name == "tc":
+                if self.has_tc:
+                    self.draw_indicator(
+                        painter, rect, level_text(self.text["tc"], self.tc_level, self.tc_cut_level, self.tc_slip_level),
+                        self.tc_active, wcfg["tc_active_color"])
+            elif name == "motor_map":
+                if self.motor_map_level >= 0:
+                    self.draw_indicator(painter, rect, level_text(self.text["motor_map"], self.motor_map_level),
+                                        True, wcfg["motor_map_color"])
+            elif name == "brake_bias" and self.merged_brake_bias():
+                self.draw_indicator(painter, rect, f"{self.text['brake_bias']}/{self.text['brake_migration']} "
+                                    f"{self.brake_bias * 100:.1f}/{self.brake_migration:.1f}",
+                                    True, wcfg["brake_bias_color"])
+            elif name == "brake_bias":
+                self.draw_indicator(painter, rect, f"{self.text['brake_bias']} {self.brake_bias * 100:.1f}",
+                                    True, wcfg["brake_bias_color"])
+            else:
+                self.draw_indicator(painter, rect, f"{self.text['brake_migration']} {self.brake_migration:.1f}",
+                                    True, wcfg["brake_bias_color"])
+            top += row_h + spacing
 
     def draw_status_icons(self, painter: QPainter):
         """Icons side by side in one side gap: headlights, then engine with its text below"""
@@ -142,6 +251,9 @@ class StatusPainter:
         if gap.isNull():
             return
         unit = self.unit
+        rows = self.side_rows_height()
+        if rows and self.side_rows_share_icons():  # side rows below icons
+            gap.setBottom(max(gap.bottom() - rows - unit * 0.2, gap.top()))
         # Icons side by side (lights left, engine right), engine text rows below
         count = int(bool(show_lights)) + int(bool(show_engine))
         size = min(gap.width() * 0.9 / (count * 1.7 - 0.7),

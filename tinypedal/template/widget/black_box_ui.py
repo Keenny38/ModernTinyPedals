@@ -51,7 +51,7 @@ BLACK_BOX_SECTIONS = {
     "show_battery_bar": "Battery",
     "show_damage_panel": "Damage Panel",
     "show_incident_recorder": "Incident Recorder & Event Log",
-    "display_order_abs": "Center Column Order",
+    "display_order_locking": "Center Column Order",
 }
 
 # Options shown in simple mode besides every on/off and choice option: the ones people
@@ -139,6 +139,7 @@ DISPLAY_PROFILES: dict[str, dict[str, bool]] = {
         **dict.fromkeys(_DIAGNOSTICS, False),
         "show_tyre_pressure": False, "show_tyre_wear_end_stint": False, "show_tyre_compound": False,
         "show_brake_wear": False, "show_brake_pressure": False, "show_brake_migration": False,
+        "show_motor_map": False,
         "show_wheel_locking": False, "show_delta_best": False, "show_laptime": False,
         "show_fuel_gauge": False, "show_energy_gauge": False, "show_stint_comparison": False,
         "show_tyre_temperature_trend": False, "show_tyre_pressure_trend": False,
@@ -239,6 +240,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_brake_temperature_trend": ("brake_trend_duration", "brake_heat_trend_threshold"),
     "show_ride_height_minimum": ("ride_height_bottoming_threshold",),
     "show_brake_heat_balance": ("text_brake_heat",),
+    "show_motor_map": ("text_motor_map", "motor_map_color"),
     "show_headlights_indicator": ("headlights_active_color", "status_icons_side", "status_icon_scale"),
     "show_engine_status": (
         "stalling_rpm_threshold", "engine_oil_warning_temperature", "engine_water_warning_temperature",
@@ -268,7 +270,7 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_speed": ("font_scale_speed", "text_speed"),
     "show_abs_indicator": ("abs_active_color", "text_abs"),
     "show_tc_indicator": ("tc_active_color", "text_tc"),
-    "show_brake_bias": ("text_brake_bias",),
+    "show_brake_bias": ("text_brake_bias", "brake_bias_color"),
     "show_brake_migration": ("text_brake_migration", "enable_brake_bias_migration_merge"),
     "show_wheel_locking": ("text_locking",),
     "show_delta_best": ("deltabest_source", "delta_gain_color", "delta_loss_color", "text_delta"),

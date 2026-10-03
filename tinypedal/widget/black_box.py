@@ -141,11 +141,12 @@ class Realtime(
         self.show_event_log = bool(wcfg["show_event_log"])
         self.match_heatmap = bool(wcfg["enable_heatmap_auto_matching"])
         self.show_tyre_wear = bool(wcfg["show_tyre_wear"])
-        self.need_switches = bool(shown & {"abs", "tc"}) or self.show_recorder
-        self.need_brake_bias = "brake_bias" in shown
+        self.need_switches = bool(wcfg["show_abs_indicator"] or wcfg["show_tc_indicator"]) or self.show_recorder
+        side = set(self.side_rows())  # brake bias & motor map between right wheels
+        self.need_brake_bias = "brake_bias" in side
         self.need_locking = "locking" in shown
-        self.need_brake_migration = "brake_migration" in shown or (
-            "brake_bias" in shown and self.merged_brake_bias())
+        self.need_brake_migration = "brake_migration" in side or ("brake_bias" in side and self.merged_brake_bias())
+        self.need_motor_map = bool(wcfg["show_motor_map"])
         self.need_delta = "delta" in shown
         self.need_laptime = "laptime" in shown
         # Justified: speed and RPM use the same label/value rows as brake bias and delta,
@@ -214,15 +215,11 @@ class Realtime(
         self.row_battery = self.show_battery_bar and presence.battery
         self.row_stint = self.show_stint and presence.stint
         self.row_damper = self.show_damper_histogram
-        center_items = [
-            name for name in self.center_order
-            if not ((name == "abs" and not presence.abs) or (name == "tc" and not presence.tc))
-        ]
         layout = build_layout(LayoutInput(
             unit=self.unit,
             layout_mode=self.layout_mode,
             has_center=self.has_center,
-            center_height=self.center_height(center_items),
+            center_height=self.center_height(),
             max_steer=self.max_steer,
             show_caption=bool(wcfg["show_caption"]),
             show_leds=bool(wcfg["show_rpm_leds"]),
@@ -517,6 +514,7 @@ class Realtime(
         self.locking_front = 0.0  # percent of lap distance spent locking a front wheel
         self.locking_rear = 0.0
         self.brake_migration = 0.0  # percent
+        self.motor_map_level = -1  # engine/motor map, -1 if car has none
         self.delta_best = 0.0  # seconds, negative is faster
         self.laptime_current = 0.0  # seconds
         self.in_pits = False
@@ -609,6 +607,7 @@ class Realtime(
         if not self.rect_center.isNull():
             self.draw_center(painter, self.rect_center)
         self.draw_status_icons(painter)
+        self.draw_side_rows(painter)
         if self.row_battery:
             self.draw_battery_bar(painter, self.rect_battery)
         self.draw_bottom_rows(painter)

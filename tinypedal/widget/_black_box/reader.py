@@ -112,6 +112,7 @@ class DataReader:
     need_brake_bias: Any
     need_brake_heat: Any
     need_brake_migration: Any
+    need_motor_map: Any
     need_compound: Any
     need_damage_total: Any
     need_delta: Any
@@ -429,6 +430,8 @@ class DataReader:
             self.locking_rear = minfo.wheels.lockingPercentRear * 100
         if self.need_brake_migration:
             self.brake_migration = api.read.brake.migration()
+        if self.need_motor_map:
+            self.motor_map_level = api.read.switch.motor_map_level()
         if self.need_delta and self.use_delta:
             self.delta_best = self.read_delta()
         if self.need_laptime and self.use_delta:
@@ -779,7 +782,7 @@ class DataReader:
             self.body_damage, self.abs_active, self.tc_active, self.abs_level, self.tc_level,
             self.tc_cut_level, self.tc_slip_level, self.abs_seen, self.tc_seen,
             rounded(self.brake_bias, 4), rounded(self.locking_front, 0), rounded(self.locking_rear, 0),
-            rounded(self.brake_migration, 1), rounded(self.delta_best, 3), rounded(self.laptime_current, 2),
+            rounded(self.brake_migration, 1), self.motor_map_level, rounded(self.delta_best, 3), rounded(self.laptime_current, 2),
             self.in_pits, self.limiter, self.headlights, self.ignition,
             rounded(self.oil_temp, 0), rounded(self.water_temp, 0), self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
             rounded(self.throttle, 3), rounded(self.brake, 3), rounded(self.clutch, 3),

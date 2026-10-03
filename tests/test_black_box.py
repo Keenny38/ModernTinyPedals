@@ -206,9 +206,9 @@ def test_gear_color_and_leds(widget):
 def test_display_order_and_layouts(ui_env):
     from tinypedal.setting import cfg
 
-    cfg.user.setting["black_box"].update(display_order_gear=0, display_order_abs=99)
+    cfg.user.setting["black_box"].update(display_order_gear=0, display_order_locking=99, show_wheel_locking=True)
     widget = black_box.Realtime(cfg, "black_box")
-    assert widget.center_order[0] == "gear" and widget.center_order[-1] == "abs"
+    assert widget.center_order[0] == "gear" and widget.center_order[-1] == "locking"
     sizes = {}
     for layout in (0, 1, 2):
         cfg.user.setting["black_box"]["layout"] = layout
@@ -378,11 +378,9 @@ def test_vertical_layout_centers_hidden_items(ui_env):
     cfg.user.setting["black_box"]["layout"] = 1
     widget = black_box.Realtime(cfg, "black_box")
     try:
-        widget.abs_seen = widget.tc_seen = False
-        widget.abs_level = widget.tc_level = -1
         widget.in_pits = widget.limiter = False
         hidden = widget.visible_center_items()
-        assert "abs" not in hidden and "pit_limiter" not in hidden
+        assert "pit_limiter" not in hidden
         drawn = []
         widget.draw_center_item = lambda painter, name, rect: drawn.append((name, rect.top()))
         widget.draw_center(None, QRectF(0, 0, 100, 500))
@@ -397,9 +395,7 @@ def test_compact_layout_skips_center_data(ui_env, monkeypatch):
     from tinypedal.setting import cfg
 
     calls = []
-    for name in ("abs_level", "tc_level", "tc_cut_level", "tc_slip_level", "speed_limiter"):
-        monkeypatch.setattr(api.read.switch, name, lambda _name=name: calls.append(_name) or 0)
-    monkeypatch.setattr(api.read.brake, "bias_front", lambda: calls.append("bias_front") or 0.5)
+    monkeypatch.setattr(api.read.switch, "speed_limiter", lambda: calls.append("speed_limiter") or 0)
     cfg.user.setting["black_box"]["layout"] = 2
     widget = black_box.Realtime(cfg, "black_box")
     try:
@@ -1059,8 +1055,8 @@ def test_new_center_items_read_their_data(ui_env, monkeypatch):
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 92.5)
     instance = new_widget({"show_brake_migration": True, "show_delta_best": True, "show_laptime": True})
     try:
-        # Brake bias on by default: migration shown inside its row
-        assert {"brake_bias", "delta", "laptime"} <= set(instance.center_order)
+        # Brake bias on by default: migration shown inside its chip, between right wheels
+        assert {"delta", "laptime"} <= set(instance.center_order)
         assert "brake_migration" not in instance.center_order
         instance.timerEvent(None)
         assert instance.brake_migration == pytest.approx(2.5)
@@ -1071,7 +1067,104 @@ def test_new_center_items_read_their_data(ui_env, monkeypatch):
         instance.deleteLater()
 
 
+def test_motor_map_drawn_between_right_wheels(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+
+    from tinypedal.api_control import api
+
+    level = [3]
+    monkeypatch.setattr(api.read.switch, "motor_map_level", lambda: level[0], raising=False)
+    instance = new_widget({"show_motor_map": True})
+    try:
+        assert "motor_map" not in instance.center_order  # side item, not in center column
+        instance.timerEvent(None)
+        assert instance.motor_map_level == 3
+        rows = []
+        monkeypatch.setattr(instance, "draw_indicator", lambda painter, row, text, active, color:
+                            rows.append((QRectF(row), text, color)))
+        instance.grab()
+        row, _, color = next(item for item in rows if item[1] == "MAP 3")
+        assert color == instance.wcfg["motor_map_color"]
+        front, rear = instance.rects_tyre[1], instance.rects_tyre[3]
+        assert row.top() >= front.bottom() and row.bottom() <= rear.top()  # between right wheels
+        assert row.left() >= instance.rect_center.right()  # right side
+        rows.clear()
+        level[0] = -1  # car without engine map
+        instance.timerEvent(None)
+        instance.grab()
+        assert all(not text.startswith("MAP") for _, text, _ in rows)
+    finally:
+        instance.deleteLater()
+
+
+def test_brake_bias_drawn_above_motor_map(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.switch, "motor_map_level", lambda: 3, raising=False)
+    monkeypatch.setattr(api.read.brake, "bias_front", lambda: 0.56)
+    monkeypatch.setattr(api.read.brake, "migration", lambda: 2.5, raising=False)
+    instance = new_widget({"show_motor_map": True, "show_brake_bias": True, "show_brake_migration": True})
+    try:
+        assert "brake_bias" not in instance.center_order and "brake_migration" not in instance.center_order
+        assert instance.side_rows() == ["abs", "tc", "brake_bias", "motor_map"]  # merged bias & migration chip
+        instance.timerEvent(None)
+        drawn = {}
+        monkeypatch.setattr(instance, "draw_indicator", lambda painter, row, text, active, color:
+                            drawn.setdefault(text, (QRectF(row), color)))
+        instance.grab()
+        bias, bias_color = drawn["BB/BMIG 56.0/2.5"]  # same chip as motor map
+        chip, _ = drawn["MAP 3"]
+        assert bias_color == instance.wcfg["brake_bias_color"]
+        assert bias.width() == pytest.approx(chip.width())
+        assert bias.bottom() <= chip.top()  # above motor map
+        front, rear = instance.rects_tyre[1], instance.rects_tyre[3]
+        assert bias.top() >= front.bottom() and chip.bottom() <= rear.top()  # between right wheels
+        assert bias.left() >= instance.rect_center.right()
+    finally:
+        instance.deleteLater()
+
+
+def test_abs_tc_chips_on_top_of_right_stack(ui_env, monkeypatch):
+    from PySide6.QtCore import QRectF
+
+    from tinypedal.api_control import api
+
+    monkeypatch.setattr(api.read.switch, "abs_level", lambda: 4)
+    monkeypatch.setattr(api.read.switch, "tc_level", lambda: 5)
+    monkeypatch.setattr(api.read.switch, "abs_active", lambda: True)
+    instance = new_widget({"enable_auto_resize": False})
+    try:
+        assert "abs" not in instance.center_order and "tc" not in instance.center_order
+        instance.timerEvent(None)
+        drawn = []
+        monkeypatch.setattr(instance, "draw_indicator", lambda painter, row, text, active, color:
+                            drawn.append((text.split()[0], QRectF(row), active)))
+        instance.grab()
+        names = [name for name, _, _ in drawn]
+        assert names.index("ABS") < names.index("TC") < names.index("BB")
+        abs_rect, abs_active = next((rect, active) for name, rect, active in drawn if name == "ABS")
+        assert abs_active  # lit while ABS works
+        assert abs_rect.top() >= instance.rects_tyre[1].bottom()  # between right wheels
+        assert abs_rect.left() >= instance.rect_center.right()
+    finally:
+        instance.deleteLater()
+
+
+def test_motor_map_stacked_below_icons_on_same_side(ui_env):
+    alone = new_widget({"show_motor_map": True, "status_icons_side": "Left"})
+    shared = new_widget({"show_motor_map": True, "status_icons_side": "Right"})
+    try:
+        assert shared.status_height() > alone.status_height()  # room for icons and map row
+    finally:
+        alone.deleteLater()
+        shared.deleteLater()
+
+
 def test_new_center_items_are_opt_in(widget):
+    assert widget.wcfg["show_motor_map"] is False
+    assert not widget.need_motor_map
     for option in ("show_brake_migration", "show_delta_best", "show_laptime"):
         assert widget.wcfg[option] is False
     assert not widget.need_brake_migration

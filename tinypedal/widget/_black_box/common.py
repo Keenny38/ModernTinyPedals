@@ -31,7 +31,7 @@ LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
 CENTER_ITEMS = (
-    "abs", "tc", "brake_bias", "brake_migration", "locking", "delta", "laptime",
+    "locking", "delta", "laptime",
     "pit_limiter", "gear", "speed", "rpm", "pedals", "brake_heat",
 )
 

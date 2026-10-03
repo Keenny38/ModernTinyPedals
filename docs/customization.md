@@ -5347,7 +5347,7 @@ Add a bottom row with, for each wheel, the time share of the current lap spent i
 Show brake pressure (percent of maximum) per wheel, below brake temperature and remaining thickness.
 
     enable_brake_bias_migration_merge
-Show brake bias and brake migration in one center column row (`BB/BMIG 56.0/2.5`) when both are shown. Enabled by default, disable for two separate rows.
+Show brake bias and brake migration in one chip (`BB/BMIG 56.0/2.5`) when both are shown. Enabled by default, disable for two separate chips.
 
     deltabest_source
 Lap the delta is against: `Best` (default, best lap), `Session` (session best), `Stint` (stint best) or `Last` (last lap), from `Delta module`. Other than `Best`, its initial follows the label (`DELTA S`).
@@ -5394,7 +5394,7 @@ Gauge fill colors. Below `gauge_low_lap_threshold` estimated laps (default `2`),
 Stint start level mark and level after refuel/refill mark.
 
     display_order_*
-Set order of center column items (ABS, TC, brake bias, pit & limiter, gear, speed, RPM, pedals). Can be changed with `Configure Display Order` button in config dialog.
+Set order of center column items (locking, delta, lap time, pit & limiter, gear, speed, RPM, pedals, brake heat). Can be changed with `Configure Display Order` button in config dialog. ABS, TC, brake bias and motor map are not in the center column: they are stacked between the right wheels.
 
     show_wheel_angle
 Turn tyres left or right with real wheel angle, 1:1 with the car in game (read from the game, each wheel its own angle, so Ackermann and toe show as they are). How the game signs wheel angles (same sign on both sides, or toe-in per wheel, positive left or right) is learned from steering input within the first corners of each car, then both front wheels turn the way the steering wheel does. The brake disc bar and the suspension turn with their wheel, keeping the corner assembly together, while brake readings stay upright.
@@ -5447,11 +5447,19 @@ Minimum speed (km/h) for lock & spin warning. Default is `10`.
     show_abs_indicator, show_tc_indicator
 Show ABS and TC indicators with current level, lit while ABS or TC is active. TC indicator shows `TC level/cut/slip` when TC cut and TC slip levels are available (for example `TC 5/3/2`). Indicators are only shown if the car has ABS or TC (level reported by game, or ABS/TC seen active with current car).
 
+Right wheels stack: ABS, TC, brake bias and motor map are drawn as chips of the same width between the front and rear right wheels, in this order from top to bottom. If `status_icons_side` is `Right`, headlights & engine icons sit above them. The gap between axles grows to fit the stack.
+
     show_brake_bias, show_pedal_bars
-Show front brake bias (percentage) and throttle & brake bars.
+Show front brake bias (percentage) as a chip between the right wheels, and throttle & brake bars.
+
+    brake_bias_color
+Brake bias & brake migration chip color. Default is orange.
 
     show_brake_migration
-Show brake migration (percent) as a center column row.
+Show brake migration (percent) as a chip between the right wheels, below brake bias (inside the brake bias chip while `enable_brake_bias_migration_merge` is enabled).
+
+    show_motor_map, motor_map_color
+Show current engine (motor) map level as a chip (`MAP 3`) between the right wheels, below brake bias. Level is read from the game (Le Mans Ultimate); the chip is hidden on a car without engine map, its room kept. Disabled by default.
 
     show_delta_best, delta_gain_color, delta_loss_color
 Show delta to best lap in the center column, colored by gain or loss, from `Delta module`.
@@ -5460,9 +5468,9 @@ Show delta to best lap in the center column, colored by gain or loss, from `Delt
 Show current lap time in the center column, from `Delta module`.
 
     center_column_alignment
-`Centered` (default) draws speed and RPM as large centered text. `Justified` draws them as label & value rows, the same as brake bias, delta and lap time, so every value in the column lines up on the right edge.
+`Centered` (default) draws speed and RPM as large centered text. `Justified` draws them as label & value rows, the same as delta and lap time, so every value in the column lines up on the right edge.
 
-    display_order_brake_migration, display_order_locking, display_order_delta, display_order_laptime
+    display_order_locking, display_order_delta, display_order_laptime
 Position of the new rows in the center column. Adding them shifted the default order of the rows below (pit & limiter, gear, speed, RPM, pedals); presets saved before these options existed keep their own order values.
 
     show_gear, show_speed, show_rpm
@@ -5539,8 +5547,8 @@ Append an arrow to brake temperature: `↑` heating (braking zone), `↓` coolin
     show_stint_comparison
 Show an extra bottom row with average tread wear per lap (percent) and average tyre pressure of the current stint, followed by the difference with the previous stint once a stint has been completed (a stint ends when entering the pits). Needs `Wheels module` for wear.
 
-    text_puncture, text_flat_spot, text_detached, text_abs, text_tc, text_brake_bias, text_brake_migration, text_locking, text_delta, text_laptime, text_pit, text_limiter, text_speed, text_rpm, text_fuel, text_energy, text_stint_wear, text_stint_pressure
-Custom label texts, for translation or shorter abbreviations. Defaults are `PUNCT`, `FLAT`, `OFF`, `ABS`, `TC`, `BB`, `BMIG`, `LOCK`, `DELTA`, `TIME`, `PIT`, `LIM`, `SPD`, `RPM`, `Fuel`, `Energy`, `Wear/lap` and `Pres`.
+    text_puncture, text_flat_spot, text_detached, text_abs, text_tc, text_brake_bias, text_brake_migration, text_locking, text_delta, text_laptime, text_pit, text_limiter, text_speed, text_rpm, text_fuel, text_energy, text_stint_wear, text_stint_pressure, text_motor_map
+Custom label texts, for translation or shorter abbreviations. Defaults are `PUNCT`, `FLAT`, `OFF`, `ABS`, `TC`, `BB`, `BMIG`, `MAP`, `LOCK`, `DELTA`, `TIME`, `PIT`, `LIM`, `SPD`, `RPM`, `Fuel`, `Energy`, `Wear/lap` and `Pres`.
 
 The order of the center column items can be changed by drag & drop with the `Configure Display Order` button at the bottom of the config dialog.
 

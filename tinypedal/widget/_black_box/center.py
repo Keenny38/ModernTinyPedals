@@ -31,21 +31,14 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
 from ... import calculation as calc
 from .._painter import fill_chip, fill_chip_gradient, fill_glow, fill_rect
 from .common import CENTER_ITEMS, LAYOUT_NORMAL, qcolor
-from .state import (
-    level_text,
-)
 
 
 class CenterPainter:
     """Draw RPM LEDs and center column items"""
 
     # Attributes set by black box widget class (widget/black_box.py) or other parts
-    abs_active: Any
-    abs_level: Any
     brake: Any
-    brake_bias: Any
     brake_heat_balance: Any
-    brake_migration: Any
     center_order: Any
     clutch: Any
     delta_best: Any
@@ -61,8 +54,6 @@ class CenterPainter:
     gear: Any
     gear_scale: Any
     gear_speed_cluster: Any
-    has_abs: Any
-    has_tc: Any
     in_pits: Any
     justify_center: Any
     laptime_current: Any
@@ -81,10 +72,6 @@ class CenterPainter:
     speed: Any
     speed_label: Any
     speed_scale: Any
-    tc_active: Any
-    tc_cut_level: Any
-    tc_level: Any
-    tc_slip_level: Any
     text: Any
     throttle: Any
     unit: Any
@@ -97,10 +84,6 @@ class CenterPainter:
     def ordered_center_items(self) -> list[str]:
         """Enabled center items sorted by display order"""
         enabled = {
-            "abs": self.wcfg["show_abs_indicator"],
-            "tc": self.wcfg["show_tc_indicator"],
-            "brake_bias": self.wcfg["show_brake_bias"],
-            "brake_migration": self.wcfg["show_brake_migration"],
             "locking": self.wcfg["show_wheel_locking"],
             "delta": self.wcfg["show_delta_best"],
             "laptime": self.wcfg["show_laptime"],
@@ -112,18 +95,10 @@ class CenterPainter:
             "brake_heat": self.wcfg["show_brake_heat_balance"],
         }
         items = [name for name in CENTER_ITEMS if enabled[name]]
-        # Brake bias & migration merged in one row: migration drawn inside the brake bias row
-        if self.merged_brake_bias() and "brake_bias" in items:
-            items.remove("brake_migration")
         # Gear & speed cluster: speed drawn inside the gear block
         if self.gear_speed_cluster and "gear" in items and "speed" in items:
             items.remove("speed")
         return sorted(items, key=lambda name: (self.wcfg[f"display_order_{name}"], CENTER_ITEMS.index(name)))
-
-    def merged_brake_bias(self) -> bool:
-        """Brake migration shown inside the brake bias row"""
-        wcfg = self.wcfg
-        return bool(wcfg["enable_brake_bias_migration_merge"] and wcfg["show_brake_bias"] and wcfg["show_brake_migration"])
 
     def item_height(self, name: str) -> float:
         """Height of center item (without gap)"""
@@ -182,14 +157,10 @@ class CenterPainter:
         return int(monotonic() / interval) % 2 == 1
 
     def visible_center_items(self) -> list[str]:
-        """Center items to draw now: ABS & TC only if car has them, pit & limiter only while active"""
+        """Center items to draw now: pit & limiter only while active"""
         return [
             name for name in self.center_order
-            if not (
-                (name == "abs" and not self.has_abs)
-                or (name == "tc" and not self.has_tc)
-                or (name == "pit_limiter" and not (self.in_pits or self.limiter))
-            )
+            if not (name == "pit_limiter" and not (self.in_pits or self.limiter))
         ]
 
     def draw_center(self, painter: QPainter, rect: QRectF):
@@ -218,25 +189,10 @@ class CenterPainter:
     def draw_center_item(self, painter: QPainter, name: str, rect: QRectF):
         wcfg = self.wcfg
         unit = self.unit
-        if name == "abs":
-            self.draw_indicator(painter, rect, level_text(self.text["abs"], self.abs_level),
-                                self.abs_active, wcfg["abs_active_color"])
-        elif name == "tc":
-            self.draw_indicator(painter, rect,
-                                level_text(self.text["tc"], self.tc_level, self.tc_cut_level, self.tc_slip_level),
-                                self.tc_active, wcfg["tc_active_color"])
-        elif name == "brake_bias":
-            if self.merged_brake_bias():  # one row: "BB/BMIG  56.0/2.5"
-                self.draw_info_row(painter, rect, f"{self.text['brake_bias']}/{self.text['brake_migration']}",
-                                   f"{self.brake_bias * 100:.1f}/{self.brake_migration:.1f}")
-            else:
-                self.draw_info_row(painter, rect, self.text["brake_bias"], f"{self.brake_bias * 100:.1f}")
-        elif name == "brake_heat":
+        if name == "brake_heat":
             # Front minus rear disc temperature: which way to move brake bias
             difference = self.unit_temp(self.brake_heat_balance) - self.unit_temp(0.0)
             self.draw_info_row(painter, rect, self.text["brake_heat"], f"{difference:+.0f}{self.sign_text}")
-        elif name == "brake_migration":
-            self.draw_info_row(painter, rect, self.text["brake_migration"], f"{self.brake_migration:.1f}")
         elif name == "delta":
             gain = self.delta_best < 0
             color = wcfg["delta_gain_color" if gain else "delta_loss_color"]
