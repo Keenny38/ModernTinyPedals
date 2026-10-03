@@ -25,6 +25,8 @@ MESSAGE_RULES = (
     (r"^Share code of (<b>.+?</b>) copied \((\d+) characters\)$", r"Code de partage de \1 copié (\2 caractères)"),
     (r"^Invalid share code:", "Code de partage invalide :"),
     (r"^Unable to read preset:", "Impossible de lire le preset :"),
+    (r"^Unable to rename: ", "Impossible de renommer : "),
+    (r"^Delete ([0-9]+) imported lap\(s\)\?$", r"Supprimer \1 tour(s) importé(s) ?"),
     (r"(<b>\d+</b>) widgets: ", r"\1 widgets : "),
     (r"(<b>\d+</b>) modules: ", r"\1 modules : "),
     (r"New preset name:$", "Nom du nouveau preset :"),

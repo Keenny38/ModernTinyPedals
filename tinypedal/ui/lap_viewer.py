@@ -1097,6 +1097,10 @@ class LapViewer(BaseDialog):
         layout_track.addWidget(self.combo_track, stretch=1)
         layout_track.addWidget(button_refresh)
         layout_track.addWidget(button_add)
+        button_library = QPushButton(tr("Imported Laps..."))
+        button_library.setToolTip(tr("Laps imported from MoTeC logs: add to viewer, rename, delete"))
+        button_library.clicked.connect(self.open_library)
+        layout_track.addWidget(button_library)
 
         # Lap list
         self.lap_list = QTreeWidget(self)
@@ -1413,26 +1417,63 @@ class LapViewer(BaseDialog):
         filenames, _ = QFileDialog.getOpenFileNames(
             self, tr("Add File..."), self.filepath,
             f"{tr('Laps')} (*.csv *.csv.gz *.ld);;Modern Tiny Pedals Lap (*.csv *.csv.gz);;MoTeC i2 (*.ld)")
-        known = {entry.file.path for entry in self.all_entries()}
-        added = set()
+        paths: list[str] = []
         imported: list[str] = []
         for filename in filenames:
-            paths = [filename]
             if filename.lower().endswith(".ld"):  # MoTeC log: complete laps converted to lap files
-                paths = self.import_motec(filename)
-                imported.extend(os.path.normpath(path) for path in paths)
-            for lap_path in paths:
-                path = os.path.normpath(lap_path)
-                if path in known:
-                    continue
-                name = os.path.basename(path)
-                self.external.append(LapEntry(
-                    LapFile(name, path, is_valid_name(name), lap_time_of(name)), read_lap_info(path), external=True))
-                added.add(path)
-        if imported:  # compare own laps with fastest imported lap
-            self.reference_key = min(imported, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
-        if added:
+                laps = [os.path.normpath(path) for path in self.import_motec(filename)]
+                imported.extend(laps)
+                paths.extend(laps)
+            else:
+                paths.append(filename)
+        self.add_external(paths, imported)
+
+    def add_external(self, lap_paths: list[str], reference_from: list[str] | None = None):
+        """Show laps from other folders, fastest of reference_from laps set as reference"""
+        known = {entry.file.path for entry in self.all_entries()}
+        added = set()
+        for lap_path in lap_paths:
+            path = os.path.normpath(lap_path)
+            if path in known or path in added:
+                continue
+            name = os.path.basename(path)
+            self.external.append(LapEntry(
+                LapFile(name, path, is_valid_name(name), lap_time_of(name)), read_lap_info(path), external=True))
+            added.add(path)
+        if reference_from:  # compare own laps with fastest imported lap
+            self.reference_key = min(
+                reference_from, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
+        if added or reference_from:
             self.fill_list(set(self.checked_paths()) | added)
+
+    def open_library(self):
+        from .lap_library import LapLibrary
+
+        LapLibrary(self, self.filepath, self.add_from_library, self.library_changed).show()
+
+    def add_from_library(self, paths: list[str]):
+        """Laps picked in library shown & checked, fastest one as reference"""
+        self.add_external(paths, paths)
+
+    def library_changed(self, moved: dict[str, str]):
+        """Imported laps renamed (new path) or deleted (empty path) in library"""
+        if not any(entry.file.path in moved for entry in self.external):
+            return
+        checked = set()
+        for path in self.checked_paths():
+            path = moved.get(path, path)
+            if path:
+                checked.add(path)
+        external = []
+        for entry in self.external:
+            path = moved.get(entry.file.path, entry.file.path)
+            if path:
+                external.append(entry._replace(file=entry.file._replace(path=path)))
+            self._lap_cache.pop(entry.file.path, None)
+        self.external = external
+        if self.reference_key in moved:
+            self.reference_key = moved[self.reference_key]
+        self.fill_list(checked)
 
     def import_motec(self, filename: str) -> list[str]:
         """Import complete laps of MoTeC .ld file, returns lap file paths"""
