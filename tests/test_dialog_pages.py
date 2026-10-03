@@ -182,20 +182,23 @@ def test_open_pages_indicator(window, monkeypatch):
 
     view = window.centralWidget()
     fuel = window.findChild(NavButton, "railTool:fuel_calculator.FuelCalculator")
-    assert fuel.dot_color is None and view._button_pages.isHidden()
+    assert view._button_pages.isHidden()
     open_tool("fuel_calculator.FuelCalculator", window)
+    assert view._button_pages.isHidden()  # rail tool: a page like any other, not an open page
     open_tool("heatmap_editor.HeatmapEditor", window)
-    assert fuel.dot_color is not None  # open in background
+    open_tool("brake_editor.BrakeEditor", window)
+    assert not fuel.isChecked()
     assert not view._button_pages.isHidden() and view._button_pages.toolTip().endswith("2")
-    # Close all: editor with unsaved changes asks, cancel keeps it open
-    editor = view.dialog_pages()[1].dialog
+    # Close all (open pages menu): editor with unsaved changes asks, cancel keeps it open
+    editor = view.dialog_pages()[2].dialog
     editor.set_modified()
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Cancel))
-    assert not view.close_all_pages()
-    assert len(view.dialog_pages()) == 2 and view._pages.currentWidget().dialog is editor
+    assert not view.close_all_pages(view.other_pages())
+    assert len(view.dialog_pages()) == 3 and view._pages.currentWidget().dialog is editor
     editor.set_unmodified()
-    assert view.close_all_pages()
-    assert not view.dialog_pages() and fuel.dot_color is None and view._button_pages.isHidden()
+    assert view.close_all_pages(view.other_pages())
+    assert [page.title for page in view.dialog_pages()] == ["Fuel Calculator"]  # rail page kept
+    assert view._button_pages.isHidden()
 
 
 def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
@@ -207,19 +210,37 @@ def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
     view = window.centralWidget()
     button = window.findChild(NavButton, "railTool:lap_viewer.LapViewer")
-    assert button is not None and not button.isCheckable()
+    assert button is not None and not button.isChecked()
     button.click()
-    # Shown as page inside app, not as separate window
+    # Shown as page inside app, not as separate window, selected in rail like other pages, no close button
     assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "LapViewer"]
     pages = view.dialog_pages()
     assert len(pages) == 1 and type(pages[0].dialog).__name__ == "LapViewer"
     assert view._pages.currentWidget() is pages[0]
-    view.set_current_index(0)  # other page, viewer kept open
-    button.click()  # already open: its page shown again, no second viewer, no warning
+    assert button.isChecked() and not [b for b in view._nav.buttons() if b.isChecked()]
+    assert pages[0]._button_close.isHidden()
+    view.set_current_index(0)  # other page, viewer kept
+    assert not button.isChecked() and view._nav.button(0).isChecked()
+    button.click()  # its page shown again, no second viewer, no warning
     assert view.dialog_pages() == pages and view._pages.currentWidget() is pages[0]
+    assert button.isChecked()
+    button.click()  # clicking selected entry keeps it selected
+    assert button.isChecked()
     assert not warnings
     pages[0].dialog.close()  # closed: page removed, back to previous page
     assert not view.dialog_pages() and view.current_index() == 0
+    assert not button.isChecked()
+
+
+def test_closed_page_goes_back_to_page_shown_before(window):
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("fuel_calculator.FuelCalculator", window)  # rail page kept in background
+    view.set_current_index(1)
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    view.dialog_pages()[-1].dialog.close()
+    assert view.current_index() == 1  # widget page, not fuel calculator page
 
 
 def test_window_grows_for_wide_page_and_restores(window):

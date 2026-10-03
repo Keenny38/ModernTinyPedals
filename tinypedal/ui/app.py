@@ -179,11 +179,6 @@ class NavButton(QAbstractButton):
         label_rect = QRectF(area.left(), area.top() + area.height() * 0.6, area.width(), area.height() * 0.32)
         label = QFontMetricsF(label_font).elidedText(self.text(), Qt.TextElideMode.ElideRight, label_rect.width())
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
-        if self.dot_color is not None:  # tool open as page
-            dot = area.height() * 0.13
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self.dot_color)
-            painter.drawEllipse(QRectF(area.center().x() + dot * 1.6, area.top() + dot * 0.9, dot, dot))
 
 
 class DialogPage(QWidget):
@@ -211,6 +206,7 @@ class DialogPage(QWidget):
         button_close = QPushButton(tr("Close"), self)
         button_close.setToolTip(tr("Close and go back to previous page"))
         button_close.clicked.connect(dialog.close)
+        self._button_close = button_close
         layout_title = QHBoxLayout()
         layout_title.setContentsMargins(UIScaler.pixel(10), UIScaler.pixel(6), UIScaler.pixel(10), 0)
         layout_title.addWidget(label_title, stretch=1)
@@ -239,6 +235,10 @@ class DialogPage(QWidget):
         layout.setSpacing(0)
         layout.addLayout(layout_title)
         layout.addWidget(scroll, stretch=1)
+
+    def set_closable(self, closable: bool):
+        """Close button shown, hidden for tools of navigation rail (pages like any other)"""
+        self._button_close.setVisible(closable)
 
     def title_height(self) -> int:
         return self._layout_title.sizeHint().height()
@@ -299,6 +299,7 @@ class TabView(QWidget):
         self._icon_family = icon_family
         self._dialog_parent = parent
         self._return_index = 0  # page shown again when last dialog page closes
+        self._page_history: list[QWidget] = []  # pages shown before, see previous_shown
         self._restoring_pages = False  # reopening pages: window not brought to front
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
@@ -419,11 +420,10 @@ class TabView(QWidget):
             if entry.page >= 0:
                 self._nav.addButton(button, entry.page)
                 action = (lambda page=entry.page: self.select_page(page))
-            else:
-                button.setCheckable(False)
+            else:  # tool: its page selected like other pages, see sync_rail_selection
                 button.setObjectName(f"railTool:{entry.dialog}")
                 action = (lambda path=entry.dialog: open_tool(path, self._dialog_parent))
-                button.clicked.connect(lambda _=False, run=action: run())
+                button.clicked.connect(lambda _=False, run=action: (run(), self.sync_rail_selection()))
             self._rail_items.addWidget(button)
             if position <= 9:
                 shortcut = QShortcut(QKeySequence(f"Ctrl+{position}"), self)
@@ -509,36 +509,58 @@ class TabView(QWidget):
         """Size chosen by user is kept when leaving dialog pages"""
         self._user_resized = True
 
-    def refresh_open_pages(self):
-        """Dot on rail tools open as page, open pages button with count"""
-        pages = self.dialog_pages()
-        accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
-        open_classes = {type(page.dialog).__name__ for page in pages if page.dialog is not None}
+    def rail_tool_buttons(self) -> dict[str, NavButton]:
+        """Rail tool entries by dialog class name"""
+        buttons = {}
         for index in range(self._rail_items.count()):
             item = self._rail_items.itemAt(index)
             button = item.widget() if item is not None else None
             if isinstance(button, NavButton) and button.objectName().startswith("railTool:"):
-                is_open = button.objectName().rsplit(".", 1)[-1] in open_classes
-                dot = accent if is_open else None
-                if button.dot_color != dot:
-                    button.dot_color = dot
-                    button.update()
+                buttons[button.objectName().rsplit(".", 1)[-1]] = button
+        return buttons
+
+    def is_rail_page(self, page: DialogPage) -> bool:
+        """Page of a tool in navigation rail: kept like other pages, not listed as open page"""
+        return page.dialog is not None and type(page.dialog).__name__ in self.rail_tool_buttons()
+
+    def other_pages(self) -> list[DialogPage]:
+        """Open dialog pages not reachable from navigation rail (config, other tools...)"""
+        return [page for page in self.dialog_pages() if not self.is_rail_page(page)]
+
+    def sync_rail_selection(self):
+        """Rail tool entry selected while its page shows"""
+        current = self._pages.currentWidget()
+        dialog = current.dialog if isinstance(current, DialogPage) else None
+        shown = type(dialog).__name__ if dialog is not None else ""
+        for name, button in self.rail_tool_buttons().items():
+            if button.isChecked() != (name == shown):
+                button.setChecked(name == shown)
+            if name == shown:
+                self._rail_scroll.ensureWidgetVisible(button, 0, 0)
+
+    def refresh_open_pages(self):
+        """Close button on pages, open pages button with count of pages outside rail"""
+        for page in self.dialog_pages():
+            page.set_closable(not self.is_rail_page(page))
+        pages = self.other_pages()
+        accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
         self._button_pages.setVisible(bool(pages))
         self._button_pages.dot_color = accent if pages else None
         self._button_pages.setToolTip(trm(f"Open pages: {len(pages)}"))
         self._button_pages.update()
+        self.sync_rail_selection()
 
     def show_pages_menu(self):
-        """Menu of open pages: show one, or close all"""
+        """Menu of open pages (outside rail): show one, or close all"""
         menu = QMenu(self)
         current = self._pages.currentWidget()
-        for page in self.dialog_pages():
+        for page in self.other_pages():
             action = menu.addAction(page.title)
             action.setCheckable(True)
             action.setChecked(page is current)
             action.triggered.connect(lambda _=False, target=page: self.show_page_widget(target))
         menu.addSeparator()
-        menu.addAction(tr("Close All")).triggered.connect(self.close_all_pages)
+        menu.addAction(tr("Close All")).triggered.connect(lambda: self.close_all_pages(self.other_pages()))
         button = self._button_pages
         menu.exec(button.mapToGlobal(button.rect().topRight()))
 
@@ -578,9 +600,9 @@ class TabView(QWidget):
         elif isinstance(self._pages.currentWidget(), DialogPage):
             self.set_current_index(index if index < len(NAV_PAGES) else self._return_index)
 
-    def close_all_pages(self) -> bool:
-        """Close every dialog page (each may ask to save), True if all closed"""
-        for page in reversed(self.dialog_pages()):
+    def close_all_pages(self, pages: list[DialogPage] | None = None) -> bool:
+        """Close every (or given) dialog page (each may ask to save), True if all closed"""
+        for page in reversed(self.dialog_pages() if pages is None else pages):
             if page.dialog is not None and not page.dialog.close():
                 self.show_page_widget(page)
                 return False
@@ -591,6 +613,7 @@ class TabView(QWidget):
         current = self._pages.currentWidget()
         if not isinstance(current, DialogPage):
             self._return_index = self._pages.currentIndex()  # back to this page when closed
+        self.remember_shown(current, page)
         self._pages.setCurrentWidget(page)
         if isinstance(page, DialogPage):
             self.fit_window(page)
@@ -598,6 +621,7 @@ class TabView(QWidget):
         for button in self._nav.buttons():
             button.setChecked(False)
         self._nav.setExclusive(True)
+        self.sync_rail_selection()
         if not bring_to_front or self._restoring_pages:
             return
         window = self.window()
@@ -616,11 +640,30 @@ class TabView(QWidget):
         page.deleteLater()
         self.refresh_open_pages()
         if was_current:
-            pages = self.dialog_pages()
-            if pages:
-                self.show_page_widget(pages[-1])
+            previous = self.previous_shown(page)
+            if isinstance(previous, DialogPage):
+                self.show_page_widget(previous)
+            elif previous is not None:
+                self.set_current_index(self._pages.indexOf(previous))
             else:
                 self.set_current_index(min(self._return_index, len(NAV_PAGES) - 1))
+
+    def remember_shown(self, current: QWidget | None, new: QWidget | None):
+        """Page left for another one, shown again when that one closes"""
+        if current is None or current is new:
+            return
+        if current in self._page_history:
+            self._page_history.remove(current)
+        self._page_history.append(current)
+        del self._page_history[:-20]
+
+    def previous_shown(self, closed: QWidget) -> QWidget | None:
+        """Last page shown before, still open"""
+        while self._page_history:
+            page = self._page_history.pop()
+            if page is not closed and self._pages.indexOf(page) >= 0:
+                return page
+        return None
 
     def current_index(self) -> int:
         """Current page index"""
@@ -668,7 +711,9 @@ class TabView(QWidget):
 
     def set_current_index(self, index: int):
         """Select page by index"""
+        self.remember_shown(self._pages.currentWidget(), self._pages.widget(index))
         self._pages.setCurrentIndex(index)
+        self.sync_rail_selection()
         if not isinstance(self._pages.currentWidget(), DialogPage):
             self.restore_window_size()
         button = self._nav.button(index)
