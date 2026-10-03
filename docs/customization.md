@@ -650,7 +650,7 @@ Set amount decimal places to keep.
 ## Application
 **Application options can be accessed from `Config` and `Window` menu in main window.**
 
-Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Small inputs (preset name, key binding, theme name) and dialogs opened from a tool stay small popups.
+Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Inputs (preset name, key binding, share code, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups.
 
     show_at_startup
 Show main window at startup, otherwise hides to tray icon.

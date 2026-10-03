@@ -104,16 +104,26 @@ def test_preset_share_code():
 def test_import_share_code_dialog(ui_env, monkeypatch):
     import os
 
-    from PySide6.QtWidgets import QApplication, QInputDialog
+    from PySide6.QtWidgets import QApplication
 
     from tinypedal.setting import cfg
+    from tinypedal.ui._common import TextInputDialog
     from tinypedal.ui.preset_view import PresetList
-    from tinypedal.userfile.preset_share import encode_preset
+    from tinypedal.userfile.preset_share import SHARE_PREFIX, encode_preset
 
     QApplication.clipboard().setText(encode_preset({"speedometer": {"enable": True}}))
-    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *args, **kwargs: (args[3], True))
-    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("My: shared", True))
+    shown = []
+
+    def answer(dialog):  # code input keeps pasted clipboard code, name input gets a name
+        shown.append(dialog.text())
+        if len(shown) == 2:
+            dialog.edit.setText("My: shared")
+        dialog.accepting()
+
+    monkeypatch.setattr(TextInputDialog, "open", answer)
     view = PresetList(None)
     view.import_share_code()
     assert os.path.exists(os.path.join(cfg.path.settings, "My shared.json"))
+    assert shown[0].startswith(SHARE_PREFIX)  # clipboard code proposed
+    assert shown[1] == "Shared preset"
     view.deleteLater()

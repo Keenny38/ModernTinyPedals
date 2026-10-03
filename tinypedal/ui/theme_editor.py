@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QMessageBox,
     QTableWidget,
@@ -54,7 +53,7 @@ from ..widget._style import (
     custom_themes,
     set_custom_themes,
 )
-from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog, table_item
+from ._common import BaseEditor, CompactButton, TextInputDialog, UIScaler, singleton_dialog, table_item
 from .toast import show_toast
 from .widget_preview import render_widget
 
@@ -191,17 +190,21 @@ class ThemeEditor(BaseEditor):
         return self.themes.get(self.theme_list.currentText())
 
     def new_theme(self):
-        name, ok = QInputDialog.getText(self, tr("New Theme"), tr("Theme name:"))
+        TextInputDialog(self, tr("New Theme"), tr("Theme name:"), self.create_theme).open()
+
+    def create_theme(self, name: str) -> bool:
+        """Create theme from current one, False keeps name input open"""
         name = name.strip()
-        if not ok or not name:
-            return
+        if not name:
+            return False
         if name in self.themes or name in BUILTIN_THEMES or name == "Global":
             QMessageBox.warning(self, tr("Error"), tr("Theme already exists."))
-            return
+            return False
         base = self.theme_list.currentText() and self.current_theme()
         self.themes[name] = deepcopy(base) if base else {"base": "Modern Dark", "colors": {}}
         self.refresh_theme_list(name)
         self.set_modified()
+        return True
 
     def delete_theme(self):
         name = self.theme_list.currentText()

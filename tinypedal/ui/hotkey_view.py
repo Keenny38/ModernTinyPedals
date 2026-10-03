@@ -246,7 +246,7 @@ class HotkeyConfigItem(QWidget):
 class ConfigHotkey(BaseDialog):
     """Configure hotkey dialog"""
 
-    EMBED_IN_APP = False  # key capture, stays a small popup
+    EMBED_FROM_PAGE = True  # page too when opened from a page (restore backup...)
 
     def __init__(self, parent, option_name: str, hotkey_name: str, reload_func: Callable):
         super().__init__(parent)

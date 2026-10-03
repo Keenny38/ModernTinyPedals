@@ -89,7 +89,11 @@ def test_theme_editor(ui_env, monkeypatch):
     from tinypedal.ui import theme_editor
 
     monkeypatch.setattr(theme_editor.loader, "reload", lambda reload_preset=False: None)
-    monkeypatch.setattr(theme_editor.QInputDialog, "getText", staticmethod(lambda *args: ("Night", True)))
+    def answer(dialog):
+        dialog.edit.setText("Night")
+        dialog.accepting()
+
+    monkeypatch.setattr(theme_editor.TextInputDialog, "open", answer)
     editor = theme_editor.ThemeEditor(None)
     try:
         editor.new_theme()

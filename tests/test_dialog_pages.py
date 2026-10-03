@@ -144,13 +144,34 @@ def test_dialog_from_dialog_stays_popup(window):
     offset.close()
 
 
-def test_small_inputs_stay_popups(window):
-    from tinypedal.ui._common import embedded_host
-    from tinypedal.ui.preset_management import CreatePreset
+def test_inputs_shown_as_pages(window, monkeypatch):
+    """Preset name & theme name inputs: pages too, also when opened from a dialog page"""
+    from PySide6.QtWidgets import QMessageBox
 
-    dialog = CreatePreset(window.centralWidget().preset_tab, title="Create new default preset")
-    assert embedded_host(dialog) is None
+    from tinypedal.ui._common import TextInputDialog, embedded_host
+    from tinypedal.ui.preset_management import CreatePreset
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    dialog = CreatePreset(view.preset_tab, title="Create new default preset")
+    assert embedded_host(dialog) is view
     dialog.close()
+    open_tool("theme_editor.ThemeEditor", window)
+    editor = view.dialog_pages()[0].dialog
+    editor.new_theme()
+    pages = view.dialog_pages()
+    assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog)
+    assert view._pages.currentWidget() is pages[1]
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
+    pages[1].dialog.edit.setText("Global")
+    pages[1].dialog.accepting()  # invalid name: warned, input kept open
+    assert warnings and len(view.dialog_pages()) == 2
+    pages[1].dialog.edit.setText("Dusk")
+    pages[1].dialog.accepting()
+    assert view.dialog_pages() == pages[:1] and view._pages.currentWidget() is pages[0]  # back to editor
+    assert editor.theme_list.currentText() == "Dusk"
+    editor.set_unmodified()
 
 
 def test_open_pages_indicator(window, monkeypatch):

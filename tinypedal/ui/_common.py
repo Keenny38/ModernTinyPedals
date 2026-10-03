@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -193,6 +194,9 @@ def page_host(parent, dialog_class: type):
     ancestor: QWidget | None = parent
     while ancestor is not None:
         if isinstance(ancestor, QDialog):
+            # Opened from a dialog page: page too if class allows it (text input), else popup over it
+            if getattr(ancestor, "in_app_page", False) and getattr(dialog_class, "EMBED_FROM_PAGE", False):
+                break
             return None
         ancestor = ancestor.parentWidget()
     return find_dialog_host(parent)
@@ -457,6 +461,56 @@ class BaseEditor(BaseDialog):
             mctrl.reload()
         if reload_widget:
             wctrl.reload()
+
+
+class TextInputDialog(BaseDialog):
+    """Text input shown as page in app (replaces QInputDialog), on_accept(text) returns True to close
+
+    Opened from a dialog page, it is a page too (back to that page when closed).
+    """
+
+    EMBED_FROM_PAGE = True
+
+    def __init__(
+        self, parent, title: str, label: str, on_accept: Callable[[str], bool], text: str = "",
+        multiline: bool = False,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self._on_accept = on_accept
+        label_text = QLabel(label, self)
+        label_text.setWordWrap(True)
+        label_text.setTextFormat(Qt.TextFormat.RichText)
+        self.edit: QLineEdit | QPlainTextEdit
+        if multiline:
+            self.edit = QPlainTextEdit(self)
+            self.edit.setPlainText(text)
+        else:
+            self.edit = QLineEdit(self)
+            self.edit.setText(text)
+            self.edit.selectAll()
+            self.edit.returnPressed.connect(self.accepting)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons.accepted.connect(self.accepting)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(label_text)
+        layout.addWidget(self.edit, stretch=1 if multiline else 0)
+        if not multiline:
+            layout.addStretch(1)
+        layout.addWidget(buttons)
+        layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        self.setMinimumWidth(UIScaler.size(24))
+
+    def text(self) -> str:
+        if isinstance(self.edit, QPlainTextEdit):
+            return self.edit.toPlainText()
+        return self.edit.text()
+
+    def accepting(self):
+        if self._on_accept(self.text()):
+            self.accept()
 
 
 class BatchOffset(BaseDialog):

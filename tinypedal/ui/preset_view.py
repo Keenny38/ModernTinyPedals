@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -55,7 +54,7 @@ from ..userfile.layout_profile import profile_filename
 from ..userfile.preset_package import export_preset_package, import_preset_package
 from ..userfile.preset_share import SHARE_PREFIX, decode_preset, encode_preset, save_preset_data, summarize_preset
 from ..validator import is_allowed_filename
-from ._common import UIScaler
+from ._common import TextInputDialog, UIScaler
 from .file_drop import unique_preset_name
 from .preset_compare import PresetCompare
 from .preset_management import CreatePreset, PresetTransfer, RestoreBackup
@@ -229,38 +228,46 @@ class PresetList(QWidget):
         show_toast(self, trm(f"Share code of <b>{preset_filename[:-5]}</b> copied ({len(code)} characters)"))
 
     def import_share_code(self):
-        """Import preset from share code, with preview"""
+        """Import preset from share code, with preview: code, then new preset name"""
         clipboard = QApplication.clipboard().text().strip()
-        code, ok = QInputDialog.getMultiLineText(
-            self, tr("Import Share Code"), tr("Paste preset share code:"),
-            clipboard if clipboard.startswith(SHARE_PREFIX) else "")
-        if not ok or not code.strip():
-            return
+        TextInputDialog(
+            self, tr("Import Share Code"), tr("Paste preset share code:"), self.share_code_entered,
+            text=clipboard if clipboard.startswith(SHARE_PREFIX) else "", multiline=True,
+        ).open()
+
+    def share_code_entered(self, code: str) -> bool:
+        """Share code entered: ask new preset name with preview, False keeps code input open"""
+        if not code.strip():
+            return False
         try:
             preset = decode_preset(code)
         except ValueError as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Invalid share code:<br>{error}"))
-            return
+            return False
         summary = summarize_preset(preset, wctrl.names, mctrl.names)
         widgets = ", ".join(module_label(name) for name in summary.widgets) or tr("None")
         modules = ", ".join(module_label(name) for name in summary.modules) or tr("None")
-        name, ok = QInputDialog.getText(
+        TextInputDialog(
             self, tr("Import Share Code"),
             trm(f"<b>{len(summary.widgets)}</b> widgets: {widgets}<br><br>"
                 f"<b>{len(summary.modules)}</b> modules: {modules}<br><br>New preset name:"),
-            text="Shared preset")
+            lambda name: self.save_shared_preset(preset, name), text="Shared preset",
+        ).open()
+        return True
+
+    def save_shared_preset(self, preset: dict, name: str) -> bool:
+        """Save imported preset, False keeps name input open (invalid name)"""
         name = re.sub(r'[\\/:*?"<>|]', "", name).strip()  # characters not allowed in file name
-        if not ok or not name:
-            return
-        if not is_allowed_filename(name):
+        if not name or not is_allowed_filename(name):
             QMessageBox.warning(self, tr("Error"), tr("Invalid preset name."))
-            return
+            return False
         filename = unique_preset_name(cfg.path.settings, f"{name}{FileExt.JSON}")
         if not save_preset_data(cfg.path.settings, filename, preset):
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to save preset {filename}"))
-            return
+            return False
         self.refresh()
         show_toast(self, trm(f"Preset imported: <b>{filename[:-5]}</b>"))
+        return True
 
     def open_restore_backup(self):
         """Restore backup"""
