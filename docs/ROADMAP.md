@@ -17,10 +17,6 @@ Légende : 🟠 à faire en priorité · 🟡 utile · 💡 idée
 - 🟡 **Tester l'enregistrement automatique des rejeux** sur une vraie session (démarrage en piste, arrêt 10 s après le retour au garage, rotation des fichiers `replay-auto-`).
 - 💡 **Autres simulateurs** via l'architecture d'adaptateurs : Automobilista 2 / Project CARS (mémoire partagée), Assetto Corsa / ACC, iRacing.
 
-## Qualité du code
-
-- 🟡 **Tester les modules Mapping, Notes et Stats** (couverture entre 10 et 20 %), avec le lecteur de télémétrie scripté de `tests/test_module_timing.py`.
-
 ## Performance
 
 - 💡 **Alléger encore le widget Standings** : 4,7 ms par image avec 20 voitures depuis la mise en cache des fonds de cellule (8,5 ms avant). Le coût restant est le texte (`drawText`) de chaque cellule.

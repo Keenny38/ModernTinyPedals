@@ -119,7 +119,7 @@ mypy tinypedal
 pytest --cov=tinypedal
 ```
 
-Le benchmark des widgets se lance à part avec `pytest -m benchmark`.
+Le benchmark des widgets se lance à part avec `pytest -m benchmark`. La CI échoue si la couverture totale des tests passe sous le seuil `fail_under` de `pyproject.toml` (74 %).
 
 L'intégration continue installe toujours les dernières versions de `ruff` et `mypy`. Si un contrôle échoue en CI alors qu'il passe chez toi, mets-les à jour :
 

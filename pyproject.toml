@@ -88,4 +88,6 @@ omit = ["tinypedal/i18n/fr.py"]
 
 [tool.coverage.report]
 skip_empty = true
+# Minimum total coverage (CI fails below), kept a few points under current level (77%) for platform differences
+fail_under = 74
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]

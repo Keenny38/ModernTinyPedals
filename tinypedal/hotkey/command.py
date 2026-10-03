@@ -183,7 +183,7 @@ def hotkey_spectate_next_driver():
     place = api.read.vehicle.place() + 1
     total_vehicles = api.read.vehicle.total_vehicles()
     if place > total_vehicles:
-        place = 0
+        place = 1  # back to leader
     for player_index in range(total_vehicles):
         if api.read.vehicle.place(player_index) == place:
             cfg.api["player_index"] = player_index
