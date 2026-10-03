@@ -108,7 +108,7 @@ def load_track_map_file(filepath: str, filename: str, extension: str = FileExt.S
         return raw_coords, raw_dists, sector_index
     except FileNotFoundError:
         logger.info("MISSING: track map (%s) data", extension)
-    except (AttributeError, IndexError, ValueError, OSError, xml.parsers.expat.ExpatError):
+    except (AttributeError, IndexError, TypeError, ValueError, OSError, xml.parsers.expat.ExpatError):
         logger.info("MISSING: invalid track map (%s) data", extension)
     return None, None, None
 
