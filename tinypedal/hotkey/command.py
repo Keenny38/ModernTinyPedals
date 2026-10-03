@@ -216,9 +216,16 @@ def hotkey_pace_notes_playback():
 
 
 def hotkey_restart_application():
-    """Command - restart application"""
+    """Command - restart application, through main window if any (open pages reopened)"""
+    from PySide6.QtWidgets import QApplication
+
     from .. import loader  # local import, loader imports hotkey control (circular)
 
+    for widget in QApplication.topLevelWidgets():
+        restart_app = getattr(widget, "restart_app", None)
+        if callable(restart_app):
+            restart_app()
+            return
     loader.restart()
 
 

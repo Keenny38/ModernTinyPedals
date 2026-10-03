@@ -26,7 +26,8 @@ import re
 from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
-from PySide6.QtCore import QRegularExpression, Qt, QTimer
+import shiboken6
+from PySide6.QtCore import QObject, QRegularExpression, Qt, QTimer
 from PySide6.QtGui import (
     QDoubleValidator,
     QIntValidator,
@@ -71,11 +72,17 @@ QVAL_FILENAME = QRegularExpressionValidator(QRegularExpression('[^\\\\/:*?"<>|]*
 
 
 def run_after_saving(callback: Callable[[], object], interval: int = 10):
-    """Run callback once saving is finished, without blocking GUI thread"""
+    """Run callback once saving is finished, without blocking GUI thread
+
+    Callback of a widget deleted meanwhile (page rebuilt on language change) is skipped.
+    """
     if cfg.is_saving:
         QTimer.singleShot(interval, lambda: run_after_saving(callback, interval))
-    else:
-        callback()
+        return
+    owner = getattr(callback, "__self__", None)
+    if isinstance(owner, QObject) and not shiboken6.isValid(owner):
+        return
+    callback()
 
 
 def add_vertical_separator() -> QFrame:

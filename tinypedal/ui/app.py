@@ -196,6 +196,8 @@ class DialogPage(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.dialog = dialog
         self._closed = False
+        self._closable = True  # see set_closable
+        self._own_close_buttons: list[QAbstractButton] | None = None
         self.title = title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
         label_title = QLabel(title, self)
         label_title.setObjectName("dialogPageTitle")
@@ -237,9 +239,14 @@ class DialogPage(QWidget):
         layout.addWidget(scroll, stretch=1)
 
     def set_closable(self, closable: bool):
-        """Close buttons (title & dialog own) shown, hidden for tools of navigation rail (pages like any other)"""
+        """Close buttons (title & dialog own) & Esc key, off for tools of navigation rail (pages like any other)"""
+        if closable == self._closable:
+            return
+        self._closable = closable
         self._button_close.setVisible(closable)
-        for button in self.dialog_close_buttons():
+        if self._own_close_buttons is None:  # found once, dialog layout does not change
+            self._own_close_buttons = self.dialog_close_buttons()
+        for button in self._own_close_buttons:
             button.setVisible(closable)
 
     def dialog_close_buttons(self) -> list[QAbstractButton]:
@@ -265,6 +272,10 @@ class DialogPage(QWidget):
         # Hidden by itself (not because page is hidden): dialog closed
         if watched is self.dialog and event.type() == QEvent.Type.Hide and self.dialog.isHidden():
             self.notify_closed()
+        # Esc does not close pages without close button
+        if (watched is self.dialog and not self._closable and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape):
+            return True
         return super().eventFilter(watched, event)
 
     def _dialog_destroyed(self, *_):
@@ -321,6 +332,7 @@ class TabView(QWidget):
         self._restoring_pages = False  # reopening pages: window not brought to front
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
+        self._grown_for: set[QWidget] = set()  # open pages needing grown window size
         self._rail = rail
         # Rail entries scrolled (wheel or thin scroll bar) when window is too short, quick actions stay below
         rail_list = QWidget()
@@ -495,7 +507,11 @@ class TabView(QWidget):
         return True
 
     def fit_window(self, page: "DialogPage"):
-        """Grow main window to page preferred size (within screen), restored when back to app pages"""
+        """Grow main window to page preferred size (within screen)
+
+        Size is kept while browsing pages (no resize back and forth), restored once every page
+        needing it is closed, see close_dialog_page.
+        """
         window = self.window()
         if window.isMaximized() or window.isFullScreen():
             return
@@ -507,11 +523,15 @@ class TabView(QWidget):
         if screen is not None:
             area = screen.availableGeometry()
             width, height = min(width, area.width()), min(height, area.height())
+        before = self._size_before_pages
+        if before is not None and (width > before.width() or height > before.height()):
+            self._grown_for.add(page)  # relies on grown size
         if width <= window.width() and height <= window.height():
             return
         if self._size_before_pages is None:
             self._size_before_pages = window.size()
             self._user_resized = False
+        self._grown_for.add(page)
         window.resize(max(width, window.width()), max(height, window.height()))
 
     def restore_window_size(self):
@@ -593,6 +613,39 @@ class TabView(QWidget):
                 paths.append(f"*{path}" if page is current else path)
         return paths
 
+    def detach_pages(self) -> tuple[list[str], list[DialogPage], DialogPage | None]:
+        """Before view is rebuilt (language change): tool pages to reopen translated (paths),
+        other pages (config, unsaved edits) taken out as they are, and shown page if taken out
+        """
+        tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+        current = self._pages.currentWidget()
+        paths: list[str] = []
+        kept: list[DialogPage] = []
+        shown = None
+        for page in self.dialog_pages():
+            dialog = page.dialog
+            if dialog is None:
+                continue
+            is_modified = getattr(dialog, "is_modified", None)
+            path = tools.get(type(dialog).__name__)
+            if path and not (callable(is_modified) and is_modified()):
+                paths.append(f"*{path}" if page is current else path)
+                continue
+            page.closed.disconnect(self.close_dialog_page)
+            self._pages.removeWidget(page)
+            page.setParent(None)
+            kept.append(page)
+            if page is current:
+                shown = page
+        return paths, kept, shown
+
+    def adopt_pages(self, pages: list[DialogPage]):
+        """Pages taken out of previous view, see detach_pages"""
+        for page in pages:
+            page.closed.connect(self.close_dialog_page)
+            self._pages.addWidget(page)
+        self.refresh_open_pages()
+
     def restore_pages(self, paths: list[str]):
         """Reopen tool pages (unknown tools skipped), shown page shown again, else current page kept"""
         known = {path for _, entries in TOOL_SECTIONS for _, _, path in entries}
@@ -656,6 +709,9 @@ class TabView(QWidget):
         was_current = self._pages.currentWidget() is page
         self._pages.removeWidget(page)
         page.deleteLater()
+        self._grown_for.discard(page)
+        if not self._grown_for:  # no open page needs grown window anymore
+            self.restore_window_size()
         self.refresh_open_pages()
         if was_current:
             previous = self.previous_shown(page)
@@ -732,8 +788,6 @@ class TabView(QWidget):
         self.remember_shown(self._pages.currentWidget(), self._pages.widget(index))
         self._pages.setCurrentIndex(index)
         self.sync_rail_selection()
-        if not isinstance(self._pages.currentWidget(), DialogPage):
-            self.restore_window_size()
         button = self._nav.button(index)
         if button is not None and not button.isChecked():
             button.setChecked(True)
@@ -986,15 +1040,25 @@ class AppWindow(QMainWindow):
         language_code = set_language(cfg.application["language"])
         install_qt_translation(QApplication.instance(), language_code)
         tab_view = self.centralWidget()
-        tab_index = tab_view.current_index() if isinstance(tab_view, TabView) else 0
-        open_pages = tab_view.open_page_paths() if isinstance(tab_view, TabView) else []
+        tab_index = 0
+        open_pages: list[str] = []
+        kept: list[DialogPage] = []
+        shown = None
+        if isinstance(tab_view, TabView):
+            tab_index = tab_view.current_index()
+            if tab_index >= len(NAV_PAGES):  # dialog page shown: app page shown before it
+                tab_index = tab_view._return_index
+            open_pages, kept, shown = tab_view.detach_pages()
         self.setStatusBar(StatusButtonBar(self))  # old widgets are deleted by Qt
         self.menuBar().clear()
         self.set_menu_bar()
         tab_view = TabView(self)
         self.setCentralWidget(tab_view)
         tab_view.set_current_index(tab_index)
+        tab_view.adopt_pages(kept)  # config & edited pages kept as they are (no edit lost)
         tab_view.restore_pages(open_pages)  # tool pages reopened in new language
+        if shown is not None:
+            tab_view.show_page_widget(shown, bring_to_front=False)
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:
             old_menu = tray_icon.contextMenu()

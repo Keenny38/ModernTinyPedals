@@ -260,14 +260,19 @@ def test_window_grows_for_wide_page_and_restores(window):
     screen_width = window.screen().availableGeometry().width()
     assert window.width() == min(page.preferred_size.width() + (small.width() - view._pages.width()), screen_width) \
         or window.width() > small.width()
-    view.set_current_index(0)  # back to app page: size before (taller rail if needed: open pages button)
+    grown = window.size()
+    view.set_current_index(0)  # browsing pages: no resize back and forth
+    assert window.size() == grown
+    view.show_page_widget(page)
+    assert window.size() == grown
+    page.dialog.close()  # page needing it closed: size before
     assert window.width() == small.width()
     assert window.height() == max(small.height(), window.minimumSizeHint().height())
-    view.show_page_widget(page)  # grows again, user resizes: kept when leaving
+    open_tool("driver_stats_viewer.DriverStatsViewer", window)  # grows again, user resizes: kept
     window.resize(window.width() + 10, window.height())
     view.window_resized_by_user()
     grown = window.size()
-    view.set_current_index(0)
+    view.dialog_pages()[0].dialog.close()
     assert window.size() == grown
 
 
@@ -393,3 +398,79 @@ def test_rail_tools_have_no_close_buttons(window):
     cfg.application["rail_items"] = "home,widget,tools"
     view.build_rail_items()
     assert len(close_buttons(lap_page)) == 2
+
+
+def test_escape_does_not_close_rail_tool_page(window):
+    from PySide6.QtGui import QKeyEvent
+
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+
+    def escape(dialog):
+        QApplication.sendEvent(dialog, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+
+    open_tool("fuel_calculator.FuelCalculator", window)  # in rail: Esc ignored
+    escape(view.dialog_pages()[0].dialog)
+    assert len(view.dialog_pages()) == 1
+    open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: Esc closes
+    escape(view.dialog_pages()[1].dialog)
+    assert len(view.dialog_pages()) == 1
+
+
+def test_language_change_keeps_config_and_edited_pages(window):
+    from tinypedal.ui.config import UserConfig
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    view.set_current_index(1)
+    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    editor = view.dialog_pages()[-1].dialog
+    editor.set_modified()  # unsaved edits: page kept as it is
+    config = UserConfig(parent=window, key_name="speedometer", preset_name="test", config_type="widget",
+                        user_setting=cfg.user.setting, default_setting=cfg.default.setting, reload_func=lambda: None)
+    config.open()
+    window.retranslate()
+    new_view = window.centralWidget()
+    assert new_view is not view
+    dialogs = [page.dialog for page in new_view.dialog_pages()]
+    assert editor in dialogs and config in dialogs  # same dialogs, edits kept
+    assert "FuelCalculator" in [type(dialog).__name__ for dialog in dialogs]  # tool reopened translated
+    assert new_view._pages.currentWidget().dialog is config  # shown page shown again
+    config.close()  # back to page shown before, closing still works
+    assert config not in [page.dialog for page in new_view.dialog_pages()]
+    editor.set_unmodified()
+
+
+def test_config_reload_skipped_for_deleted_widget(ui_env):
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.ui._common import run_after_saving
+
+    calls = []
+
+    class Item(QWidget):
+        def reload(self):
+            calls.append(1)
+
+    item = Item()
+    reload = item.reload
+    run_after_saving(reload)
+    item.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    run_after_saving(reload)  # widget gone (page rebuilt): skipped, no error
+    assert calls == [1]
+
+
+def test_hotkey_restart_saves_open_pages(window, monkeypatch):
+    from tinypedal import loader
+    from tinypedal.hotkey.command import hotkey_restart_application
+    from tinypedal.ui.tools_view import open_tool
+
+    restarted = []
+    monkeypatch.setattr(loader, "restart", lambda: restarted.append(1))
+    open_tool("fuel_calculator.FuelCalculator", window)
+    window.show()
+    hotkey_restart_application()
+    assert restarted and cfg.application["open_pages"] == "*fuel_calculator.FuelCalculator"

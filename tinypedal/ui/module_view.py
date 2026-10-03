@@ -25,7 +25,7 @@ Inactive filter on top, so a widget is found among dozens without scrolling.
 
 import logging
 import unicodedata
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import cast
 
 import shiboken6
@@ -121,6 +121,13 @@ def category_icon(category: str, size: int) -> QIcon:
     painter.drawEllipse(QRectF((size - dot) / 2, (size - dot) / 2, dot, dot))
     painter.end()
     return QIcon(pixmap)
+
+
+def reload_module(module_control, module_name: str, item=None):
+    """Reload module (after config saved), then state of its list item if still shown"""
+    module_control.reload(module_name)
+    if item is not None and shiboken6.isValid(item):
+        item.update_state()
 
 
 class ToggleSwitch(QAbstractButton):
@@ -543,11 +550,10 @@ class ModuleControlItem(QWidget):
             config_type=self.module_control.type_id,
             user_setting=cfg.user.setting,
             default_setting=cfg.default.setting,
-            reload_func=self.reload_module,
+            reload_func=partial(reload_module, self.module_control, self.module_name, self),
         )
         _dialog.open()
 
     def reload_module(self):
         """Reload module & button state"""
-        self.module_control.reload(self.module_name)
-        self.update_state()
+        reload_module(self.module_control, self.module_name, self)
