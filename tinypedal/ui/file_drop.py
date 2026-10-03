@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 DROP_PRESET = "preset"
 DROP_PACKAGE = "package"
 DROP_PLUGIN = "plugin"
+DROP_MOTEC = "motec"
 MAX_PRESET_SIZE = 20 * 1024 * 1024
 
 
@@ -49,7 +50,7 @@ def dropped_files(mime: QMimeData) -> list[str]:
         return []
     return [
         url.toLocalFile() for url in mime.urls()
-        if url.isLocalFile() and url.toLocalFile().lower().endswith((FileExt.JSON, ".zip"))
+        if url.isLocalFile() and url.toLocalFile().lower().endswith((FileExt.JSON, ".zip", ".ld"))
     ]
 
 
@@ -58,6 +59,8 @@ def classify(path: str) -> str:
     lower = path.lower()
     if lower.endswith(FileExt.JSON):
         return DROP_PRESET
+    if lower.endswith(".ld"):
+        return DROP_MOTEC
     if lower.endswith(".zip"):
         try:
             with zipfile.ZipFile(path) as package:
@@ -133,6 +136,10 @@ def handle_drop(window, paths: list[str]) -> list[str]:
         elif kind == DROP_PACKAGE:
             window.centralWidget().set_current_index(PAGE_INDEX["preset"])
             window.centralWidget().preset_tab.import_package_file(path)
+        elif kind == DROP_MOTEC:
+            from .lap_viewer import import_motec_log
+
+            messages.append(import_motec_log(window, path))
         elif kind == DROP_PLUGIN:
             from .plugin_manager import PluginManager
 

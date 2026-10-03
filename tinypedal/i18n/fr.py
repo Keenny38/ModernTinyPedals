@@ -625,6 +625,10 @@ TRANSLATION = MappingProxyType({
     "Imported log name:": "Nom du log importé :",
     "Name already used by another imported log.": "Nom déjà utilisé par un autre log importé.",
     'Invalid name, characters \\ / : * ? " < > | not allowed.': 'Nom invalide, caractères \\ / : * ? " < > | interdits.',
-    "No imported lap. Import a MoTeC log (.ld) with Add File... in lap viewer.": "Aucun tour importé. Importe un log MoTeC (.ld) avec Ajouter un fichier... dans le viewer.",
+    "No imported lap. Import a MoTeC log (.ld) with Import MoTeC..., or drop it on the app.": "Aucun tour importé. Importe un log MoTeC (.ld) avec Importer MoTeC..., ou dépose-le sur l'app.",
+    "Search track, vehicle, driver or log...": "Rechercher circuit, voiture, pilote ou log...",
+    "Import MoTeC...": "Importer MoTeC...",
+    "Import complete laps of MoTeC logs (.ld), also by dropping them on the app": "Importer les tours complets de logs MoTeC (.ld), aussi en les déposant sur l'app",
+    "Imported": "Importé",
     "Unable to open tool, see log for details.": "Impossible d'ouvrir l'outil, voir le journal.",
 })

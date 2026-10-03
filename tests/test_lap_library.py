@@ -124,3 +124,62 @@ def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
     assert not viewer.external and library.tree.topLevelItemCount() == 0
     assert library.label_empty.isVisibleTo(library)
     library.close()
+
+
+# --- Import, search, drop
+def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
+    from tests.test_motec_import import logger_channels, write_logger_ld
+    from tinypedal.ui import lap_library
+
+    log = tmp_path / "Monza run.ld"
+    write_logger_ld(str(log), logger_channels(), venue="Monza", vehicle="LMP2", driver="Ace")
+    (tmp_path / "empty.ld").write_bytes(b"not a log")
+    library = open_library(viewer)
+    monkeypatch.setattr(lap_library.QFileDialog, "getOpenFileNames",
+                        staticmethod(lambda *args, **kwargs: ([str(log), str(tmp_path / "empty.ld")], "")))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
+    library.import_logs()
+    names = [item.text(library.COL_NAME) for item in library.top_items()]
+    assert names == ["Monza run", "Spa race"] and warnings  # broken log reported
+    monza = library.top_items()[0]
+    assert monza.isExpanded() and monza.childCount() == 3  # complete laps only
+    assert monza.text(library.COL_DATE)[:2] == "20"  # import date
+
+    library.edit_filter.setText("monza lmp2")  # every word, any column
+    assert not monza.isHidden() and library.top_items()[1].isHidden()
+    library.edit_filter.setText("spa 2:18")  # lap of a group matching group words
+    spa = library.top_items()[1]
+    visible = [spa.child(index).text(library.COL_TIME) for index in range(spa.childCount())
+               if not spa.child(index).isHidden()]
+    assert not spa.isHidden() and visible == ["2:18.200"] and monza.isHidden()
+    library.edit_filter.clear()
+    assert not monza.isHidden() and not spa.isHidden()
+    library.close()
+
+
+def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):
+    from tests.test_motec_import import logger_channels, write_logger_ld
+    from tinypedal.setting import cfg
+    from tinypedal.ui import file_drop
+
+    log = tmp_path / "Shared lap.ld"
+    write_logger_ld(str(log), logger_channels())
+    assert file_drop.classify(str(log)) == file_drop.DROP_MOTEC
+
+    from PySide6.QtWidgets import QWidget
+
+    window = QWidget()
+    try:
+        messages = file_drop.handle_drop(window, [str(log)])
+        assert "Shared lap" in messages[0] and "3 laps" in messages[0]
+        from tinypedal.ui._common import BaseDialog
+
+        viewer = next(dialog for dialog in window.findChildren(BaseDialog) if type(dialog).__name__ == "LapViewer")
+        assert len(viewer.external) == 3  # shown in lap viewer
+        assert list_imported(cfg.path.telemetry)[0][0] == "Shared lap"
+        assert "Unable to import" in file_drop.handle_drop(window, [str(tmp_path / "missing.ld")])[0]
+        viewer.close()
+    finally:
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

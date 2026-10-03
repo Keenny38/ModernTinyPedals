@@ -1068,6 +1068,28 @@ class LapEntry(NamedTuple):
     external: bool = False
 
 
+def import_motec_log(window, filename: str) -> str:
+    """Import MoTeC log (dropped on app) to imported laps, shown in lap viewer page, returns message"""
+    from .tools_view import open_tool
+
+    name = os.path.basename(filename)
+    try:
+        paths = import_ld_file(filename, os.path.join(cfg.path.telemetry, IMPORT_FOLDER))
+    except (OSError, ValueError) as error:
+        logger.error("LAP VIEWER: unable to import %s: %s", filename, error)
+        return trm(f"Unable to import <b>{name}</b>: {error}")
+    if not paths:
+        return trm(f"No complete lap in: {name}")
+    open_tool("lap_viewer.LapViewer", window)
+    viewers = [  # LapViewer name is singleton wrapper, not class
+        viewer for viewer in window.findChildren(BaseDialog)
+        if type(viewer).__name__ == "LapViewer" and viewer.isVisibleTo(window)
+    ]
+    if viewers:
+        viewers[-1].add_external(paths, paths)
+    return trm(f"MoTeC log imported: <b>{name}</b> ({len(paths)} laps)")
+
+
 @singleton_dialog("lap_viewer")
 class LapViewer(BaseDialog):
     """Recorded lap telemetry viewer"""

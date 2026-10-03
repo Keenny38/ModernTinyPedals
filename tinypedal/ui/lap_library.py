@@ -17,20 +17,24 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Imported laps library: list, add to lap viewer, rename & delete laps imported from MoTeC logs
+Imported laps library: import, search, add to lap viewer, rename & delete laps imported from MoTeC logs
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import time
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTreeWidget,
@@ -39,11 +43,24 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr, trm
-from ..userfile.lap_library import delete_laps, group_name_error, list_imported, rename_group
+from ..userfile.lap_library import delete_laps, group_name_error, import_folder, list_imported, rename_group
+from ..userfile.motec_import import import_ld_file
 from ..userfile.telemetry_lap import read_lap_info
 from ._common import BaseDialog, TextInputDialog, UIScaler
 
 logger = logging.getLogger(__name__)
+
+
+def imported_time(path: str) -> float:
+    """Time lap was imported (file time), 0 if unknown"""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def format_date(timestamp: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
 
 
 class LapLibrary(BaseDialog):
@@ -56,7 +73,7 @@ class LapLibrary(BaseDialog):
     """
 
     EMBED_FROM_PAGE = True
-    COL_NAME, COL_TIME, COL_TRACK, COL_VEHICLE, COL_DRIVER = range(5)
+    COL_NAME, COL_TIME, COL_TRACK, COL_VEHICLE, COL_DRIVER, COL_DATE = range(6)
 
     def __init__(
         self, parent, filepath: str,
@@ -68,11 +85,22 @@ class LapLibrary(BaseDialog):
         self._on_add = on_add
         self._on_changed = on_changed
 
+        self.edit_filter = QLineEdit(self)
+        self.edit_filter.setPlaceholderText(tr("Search track, vehicle, driver or log..."))
+        self.edit_filter.setClearButtonEnabled(True)
+        self.edit_filter.textChanged.connect(self.apply_filter)
+        button_import = QPushButton(tr("Import MoTeC..."))
+        button_import.setToolTip(tr("Import complete laps of MoTeC logs (.ld), also by dropping them on the app"))
+        button_import.clicked.connect(self.import_logs)
+        layout_top = QHBoxLayout()
+        layout_top.addWidget(self.edit_filter, stretch=1)
+        layout_top.addWidget(button_import)
+
         self.tree = QTreeWidget(self)
-        self.tree.setHeaderLabels([tr("Name"), tr("Time"), tr("Track"), tr("Vehicle"), tr("Driver")])
+        self.tree.setHeaderLabels([tr("Name"), tr("Time"), tr("Track"), tr("Vehicle"), tr("Driver"), tr("Imported")])
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(lambda item, _: self.add_to_viewer([item]))
-        self.label_empty = QLabel(tr("No imported lap. Import a MoTeC log (.ld) with Add File... in lap viewer."), self)
+        self.label_empty = QLabel(tr("No imported lap. Import a MoTeC log (.ld) with Import MoTeC..., or drop it on the app."), self)
         self.label_empty.setWordWrap(True)
 
         button_add = QPushButton(tr("Add to Viewer"))
@@ -93,6 +121,7 @@ class LapLibrary(BaseDialog):
         layout_button.addWidget(button_close)
 
         layout_main = QVBoxLayout(self)
+        layout_main.addLayout(layout_top)
         layout_main.addWidget(self.label_empty)
         layout_main.addWidget(self.tree, stretch=1)
         layout_main.addLayout(layout_button)
@@ -100,11 +129,11 @@ class LapLibrary(BaseDialog):
         self.resize(UIScaler.size(46), UIScaler.size(30))
         self.refresh()
 
-    def refresh(self):
-        """List imported logs & their laps, expanded state kept"""
+    def refresh(self, expand: set[str] | None = None):
+        """List imported logs & their laps, expanded state kept (and expand groups)"""
         from .lap_viewer import format_laptime, lap_label
 
-        expanded = {self.group_of(item) for item in self.top_items() if item.isExpanded()}
+        expanded = {self.group_of(item) for item in self.top_items() if item.isExpanded()} | (expand or set())
         self.tree.clear()
         groups = list_imported(self.filepath)
         for name, laps in groups:
@@ -117,10 +146,14 @@ class LapLibrary(BaseDialog):
             best = min((lap.lap_time for lap in laps if lap.lap_time > 0), default=0.0)
             group.setText(self.COL_TIME, format_laptime(best))
             first_info: dict = {}
+            newest = 0.0
             for lap in laps:
                 info = read_lap_info(lap.path)
                 first_info = first_info or info
+                imported = imported_time(lap.path)
+                newest = max(newest, imported)
                 item = QTreeWidgetItem(group)
+                item.setText(self.COL_DATE, format_date(imported))
                 item.setText(self.COL_NAME, lap_label(lap.filename))
                 item.setData(self.COL_NAME, Qt.ItemDataRole.UserRole, lap.path)
                 item.setText(self.COL_TIME, format_laptime(lap.lap_time))
@@ -131,10 +164,60 @@ class LapLibrary(BaseDialog):
                     item.setText(column, str(info.get(key, "")))
             for column, key in ((self.COL_TRACK, "track"), (self.COL_VEHICLE, "vehicle"), (self.COL_DRIVER, "driver")):
                 group.setText(column, str(first_info.get(key, "")))
+            group.setText(self.COL_DATE, format_date(newest))
             group.setExpanded(name in expanded or len(groups) == 1)
         for column in range(self.tree.columnCount()):
             self.tree.resizeColumnToContents(column)
         self.label_empty.setVisible(not groups)
+        self.apply_filter(self.edit_filter.text())
+
+    def apply_filter(self, text: str):
+        """Show logs & laps matching every searched word (name, time, track, vehicle, driver, date)"""
+        words = text.lower().split()
+        # Log described by its columns but best time (a searched time selects laps)
+        group_columns = [column for column in range(self.tree.columnCount()) if column != self.COL_TIME]
+
+        def matches(item: QTreeWidgetItem, extra: str = "") -> bool:
+            content = " ".join(item.text(column) for column in range(self.tree.columnCount())).lower() + extra
+            return all(word in content for word in words)
+
+        for group in self.top_items():
+            group_text = " ".join(group.text(column) for column in group_columns).lower()
+            group_match = all(word in group_text for word in words)
+            any_lap = False
+            for index in range(group.childCount()):
+                lap = group.child(index)
+                if lap is None:
+                    continue
+                visible = group_match or matches(lap, " " + group_text)
+                lap.setHidden(not visible)
+                any_lap = any_lap or visible
+            group.setHidden(not any_lap)
+            if words and any_lap:
+                group.setExpanded(True)
+
+    def import_logs(self):
+        """Import MoTeC logs into library, new logs shown expanded"""
+        filenames, _ = QFileDialog.getOpenFileNames(self, tr("Import MoTeC..."), "", "MoTeC i2 (*.ld)")
+        if not filenames:
+            return
+        groups: set[str] = set()
+        problems: list[str] = []
+        for filename in filenames:
+            name = os.path.basename(filename)
+            try:
+                paths = import_ld_file(filename, import_folder(self.filepath))
+            except (OSError, ValueError) as error:
+                logger.error("LAP LIBRARY: unable to import %s: %s", filename, error)
+                problems.append(trm(f"Unable to import <b>{name}</b>: {error}"))
+                continue
+            if not paths:
+                problems.append(trm(f"No complete lap in: {name}"))
+            groups.update(os.path.basename(os.path.dirname(path)) for path in paths)
+        self.edit_filter.clear()
+        self.refresh(groups)
+        if problems:
+            QMessageBox.warning(self, tr("Error"), "<br>".join(problems))
 
     def top_items(self) -> list[QTreeWidgetItem]:
         items = (self.tree.topLevelItem(index) for index in range(self.tree.topLevelItemCount()))
