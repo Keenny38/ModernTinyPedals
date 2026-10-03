@@ -66,7 +66,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Installeur Windows et mises à jour vérifiées (SHA-256) depuis l'app.
 - Sauvegardes automatiques des presets, écriture de fichiers atomique, redémarrage automatique des threads plantés.
 - Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
-- Plus de 1100 tests automatisés (81 % du code couvert), vérification de types et lint en intégration continue.
+- Plus de 1200 tests automatisés (85 % du code couvert), vérification de types et lint en intégration continue.
 
 Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans les [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
@@ -122,7 +122,7 @@ mypy tinypedal
 pytest --cov=tinypedal
 ```
 
-Le benchmark des widgets se lance à part avec `pytest -m benchmark`. La CI échoue si la couverture totale des tests passe sous le seuil `fail_under` de `pyproject.toml` (78 %).
+Le benchmark des widgets se lance à part avec `pytest -m benchmark`. La CI échoue si la couverture totale des tests passe sous le seuil `fail_under` de `pyproject.toml` (81 %).
 
 L'intégration continue installe toujours les dernières versions de `ruff` et `mypy`. Si un contrôle échoue en CI alors qu'il passe chez toi, mets-les à jour :
 

@@ -185,7 +185,7 @@ class FuelCalculator(BaseDialog):
         """Toggle history data panel"""
         self.panel_history.setHidden(not checked)
         self.button_adddata.setHidden(not checked)
-        self.button_toggle.setText("Hide History" if checked else "Show History")
+        self.button_toggle.setText(tr("Hide History") if checked else tr("Show History"))
 
         layout = self.layout()
         if layout is None:

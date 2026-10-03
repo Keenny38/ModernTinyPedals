@@ -250,6 +250,7 @@ TRANSLATION = MappingProxyType({
     "Load Live": "Charger en direct",
     "Load File": "Charger un fichier",
     "Hide History": "Masquer l'historique",
+    "Show History": "Afficher l'historique",
     "Lap Time:": "Temps au tour :",
 
     # Heatmap editor
