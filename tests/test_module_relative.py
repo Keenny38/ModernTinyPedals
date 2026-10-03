@@ -7,6 +7,7 @@ shows the wrong cars.
 
 import pytest
 
+from tinypedal.const_common import MAX_SECONDS
 from tinypedal.module.module_relative import (
     calc_standings_index,
     create_reference_place,
@@ -145,3 +146,85 @@ def test_position_in_class_numbers_each_class_separately(ui_env):
     assert veh_data[1].isClassFastestLastLap
     assert veh_data[3].isClassFastestLastLap
     assert not veh_data[0].isClassFastestLastLap
+
+
+# --- Vehicles info from game (relative gaps, classes, draw order) & module loop
+FIELD = [  # class, place, time into lap (s), in pits, in garage, best, last
+    ("GT3", 3, 10.0, False, False, 101.0, 102.0),  # 0 player
+    ("GT3", 4, 5.0, False, False, 101.5, 101.8),  # 1 just behind player
+    ("HY", 1, 60.0, False, False, 95.0, 96.0),  # 2 overall leader
+    ("HY", 2, 15.0, True, False, 96.0, 0.0),  # 3 in pits, ahead of player
+    ("GT3", 5, 95.0, False, True, 0.0, 0.0),  # 4 in garage
+]
+
+
+@pytest.fixture
+def field(ui_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from tinypedal import realtime_state
+    from tinypedal.api_control import api
+
+    vehicle = SimpleNamespace(
+        total_vehicles=lambda: len(FIELD), player_index=lambda: 0,
+        place=lambda index=0: FIELD[index][1], class_name=lambda index=0: FIELD[index][0],
+        in_pits=lambda index=0: FIELD[index][3], in_garage=lambda index=0: FIELD[index][4])
+    timing = SimpleNamespace(
+        estimated_laptime=lambda: 100.0, estimated_time_into=lambda index=0: FIELD[index][2],
+        best_laptime=lambda index=0: FIELD[index][5], last_laptime=lambda index=0: FIELD[index][6])
+    monkeypatch.setattr(api, "read", SimpleNamespace(vehicle=vehicle, timing=timing))
+    monkeypatch.setattr(realtime_state, "paused", False)
+
+
+def test_vehicles_info_relative_gaps_and_draw_order(field):
+    from tinypedal.module.module_relative import get_vehicles_info
+    from tinypedal.module_info import minfo
+
+    ahead, behind, classes, draw_order, multi_class = get_vehicles_info(
+        len(FIELD), 0, False, True, minfo.relative.relativeDeltaAhead, minfo.relative.relativeDeltaBehind)
+    gaps_ahead = {index: gap for gap, index in ahead}
+    assert set(gaps_ahead) == {1, 2, 3}  # car in garage hidden
+    assert gaps_ahead[3] == pytest.approx(5.0) and gaps_ahead[1] == pytest.approx(95.0)
+    assert {index: gap for gap, index in behind}[1] == pytest.approx(-5.0)
+    assert multi_class
+    assert [entry[0] for entry in classes] == ["GT3", "GT3", "GT3", "HY", "HY"]  # sorted by class
+    assert classes[0][4] == 102.0 and next(c for c in classes if c[2] == 3)[4] == MAX_SECONDS  # in pits: no last lap
+    assert draw_order[-1] == 2 and draw_order[-2] == 0  # leader drawn on top, then player
+    assert draw_order[0] in (3, 4)  # cars in pits drawn first (below)
+    with_garage, *_ = get_vehicles_info(
+        len(FIELD), 0, True, False, minfo.relative.relativeDeltaAhead, minfo.relative.relativeDeltaBehind)
+    assert 4 in {index for _, index in with_garage}
+
+
+def test_standings_split_by_class_fastest_class_first():
+    from tinypedal.module.module_relative import standings_index_from_all_classes
+
+    classes = [entry("GT3", 3, 0, best=101.0), entry("GT3", 4, 1, best=101.0),
+               entry("HY", 1, 2, best=95.0), entry("HY", 2, 3, best=95.0)]
+    lists = list(standings_index_from_all_classes(1, classes, "GT3", 1, 3, 5))
+    assert lists == [[2, 3, -1], [0, 1, -1]]  # hypercars (faster) first, gap after each class
+
+
+@pytest.mark.parametrize(("option", "value"), [
+    ("enable_single_class_exclusive_mode", True),
+    ("enable_multi_class_split_mode", True),
+    ("enable_multi_class_split_mode", False),
+])
+def test_module_loop_outputs_standings(field, option, value):
+    from tinypedal.module.module_relative import Realtime
+    from tinypedal.module_info import minfo
+    from tinypedal.setting import cfg
+
+    cfg.user.setting["standings"]["enable_single_class_exclusive_mode"] = False
+    cfg.user.setting["standings"][option] = value
+    module = Realtime(cfg, "module_relative")
+    waits = iter((False, True))
+    module._event.wait = lambda interval: next(waits)  # one update then stop
+    module.update_data()
+    standings = minfo.relative.standings
+    assert 0 in standings and standings[-1] == -1
+    if option == "enable_single_class_exclusive_mode":
+        assert 2 not in standings  # other class left out
+    else:
+        assert 2 in standings
+    assert minfo.relative.drawOrder[-1] == 2
