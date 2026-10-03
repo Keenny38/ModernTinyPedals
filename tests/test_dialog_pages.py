@@ -315,6 +315,8 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
     other = app_module.AppWindow()
     try:
         other_view = other.centralWidget()
+        assert not other_view.dialog_pages()  # reopened once window is shown
+        QApplication.processEvents()
         assert [page.title for page in other_view.dialog_pages()] == ["Fuel Calculator", "Brake Editor"]
         assert other_view._pages.currentWidget() is other_view.dialog_pages()[0]
         assert not other.isVisible()

@@ -27,7 +27,7 @@ import logging
 import os
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -88,6 +88,7 @@ COLOR_B = LAP_COLORS[1]  # first compared lap
 COLOR_GRID = QColor(128, 128, 128, 70)
 VIEWER_SETTING = ".lap_viewer.json"  # visible channels, in telemetry folder
 LAP_CACHE_SIZE = 12  # loaded laps kept in memory
+RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
 
 
 class Channel(NamedTuple):
@@ -1104,6 +1105,12 @@ class LapViewer(BaseDialog):
         self.external: list[LapEntry] = []
         self.reference_key = ""
         self._lap_cache: dict[str, LapData | None] = {}  # recently loaded laps, see read_lap
+        self._released = False  # loaded laps released while hidden, reloaded when shown
+        self._released_view = (0.0, 0.0)  # chart zoom when released
+        self._release_timer = QTimer(self)
+        self._release_timer.setSingleShot(True)
+        self._release_timer.setInterval(RELEASE_DELAY)
+        self._release_timer.timeout.connect(self.release_laps)
         self._outline_cache: dict[str, list[tuple[float, float]]] = {}  # track name: circuit
 
         # Track selection
@@ -1382,6 +1389,32 @@ class LapViewer(BaseDialog):
         while len(self._lap_cache) > LAP_CACHE_SIZE:  # a lap takes several MB in memory
             self._lap_cache.pop(next(iter(self._lap_cache)))
         return lap
+
+    def hideEvent(self, event):
+        """Page left in background: loaded laps (several MB each) released after a while"""
+        self._release_timer.start()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        self._release_timer.stop()
+        if self._released:  # same laps & zoom as before
+            self._released = False
+            self.load_laps()
+            self.plot.set_view(*self._released_view)
+        super().showEvent(event)
+
+    def release_laps(self):
+        """Free memory of loaded laps while hidden, see showEvent"""
+        if self.isVisible() or self._released:
+            return
+        self._released_view = self.plot.view_start, self.plot.view_end
+        self._lap_cache.clear()
+        self.plot.set_laps([])
+        self.trajectory.set_laps([])
+        self.gcircle.set_laps([])
+        self.corners.set_laps(None, None)
+        self._released = True
+        logger.info("LAP VIEWER: loaded laps released while hidden")
 
     def load_laps(self):
         paths = self.checked_paths()

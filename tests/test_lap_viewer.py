@@ -485,3 +485,27 @@ def test_sector_lines_at_official_sector_times():
     assert sector_bounds(LapData("a", columns)) == [1020.0, 2020.0]
     assert sector_bounds(LapData("b", columns, {"sectors": [33.0, 34.0, 33.0]})) == pytest.approx([990.0, 2010.0])
     assert sector_bounds(LapData("c", columns, {"sectors": [33.0, "x", 33.0]})) == [1020.0, 2020.0]  # invalid info
+
+
+def test_hidden_viewer_releases_laps_and_reloads(ui_env):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import LapViewer
+
+    write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
+    write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
+    viewer = LapViewer(None)
+    try:
+        viewer.show()
+        viewer.plot.set_view(500.0, 1500.0)
+        viewer.release_laps()  # visible: kept
+        assert viewer.plot.laps and viewer._lap_cache
+        viewer.hide()
+        assert viewer._release_timer.isActive()  # released after a while in background
+        viewer.release_laps()
+        assert not viewer.plot.laps and not viewer._lap_cache
+        viewer.show()  # same laps & zoom again
+        assert len(viewer.plot.laps) == 2 and not viewer._release_timer.isActive()
+        assert (viewer.plot.view_start, viewer.plot.view_end) == (500.0, 1500.0)
+    finally:
+        viewer.close()
+        flush_deleted()

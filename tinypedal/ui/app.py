@@ -24,6 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
+import shiboken6
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QColor,
@@ -1028,8 +1029,8 @@ class AppWindow(QMainWindow):
         # Window state
         self.set_window_state()
         self.__connect_signal()
-        if cfg.application["remember_open_pages"]:
-            self.restore_open_pages()
+        if cfg.application["remember_open_pages"]:  # once window is shown: faster startup
+            QTimer.singleShot(0, self.restore_open_pages)
         # Follow OS light / dark switch when window color theme is "System"
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
 
@@ -1299,6 +1300,8 @@ class AppWindow(QMainWindow):
 
     def restore_open_pages(self):
         """Reopen tool pages left open at last quit"""
+        if not shiboken6.isValid(self):  # closed before event loop ran
+            return
         view = self.centralWidget()
         paths = [path for path in cfg.application["open_pages"].split(",") if path.strip()]
         if isinstance(view, TabView) and paths:
