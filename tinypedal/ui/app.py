@@ -237,8 +237,26 @@ class DialogPage(QWidget):
         layout.addWidget(scroll, stretch=1)
 
     def set_closable(self, closable: bool):
-        """Close button shown, hidden for tools of navigation rail (pages like any other)"""
+        """Close buttons (title & dialog own) shown, hidden for tools of navigation rail (pages like any other)"""
         self._button_close.setVisible(closable)
+        for button in self.dialog_close_buttons():
+            button.setVisible(closable)
+
+    def dialog_close_buttons(self) -> list[QAbstractButton]:
+        """Close buttons of dialog itself (not of dialogs opened from it)"""
+        if self.dialog is None:
+            return []
+        close_text = tr("Close")
+        buttons = []
+        for button in self.dialog.findChildren(QAbstractButton):
+            if button.text() != close_text:
+                continue
+            owner = button.parentWidget()
+            while owner is not None and not isinstance(owner, BaseDialog):
+                owner = owner.parentWidget()
+            if owner is self.dialog:
+                buttons.append(button)
+        return buttons
 
     def title_height(self) -> int:
         return self._layout_title.sizeHint().height()

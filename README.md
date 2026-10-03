@@ -44,7 +44,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
 - Assistant de premier lancement, recherche globale d'option (`Ctrl+F`), aperçu en direct des widgets, annuler/rétablir dans les éditeurs.
-- Tout s'ouvre dans la fenêtre de l'app : outils, éditeurs et réglages s'affichent comme des pages, avec un bouton `Fermer` pour revenir ; les outils de la barre de navigation sont des pages comme Widget ou Module (entrée surlignée, pas de bouton `Fermer`). Les pages d'outils laissées ouvertes se rouvrent au démarrage suivant.
+- Tout s'ouvre dans la fenêtre de l'app : outils, éditeurs et réglages s'affichent comme des pages, avec un bouton `Fermer` pour revenir ; les outils de la barre de navigation sont des pages comme Widget ou Module (entrée surlignée, aucun bouton `Fermer`). Les pages d'outils laissées ouvertes se rouvrent au démarrage suivant.
 - Barre de navigation personnalisable (clic droit > `Personnaliser la barre de navigation...`) : pages et outils au choix, dans l'ordre voulu ; les icônes gardent leur taille et la barre défile si la fenêtre est petite.
 - Liste des widgets avec filtre et pastille de couleur par catégorie, statut des plugins en badges.
 - Style d'overlay moderne : thèmes (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par widget, export et import de thèmes en fichier.

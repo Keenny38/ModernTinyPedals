@@ -368,3 +368,28 @@ def test_rail_entries_keep_size_and_scroll(window):
     tools = view._nav.button(PAGE_INDEX["tools"])
     top = tools.mapTo(view._rail_scroll.viewport(), tools.rect().topLeft()).y()
     assert 0 <= top <= view._rail_scroll.viewport().height() - tools.height()
+
+
+def test_rail_tools_have_no_close_buttons(window):
+    from PySide6.QtWidgets import QAbstractButton
+
+    from tinypedal.i18n import tr
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+
+    def close_buttons(page):
+        return [button for button in page.findChildren(QAbstractButton)
+                if button.text() == tr("Close") and not button.isHidden()]
+
+    for path in ("lap_viewer.LapViewer", "driver_stats_viewer.DriverStatsViewer",
+                 "fuel_calculator.FuelCalculator", "tyre_strategy_planner.TyreStrategyPlanner"):
+        open_tool(path, window)
+        assert not close_buttons(view._pages.currentWidget()), path
+    open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: title & own close buttons
+    assert len(close_buttons(view._pages.currentWidget())) == 2
+    # Tool removed from rail: its page gets close buttons back
+    lap_page = next(page for page in view.dialog_pages() if page.title == "Lap Telemetry Viewer")
+    cfg.application["rail_items"] = "home,widget,tools"
+    view.build_rail_items()
+    assert len(close_buttons(lap_page)) == 2
