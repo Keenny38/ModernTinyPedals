@@ -186,6 +186,7 @@ MESSAGE_RULES = (
     (r"Exported: (.+)", r"Exporté : \1"),
     (r"Unable to import MoTeC file: (.+)", r"Impossible d'importer le fichier MoTeC : \1"),
     (r"No complete lap in: (.+)", r"Aucun tour complet dans : \1"),
+    (r"^Open pages: ([0-9]+)$", r"Pages ouvertes : \1"),
     (r"^Theoretical best: (.+)$", r"Meilleur tour théorique : \1"),
     (r"^Laps from different vehicles: (.+)$", r"Tours de véhicules différents : \1"),
     (r"^Lap (\d+) \((.+)\)$", r"Tour \1 (\2)"),

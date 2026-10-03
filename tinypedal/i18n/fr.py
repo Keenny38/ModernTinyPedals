@@ -514,6 +514,8 @@ TRANSLATION = MappingProxyType({
     "Time": "Temps",
     "Check laps to compare, double-click to set reference lap.": "Cochez les tours à comparer, double-cliquez pour choisir le tour de référence.",
     "G Circle": "Cercle G",
+    "Open Pages": "Pages ouvertes",
+    "Close All": "Tout fermer",
     "Customize Navigation Bar": "Personnaliser la barre de navigation",
     "Customize Navigation Bar...": "Personnaliser la barre de navigation...",
     "Check entries to show, drag to reorder. Hidden pages stay in command palette (Ctrl+K).": "Cochez les éléments à afficher, glissez pour les réordonner. Les pages masquées restent dans la palette de commandes (Ctrl+K).",

@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QStatusBar,
     QSystemTrayIcon,
@@ -176,6 +177,11 @@ class NavButton(QAbstractButton):
         label_rect = QRectF(area.left(), area.top() + area.height() * 0.6, area.width(), area.height() * 0.32)
         label = QFontMetricsF(label_font).elidedText(self.text(), Qt.TextElideMode.ElideRight, label_rect.width())
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+        if self.dot_color is not None:  # tool open as page
+            dot = area.height() * 0.13
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.dot_color)
+            painter.drawEllipse(QRectF(area.center().x() + dot * 1.6, area.top() + dot * 0.9, dot, dot))
 
 
 class DialogPage(QWidget):
@@ -189,9 +195,11 @@ class DialogPage(QWidget):
     def __init__(self, dialog: BaseDialog, parent=None):
         super().__init__(parent)
         self.setObjectName("dialogPage")
+        # Page never sets main window minimum size (open pages are kept, hidden, in page stack)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.dialog = dialog
         self._closed = False
-        title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
+        self.title = title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
         label_title = QLabel(title, self)
         label_title.setObjectName("dialogPageTitle")
         font = label_title.font()
@@ -205,8 +213,16 @@ class DialogPage(QWidget):
         layout_title.setContentsMargins(UIScaler.pixel(10), UIScaler.pixel(6), UIScaler.pixel(10), 0)
         layout_title.addWidget(label_title, stretch=1)
         layout_title.addWidget(button_close)
+        self._layout_title = layout_title
 
         dialog.in_app_page = True  # shown as page, see embedded_host
+        # Size the dialog was designed for as window (resize & minimum size), main window grows
+        # to it if screen allows, while page itself only needs its layout minimum (scrolled below)
+        preferred = dialog.minimumSize().expandedTo(dialog.minimumSizeHint())
+        if dialog.testAttribute(Qt.WidgetAttribute.WA_Resized):
+            preferred = preferred.expandedTo(dialog.size())
+        self.preferred_size = preferred
+        dialog.setMinimumSize(0, 0)
         dialog.setWindowFlags(Qt.WindowType.Widget)
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -221,6 +237,9 @@ class DialogPage(QWidget):
         layout.setSpacing(0)
         layout.addLayout(layout_title)
         layout.addWidget(scroll, stretch=1)
+
+    def title_height(self) -> int:
+        return self._layout_title.sizeHint().height()
 
     def eventFilter(self, watched, event):
         # Hidden by itself (not because page is hidden): dialog closed
@@ -278,6 +297,8 @@ class TabView(QWidget):
         self._icon_family = icon_family
         self._dialog_parent = parent
         self._return_index = 0  # page shown again when last dialog page closes
+        self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
+        self._user_resized = False  # window resized by user while grown
         self._rail = rail
         self._rail_items = QVBoxLayout()
         self._rail_items.setSpacing(UIScaler.pixel(2))
@@ -312,6 +333,12 @@ class TabView(QWidget):
         button_search.setCheckable(False)
         button_search.clicked.connect(parent.open_command_palette)
         layout_quick.addWidget(button_search, 2, 0)
+        # Pages of tools & config dialogs left open, shown while any
+        self._button_pages = NavButton(tr("Open Pages"), "", "P", icon_family, rail, compact=True)
+        self._button_pages.setCheckable(False)
+        self._button_pages.clicked.connect(self.show_pages_menu)
+        self._button_pages.setVisible(False)
+        layout_quick.addWidget(self._button_pages, 3, 0)
         layout_rail.addLayout(layout_quick)
         self._rail_timer = QTimer(self)
         self._rail_timer.timeout.connect(self.refresh_rail)
@@ -383,6 +410,8 @@ class TabView(QWidget):
         button = self._nav.button(self._pages.currentIndex())
         if button is not None:
             button.setChecked(True)
+        if hasattr(self, "_button_pages"):
+            self.refresh_open_pages()
 
     def show_rail_menu(self, position):
         """Rail context menu: customize entries"""
@@ -419,6 +448,81 @@ class TabView(QWidget):
         page.closed.connect(self.close_dialog_page)
         self._pages.addWidget(page)
         self.show_page_widget(page)
+        self.refresh_open_pages()
+        return True
+
+    def fit_window(self, page: "DialogPage"):
+        """Grow main window to page preferred size (within screen), restored when back to app pages"""
+        window = self.window()
+        if window.isMaximized() or window.isFullScreen():
+            return
+        extra_width = window.width() - self._pages.width()  # rail & margins
+        extra_height = window.height() - self._pages.height() + page.title_height()  # menu, status, title
+        width = page.preferred_size.width() + extra_width
+        height = page.preferred_size.height() + extra_height
+        screen = window.screen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            width, height = min(width, area.width()), min(height, area.height())
+        if width <= window.width() and height <= window.height():
+            return
+        if self._size_before_pages is None:
+            self._size_before_pages = window.size()
+            self._user_resized = False
+        window.resize(max(width, window.width()), max(height, window.height()))
+
+    def restore_window_size(self):
+        """Size before a page grew window, unless user resized window meanwhile"""
+        if self._size_before_pages is None:
+            return
+        window = self.window()
+        if not self._user_resized and not window.isMaximized():
+            window.resize(self._size_before_pages)
+        self._size_before_pages = None
+
+    def window_resized_by_user(self):
+        """Size chosen by user is kept when leaving dialog pages"""
+        self._user_resized = True
+
+    def refresh_open_pages(self):
+        """Dot on rail tools open as page, open pages button with count"""
+        pages = self.dialog_pages()
+        accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
+        open_classes = {type(page.dialog).__name__ for page in pages if page.dialog is not None}
+        for index in range(self._rail_items.count()):
+            item = self._rail_items.itemAt(index)
+            button = item.widget() if item is not None else None
+            if isinstance(button, NavButton) and button.objectName().startswith("railTool:"):
+                is_open = button.objectName().rsplit(".", 1)[-1] in open_classes
+                dot = accent if is_open else None
+                if button.dot_color != dot:
+                    button.dot_color = dot
+                    button.update()
+        self._button_pages.setVisible(bool(pages))
+        self._button_pages.dot_color = accent if pages else None
+        self._button_pages.setToolTip(trm(f"Open pages: {len(pages)}"))
+        self._button_pages.update()
+
+    def show_pages_menu(self):
+        """Menu of open pages: show one, or close all"""
+        menu = QMenu(self)
+        current = self._pages.currentWidget()
+        for page in self.dialog_pages():
+            action = menu.addAction(page.title)
+            action.setCheckable(True)
+            action.setChecked(page is current)
+            action.triggered.connect(lambda _=False, target=page: self.show_page_widget(target))
+        menu.addSeparator()
+        menu.addAction(tr("Close All")).triggered.connect(self.close_all_pages)
+        button = self._button_pages
+        menu.exec(button.mapToGlobal(button.rect().topRight()))
+
+    def close_all_pages(self) -> bool:
+        """Close every dialog page (each may ask to save), True if all closed"""
+        for page in reversed(self.dialog_pages()):
+            if page.dialog is not None and not page.dialog.close():
+                self.show_page_widget(page)
+                return False
         return True
 
     def show_page_widget(self, page: QWidget):
@@ -427,6 +531,8 @@ class TabView(QWidget):
         if not isinstance(current, DialogPage):
             self._return_index = self._pages.currentIndex()  # back to this page when closed
         self._pages.setCurrentWidget(page)
+        if isinstance(page, DialogPage):
+            self.fit_window(page)
         self._nav.setExclusive(False)  # no rail page selected while dialog page shows
         for button in self._nav.buttons():
             button.setChecked(False)
@@ -445,6 +551,7 @@ class TabView(QWidget):
         was_current = self._pages.currentWidget() is page
         self._pages.removeWidget(page)
         page.deleteLater()
+        self.refresh_open_pages()
         if was_current:
             pages = self.dialog_pages()
             if pages:
@@ -499,6 +606,8 @@ class TabView(QWidget):
     def set_current_index(self, index: int):
         """Select page by index"""
         self._pages.setCurrentIndex(index)
+        if not isinstance(self._pages.currentWidget(), DialogPage):
+            self.restore_window_size()
         button = self._nav.button(index)
         if button is not None and not button.isChecked():
             button.setChecked(True)
@@ -883,8 +992,18 @@ class AppWindow(QMainWindow):
         app_signal.refresh.emit(True)
 
     @Slot(bool)  # type: ignore[operator]
+    def resizeEvent(self, event):
+        if event.spontaneous():  # resized by user (window manager), not by app
+            view = self.centralWidget()
+            if isinstance(view, TabView):
+                view.window_resized_by_user()
+        super().resizeEvent(event)
+
     def quit_app(self):
-        """Quit manager"""
+        """Quit manager, open pages with unsaved changes are asked first (cancel keeps app open)"""
+        view = self.centralWidget()
+        if isinstance(view, TabView) and not view.close_all_pages():
+            return
         loader.close()  # must close this first
         self.save_window_state()
         self.__break_signal()

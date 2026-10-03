@@ -472,38 +472,6 @@ def test_track_map_circuit_falls_back_to_reference_lap(ui_env):
     parent.deleteLater()
 
 
-def test_lap_viewer_opened_from_navigation_rail(ui_env, monkeypatch):
-    from PySide6.QtCore import QCoreApplication
-    from PySide6.QtWidgets import QApplication, QMessageBox
-
-    from tinypedal.ui import app as app_module
-
-    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
-    window = app_module.AppWindow()
-    try:
-        view = window.centralWidget()
-        button = window.findChild(app_module.NavButton, "railTool:lap_viewer.LapViewer")
-        assert button is not None and not button.isCheckable()
-        button.click()
-        # Shown as page inside app, not as separate window
-        assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "LapViewer"]
-        pages = view.dialog_pages()
-        assert len(pages) == 1 and type(pages[0].dialog).__name__ == "LapViewer"
-        assert view._pages.currentWidget() is pages[0]
-        view.set_current_index(0)  # other page, viewer kept open
-        button.click()  # already open: its page shown again, no second viewer, no warning
-        assert view.dialog_pages() == pages and view._pages.currentWidget() is pages[0]
-        assert not warnings
-        pages[0].dialog.close()  # closed: page removed, back to previous page
-        assert not view.dialog_pages() and view.current_index() == 0
-        flush_deleted()
-    finally:
-        window.deleteLater()
-        QCoreApplication.processEvents()
-
-
 def test_sector_lines_at_official_sector_times():
     """Sector column changes late (scoring data at 5 Hz): official times place sector lines exactly"""
     from tinypedal.userfile.telemetry_lap import LapData, sector_bounds

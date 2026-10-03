@@ -151,3 +151,79 @@ def test_small_inputs_stay_popups(window):
     dialog = CreatePreset(window.centralWidget().preset_tab, title="Create new default preset")
     assert embedded_host(dialog) is None
     dialog.close()
+
+
+def test_open_pages_indicator(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from tinypedal.ui.app import NavButton
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    fuel = window.findChild(NavButton, "railTool:fuel_calculator.FuelCalculator")
+    assert fuel.dot_color is None and view._button_pages.isHidden()
+    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    assert fuel.dot_color is not None  # open in background
+    assert not view._button_pages.isHidden() and view._button_pages.toolTip().endswith("2")
+    # Close all: editor with unsaved changes asks, cancel keeps it open
+    editor = view.dialog_pages()[1].dialog
+    editor.set_modified()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Cancel))
+    assert not view.close_all_pages()
+    assert len(view.dialog_pages()) == 2 and view._pages.currentWidget().dialog is editor
+    editor.set_unmodified()
+    assert view.close_all_pages()
+    assert not view.dialog_pages() and fuel.dot_color is None and view._button_pages.isHidden()
+
+
+def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from tinypedal.ui.app import NavButton
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
+    view = window.centralWidget()
+    button = window.findChild(NavButton, "railTool:lap_viewer.LapViewer")
+    assert button is not None and not button.isCheckable()
+    button.click()
+    # Shown as page inside app, not as separate window
+    assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "LapViewer"]
+    pages = view.dialog_pages()
+    assert len(pages) == 1 and type(pages[0].dialog).__name__ == "LapViewer"
+    assert view._pages.currentWidget() is pages[0]
+    view.set_current_index(0)  # other page, viewer kept open
+    button.click()  # already open: its page shown again, no second viewer, no warning
+    assert view.dialog_pages() == pages and view._pages.currentWidget() is pages[0]
+    assert not warnings
+    pages[0].dialog.close()  # closed: page removed, back to previous page
+    assert not view.dialog_pages() and view.current_index() == 0
+
+
+def test_window_grows_for_wide_page_and_restores(window):
+    from PySide6.QtCore import QSize
+
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    window.resize(QSize(480, 520))
+    window.show()
+    QCoreApplication.processEvents()
+    small = window.size()
+    open_tool("driver_stats_viewer.DriverStatsViewer", window)
+    page = view.dialog_pages()[0]
+    assert page.dialog.minimumWidth() == 0  # window minimum dropped, page scrolls instead
+    assert page.preferred_size.width() > small.width()
+    screen_width = window.screen().availableGeometry().width()
+    assert window.width() == min(page.preferred_size.width() + (small.width() - view._pages.width()), screen_width) \
+        or window.width() > small.width()
+    view.set_current_index(0)  # back to app page: size before (taller rail if needed: open pages button)
+    assert window.width() == small.width()
+    assert window.height() == max(small.height(), window.minimumSizeHint().height())
+    view.show_page_widget(page)  # grows again, user resizes: kept when leaving
+    window.resize(window.width() + 10, window.height())
+    view.window_resized_by_user()
+    grown = window.size()
+    view.set_current_index(0)
+    assert window.size() == grown
