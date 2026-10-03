@@ -65,6 +65,14 @@ def is_blank(image: QImage) -> bool:
     return True
 
 
+@pytest.fixture(autouse=True)
+def fixed_clock(monkeypatch):
+    """Same system clock text in every render: visual diff compares renders of two commits"""
+    from tinypedal.widget import session
+
+    monkeypatch.setattr(session, "strftime", lambda fmt, *args: "15:04PM" if "%" in fmt else fmt)
+
+
 @pytest.mark.parametrize("name", WIDGET_NAMES)
 def test_render_widget(default_setting, name):
     classic = render(name, modern=False)
