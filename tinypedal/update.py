@@ -106,13 +106,20 @@ def parse_installer(data: bytes) -> InstallerAsset | None:
     return None
 
 
+RELEASE_VISUALS_HEADING = "### Visuals"  # see tools/gen_release_notes.py
+
+
 def parse_release_notes(data: bytes) -> str:
-    """Release notes (Markdown body of GitHub release), empty if unavailable"""
+    """Release notes (Markdown body of GitHub release), empty if unavailable
+
+    Visuals section (before / after images of overlays) is left out: images are online only.
+    """
     try:
         release = json.loads(data[data.index(b"{"):].decode("utf-8"))
-        return str(release.get("body") or "").strip()
+        body = str(release.get("body") or "")
     except (AttributeError, TypeError, IndexError, ValueError):
         return ""
+    return body.split(RELEASE_VISUALS_HEADING, 1)[0].strip()
 
 
 def can_auto_update() -> bool:

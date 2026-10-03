@@ -90,6 +90,28 @@ def test_parse_release_notes():
     body = release_body([])[:-1] + b', "body": "### Added\\n\\n- Add replay"}'
     assert update.parse_release_notes(body) == "### Added\n\n- Add replay"
     assert update.parse_release_notes(b"") == ""
+    with_visuals = release_body([])[:-1] + b', "body": "### Added\\n\\n- Add MAP\\n\\n### Visuals\\n\\n![MAP](https://x/y.png)"}'
+    assert update.parse_release_notes(with_visuals) == "### Added\n\n- Add MAP"
+
+
+def test_release_notes_visuals(tmp_path):
+    import sys
+
+    from PySide6.QtGui import QColor, QImage
+
+    sys.path.insert(0, "tools")
+    from gen_release_notes import Visual, format_visuals, png_title
+
+    image = QImage(4, 4, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#000000"))
+    image.setText("Title", "Black box : cartographie moteur")
+    image.save(str(tmp_path / "visual.png"))
+    assert png_title((tmp_path / "visual.png").read_bytes()) == "Black box : cartographie moteur"
+    assert png_title(b"") == ""
+    notes = format_visuals([Visual("abc123", "docs/changes/x.png", "MAP")])
+    assert notes.startswith("### Visuals\n")
+    assert "![MAP](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/abc123/docs/changes/x.png)" in notes
+    assert format_visuals([]) == ""
 
 
 def test_old_repository_name_is_migrated(ui_env):

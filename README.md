@@ -48,7 +48,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Éditeur de disposition avec guides d'alignement et magnétisme.
 
 **Widgets et données**
-- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents.
+- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites.
 - Enregistreur de tours et visionneuse de télémétrie (superposer deux tours), export **MoTeC `.ld`**.
 - **Rejeu de télémétrie** : enregistre une session LMU et rejoue-la dans tous les widgets, sans lancer le jeu.
 
@@ -138,6 +138,7 @@ Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedal
 - **Version** (`MAJEUR.MINEUR.CORRECTIF`, à partir de `0.10.0`) : calculée depuis les commits depuis la dernière release. Un titre qui commence par `Add` (nouveauté) monte la version mineure (`0.10.3` → `0.11.0`), tout le reste monte le correctif (`0.10.0` → `0.10.1`). Une version majeure se choisit à la main : lance `Build and Release` depuis l'onglet Actions avec `bump: major`.
 - **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
 - **Changelog** : les notes de chaque release listent ses commits en **Added**, **Fixed** et **Changed**. Écris donc des titres de commit clairs.
+- **Visuels** : quand un commit change l'apparence d'un overlay, ajoute-lui une image avant/après dans `docs/changes`. Les notes de la release l'affichent dans une section **Visuals** (pas dans l'app, qui n'affiche pas les images).
 - **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
 
 Pour prévisualiser en local la prochaine version et ses notes :
@@ -153,6 +154,14 @@ python tools/gen_release_notes.py v0.10.0
 La version de l'app est indépendante de celle du format des réglages (`SETTING_VERSION` dans `tinypedal/version.py`, restée sur la numérotation TinyPedal 2.x), pour que les presets existants continuent de se charger sans migration inutile.
 
 L'image d'aperçu de ce README est générée à partir des vrais widgets : `python tools/make_readme_preview.py`.
+
+Pour l'image avant/après d'un overlay modifié (dernier commit à gauche, code en cours à droite), avant de commiter :
+
+```bash
+python tools/make_change_visual.py black_box --title "Black box : cartographie moteur"
+```
+
+`--set black_box.show_motor_map=true` montre une option désactivée par défaut, `--base` choisit la révision « avant ».
 
 ### Compiler pour Windows
 
