@@ -122,6 +122,8 @@ class PerformanceView(BaseDialog):
 
     def timerEvent(self, event):
         """Auto refresh"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         self.refresh()
 
     def refresh(self):

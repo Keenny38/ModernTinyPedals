@@ -311,6 +311,8 @@ class ConfigHotkey(BaseDialog):
 
     def timerEvent(self, event):
         """Monitor key press"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         if PLATFORM.WINDOWS:
             key_combo = set_hotkey_win(self.get_key_state)
         else:

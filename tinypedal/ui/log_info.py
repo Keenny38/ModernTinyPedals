@@ -95,6 +95,8 @@ class LogInfo(BaseDialog):
 
     def timerEvent(self, event):
         """Refresh log"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         position = log_stream.tell()
         if self.last_position != position:
             self.last_position = position

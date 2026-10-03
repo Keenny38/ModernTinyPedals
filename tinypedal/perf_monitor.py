@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from contextlib import suppress
 from functools import wraps
 from time import monotonic, perf_counter
 from typing import NamedTuple
@@ -114,7 +115,14 @@ def timed_event(func: Callable, event: str) -> Callable:
         try:
             return func(self, qt_event)
         finally:
-            PerfMonitor.record(_owner_name(self), event, perf_counter() - start)
+            elapsed = perf_counter() - start
+            try:
+                name = self._perf_owner
+            except AttributeError:  # first call: owner overlay found once
+                name = _owner_name(self)
+                with suppress(AttributeError):  # slots class: looked up every time
+                    self._perf_owner = name
+            PerfMonitor.record(name, event, elapsed)
 
     wrapper.timed = True  # type: ignore[attr-defined]
     return wrapper

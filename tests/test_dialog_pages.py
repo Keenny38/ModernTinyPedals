@@ -248,3 +248,19 @@ def test_window_grows_for_wide_page_and_restores(window):
     grown = window.size()
     view.set_current_index(0)
     assert window.size() == grown
+
+
+def test_hidden_tool_page_skips_refresh(window, monkeypatch):
+    from tinypedal.ui.tools_view import open_tool
+
+    calls = []
+    view = window.centralWidget()
+    window.show()
+    open_tool("perf_view.PerformanceView", window)
+    page = view.dialog_pages()[0]
+    monkeypatch.setattr(type(page.dialog), "refresh", lambda self: calls.append(1))
+    page.dialog.timerEvent(None)
+    assert calls == [1]  # shown: refreshed
+    view.set_current_index(0)  # other page: tool kept open, hidden
+    page.dialog.timerEvent(None)
+    assert calls == [1]  # no work while hidden

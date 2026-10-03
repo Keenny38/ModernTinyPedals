@@ -148,6 +148,8 @@ class HomeView(QWidget):
 
     def refresh_live(self):
         """Refresh game & overlay state"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         state, running = api_state_text()
         dot = "#3DDC84" if running else "#808080"
         self.card_game.set_text(

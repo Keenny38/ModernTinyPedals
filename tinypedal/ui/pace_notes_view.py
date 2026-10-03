@@ -110,6 +110,8 @@ class PaceNotesPlayer(QMediaPlayer):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         # Out pit notes
         notes_index = minfo.pacenotes.out.currentIndex
         if self._last_notes_index != notes_index:

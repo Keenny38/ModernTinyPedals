@@ -77,14 +77,36 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
     if not rgba >> 24:  # fully transparent: no panel to round or shade
         return
-    # Rounded & shaded fill is pre-rendered once per size & color (list widgets repaint
-    # hundreds of identical cells), then drawn as pixmap
     rect = QRectF(rect)
-    ratio = painter.device().devicePixelRatioF()
-    width, height = rect.width() * ratio, rect.height() * ratio
+    pixmap = _cached_background(rect.width(), rect.height(), rgba, radius, depth, painter.device().devicePixelRatioF())
+    if pixmap is None:
+        _fill_rect_direct(painter, rect, color, radius, depth)
+    else:
+        painter.drawPixmap(rect.topLeft(), pixmap)
+
+
+def background_pixmap(width: float, height: float, color, ratio: float) -> QPixmap | None:
+    """Rounded and/or shaded background of size & color in current overlay style, from cache
+
+    None if fill_rect draws it directly: flat style, transparent, size seen for the first time
+    or too large. A cell keeps the pixmap while its color, size & style do not change.
+    """
+    radius = min(width, height) * OverlayStyle.corner_scale
+    depth = OverlayStyle.depth_effects and min(width, height) >= _DEPTH_MIN_SIZE
+    if radius < 1 and not depth:
+        return None
+    rgba = _color_rgba(color) if isinstance(color, str) else QColor(color).rgba()
+    if not rgba >> 24:
+        return None
+    return _cached_background(width, height, rgba, radius, depth, ratio)
+
+
+def _cached_background(width: float, height: float, rgba: int, radius: float, depth: bool, ratio: float):
+    """Rounded & shaded fill pre-rendered once per size & color (list widgets repaint hundreds of
+    identical cells), None if not cached (yet)"""
+    width, height = width * ratio, height * ratio
     if not (width > 0 and height > 0 and width * height <= _CACHE_MAX_PIXELS):
-        _fill_rect_direct(painter, rect, color, radius, depth)  # large or invalid size, not cached
-        return
+        return None  # large or invalid size, not cached
     key = (max(round(width), 1), max(round(height), 1), round(radius, 2) if radius >= 1 else 0.0, depth, rgba, ratio)
     pixmap = _background_cache.get(key)
     if pixmap is None:
@@ -94,15 +116,14 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
             _background_seen[key] = None
             if len(_background_seen) > _SEEN_SIZE:
                 _background_seen.popitem(last=False)
-            _fill_rect_direct(painter, rect, color, radius, depth)
-            return
+            return None
         pixmap = _background_pixmap(*key)
         _background_cache[key] = pixmap
         if len(_background_cache) > _CACHE_SIZE:
             _background_cache.popitem(last=False)
     else:
         _background_cache.move_to_end(key)
-    painter.drawPixmap(rect.topLeft(), pixmap)
+    return pixmap
 
 
 _CACHE_MAX_PIXELS = 512 * 512  # larger fills are drawn directly
@@ -643,6 +664,9 @@ class RawText(QWidget):
         self._static_text.setTextFormat(Qt.TextFormat.PlainText)
         self._static_source: str | None = None  # text of laid out static text
         self._static_pos = QPointF()
+        self._bg_key: tuple = ()  # background pixmap cache, see _paint_background
+        self._bg_pixmap: QPixmap | None = None
+        self._pen_color: Any = None  # color set on text pen
 
     def clear(self):
         """Clear display"""
@@ -692,12 +716,29 @@ class RawText(QWidget):
         self._static_pos = QPointF(pos_x, pos_y + self._offset_y)
         self._static_source = text
 
+    def _paint_background(self, painter: QPainter):
+        """Background kept as pixmap while color, size & style do not change (skips style lookups)"""
+        bg = self.bg
+        if not OverlayStyle.corner_scale and not OverlayStyle.depth_effects:  # flat style
+            painter.fillRect(0, 0, self._width, self._height, bg)
+            return
+        key = (bg, self._width, self._height, OverlayStyle.corner_scale, OverlayStyle.depth_effects)
+        if key != self._bg_key or self._bg_pixmap is None:
+            self._bg_key = key
+            self._bg_pixmap = background_pixmap(self._width, self._height, bg, self.devicePixelRatioF())
+        if self._bg_pixmap is not None:
+            painter.drawPixmap(0, 0, self._bg_pixmap)
+        else:
+            fill_rect(painter, QRectF(0, 0, self._width, self._height), bg)
+
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        self._pen_text.setColor(self.fg)
+        self._paint_background(painter)
+        if self.fg != self._pen_color:
+            self._pen_color = self.fg
+            self._pen_text.setColor(self.fg)
         painter.setPen(self._pen_text)
-        fill_rect(painter, QRectF(0, 0, self._width, self._height), self.bg)
         text = self.text
         if not text:
             return

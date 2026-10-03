@@ -127,6 +127,8 @@ class WidgetPreview(QWidget):
 
     def timerEvent(self, event):
         """Refresh periodically"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         self.refresh()
 
     def refresh(self):

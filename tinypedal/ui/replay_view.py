@@ -254,6 +254,8 @@ class ReplayView(BaseDialog):
 
     def timerEvent(self, event):
         """Update position & recording state"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         self.refresh()
 
     def closeEvent(self, event):

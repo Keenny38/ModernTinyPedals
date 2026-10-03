@@ -112,6 +112,8 @@ class SpectateList(QWidget):
 
     def timerEvent(self, event):
         """Update when data not paused"""
+        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
+            return
         if not realtime_state.paused:
             total_vehicles = api.read.vehicle.total_vehicles()
             driver_name = api.read.vehicle.driver_name()

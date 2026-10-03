@@ -367,3 +367,44 @@ def test_transparent_cell_not_shaded():
         assert all(image.pixel(x, y) == 0 for x in range(40) for y in range(20))
     finally:
         _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
+
+
+def test_raw_text_background_kept_while_unchanged():
+    """Cell keeps its background pixmap while color, size & style stay, same pixels as fill_rect"""
+    from PySide6.QtCore import QPoint, QRectF
+    from PySide6.QtGui import QImage, QPainter, QRegion
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
+    _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
+    try:
+        cell = _painter.RawText(None, text="", bg_color="#336699")
+        cell.resize(60, 20)
+        cell.grab()
+        cell.grab()  # size seen twice: cached
+        pixmap = cell._bg_pixmap
+        assert pixmap is not None
+        cell.grab()
+        assert cell._bg_pixmap is pixmap  # reused, no style lookup
+        cell.bg = "#993366"
+        cell.grab()
+        assert cell._bg_pixmap is not pixmap
+        images = []
+        for direct in (False, True):  # cell render, then same fill drawn by fill_rect
+            image = QImage(60, 20, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            if direct:
+                painter = QPainter(image)
+                _painter.fill_rect(painter, QRectF(0, 0, 60, 20), "#993366")
+                painter.end()
+            else:
+                cell.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+            images.append(image)
+        assert images[0] == images[1]
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.0, False
+        cell.grab()  # flat style: plain fill, no pixmap needed
+        assert cell._bg_pixmap is not None  # kept for when style comes back, not used
+    finally:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
