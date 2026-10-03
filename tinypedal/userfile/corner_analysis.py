@@ -158,13 +158,26 @@ def corner_stats(lap: LapData, corner: Corner) -> CornerStats | None:
     return CornerStats(speeds[lowest], grid[lowest], brake_point, throttle_point, times[1] - times[0])
 
 
-def compare_corners(reference: LapData, compared: LapData | None = None) -> list[CornerComparison]:
+def compare_corners(
+    reference: LapData, compared: LapData | None = None, hysteresis: float = SPEED_HYSTERESIS,
+) -> list[CornerComparison]:
     """Corner stats of reference lap, and of compared lap on the same corners"""
     result = []
-    for corner in find_corners(reference):
+    for corner in find_corners(reference, hysteresis):
         ref_stats = corner_stats(reference, corner)
         if ref_stats is None:
             continue
         other = corner_stats(compared, corner) if compared is not None else None
         result.append(CornerComparison(corner, ref_stats, other))
     return result
+
+
+def lap_time_delta(reference: LapData, compared: LapData) -> float:
+    """Lap time difference (compared - reference)"""
+    return compared.lap_time - reference.lap_time
+
+
+def straights_delta(rows: list[CornerComparison], reference: LapData, compared: LapData) -> float:
+    """Time lost on straights: lap delta not spent in corners (between top speed & braking)"""
+    corners = sum(row.time_delta or 0.0 for row in rows)
+    return lap_time_delta(reference, compared) - corners

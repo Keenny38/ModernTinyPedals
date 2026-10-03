@@ -74,7 +74,7 @@ def test_import_logger_laps(tmp_path):
     columns = lap.columns
     assert columns["speed_kph"][5] == pytest.approx(360.0, abs=0.1)  # int16 * multiplier * 10^-decimals + shift
     assert columns["throttle"][5] == pytest.approx(1.0)  # percent to fraction
-    assert columns["distance"][0] < 20 and max(columns["distance"]) > 980
+    assert columns["distance"][0] < 20 and max(columns["distance"]) > 970
     assert columns["tyre_temp_fl"][3] == pytest.approx(80.0, abs=0.1)  # average of inner, centre & outer
     assert columns["tyre_wear_fl"][0] > columns["tyre_wear_fl"][-1] > 90  # worn % to remaining %
     assert columns["lap_time"][0] == 0.0 and columns["gear"][0] == 4
@@ -92,7 +92,7 @@ def test_import_saves_lap_files(tmp_path):
     assert lap_time_of(os.path.basename(paths[0])) == pytest.approx(10.0, abs=0.11)
     lap = load_lap(paths[0])
     assert lap.meta["imported_from"] == "spa.ld" and read_lap_info(paths[0])["vehicle"] == "GT3"
-    assert max(lap.distance) > 980
+    assert max(lap.distance) > 970
     assert list_tracks(str(tmp_path / "telemetry")) == []  # import folder is not a track
 
 
@@ -178,3 +178,26 @@ def test_read_ld_skips_unknown_channel_types(tmp_path):
         file.write(bytes(data))
     _, channels = read_ld(filename)
     assert "Lap Number" not in [channel.name for channel in channels] and channels
+
+
+def test_lap_time_from_line_crossing(tmp_path):
+    """Distance at 5 Hz, lap number changing 0.05-0.15 s late (as LMU logs): lap time from line crossing"""
+    lap_seconds, track, start = 10.0, 1000.0, 3.03  # line crossed between distance samples
+    distance_rate, rate = 5, 50
+    seconds = 3 * lap_seconds
+    distance = [((index / distance_rate + start) % lap_seconds) * track / lap_seconds
+                for index in range(int(seconds * distance_rate))]
+    lags = (0.15, 0.05, 0.12, 0.08)  # lap number change after line crossing, not the same every lap
+    changes = [k * lap_seconds - start + lags[k % len(lags)] for k in range(1, 5)]
+    lap_number = [sum(index / rate >= change for change in changes) for index in range(int(seconds * rate))]
+    filename = str(tmp_path / "late.ld")
+    write_logger_ld(filename, [
+        ("Lap Number", "", rate, lap_number, 32760, 1, 0),
+        ("Lap Distance", "m", distance_rate, distance, 31780, 1, 0),
+        ("Ground Speed", "km/h", rate, [360.0] * len(lap_number), 641, 2, 2),
+    ])
+    _, laps = import_laps(filename)
+    assert laps and laps[0].lap_time == pytest.approx(lap_seconds, abs=0.01)
+    distances = laps[0].columns["distance"]
+    # No made-up distance while crossing start line (was interpolated across lap reset: 0 to 1000)
+    assert all(value < 60 or value > 940 for value in distances[:15])

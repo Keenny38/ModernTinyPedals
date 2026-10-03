@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTabWidget,
     QTreeWidget,
@@ -46,7 +47,13 @@ from PySide6.QtWidgets import (
 
 from ..i18n import tr, trm
 from ..setting import cfg
-from ..userfile.corner_analysis import CornerComparison, compare_corners
+from ..userfile.corner_analysis import (
+    SPEED_HYSTERESIS,
+    CornerComparison,
+    compare_corners,
+    lap_time_delta,
+    straights_delta,
+)
 from ..userfile.motec_import import import_ld_file
 from ..userfile.motec_ld import export_lap
 from ..userfile.telemetry_lap import (
@@ -179,12 +186,29 @@ def load_visible_channels(folder: str) -> list[str]:
         return list(DEFAULT_CHANNELS)
 
 
-def save_visible_channels(folder: str, columns: list[str]):
+def load_viewer_setting(folder: str) -> dict:
+    """Lap viewer settings (visible channels, corner sensitivity) saved in telemetry folder"""
+    try:
+        with open(os.path.join(folder, VIEWER_SETTING), encoding="utf-8") as file:
+            setting = json.load(file)
+        return setting if isinstance(setting, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_viewer_setting(folder: str, **values):
+    """Update lap viewer settings, other saved values kept"""
+    setting = load_viewer_setting(folder)
+    setting.update(values)
     try:
         with open(os.path.join(folder, VIEWER_SETTING), "w", encoding="utf-8") as file:
-            json.dump({"channels": columns}, file)
+            json.dump(setting, file)
     except OSError as error:
-        logger.warning("LAP VIEWER: unable to save channels: %s", error)
+        logger.warning("LAP VIEWER: unable to save setting: %s", error)
+
+
+def save_visible_channels(folder: str, columns: list[str]):
+    save_viewer_setting(folder, channels=columns)
 
 
 class TracePlot(QWidget):
@@ -939,11 +963,24 @@ class CornerTable(QWidget):
     COLOR_GAIN = QColor("#22C55E")
     COLOR_LOSS = QColor("#EF4444")
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, folder: str = ""):
         super().__init__(parent)
         self.rows: list[CornerComparison] = []
+        self.folder = folder  # telemetry folder, sensitivity saved in viewer setting
+        self.laps: tuple[LapData | None, LapData | None] = (None, None)
         self.label = QLabel(self)
         self.label.setWordWrap(True)
+        self.spin_hysteresis = QSpinBox(self)
+        self.spin_hysteresis.setRange(3, 40)
+        self.spin_hysteresis.setSuffix(" km/h")
+        saved = load_viewer_setting(folder).get("corner_hysteresis", SPEED_HYSTERESIS) if folder else SPEED_HYSTERESIS
+        self.spin_hysteresis.setValue(int(saved) if isinstance(saved, (int, float)) else int(SPEED_HYSTERESIS))
+        self.spin_hysteresis.setToolTip(tr("Speed drop & rise counted as a corner: lower finds more corners"))
+        self.spin_hysteresis.valueChanged.connect(self.hysteresis_changed)
+        layout_sensitivity = QHBoxLayout()
+        layout_sensitivity.addWidget(QLabel(tr("Corner detection"), self))
+        layout_sensitivity.addWidget(self.spin_hysteresis)
+        layout_sensitivity.addStretch(1)
         self.table = QTreeWidget(self)
         self.table.setRootIsDecorated(False)
         self.table.setHeaderLabels([tr(text) for text in self.COLUMNS])
@@ -954,10 +991,18 @@ class CornerTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.label)
+        layout.addLayout(layout_sensitivity)
         layout.addWidget(self.table, stretch=1)
 
+    def hysteresis_changed(self, value: int):
+        if self.folder:
+            save_viewer_setting(self.folder, corner_hysteresis=value)
+        self.set_laps(*self.laps)
+
     def set_laps(self, reference: LapData | None, compared: LapData | None):
-        self.rows = compare_corners(reference, compared) if reference is not None else []
+        self.laps = (reference, compared)
+        self.rows = (
+            compare_corners(reference, compared, self.spin_hysteresis.value()) if reference is not None else [])
         self.table.clear()
         if not self.rows:
             self.label.setText(tr("No corner found: speed not recorded."))
@@ -968,6 +1013,18 @@ class CornerTable(QWidget):
             self.label.setText(tr("Compared lap against reference lap. Click a corner to zoom on it."))
         for row in self.rows:
             self.table.addTopLevelItem(self.make_item(row))
+        if reference is not None and compared is not None:  # corners + straights = lap delta
+            for text, delta in ((tr("Straights"), straights_delta(self.rows, reference, compared)),
+                                (tr("Total"), lap_time_delta(reference, compared))):
+                item = QTreeWidgetItem()
+                item.setText(0, text)
+                item.setText(1, signed(delta, 2))
+                item.setForeground(1, self.COLOR_LOSS if delta > 0.005 else self.COLOR_GAIN if delta < -0.005 else QColor())
+                font = QFont(item.font(0))
+                font.setBold(text == tr("Total"))
+                item.setFont(0, font)
+                item.setFont(1, font)
+                self.table.addTopLevelItem(item)
         for column in range(self.table.columnCount()):
             self.table.resizeColumnToContents(column)
 
@@ -1077,7 +1134,7 @@ class LapViewer(BaseDialog):
         self.side_tabs = QTabWidget(self)
         self.side_tabs.addTab(self.trajectory, tr("Track Map"))
         self.side_tabs.addTab(self.gcircle, tr("G Circle"))
-        self.corners = CornerTable(self)
+        self.corners = CornerTable(self, self.filepath)
         self.corners.corner_selected.connect(lambda start, end: self.plot.set_view(start, end))
         self.side_tabs.addTab(self.corners, tr("Corners"))
 

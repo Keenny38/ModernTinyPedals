@@ -78,10 +78,11 @@ class Source(NamedTuple):
     names: tuple[str, ...]
     scale: Callable[[str], float] = _one
     step: bool = False  # hold value (gear, sector) instead of linear interpolation
+    wraps: bool = False  # lap distance: back to 0 at start line
 
 
 SOURCES = (
-    Source("distance", ("Lap Distance", "Lap Dist", "Distance")),
+    Source("distance", ("Lap Distance", "Lap Dist", "Distance"), wraps=True),
     Source("speed_kph", ("Ground Speed", "Speed", "Vehicle Speed"), _speed_kph),
     Source("throttle", ("Throttle Pos", "Throttle"), _fraction),
     Source("brake", ("Brake Pos", "Brake"), _fraction),
@@ -123,7 +124,7 @@ class ImportedLap(NamedTuple):
     info: dict
 
 
-def sample_at(channel: Channel, seconds: float, step: bool = False) -> float:
+def sample_at(channel: Channel, seconds: float, step: bool = False, wrap_length: float = 0.0) -> float:
     """Channel value at log time, linear interpolation (or held value) between samples"""
     values = channel.values
     position = seconds * channel.frequency
@@ -135,7 +136,37 @@ def sample_at(channel: Channel, seconds: float, step: bool = False) -> float:
     if step:
         return values[index]
     fraction = position - index
-    return values[index] + (values[index + 1] - values[index]) * fraction
+    low, high = values[index], values[index + 1]
+    if wrap_length > 0 and low - high > wrap_length / 2:  # crossed start line between samples
+        value = low + (high + wrap_length - low) * fraction
+        return value - wrap_length if value >= wrap_length else value
+    return low + (high - low) * fraction
+
+
+def estimate_track_length(distances: Sequence[float]) -> float:
+    """Track length from lap distance samples: last sample before line is half a step short on average"""
+    top = max(distances)
+    steps = sorted(after - before for before, after in pairwise(distances) if 0 < after - before < top / 2)
+    return top + (steps[len(steps) // 2] / 2 if steps else 0.0)
+
+
+def line_crossings(channel: Channel, length: float) -> list[float]:
+    """Log times of start line crossings, interpolated between lap distance samples"""
+    values = channel.values
+    times = []
+    for index in range(1, len(values)):
+        before, after = values[index - 1], values[index]
+        if before - after > length / 2:
+            to_line = max(length - before, 0.0)
+            fraction = to_line / (to_line + max(after, 0.0)) if to_line + after > 0 else 0.0
+            times.append((index - 1 + fraction) / channel.frequency)
+    return times
+
+
+def nearest(times: list[float], target: float, limit: float = 1.0) -> float:
+    """Nearest time to target within limit seconds, target if none"""
+    best = min(times, key=lambda value: abs(value - target), default=target)
+    return best if abs(best - target) <= limit else target
 
 
 def is_worn_percent(values: Sequence[float]) -> bool:
@@ -188,10 +219,13 @@ def import_laps(filename: str) -> tuple[LdInfo, list[ImportedLap]]:
     if count < 2:
         raise ValueError("log too short")
 
+    distance_channel = next((channel for source, channel in found if source.wraps), None)
+    track_length = estimate_track_length(distance_channel.values) if distance_channel is not None else 0.0
     columns: dict[str, list[float]] = {}
     for source, channel in found:
         factor = source.scale(channel.unit)
-        values = [sample_at(channel, t, source.step) * factor for t in times]
+        wrap_length = track_length if source.wraps else 0.0
+        values = [sample_at(channel, t, source.step, wrap_length) * factor for t in times]
         if source.column.startswith("tyre_wear_") and is_worn_percent(channel.values):
             values = [100.0 - value for value in values]  # LMU logs worn %, recorder remaining %
         columns[source.column] = values
@@ -215,22 +249,27 @@ def import_laps(filename: str) -> tuple[LdInfo, list[ImportedLap]]:
         laps = [build_lap(info, filename, 1, times, columns, 0, count, lap_time)] if lap_time > 0 else []
         return info, laps
     starts = lap_starts(times, lap_numbers, columns.get("distance"))
+    # Lap start & end at start line crossing (between samples), else at lap number change
+    crossings = line_crossings(distance_channel, track_length) if distance_channel is not None else []
     laps = []
     for first, last in pairwise(starts):
         number = int(lap_numbers[first]) if lap_numbers else len(laps) + 1
-        laps.append(build_lap(info, filename, number, times, columns, first, last, times[last] - times[first]))
+        start_time = nearest(crossings, times[first])
+        lap_time = nearest(crossings, times[last]) - start_time
+        laps.append(build_lap(info, filename, number, times, columns, first, last, lap_time, start_time))
     return info, [lap for lap in laps if "distance" in lap.columns]
 
 
 def build_lap(
     info: LdInfo, filename: str, number: int, times: list[float], columns: dict[str, list[float]],
-    first: int, last: int, lap_time: float,
+    first: int, last: int, lap_time: float, start_time: float | None = None,
 ) -> ImportedLap:
-    """Lap columns (with log time & lap time) between sample indexes"""
-    start_time = times[first]
+    """Lap columns (with log time & lap time from start_time, first sample time if None) between sample indexes"""
+    if start_time is None:
+        start_time = times[first]
     lap_columns = {
         "time": [round(t, 3) for t in times[first:last]],
-        "lap_time": [round(t - start_time, 3) for t in times[first:last]],
+        "lap_time": [round(max(t - start_time, 0.0), 3) for t in times[first:last]],
     }
     for column, values in columns.items():
         lap_columns[column] = values[first:last]

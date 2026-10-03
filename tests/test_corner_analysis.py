@@ -99,7 +99,7 @@ def test_lap_viewer_corner_tab(ui_env, tmp_path, monkeypatch):
         viewer.plot.set_laps([reference, compared], "a")
         viewer.corners.set_laps(viewer.plot.lap_a, viewer.plot.lap_b)
         table = viewer.corners.table
-        assert table.topLevelItemCount() == 2
+        assert table.topLevelItemCount() == 4  # 2 corners, straights, total
         assert table.topLevelItem(0).text(1).startswith("+")  # time lost
         assert "100 / 90" in table.topLevelItem(0).text(2)
         viewer.corners.select_row(table.topLevelItem(1))
@@ -112,4 +112,34 @@ def test_lap_viewer_corner_tab(ui_env, tmp_path, monkeypatch):
     finally:
         viewer.close()
         viewer.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_corner_tab_totals_and_sensitivity(ui_env, tmp_path):
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from tinypedal.ui import lap_viewer
+
+    table = lap_viewer.CornerTable(None, f"{tmp_path.as_posix()}/")
+    try:
+        dip = ((1100, 240), (1250, 240), (1300, 220), (1350, 240), (1500, 240))  # small 20 km/h lift
+        reference = make_lap(PROFILE[:-2] + dip)
+        slower = make_lap(((0, 245), (400, 245), (500, 90), (700, 220), (800, 220), (900, 150), *dip))
+        table.set_laps(reference, slower)
+        tree = table.table
+        assert tree.topLevelItemCount() == len(table.rows) + 2  # corners, straights, total
+        straights = tree.topLevelItem(tree.topLevelItemCount() - 2)
+        total = tree.topLevelItem(tree.topLevelItemCount() - 1)
+        corners = sum(row.time_delta for row in table.rows)
+        assert float(straights.text(1).replace(chr(0x2212), "-")) + corners == pytest.approx(
+            float(total.text(1).replace(chr(0x2212), "-")), abs=0.011)
+        assert float(straights.text(1).replace(chr(0x2212), "-")) > 0  # slower on first straight
+        table.select_row(total)  # not a corner: no zoom, no error
+        assert len(table.rows) == 3  # default 10 km/h: small lift is a corner
+        table.spin_hysteresis.setValue(25)  # less sensitive: small lift left out
+        assert len(table.rows) == 2
+        assert lap_viewer.load_viewer_setting(table.folder)["corner_hysteresis"] == 25
+        assert lap_viewer.CornerTable(None, table.folder).spin_hysteresis.value() == 25  # remembered
+    finally:
+        table.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
