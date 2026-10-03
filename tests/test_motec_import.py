@@ -150,7 +150,8 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
         imported = [entry for entry in viewer.external if entry.info.get("source") == "MoTeC"]
         assert len(imported) == 3
         assert viewer.reference_key in {entry.file.path for entry in imported}  # fastest imported lap
-        assert viewer.lap_list.topLevelItem(0).text(0).startswith("pro lap:")
+        assert viewer.lap_list.topLevelItem(0).text(0) == "Added Laps"  # added files on top
+        assert viewer.lap_items()[0].text(0).startswith("pro lap:")
         assert viewer.plot.lap_a is not None
         bad = tmp_path / "bad.ld"
         bad.write_bytes(b"x" * 10)

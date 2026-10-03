@@ -33,9 +33,11 @@ import json
 import logging
 import os
 import re
+import time
 from bisect import bisect_left
+from collections.abc import Callable, Sequence
 from itertools import pairwise
-from typing import IO, NamedTuple
+from typing import IO, NamedTuple, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,10 @@ LAP_EXTS = (".csv.gz", ".csv")
 INFO_PREFIX = "# "
 IMPORT_FOLDER = ".imported"  # laps imported from other files (MoTeC), not a track folder
 _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
+_lap_number_name = re.compile(r"(?:^| )lap(\d+) ")
+SESSION_START_TOLERANCE = 120  # seconds, laps whose recorded session start differ less are same session
+SESSION_GAP = 1800  # seconds without lap: new session (laps recorded without session start)
+EntryType = TypeVar("EntryType")
 
 
 def lap_stem(filename: str) -> str:
@@ -64,6 +70,52 @@ def lap_time_of(filename: str) -> float:
     if not match:
         return 0.0
     return int(match.group(1)) * 60 + float(match.group(2))
+
+
+def lap_number_of(filename: str) -> int:
+    """Lap number from file name, 0 if unknown"""
+    match = _lap_number_name.search(lap_stem(filename))
+    return int(match.group(1)) if match else 0
+
+
+def lap_timestamp_of(filename: str) -> float:
+    """Time lap was recorded, from file name date ("YYYY-MM-DD HH-MM-SS ..."), 0 if unknown"""
+    try:
+        return time.mktime(time.strptime(filename[:19], "%Y-%m-%d %H-%M-%S"))
+    except (ValueError, OverflowError):
+        return 0.0
+
+
+def group_sessions(
+    entries: Sequence[EntryType], filename: Callable[[EntryType], str], info: Callable[[EntryType], dict],
+) -> list[list[EntryType]]:
+    """Group laps by session, newest session first, laps in driving order
+
+    Same session: same recorded session start (laps from this version), otherwise
+    (older laps) same session type, lap number going up, and less than SESSION_GAP between laps.
+    """
+    ordered = sorted(entries, key=lambda entry: (lap_timestamp_of(filename(entry)), lap_number_of(filename(entry))))
+    groups: list[list[EntryType]] = []
+    last = None
+    for entry in ordered:
+        if last is None or not same_session(last, entry, filename, info):
+            groups.append([])
+        groups[-1].append(entry)
+        last = entry
+    groups.reverse()
+    return groups
+
+
+def same_session(previous, entry, filename: Callable, info: Callable) -> bool:
+    """Whether lap was driven in same session as previous lap"""
+    start_a, start_b = info(previous).get("session_start"), info(entry).get("session_start")
+    if isinstance(start_a, (int, float)) and isinstance(start_b, (int, float)):
+        return abs(start_a - start_b) < SESSION_START_TOLERANCE
+    if info(previous).get("session", "") != info(entry).get("session", ""):
+        return False
+    if lap_number_of(filename(entry)) <= lap_number_of(filename(previous)):
+        return False
+    return lap_timestamp_of(filename(entry)) - lap_timestamp_of(filename(previous)) < SESSION_GAP
 
 
 def is_valid_name(filename: str) -> bool:

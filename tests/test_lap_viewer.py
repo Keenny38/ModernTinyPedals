@@ -213,11 +213,11 @@ def test_lap_viewer_multiple_laps(ui_env, monkeypatch):
     viewer = LapViewer(None)
     try:
         assert "1m30.000s" in viewer.reference_key  # best lap is reference
-        for index in range(viewer.lap_list.topLevelItemCount()):
-            viewer.lap_list.topLevelItem(index).setCheckState(0, Qt.CheckState.Checked)
+        for item in viewer.lap_items():
+            item.setCheckState(0, Qt.CheckState.Checked)
         assert len(viewer.plot.laps) == 3
         assert viewer.plot.reference is not None and "1m30" in viewer.plot.reference.key
-        newest = viewer.lap_list.topLevelItem(0)
+        newest = viewer.lap_items()[-1]  # laps in driving order
         viewer.set_reference_item(newest)
         assert viewer.plot.reference.key == newest.data(0, Qt.ItemDataRole.UserRole)
         viewer.toggle_channel("rpm", True)
@@ -555,6 +555,70 @@ def test_viewer_time_gain_option_saved(ui_env):
         viewer.check_gain.setChecked(True)
         assert viewer.trajectory.show_gain
         assert load_viewer_setting(cfg.path.telemetry)["map_time_gain"] is True
+    finally:
+        viewer.close()
+        flush_deleted()
+
+
+def save_session_lap(folder, number, lap_time, timestamp, session="Practice", start=None, valid=True, kind="lap"):
+    rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
+    info = {"kind": kind, "session": session, "vehicle": "Porsche 963"}
+    if start is not None:
+        info["session_start"] = start
+    module_recorder.save_lap(f"{folder}/", "Atlanta - Hyper", number, lap_time, rows, max_saved_laps=99,
+                             valid=valid, info=info, timestamp=timestamp)
+
+
+def test_laps_grouped_by_session():
+    import time
+
+    from tinypedal.userfile.telemetry_lap import group_sessions, lap_number_of, lap_timestamp_of
+
+    base = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
+    laps = [  # (file name, info)
+        (f"{time.strftime('%Y-%m-%d %H-%M-%S', time.localtime(base + t))} lap{n:03d} 1m30.000s.csv", info)
+        for t, n, info in (
+            (0, 1, {"session": "Practice"}), (90, 2, {"session": "Practice"}), (180, 3, {"session": "Practice"}),
+            (400, 1, {"session": "Practice"}),  # lap number restarts: new session
+            (3000, 2, {"session": "Practice"}),  # long break: new session
+            (3090, 3, {"session": "Qualify"}),  # other session type
+            (9000, 5, {"session": "Race", "session_start": base + 8500}),  # recorded session start
+            (9200, 1, {"session": "Race", "session_start": base + 8520}),  # same start (rejoin): same session
+            (9400, 6, {"session": "Race", "session_start": base + 9300}),  # restarted session
+        )
+    ]
+    assert lap_number_of(laps[0][0]) == 1 and lap_timestamp_of(laps[0][0]) == base
+    assert lap_timestamp_of("unknown.csv") == 0.0 and lap_number_of("unknown.csv") == 0
+    groups = group_sessions(laps, lambda lap: lap[0], lambda lap: lap[1])
+    numbers = [[lap_number_of(name) for name, _ in group] for group in groups]
+    assert numbers == [[6], [5, 1], [3], [2], [1], [1, 2, 3]]  # newest session first, laps in driving order
+
+
+def test_lap_list_shows_sessions(ui_env):
+    import time
+
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import LapViewer
+
+    folder = cfg.path.telemetry.rstrip("/")
+    base = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
+    for number, lap_time in ((1, 92.0), (2, 90.0), (3, 91.0)):
+        save_session_lap(folder, number, lap_time, base + number * 95, start=base)
+    save_session_lap(folder, 1, 95.0, base + 7200, session="Race", start=base + 7000, valid=False)
+    save_session_lap(folder, 2, 89.5, base + 7300, session="Race", start=base + 7000)
+    viewer = LapViewer(None)
+    try:
+        sessions = viewer.session_items()
+        assert [item.text(0) for item in sessions] == ["Race  03/10 15:56", "Practice  03/10 14:00"]
+        race, practice = sessions
+        assert race.text(1) == "1:29.500" and race.text(5) == "2 laps, Porsche 963"
+        assert [practice.child(i).text(0) for i in range(3)] == ["Lap 1", "Lap 2", "Lap 3"]
+        assert practice.child(0).text(5) == ""  # vehicle shown once, on session row
+        assert "invalid" in race.child(0).text(5)
+        assert race.isExpanded()  # reference (best lap) inside
+        viewer.set_reference_item(race)  # session row: no lap
+        assert viewer.reference_key.endswith("1m29.500s.csv")
+        assert set(viewer.checked_paths()) <= {item.data(0, Qt.ItemDataRole.UserRole) for item in viewer.lap_items()}
     finally:
         viewer.close()
         flush_deleted()

@@ -223,6 +223,8 @@ def lap_info(kind: str, rows: list) -> dict:
             "track_temperature": round(read.session.track_temperature(), 1),
             "ambient_temperature": round(read.session.ambient_temperature(), 1),
             "wetness": round(read.session.wetness_average(), 3),
+            # Real time when session clock was 0: same value for every lap of a session (lap viewer groups)
+            "session_start": round(lap_timestamp() - read.timing.elapsed()),
         })
     except (AttributeError, TypeError, ValueError, IndexError):
         pass

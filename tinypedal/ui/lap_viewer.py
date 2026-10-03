@@ -25,10 +25,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -64,10 +65,13 @@ from ..userfile.telemetry_lap import (
     best_laps,
     compute_delta,
     decimate_minmax,
+    group_sessions,
     interpolate,
     is_valid_name,
+    lap_number_of,
     lap_stem,
     lap_time_of,
+    lap_timestamp_of,
     list_laps,
     list_tracks,
     load_lap,
@@ -1210,7 +1214,8 @@ class LapViewer(BaseDialog):
 
         # Lap list
         self.lap_list = QTreeWidget(self)
-        self.lap_list.setRootIsDecorated(False)
+        self.lap_list.setRootIsDecorated(True)  # laps grouped by session
+        self.lap_list.setUniformRowHeights(True)
         self.lap_list.setHeaderLabels([tr("Lap"), tr("Time"), "S1", "S2", "S3", tr("Info")])
         self.lap_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.lap_list.customContextMenuRequested.connect(self.lap_menu)
@@ -1379,34 +1384,106 @@ class LapViewer(BaseDialog):
         return self.entries + self.external
 
     def fill_list(self, checked: set[str]):
+        """Laps grouped by session (newest first), added files on top, sessions with shown laps expanded"""
+        expanded = {
+            item.data(self.COL_LAP, Qt.ItemDataRole.UserRole + 1)
+            for item in self.session_items() if item.isExpanded()
+        }
         self.lap_list.blockSignals(True)
         self.lap_list.clear()
         # Added files may come from other tracks: theoretical best & best sectors of current track only
         sectors = [self.entry_sectors(entry) for entry in self.entries if entry.file.valid]
         best_total, best_sectors = theoretical_best(sectors)
-        for entry in self.all_entries():
-            item = QTreeWidgetItem(self.lap_list)
-            label = lap_label(entry.file.filename)
-            if entry.external:
-                label = f"{os.path.basename(os.path.dirname(entry.file.path))}: {label}"
-            item.setText(self.COL_LAP, label)
-            item.setText(self.COL_TIME, format_laptime(entry.file.lap_time))
-            item.setData(self.COL_LAP, Qt.ItemDataRole.UserRole, entry.file.path)
-            item.setCheckState(
-                self.COL_LAP, Qt.CheckState.Checked if entry.file.path in checked else Qt.CheckState.Unchecked)
-            lap_sectors = self.entry_sectors(entry)
-            for column, value, best in zip(
-                    (self.COL_S1, self.COL_S2, self.COL_S3), lap_sectors or (0, 0, 0), best_sectors or (0, 0, 0)):
-                item.setText(column, format_laptime(value))
-                if value > 0 and abs(value - best) < 0.0005 and entry.file.valid and not entry.external:
-                    item.setForeground(column, QColor("#A855F7"))  # best sector
-            item.setText(self.COL_INFO, self.entry_text(entry))
+        groups = group_sessions(self.entries, lambda entry: entry.file.filename, lambda entry: entry.info)
+        if self.external:
+            groups.insert(0, self.external)
+        for index, group in enumerate(groups):
+            is_added = group is self.external
+            header = self.add_session_item(group, is_added)
+            key = header.data(self.COL_LAP, Qt.ItemDataRole.UserRole + 1)
+            vehicle = str(group[0].info.get("vehicle", ""))
+            for entry in group:
+                self.add_lap_item(header, entry, checked, best_sectors, vehicle, is_added)
+            has_checked = any(entry.file.path in checked for entry in group)
+            header.setExpanded(has_checked or key in expanded or (index == 0 and not expanded))
         self.lap_list.blockSignals(False)
         if best_total > 0:
             self.label_best.setText(trm(f"Theoretical best: {format_laptime(best_total)}"))
         else:
             self.label_best.setText("")
         self.load_laps()
+
+    def add_session_item(self, group: list[LapEntry], is_added: bool) -> QTreeWidgetItem:
+        """Session header: session & date, best lap, number of laps & vehicle"""
+        header = QTreeWidgetItem(self.lap_list)
+        header.setFlags(Qt.ItemFlag.ItemIsEnabled)  # not checkable nor selectable
+        first = group[0]
+        if is_added:
+            title = tr("Added Laps")
+            key = "added"
+        else:
+            session = str(first.info.get("session", "")) or tr("Session")
+            start = first.info.get("session_start")  # recorded, else when first lap started
+            timestamp = start if isinstance(start, (int, float)) else (
+                lap_timestamp_of(first.file.filename) - first.file.lap_time)
+            date = time.strftime("%d/%m %H:%M", time.localtime(timestamp)) if timestamp > 0 else ""
+            title = f"{tr(session)}  {date}".strip()
+            key = f"{session} {first.file.filename[:19]}"
+        header.setText(self.COL_LAP, title)
+        header.setData(self.COL_LAP, Qt.ItemDataRole.UserRole + 1, key)
+        best = min((entry.file.lap_time for entry in group if entry.file.valid and entry.file.lap_time > 0), default=0)
+        header.setText(self.COL_TIME, format_laptime(best))
+        details = [trm(f"{len(group)} laps") if len(group) > 1 else tr("1 lap")]
+        vehicle = str(first.info.get("vehicle", ""))
+        if vehicle and not is_added:
+            details.append(vehicle)
+        header.setText(self.COL_INFO, ", ".join(details))
+        font = QFont(header.font(self.COL_LAP))
+        font.setBold(True)
+        for column in (self.COL_LAP, self.COL_TIME):
+            header.setFont(column, font)
+        header.setFirstColumnSpanned(False)
+        return header
+
+    def add_lap_item(self, header: QTreeWidgetItem, entry: LapEntry, checked: set[str], best_sectors,
+                     vehicle: str, is_added: bool):
+        """Lap row: number, time, sectors (best in purple), info; invalid laps dimmed"""
+        item = QTreeWidgetItem(header)
+        number = lap_number_of(entry.file.filename)
+        if is_added:
+            label = f"{os.path.basename(os.path.dirname(entry.file.path))}: {lap_label(entry.file.filename)}"
+        else:
+            label = trm(f"Lap {number}") if number else lap_label(entry.file.filename)
+        item.setText(self.COL_LAP, label)
+        item.setText(self.COL_TIME, format_laptime(entry.file.lap_time))
+        item.setData(self.COL_LAP, Qt.ItemDataRole.UserRole, entry.file.path)
+        item.setCheckState(
+            self.COL_LAP, Qt.CheckState.Checked if entry.file.path in checked else Qt.CheckState.Unchecked)
+        lap_sectors = self.entry_sectors(entry)
+        for column, value, best in zip(
+                (self.COL_S1, self.COL_S2, self.COL_S3), lap_sectors or (0, 0, 0), best_sectors or (0, 0, 0)):
+            item.setText(column, format_laptime(value))
+            if value > 0 and abs(value - best) < 0.0005 and entry.file.valid and not entry.external:
+                item.setForeground(column, QColor("#A855F7"))  # best sector
+        item.setText(self.COL_INFO, self.entry_text(entry, vehicle))
+        if not entry.file.valid or entry.info.get("kind") in ("out", "in"):
+            dimmed = self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
+            for column in (self.COL_TIME, self.COL_INFO):
+                item.setForeground(column, dimmed)
+
+    def session_items(self) -> list[QTreeWidgetItem]:
+        items = (self.lap_list.topLevelItem(index) for index in range(self.lap_list.topLevelItemCount()))
+        return [item for item in items if item is not None]
+
+    def lap_items(self) -> list[QTreeWidgetItem]:
+        """Lap rows of every session"""
+        laps = []
+        for header in self.session_items():
+            for index in range(header.childCount()):
+                item = header.child(index)
+                if item is not None:
+                    laps.append(item)
+        return laps
 
     @staticmethod
     def entry_sectors(entry: LapEntry) -> list[float]:
@@ -1416,7 +1493,8 @@ class LapViewer(BaseDialog):
         return []
 
     @staticmethod
-    def entry_text(entry: LapEntry) -> str:
+    def entry_text(entry: LapEntry, session_vehicle: str = "") -> str:
+        """Lap details not shown by its session header"""
         texts = []
         if not entry.file.valid:
             texts.append(tr("invalid"))
@@ -1425,19 +1503,18 @@ class LapViewer(BaseDialog):
             texts.append(tr("out lap"))
         elif kind == "in":
             texts.append(tr("in lap"))
-        if entry.info.get("session"):
+        if entry.external and entry.info.get("session"):
             texts.append(tr(str(entry.info["session"])))
-        if entry.info.get("vehicle"):
-            texts.append(str(entry.info["vehicle"]))
+        vehicle = str(entry.info.get("vehicle", ""))
+        if vehicle and vehicle != session_vehicle:
+            texts.append(vehicle)
         return ", ".join(texts)
 
     def checked_paths(self) -> list[str]:
-        paths = []
-        for index in range(self.lap_list.topLevelItemCount()):
-            item = self.lap_list.topLevelItem(index)
-            if item is not None and item.checkState(self.COL_LAP) == Qt.CheckState.Checked:
-                paths.append(item.data(self.COL_LAP, Qt.ItemDataRole.UserRole))
-        return paths
+        return [
+            item.data(self.COL_LAP, Qt.ItemDataRole.UserRole) for item in self.lap_items()
+            if item.checkState(self.COL_LAP) == Qt.CheckState.Checked
+        ]
 
     def lap_checked(self, item: QTreeWidgetItem, column: int):
         if column == self.COL_LAP:
@@ -1445,6 +1522,8 @@ class LapViewer(BaseDialog):
 
     def set_reference_item(self, item: QTreeWidgetItem, *_):
         path = item.data(self.COL_LAP, Qt.ItemDataRole.UserRole)
+        if not path:  # session header
+            return
         self.reference_key = path
         if item.checkState(self.COL_LAP) != Qt.CheckState.Checked:
             item.setCheckState(self.COL_LAP, Qt.CheckState.Checked)  # reloads laps
@@ -1453,7 +1532,7 @@ class LapViewer(BaseDialog):
 
     def lap_menu(self, position):
         item = self.lap_list.itemAt(position)
-        if item is None:
+        if item is None or not item.data(self.COL_LAP, Qt.ItemDataRole.UserRole):  # no lap (session header)
             return
         menu = QMenu(self)
         menu.addAction(tr("Set as Reference")).triggered.connect(lambda: self.set_reference_item(item))
@@ -1541,10 +1620,7 @@ class LapViewer(BaseDialog):
     def update_list_colors(self, laps: list[PlotLap]):
         colors = {lap.key: lap.color for lap in laps}
         self.lap_list.blockSignals(True)
-        for index in range(self.lap_list.topLevelItemCount()):
-            item = self.lap_list.topLevelItem(index)
-            if item is None:
-                continue
+        for item in self.lap_items():
             path = item.data(self.COL_LAP, Qt.ItemDataRole.UserRole)
             color = colors.get(path)
             item.setForeground(self.COL_LAP, color if color is not None else self.palette().text().color())

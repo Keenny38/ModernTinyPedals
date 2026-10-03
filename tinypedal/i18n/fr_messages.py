@@ -193,6 +193,8 @@ MESSAGE_RULES = (
     (r"^Theoretical best: (.+)$", r"Meilleur tour théorique : \1"),
     (r"^Laps from different vehicles: (.+)$", r"Tours de véhicules différents : \1"),
     (r"^Lap (\d+) \((.+)\)$", r"Tour \1 (\2)"),
+    (r"^Lap ([0-9]+)$", r"Tour \1"),
+    (r"^([0-9]+) laps(, |$)", r"\1 tours\2"),
     (r"Unable to save replay section: (.+)", r"Impossible d'enregistrer la section du rejeu : \1"),
     (r"^(\d+) widgets moved$", r"\1 widget(s) déplacé(s)"),
     (r"^(\d+) widgets$", r"\1 widget(s)"),
