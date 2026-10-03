@@ -292,7 +292,7 @@ class PresetList(QWidget):
 
         # Create context menu
         menu = QMenu()  # no parent for temp menu
-        menu.addAction("Unlock Preset" if is_locked else "Lock Preset")
+        menu.addAction(tr("Unlock Preset") if is_locked else tr("Lock Preset"))
         menu.addAction(tr("Backup Preset"))
         menu.addAction(tr("Export Package..."))
         menu.addAction(tr("Copy Share Code"))

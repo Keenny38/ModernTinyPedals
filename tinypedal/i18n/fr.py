@@ -460,6 +460,8 @@ TRANSLATION = MappingProxyType({
     "Plugin": "Plugin",
     "Status": "Statut",
     "Enabled": "Activé",
+    "Disabled": "Désactivé",
+    "Select a preset ...": "Choisir un preset ...",
     # Preset comparison
     "Ignore widget positions": "Ignorer les positions des widgets",
     "Filter": "Filtrer",

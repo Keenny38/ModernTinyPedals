@@ -127,7 +127,7 @@ class HotkeyList(QWidget):
     def set_enable_state(self, enabled: bool):
         """Set enable state"""
         self.button_toggle.setChecked(enabled)
-        self.button_toggle.setText("Enabled" if enabled else "Disabled")
+        self.button_toggle.setText(tr("Enabled") if enabled else tr("Disabled"))
         self.button_reset.setDisabled(not enabled)
         self.listbox_hotkey.setDisabled(not enabled)
 
@@ -269,7 +269,7 @@ class ConfigHotkey(BaseDialog):
         # Preset selector
         if self.option_name in SHORTCUTS_PRESET:
             self.preset_selector = QComboBox()
-            self.preset_selector.addItem("Select a preset ...")
+            self.preset_selector.addItem(tr("Select a preset ..."))
             self.preset_selector.addItems(cfg.preset_files())
             self.preset_selector.setCurrentText(cfg.user.shortcuts[self.option_name]["preset"])
             self.preset_selector.setFocusPolicy(Qt.FocusPolicy.NoFocus)
