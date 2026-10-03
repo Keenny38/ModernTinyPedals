@@ -385,11 +385,13 @@ def _user_prior_2_41_0(dict_user: dict):
         cruise = dict_user.get("cruise")
         if isinstance(cruise, dict):
             dict_user["track_clock"] = cruise.copy()
-            dict_user["track_clock"]["position_y"] += 30
+            _offset_position(dict_user["track_clock"], 30)
     # Convert font weight name to title case
     for sub_dict in dict_user.values():
+        if not isinstance(sub_dict, dict):
+            continue
         for option, value in sub_dict.items():
-            if "font_weight" in option:
+            if "font_weight" in option and isinstance(value, str):
                 sub_dict[option] = value.title()
 
 
@@ -404,7 +406,7 @@ def _user_prior_2_40_0(dict_user: dict):
 
 def _user_prior_2_39_0(dict_user: dict):
     suspension_position = dict_user.get("suspension_position")
-    if isinstance(suspension_position, dict) and suspension_position["negative_position_color"] == "#FF2200":
+    if isinstance(suspension_position, dict) and suspension_position.get("negative_position_color") == "#FF2200":
         suspension_position["negative_position_color"] = "#00AAFF"
 
 
@@ -415,7 +417,7 @@ def _user_prior_2_37_0(dict_user: dict):
         wheel_alignment["bar_gap"] = 0
         dict_user["wheel_camber"] = wheel_alignment.copy()
         dict_user["wheel_toe"] = wheel_alignment.copy()
-        dict_user["wheel_toe"]["position_y"] += 60
+        _offset_position(dict_user["wheel_toe"], 60)
 
 
 def _user_prior_2_36_0(dict_user: dict):
@@ -426,11 +428,17 @@ def _user_prior_2_36_0(dict_user: dict):
         dict_user["api_rf2"] = telemetry_api.copy()
     # Correct default update interval in module_vehicles
     module_vehicles = dict_user.get("module_vehicles")
-    if isinstance(module_vehicles, dict) and module_vehicles["update_interval"] == 20:
+    if isinstance(module_vehicles, dict) and module_vehicles.get("update_interval") == 20:
         module_vehicles["update_interval"] = 10
 
 
 # Misc function
+def _offset_position(data: dict, offset: int):
+    """Move copied widget down, if position is set"""
+    if isinstance(data.get("position_y"), (int, float)):
+        data["position_y"] += offset
+
+
 def _rename_key(data: dict, old: str, new: str):
     """Rename key name"""
     for key in tuple(data):
