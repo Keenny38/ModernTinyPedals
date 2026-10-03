@@ -119,3 +119,19 @@ def test_old_repository_name_is_migrated(ui_env):
 
     cfg.application["update_repository"] = "Keenny38/overlays"
     assert update.update_repository() == "Keenny38/ModernTinyPedals"
+
+
+def test_release_notes_start_with_changelog_section(tmp_path):
+    import sys
+
+    sys.path.insert(0, "tools")
+    from gen_release_notes import changelog_section
+
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "# Changelog\n\nIntro.\n\n## 1.2.0 (2026-10-04)\n\n### Pages\n\n- New pages.\n\n"
+        "## 1.1.0 (2026-10-01)\n\n- Older.\n", encoding="utf-8")
+    assert changelog_section("1.2.0", str(changelog)) == "### Pages\n\n- New pages.\n"
+    assert changelog_section("1.1.0", str(changelog)) == "- Older.\n"
+    assert changelog_section("1.3.0", str(changelog)) == ""  # not written: commits only
+    assert changelog_section("1.2.0", str(tmp_path / "missing.md")) == ""

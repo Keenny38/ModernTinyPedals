@@ -8,7 +8,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 [Démarrage rapide](#démarrage-rapide) ·
 [Nouveautés](#ce-que-cette-version-apporte) ·
 [Guide des réglages](docs/customization.md) ·
-[Historique des versions](https://github.com/Keenny38/ModernTinyPedals/releases) ·
+[Changelog](CHANGELOG.md) ·
 [Feuille de route](docs/ROADMAP.md)
 
 ![Aperçu des 77 overlays (style modern) sur une course simulée à Road Atlanta](images/readme_preview.png)
@@ -41,6 +41,8 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 ## Ce que cette version apporte
 
+> **Nouveau dans la 0.13.0** : tout s'ouvre dans la fenêtre de l'app, barre de navigation personnalisable, tours de la visionneuse regroupés par session, comparaison virage par virage, trajectoire colorée selon le temps gagné ou perdu, import et bibliothèque de tours MoTeC. Détails dans le [changelog](CHANGELOG.md).
+
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
 - Assistant de premier lancement, recherche globale d'option (`Ctrl+F`), aperçu en direct des widgets, annuler/rétablir dans les éditeurs.
@@ -68,7 +70,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
 - Plus de 1200 tests automatisés (85 % du code couvert), vérification de types et lint en intégration continue.
 
-Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans les [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
+Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans le [changelog](CHANGELOG.md).
 
 ## Lancer depuis le code source
 
@@ -148,7 +150,7 @@ Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedal
 
 - **Version** (`MAJEUR.MINEUR.CORRECTIF`, à partir de `0.10.0`) : calculée depuis les commits depuis la dernière release. Un titre qui commence par `Add` (nouveauté) monte la version mineure (`0.10.3` → `0.11.0`), tout le reste monte le correctif (`0.10.0` → `0.10.1`). Une version majeure se choisit à la main : lance `Build and Release` depuis l'onglet Actions avec `bump: major`.
 - **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
-- **Changelog** : les notes de chaque release listent ses commits en **Added**, **Fixed** et **Changed**. Écris donc des titres de commit clairs.
+- **Changelog** : [`CHANGELOG.md`](CHANGELOG.md) décrit en français les nouveautés de chaque version (section `## X.Y.Z (date)`). Les notes de la release commencent par la section de sa version, puis listent ses commits en **Added**, **Fixed** et **Changed** : écris donc des titres de commit clairs, et ajoute la section de la prochaine version dans le changelog avant de pousser.
 - **Visuels** : quand un commit change l'apparence d'un overlay, ajoute-lui une image avant/après dans `docs/changes`. Les notes de la release l'affichent dans une section **Visuals** (pas dans l'app, qui n'affiche pas les images).
 - **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
 
