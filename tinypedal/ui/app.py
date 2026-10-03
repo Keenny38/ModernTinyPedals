@@ -24,7 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -32,8 +32,10 @@ from PySide6.QtGui import (
     QFontMetricsF,
     QGuiApplication,
     QKeySequence,
+    QLinearGradient,
     QPainter,
     QPalette,
+    QPen,
     QShortcut,
 )
 from PySide6.QtWidgets import (
@@ -179,6 +181,59 @@ class NavButton(QAbstractButton):
         label_rect = QRectF(area.left(), area.top() + area.height() * 0.6, area.width(), area.height() * 0.32)
         label = QFontMetricsF(label_font).elidedText(self.text(), Qt.TextElideMode.ElideRight, label_rect.width())
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+
+class ScrollFade(QWidget):
+    """Fade over top or bottom edge of a scroll area, shown while entries are hidden that way"""
+
+    def __init__(self, scroll: QScrollArea, at_top: bool):
+        super().__init__(scroll)
+        self._scroll = scroll
+        self.at_top = at_top
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        bar = scroll.verticalScrollBar()
+        bar.valueChanged.connect(self.update_state)
+        bar.rangeChanged.connect(self.update_state)
+        scroll.installEventFilter(self)
+        self.update_state()
+
+    def eventFilter(self, watched, event):
+        if watched is self._scroll and event.type() == QEvent.Type.Resize:
+            self.update_state()
+        return super().eventFilter(watched, event)
+
+    def update_state(self, *_):
+        bar = self._scroll.verticalScrollBar()
+        hidden = bar.value() > bar.minimum() if self.at_top else bar.value() < bar.maximum()
+        viewport = self._scroll.viewport().geometry()
+        height = max(self.fontMetrics().height() * 2, 1)
+        top = viewport.top() if self.at_top else viewport.bottom() + 1 - height
+        self.setGeometry(viewport.left(), top, viewport.width(), height)
+        self.setVisible(hidden)
+        if hidden:
+            self.raise_()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        color = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Window)
+        clear = QColor(color)
+        clear.setAlpha(0)
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0, color if self.at_top else clear)
+        gradient.setColorAt(1, clear if self.at_top else color)
+        painter.fillRect(self.rect(), gradient)
+        # Chevron toward hidden entries
+        pen = QPen(self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText))
+        pen.setWidthF(1.5)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(pen)
+        center = self.width() / 2
+        size = self.height() * 0.18
+        y = self.height() * (0.3 if self.at_top else 0.7)
+        tip = y - size / 2 if self.at_top else y + size / 2
+        base = y + size / 2 if self.at_top else y - size / 2
+        painter.drawLine(QPointF(center - size, base), QPointF(center, tip))
+        painter.drawLine(QPointF(center, tip), QPointF(center + size, base))
 
 
 class DialogPage(QWidget):
@@ -329,6 +384,7 @@ class TabView(QWidget):
         self._dialog_parent = parent
         self._return_index = 0  # page shown again when last dialog page closes
         self._page_history: list[QWidget] = []  # pages shown before, see previous_shown
+        self._going_back = False
         self._restoring_pages = False  # reopening pages: window not brought to front
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
@@ -352,6 +408,7 @@ class TabView(QWidget):
         self._rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._rail_scroll.setWidget(rail_list)
+        self._rail_fades = (ScrollFade(self._rail_scroll, True), ScrollFade(self._rail_scroll, False))
         self._rail_scroll.viewport().setAutoFillBackground(False)
         rail_list.setAutoFillBackground(False)
         self._rail_shortcuts: list[QShortcut] = []
@@ -723,21 +780,36 @@ class TabView(QWidget):
                 self.set_current_index(min(self._return_index, len(NAV_PAGES) - 1))
 
     def remember_shown(self, current: QWidget | None, new: QWidget | None):
-        """Page left for another one, shown again when that one closes"""
-        if current is None or current is new:
+        """Page left for another one, shown again when that one closes or going back"""
+        if current is None or current is new or self._going_back:
             return
         if current in self._page_history:
             self._page_history.remove(current)
         self._page_history.append(current)
         del self._page_history[:-20]
 
-    def previous_shown(self, closed: QWidget) -> QWidget | None:
+    def previous_shown(self, closed: QWidget | None) -> QWidget | None:
         """Last page shown before, still open"""
         while self._page_history:
             page = self._page_history.pop()
             if page is not closed and self._pages.indexOf(page) >= 0:
                 return page
         return None
+
+    def go_back(self) -> bool:
+        """Show page shown before current one (Alt+Left, mouse back button), True if any"""
+        previous = self.previous_shown(self._pages.currentWidget())
+        if previous is None:
+            return False
+        self._going_back = True  # page left now is not remembered: going back again goes further back
+        try:
+            if isinstance(previous, DialogPage):
+                self.show_page_widget(previous, bring_to_front=False)
+            else:
+                self.set_current_index(self._pages.indexOf(previous))
+        finally:
+            self._going_back = False
+        return True
 
     def current_index(self) -> int:
         """Current page index"""
@@ -941,6 +1013,8 @@ class AppWindow(QMainWindow):
 
         # Command palette
         QShortcut(QKeySequence("Ctrl+K"), self, self.open_command_palette)
+        # Previous page, like a browser
+        QShortcut(QKeySequence("Alt+Left"), self, self.go_back)
 
         # Import preset, preset package or plugin by drag & drop
         self.setAcceptDrops(True)
@@ -1190,6 +1264,20 @@ class AppWindow(QMainWindow):
         self.showNormal()
         self.activateWindow()
         app_signal.refresh.emit(True)
+
+    def go_back(self):
+        """Previous page"""
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.go_back()
+
+    def mousePressEvent(self, event):
+        """Mouse back button: previous page (clicks not used by widget under mouse come here)"""
+        if event.button() == Qt.MouseButton.BackButton:
+            self.go_back()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     @Slot(bool)  # type: ignore[operator]
     def resizeEvent(self, event):

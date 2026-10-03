@@ -474,3 +474,40 @@ def test_hotkey_restart_saves_open_pages(window, monkeypatch):
     window.show()
     hotkey_restart_application()
     assert restarted and cfg.application["open_pages"] == "*fuel_calculator.FuelCalculator"
+
+
+def test_go_back_to_previous_pages(window):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    view.set_current_index(0)
+    view.set_current_index(1)
+    open_tool("fuel_calculator.FuelCalculator", window)
+    view.set_current_index(3)
+    assert view.go_back() and type(view._pages.currentWidget().dialog).__name__ == "FuelCalculator"
+    assert view.go_back() and view.current_index() == 1  # further back, no ping-pong
+    window.mousePressEvent(QMouseEvent(  # mouse back button
+        QEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(5, 5), Qt.MouseButton.BackButton,
+        Qt.MouseButton.BackButton, Qt.KeyboardModifier.NoModifier))
+    assert view.current_index() == 0 and view._nav.button(0).isChecked()
+    assert not view.go_back()  # nothing before
+
+
+def test_rail_fades_show_hidden_entries(window):
+    view = window.centralWidget()
+    top, bottom = view._rail_fades
+    window.resize(700, 900)
+    window.show()
+    QApplication.processEvents()
+    assert top.isHidden() and bottom.isHidden()  # every entry visible
+    window.resize(700, 420)
+    QApplication.processEvents()
+    bar = view._rail_scroll.verticalScrollBar()
+    bar.setValue(bar.minimum())
+    assert top.isHidden() and not bottom.isHidden()  # entries hidden below
+    bar.setValue(bar.maximum())
+    assert not top.isHidden() and bottom.isHidden()
+    assert not top.grab().isNull()
