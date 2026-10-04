@@ -154,7 +154,7 @@ Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedal
 - **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
 - **Changelog** : [`CHANGELOG.md`](CHANGELOG.md) décrit en français les nouveautés de chaque version (section `## X.Y.Z (date)`). Les notes de la release commencent par la section de sa version, puis listent ses commits en **Added**, **Fixed** et **Changed** : écris donc des titres de commit clairs, et ajoute la section de la prochaine version dans le changelog avant de pousser.
 - **Visuels** : quand un commit change l'apparence d'un overlay, ajoute-lui une image avant/après dans `docs/changes`. Les notes de la release l'affichent dans une section **Visuals** (pas dans l'app, qui n'affiche pas les images).
-- **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes (`Voir les nouveautés`) et propose `Télécharger et installer`.
+- **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes dans la page `Nouveautés` (une carte par thème, commits et SHA256 repliés) et propose `Télécharger et installer` (dans le navigateur quand l'app ne peut pas s'installer seule, depuis le code source par exemple).
 
 Pour prévisualiser en local la prochaine version et ses notes :
 

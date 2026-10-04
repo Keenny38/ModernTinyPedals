@@ -205,6 +205,14 @@ class UpdateChecker:
         """Is updates available"""
         return self._update_available
 
+    def latest_version(self) -> tuple[int, int, int]:
+        """Version of latest release (last check)"""
+        return self._last_checked_version
+
+    def latest_date(self) -> tuple[int, int, int]:
+        """Release date of latest release (last check)"""
+        return self._last_checked_date
+
     def check(self, manual: bool):
         """Run update check in separated thread"""
         self._manual_checking = manual

@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QMenu,
@@ -173,7 +173,7 @@ class UpdatesNotifyButton(QPushButton):
             self.setVisible(update_checker.is_manual())
         else:
             # Hide message if no unpdates and not manual checking
-            self.setText(update_checker.message())
+            self.setText(trm(update_checker.message()))
             self.setVisible(update_checker.is_manual() or update_checker.is_updates())
             self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.release_notes))
             self.install_update.setVisible(
@@ -183,30 +183,32 @@ class UpdatesNotifyButton(QPushButton):
                 self.prompt_update()
 
     def prompt_update(self):
-        """Ask once per version to install available update, yes downloads and installs it"""
+        """Ask once per version to install available update (what's new shown), install downloads it"""
         version_text = update_checker.message()
         if self._prompted_version == version_text:
             return
         self._prompted_version = version_text
-        message = QMessageBox(self)
-        message.setWindowTitle(tr("Download And Install"))
-        message.setTextFormat(Qt.TextFormat.MarkdownText)
-        message.setText(
-            f"**{version_text}**\n\n{tr('Install update now? Modern Tiny Pedals restarts when done.')}"
-            + (f"\n\n{update_checker.release_notes}" if update_checker.release_notes else "")
-        )
-        message.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if message.exec() == QMessageBox.StandardButton.Yes:
-            self._auto_install = True
-            self.download_update()
+        self.show_release_notes(prompt=True)
 
-    def show_release_notes(self):
+    def release_notes_dialog(self, prompt: bool = False):
+        """What's new page of available update, install button when it can install"""
+        from .release_notes import ReleaseNotesDialog
+
+        dialog = ReleaseNotesDialog(
+            self, update_checker.release_notes, update_checker.latest_version(), update_checker.latest_date(),
+            can_install=can_auto_update() and update_checker.is_updates() and update_checker.installer is not None,
+            prompt=prompt, download_url=update_checker.installer.url if update_checker.installer else "")
+        dialog.install_requested.connect(self.install_from_notes)
+        return dialog
+
+    def show_release_notes(self, prompt: bool = False):
         """Show release notes (changelog) of available update"""
-        message = QMessageBox(self)
-        message.setWindowTitle(tr("What's New"))
-        message.setTextFormat(Qt.TextFormat.MarkdownText)
-        message.setText(f"**{update_checker.message()}**\n\n{update_checker.release_notes}")
-        message.exec()
+        self.release_notes_dialog(prompt).open()
+
+    def install_from_notes(self):
+        """Install asked from what's new page: installs once downloaded, no second question"""
+        self._auto_install = True
+        self.download_update()
 
     def download_update(self):
         """Download installer in background thread"""
@@ -229,7 +231,7 @@ class UpdatesNotifyButton(QPushButton):
     def install_downloaded(self, path: str, error: str):
         """Run installer and quit, installer restarts TinyPedal when done"""
         self.install_update.setEnabled(True)
-        self.setText(update_checker.message())
+        self.setText(trm(update_checker.message()))
         auto_install, self._auto_install = self._auto_install, False
         if not path:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to download update: {error}"))
