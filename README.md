@@ -1,6 +1,6 @@
 # Modern Tiny Pedals
 
-**Overlay de télémétrie pour Le Mans Ultimate et rFactor 2**, libre et gratuit. 77 widgets configurables (pneus, freins, carburant, delta, classement, radar, météo…), des outils d'analyse et une interface en français.
+**Overlay de télémétrie pour Le Mans Ultimate et rFactor 2**, libre et gratuit. 78 widgets configurables (pneus, freins, carburant, delta, classement, radar, météo…), des outils d'analyse et une interface en français.
 
 Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com/TinyPedal/TinyPedal) : même base solide, avec une nouvelle interface, de nouveaux outils et beaucoup de travail sur la fiabilité.
 
@@ -11,7 +11,7 @@ Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com
 [Changelog](CHANGELOG.md) ·
 [Feuille de route](docs/ROADMAP.md)
 
-![Aperçu des 77 overlays (style modern) sur une course simulée à Road Atlanta](images/readme_preview.png)
+![Aperçu des 78 overlays (style modern) sur une course simulée à Road Atlanta](images/readme_preview.png)
 
 ---
 
@@ -41,7 +41,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 ## Ce que cette version apporte
 
-> **Nouveau dans la 0.15.0** : visionneuse de télémétrie plus lisible et plus complète (unités, axes, valeurs au curseur, virages numérotés, analyse de pilotage, axe en temps, export CSV, tours gardés et notes). Détails dans le [changelog](CHANGELOG.md).
+> **Nouveau dans la 0.16.0** : **Calculateur de course** (carburant, énergie et pneus réunis, plan d'arrêts tour par tour, course au temps avec le temps aux stands, règlement, plan pneus relié aux relais, fichier plan de course), widget **Plan de course** pour le prochain arrêt en jeu, **statistiques pilote** comparées aux temps de la communauté LMU, Black box sans chevauchement, page **Nouveautés** modernisée. Détails dans le [changelog](CHANGELOG.md).
 
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
@@ -71,7 +71,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Installeur Windows et mises à jour vérifiées (SHA-256) depuis l'app.
 - Sauvegardes automatiques des presets, écriture de fichiers atomique, redémarrage automatique des threads plantés.
 - Plugins de widgets avec gestionnaire, rapport de bug en un clic, moniteur de performance.
-- Plus de 1200 tests automatisés (85 % du code couvert), vérification de types et lint en intégration continue.
+- Plus de 1300 tests automatisés (85 % du code couvert), vérification de types et lint en intégration continue.
 
 Tout est détaillé dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans le [changelog](CHANGELOG.md).
 

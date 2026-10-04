@@ -3,6 +3,54 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.16.0 (2026-10-04)
+
+### Calculateur de course (nouveau)
+
+Le calculateur de carburant et la stratégie pneus ne font plus qu'un outil, **Calculateur de course** (entrée « Course » de la barre de navigation). Les anciennes entrées de la barre et les pages ouvertes s'y redirigent toutes seules.
+
+- **Une page, deux onglets** : réglages de course et chiffres clés en haut, communs, puis onglets **Carburant** et **Pneus**. Tout est en français, s'adapte aux petites fenêtres et se recalcule dès qu'une valeur est validée (Entrée ou en quittant le champ).
+- **Plan d'arrêts tour par tour** : à chaque arrêt, tour, carburant et énergie à remettre (plein tant que d'autres relais suivent, juste ce qu'il faut au dernier), pneus, pilote et durée de l'arrêt. Bouton `Copier` pour le partager en texte.
+- **Frise de stratégie** : un bloc par relais, tours d'arrêt au-dessus (en orange quand on change de pneus), lisible même en course de 24 h.
+- **Chiffres clés** : carburant et énergie de la course, arrêts (et ce qui les impose : carburant, énergie ou durée des relais), relais le plus long, plein moyen par arrêt (ou carburant à charger quand il n'y a pas d'arrêt), pneus utilisés sur le maximum autorisé.
+- **Course au temps juste** : carburant et énergie partagent les mêmes arrêts, et le nombre de tours dépend vraiment du temps perdu aux stands (ravitaillement, pneus, changement de pilote).
+- **Marge de sécurité** en tours, gardée à chaque arrêt et à l'arrivée.
+- **Arrêts au stand réalistes** : débit de ravitaillement carburant et énergie (un complément coûte moins qu'un plein), pneus changés pendant le ravitaillement ou après, temps de changement de pilote.
+- **Règlement** : arrêts obligatoires, durée maximale d'un relais, pilotes qui se relaient.
+- **Rythme** : effet du carburant sur le temps au tour et évolution de la piste au fil des heures.
+- **Objectif d'économie** : consommation à tenir pour gagner un arrêt, ou pour faire un nombre de tours par relais.
+- **Voitures à énergie seule** planifiées sur l'énergie.
+- **Remplissage intelligent** depuis le direct ou un fichier : moyenne des 5 derniers tours valides au rythme course (tours de stand écartés). En direct, la longueur de la course est reprise de la session, l'historique se met à jour tout seul, et l'option `Suivre le direct` met aussi à jour les saisies.
+- **Historique de consommation** : tri par colonne, filtre `Tours valides seulement`, sélection par tours entiers (tours invalides ignorés), bouton `Colonnes`, et suppression de tours ou de tout l'historique (`Supprimer la sélection`, `Tout supprimer`).
+- **Plan pneus relié à la stratégie** : une ligne par relais, temps de changement de pneus ajouté à l'arrêt, usure = usure par tour x tours du relais, ajustée selon la gomme (`Gomme mesurée`).
+- **`Proposer les changements`** : pneus neufs roue par roue au relais où la gomme passerait sous le minimum (2 pneus quand un seul essieu en a besoin), dans la limite des pneus autorisés ; s'il en manque, les meilleurs pneus usés sont remontés et les relais concernés signalés.
+- **Plan pneus gardé d'une session à l'autre**, avec annuler / rétablir (`Ctrl+Z` / `Ctrl+Y`) ; en tapant une valeur, les lignes ne sont plus perdues.
+- **Fichier plan de course** (`.race-plan`) : réglages, saisies et plan pneus dans un seul fichier, à garder ou partager avec l'équipe. Toutes les saisies sont aussi retrouvées à la réouverture, et `Remettre à zéro` les efface.
+
+### Widget Plan de course (nouveau)
+
+- **Le prochain arrêt en jeu** : tour de l'arrêt et tours restants (mis en évidence à l'approche), carburant et énergie à remettre, pneus à changer, arrêts restants. Le plan est refait à partir des saisies du calculateur, même fermé.
+
+### Black box
+
+- **Plus aucun chevauchement** : pneus, disques et suspensions qui braquent et bougent avec la suspension ne passent plus sur les LEDs RPM, les pastilles TC/BB/MAP ni les températures de freins. La place est réservée au braquage maximum, l'arrière braquant moins, et le débattement dessiné est plafonné.
+
+### Statistiques pilote
+
+- **Page modernisée** : chiffres clés du circuit (meilleur tour et sa voiture, niveau, distance, temps de conduite, tours valides, courses), tableau lisible, carte de référence de la voiture sélectionnée.
+- **Comparaison aux temps de la communauté** (feuille LMU d'[ohne_speed](https://www.youtube.com/@ohne_speed)) : chaque record est placé sur une échelle de niveaux, d'**Alien** à **Hors rythme**, avec son écart en % au temps de référence de la catégorie et la voiture la plus rapide. Les noms de circuits LMU et leurs variantes sont reconnus automatiquement. La feuille est téléchargée une fois par jour et gardée hors ligne ; menu `Référence` pour l'actualiser, changer de feuille ou désactiver la comparaison.
+
+### Mises à jour
+
+- **Page « Nouveautés » modernisée** : version et date de publication en en-tête, une carte par thème, détails techniques (commits, empreintes SHA256) repliés, texte adapté à la taille de la fenêtre.
+- **Bouton `Télécharger et installer` toujours disponible** (téléchargement dans le navigateur quand l'installation automatique n'est pas possible). La demande d'installation d'une nouvelle version utilise la même page.
+- **Messages de mise à jour traduits** (« Nouvelle version : v… », « Aucune mise à jour disponible »).
+
+### Interface
+
+- **Retour sur la dernière page au redémarrage**, même après un plantage ou un arrêt de Windows : la page affichée est enregistrée dès qu'elle change, plus seulement en quittant par le menu.
+- **Palette de commandes** : chercher « carburant », « stratégie pneus » ou « fuel calculator » trouve le Calculateur de course.
+
 ## 0.15.0 (2026-10-04)
 
 ### Visionneuse de télémétrie (Telemetry)
