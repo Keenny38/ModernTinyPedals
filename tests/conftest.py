@@ -36,6 +36,17 @@ def isolated_user_paths(tmp_path_factory):
         setattr(cfg.path, name, value)
 
 
+@pytest.fixture(autouse=True)
+def offline_lap_reference(monkeypatch):
+    """Community lap times never downloaded in tests (tests feed sheet text themselves)"""
+    from tinypedal.userfile import lap_reference
+
+    def offline(url, timeout=15):
+        raise OSError("offline in tests")
+
+    monkeypatch.setattr(lap_reference, "fetch_sheet", offline)
+
+
 @pytest.fixture
 def ui_env(monkeypatch, tmp_path):
     """Isolated setting for UI tests: default presets, data paths in tmp folder, saving disabled"""

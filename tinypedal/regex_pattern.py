@@ -108,6 +108,7 @@ CFG_STRING = (
     "file_name|"
     "prefix|"
     "repository|"
+    "sheet_url|"
     "sound_format|"
     "suffix|"
     "symbol|"
