@@ -158,6 +158,7 @@ class WheelPainter:
     show_ride_min: Any
     show_temp_trend: Any
     susp_extra: Any
+    disc_swing_x: Any
     text: Any
     tyre_fades: Any
     unit: Any
@@ -381,7 +382,7 @@ class WheelPainter:
         wcfg = self.wcfg
         is_right = index % 2  # FL, FR, RL, RR: odd index is on right side
         bar_w, bar_gap = self.brake_bar_w, self.brake_bar_gap
-        skip = bar_w + bar_gap + self.susp_extra  # bar, then suspension, then readings
+        skip = bar_w + bar_gap + self.susp_extra + self.disc_swing_x  # bar, suspension, swing room, readings
         if is_right:  # tyre on right side of brake
             bar = QRectF(rect.right() - bar_w, rect.top(), bar_w, rect.height())
             text_rect = QRectF(rect.left(), rect.top(), rect.width() - skip, rect.height())

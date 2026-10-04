@@ -106,15 +106,16 @@ def test_tyres_turn_with_real_wheel_angle(widget, monkeypatch):
     import math
 
     from tinypedal.api_control import api
+    from tinypedal.widget._black_box.common import REAR_MAX_STEER
 
-    monkeypatch.setattr(api.read.wheel, "toe", lambda: tuple(map(math.radians, (-10.0, 8.0, 0.5, 40.0))),
+    monkeypatch.setattr(api.read.wheel, "toe", lambda: tuple(map(math.radians, (-10.0, 40.0, 0.5, 40.0))),
                         )
     widget.use_wheels = False  # Wheels module off: still turns
     widget.timerEvent(None)
     assert widget.wheels[0].steer == pytest.approx(-10.0)  # left, real angle
-    assert widget.wheels[1].steer == pytest.approx(8.0)  # right
+    assert widget.wheels[1].steer == pytest.approx(30.0)  # limited to maximum (room around tyres)
     assert widget.wheels[2].steer == pytest.approx(0.5)
-    assert widget.wheels[3].steer == pytest.approx(30.0)  # limited to maximum (room around tyres)
+    assert widget.wheels[3].steer == pytest.approx(REAR_MAX_STEER)  # rear: smaller room, smaller limit
     widget.grab()  # draws turned tyres
 
 
@@ -152,7 +153,8 @@ def test_text_sizes_and_fit(ui_env):
 
     from tinypedal.setting import cfg
 
-    cfg.user.setting["black_box"].update(font_scale_gear=3.0, font_scale_speed=1.5, font_scale_rpm=1.0)
+    cfg.user.setting["black_box"].update(font_scale_gear=3.0, font_scale_speed=1.5, font_scale_rpm=1.0,
+                                          show_wheel_angle=False, show_suspension=False)  # center column sets height
     large = black_box.Realtime(cfg, "black_box")
     cfg.user.setting["black_box"].update(font_scale_gear=1.0, font_scale_speed=0.8, font_scale_rpm=0.5)
     small = black_box.Realtime(cfg, "black_box")

@@ -47,6 +47,7 @@ MAX_COMPRESSION = 0.8  # shortest spring is 1 - this, relative to longest
 STATIC_LENGTH = 0.5
 DAMPER_LENGTH = 0.18  # damper body, relative to longest spring (shorter than shortest spring)
 TYRE_DIAMETER_MM = 680.0  # tyre drawing height stands for this real diameter (race tyre)
+WHEEL_TRAVEL_MM = 50.0  # wheel travel kept clear above & below tyres (bumps, kerbs), drawn shift capped to it
 
 
 def blend(base: QColor, tint: QColor, amount: float) -> QColor:
@@ -95,6 +96,7 @@ class SuspensionPainter:
     unit: Any
     wcfg: Any
     wheel_suspension_motion: Any
+    wheel_travel_px: Any
 
     def draw_suspension(self, painter: QPainter, rect: QRectF, wheel: WheelState, index: int = 0):
         """Coilover anchored to its wheel: turns with the wheel around the tyre center, like the
@@ -186,11 +188,17 @@ class SuspensionPainter:
 
     def wheel_shift(self, index: int, wheel: WheelState) -> float:
         """Vertical shift of tyre & disc by the real wheel travel, 1:1 with the car
-        (0 if suspension hidden or wheel motion disabled)"""
+        (0 if suspension hidden or wheel motion disabled)
+
+        Capped to the travel layout keeps clear above & below tyres, so a big hit never
+        pushes the tyre into RPM LEDs, the other axle or chips between axles.
+        """
         if not self.wheel_suspension_motion or index >= len(self.rects_susp) or self.rects_susp[index].isNull():
             return 0.0
         _, _, full = spring_frame(self.rects_susp[index])
-        return spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index)) - full * STATIC_LENGTH
+        shift = spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index)) - full * STATIC_LENGTH
+        limit = self.wheel_travel_px
+        return min(max(shift, -limit), limit)
 
     def pixels_per_mm(self, index: int) -> float:
         """Scale of wheel index: tyre drawing height stands for that tyre's real diameter"""

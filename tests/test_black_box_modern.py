@@ -1626,6 +1626,85 @@ def test_status_icons_reserve_room_between_axles(ui_env):
         shown.deleteLater()
 
 
+def wheel_corner_bounds(widget, index):
+    """Bounding rects of tyre, disc bar & coilover at full lock both ways and full drawn travel"""
+    from PySide6.QtCore import QPointF, QRectF
+    from PySide6.QtGui import QTransform
+
+    tyre, disc, susp = widget.rects_tyre[index], widget.rects_disc[index], widget.rects_susp[index]
+    bar_w = widget.brake_bar_w
+    bar = (QRectF(disc.right() - bar_w, disc.top(), bar_w, disc.height()) if index % 2
+           else QRectF(disc.left(), disc.top(), bar_w, disc.height()))
+    from tinypedal.widget._black_box.common import REAR_MAX_STEER
+
+    limit = widget.max_steer if index < 2 else min(widget.max_steer, REAR_MAX_STEER)
+    bounds = []
+    for angle in (-limit, 0, limit):
+        for shift in (-widget.wheel_travel_px, 0, widget.wheel_travel_px):
+            pivot = tyre.center() + QPointF(0, shift)
+            turn = QTransform().translate(pivot.x(), pivot.y()).rotate(angle).translate(-pivot.x(), -pivot.y())
+            moved = QTransform().translate(0, shift) * turn
+            bounds.append(moved.map(widget.path_tyre.translated(tyre.center())).boundingRect())  # rounded tyre
+            bounds.append(moved.mapRect(bar))
+            if not susp.isNull():  # chassis mount fixed, rotates around moved hub
+                bounds.append(turn.mapRect(susp))
+    return bounds
+
+
+@pytest.mark.parametrize("options", [
+    {},
+    {"maximum_wheel_angle": 45, "suspension_scale": 3.0, "suspension_motion_scale": 3.0},
+    {"tyre_scale": 2.0, "status_icons_side": "Right"},
+    {"show_suspension": False},
+])
+def test_wheel_corners_never_overlap(ui_env, options):
+    widget = new_widget({"show_wheel_angle": True, "maximum_wheel_angle": 30, "show_rpm_leds": True,
+                         "show_tc_indicator": True, "show_brake_bias": True, "show_motor_map": True,
+                         "show_headlights_indicator": True, "show_engine_status": True, **options})
+    tol = 0.01
+    try:
+        assert widget.wheel_pad_front > 0
+        for right in (False, True):
+            gap = widget.side_gap(right)
+            assert not gap.isNull()
+            front, rear = (1, 3) if right else (0, 2)
+            for index in (front, rear):
+                disc = widget.rects_disc[index]
+                skip = widget.brake_bar_w + widget.brake_bar_gap + widget.susp_extra + widget.disc_swing_x
+                for box in wheel_corner_bounds(widget, index):
+                    if index == front:
+                        assert box.top() >= widget.rect_leds.bottom() - tol  # clear of RPM LEDs
+                        assert box.bottom() <= gap.top() + tol  # clear of chips & icons
+                    else:
+                        assert box.top() >= gap.bottom() - tol
+                        assert box.bottom() <= widget.rect_car_view.bottom() + tol
+                    if box.width() < widget.rects_tyre[index].width():  # disc bar & coilover
+                        if right:  # readings left of the disc bar
+                            assert box.left() >= disc.left() + disc.width() - skip - tol
+                        else:
+                            assert box.right() <= disc.left() + skip + tol
+        assert widget.side_gap(True).height() >= widget.side_rows_height() - 1  # chips keep full size
+        assert widget.wheel_pad_rear <= widget.wheel_pad_front  # rear wheels turn less
+    finally:
+        widget.deleteLater()
+
+
+def test_drawn_wheel_shift_capped_to_reserved_travel(ui_env):
+    widget = new_widget({"show_suspension": True, "enable_wheel_suspension_motion": True,
+                         "suspension_motion_scale": 1.0})
+    try:
+        wheel = widget.wheels[0]
+        limit = widget.wheel_travel_px
+        assert limit > 0
+        for offset, sign in ((500.0, -1), (-500.0, 1)):  # huge compression / droop
+            wheel.susp_wheel_offset = offset
+            assert widget.wheel_shift(0, wheel) == pytest.approx(sign * limit)
+        wheel.susp_wheel_offset = 0.0
+        assert widget.wheel_shift(0, wheel) == pytest.approx(0)
+    finally:
+        widget.deleteLater()
+
+
 def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
     from tinypedal.setting import cfg
     from tinypedal.widget._black_box import persist

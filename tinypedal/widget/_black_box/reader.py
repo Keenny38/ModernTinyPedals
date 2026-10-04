@@ -41,6 +41,7 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
+from .common import REAR_MAX_STEER
 from .recorder import EXPORT_QUEUE, IncidentBrowse, RaceReadings, Sample, index_of, log_race_events
 from .sizing import Presence
 from .state import (
@@ -408,7 +409,8 @@ class DataReader:
                 wheel.slip_angle = minfo.wheels.slipAngle[index]
             if steer:
                 angle = self.steer_convention.screen_angle(index, wheel_angle[index])
-                wheel.steer = min(max(angle, -self.max_steer), self.max_steer)
+                limit = self.max_steer if index < 2 else min(self.max_steer, REAR_MAX_STEER)  # room sized per axle
+                wheel.steer = min(max(angle, -limit), limit)
 
         if self.need_switches:
             vehicle_name = self.vehicle_name

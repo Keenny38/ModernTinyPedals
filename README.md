@@ -55,7 +55,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 - Code de partage de preset : copier un preset en texte, l'importer avec un aperçu.
 
 **Widgets et données**
-- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites. Plages de pression cible saisies en kPa, psi ou bar.
+- Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites. Plages de pression cible saisies en kPa, psi ou bar. Aucun chevauchement : roues, disques et suspensions qui braquent et bougent gardent leur place.
 - Enregistreur de tours et visionneuse de télémétrie (tours regroupés par session, superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**, import d'un journal MoTeC (celui de LMU par exemple) pour se comparer au tour d'un autre pilote (bibliothèque des tours importés : importer, rechercher, afficher, renommer, supprimer ; un `.ld` déposé sur l'app est importé directement), comparaison virage par virage (temps, vitesse mini, points de freinage et de plein gaz, freinage dégressif, roue libre, chevauchement des pédales), trajectoire colorée selon le temps gagné ou perdu, courbe de gain/perte de temps, axe en temps, virages numérotés, export CSV pour Excel, tours gardés et notes par tour.
 - **Rejeu de télémétrie** : enregistre une session LMU ou rFactor 2 et rejoue-la dans tous les widgets, sans lancer le jeu.
 

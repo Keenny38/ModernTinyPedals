@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainterPath
 
-from .common import LAYOUT_NORMAL
+from .common import LAYOUT_NORMAL, REAR_MAX_STEER
 
 DAMAGE_PANEL_RATIO = 0.8  # damage panel width relative to its height
 CENTER_WIDTH = 6.4  # center column width between tyres, in lines (room for merged rows like BB/BMIG)
@@ -65,6 +65,7 @@ class LayoutInput:
     damage_position: str = "Bottom Right"  # corner of damage panel, outside main area
     suspension_scale: float = 0.0  # width of suspension (coilover) beside brake bar, 0 if hidden
     status_height: float = 0.0  # room for headlights & engine icons between axles, 0 if hidden
+    wheel_travel: float = 0.0  # wheel travel kept clear above & below tyres, relative to tyre height
 
 
 @dataclass
@@ -96,6 +97,10 @@ class Layout:
     rects_disc: list[QRectF] = field(default_factory=list)
     rects_susp: list[QRectF] = field(default_factory=list)  # null rects if suspension hidden
     susp_extra: float = 0.0  # room taken by suspension inside brake column
+    wheel_pad_front: int = 0  # how far a turned & moving front wheel corner reaches above & below its tyre rect
+    wheel_pad_rear: int = 0  # same for rear wheels (smaller angle)
+    wheel_travel_px: float = 0.0  # largest drawn wheel shift (up or down), within wheel pads
+    disc_swing_x: int = 0  # room between turned disc bar / coilover and brake readings
     bottom_rows: list[tuple[QRectF, QRectF]] = field(default_factory=list)
     event_rows: list[QRectF] = field(default_factory=list)
 
@@ -118,12 +123,36 @@ def build_layout(spec: LayoutInput) -> Layout:
     corner = tyre_w * 0.28
     core_w, core_h = tyre_w - corner * 2, tyre_h - corner * 2
     pad_x = max(math.ceil((core_w * steer_cos + core_h * steer_sin) / 2 + corner - tyre_w / 2), 0)
-    pad_y = max(math.ceil((core_h * steer_cos + core_w * steer_sin) / 2 + corner - tyre_h / 2), 0)
     brake_gap = round(unit * 0.12)  # brake bar close to tyre (turned tyre may touch it at full lock)
     # Suspension: coilover drawn right beside the brake bar, before brake readings
     susp_w = max(round(unit * 0.5 * spec.suspension_scale), 4) if spec.suspension_scale > 0 else 0
     susp_extra = susp_w + brake_bar_gap if susp_w else 0
     brake_w += susp_extra
+    # Room above & below tyres, so a moving wheel corner never overlaps RPM LEDs, the other axle
+    # or chips between axles. Tyre, disc bar and coilover turn as one piece around the tyre center
+    # (the outer coilover swings much higher than the tyre), and move by the wheel travel.
+    # Rear wheels turn far less (toe), so rear room is sized for their own smaller angle.
+    disc_x = tyre_w / 2 + brake_gap + brake_bar_w  # outer edge of disc bar from tyre center
+    susp_x = disc_x + brake_bar_gap + susp_w  # outer edge of coilover, as tall as the tyre
+    travel = round(tyre_h * min(max(spec.wheel_travel, 0.0), 0.25))  # drawn wheel shift is capped to it
+
+    def corner_reach(angle: float) -> int:
+        """Room above & below tyre rect for a wheel corner turned up to angle"""
+        sin, cos = math.sin(math.radians(angle)), math.cos(math.radians(angle))
+        reach = (core_h * cos + core_w * sin) / 2 + corner - tyre_h / 2
+        reach = max(reach, disc_x * sin + brake_h / 2 * cos - tyre_h / 2)
+        if susp_w:
+            reach = max(reach, susp_x * sin + tyre_h / 2 * cos - tyre_h / 2)
+        return max(math.ceil(reach + travel), 0)
+
+    pad_front = corner_reach(spec.max_steer)
+    pad_rear = corner_reach(min(spec.max_steer, REAR_MAX_STEER))
+    # Turned disc bar & coilover also swing sideways, toward brake readings: keep room for it
+    swing = disc_x * steer_cos + brake_h / 2 * steer_sin
+    if susp_w:  # coilover turns around the hub, which moves with the wheel travel
+        swing = max(swing, susp_x * steer_cos + (tyre_h / 2 + travel) * steer_sin)
+    swing_x = max(math.ceil(swing - (disc_x + brake_bar_gap + susp_extra)), 0)  # past where readings start
+    brake_w += swing_x
     side_w = pad_x + tyre_w + brake_gap + brake_w
 
     center_between_tyres = spec.has_center and spec.layout_mode == LAYOUT_NORMAL
@@ -155,10 +184,11 @@ def build_layout(spec: LayoutInput) -> Layout:
     top_y = led_y + (led_h + gap if led_h else 0)
     rect_leds = QRectF(content_x + round(unit * 0.3), led_y + round(gap * 0.6), content_w - round(unit * 0.6), led_h)
 
-    axle_gap = max(round(unit * 0.9) + pad_y * 2, math.ceil(spec.status_height))
+    # Status icons & chips need their room clear of turned wheel corners of both axles too
+    axle_gap = max(round(unit * 0.9), math.ceil(spec.status_height)) + pad_front + pad_rear
     if center_between_tyres:  # taller if center column needs more room
-        axle_gap += max(round(spec.center_height - (pad_y * 2 + tyre_h * 2 + axle_gap)), 0)
-    body_h = pad_y + tyre_h * 2 + axle_gap + pad_y
+        axle_gap += max(round(spec.center_height - (pad_front + pad_rear + tyre_h * 2 + axle_gap)), 0)
+    body_h = pad_front + tyre_h * 2 + axle_gap + pad_rear
 
     # All tyres share the same size, so the rounded path is built once instead of every frame
     local_tyre = QRectF(-tyre_w / 2, -tyre_h / 2, tyre_w, tyre_h)
@@ -169,7 +199,7 @@ def build_layout(spec: LayoutInput) -> Layout:
     rects_tyre, rects_disc, rects_susp = [], [], []
     for index in range(4):
         is_right = index % 2
-        top = top_y + pad_y + (0 if index < 2 else tyre_h + axle_gap)
+        top = top_y + pad_front + (0 if index < 2 else tyre_h + axle_gap)
         if is_right:
             brake_x = right_x
             tyre_x = right_x + brake_w + brake_gap
@@ -180,9 +210,9 @@ def build_layout(spec: LayoutInput) -> Layout:
         rects_tyre.append(QRectF(tyre_x, top, tyre_w, tyre_h))
         rects_disc.append(QRectF(brake_x, brake_top, brake_w, brake_h))
         if susp_w:
-            susp_x = (brake_x + brake_w - brake_bar_w - brake_bar_gap - susp_w if is_right
-                      else brake_x + brake_bar_w + brake_bar_gap)
-            rects_susp.append(QRectF(susp_x, top, susp_w, tyre_h))  # as tall as the tyre
+            susp_left = (brake_x + brake_w - brake_bar_w - brake_bar_gap - susp_w if is_right
+                         else brake_x + brake_bar_w + brake_bar_gap)
+            rects_susp.append(QRectF(susp_left, top, susp_w, tyre_h))  # as tall as the tyre
         else:
             rects_susp.append(QRectF())
 
@@ -252,7 +282,8 @@ def build_layout(spec: LayoutInput) -> Layout:
         rect_leds=rect_leds, rect_center=rect_center, rect_car_view=rect_car_view,
         rect_battery=rect_battery, rect_trace=rect_trace, rect_damage=rect_damage, path_tyre=path_tyre,
         local_tyre=local_tyre, rects_tyre=rects_tyre, rects_disc=rects_disc, rects_susp=rects_susp,
-        susp_extra=susp_extra,
+        susp_extra=susp_extra, wheel_pad_front=pad_front, wheel_pad_rear=pad_rear, wheel_travel_px=travel,
+        disc_swing_x=swing_x,
         bottom_rows=bottom_rows, event_rows=event_rows,
     )
 

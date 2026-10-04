@@ -92,6 +92,8 @@ class StatusPainter:
     rects_susp: Any
     rects_tyre: Any
     sign_text: Any
+    wheel_pad_front: Any
+    wheel_pad_rear: Any
     tc_active: Any
     tc_cut_level: Any
     tc_level: Any
@@ -120,9 +122,9 @@ class StatusPainter:
             else:
                 right_edge = max(right_edge, center.left() - self.unit * 0.2)
         width = right_edge - left
-        margin = self.unit * 0.25
-        top = self.rects_tyre[front].bottom() + margin
-        bottom = self.rects_tyre[rear].top() - margin
+        margin = self.unit * 0.25  # plus room of turned & moving wheel corners
+        top = self.rects_tyre[front].bottom() + margin + self.wheel_pad_front
+        bottom = self.rects_tyre[rear].top() - margin - self.wheel_pad_rear
         if bottom - top < self.unit * 0.5:
             return QRectF()
         return QRectF(left, top, width, bottom - top)

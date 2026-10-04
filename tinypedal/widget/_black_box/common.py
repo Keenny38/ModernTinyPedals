@@ -30,6 +30,8 @@ LAYOUT_NORMAL = 0  # info column between tyres
 LAYOUT_VERTICAL = 1  # info column below tyres
 LAYOUT_COMPACT = 2  # tyres & brakes only
 
+REAR_MAX_STEER = 10.0  # degrees, rear wheels drawn turned at most this much (toe, rear steer)
+
 CENTER_ITEMS = (
     "locking", "delta", "laptime",
     "pit_limiter", "gear", "speed", "rpm", "pedals", "brake_heat",

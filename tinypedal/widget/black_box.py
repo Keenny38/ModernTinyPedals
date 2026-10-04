@@ -64,7 +64,7 @@ from ._black_box.state import (
     pressure_target_kpa,
 )
 from ._black_box.status import StatusPainter
-from ._black_box.suspension import TYRE_DIAMETER_MM, SuspensionPainter
+from ._black_box.suspension import TYRE_DIAMETER_MM, WHEEL_TRAVEL_MM, SuspensionPainter
 from ._black_box.trace import TracePainter
 from ._black_box.wheels import ColorFade, WheelPainter
 from ._common import warning_flash
@@ -242,6 +242,8 @@ class Realtime(
             damage_position=wcfg["damage_panel_position"],
             suspension_scale=min(max(wcfg["suspension_scale"], 0.5), 3) if self.show_suspension else 0,
             status_height=self.status_height(),
+            wheel_travel=(WHEEL_TRAVEL_MM / TYRE_DIAMETER_MM * max(wcfg["suspension_motion_scale"], 0)
+                          if self.wheel_suspension_motion else 0),
         ))
         self.car_layout = layout
         # Painting code reads geometry as widget attributes (width & height stay QWidget methods)
