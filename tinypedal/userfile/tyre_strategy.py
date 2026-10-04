@@ -254,3 +254,15 @@ def export_tyre_strategy_file(
         # Write tyre plan
         data_writer.writerows(plan_data)
         logger.info("USERDATA: %s%s saved", filename, extension)
+
+
+def plan_tyre_changes(user_data: dict) -> tuple[list[int], list[float]]:
+    """Tyres changed at each stop of a tyre plan (row after start) & their change time"""
+    rows = user_data.get("tyre_plan", [])
+    rule = user_data.get("tyre_rule", DEFAULT_TYRE_RULE)
+    times = (0.0, *(float(rule.get(f"tyre_change_time_{count}", 0.0)) for count in range(1, 5)))
+    counts = []
+    for index in range(1, len(rows)):
+        counts.append(sum(
+            1 for column in range(4) if rows[index][column] and rows[index][column] != rows[index - 1][column]))
+    return counts, [times[count] for count in counts]

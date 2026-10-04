@@ -153,9 +153,12 @@ def test_command_palette(ui_env, monkeypatch):
     try:
         palette = CommandPalette(window)
         titles = [command.title for command in palette.commands]
-        assert "Fuel Calculator" in titles and "Tools" in titles
+        assert "Race Calculator" in titles and "Tools" in titles
         # Accent & case insensitive, words in any order
-        assert match_commands(palette.commands, "calculator FUEL")[0].title == "Fuel Calculator"
+        assert match_commands(palette.commands, "calculator RACE")[0].title == "Race Calculator"
+        # Former fuel calculator & tyre strategy planner names find the merged tool
+        assert match_commands(palette.commands, "fuel calculator")[0].title == "Race Calculator"
+        assert match_commands(palette.commands, "stratégie pneus")[0].title == "Race Calculator"
         palette.edit_search.setText("hotkey")
         assert palette.list_results.count() >= 1
         palette.edit_search.setText("font color speed")  # options found too

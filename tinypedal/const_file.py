@@ -76,6 +76,7 @@ class FileExt:
     STATS = ".stats"
     LOCK = ".lock"
     TYRESTRATEGY = ".tyre-strategy"
+    RACEPLAN = ".race-plan"
 
 
 class FileFilter:
@@ -97,6 +98,7 @@ class FileFilter:
     TPPN = qfile_filter(FileExt.TPPN, "Modern Tiny Pedals Pace Notes")
     TPTN = qfile_filter(FileExt.TPTN, "Modern Tiny Pedals Track Notes")
     TYRESTRATEGY = qfile_filter(FileExt.TYRESTRATEGY, "Modern Tiny Pedals Tyre Strategy")
+    RACEPLAN = qfile_filter(FileExt.RACEPLAN, "Modern Tiny Pedals Race Plan")
 
 
 class ImageFile:

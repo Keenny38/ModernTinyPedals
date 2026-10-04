@@ -746,21 +746,127 @@ def set_style_window(base_font_pt: int) -> str:
             border: none;
         }}
 
-        /* Fuel calculator dialog */
-        FuelCalculator QLineEdit[readOnly="true"]{{
+        /* Race calculator (fuel & tyres): cards, key figure tiles, results */
+        RaceCalculator #fuelCard,
+        RaceCalculator #fuelTile,
+        DriverStatsViewer #fuelCard,
+        DriverStatsViewer #fuelTile {{
+            background: {color_active_base};
+            border: 1px solid {color_active_midlight};
+            border-radius: {border_radius_card}px;
+        }}
+        RaceCalculator #fuelCardTitle,
+        DriverStatsViewer #fuelCardTitle {{
+            font-size: {font_pt_item_button}pt;
+            font-weight: bold;
+        }}
+        RaceCalculator #fuelTileValue,
+        DriverStatsViewer #fuelTileValue {{
+            font-size: {font_pt_app_name}pt;
+            font-weight: bold;
+        }}
+        RaceCalculator #fuelValue {{
+            font-weight: bold;
+        }}
+        RaceCalculator #fuelSource {{
+            font-size: {font_pt_item_button}pt;
+        }}
+        RaceCalculator QLabel[warning="true"] {{
+            color: #FF4400;
+        }}
+        RaceCalculator QAbstractSpinBox {{
+            border: 1px solid {color_active_mid};
+            border-radius: {border_radius_input}px;
+            padding: 0.15em 0.35em;
             background: {color_active_window};
         }}
-        FuelCalculator QLabel {{
+        RaceCalculator QAbstractSpinBox:focus {{
+            border-color: {color_active_highlight};
+        }}
+        RaceCalculator QAbstractSpinBox:disabled {{
+            color: {color_disabled_window_text};
+        }}
+        RaceCalculator #fuelSegment {{
+            border-radius: 0;
+            padding: 0.25em 0.6em;
+        }}
+        RaceCalculator #fuelSegment:first {{
+            border-top-left-radius: {border_radius_input}px;
+            border-bottom-left-radius: {border_radius_input}px;
+        }}
+        RaceCalculator #fuelSegment:last {{
+            border-top-right-radius: {border_radius_input}px;
+            border-bottom-right-radius: {border_radius_input}px;
+        }}
+        RaceCalculator PitStopPreview {{
             font-size: {font_pt_text_browser}pt;
         }}
-        FuelCalculator PitStopPreview {{
-            font-size: {font_pt_text_browser}pt;
-            font-weight:bold;
+        RaceCalculator QTableWidget {{
+            background: {color_active_base};
+            alternate-background-color: {color_active_window};
         }}
-        FuelCalculator PitStopPreview QLabel {{
-            color: {color_inactive_highlighted_text};
-            background: {color_inactive_highlight};
-            font-weight:bold;
+
+        /* Driver stats viewer: table & level marks (cards & tiles shared with race calculator) */
+        DriverStatsViewer QTableWidget {{
+            background: {color_active_base};
+            alternate-background-color: {color_active_window};
+        }}
+        DriverStatsViewer #statsMark {{
+            color: {color_active_highlight};
+            font-weight: bold;
+        }}
+        DriverStatsViewer #statsTrack {{
+            font-size: {font_pt_item_button}pt;
+            font-weight: bold;
+            padding: 0.2em 0.5em;
+        }}
+
+        /* What's new: header, version chip, theme cards, primary action */
+        ReleaseNotesDialog #notesBody {{
+            background: transparent;
+        }}
+        ReleaseNotesDialog #notesTitle {{
+            font-size: {font_pt_app_name}pt;
+            font-weight: bold;
+        }}
+        ReleaseNotesDialog #notesChip {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-radius: 0.6em;
+            padding: 0.1em 0.6em;
+            font-weight: bold;
+        }}
+        ReleaseNotesDialog #notesCard {{
+            background: {color_active_base};
+            border: 1px solid {color_active_midlight};
+            border-radius: {border_radius_card}px;
+        }}
+        ReleaseNotesDialog #notesCardTitle {{
+            font-size: {font_pt_item_button}pt;
+            font-weight: bold;
+            color: {color_active_highlight};
+        }}
+        ReleaseNotesDialog #notesItems {{
+            font-size: {font_pt_item_toggle}pt;
+        }}
+        ReleaseNotesDialog #notesMono {{
+            font-family: "Cascadia Mono", "Consolas", monospace;
+            font-size: {font_pt_text_browser}pt;
+        }}
+        ReleaseNotesDialog #notesToggle {{
+            border: none;
+            background: transparent;
+            color: {color_disabled_window_text};
+            padding: 0.2em 0;
+        }}
+        ReleaseNotesDialog #notesToggle:hover {{
+            color: {color_active_window_text};
+        }}
+        ReleaseNotesDialog #notesPrimary {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-color: {color_active_highlight};
+            font-weight: bold;
         }}
 
         /* About dialog */

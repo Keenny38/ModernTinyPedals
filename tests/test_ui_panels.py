@@ -20,9 +20,9 @@ def lap(number: int, *, valid: bool = True) -> ConsumptionDataSet:
 
 
 def test_fuel_history_table_keeps_its_columns_and_highlight(ui_env):
-    from tinypedal.ui.fuel_calculator import FuelCalculator
+    from tinypedal.ui.race_calculator import RaceCalculator
 
-    dialog = FuelCalculator(None)
+    dialog = RaceCalculator(None)
     try:
         dialog.panel_history.refresh([lap(1), lap(2, valid=False), lap(3)])
         table = dialog.panel_history.table_history
@@ -42,9 +42,9 @@ def test_fuel_history_table_keeps_its_columns_and_highlight(ui_env):
 
 
 def test_fuel_history_table_accepts_an_empty_history(ui_env):
-    from tinypedal.ui.fuel_calculator import FuelCalculator
+    from tinypedal.ui.race_calculator import RaceCalculator
 
-    dialog = FuelCalculator(None)
+    dialog = RaceCalculator(None)
     try:
         dialog.panel_history.refresh([])
         assert dialog.panel_history.table_history.rowCount() == 0

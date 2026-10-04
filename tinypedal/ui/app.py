@@ -80,7 +80,7 @@ from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
 from .toast import show_toast
-from .tools_view import TOOL_SECTIONS, ToolsView, open_tool
+from .tools_view import RENAMED_TOOLS, TOOL_SECTIONS, ToolsView, open_tool
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +387,7 @@ class TabView(QWidget):
         self._page_history: list[QWidget] = []  # pages shown before, see previous_shown
         self._going_back = False
         self._restoring_pages = False  # reopening pages: window not brought to front
+        self.track_pages = False  # shown page remembered on change, once startup pages are restored
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
         self._grown_for: set[QWidget] = set()  # open pages needing grown window size
@@ -458,6 +459,7 @@ class TabView(QWidget):
 
         last_page = cfg.application["last_page_index"]
         self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0)
+        self._pages.currentChanged.connect(self.page_changed)
 
         layout_body = QHBoxLayout()
         layout_body.setContentsMargins(0, 0, 0, 0)
@@ -713,6 +715,7 @@ class TabView(QWidget):
         try:
             for entry in paths:
                 path = entry.strip().removeprefix("*")
+                path = RENAMED_TOOLS.get(path, path)  # merged tools: new tool
                 if path not in known:
                     continue
                 try:
@@ -815,6 +818,15 @@ class TabView(QWidget):
     def current_index(self) -> int:
         """Current page index"""
         return self._pages.currentIndex()
+
+    def page_changed(self, index: int):
+        """Shown page remembered at once, so a restart reopens it even after a crash or a
+        system shutdown (not only after Quit)"""
+        if not self.track_pages or self._restoring_pages:
+            return
+        remember = getattr(self.window(), "remember_shown_page", None)
+        if callable(remember):
+            remember(index)
 
     @Slot(bool)  # type: ignore[operator]
     def refresh_rail(self):
@@ -1029,8 +1041,7 @@ class AppWindow(QMainWindow):
         # Window state
         self.set_window_state()
         self.__connect_signal()
-        if cfg.application["remember_open_pages"]:  # once window is shown: faster startup
-            QTimer.singleShot(0, self.restore_open_pages)
+        QTimer.singleShot(0, self.restore_open_pages)  # once window is shown: faster startup
         # Follow OS light / dark switch when window color theme is "System"
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
 
@@ -1134,6 +1145,7 @@ class AppWindow(QMainWindow):
         tab_view.restore_pages(open_pages)  # tool pages reopened in new language
         if shown is not None:
             tab_view.show_page_widget(shown, bring_to_front=False)
+        tab_view.track_pages = True
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:
             old_menu = tray_icon.contextMenu()
@@ -1288,28 +1300,45 @@ class AppWindow(QMainWindow):
                 view.window_resized_by_user()
         super().resizeEvent(event)
 
-    def save_open_pages(self):
-        """Remember tool pages left open, reopened at next startup"""
+    def save_open_pages(self, delay: int = 0):
+        """Remember tool pages left open (shown one marked), reopened at next startup"""
         view = self.centralWidget()
         if not isinstance(view, TabView):
             return
         open_pages = ",".join(view.open_page_paths()) if cfg.application["remember_open_pages"] else ""
         if cfg.application["open_pages"] != open_pages:
             cfg.application["open_pages"] = open_pages
-            cfg.save(0, config_type=ConfigType.CONFIG)
+            cfg.save(delay, config_type=ConfigType.CONFIG)
+
+    def remember_shown_page(self, index: int):
+        """Shown page changed: app page index & open tool pages saved for next startup"""
+        if 0 <= index < len(NAV_PAGES) and cfg.application["last_page_index"] != index:
+            cfg.application["last_page_index"] = index
+            cfg.save(config_type=ConfigType.CONFIG)
+        self.save_open_pages(delay=66)
+
+    def stop_tracking_pages(self):
+        """Before pages close for quit or restart: state saved at that moment is kept"""
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.track_pages = False
 
     def restore_open_pages(self):
-        """Reopen tool pages left open at last quit"""
+        """Reopen tool pages left open at last quit, then follow page changes"""
         if not shiboken6.isValid(self):  # closed before event loop ran
             return
         view = self.centralWidget()
+        if not isinstance(view, TabView):
+            return
         paths = [path for path in cfg.application["open_pages"].split(",") if path.strip()]
-        if isinstance(view, TabView) and paths:
+        if cfg.application["remember_open_pages"] and paths:
             view.restore_pages(paths)
+        view.track_pages = True
 
     def restart_app(self):
         """Restart app, tool pages left open reopened"""
         self.save_open_pages()
+        self.stop_tracking_pages()
         loader.restart()
 
     def quit_app(self):
@@ -1317,7 +1346,9 @@ class AppWindow(QMainWindow):
         view = self.centralWidget()
         if isinstance(view, TabView):
             self.save_open_pages()
+            view.track_pages = False  # pages closing now: saved state kept
             if not view.close_all_pages():
+                view.track_pages = True
                 return
         loader.close()  # must close this first
         self.save_window_state()

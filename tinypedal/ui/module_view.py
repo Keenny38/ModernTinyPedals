@@ -64,7 +64,7 @@ GEAR_SYMBOL = "\u2699\ufe0e"  # gear, text style (not color emoji)
 # Widget categories: (name, widget name prefixes), first match wins, unmatched (plugins) are "Other"
 WIDGET_CATEGORIES = (
     ("Timing", (
-        "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "relative", "rivals",
+        "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "race_plan", "relative", "rivals",
         "sectors", "session", "standings", "stint_history", "timing", "track_clock",
     )),
     ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),

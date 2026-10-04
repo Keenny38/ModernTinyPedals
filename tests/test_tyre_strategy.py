@@ -66,10 +66,12 @@ def planner(ui_env, monkeypatch, tmp_path):
     monkeypatch.setattr(BaseEditor, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(tyre_strategy_planner, "show_toast", lambda *args, **kwargs: None)
-    editor = tyre_strategy_planner.TyreStrategyPlanner(None)
-    yield editor
-    editor.set_unmodified()
-    editor.close()
+    from tinypedal.ui.race_calculator import RaceCalculator
+
+    page = RaceCalculator(None)
+    yield page.tyre_planner
+    page.set_unmodified()
+    page.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert not slot_errors
 

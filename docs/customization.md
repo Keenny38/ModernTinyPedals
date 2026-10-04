@@ -291,7 +291,7 @@ Data recording is handled by [Fuel Module](#fuel-module).
 ## Consumption history
 Consumption history data is stored as `CSV` format (.consumption extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
-Consumption history data stores lap time, fuel consumption, battery charge, tyre wear usage data per `track and vehicle class`, which can be loaded in [Fuel Calculator](#fuel-calculator). Up to 100 most recent lap entries are saved per `track and vehicle class`. Data recording is handled by [Fuel Module](#fuel-module).
+Consumption history data stores lap time, fuel consumption, battery charge, tyre wear usage data per `track and vehicle class`, which can be loaded in [Race Calculator](#race-calculator). Up to 100 most recent lap entries are saved per `track and vehicle class`. Data recording is handled by [Fuel Module](#fuel-module).
 
 [**`Back to Top`**](#)
 
@@ -339,7 +339,7 @@ To allow `auto notes loading` function to work, track notes file name must match
 
 
 ## Tyre strategy
-`TinyPedal Tyre Strategy` file is stored as `JSON` format (.tyre-strategy extension). Tyre strategy file can be created or edited with [Tyre Strategy Planner](#tyre-strategy-planner) from `Tools` menu in main window.
+`TinyPedal Tyre Strategy` file is stored as `JSON` format (.tyre-strategy extension). Tyre strategy file can be created or edited in the tyre tab of [Race Calculator](#race-calculator).
 
 [**`Back to Top`**](#)
 
@@ -746,10 +746,10 @@ Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value di
 Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from `Restore Backup` dialog. Set `0` to disable. Default is `10`.
 
     rail_items
-Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `fuel_calculator`, `tyre_strategy_planner`). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer, Fuel Calculator and Tyre Strategy Planner.
+Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer and Race Calculator.
 
     remember_open_pages
-Reopen tool pages (fuel calculator, editors, telemetry viewer...) left open at quit or restart, page shown at quit shown again. Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
+Reopen tool pages (race calculator, editors, telemetry viewer...) left open at quit or restart, page shown last shown again (saved as soon as it is shown, so a crash or a system shutdown keeps it too). Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
 
     show_layout_guides
 Show alignment guides (grid, other widget edges and centers) while dragging a widget. Widgets also snap to centers while snapping is active. Default is enabled.
@@ -1156,98 +1156,40 @@ Enable or disable module.
 [**`Back to Top`**](#)
 
 
-## Fuel calculator
-**Fuel calculator can be accessed from `Tools` menu in main window.**
+## Race calculator
+**Race calculator plans fuel, virtual energy and tyres of a race in one page, which can be accessed from `Race` button of navigation bar, or `Tools` menu in main window.** It replaces the former fuel calculator and tyre strategy planner (their navigation bar entries and open pages now open the race calculator). The next stop of the plan can be shown in game with [Race plan](#race-plan) widget.
 
-Fuel value and unit symbol depend on `Fuel Unit` setting from [Units](#units) config dialog, `L` = liter, `gal` = gallon. Virtual energy unit is `%` = percentage. Note, after changed `Fuel Unit` setting, it is required to close and reopen `Fuel calculator` in order to update units info for calculation.
+Fuel value and unit symbol depend on `Fuel Unit` setting from [Units](#units) config dialog, `L` = liter, `gal` = gallon. Virtual energy unit is `%` = percentage. Note, after changed `Fuel Unit` setting, it is required to close and reopen `Race calculator` in order to update units info for calculation. A typed value is applied when pressing `Enter` or leaving the box (arrows & mouse wheel apply at once), then everything is calculated again. Inputs and tyre plan are kept for next time, `Reset to Zero` clears inputs (starting tread back to 100%).
 
-    Calculation panel
-On the left side is calculation panel, which handles `fuel` and `virtual energy` usage calculation and results display.
+    Top of page (shared by both tabs)
+- Data source: live session (`Load Live`) or consumption history file (`Load File`, `.consumption` or `.csv`), with track and class name. An invalid file is reported and current data kept. `Follow Live`: inputs follow each new lap of the live session (saved).
+- `Race Plan` menu: `Save Race Plan As...` saves race setup, every input and tyre plan in one `.race-plan` file to keep or share, `Open Race Plan...` opens one (tyre plan replaced can be undone).
+- Race: `Time` or `Laps` race (only the field of the selected type is shown), formation or rolling start laps (driven before race clock starts), pit stop time (time lost per stop in pit lane, service time added: refuelling, tyre & driver change), safety margin (laps of fuel kept in the tank at every stop and at the finish).
+- Key figures: race fuel & energy (safety margin included), pit stops (what limits stints: fuel, energy or stint length; stops with tyres), longest stint, average refill per stop (or fuel to load at start when no stop is needed, red when the tank is too small for one lap), tyres used by the tyre plan / maximum allowed.
+- On a narrow window, race setup & key figures wrap on two rows, consumption history moves below calculator and tyre stock below tyre plan.
 
-This panel also includes a vertical `pit stop preview` bar on the left, which visualizes pit stops as blue marks and stint laps as grey marks. Each pit stop mark shows a reference lap completion number. Total estimated number of race laps is displayed at bottom of the bar.
+    Fuel tab
+- Lap & consumption: lap time (`minutes` : `seconds` . `milliseconds`, carried over between boxes, at half tank), fuel & energy per lap, tank capacity, fuel ratio (fuel used per 1% of virtual energy). `Load Live` and `Load File` fill them with the average of the 5 latest valid laps at race pace (laps over 105% of median lap time, as in & out laps, left out), and `Load Live` also sets race length from a live race session. A car using energy only (no fuel per lap) is planned on energy.
+- Start: starting fuel & energy, `0` = full tank, or exactly what the race needs when it needs no stop.
+- Pit stop: refuel rate and energy rate (amount added per second, `0` = refuelling inside pit stop time), so a splash costs less time than a full tank; driver change time; `Tyres Changed While Refuelling` (longest of refuelling and tyre change counts, not both).
+- Race rules: mandatory stops (stints shortened evenly until the race has as many stops), maximum stint time (driver limit), drivers taking turns (one driver change at each stop, driver of each stint in pit stop plan).
+- Pace: fuel effect (lap time lost per 10 fuel units in the tank, from half tank) and track evolution (lap time change per hour, negative when the track gets faster), used for stint durations and laps of a time race.
+- Strategy: timeline of the race, one block per stint with its laps, pit laps above (in orange when tyres are changed, shortened or left out when stops are too close to read), with a summary line (stints, race laps, stop laps, tyres, time spent in the pits).
+- Pit stop plan: start load, then each stop with its lap, fuel & energy to add (full tank while more stints follow, only what is needed for the last one), tyre change (number of tyres), driver and stop time. `Copy` copies the plan as text.
+- Details: total needed (exact ≈ rounded up), stops each resource alone needs, laps & minutes total amounts last, longest stint laps & minutes (safety margin kept), amount left at stint end, consumption per lap to save one stop (`-` without stop), average refill of the pit stop plan.
+- Saving target: laps per stint and consumption per lap (difference with current one) for one stop less, and consumption & stops for laps per stint to aim for.
+- Consumption history: `lap number`, `lap time`, `fuel`, `virtual energy`, `fuel ratio`, `battery drain`, `battery regen`, `battery net change`, `average tyre tread wear`, `tank capacity` of [Consumption History](#consumption-history) data, invalid laps in red. Live history follows new laps while the page is shown. Click a column header to sort (numbers by value), `Valid Laps Only` hides invalid laps (saved). Select laps (whole rows) and click `Add Selected Data`: their average goes to the calculator, invalid laps are left out. `Delete Selected` and `Delete All` remove laps from consumption history (live session or loaded file, asks first, cannot be undone). `Columns` button (or right click on table header) shows or hides optional columns.
 
-Note, when `Energy consumption` value is higher than zero, pit stops and stint laps from preview bar will be calculated based on energy usage. Stint lap mark may not be displayed if there is not enough space to draw.
+How stints are planned: a car pits at the end of a lap, so stints are whole laps; a stint lasts until fuel or energy (whichever runs out first) cannot cover one more lap plus the safety margin, or until stint length limit. In a time race, laps that fit in race time follow lap times and stop times, and fuel & energy share the same stops, so both are calculated for the same race length.
 
-    Consumption history table
-On the right side is consumption history table, which lists `lap number`, `lap time`, `fuel consumption`, `virtual energy consumption`, `fuel ratio`, `battery drain`, `battery regen`, `battery net change`, `average tyre tread wear`, `tank capacity` columns from [Consumption History](#consumption-history) data. Invalid lap time or consumption data is highlighted in red. Nonessential column can be hidden (or shown) by right-click on table header and select corresponding column name.
-
-Click `Load Live` button to load or update consumption history from live session to history table and automatically fill in latest data to calculator.
-
-Click `Load File` button to load data from specific consumption history file to history table and automatically fill in latest data to calculator.
-
-Loaded data source and track and class name will be displayed on status bar.
-
-Select one or more `Time`, `Fuel`, `Energy`, `Tyre`, `Tank` values from history table and click `Add selected data` button to send value to calculator.
-
-Select multiple values from history table and click `Add selected data` button to calculate average reading of selected values and send to calculator.
-
-    Lap time
-Set lap time in `minutes` : `seconds` : `milliseconds` format. Values are automatically carried over between spin boxes when exceeded minimum or maximum value range. This value can be retrieved from `Time` column.
-
-    Tank capacity
-Set vehicle fuel tank capacity. This value can be retrieved from `Tank` column.
-
-    Fuel consumption
-Set fuel consumption per lap. This value can be retrieved from `Fuel` column.
-
-    Energy consumption
-Set virtual energy consumption per lap. This value can be retrieved from `Energy` column.
-
-    Fuel ratio
-Show fuel ratio between fuel and virtual energy consumption.
-
-    Race minutes
-Set race length in minutes for time-based race. Note, option is disabled if `Race laps` is set.
-
-    Race laps
-Set race length in laps for lap-based race. Note, option is disabled if `Race minutes` is set.
-
-    Formation/Rolling
-Set number of formation or rolling start laps.
-
-    Average pit seconds
-Set average pit stop time in seconds.
-
-    Total race fuel, Total race energy
-Show total required fuel or energy to finish race. First value is raw reading with decimal places, second value behind `≈` sign is rounded up integer reading.
-
-    End stint fuel, End stint energy
-Show remaining fuel or energy at the end of stint.
-
-    Total pit stops
-Show total number of pit stops required to finish race. First value is raw reading with decimal places, second value behind `≈` sign is rounded up integer reading.
-
-Note, sometimes when `Average pit seconds` is set to longer duration, ceiling integer reading may be rounded up `2` units higher than raw reading, this is not an error. For example, it may show `5.978 ≈ 7` instead of `5.978 ≈ 6`, this is because when calculating from `6` pit stops, due to less amount time spent in pit stop compare to `7`, more fuel is required per pit stop which would exceed tank capacity, hence calculator adds 1 more pit stop.
-
-    One less pit stop
-Show theoretical fuel or energy consumption in order to make one less pit stop.
-
-    Total laps, Total minutes
-Show total laps and minutes can run based on `Total race fuel` or `Total race energy` value.
-
-    Maximum stint laps, Maximum stint minutes
-Show maximum laps and minutes can run per stint based on `Tank capacity` value (or 100% capacity for virtual energy).
-
-    Starting fuel, Starting energy
-Set amount fuel or energy to carry at the starting of race (first stint). This value affects `Total race fuel (or energy)` and `Total pit stops` calculation, and is used for calculating `Average refueling` or `Average replenishing` per pit stop. Maximum value cannot exceed `Tank capacity` for fuel (or `100%` for energy). If value is set to `0` (default), `Tank capacity` value will be used as starting fuel (or `100%` for starting energy) for `Average refueling` calculation.
-
-    Average refueling, Average replenishing
-Show average refueling or replenishing per pit stop, and display warning color if value exceeds `Tank capacity` (fuel) or `100%` (energy).
-
-    Starting tyre tread
-Set average starting tyre tread (percent). For example, 100% for new tyres, and less for worn tyres.
-
-    Tread wear per lap
-Set average tyre tread wear (percent) per lap. This value can be retrieved from `Tyre` column.
-
-    Tread wear per stint
-Show total average tyre tread wear (percent) per stint. Note, while virtual energy is available, this value will be calculated based on the least `maximum stint laps` between fuel and virtual energy.
-
-    Lifespan laps, Lifespan minutes
-Show total tyre lifespan in laps and minutes based on `tread wear per lap` and `lap time`.
-
-    Lifespan stints
-Show estimated tyre lifespan in number of stints. Note, while virtual energy is available, this value will be calculated based on the least `maximum stint laps` between fuel and virtual energy.
+    Tyre tab
+- Tyre wear: starting tread (when the tyre plan has no tyre at start, else starting tread of its compound), wear per lap (filled from history like other inputs), measured compound (compound the wear per lap was measured on, saved), minimum tread: the strategy proposes tyre changes at the stop before tread would go below it.
+- Tyre rules: maximum tyres allowed for race, tyre change time by number of tyres changed (default values match `LMU` tyre change rule), restricted allocation (an already used tyre cannot be allocated on a different wheel in later stint, which matches `LMU` tyre allocation rule), highlight new tyres.
+- Tyre life: lifespan in laps, minutes and longest stints, tread used over longest stint.
+- Tyre plan: one row per stint, columns `Front Left`, `Front Right`, `Rear Left`, `Rear Right` (tyre installed on each wheel, with remaining tread at start - end of stint) and `Change` (tyre change time of that stop). Once the fuel strategy is ready, rows follow its stints (stint number and laps shown on each row); rows taken out by a shorter strategy are kept aside and come back when it grows again, added rows keep the tyres of the stint before. Tyre wear of a stint = wear per lap x stint laps x compound factor (wear per stint of compound relative to measured compound; wear per stint of compound without wear per lap), and the tyre change time of each stop is added to that stop. Without strategy, rows are edited by hand (`Duplicate Row`, `New Row`, `Insert Below`, `Insert Above`, `Delete Row`). `Propose Changes` fills the plan with tyres of the compound selected in tyre stock, wheel by wheel at the stint it would go below minimum tread (2 tyres when only one axle needs it), within maximum tyres: short of tyres, the best worn tyre that wheel used before (any wheel without restricted allocation) is fitted again, else tyres are kept and the stints short of tyres are reported. Tyres a previous proposal added are reused or removed, so proposing again adds no stock. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo tyre plan edits. Status line: stock (`invalid` when over maximum tyres, tyres without limited stock not counted), used tyres, stints, pit stops, tyre changes and total tyre change time.
+- Tyre stock: compound selector (tyre name starting with `Q` is a tyre reused from qualifying session), `Add` adds a tyre with a unique number and a label showing the stints it runs, `Config` sets compound setting (`Enable Limited Stock`: counts towards maximum tyres, enabled for dry compounds by default; `Starting Tread`; `Wear Per Stint`), `Sort By` compound type or number of stints, `Remove Unused` removes tyres the plan does not use, `Remove`, `Clear All` (corresponding tyres removed from tyre plan too).
+- File menu of tyre plan: `New File`, `Open File` and `Save As` in [Tyre strategy](#tyre-strategy) format, `Export As` spreadsheet (CSV). Tyre plan is also kept automatically between sessions (nothing asked on close).
+- To add a tyre to the plan, drag it from tyre stock onto a wheel (tyres can be dragged & copied in the plan too). Hold `Ctrl` or `Shift` to select several tyres (drag is disabled then). Right click on tyre stock or plan opens a menu, `Delete` removes selected tyres from the plan (asks first).
 
 [**`Back to Top`**](#)
 
@@ -1257,9 +1199,11 @@ Show estimated tyre lifespan in number of stints. Note, while virtual energy is 
 
 Driver stats viewer is used for viewing [Driver Stats](#driver-stats). Note, the viewer only allows limited reset or removal, stat value cannot be edited by design. Any changes will take immediate effect after confirmation, changes cannot be undone.
 
-Driver stats are grouped under specific track name, which can be switched from track name selector on the top.
+Driver stats are grouped under specific track name, which can be switched from track name selector on the top. Key figures of the track sum all vehicles: best lap (and its vehicle), its level, distance, driving time, valid laps (and share of all laps), races (wins & podiums).
 
 To sort by specific stat, click on corresponding column name. Stats are sorted by `personal best lap time` by default.
+
+Community lap times: personal best of each vehicle is compared with community LMU lap times of a published Google Sheet (by default the lap time sheet of [ohne_speed](https://www.youtube.com/@ohne_speed): class reference hotlap of each track & class, race pace ladder from ~100% to 107% of it, fastest car). `Ref.` column shows personal best in percent of class reference, `Level` column its level: `Alien` (~100%), `Competitive` (101%), `Good` (102%), `Midpack` (103-104%), `Tail-ender` (105-106%), `Offline` (slower). The card on the right shows the ladder of selected vehicle with lap time limit of each level, where personal best and race best stand, gap to class reference and fastest car. LMU track names are matched to sheet tracks by name & layout (Spa-Francorchamps Endurance as Spa, Monza Curva Grande as Monza (curvagrande)...), vehicle class from vehicle name (Hyper, LMP2_ELMS, LMP2, LMP3, GT3, GTE): `vehicle_classification` must include class (`Class - Brand` or `Class`) to compare. The sheet is downloaded once a day when page opens and kept in config folder (works offline). `Reference` menu: `Update Reference` downloads again, `Change Sheet Address...` sets another published Google Sheet of same layout, `Compare With Community Lap Times` turns comparison on or off (`enable_lap_reference` and `lap_reference_sheet_url` options of `driver_stats_viewer` in config file).
 
 To view corresponding track map, click `View Map` button.
 
@@ -1594,72 +1538,6 @@ To highlight a `distance` value on `Track Map Viewer`, right-click on a note lin
 To add tag to specific notes, select one or more notes, right-click and click `Add Tag`, then select a tag name.
 
 To remove all tags from specific notes, select one or more notes, right-click and select `Clear Tag`.
-
-[**`Back to Top`**](#)
-
-
-## Tyre strategy planner
-**Tyre strategy planner allows to create and edit tyre strategy plan, which can be accessed from `Tools` menu in main window.**
-
-Note, all setting and data are saved per file as [Tyre strategy](#tyre-strategy) format.
-
-**Important notes:** The planner does not provide `undo` function, it is recommended to save file before doing heavy modification.
-
-**Tyre rule setting (top panel):**
-- Maximum Tyres: set number of available tyres allowed for race.
-- Change Time: set tyre change time during pit stop for corresponding number of tyres. Default values match `LMU` tyre change rule.
-- Restrict Allocation: enable restricted tyre allocation, where an already used tyre cannot be allocated on a different wheel in later stint, which matches `LMU` tyre allocation rule.
-
-**Tyre set & stock list (left panel):**
-- Tyre compound selector: select a predefined `tyre compound` to be added or configured. Tyre name that starts with `Q` is the tyre reused from qualifying session.
-- Add: add selected tyre compound to `tyre stock` list. Each newly added tyre compound will be attached with a `unique number` and `stints` label that indicates number of running stints for each tyre.
-- Config: set tyre compound setting for currently selected tyre compound in tyre compound selector. See `Tyre compound setting` below for details.
-- Sort By: sort tyre stock list by either `Compound Type` or `Number of Stints`.
-- Remove: remove selected tyre from `tyre stock` list. This will also remove corresponding tyre from `tyre plan` table.
-- Clear All: remove all tyres from `tyre stock` list and `tyre plan` table.
-
-**Tyre compound setting (Config button):**
-- Enable Limited Stock: enable limited stock for this tyre compound, which counts towards `Maximum Tyres` from `tyre rule` setting. This option is enabled for all `dry compound` tyres, and disabled for all `wet compound` tyres by default, which matches `LMU` tyre rule.
-- Starting Tread: set starting tyre tread (percent). Set `100` for fresh new tyre, and less for worn tyre such as reused from qualifying session.
-- Wear Per Stint: set average tyre tread wear (percent) per stint.
-
-**Tyre plan table (right panel):**
-- Duplicate Row: duplicate selected row and associated tyres.
-- New Row: add a new row at the bottom of table.
-- Insert Below: insert a new row below selected row.
-- Insert Above: insert a new row above selected row.
-- Delete Row: delete selected rows.
-
-**File menu:**
-- New File: create new tyre strategy file.
-- Open File: open a tyre strategy file, only support [Tyre strategy](#tyre-strategy) format.
-- Save As: save current tyre strategy as [Tyre strategy](#tyre-strategy) format to file.
-- Export As: export current tyre strategy as spreadsheet (CSV) format to file.
-
-**Table rows:**
-- Each row represents a stint with corresponding tyre usage info.
-
-**Table columns:**
-- Front Left: tyre that installed on front left wheel.
-- Front Right: tyre that installed on front right wheel.
-- Rear Left: tyre that installed on rear left wheel.
-- Rear Right: tyre that installed on rear right wheel.
-- Change: amount tyre change time during pit stop.
-
-**Status bar**
-- Stock: shows total number of tyres in `tyre stock` list, and maximum available tyres allowed for race. A `invalid` text is displayed if exceeded maximum available tyres. Note, tyres that without limited stock are not counted toward total stock, such as wet tyres (from default setting).
-- Used: shows total number of tyres used in `tyre plan` table, including tyres that without limited stock.
-- Stints: number of stints that corresponds to rows in `tyre plan` table.
-- Pits: number of pit stops that corresponds to rows in `tyre plan` table.
-- Changes: number of pit stops with tyre changes.
-- Time: sum of tyre change time from all stints.
-
-**Usage**
-- To add `tyre` from list to table, select a tyre name in `tyre stock` list, then `hold` and `drag` it into `tyre plan` table. You can also drag & copy tyre in the table.
-- To select multiple tyres, hold `Ctrl` or `Shift` while clicking on tyres. Note, `drag` is disabled while selected multiple tyres.
-- Right-click on tyre list or table to open context menu for quick-access options.
-- To highlight new tyres (first time installed in race session) in table, enabled `Highlight New Tyre` check box at top panel.
-- To delete tyres from list or table, select one or more tyres, then right-click and select `Removed Selected`. A confirmation dialog will be displayed before deletion.
 
 [**`Back to Top`**](#)
 
@@ -3542,6 +3420,30 @@ Show number of vehicles that stopped in pit lane, and number of vehicles current
 
     pit_requests
 Show number of vehicles that requested for pit stop, and number of vehicles currently outside pit lane.
+
+[**`Back to Top`**](#)
+
+
+## Race plan
+**This widget displays the next pit stop of the [Race Calculator](#race-calculator) plan: lap, fuel & energy to add, tyres to change and stops left.** The plan is made again from race calculator inputs and tyre plan whenever they change (they are kept between sessions), so the widget works with race calculator closed. Laps count from race start, formation laps of race calculator left out.
+
+    pit_window_laps
+Set number of laps before next stop from which next stop is highlighted with `warning_color_pit_window`.
+
+    show_next_stop
+Show lap of next stop, and laps to go in brackets. `END` is shown after last stop, `---` when race calculator has no plan.
+
+    show_refuel
+Show fuel to add at next stop.
+
+    show_energy
+Show virtual energy to add at next stop.
+
+    show_tyres
+Show number of tyres to change at next stop, highlighted with `highlight_color_tyre_change` when tyres are changed. Tyres of race calculator tyre plan, or 4 tyres at stops proposed from minimum tread when tyre plan has no tyre.
+
+    show_stops_left
+Show stops left, and total stops of plan.
 
 [**`Back to Top`**](#)
 

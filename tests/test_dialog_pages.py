@@ -48,10 +48,12 @@ def rail_keys(main) -> list[str]:
 def test_rail_items_setting():
     from tinypedal.ui.nav_rail import default_rail_items, parse_rail_items
 
-    assert parse_rail_items(" home, nope,fuel_calculator,home ,tools") == ["home", "fuel_calculator", "tools"]
+    assert parse_rail_items(" home, nope,race_calculator,home ,tools") == ["home", "race_calculator", "tools"]
+    # Former fuel calculator & tyre strategy planner entries: merged race calculator, once
+    assert parse_rail_items("fuel_calculator,tools,tyre_strategy_planner") == ["race_calculator", "tools"]
     default = default_rail_items()
     assert "pacenotes" not in default
-    assert default[-3:] == ["driver_stats_viewer", "fuel_calculator", "tyre_strategy_planner"]
+    assert default[-3:] == ["lap_viewer", "driver_stats_viewer", "race_calculator"]
 
 
 def test_default_rail(window):
@@ -59,8 +61,8 @@ def test_default_rail(window):
 
     keys = rail_keys(window)
     assert f"page:{PAGE_INDEX['pacenotes']}" not in keys
-    assert "railTool:fuel_calculator.FuelCalculator" in keys
-    assert "railTool:tyre_strategy_planner.TyreStrategyPlanner" in keys
+    assert "railTool:race_calculator.RaceCalculator" in keys
+    assert not [key for key in keys if "fuel_calculator" in key or "tyre_strategy_planner" in key]
     assert "railTool:driver_stats_viewer.DriverStatsViewer" in keys
 
 
@@ -75,18 +77,18 @@ def test_customize_rail(window):
     entries = editor.list_entries
     for row in range(entries.count()):
         item = entries.item(row)
-        keep = item.data(Qt.ItemDataRole.UserRole) in ("home", "pacenotes", "fuel_calculator")
+        keep = item.data(Qt.ItemDataRole.UserRole) in ("home", "pacenotes", "race_calculator")
         item.setCheckState(Qt.CheckState.Checked if keep else Qt.CheckState.Unchecked)
     row = next(row for row in range(entries.count()) if entries.item(row).data(Qt.ItemDataRole.UserRole) == "pacenotes")
     entries.setCurrentRow(row)
     editor.move_current(-row)  # to top
     editor.move_current(-1)  # already first: no change
     editor.saving()
-    assert cfg.application["rail_items"] == "pacenotes,home,fuel_calculator"
-    assert len(rail_keys(window)) == 3 and rail_keys(window)[2] == "railTool:fuel_calculator.FuelCalculator"
+    assert cfg.application["rail_items"] == "pacenotes,home,race_calculator"
+    assert len(rail_keys(window)) == 3 and rail_keys(window)[2] == "railTool:race_calculator.RaceCalculator"
     assert not view.dialog_pages()  # editor page closed
-    view._rail_shortcuts[2].activated.emit()  # Ctrl+3: fuel calculator page
-    assert type(view.dialog_pages()[0].dialog).__name__ == "FuelCalculator"
+    view._rail_shortcuts[2].activated.emit()  # Ctrl+3: race calculator page
+    assert type(view.dialog_pages()[0].dialog).__name__ == "RaceCalculator"
 
 
 def test_rail_editor_reset_and_nothing_checked(window):
@@ -111,10 +113,10 @@ def test_tool_and_config_shown_as_pages(window):
 
     view = window.centralWidget()
     view.set_current_index(1)
-    open_tool("fuel_calculator.FuelCalculator", window)
-    open_tool("fuel_calculator.FuelCalculator", window)  # same tool: its page again
-    assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["FuelCalculator"]
-    assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "FuelCalculator"]
+    open_tool("race_calculator.RaceCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)  # same tool: its page again
+    assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["RaceCalculator"]
+    assert not [widget for widget in QApplication.topLevelWidgets() if type(widget).__name__ == "RaceCalculator"]
 
     def open_config(name):
         UserConfig(parent=window, key_name=name, preset_name="test", config_type="widget",
@@ -181,9 +183,9 @@ def test_open_pages_indicator(window, monkeypatch):
     from tinypedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
-    fuel = window.findChild(NavButton, "railTool:fuel_calculator.FuelCalculator")
+    fuel = window.findChild(NavButton, "railTool:race_calculator.RaceCalculator")
     assert view._button_pages.isHidden()
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     assert view._button_pages.isHidden()  # rail tool: a page like any other, not an open page
     open_tool("heatmap_editor.HeatmapEditor", window)
     open_tool("brake_editor.BrakeEditor", window)
@@ -197,7 +199,7 @@ def test_open_pages_indicator(window, monkeypatch):
     assert len(view.dialog_pages()) == 3 and view._pages.currentWidget().dialog is editor
     editor.set_unmodified()
     assert view.close_all_pages(view.other_pages())
-    assert [page.title for page in view.dialog_pages()] == ["Fuel Calculator"]  # rail page kept
+    assert [page.title for page in view.dialog_pages()] == ["Race Calculator"]  # rail page kept
     assert view._button_pages.isHidden()
 
 
@@ -236,7 +238,7 @@ def test_closed_page_goes_back_to_page_shown_before(window):
     from tinypedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
-    open_tool("fuel_calculator.FuelCalculator", window)  # rail page kept in background
+    open_tool("race_calculator.RaceCalculator", window)  # rail page kept in background
     view.set_current_index(1)
     open_tool("heatmap_editor.HeatmapEditor", window)
     view.dialog_pages()[-1].dialog.close()
@@ -299,15 +301,15 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
     from tinypedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     open_tool("brake_editor.BrakeEditor", window)
     UserConfig(parent=window, key_name="speedometer", preset_name="test", config_type="widget",
                user_setting=cfg.user.setting, default_setting=cfg.default.setting,
                reload_func=lambda: None).open()  # config dialogs are not tools: never reopened
     view.show_page_widget(view.dialog_pages()[0])
-    assert view.open_page_paths() == ["*fuel_calculator.FuelCalculator", "brake_editor.BrakeEditor"]
+    assert view.open_page_paths() == ["*race_calculator.RaceCalculator", "brake_editor.BrakeEditor"]
     window.save_open_pages()
-    assert cfg.application["open_pages"] == "*fuel_calculator.FuelCalculator,brake_editor.BrakeEditor"
+    assert cfg.application["open_pages"] == "*race_calculator.RaceCalculator,brake_editor.BrakeEditor"
 
     # Next startup: same pages, shown page shown again, window not brought to front
     cfg.application["open_pages"] += ",unknown.Tool"
@@ -317,7 +319,7 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
         other_view = other.centralWidget()
         assert not other_view.dialog_pages()  # reopened once window is shown
         QApplication.processEvents()
-        assert [page.title for page in other_view.dialog_pages()] == ["Fuel Calculator", "Brake Editor"]
+        assert [page.title for page in other_view.dialog_pages()] == ["Race Calculator", "Brake Editor"]
         assert other_view._pages.currentWidget() is other_view.dialog_pages()[0]
         assert not other.isVisible()
     finally:
@@ -338,7 +340,7 @@ def test_open_pages_current_app_page_kept(window):
 def test_open_pages_not_remembered_when_disabled(window, monkeypatch):
     from tinypedal.ui.tools_view import open_tool
 
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     monkeypatch.setitem(cfg.application, "remember_open_pages", False)
     window.save_open_pages()
     assert cfg.application["open_pages"] == ""
@@ -347,9 +349,9 @@ def test_open_pages_not_remembered_when_disabled(window, monkeypatch):
 def test_language_change_keeps_open_pages(window):
     from tinypedal.ui.tools_view import open_tool
 
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     window.retranslate()
-    assert [type(page.dialog).__name__ for page in window.centralWidget().dialog_pages()] == ["FuelCalculator"]
+    assert [type(page.dialog).__name__ for page in window.centralWidget().dialog_pages()] == ["RaceCalculator"]
 
 
 def test_rail_entries_keep_size_and_scroll(window):
@@ -390,7 +392,7 @@ def test_rail_tools_have_no_close_buttons(window):
                 if button.text() == tr("Close") and not button.isHidden()]
 
     for path in ("lap_viewer.LapViewer", "driver_stats_viewer.DriverStatsViewer",
-                 "fuel_calculator.FuelCalculator", "tyre_strategy_planner.TyreStrategyPlanner"):
+                 "race_calculator.RaceCalculator"):
         open_tool(path, window)
         assert not close_buttons(view._pages.currentWidget()), path
     open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: title & own close buttons
@@ -412,7 +414,7 @@ def test_escape_does_not_close_rail_tool_page(window):
     def escape(dialog):
         QApplication.sendEvent(dialog, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
 
-    open_tool("fuel_calculator.FuelCalculator", window)  # in rail: Esc ignored
+    open_tool("race_calculator.RaceCalculator", window)  # in rail: Esc ignored
     escape(view.dialog_pages()[0].dialog)
     assert len(view.dialog_pages()) == 1
     open_tool("heatmap_editor.HeatmapEditor", window)  # not in rail: Esc closes
@@ -426,7 +428,7 @@ def test_language_change_keeps_config_and_edited_pages(window):
 
     view = window.centralWidget()
     view.set_current_index(1)
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     open_tool("heatmap_editor.HeatmapEditor", window)
     editor = view.dialog_pages()[-1].dialog
     editor.set_modified()  # unsaved edits: page kept as it is
@@ -438,7 +440,7 @@ def test_language_change_keeps_config_and_edited_pages(window):
     assert new_view is not view
     dialogs = [page.dialog for page in new_view.dialog_pages()]
     assert editor in dialogs and config in dialogs  # same dialogs, edits kept
-    assert "FuelCalculator" in [type(dialog).__name__ for dialog in dialogs]  # tool reopened translated
+    assert "RaceCalculator" in [type(dialog).__name__ for dialog in dialogs]  # tool reopened translated
     assert new_view._pages.currentWidget().dialog is config  # shown page shown again
     config.close()  # back to page shown before, closing still works
     assert config not in [page.dialog for page in new_view.dialog_pages()]
@@ -472,10 +474,10 @@ def test_hotkey_restart_saves_open_pages(window, monkeypatch):
 
     restarted = []
     monkeypatch.setattr(loader, "restart", lambda: restarted.append(1))
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     window.show()
     hotkey_restart_application()
-    assert restarted and cfg.application["open_pages"] == "*fuel_calculator.FuelCalculator"
+    assert restarted and cfg.application["open_pages"] == "*race_calculator.RaceCalculator"
 
 
 def test_go_back_to_previous_pages(window):
@@ -487,9 +489,9 @@ def test_go_back_to_previous_pages(window):
     view = window.centralWidget()
     view.set_current_index(0)
     view.set_current_index(1)
-    open_tool("fuel_calculator.FuelCalculator", window)
+    open_tool("race_calculator.RaceCalculator", window)
     view.set_current_index(3)
-    assert view.go_back() and type(view._pages.currentWidget().dialog).__name__ == "FuelCalculator"
+    assert view.go_back() and type(view._pages.currentWidget().dialog).__name__ == "RaceCalculator"
     assert view.go_back() and view.current_index() == 1  # further back, no ping-pong
     window.mousePressEvent(QMouseEvent(  # mouse back button
         QEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(5, 5), Qt.MouseButton.BackButton,
@@ -513,3 +515,71 @@ def test_rail_fades_show_hidden_entries(window):
     bar.setValue(bar.maximum())
     assert not top.isHidden() and bottom.isHidden()
     assert not top.grab().isNull()
+
+
+def test_shown_page_remembered_without_quit(window):
+    """Page shown is saved at once: a restart after a crash or a shutdown reopens it"""
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    QApplication.processEvents()  # startup pages restored: tracking on
+    assert view.track_pages
+    view.set_current_index(3)
+    view.set_current_index(1)
+    assert view.go_back() and cfg.application["last_page_index"] == 3  # not only rail clicks
+    open_tool("race_calculator.RaceCalculator", window)
+    assert cfg.application["open_pages"] == "*race_calculator.RaceCalculator"  # tool page shown
+    view.set_current_index(2)
+    assert cfg.application["open_pages"] == "race_calculator.RaceCalculator"
+    assert cfg.application["last_page_index"] == 2
+
+
+def test_last_tool_page_shown_at_next_startup(window, monkeypatch):
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui.tools_view import open_tool
+
+    QApplication.processEvents()
+    open_tool("race_calculator.RaceCalculator", window)  # left shown, app killed (no quit)
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    other = app_module.AppWindow()
+    try:
+        QApplication.processEvents()
+        current = other.centralWidget()._pages.currentWidget()
+        assert type(current.dialog).__name__ == "RaceCalculator"
+    finally:
+        for page in other.centralWidget().dialog_pages():
+            if page.dialog is not None:
+                page.dialog.close()
+        other.deleteLater()
+
+
+def test_quit_keeps_saved_pages(window, monkeypatch):
+    from tinypedal import loader
+    from tinypedal.ui.tools_view import open_tool
+
+    QApplication.processEvents()
+    open_tool("race_calculator.RaceCalculator", window)
+    monkeypatch.setattr(loader, "close", lambda: None)
+    monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: None))
+    monkeypatch.setattr(type(window), "save_window_state", lambda self: None, raising=False)
+    monkeypatch.setattr(window, "_AppWindow__break_signal", lambda: None, raising=False)
+    window.quit_app()  # pages closed after saving: closing them does not overwrite
+    assert cfg.application["open_pages"] == "*race_calculator.RaceCalculator"
+
+
+def test_former_tool_pages_reopen_as_race_calculator(window, monkeypatch):
+    from tinypedal.ui import app as app_module
+
+    cfg.application["open_pages"] = "*fuel_calculator.FuelCalculator,tyre_strategy_planner.TyreStrategyPlanner"
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    other = app_module.AppWindow()
+    try:
+        QApplication.processEvents()
+        pages = other.centralWidget().dialog_pages()
+        assert [type(page.dialog).__name__ for page in pages] == ["RaceCalculator"]  # merged: once
+        assert other.centralWidget()._pages.currentWidget() is pages[0]
+    finally:
+        for page in other.centralWidget().dialog_pages():
+            if page.dialog is not None:
+                page.dialog.close()
+        other.deleteLater()

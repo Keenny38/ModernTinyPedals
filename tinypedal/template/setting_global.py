@@ -61,7 +61,7 @@ GLOBAL_DEFAULT = {
         # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
         "rail_items": (
             "home,widget,module,preset,spectate,hotkey,tools,"
-            "lap_viewer,driver_stats_viewer,fuel_calculator,tyre_strategy_planner"
+            "lap_viewer,driver_stats_viewer,race_calculator"
         ),
         "enable_layout_per_screen_setup": True,
         # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
@@ -151,9 +151,46 @@ GLOBAL_DEFAULT = {
         "show_column_battery_net_change": True,
         "show_column_tyre_wear": True,
         "show_column_tank_capacity": True,
+        # Inputs of last time
+        "input_lap_time": 0.0,
+        "input_fuel_per_lap": 0.0,
+        "input_energy_per_lap": 0.0,
+        "input_tank_capacity": 0.0,
+        "enable_lap_race": False,
+        "input_race_minutes": 0,
+        "input_race_laps": 0,
+        "input_formation_laps": 0.0,
+        "input_pit_seconds": 0.0,
+        "input_safety_margin": 0.0,
+        "input_fuel_start": 0.0,
+        "input_energy_start": 0.0,
+        "input_tread_start": 100.0,
+        "input_wear_per_lap": 0.0,
+        "input_minimum_tread": 0.0,
+        "input_refuel_rate": 0.0,
+        "input_energy_rate": 0.0,
+        "enable_tyres_during_refuel": False,
+        "input_driver_change_seconds": 0.0,
+        "input_minimum_stops": 0,
+        "input_max_stint_minutes": 0.0,
+        "input_drivers": 1,
+        "input_fuel_effect": 0.0,
+        "input_track_evolution": 0.0,
+        "input_target_stint_laps": 0,
+        "input_measured_compound": 3,
+        "enable_follow_live": False,
+        "enable_valid_laps_only": False,
+    },
+    "driver_stats_viewer": {
+        "enable_lap_reference": True,
+        "lap_reference_sheet_url": (
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vTN03UvJDm99byA6vQPZHKOCYVvfxLu1zkJAzdaKyROykzEKY2-"
+            "Xl1rl1q5znZEf36m88dxMKsY2eaO/pubhtml#gid=1766901750"
+        ),
     },
     "tyre_strategy_planner": {
         "last_file_path": "",
+        "last_file_name": "",
     },
     "track_map_viewer": {
         "show_dark_background": True,

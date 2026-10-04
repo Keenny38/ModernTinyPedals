@@ -45,8 +45,7 @@ logger = logging.getLogger(__name__)
 # Dialog modules are imported when first opened, to keep startup light
 TOOL_SECTIONS = (
     ("Utilities", (
-        ("Fuel Calculator", "\ue8ef", "fuel_calculator.FuelCalculator"),  # calculator
-        ("Tyre Strategy Planner", "\ue7c1", "tyre_strategy_planner.TyreStrategyPlanner"),  # flag
+        ("Race Calculator", "\ue8ef", "race_calculator.RaceCalculator"),  # calculator
         ("Driver Stats Viewer", "\ue77b", "driver_stats_viewer.DriverStatsViewer"),  # contact
         ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
         ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
@@ -71,8 +70,24 @@ TOOL_SECTIONS = (
 )
 
 
+# Former tools merged into another one: old path (saved open pages, navigation bar) -> new path
+RENAMED_TOOLS = {
+    "fuel_calculator.FuelCalculator": "race_calculator.RaceCalculator",
+    "tyre_strategy_planner.TyreStrategyPlanner": "race_calculator.RaceCalculator",
+}
+RENAMED_TOOL_KEYS = {old.split(".", 1)[0]: new.split(".", 1)[0] for old, new in RENAMED_TOOLS.items()}
+# Extra words finding a tool in command palette (former names, what it covers), both languages
+TOOL_KEYWORDS = {
+    "race_calculator.RaceCalculator": (
+        "fuel calculator tyre tire strategy planner energy pit stop stint "
+        "carburant calculateur pneus strategie energie arret relais"
+    ),
+}
+
+
 def open_tool(dialog_path: str, parent):
     """Open tool dialog from "module.DialogClass" path relative to ui package"""
+    dialog_path = RENAMED_TOOLS.get(dialog_path, dialog_path)
     module_name, class_name = dialog_path.rsplit(".", 1)
     host = find_dialog_host(parent)
     if host is not None and host.activate_dialog_page(class_name):  # already open as page in app

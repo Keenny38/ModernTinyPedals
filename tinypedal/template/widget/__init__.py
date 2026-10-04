@@ -91,6 +91,7 @@ WIDGET_DISPLAY_ORDER = (
     "pedal",
     "pit_stop_estimate",
     "push_to_pass",
+    "race_plan",
     "radar",
     "rake_angle",
     "relative",

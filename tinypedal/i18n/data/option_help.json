@@ -88,7 +88,8 @@
             "number_of_automatic_backups": "Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from Restore Backup dialog. Set 0 to disable. Default is 10.",
             "position_x": "Define main window position on screen in pixels. Those values will be auto updated and saved while remember_position option is enabled.",
             "position_y": "Define main window position on screen in pixels. Those values will be auto updated and saved while remember_position option is enabled.",
-            "rail_items": "Entries of the navigation bar of main window, in order, separated by comma: pages (home, widget, module, preset, spectate, pacenotes, hotkey, tools) and tools (dialog module name, for example lap_viewer, driver_stats_viewer, fuel_calculator, tyre_strategy_planner). Easier to set by right-clicking the navigation bar, Customize Navigation Bar...: check entries to show, drag or Up / Down to reorder, Reset for default. Ctrl+1 to Ctrl+9 open the first 9 entries. Pages left out stay in command palette (Ctrl+K). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer, Fuel Calculator and Tyre Strategy Planner.",
+            "rail_items": "Entries of the navigation bar of main window, in order, separated by comma: pages (home, widget, module, preset, spectate, pacenotes, hotkey, tools) and tools (dialog module name, for example lap_viewer, driver_stats_viewer, race_calculator; former fuel_calculator & tyre_strategy_planner entries open race calculator). Easier to set by right-clicking the navigation bar, Customize Navigation Bar...: check entries to show, drag or Up / Down to reorder, Reset for default. Ctrl+1 to Ctrl+9 open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows…",
+            "remember_open_pages": "Reopen tool pages (race calculator, editors, telemetry viewer...) left open at quit or restart, page shown last shown again (saved as soon as it is shown, so a crash or a system shutdown keeps it too). Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in Window menu, Reopen Pages at Startup. Default is enabled.",
             "remember_position": "Remember main window last position.",
             "remember_size": "Remember main window last size.",
             "show_at_startup": "Show main window at startup, otherwise hides to tray icon.",
@@ -994,6 +995,14 @@
             "minimum_activation_time_delay": "Set minimum time delay between each P2P activation, unit in seconds.",
             "show_activation_timer": "Show electric boost motor activation timer.",
             "show_battery_charge": "Show percentage available battery charge."
+        },
+        "race_plan": {
+            "pit_window_laps": "Set number of laps before next stop from which next stop is highlighted with warning_color_pit_window.",
+            "show_energy": "Show virtual energy to add at next stop.",
+            "show_next_stop": "Show lap of next stop, and laps to go in brackets. END is shown after last stop, --- when race calculator has no plan.",
+            "show_refuel": "Show fuel to add at next stop.",
+            "show_stops_left": "Show stops left, and total stops of plan.",
+            "show_tyres": "Show number of tyres to change at next stop, highlighted with highlight_color_tyre_change when tyres are changed. Tyres of race calculator tyre plan, or 4 tyres at stops proposed from minimum tread when tyre plan has no tyre."
         },
         "radar": {
             "auto_hide_minimum_distance_ahead": "The three values define an invisible rectangle area(unit meter) that auto hides radar if no vehicle is within the rectangle area. Default value is -1, which auto scales with radar_radius value. Set to any positive value to customize radar auto-hide range. Note, each value is measured from center of player's vehicle position.",

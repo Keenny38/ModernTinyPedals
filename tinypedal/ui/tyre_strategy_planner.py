@@ -17,21 +17,26 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Tyre strategy planner
+Race calculator, tyre side: tyre plan (tyre set on each wheel per stint), tyre stock & rules
+
+Tyre tab of the race calculator page (race_calculator.py). Once the fuel strategy is ready,
+plan rows follow its stints, and the tyre change time of each stop is added to that stop.
 """
 
 from __future__ import annotations
 
 import os
-from typing import cast
+from collections import Counter
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
-from PySide6.QtCore import QPoint, QStandardPaths, Qt, Signal, Slot
+from PySide6.QtCore import QPoint, QStandardPaths, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QBoxLayout,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -42,8 +47,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
-    QSpinBox,
-    QSplitter,
+    QPushButton,
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
@@ -51,7 +55,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..const_file import ConfigType, FileFilter
+from ..const_file import ConfigType, FileExt, FileFilter
 from ..formatter import format_option_name
 from ..i18n import tr, trm
 from ..setting import cfg
@@ -77,7 +81,32 @@ from ._common import (
     table_item,
 )
 from .config import UserConfig
+from .race_widgets import Card, double_box, muted_label, set_warning, spin_box
 from .toast import show_toast
+
+if TYPE_CHECKING:
+    from ..fuel_strategy import Strategy
+
+
+CORNER_STARTING_TREAD = (
+    "front_left_starting_tread",
+    "front_right_starting_tread",
+    "rear_left_starting_tread",
+    "rear_right_starting_tread",
+)
+CORNER_WEAR_PER_STINT = (
+    "front_left_wear_per_stint",
+    "front_right_wear_per_stint",
+    "rear_left_wear_per_stint",
+    "rear_right_wear_per_stint",
+)
+AUTOSAVE_NAME = "race_calculator_tyres"  # tyre plan kept between sessions (config folder)
+MEASURED_DEFAULT = tuple(DEFAULT_TYRE_SET).index("Medium")
+
+
+def average_setting(setting: dict, keys: tuple[str, ...]) -> float:
+    """Average of 4 wheels of a compound setting"""
+    return sum(max(setting[key], 0.0) for key in keys) / len(keys)
 
 
 def set_tyre_strategy_file_path(filename: str = "") -> str:
@@ -286,6 +315,24 @@ class TyrePlanTable(QTableWidget):
                     text = ""
                 self._add_item(row_index, column_index, text)
 
+    def load_row(self, row_index: int, tyre_names: list[str]):
+        """New row at row_index with given tyres"""
+        self._add_row(row_index)
+        for column_index, tyre_name in enumerate(tyre_names[:self._wheel_count]):
+            if tyre_name:
+                table_item(self, row_index, column_index).setText(tyre_name)
+                self._add_stats(row_index, column_index)
+
+    def copy_row(self, source_row: int, row_index: int):
+        """New row at row_index with tyres of source row (same tyres, no change)"""
+        self._add_row(row_index)
+        for column_index in range(self._wheel_count):
+            item = self.item(source_row, column_index) if source_row >= 0 else None
+            tyre_name = item.text() if item else ""
+            if tyre_name:
+                table_item(self, row_index, column_index).setText(tyre_name)
+                self._add_stats(row_index, column_index)
+
     def set_change_time(self, row_index: int, column_index: int, seconds: float):
         """Set tyre change time"""
         item = table_item(self, row_index, column_index)
@@ -410,14 +457,11 @@ class TyreSetList(QListWidget):
             self.takeItem(self.row(item))
 
     def update_uses(self, tyre_name_list: list[str]):
-        """Update number of stints for each tyre"""
+        """Update number of stints for each tyre (counted in one pass)"""
+        uses = Counter(tyre_name_list)
         for row in range(self.count()):
             item = cast(TyreNameListItem, self.item(row))
-            tyre_name = item.text()
-            if tyre_name in tyre_name_list:
-                count_stints = tyre_name_list.count(tyre_name)
-            else:
-                count_stints = 0
+            count_stints = uses[item.text()]
             item.stints = count_stints
             cast(TyreSetItemTag, self.itemWidget(item)).set_uses(count_stints)
 
@@ -566,65 +610,44 @@ class TyreStatusBar(QStatusBar):
         self._change_time.setText(trm(f"Time: {change_time:+.2f}s"))
 
 
-class TyreRulePanel(QFrame):
-    """Tyre rule panel"""
+class TyreRulePanel(Card):
+    """Tyre rules: maximum tyres, change time by tyres changed, allocation"""
 
-    def __init__(self, parent: TyreStrategyPlanner):
-        super().__init__(parent)
-        layout = QHBoxLayout()
-        layout.setContentsMargins(4, 2, 4, 2)
-        self.setLayout(layout)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-
-        self._max_tyre = QSpinBox()
-        self._max_tyre.setRange(0, 999)
+    def __init__(self, parent: TyrePlannerPanel):
+        super().__init__(parent, tr("Tyre Rules"))
+        self._max_tyre = spin_box(999, tooltip=tr("Tyres allowed for the race (limited stock compounds)"))
         self._max_tyre.setValue(4)
-        self._max_tyre.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._max_tyre.valueChanged.connect(parent.update_tyre_status)
 
         self._tyre_alloc = QCheckBox(tr("Restrict Allocation"))
+        self._tyre_alloc.setToolTip(tr("A used tyre stays on the same wheel"))
         self._tyre_alloc.setChecked(True)
         self._tyre_alloc.toggled.connect(parent.update_tyre_status)
 
         self._change_time_1 = self._add_tyre_time_spinbox(1)
-        self._change_time_1.valueChanged.connect(parent.update_tyre_wear)
-
         self._change_time_2 = self._add_tyre_time_spinbox(2)
-        self._change_time_2.valueChanged.connect(parent.update_tyre_wear)
-
         self._change_time_3 = self._add_tyre_time_spinbox(3)
-        self._change_time_3.valueChanged.connect(parent.update_tyre_wear)
-
         self._change_time_4 = self._add_tyre_time_spinbox(4)
-        self._change_time_4.valueChanged.connect(parent.update_tyre_wear)
+        for spinbox in (self._change_time_1, self._change_time_2, self._change_time_3, self._change_time_4):
+            spinbox.valueChanged.connect(parent.update_tyre_wear)
 
         self._highlight_new = QCheckBox(tr("Highlight New Tyre"))
         self._highlight_new.setChecked(True)
         self._highlight_new.toggled.connect(parent.update_tyre_wear)
 
-        layout.addWidget(QLabel(tr("Maximum Tyres")))
-        layout.addWidget(self._max_tyre)
-        layout.addWidget(add_vertical_separator())
-        layout.addWidget(QLabel(tr("Change Time")))
-        layout.addWidget(self._change_time_1)
-        layout.addWidget(self._change_time_2)
-        layout.addWidget(self._change_time_3)
-        layout.addWidget(self._change_time_4)
-        layout.addWidget(add_vertical_separator())
-        layout.addWidget(self._tyre_alloc)
-        layout.addWidget(add_vertical_separator())
-        layout.addWidget(self._highlight_new)
-        layout.addStretch(1)
+        self.add_row(tr("Maximum Tyres"), self._max_tyre, 0)
+        label = muted_label(tr("Change Time"))
+        label.setToolTip(tr("Time added to the stop, by number of tyres changed"))
+        self.grid.addWidget(label, 1, 0, 1, 2)
+        for row, spinbox in enumerate(
+                (self._change_time_1, self._change_time_2, self._change_time_3, self._change_time_4), start=2):
+            self.add_row(trm(f"{row - 1} tyre(s)"), spinbox, row)
+        self.grid.addWidget(self._tyre_alloc, 6, 0, 1, 2)
+        self.grid.addWidget(self._highlight_new, 7, 0, 1, 2)
 
     def _add_tyre_time_spinbox(self, count: int):
         """Add tyre time spinbox"""
-        spinbox = QDoubleSpinBox()
-        spinbox.setRange(0, 99)
-        spinbox.setDecimals(1)
-        spinbox.setSingleStep(0.1)
-        spinbox.setAlignment(Qt.AlignmentFlag.AlignRight)
-        spinbox.setSuffix(f" s/{count}")
-        return spinbox
+        return double_box(99, 1, 0.1, "s")
 
     def load_tyre_rule(self, user_data: dict):
         """Load tyre rule from user data"""
@@ -669,27 +692,26 @@ class TyreRulePanel(QFrame):
         )
 
 
-class TyreSetPanel(QFrame):
-    """Tyre set panel"""
+class TyreSetPanel(Card):
+    """Tyre stock: compound selector, tyres available to the plan (drag to a wheel)"""
 
-    def __init__(self, parent: TyreStrategyPlanner, tyre_set_list: TyreSetList):
-        super().__init__(parent)
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.setMinimumWidth(UIScaler.size(17))
-        self.setLayout(layout)
+    def __init__(self, parent: TyrePlannerPanel, tyre_set_list: TyreSetList):
+        super().__init__(parent, tr("Tyre Stock"))
+        self.setMinimumWidth(UIScaler.size(15))
 
         # Button top
         self._tyre_selector = QComboBox()
+        self._tyre_selector.setToolTip(tr("Compound added to stock, and of proposed tyre changes"))
 
         button_addtyre = CompactButton(tr("Add"))
         button_addtyre.clicked.connect(parent.add_tyre_to_set)
 
         button_config = CompactButton(tr("Config"))
+        button_config.setToolTip(tr("Starting tread & wear per stint of compound"))
         button_config.clicked.connect(parent.open_tyre_config_dialog)
 
         layout_top = QHBoxLayout()
-        layout_top.addWidget(self._tyre_selector)
+        layout_top.addWidget(self._tyre_selector, stretch=1)
         layout_top.addWidget(button_addtyre)
         layout_top.addWidget(button_config)
 
@@ -711,15 +733,28 @@ class TyreSetPanel(QFrame):
         button_clearall = CompactButton(tr("Clear All"))
         button_clearall.clicked.connect(parent.remove_all_tyres)
 
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_sort)
-        layout_button.addStretch(1)
-        layout_button.addWidget(button_remove)
-        layout_button.addWidget(button_clearall)
+        button_unused = CompactButton(tr("Remove Unused"))
+        button_unused.setToolTip(tr("Remove tyres the plan does not use"))
+        button_unused.clicked.connect(parent.remove_unused_tyres)
 
-        layout.addLayout(layout_top)
-        layout.addWidget(tyre_set_list)
-        layout.addLayout(layout_button)
+        layout_button = QVBoxLayout()  # two rows: stock card stays narrow
+        layout_sort = QHBoxLayout()
+        layout_sort.addWidget(button_sort)
+        layout_sort.addStretch(1)
+        layout_sort.addWidget(button_unused)
+        layout_remove = QHBoxLayout()
+        layout_remove.addStretch(1)
+        layout_remove.addWidget(button_remove)
+        layout_remove.addWidget(button_clearall)
+        layout_button.addLayout(layout_sort)
+        layout_button.addLayout(layout_remove)
+
+        hint = muted_label(tr("Drag a tyre onto a wheel of the plan."))
+        hint.setWordWrap(True)
+        self.layout_card.addLayout(layout_top)
+        self.layout_card.addWidget(hint)
+        self.layout_card.addWidget(tyre_set_list, stretch=1)
+        self.layout_card.addLayout(layout_button)
 
     def load_tyre_set(self, userdata: dict[str, dict]):
         """Load tyre set"""
@@ -732,15 +767,18 @@ class TyreSetPanel(QFrame):
         return self._tyre_selector.currentText()
 
 
-class TyrePlanPanel(QFrame):
-    """Tyre plan panel"""
+class TyrePlanPanel(Card):
+    """Tyre plan: one row per stint (follows the fuel strategy once it is ready), file actions"""
 
-    def __init__(self, parent: TyreStrategyPlanner, tyre_plan_table: TyrePlanTable):
-        super().__init__(parent)
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.setMinimumWidth(UIScaler.size(60))
-        self.setLayout(layout)
+    def __init__(self, parent: TyrePlannerPanel, tyre_plan_table: TyrePlanTable):
+        self.button_propose = QPushButton(tr("Propose Changes"))
+        self.button_propose.setToolTip(tr(
+            "New tyres at the start and at the stops the strategy proposes (minimum tread), "
+            "compound selected in tyre stock"))
+        self.button_propose.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.button_propose.clicked.connect(parent.propose_changes)
+        super().__init__(parent, tr("Tyre Plan"), (self.button_propose,))
+        self.setMinimumWidth(UIScaler.size(34))
 
         # Filename edit
         self._filename = QLineEdit()
@@ -771,42 +809,46 @@ class TyrePlanPanel(QFrame):
         button_save = CompactButton(tr("Save As"))
         button_save.clicked.connect(parent.saving)
 
-        layout_top = QHBoxLayout()
+        layout_top = self.layout_top = QHBoxLayout()
         layout_top.addWidget(button_file)
         layout_top.addWidget(self._filename, stretch=1)
         layout_top.addWidget(button_save)
 
-        # Button bottom
-        button_duplicate = CompactButton(tr("Duplicate Row"))
-        button_duplicate.clicked.connect(parent.duplicate_row)
-
-        button_addnew = CompactButton(tr("New Row"))
-        button_addnew.clicked.connect(parent.add_new_row)
-
-        button_insertbelow = CompactButton(tr("Insert Below"))
-        button_insertbelow.clicked.connect(parent.insert_row_below)
-
-        button_insertabove = CompactButton(tr("Insert Above"))
-        button_insertabove.clicked.connect(parent.insert_row_above)
-
-        button_delete = CompactButton(tr("Delete Row"))
-        button_delete.clicked.connect(parent.delete_row)
-
-        button_close = CompactButton(tr("Close"))
-        button_close.clicked.connect(parent.close)
-
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(button_duplicate)
-        layout_button.addWidget(button_addnew)
-        layout_button.addWidget(button_insertbelow)
-        layout_button.addWidget(button_insertabove)
-        layout_button.addWidget(button_delete)
+        # Row buttons: manual plan only (rows follow stints once the fuel strategy is ready)
+        self.row_buttons = QWidget()
+        layout_button = QHBoxLayout(self.row_buttons)
+        layout_button.setContentsMargins(0, 0, 0, 0)
+        for text, action in (
+            (tr("Duplicate Row"), parent.duplicate_row),
+            (tr("New Row"), parent.add_new_row),
+            (tr("Insert Below"), parent.insert_row_below),
+            (tr("Insert Above"), parent.insert_row_above),
+            (tr("Delete Row"), parent.delete_row),
+        ):
+            button = CompactButton(text)
+            button.clicked.connect(action)
+            layout_button.addWidget(button)
         layout_button.addStretch(1)
-        layout_button.addWidget(button_close)
+        self.label_linked = muted_label(tr("One row per stint of the strategy: tyre change time added to "
+                                           "the stop, wear = wear per lap x stint laps (compound wear "
+                                           "per stint without wear per lap)."))
+        self.label_linked.setWordWrap(True)
+        self.label_linked.hide()
+        self.label_proposal = QLabel("")  # proposal short of tyres allowed
+        self.label_proposal.setWordWrap(True)
+        self.label_proposal.hide()
 
-        layout.addLayout(layout_top)
-        layout.addWidget(tyre_plan_table)
-        layout.addLayout(layout_button)
+        self.layout_card.addLayout(layout_top)
+        self.layout_card.addWidget(self.label_linked)
+        self.layout_card.addWidget(self.label_proposal)
+        self.layout_card.addWidget(tyre_plan_table, stretch=1)
+        self.layout_card.addWidget(self.row_buttons)
+        self.layout_card.addWidget(parent.tyre_status_bar)
+
+    def set_linked(self, linked: bool):
+        """Rows follow stints: manual row buttons hidden"""
+        self.row_buttons.setHidden(linked)
+        self.label_linked.setHidden(not linked)
 
     def set_filename(self, filename: str):
         """Set tyre strategy file name"""
@@ -817,15 +859,44 @@ class TyrePlanPanel(QFrame):
         return self._filename.text()
 
 
-class TyreStrategyPlanner(BaseEditor):
-    """Tyre strategy planner"""
+class TyrePlannerPanel(QWidget):
+    """Tyre tab of the race calculator: tyre rules & extra cards (left), tyre plan, tyre stock
 
-    def __init__(self, parent):
+    Editor state (modified, confirmations) belongs to the race calculator page (host).
+    Linked to the fuel strategy, see fuel_calculator.TyreLink.
+    """
+
+    changed = Signal()  # tyre plan edited by user: tyre change time may change the strategy
+
+    def __init__(self, parent, host: BaseEditor):
         super().__init__(parent)
-        self.set_utility_title(tr("Tyre Strategy Planner"))
-        self.setMinimumHeight(UIScaler.size(40))
+        self.host = host
+        self.user_data: dict = {}
+        self.linked = False  # rows follow stints of the fuel strategy
+        self._syncing = False  # rows set by the strategy: not a user edit
+        self._row_changes: list[int] = []  # tyres changed on each row (row 0: start)
+        self._has_tyres = False  # any tyre on a wheel of the plan
+        self.proposed_rows: Callable[[], list[int]] = list  # rows needing new tyres, set by host
+        self.wear_per_lap: Callable[[], float] = float  # tread % per lap of the strategy, set by host
+        self.minimum_tread: Callable[[], float] = float  # tread % never gone below, set by host
+        self._stint_laps: list[int] = []  # laps of each stint (row) once linked
+        self._spare_rows: list[list[str]] = []  # rows taken out by a shorter strategy, back when it grows
+        self._proposed_names: set[str] = set()  # tyres added to stock by last proposal
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(500)
+        self._autosave_timer.timeout.connect(self.autosave)
 
-        self.user_data = {}
+        # Compound the wear per lap was measured on: other compounds scaled by their wear
+        self.combo_measured = QComboBox()
+        self.combo_measured.addItems(tuple(DEFAULT_TYRE_SET))
+        self.combo_measured.setToolTip(tr("Compound of measured wear per lap: wear of other compounds "
+                                          "scaled by their wear per stint"))
+        index = cfg.user.config["fuel_calculator"].get("input_measured_compound", MEASURED_DEFAULT)
+        self.combo_measured.setCurrentIndex(index if isinstance(index, int) and
+                                            0 <= index < self.combo_measured.count() else MEASURED_DEFAULT)
+        self.combo_measured.currentIndexChanged.connect(self.measured_compound_changed)
+        self.status_listener: Callable[..., None] | None = None  # tyre status for key figure tile
 
         # Tyre set list
         tyre_set = TyreSetList(self)
@@ -843,9 +914,11 @@ class TyreStrategyPlanner(BaseEditor):
         tyre_plan.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         tyre_plan.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         tyre_plan.setShowGrid(False)
+        tyre_plan.setAlternatingRowColors(True)
+        tyre_plan.setFrameShape(QFrame.Shape.NoFrame)
 
         tyre_plan.setColumnCount(len(HEADER_TYREPLAN))
-        tyre_plan.setHorizontalHeaderLabels(HEADER_TYREPLAN)
+        tyre_plan.setHorizontalHeaderLabels([tr(name) for name in HEADER_TYREPLAN])
 
         tyre_plan.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         tyre_plan.setColumnWidth(4, UIScaler.size(5))
@@ -860,37 +933,133 @@ class TyreStrategyPlanner(BaseEditor):
 
         # Set panels
         self.tyre_status_bar = TyreStatusBar(self)
+        self.tyre_status_bar.setSizeGripEnabled(False)
         self.tyre_rule_panel = TyreRulePanel(self)
         self.tyre_set_panel = TyreSetPanel(self, self.tyre_set)
         self.tyre_plan_panel = TyrePlanPanel(self, self.tyre_plan)
 
-        # Set layout
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.setHandleWidth(5)
-        splitter.addWidget(self.tyre_set_panel)
-        splitter.addWidget(self.tyre_plan_panel)
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes((self.tyre_set_panel.width(), self.tyre_plan_panel.width()))
-
-        layout_main = QVBoxLayout()
-        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, 0)
-        layout_main.addWidget(self.tyre_rule_panel)
-        layout_main.addWidget(splitter, stretch=1)
-        layout_main.addWidget(self.tyre_status_bar)
-        self.setLayout(layout_main)
+        # Layout: left column (cards added by host too), plan, stock
+        self.layout_left = QVBoxLayout()
+        self.layout_left.setContentsMargins(0, 0, 0, 0)
+        self.layout_left.setSpacing(UIScaler.pixel(10))
+        self.layout_left.addWidget(self.tyre_rule_panel)
+        self.layout_left.addStretch(1)
+        left = QWidget(self)
+        left.setLayout(self.layout_left)
+        left.setFixedWidth(UIScaler.size(23))
+        self.layout_plan_stock = QBoxLayout(QBoxLayout.Direction.LeftToRight)  # stock below plan when narrow
+        self.layout_plan_stock.setSpacing(UIScaler.pixel(10))
+        self.layout_plan_stock.addWidget(self.tyre_plan_panel, stretch=3)
+        self.layout_plan_stock.addWidget(self.tyre_set_panel, stretch=1)
+        layout_main = QHBoxLayout(self)
+        layout_main.setContentsMargins(0, 0, 0, 0)
+        layout_main.setSpacing(UIScaler.pixel(10))
+        layout_main.addWidget(left)
+        layout_main.addLayout(self.layout_plan_stock, stretch=1)
 
         # Shortcut
         self._add_keyboard_shortcut()
 
-        # Init setting & table
-        self.create_new_file()
+        # Init setting & table: tyre plan of last time
+        self.load_autosave()
+
+    def set_wide(self, wide: bool):
+        """Narrow page: tyre stock below tyre plan"""
+        self.layout_plan_stock.setDirection(
+            QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom)
+
+    def measured_compound_changed(self, index: int):
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("input_measured_compound") != index:
+            config["input_measured_compound"] = index
+            cfg.save(config_type=ConfigType.CONFIG)
+        self.update_tyre_wear()
+        self.changed.emit()  # strategy wear follows compound
+
+    # Tyre plan kept between sessions
+    def autosave_path(self) -> tuple[str, str]:
+        return cfg.path.config, f"{AUTOSAVE_NAME}{FileExt.TYRESTRATEGY}"
+
+    def capture_data(self) -> dict:
+        """Tyre strategy data of current plan (file format)"""
+        user_data = self.user_data
+        user_data["file_version"] = TYRE_STRATEGY_FILE_VERSION
+        user_data["tyre_rule"].update(self.tyre_rule_panel.export_tyre_rule())
+        user_data["tyre_stock"] = list(self.tyre_set.tyre_in_stock())
+        user_data["tyre_plan"] = self.tyre_plan.export_to_list() + [list(row) for row in self._spare_rows]
+        return user_data
+
+    def autosave(self):
+        """Tyre plan saved to config folder, reopened next time"""
+        filepath, filename = self.autosave_path()
+        try:
+            save_tyre_strategy_file(dict_user=self.capture_data(), filename=filename, filepath=filepath)
+        except OSError:
+            return
+        config = cfg.user.config["tyre_strategy_planner"]
+        if config.get("last_file_name") != self.tyre_plan_panel.filename():
+            config["last_file_name"] = self.tyre_plan_panel.filename()
+            cfg.save(config_type=ConfigType.CONFIG)
+
+    def load_autosave(self):
+        """Tyre plan of last time, new plan if none"""
+        filepath, filename = self.autosave_path()
+        user_data = load_tyre_strategy_file(filepath=filepath, filename=filename) \
+            if os.path.exists(f"{filepath}{filename}") else None
+        if user_data is None:
+            self.create_new_file()
+            return
+        self.user_data = user_data
+        self.tyre_plan_panel.set_filename(cfg.user.config["tyre_strategy_planner"].get("last_file_name")
+                                          or tr("Untitled plan"))
+        self.refresh_table()
+        self.set_unmodified()
+
+    # Undo & redo (host page)
+    def capture_state(self) -> dict:
+        return {
+            "rule": self.tyre_rule_panel.export_tyre_rule(),
+            "stock": list(self.tyre_set.tyre_in_stock()),
+            "plan": self.tyre_plan.export_to_list(),
+            "spare": [list(row) for row in self._spare_rows],
+        }
+
+    def restore_state(self, state: dict):
+        self.user_data["tyre_rule"].update(state["rule"])
+        self.tyre_rule_panel.load_tyre_rule(self.user_data["tyre_rule"])
+        self.tyre_set.load_tyre_stock(state["stock"])
+        self.tyre_plan.load_tyre_plan(state["plan"])
+        self._spare_rows = [list(row) for row in state["spare"]]
+        self.update_tyre_wear()
+        self.changed.emit()
+
+    def add_left_card(self, card: QWidget, position: int = -1):
+        """Card of the race calculator in left column (above stretch)"""
+        count = self.layout_left.count() - 1  # last item: stretch
+        self.layout_left.insertWidget(count if position < 0 else position, card)
+
+    # Editor state of host page
+    def confirm_discard(self) -> bool:
+        return self.host.confirm_discard()
+
+    def confirm_operation(self, title: str = "Confirm", message: str = "") -> bool:
+        return self.host.confirm_operation(title, message)
+
+    def is_modified(self) -> bool:
+        return self.host.is_modified()
+
+    def set_modified(self):
+        if not self._syncing:
+            self.host.set_modified()
+
+    def set_unmodified(self):
+        self.host.set_unmodified()
 
     def _add_keyboard_shortcut(self):
         """Add keyboard shortcut"""
         delete_key = QShortcut(self)
         delete_key.setKey(QKeySequence(QKeySequence.StandardKey.Delete))
+        delete_key.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         delete_key.activated.connect(self.remove_tyre_from_table)
 
     def refresh_table(self):
@@ -901,15 +1070,199 @@ class TyreStrategyPlanner(BaseEditor):
         self.tyre_plan.load_tyre_plan(self.user_data["tyre_plan"])
         self.update_tyre_wear()
 
+    # Link to fuel strategy
+    def compound(self, tyre_key: str) -> dict:
+        return self.user_data["tyre_set"].get(tyre_key, DEFAULT_TYRE_SETTING)
+
+    def row_wear(self, row_index: int, setting: dict, corner: int) -> float:
+        """Tread used over a stint by a wheel (fraction)
+
+        Linked to the strategy with a wear per lap (measured or entered): wear per lap x laps of
+        that stint, scaled by compound (its wear per stint relative to the measured compound).
+        Otherwise wear per stint of compound.
+        """
+        wear_per_stint = max(setting[CORNER_WEAR_PER_STINT[corner]], 0.0) * 0.01
+        wear_per_lap = self.wear_per_lap()
+        if self.linked and wear_per_lap > 0 and row_index < len(self._stint_laps):
+            reference = average_setting(self.compound(self.combo_measured.currentText()), CORNER_WEAR_PER_STINT)
+            factor = wear_per_stint * 100 / reference if reference > 0 else 1.0
+            return wear_per_lap * self._stint_laps[row_index] * 0.01 * factor
+        return wear_per_stint
+
+    def has_tyres(self) -> bool:
+        return self._has_tyres
+
+    def full_change_seconds(self) -> float:
+        return self.tyre_rule_panel.change_time()[4]
+
+    def start_tread(self, default: float) -> float:
+        """Tread at start: tyres of first stint (compound starting tread), else default"""
+        treads = []
+        for column_index in range(4):
+            item = self.tyre_plan.item(0, column_index) if self.tyre_plan.rowCount() else None
+            if item and item.text():
+                setting = self.compound(extract_tyre_key(item.text()))
+                treads.append(min(setting[CORNER_STARTING_TREAD[column_index]], 100.0))
+        return sum(treads) / len(treads) if treads else default
+
+    def fresh_tread(self) -> float:
+        return min(average_setting(self.compound(self.tyre_set_panel.selected_tyre()), CORNER_STARTING_TREAD), 100.0)
+
+    def wear_factor(self) -> float:
+        """Wear of compound selected in stock relative to measured compound"""
+        reference = average_setting(self.compound(self.combo_measured.currentText()), CORNER_WEAR_PER_STINT)
+        selected = average_setting(self.compound(self.tyre_set_panel.selected_tyre()), CORNER_WEAR_PER_STINT)
+        return selected / reference if reference > 0 and selected > 0 else 1.0
+
+    def stop_change_times(self) -> list[float]:
+        """Tyre change seconds of each stop (rows after start)"""
+        times = []
+        for row_index in range(1, self.tyre_plan.rowCount()):
+            item = self.tyre_plan.item(row_index, 4)
+            text = item.text() if item else ""
+            times.append(float(text.rstrip("s")) if text.endswith("s") else 0.0)
+        return times
+
+    def stop_tyre_changes(self) -> list[int]:
+        """Tyres changed at each stop, empty list if no tyre planned"""
+        if not self._has_tyres:
+            return []
+        return self._row_changes[1:]
+
+    def set_stints(self, strategy: Strategy):
+        """One row per stint of a ready strategy: added rows keep the tyres of the stint before"""
+        linked = strategy.ready
+        table = self.tyre_plan
+        self._syncing = True
+        try:
+            self._stint_laps = list(strategy.stints) if linked else []
+            if linked:
+                count = len(strategy.stints)
+                while table.rowCount() > count:  # kept aside (not lost), back when stints grow
+                    self._spare_rows.insert(0, table.export_to_list()[-1])
+                    table.removeRow(table.rowCount() - 1)
+                while table.rowCount() < count:
+                    if self._spare_rows:
+                        table.load_row(table.rowCount(), self._spare_rows.pop(0))
+                    else:
+                        table.copy_row(table.rowCount() - 1, table.rowCount())
+                first = 1
+                labels = []
+                for index, laps in enumerate(strategy.stints, start=1):
+                    labels.append(f"{index}  ({first}-{first + laps - 1})")
+                    first += laps
+                table.setVerticalHeaderLabels(labels)
+            elif self.linked:
+                table.setVerticalHeaderLabels([str(row + 1) for row in range(table.rowCount())])
+            if linked != self.linked:
+                self.linked = linked
+                self.tyre_plan_panel.set_linked(linked)
+            self.update_tyre_wear()
+        finally:
+            self._syncing = False
+        self._autosave_timer.start()
+
+    def propose_changes(self):
+        """New tyres (compound selected in stock) on each wheel at the stint it would go below the
+        minimum tread, within tyres allowed: short of tyres, the best worn tyre that wheel used
+        before (restricted allocation) or any wheel used is fitted again, else tyres are kept"""
+        table = self.tyre_plan
+        compound = self.tyre_set_panel.selected_tyre()
+        if not compound:
+            QMessageBox.warning(self, tr("Error"), tr("Invalid tyre name."))
+            return
+        if self._has_tyres and not self.confirm_operation(
+                message=tr("<b>Replace tyre plan with proposed changes?</b>")):
+            return
+        setting = self.compound(compound)
+        for row_index in range(table.rowCount()):
+            for column_index in range(4):
+                table._remove_item(row_index, column_index)
+        self._spare_rows.clear()
+        # Tyres a previous proposal added, now unused: removed, so proposing again adds no stock
+        self.tyre_set.remove_tyre([
+            self.tyre_set.item(row) for row in range(self.tyre_set.count())
+            if self.tyre_set.item(row).text() in self._proposed_names
+        ])
+        self._proposed_names.clear()
+        stock = self.tyre_set.tyre_in_stock()
+        if setting["enable_limited_stock"]:
+            others = sum(
+                1 for name in stock
+                if extract_tyre_key(name) != compound and self.compound(extract_tyre_key(name))["enable_limited_stock"])
+            allowed = max(self.tyre_rule_panel.max_allowed() - others, 0)
+        else:
+            allowed = len(stock) + table.rowCount() * 4  # no limit
+        free = [name for name in stock if extract_tyre_key(name) == compound]
+        restricted = self.tyre_rule_panel.is_restrict_allocation()
+        removed: list[list[tuple[str, float]]] = [[] for _ in range(4)]  # tyres taken off, per wheel
+        minimum = self.minimum_tread() * 0.01
+        current = ["", "", "", ""]
+        tread = [0.0, 0.0, 0.0, 0.0]
+        fitted = 0
+        short_rows: list[int] = []
+        for row_index in range(table.rowCount()):
+            for corner in range(4):
+                wear = self.row_wear(row_index, setting, corner)
+                if current[corner] and tread[corner] - wear >= minimum - 1e-9:
+                    pass  # tyre lasts this stint
+                elif fitted < allowed:
+                    if free:
+                        name = free.pop(0)
+                    else:
+                        name = encode_tyre_name(compound, self.tyre_set.tyre_in_stock())
+                        self.tyre_set.add_tyre(compound)
+                        self._proposed_names.add(name)
+                    fitted += 1
+                    if current[corner]:
+                        removed[corner].append((current[corner], tread[corner]))
+                    current[corner] = name
+                    tread[corner] = min(setting[CORNER_STARTING_TREAD[corner]], 100.0) * 0.01
+                else:
+                    pool = removed[corner] if restricted else [tyre for wheel in removed for tyre in wheel]
+                    best = max(pool, key=lambda tyre: tyre[1], default=None)
+                    if best is not None and best[1] > tread[corner]:
+                        for wheel in removed:
+                            if best in wheel:
+                                wheel.remove(best)
+                        if current[corner]:
+                            removed[corner].append((current[corner], tread[corner]))
+                        current[corner], tread[corner] = best
+                    if tread[corner] - wear < minimum - 1e-9 and row_index + 1 not in short_rows:
+                        short_rows.append(row_index + 1)
+                if current[corner]:
+                    table_item(table, row_index, corner).setText(current[corner])
+                    table._add_stats(row_index, corner)
+                tread[corner] -= wear
+        label = self.tyre_plan_panel.label_proposal
+        label.setText(trm(f"Not enough tyres allowed: worn tyres kept at stint {', '.join(map(str, short_rows))}")
+                      if short_rows else "")
+        label.setHidden(not short_rows)
+        set_warning(label, bool(short_rows))
+        table.refresh.emit(True)
+
+    def remove_unused_tyres(self):
+        """Remove tyres of stock the plan does not use"""
+        unused = [item for item in (self.tyre_set.item(row) for row in range(self.tyre_set.count()))
+                  if not cast(TyreNameListItem, item).stints]
+        if not unused:
+            return
+        self.tyre_set.remove_tyre(unused)
+        self._proposed_names.difference_update(item.text() for item in unused)
+        self.update_tyre_status()
+
     # File create, load, save, export
     def create_new_file(self):
         """Create new file"""
         if not self.confirm_discard():
             return
-        self.tyre_plan_panel.set_filename("Untitled plan")
+        self.tyre_plan_panel.set_filename(tr("Untitled plan"))
         self.user_data = create_tyre_strategy()
+        self._spare_rows.clear()
+        self._proposed_names.clear()
         self.refresh_table()
         self.set_unmodified()
+        self.changed.emit()
 
     def load_from_file(self):
         """Load tyre strategy from file"""
@@ -933,11 +1286,14 @@ class TyreStrategyPlanner(BaseEditor):
             QMessageBox.warning(self, tr("Error"), trm(msg_text))
             return
         self.user_data = user_data
+        self._spare_rows.clear()
+        self._proposed_names.clear()
         # Update file name
         save_tyre_strategy_file_path(filepath)
         self.tyre_plan_panel.set_filename(os.path.splitext(filename)[0])
         self.refresh_table()
         self.set_unmodified()
+        self.changed.emit()
 
     def saving(self):
         """Save tyre strategy file"""
@@ -1083,8 +1439,11 @@ class TyreStrategyPlanner(BaseEditor):
 
     # Update tyre table, list, status
     def update_tyre_status(self):
-        """Update tyre status info"""
+        """Update tyre status info, strategy told about user edits (tyre change time)"""
         self.set_modified()
+        if not self._syncing:
+            self.changed.emit()
+            self._autosave_timer.start()
         self.tyre_plan.set_allocation(self.tyre_rule_panel.is_restrict_allocation())
         tyre_used = self.tyre_set.count_used()
         tyre_max = self.tyre_rule_panel.max_allowed()
@@ -1111,6 +1470,8 @@ class TyreStrategyPlanner(BaseEditor):
             changes=total_changes,
             change_time=total_change_time,
         )
+        if self.status_listener is not None:
+            self.status_listener(tyre_used, tyre_max, tyre_stock, total_changes, total_change_time)
 
     @Slot(bool)  # type: ignore[operator]
     def update_tyre_wear(self):
@@ -1119,22 +1480,12 @@ class TyreStrategyPlanner(BaseEditor):
         tyre_change_time = self.tyre_rule_panel.change_time()
         is_highlight_new = self.tyre_rule_panel.is_highlight_new()
         tyre_set_data = self.user_data["tyre_set"]
-        refer_starting_tread = (
-            "front_left_starting_tread",
-            "front_right_starting_tread",
-            "rear_left_starting_tread",
-            "rear_right_starting_tread",
-        )
-        refer_wear_per_stint = (
-            "front_left_wear_per_stint",
-            "front_right_wear_per_stint",
-            "rear_left_wear_per_stint",
-            "rear_right_wear_per_stint",
-        )
-
         tyre_name_list = []
+        uses: Counter[str] = Counter()  # stints run so far by each tyre
+        worn: dict[str, float] = {}  # tread used so far by each tyre (fraction)
         row_count = table.rowCount()
         column_count = 4
+        self._row_changes = []
         for row_index in range(row_count):
             count_changed = 0
             for column_index in range(column_count):
@@ -1150,6 +1501,7 @@ class TyreStrategyPlanner(BaseEditor):
                     count_changed += 1
                 # Count used tyres
                 tyre_name_list.append(tyre_name)
+                uses[tyre_name] += 1
                 # Get unique tyre key name
                 tyre_key = extract_tyre_key(tyre_name)
                 if not tyre_key:
@@ -1159,15 +1511,19 @@ class TyreStrategyPlanner(BaseEditor):
                 if not tyre_item:
                     continue
                 tyre_setting = tyre_set_data.get(tyre_key, DEFAULT_TYRE_SETTING)
-                starting_tread = min(tyre_setting[refer_starting_tread[column_index]], 100.0) * 0.01
-                wear_per_stint = max(tyre_setting[refer_wear_per_stint[column_index]], 0.0) * 0.01
-                count_stints = tyre_name_list.count(tyre_name) - 1
+                starting_tread = min(tyre_setting[CORNER_STARTING_TREAD[column_index]], 100.0) * 0.01
+                count_stints = uses[tyre_name] - 1
                 highlight = (not is_highlight_new or count_stints < 1)
                 item.setForeground(Qt.BrushStyle.NoBrush if highlight else QBrush(Qt.GlobalColor.darkGray))
-                tyre_item.set_remaining(starting_tread - wear_per_stint * count_stints, wear_per_stint)
+                wear = self.row_wear(row_index, tyre_setting, column_index)
+                used = worn.get(tyre_name, 0.0)
+                tyre_item.set_remaining(starting_tread - used, wear)
+                worn[tyre_name] = used + wear
             # Calculate tyre change time
             table.set_change_time(row_index, column_count, tyre_change_time[count_changed])
+            self._row_changes.append(count_changed)
 
+        self._has_tyres = bool(tyre_name_list)
         self.tyre_set.update_uses(tyre_name_list)
         self.update_tyre_status()
 

@@ -102,7 +102,7 @@ def build_commands(window) -> list[Command]:
     """All palette commands, built when palette opens (states are current)"""
     from .app import NAV_PAGES
     from .menu import open_config_application
-    from .tools_view import TOOL_SECTIONS, open_tool
+    from .tools_view import TOOL_KEYWORDS, TOOL_SECTIONS, open_tool
 
     tab_view = window.centralWidget()
     commands: list[Command] = []
@@ -128,7 +128,7 @@ def build_commands(window) -> list[Command]:
     for _, tools in TOOL_SECTIONS:
         for label, _, dialog_path in tools:
             commands.append(Command(
-                tr(label), tr("Tools"), search_text(tr(label), label, "tool"),
+                tr(label), tr("Tools"), search_text(tr(label), label, "tool", TOOL_KEYWORDS.get(dialog_path, "")),
                 partial(open_tool, dialog_path, window)))
     for preset_name in cfg.preset_files():
         commands.append(Command(

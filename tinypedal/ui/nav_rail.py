@@ -44,7 +44,7 @@ from ..i18n import tr
 from ..setting import cfg
 from ..template.setting_global import GLOBAL_DEFAULT
 from ._common import BaseDialog, UIScaler
-from .tools_view import TOOL_SECTIONS
+from .tools_view import RENAMED_TOOL_KEYS, TOOL_SECTIONS
 
 # Pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
 NAV_PAGES = (
@@ -61,8 +61,7 @@ PAGE_INDEX = {key: index for index, (key, *_) in enumerate(NAV_PAGES)}
 
 # Short rail label of tools (rail buttons are narrow), full name in tooltip
 TOOL_SHORT_LABELS = {
-    "fuel_calculator": "Fuel",
-    "tyre_strategy_planner": "Tyres",
+    "race_calculator": "Race",
     "driver_stats_viewer": "Stats",
     "track_map_viewer": "Map",
     "lap_viewer": "Telemetry",
@@ -113,7 +112,7 @@ def parse_rail_items(text: str) -> list[str]:
     known = rail_entries()
     keys: list[str] = []
     for key in (text or "").split(","):
-        key = key.strip()
+        key = RENAMED_TOOL_KEYS.get(key.strip(), key.strip())  # merged tools: new tool
         if key in known and key not in keys:
             keys.append(key)
     return keys
