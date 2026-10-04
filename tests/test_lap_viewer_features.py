@@ -5,7 +5,6 @@ import os
 import time
 
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from tests.test_lap_viewer import flush_deleted, wait_loaded
@@ -76,10 +75,16 @@ def viewer(laps):
 
 
 def check_only(viewer, paths):
-    for item in viewer.lap_items():
-        item.setCheckState(0, Qt.CheckState.Checked if item.data(0, Qt.ItemDataRole.UserRole) in paths
-                           else Qt.CheckState.Unchecked)
+    backend = viewer.backend
+    for row in backend.lap_rows():
+        backend.checked.discard(row["path"])
+    backend.checked.update(paths)
+    backend.load_laps()
     wait_loaded(viewer)
+
+
+def rows_by_path(backend) -> dict[str, dict]:
+    return {row["path"]: row for row in backend.lap_rows()}
 
 
 # --- 1. Lap names
@@ -88,8 +93,9 @@ def test_lap_names(viewer, laps):
 
     assert lap_label(os.path.basename(laps[1])) == "Lap 2 · 1:10.000"
     assert lap_label("other file.csv") == "other file"
-    legend = [lap.label for lap in viewer.plot.laps]
-    assert legend[0].startswith("Lap 2 · 1:10.000 · Practice 03/10")
+    legend = viewer.backend.legend
+    assert legend[0]["full"].startswith("Lap 2 · 1:10.000 · Practice 03/10")
+    assert legend[0]["label"] == "Lap 2 · 1:10.000"
 
 
 # --- 2. Units
@@ -97,33 +103,33 @@ def test_values_in_user_units(viewer, monkeypatch):
     monkeypatch.setitem(cfg.units, "speed_unit", "MPH")
     monkeypatch.setitem(cfg.units, "temperature_unit", "Fahrenheit")
     monkeypatch.setitem(cfg.units, "tyre_pressure_unit", "psi")
-    viewer.load_laps()
-    plot = viewer.plot
+    backend = viewer.backend
+    backend.load_laps()
+    data = backend.data
     from tinypedal.ui.lap_viewer import CHANNEL_MAP
 
     speed = CHANNEL_MAP["speed_kph"]
-    assert plot.unit_of(speed) == "mph" and plot.unit_of(CHANNEL_MAP["tyre_temp_fl"]) == "°F"
-    lap = plot.laps[0]
-    assert plot.series(speed, lap)[1][0] == pytest.approx(250 / 1.609344)
-    assert plot.series(CHANNEL_MAP["tyre_temp_fl"], lap)[1][0] == pytest.approx(80 * 1.8 + 32)
-    assert plot.series(CHANNEL_MAP["tyre_pres_fl"], lap)[1][0] == pytest.approx(170 * 0.145038, abs=0.01)
-    viewer.corners.set_laps(plot.lap_a, plot.lap_b)  # corner table in mph too
-    assert viewer.corners.speed_unit == "mph" and viewer.corners.speed(160.9344) == pytest.approx(100)
+    assert data.unit_of(speed) == "mph" and data.unit_of(CHANNEL_MAP["tyre_temp_fl"]) == "°F"
+    lap = data.laps[0]
+    assert data.series(speed, lap)[1][0] == pytest.approx(250 / 1.609344)
+    assert data.series(CHANNEL_MAP["tyre_temp_fl"], lap)[1][0] == pytest.approx(80 * 1.8 + 32)
+    assert data.series(CHANNEL_MAP["tyre_pres_fl"], lap)[1][0] == pytest.approx(170 * 0.145038, abs=0.01)
+    assert next(panel for panel in backend.panels if panel["column"] == "speed_kph")["unit"] == "mph"
+    corner = backend.corners[0]  # corner table in mph too
+    reference, _ = (float(value) for value in corner["speed"].split(" / "))
+    assert reference == pytest.approx(120 / 1.609344, abs=1)
 
 
 # --- 3 & 6. Cursor values
 def test_cursor_values_colored_and_in_charts(viewer):
-    plot = viewer.plot
-    plot.resize(900, 600)
-    plot.cursor_distance = 500.0
-    text = plot.cursor_values()
-    assert " m " in text and "<span style='color:" in text and plot.laps[0].color.name() in text
+    backend = viewer.backend
+    values = backend.cursorValues(500.0)
+    throttle = values[backend.visible.index("throttle")]
+    assert len(throttle) == 2 and throttle[0]["text"].endswith("%")
+    assert throttle[0]["color"] == backend.data.laps[0].color.name()
     from tinypedal.ui.lap_viewer import CHANNEL_MAP, format_channel_value
 
-    values = plot.values_at(CHANNEL_MAP["throttle"], 500.0)
-    assert len(values) == 2 and values[0][1].endswith("%")
     assert format_channel_value(CHANNEL_MAP["delta"], 0.1234) == "+0.123"
-    assert not plot.grab().isNull()  # cursor values drawn next to cursor
 
 
 # --- 4. Added laps grouped by folder
@@ -131,33 +137,34 @@ def test_added_laps_grouped_by_folder(viewer, tmp_path):
     first = save(1, 80.0, BASE, folder=str(tmp_path / "log A"))
     second = save(1, 81.0, BASE, folder=str(tmp_path / "log B"))
     viewer.add_external([first, second])
-    added = [item for item in viewer.session_items() if "added" in item.text(5)]
-    assert [item.text(0) for item in added] == [TRACK, TRACK]  # one group per folder (track folder of each log)
-    assert {item.child(0).data(0, Qt.ItemDataRole.UserRole) for item in added} == {os.path.normpath(first), os.path.normpath(second)}
+    rows = viewer.backend.lap_model.rows
+    added = [row for row in rows if row["kind"] == "session" and "added" in row["info"]]
+    assert [row["title"] for row in added] == [TRACK, TRACK]  # one group per folder (track folder of each log)
+    paths = {row["path"] for row in rows if row["kind"] == "lap" and row["session"] in {r["session"] for r in added}}
+    assert paths == {os.path.normpath(first), os.path.normpath(second)}
 
 
 # --- 5. Axes
-def test_axis_steps_and_labels(viewer):
+def test_axis_steps_and_labels():
     from tinypedal.ui.lap_viewer import CHANNEL_MAP, format_axis_time, format_axis_value, nice_step
 
     assert nice_step(2000, 8) == 500 and nice_step(70, 6) == 20 and nice_step(0.9, 3) == pytest.approx(0.5)
     assert format_axis_time(45) == "45s" and format_axis_time(65) == "1:05"
     assert format_axis_value(CHANNEL_MAP["brake"], 1.0, 1.0) == "100%"
     assert format_axis_value(CHANNEL_MAP["speed_kph"], 251.4, 140) == "251"
-    viewer.plot.resize(900, 600)
-    assert not viewer.plot.grab().isNull()
 
 
 # --- 7 & 13. Corners on charts & map, driving analysis
 def test_corners_marked_and_driving_analysis(viewer):
-    marks = viewer.plot.corner_marks
-    assert len(marks) == 2 and marks == viewer.trajectory.corner_marks
-    rows = viewer.corners.rows
-    assert rows[0].reference.trail_braking >= 0 and rows[0].compared is not None
-    item = viewer.corners.table.topLevelItem(0)
-    assert item.text(0).startswith("T1") and " / " in item.text(5) and item.text(7).endswith(" s")
-    viewer.trajectory.resize(400, 400)
-    assert not viewer.trajectory.grab().isNull()
+    backend = viewer.backend
+    marks = backend.cornerMarks
+    assert len(marks) == 2 and [mark["label"] for mark in backend.trackMap["corners"]] == ["T1", "T2"]
+    assert backend.trackMap["corners"][0]["delta"].startswith("+")  # compared lap slower
+    rows = backend.corners
+    assert rows[0]["label"] == "T1" and " / " in rows[0]["coast"] and rows[0]["overlap"].endswith(" s")
+    assert [row["kind"] for row in rows[-2:]] == ["sum", "total"]
+    start, end = backend.cornerRange(0)
+    assert start < marks[0]["x"] < end
 
 
 def test_driving_times_counted():
@@ -174,52 +181,83 @@ def test_driving_times_counted():
     assert driving_times(lap, distance, None, throttle) == (0.0, 0.0, 0.0)
 
 
-# --- 8. Map click
-def test_map_click_moves_cursor(viewer):
-    trajectory = viewer.trajectory
-    trajectory.resize(400, 400)
-    distances, xs, ys, _ = trajectory._lines[0]
-    index = len(distances) // 3
-    trajectory.map_clicked(trajectory.to_screen(xs[index], ys[index]))
-    assert viewer.plot.cursor_track_distance() == pytest.approx(distances[index], abs=1)
-    assert viewer.trajectory.cursor_distance == pytest.approx(distances[index], abs=1)
+# --- 8. Map click, cursor, braking points, color modes
+def test_map_click_and_cursor(viewer):
+    backend = viewer.backend
+    line = backend._map_lines[0][0]
+    index = len(line.distances) // 3
+    position = backend.mapPick(line.xs[index], line.ys[index], 5.0)
+    assert backend.distanceAt(position) == pytest.approx(line.distances[index], abs=1)
+    points = backend.mapCursor(position)
+    assert len(points) == 2 and points[0]["x"] == pytest.approx(line.xs[index], abs=1)
+    braking = backend.trackMap["braking"]
+    assert len(braking) == 4 and {point["color"] for point in braking} == {lap.color.name() for lap in backend.data.laps}
+    bounds = backend.mapBounds(0.0, 500.0)  # first quarter: right & top of oval
+    assert bounds[0] > 0 and bounds[3] > 150
+
+
+def test_map_color_modes(viewer):
+    from tinypedal.ui.quick.lines import VertexStore
+
+    backend = viewer.backend
+    colored = backend.trackMap["colored"]
+    assert VertexStore.get(colored).vertex_count == 0  # lap colors: no colored line
+    for mode in ("gain", "speed", "pedals"):
+        backend.setMapMode(mode)
+        vertices = VertexStore.get(colored)
+        assert vertices.colored and vertices.vertex_count > 10, mode
+    assert backend.mapLegend == {}  # pedals: fixed colors
+    backend.setMapMode("speed")
+    legend = backend.mapLegend
+    assert legend["low"] == "120" and legend["high"] == "250" and legend["unit"] == "km/h"
+    backend.setMapView(500.0, 1000.0, 2.0)  # zoomed part & thick lines rebuilt for scale
+    assert VertexStore.get(backend.trackMap["lines"][0]["highlight"]).vertex_count > 0
+    backend.setMapFollow(False)
+    backend.setMapBraking(False)
+    assert not backend.mapFollow and not backend.mapBraking
 
 
 # --- 10. Fastest lap star & hidden laps
 def test_star_and_hidden_laps(viewer, laps):
-    labels = {item.data(0, Qt.ItemDataRole.UserRole): item.text(0) for item in viewer.lap_items()}
-    assert labels[laps[1]].startswith("★")
+    backend = viewer.backend
+    assert rows_by_path(backend)[laps[1]]["fastest"]
     check_only(viewer, [laps[1]])
-    viewer.check_clean.setChecked(True)
-    shown = {item.data(0, Qt.ItemDataRole.UserRole) for item in viewer.lap_items()}
+    backend.setHideUnclean(True)
+    shown = set(rows_by_path(backend))
     assert laps[0] not in shown and laps[3] not in shown and laps[2] in shown  # out & invalid hidden
-    viewer.check_clean.setChecked(False)
-    assert len(viewer.lap_items()) == 4
+    backend.setHideUnclean(False)
+    assert len(backend.lap_rows()) == 4
 
 
 # --- 11 & 19. Keep, note, delete
 def test_keep_note_and_delete(viewer, laps, monkeypatch):
-    from tinypedal.ui import lap_viewer
+    from tinypedal.ui import _common
     from tinypedal.userfile.lap_marks import kept_laps, load_marks
 
+    backend = viewer.backend
     folder = os.path.dirname(laps[0])
-    viewer.keep_lap(laps[0], True)
+    assert backend.lapActions(laps[0]) == {"recorded": True, "kept": False}
+    backend.keepLap(laps[0], True)
     assert kept_laps(folder) == {os.path.basename(laps[0])}
+    assert backend.lapActions(laps[0])["kept"]
     inputs = []
-    monkeypatch.setattr(lap_viewer.TextInputDialog, "show", lambda self: inputs.append(self))
-    viewer.edit_note(laps[0])
+    monkeypatch.setattr(_common.TextInputDialog, "show", lambda self: inputs.append(self))
+    backend.editNote(laps[0])
     assert inputs[0]._on_accept("cold tyres")
-    info = {item.data(0, Qt.ItemDataRole.UserRole): item.text(5) for item in viewer.lap_items()}
-    assert "kept" in info[laps[0]] and "cold tyres" in info[laps[0]]
+    row = rows_by_path(backend)[laps[0]]
+    assert "kept" in row["info"] and row["note"] == "cold tyres"
     module_recorder.remove_old_laps(folder, 1, keep_best=0)  # recorder cleanup over limit
     assert os.path.exists(laps[0])  # kept lap never removed
-    viewer.refresh_tracks()
-    remaining = [item.data(0, Qt.ItemDataRole.UserRole) for item in viewer.lap_items()]
-    viewer.delete_lap(laps[0])
-    assert not os.path.exists(laps[0]) and laps[0] not in [
-        item.data(0, Qt.ItemDataRole.UserRole) for item in viewer.lap_items()]
+    backend.refresh()
+    backend.deleteLap(laps[0])
+    assert not os.path.exists(laps[0]) and laps[0] not in rows_by_path(backend)
     assert os.path.basename(laps[0]) not in load_marks(folder)
-    assert len(remaining) >= 1
+
+
+def test_added_lap_actions(viewer, tmp_path):
+    other = save(1, 80.0, BASE, folder=str(tmp_path / "log"))
+    viewer.add_external([other])
+    assert viewer.backend.lapActions(os.path.normpath(other)) == {"recorded": False, "kept": False}
 
 
 # --- 12. Selection remembered
@@ -227,14 +265,14 @@ def test_selection_remembered(viewer, laps):
     from tinypedal.ui.lap_viewer import LapViewer
 
     check_only(viewer, [laps[2], laps[3]])
-    viewer.set_reference_item(next(item for item in viewer.lap_items()
-                                   if item.data(0, Qt.ItemDataRole.UserRole) == laps[3]))
+    viewer.backend.setReference(laps[3])
     viewer.close()
     flush_deleted()
     other = LapViewer(None)
     try:
         wait_loaded(other)
-        assert set(other.checked_paths()) == {laps[2], laps[3]} and other.reference_key == laps[3]
+        assert set(other.backend.ordered_checked()) == {laps[2], laps[3]}
+        assert other.backend.reference_key == laps[3]
     finally:
         other.close()
         flush_deleted()
@@ -246,66 +284,87 @@ def test_delta_rate_channel(viewer):
     from tinypedal.userfile.telemetry_lap import delta_rate
 
     assert delta_rate([0, 100, 200], [0.0, 0.5, 1.0], window=100) == pytest.approx([0.25, 0.5, 0.25])
-    viewer.toggle_channel("delta_rate", True)
-    plot = viewer.plot
-    xs, ys = plot.series(CHANNEL_MAP["delta_rate"], plot.compared()[0])
+    backend = viewer.backend
+    backend.setChannelVisible("delta_rate", True)
+    data = backend.data
+    xs, ys = data.series(CHANNEL_MAP["delta_rate"], data.compared()[0])
     assert xs and sum(ys) / len(ys) > 0  # compared lap slower: losing time on average
-    low, high = plot.value_range(CHANNEL_MAP["delta_rate"])
+    low, high = data.value_range(CHANNEL_MAP["delta_rate"])
     assert low == -high
 
 
 # --- 15. Time axis
 def test_time_axis(viewer):
-    plot = viewer.plot
-    viewer.check_time_axis.setChecked(True)
-    assert plot.time_axis and plot.max_distance() == pytest.approx(72.0, abs=0.5)  # slowest lap time
-    assert plot.distance_at_x(plot.x_at_distance(800.0)) == pytest.approx(800.0, abs=1)
-    plot.set_view_distance(500, 1000)
-    start, end = plot.view_track_range()
-    assert start == pytest.approx(500, abs=2) and end == pytest.approx(1000, abs=2)
-    plot.cursor_distance = 30.0
-    assert "0:30" not in plot.cursor_values() and "30s" in plot.cursor_values()
-    plot.resize(900, 600)
-    assert not plot.grab().isNull()
-    viewer.check_time_axis.setChecked(False)
-    assert not plot.time_axis and plot.view_track_range()[0] == pytest.approx(500, abs=2)
+    backend = viewer.backend
+    restored = []
+    backend.viewRestored.connect(lambda start, end: restored.append((start, end)))
+    backend.setChartView(500.0, 1000.0)  # zoomed on distance axis
+    backend.setTimeAxis(True)
+    data = backend.data
+    assert backend.timeAxis and backend.maxX == pytest.approx(72.0, abs=0.5)  # slowest lap time
+    assert data.distance_at_x(data.x_at_distance(800.0)) == pytest.approx(800.0, abs=1)
+    start, end = restored[-1]  # same part of lap kept in view
+    assert data.distance_at_x(start) == pytest.approx(500, abs=2) and data.distance_at_x(end) == pytest.approx(1000, abs=2)
+    assert backend.cursorTitle(30.0).startswith("30s")
+    backend.setChartView(*restored[-1])
+    backend.setTimeAxis(False)
+    assert not backend.timeAxis and restored[-1][0] == pytest.approx(500, abs=2)
 
 
 # --- 16 & 17. Background loading, refresh of changed laps only
 def test_background_loading_and_refresh(viewer, laps):
-    viewer._lap_cache.clear()
-    viewer.lap_list.blockSignals(True)
-    for item in viewer.lap_items():
-        item.setCheckState(0, Qt.CheckState.Checked)
-    viewer.lap_list.blockSignals(False)
-    viewer.load_laps()
-    assert viewer.is_loading()  # 4 laps read in background
+    backend = viewer.backend
+    backend._lap_cache.clear()
+    backend.checked.update(row["path"] for row in backend.lap_rows())
+    backend.load_laps()
+    assert viewer.is_loading() and backend.loading  # 4 laps read in background
     wait_loaded(viewer)
-    assert len(viewer.plot.laps) == 4
-    kept = viewer._lap_cache[laps[1]]
+    assert len(backend.data.laps) == 4
+    kept = backend._lap_cache[laps[1]]
     os.utime(laps[2], (time.time() + 5, time.time() + 5))  # file changed
-    viewer.refresh_tracks()
+    backend.refresh()
     wait_loaded(viewer)
-    assert viewer._lap_cache[laps[1]] is kept  # unchanged lap not read again
-    assert viewer._lap_cache.get(laps[2]) is not None
+    assert backend._lap_cache[laps[1]] is kept  # unchanged lap not read again
+    assert backend._lap_cache.get(laps[2]) is not None
 
 
-# --- 18. CSV export
+# --- 18. Exports
 def test_csv_export(viewer, tmp_path):
+    backend = viewer.backend
     target = tmp_path / "laps.csv"
-    assert viewer.write_csv(str(target), decimal_point=",")
+    assert backend.write_csv(str(target), decimal_point=",")
     lines = target.read_text(encoding="utf-8-sig").splitlines()
     header = lines[0].split(";")
     assert header[0] == "Distance (m)" and any("Speed (km/h)" in name for name in header)
-    assert len(header) == 1 + len(viewer.plot.laps) * len(viewer.plot.channels)
+    assert len(header) == 1 + len(backend.data.laps) * len(backend.visible)
     assert len(lines) == int(LENGTH) + 2 and "," in lines[100]
-    assert viewer.write_csv(str(tmp_path / "dot.csv"), decimal_point=".")
+    assert backend.write_csv(str(tmp_path / "dot.csv"), decimal_point=".")
     assert (tmp_path / "dot.csv").read_text(encoding="utf-8-sig").splitlines()[0].count(",") == len(header) - 1
 
 
+def test_motec_export(viewer, laps, tmp_path, monkeypatch):
+    from tinypedal.ui.quick import lap_backend
+    from tinypedal.userfile.motec_ld import read_ld
+
+    backend = viewer.backend
+    target = tmp_path / "reference.ld"
+    monkeypatch.setattr(lap_backend.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
+    backend.exportMotec("")  # reference lap
+    assert target.exists() and read_ld(str(target))
+    assert "Exported" in backend.status
+    monkeypatch.setattr(lap_backend.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))
+    os.makedirs(tmp_path / "all")
+    backend.exportMotecMany(True)  # every lap of track
+    assert len(os.listdir(tmp_path / "all")) == len(laps)
+
+
 def test_gear_drawn_as_steps(viewer):
-    viewer.toggle_channel("gear", True)
-    viewer.plot.resize(900, 600)
-    assert not viewer.plot.grab().isNull()
-    viewer.plot.show_distance(10.0)
-    assert viewer.plot.cursor_distance == pytest.approx(10.0)
+    from tinypedal.ui.quick.lines import VertexStore
+
+    backend = viewer.backend
+    backend.setChannelVisible("gear", True)
+    gear = next(panel for panel in backend.panels if panel["column"] == "gear")
+    speed = next(panel for panel in backend.panels if panel["column"] == "speed_kph")
+    # Steps: 2 vertices per sample
+    assert VertexStore.get(gear["series"][0]["key"]).vertex_count == 2 * VertexStore.get(
+        speed["series"][0]["key"]).vertex_count

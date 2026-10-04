@@ -41,7 +41,7 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 ## Ce que cette version apporte
 
-> **Nouveau dans la 0.16.0** : **Calculateur de course** (carburant, énergie et pneus réunis, plan d'arrêts tour par tour, course au temps avec le temps aux stands, règlement, plan pneus relié aux relais, fichier plan de course), widget **Plan de course** pour le prochain arrêt en jeu, **statistiques pilote** comparées aux temps de la communauté LMU, Black box sans chevauchement, page **Nouveautés** modernisée. Détails dans le [changelog](CHANGELOG.md).
+> **Nouveau dans la 0.17.0** : **visionneuse de télémétrie** refaite en Qt Quick et dessinée par la carte graphique (zoom fluide et animé, carte colorée par tour, gain/perte, vitesse ou pédales, points de freinage, carte qui suit le zoom), **vrais numéros de virages** des circuits LMU, **Track Map Viewer** refait (secteurs, courbe et pente à la position, profil d'altitude, parcours animé). Détails dans le [changelog](CHANGELOG.md).
 
 **Interface**
 - Interface Qt 6 modernisée, en français ou en anglais (changement à chaud), avec noms et bulles d'aide des options traduits.
@@ -56,7 +56,8 @@ Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin
 
 **Widgets et données**
 - Widget **Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, enregistreur d'incidents, et pastilles ABS, TC, répartition de freinage et cartographie moteur entre les roues droites. Plages de pression cible saisies en kPa, psi ou bar. Aucun chevauchement : roues, disques et suspensions qui braquent et bougent gardent leur place.
-- Enregistreur de tours et visionneuse de télémétrie (tours regroupés par session, superposer deux tours, carte de trajectoire des deux tours au curseur), export **MoTeC `.ld`**, import d'un journal MoTeC (celui de LMU par exemple) pour se comparer au tour d'un autre pilote (bibliothèque des tours importés : importer, rechercher, afficher, renommer, supprimer ; un `.ld` déposé sur l'app est importé directement), comparaison virage par virage (temps, vitesse mini, points de freinage et de plein gaz, freinage dégressif, roue libre, chevauchement des pédales), trajectoire colorée selon le temps gagné ou perdu, courbe de gain/perte de temps, axe en temps, virages numérotés, export CSV pour Excel, tours gardés et notes par tour.
+- Enregistreur de tours et visionneuse de télémétrie en Qt Quick, dessinée par la carte graphique (zoom fluide et animé, tours regroupés par session, superposer plusieurs tours, carte de trajectoire au curseur colorée par tour, gain/perte, vitesse ou pédales, points de freinage, carte qui suit le zoom, vrais numéros de virages des circuits LMU), export **MoTeC `.ld`**, import d'un journal MoTeC (celui de LMU par exemple) pour se comparer au tour d'un autre pilote (bibliothèque des tours importés : importer, rechercher, afficher, renommer, supprimer ; un `.ld` déposé sur l'app est importé directement), comparaison virage par virage (temps, vitesse mini, points de freinage et de plein gaz, freinage dégressif, roue libre, chevauchement des pédales), trajectoire colorée selon le temps gagné ou perdu, courbe de gain/perte de temps, axe en temps, virages numérotés, export CSV pour Excel, tours gardés et notes par tour.
+- **Visionneuse de carte de piste** refaite en Qt Quick : carte par secteurs dessinée par la carte graphique, vrais numéros de virages, courbe et pente à la position (rayon, cercle osculateur, angle, longueur), profil d'altitude, suivi de la position et parcours animé du circuit.
 - **Calculateur de course** : carburant, énergie et pneus dans une seule page. Plan d'arrêts tour par tour (plein ou juste ce qu'il faut, pneus, pilote, durée de l'arrêt), course au temps calculée avec le temps passé aux stands (débit de ravitaillement, pneus, changement de pilote), marge de sécurité, arrêts obligatoires et relais max, effet du carburant, objectif d'économie, plan pneus relié aux relais avec propositions dans la limite des pneus autorisés, historique de consommation triable et effaçable, fichier plan de course à partager.
 - Widget **Plan de course** : le prochain arrêt en jeu (tour, carburant et énergie à remettre, pneus, arrêts restants).
 - **Statistiques pilote** : chiffres clés par circuit et comparaison de tes records aux temps de la communauté LMU (feuille d'[ohne_speed](https://www.youtube.com/@ohne_speed)), avec un niveau d'Alien à Hors rythme et l'écart au temps de référence.
@@ -147,6 +148,8 @@ python tools/gen_option_help.py
 
 Le second script signale les bulles d'aide qui n'ont pas encore de traduction française (`tinypedal/i18n/data/fr_option_help.json`).
 
+Les pages Qt Quick (visionneuse de télémétrie, Track Map Viewer) sont en QML dans `tinypedal/ui/qml`, avec leur état dans `tinypedal/ui/quick` (Python pur, testable sans affichage). Courbes et cartes sont envoyées une seule fois à la carte graphique (`GpuShape`), le zoom ne fait que changer une matrice. Un nouveau module QML importé par une page doit être ajouté à `tinypedal/ui/quick/qml_modules.py` : l'exe n'embarque que ceux-là (un test charge les pages avec ces seuls modules). Les numéros officiels des virages sont dans `tinypedal/userfile/track_corners.py`.
+
 ### Releases, mises à jour et changelog
 
 Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedals/releases), sans rien faire à la main : chaque push sur `master` publie une nouvelle version dès que les contrôles (`Checks`) passent.
@@ -155,6 +158,7 @@ Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedal
 - **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
 - **Changelog** : [`CHANGELOG.md`](CHANGELOG.md) décrit en français les nouveautés de chaque version (section `## X.Y.Z (date)`). Les notes de la release commencent par la section de sa version, puis listent ses commits en **Added**, **Fixed** et **Changed** : écris donc des titres de commit clairs, et ajoute la section de la prochaine version dans le changelog avant de pousser.
 - **Visuels** : quand un commit change l'apparence d'un overlay, ajoute-lui une image avant/après dans `docs/changes`. Les notes de la release l'affichent dans une section **Visuals** (pas dans l'app, qui n'affiche pas les images).
+- **Captures du changelog** : les captures d'une nouveauté (pages de l'app) vont dans `docs/changelog` et sont insérées dans `CHANGELOG.md` par leur adresse `raw.githubusercontent.com` (visibles sur GitHub et dans les notes de release ; la page `Nouveautés` de l'app ignore ces lignes).
 - **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes dans la page `Nouveautés` (une carte par thème, commits et SHA256 repliés) et propose `Télécharger et installer` (dans le navigateur quand l'app ne peut pas s'installer seule, depuis le code source par exemple).
 
 Pour prévisualiser en local la prochaine version et ses notes :
@@ -189,7 +193,7 @@ pip install pyinstaller
 python build_pyinstaller.py
 ```
 
-L'exécutable est créé dans `dist\TinyPedal`. Pour l'installeur, installe [Inno Setup 6](https://jrsoftware.org/isinfo.php) puis (en remplaçant la version) :
+L'exécutable est créé dans `dist\TinyPedal`. Le hook `tools/pyinstaller_hooks/hook-PySide6.QtQml.py` n'embarque que les modules QML utilisés (environ 2 Mo au lieu de 300 Mo avec WebEngine et 3D). Pour l'installeur, installe [Inno Setup 6](https://jrsoftware.org/isinfo.php) puis (en remplaçant la version) :
 
 ```bash
 iscc /DAppVersion=0.10.0 installer\tinypedal.iss

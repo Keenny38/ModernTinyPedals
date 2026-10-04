@@ -3,6 +3,54 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.17.0 (2026-10-04)
+
+### Visionneuse de télémétrie refaite
+
+La visionneuse est entièrement refaite en Qt Quick : courbes, carte et cercle G sont dessinés par la carte graphique.
+
+- **Fluide** : zoom et déplacement animés, à la fréquence de l'écran. Avant, chaque cran de molette demandait environ 160 ms de dessin.
+- **Navigation** : mini-courbe du tour entier sous les graphes pour voir et déplacer la partie zoomée, bouton `Reset`, `Maj` + glisser pour zoomer une zone, glisser le nom d'une voie pour la déplacer.
+- **Liste des tours** : sessions repliables, couleur de chaque tour, badge `RÉF`, drapeau (ou double-clic) pour choisir la référence, `Tours propres` pour masquer les tours invalides, de sortie et de rentrée.
+- **Clic droit sur un tour** : référence, export MoTeC, garder, note, supprimer.
+- **Barre d'outils** : légende des tours, `Imported Laps...`, menu `Export` (MoTeC : tour de référence, tours affichés ou tous les tours du circuit ; CSV pour Excel).
+- **Onglet Virages** : barre de temps gagné/perdu par virage et, sous chaque virage, point de freinage, plein gaz, freinage dégressif, roue libre et chevauchement des pédales.
+- **Mémoire** : les tours chargés sont libérés après 3 minutes en arrière-plan, puis rechargés avec le même zoom.
+
+![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-telemetry-viewer.png)
+
+### Carte de trajectoire
+
+- **4 colorations** : par tour, gain/perte de temps face au tour de référence, vitesse (du plus lent au plus rapide, avec l'échelle) ou pédales (gaz, frein, les deux, roue libre).
+- **Suivre le zoom** : la carte zoome toute seule sur la partie du tour zoomée dans les courbes.
+- **Points de freinage** de chaque tour.
+- **Circuit soigné** : route avec bordure, ligne de départ en damier, limites de secteurs, échelle et boutons de zoom.
+- **Virages cliquables** avec le temps gagné ou perdu par le tour comparé : un clic zoome les courbes sur le virage.
+
+### Vrais numéros de virages
+
+Les virages portent leur numéro officiel (`T1`, `T10a`…, `V1` en français) sur les courbes, la carte et l'onglet Virages, au lieu d'un numéro dans l'ordre du tour.
+
+- **Circuits** : Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (tracé F1), Monza, Bahreïn, Portimão, Lusail, Road Atlanta, Laguna Seca et Long Beach. Au Mans, sans numérotation officielle, les virages sont nommés (Dunlop, Tertre Rouge, Mulsanne, Indianapolis, Arnage, Virages Porsche, Chicanes Ford).
+- **Placés sur le vrai tracé** : chaque virage est calé sur l'apex du virage correspondant de ton tour (ou de la carte du circuit). La carte montre tous les virages, même ceux passés à fond, et un virage détecté qui en couvre plusieurs s'appelle `T2-4`.
+- Les autres circuits et tracés gardent la numérotation dans l'ordre du tour.
+
+![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-corners.png)
+
+### Track Map Viewer refait
+
+- **Carte dessinée par la carte graphique** : route à sa vraie largeur, ligne colorée par secteur (longueur de S1, S2 et S3), ligne de départ, limites de secteurs, virages officiels (un clic y amène la position).
+- **À la position** : section de courbe, cercle osculateur, cercles de distance et repère central ; infos de position (virage, nœud, secteur, XYZ), de courbe (« Droite 3 », rayon, longueur, angle) et de pente.
+- **Profil d'altitude** de tout le tour, cliquable, avec la position.
+- **Navigation** : clic sur la carte, curseur, flèches du clavier, bouton `Play` pour parcourir le circuit, `Suivre la position` pour garder la position au centre.
+- Menu `Afficher` pour chaque élément ; couleurs, largeurs et seuils de courbe de la configuration existante conservés.
+
+![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-track-map-viewer.png)
+
+### Et aussi
+
+- L'app ne s'alourdit que de 20 Mo pour Qt Quick : seuls les modules utilisés sont embarqués (sans ça, plus de 300 Mo).
+
 ## 0.16.0 (2026-10-04)
 
 ### Calculateur de course (nouveau)

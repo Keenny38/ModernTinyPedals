@@ -77,7 +77,7 @@ def viewer(ui_env, monkeypatch):
 def open_library(viewer):
     from tinypedal.ui.lap_library import LapLibrary
 
-    viewer.open_library()
+    viewer.backend.openLibrary()
     return next(widget for widget in viewer.findChildren(LapLibrary) if widget.isVisible())
 
 
@@ -88,11 +88,11 @@ def test_library_lists_and_adds_to_viewer(viewer):
     assert group.text(library.COL_TIME) == "2:18.200" and group.text(library.COL_TRACK) == "Spa"
     assert not library.label_empty.isVisibleTo(library)
     library.add_to_viewer([group])  # group: every lap, fastest as reference
-    assert len(viewer.external) == 2
-    assert viewer.reference_key.endswith("2m18.200s.csv")
-    assert len(viewer.checked_paths()) == 2
+    assert len(viewer.backend.external) == 2
+    assert viewer.backend.reference_key.endswith("2m18.200s.csv")
+    assert len(viewer.backend.ordered_checked()) == 2
     library.add_to_viewer([group.child(0)])  # already shown: not added twice
-    assert len(viewer.external) == 2
+    assert len(viewer.backend.external) == 2
     library.close()
 
 
@@ -111,17 +111,17 @@ def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
     assert not inputs[0]._on_accept("bad/name") and warnings
     assert inputs[0]._on_accept("Spa best")
     assert library.tree.topLevelItem(0).text(library.COL_NAME) == "Spa best"
-    assert all("Spa best" in entry.file.path for entry in viewer.external)
-    assert all(os.path.exists(path) for path in viewer.checked_paths())
-    assert "Spa best" in viewer.reference_key
+    assert all("Spa best" in entry.file.path for entry in viewer.backend.external)
+    assert all(os.path.exists(path) for path in viewer.backend.ordered_checked())
+    assert "Spa best" in viewer.backend.reference_key
 
     library.tree.clearSelection()
     library.tree.topLevelItem(0).child(0).setSelected(True)
     library.delete()
-    assert len(viewer.external) == 1 and library.tree.topLevelItem(0).childCount() == 1
+    assert len(viewer.backend.external) == 1 and library.tree.topLevelItem(0).childCount() == 1
     library.tree.topLevelItem(0).setSelected(True)
     library.delete()
-    assert not viewer.external and library.tree.topLevelItemCount() == 0
+    assert not viewer.backend.external and library.tree.topLevelItemCount() == 0
     assert library.label_empty.isVisibleTo(library)
     library.close()
 
@@ -176,7 +176,7 @@ def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):
         from tinypedal.ui._common import BaseDialog
 
         viewer = next(dialog for dialog in window.findChildren(BaseDialog) if type(dialog).__name__ == "LapViewer")
-        assert len(viewer.external) == 3  # shown in lap viewer
+        assert len(viewer.backend.external) == 3  # shown in lap viewer
         assert list_imported(cfg.path.telemetry)[0][0] == "Shared lap"
         assert "Unable to import" in file_drop.handle_drop(window, [str(tmp_path / "missing.ld")])[0]
         viewer.close()

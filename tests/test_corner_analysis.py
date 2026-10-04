@@ -85,61 +85,71 @@ def test_smooth():
     assert smooth([0, 10, 0, 10, 0], 3) == pytest.approx([5, 10 / 3, 20 / 3, 10 / 3, 5])
 
 
-def test_lap_viewer_corner_tab(ui_env, tmp_path, monkeypatch):
-    from PySide6.QtCore import QCoreApplication, QEvent
+def corner_backend(folder: str):
+    from PySide6.QtWidgets import QWidget
 
+    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+
+    parent = QWidget()
+    return LapViewerBackend(parent, folder), parent
+
+
+def show_laps(backend, laps):
     from tinypedal.ui import lap_viewer
 
-    viewer = lap_viewer.LapViewer(None)
+    backend.data.set_laps([lap_viewer.PlotLap(name, name, lap, lap_viewer.COLOR_A) for name, lap in laps],
+                          laps[0][0] if laps else "")
+    backend.rebuild_chart()
+
+
+def minus(text: str) -> float:
+    return float(text.replace(chr(0x2212), "-"))
+
+
+def test_lap_viewer_corner_tab(ui_env, tmp_path):
+    backend, parent = corner_backend(f"{tmp_path.as_posix()}/")
     try:
-        reference = lap_viewer.PlotLap("a", "a", make_lap(), lap_viewer.COLOR_A)
+        reference = make_lap()
         slower = make_lap(((0, 250), (400, 250), (500, 90), (700, 220), (800, 220), (900, 150), (1100, 240),
                            (1500, 240)))
-        compared = lap_viewer.PlotLap("b", "b", slower, lap_viewer.COLOR_B)
-        viewer.plot.set_laps([reference, compared], "a")
-        viewer.corners.set_laps(viewer.plot.lap_a, viewer.plot.lap_b)
-        table = viewer.corners.table
-        assert table.topLevelItemCount() == 4  # 2 corners, straights, total
-        assert table.topLevelItem(0).text(1).startswith("+")  # time lost
-        assert "100 / 90" in table.topLevelItem(0).text(2)
-        viewer.corners.select_row(table.topLevelItem(1))
-        corner = viewer.corners.rows[1].corner
-        assert (viewer.plot.view_start, viewer.plot.view_end) == pytest.approx((corner.start, corner.end))
-        viewer.corners.set_laps(viewer.plot.lap_a, None)  # reference only: its own values
-        assert table.topLevelItem(0).text(2) == "100"
-        viewer.corners.set_laps(None, None)
-        assert table.topLevelItemCount() == 0
+        show_laps(backend, [("a", reference), ("b", slower)])
+        rows = backend.corners
+        assert len(rows) == 4  # 2 corners, straights, total
+        assert rows[0]["time"].startswith("+")  # time lost
+        assert rows[0]["speed"] == "100 / 90"
+        corner = backend._corner_rows[1].corner
+        assert backend.cornerRange(1) == pytest.approx([corner.start, corner.end])  # click: zoom on corner
+        assert [mark["label"] for mark in backend.cornerMarks] == ["T1", "T2"]
+        show_laps(backend, [("a", reference)])  # reference only: its own values
+        assert backend.corners[0]["speed"] == "100" and backend.corners[0]["timeColor"] == ""
+        show_laps(backend, [])
+        assert backend.corners == []
     finally:
-        viewer.close()
-        viewer.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        parent.deleteLater()
 
 
 def test_corner_tab_totals_and_sensitivity(ui_env, tmp_path):
-    from PySide6.QtCore import QCoreApplication, QEvent
-
     from tinypedal.ui import lap_viewer
 
-    table = lap_viewer.CornerTable(None, f"{tmp_path.as_posix()}/")
+    folder = f"{tmp_path.as_posix()}/"
+    backend, parent = corner_backend(folder)
     try:
         dip = ((1100, 240), (1250, 240), (1300, 220), (1350, 240), (1500, 240))  # small 20 km/h lift
         reference = make_lap(PROFILE[:-2] + dip)
         slower = make_lap(((0, 245), (400, 245), (500, 90), (700, 220), (800, 220), (900, 150), *dip))
-        table.set_laps(reference, slower)
-        tree = table.table
-        assert tree.topLevelItemCount() == len(table.rows) + 2  # corners, straights, total
-        straights = tree.topLevelItem(tree.topLevelItemCount() - 2)
-        total = tree.topLevelItem(tree.topLevelItemCount() - 1)
-        corners = sum(row.time_delta for row in table.rows)
-        assert float(straights.text(1).replace(chr(0x2212), "-")) + corners == pytest.approx(
-            float(total.text(1).replace(chr(0x2212), "-")), abs=0.011)
-        assert float(straights.text(1).replace(chr(0x2212), "-")) > 0  # slower on first straight
-        table.select_row(total)  # not a corner: no zoom, no error
-        assert len(table.rows) == 3  # default 10 km/h: small lift is a corner
-        table.spin_hysteresis.setValue(25)  # less sensitive: small lift left out
-        assert len(table.rows) == 2
-        assert lap_viewer.load_viewer_setting(table.folder)["corner_hysteresis"] == 25
-        assert lap_viewer.CornerTable(None, table.folder).spin_hysteresis.value() == 25  # remembered
+        show_laps(backend, [("a", reference), ("b", slower)])
+        rows = backend.corners
+        corner_rows = backend._corner_rows
+        assert len(rows) == len(corner_rows) + 2  # corners, straights, total
+        straights, total = rows[-2], rows[-1]
+        corners = sum(row.time_delta for row in corner_rows)
+        assert minus(straights["time"]) + corners == pytest.approx(minus(total["time"]), abs=0.011)
+        assert minus(straights["time"]) > 0  # slower on first straight
+        assert backend.cornerRange(-1) == []  # not a corner: no zoom, no error
+        assert len(corner_rows) == 3  # default 10 km/h: small lift is a corner
+        backend.setHysteresis(25)  # less sensitive: small lift left out
+        assert len(backend._corner_rows) == 2 and len(backend.trackMap.get("corners", [])) == 0
+        assert lap_viewer.load_viewer_setting(folder)["corner_hysteresis"] == 25
+        assert corner_backend(folder)[0].hysteresis == 25  # remembered
     finally:
-        table.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        parent.deleteLater()

@@ -94,6 +94,10 @@ def build_exe():
         f"--specpath={WORK_FOLDER}",
         "--optimize=2",
         f"--add-data={os.path.abspath('tinypedal/i18n/data')}{os.pathsep}tinypedal/i18n/data",
+        # Qt Quick pages (ui/qml), loaded by file path
+        f"--add-data={os.path.abspath('tinypedal/ui/qml')}{os.pathsep}tinypedal/ui/qml",
+        # Only QML modules used by pages (default PySide6.QtQml hook bundles every one, about 300 MB)
+        f"--additional-hooks-dir={os.path.abspath('tools/pyinstaller_hooks')}",
         # Widget & module packages import submodules dynamically via __all__
         "--collect-submodules=tinypedal.widget",
         "--collect-submodules=tinypedal.module",

@@ -222,7 +222,7 @@ MESSAGE_RULES = (
     (r"^Laps from different vehicles: (.+)$", r"Tours de véhicules différents : \1"),
     (r"^Lap (\d+) \((.+)\)$", r"Tour \1 (\2)"),
     (r"^Lap ([0-9]+)$", r"Tour \1"),
-    (r"^T([0-9]+)$", r"V\1"),
+    (r"^T([0-9]+[a-z]?(?:-[0-9]+[a-z]?)?)$", r"V\1"),
     (r"^Lap ([0-9]+) · ", r"Tour \1 · "),
     (r"^Minimum speed \((.+)\): reference lap, compared lap$", r"Vitesse minimale (\1) : tour de référence, tour comparé"),
     (r"^Delete <b>(.+?)</b> permanently\?$", r"Supprimer définitivement <b>\1</b> ?"),

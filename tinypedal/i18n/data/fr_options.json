@@ -2206,6 +2206,7 @@
     "show_elevation": "Afficher altitude",
     "show_elevation_background": "Afficher fond altitude",
     "show_elevation_line": "Afficher ligne altitude",
+    "show_elevation_profile": "Afficher profil altitude",
     "show_elevation_progress": "Afficher progression altitude",
     "show_elevation_progress_line": "Afficher ligne progression altitude",
     "show_elevation_reading": "Afficher valeur altitude",

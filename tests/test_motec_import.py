@@ -140,29 +140,31 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
     from PySide6.QtCore import QCoreApplication, QEvent
 
     from tinypedal.ui import lap_viewer
+    from tinypedal.ui.quick import lap_backend
 
     filename = str(tmp_path / "pro lap.ld")
     write_logger_ld(filename, logger_channels())
-    monkeypatch.setattr(lap_viewer.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([filename], ""))
+    monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([filename], ""))
     viewer = lap_viewer.LapViewer(None)
+    backend = viewer.backend
     try:
-        viewer.add_files()
-        imported = [entry for entry in viewer.external if entry.info.get("source") == "MoTeC"]
+        backend.addFiles()
+        imported = [entry for entry in backend.external if entry.info.get("source") == "MoTeC"]
         assert len(imported) == 3
-        assert viewer.reference_key in {entry.file.path for entry in imported}  # fastest imported lap
+        assert backend.reference_key in {entry.file.path for entry in imported}  # fastest imported lap
         from tests.test_lap_viewer import wait_loaded
 
         wait_loaded(viewer)  # 3 laps read in background
-        header = viewer.lap_list.topLevelItem(0)
-        assert header.text(0) == "pro lap" and "added" in header.text(5)  # added log on top
-        assert viewer.lap_items()[0].text(0).endswith("Lap 1") or "Lap" in viewer.lap_items()[0].text(0)
-        assert viewer.plot.laps[0].label.startswith("pro lap: Lap")  # legend names the log
-        assert viewer.plot.lap_a is not None
+        header = backend.lap_model.rows[0]
+        assert header["title"] == "pro lap" and "added" in header["info"]  # added log on top
+        assert backend.lap_rows()[0]["title"].startswith("Lap")
+        assert backend.legend[0]["full"].startswith("pro lap: Lap")  # legend names the log
+        assert backend.data.reference is not None
         bad = tmp_path / "bad.ld"
         bad.write_bytes(b"x" * 10)
-        monkeypatch.setattr(lap_viewer.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([str(bad)], ""))
-        viewer.add_files()
-        assert "MoTeC" in viewer.label_cursor.text()
+        monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([str(bad)], ""))
+        backend.addFiles()
+        assert "MoTeC" in backend.status
     finally:
         viewer.close()
         viewer.deleteLater()

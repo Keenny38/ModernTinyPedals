@@ -76,7 +76,7 @@ from ._common import (
     table_item,
 )
 from .toast import show_toast
-from .track_map_viewer import MapView
+from .track_map_widget import MapView
 
 DECIMALS = 2
 

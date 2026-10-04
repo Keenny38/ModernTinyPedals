@@ -35,6 +35,8 @@ def test_split_notes_themes_and_details():
     commits_only, none = split_notes("### Fixed\n\n- Fix replay")
     assert [section.title for section in commits_only] == ["Fixed"] and not none
     assert split_notes("") == ([], [])
+    with_image = split_notes("### Carte\n\n- Nouvelle carte\n\n![Carte](https://example.com/map.png)\n")[0]
+    assert with_image[0].items == ["Nouvelle carte"]  # changelog screenshots are online only
 
 
 def test_inline_html():

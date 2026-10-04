@@ -109,7 +109,7 @@ WORDS = {
     "position": "position", "positive": "positif", "power": "puissance", "practice": "essais",
     "predicted": "prévu", "prediction": "prédiction", "prefix": "préfixe", "preset": "preset",
     "pressure": "pression", "previous": "précédent", "private": "privées", "process": "processus",
-    "progress": "progression", "progression": "progression", "proximity": "proximité", "puncture": "crevaison",
+    "profile": "profil", "progress": "progression", "progression": "progression", "proximity": "proximité", "puncture": "crevaison",
     "push": "push", "qualify": "qualifications", "qualifying": "qualifications", "queue": "file d'attente",
     "quit": "quitter", "race": "course", "radar": "radar", "radius": "rayon", "rain": "pluie",
     "raininess": "pluviosité", "rake": "assiette", "range": "plage", "rate": "taux", "ratio": "rapport",

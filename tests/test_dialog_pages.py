@@ -134,6 +134,23 @@ def test_tool_and_config_shown_as_pages(window):
     assert not view.dialog_pages() and view.current_index() == 1
 
 
+def test_lap_viewer_page_releases_vertices(window):
+    """Qt Quick page shown inside app like widget tools, page vertices released when closed"""
+    from tinypedal.ui.quick.lines import VertexStore, line_strip
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("lap_viewer.LapViewer", window)
+    pages = view.dialog_pages()
+    assert [type(page.dialog).__name__ for page in pages] == ["LapViewer"]
+    dialog = pages[0].dialog
+    assert not dialog.view.errors() and dialog.view.rootObject() is not None
+    VertexStore.set(dialog.backend.prefix + "test", line_strip([0.0, 1.0], [0.0, 1.0]))
+    dialog.close()
+    assert not view.dialog_pages()
+    assert not VertexStore.has(dialog.backend.prefix + "test")
+
+
 def test_dialog_from_dialog_stays_popup(window):
     from tinypedal.ui._common import BatchOffset, embedded_host
     from tinypedal.ui.tools_view import open_tool
@@ -401,7 +418,7 @@ def test_rail_tools_have_no_close_buttons(window):
     lap_page = next(page for page in view.dialog_pages() if page.title == "Lap Telemetry Viewer")
     cfg.application["rail_items"] = "home,widget,tools"
     view.build_rail_items()
-    assert len(close_buttons(lap_page)) == 2
+    assert len(close_buttons(lap_page)) == 1  # title close button (Qt Quick page has no own button)
 
 
 def test_escape_does_not_close_rail_tool_page(window):

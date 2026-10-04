@@ -1,8 +1,6 @@
 """Recorded lap loading, delta & viewer tests"""
 
 import pytest
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QMouseEvent
 
 from tinypedal.module import module_recorder
 from tinypedal.userfile.telemetry_lap import compute_delta, interpolate, list_laps, list_tracks, load_lap
@@ -66,70 +64,6 @@ def test_invalid_file(tmp_path):
         load_lap(str(path))
 
 
-def test_lap_viewer_dialog(ui_env, tmp_path, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
-
-    write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
-    write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
-    viewer = LapViewer(None)
-    try:
-        assert viewer.combo_track.currentText() == "Track - GT3"
-        assert viewer.plot.lap_a is not None and viewer.plot.lap_b is not None
-        assert viewer.plot.delta
-        viewer.plot.resize(800, 500)
-        image = viewer.plot.grab()
-        assert not image.isNull()
-        event = QMouseEvent(
-            QMouseEvent.Type.MouseMove, QPointF(400, 100), QPointF(400, 100),
-            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
-        )
-        viewer.plot.mouseMoveEvent(event)
-        assert " m " in viewer.label_cursor.text()
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_trajectory_map(ui_env):
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import PlotLap, TrajectoryMap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(0, 101, 10)]
-    lap_a = LapData("a", {"distance": distance, "pos_x": [d * 2 for d in distance], "pos_y": [d for d in distance]})
-    lap_b = LapData("b", {"distance": distance, "pos_x": [d * 2 + 1 for d in distance], "pos_y": distance})
-    parent = QWidget()
-    view = TrajectoryMap(parent)
-    view.resize(300, 300)
-    view.set_laps([PlotLap("a", "a", lap_a, QColor("red")), PlotLap("b", "b", lap_b, QColor("blue"))])
-    view.set_cursor(50.0, (20.0, 60.0))
-    assert len(view.positions(lap_a)) == 10  # (0, 0) means position not recorded
-    assert not view.grab().isNull()
-    assert view.positions(LapData("c", {"distance": distance})) == []  # positions not recorded
-    parent.deleteLater()
-
-
-def test_gcircle(ui_env):
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import GCircle, PlotLap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(100)]
-    lap = LapData("a", {"distance": distance, "accel_lat": [1.5] * 100, "accel_long": [-0.5] * 100})
-    parent = QWidget()
-    view = GCircle(parent)
-    view.resize(200, 200)
-    view.set_laps([PlotLap("a", "a", lap, QColor("red"))])
-    view.set_cursor(50.0, (10.0, 60.0))
-    assert not view.grab().isNull()
-    parent.deleteLater()
-
-
 def test_decimate_minmax_keeps_peaks():
     from tinypedal.userfile.telemetry_lap import decimate_minmax
 
@@ -161,39 +95,6 @@ def test_sectors_and_theoretical_best():
     assert theoretical_best([]) == (0.0, [])
 
 
-def test_trace_plot_many_laps_and_navigation(ui_env, tmp_path):
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import PlotLap, TracePlot
-
-    write_lap(tmp_path, 1, 90.0)
-    write_lap(tmp_path, 2, 91.0)
-    write_lap(tmp_path, 3, 92.0)
-    laps = [load_lap(lap.path) for lap in list_laps(f"{tmp_path}/", "Track - GT3")]
-    parent = QWidget()
-    plot = TracePlot(parent)
-    plot.resize(800, 500)
-    plot.set_laps([PlotLap(str(index), lap.name, lap, QColor("red")) for index, lap in enumerate(laps)], "2")
-    assert plot.reference is not None and plot.reference.key == "2"
-    assert len(plot.deltas) == 2  # one delta per compared lap
-    plot.set_channels(["delta", "speed_kph", "rpm", "tyre_temp_fl", "unknown"])
-    assert [channel.column for channel in plot.channels] == ["delta", "speed_kph", "rpm", "tyre_temp_fl"]
-    assert not plot.grab().isNull()
-    cache = plot._cache
-    plot.cursor_distance = 500.0
-    plot.repaint()
-    assert plot._cache is cache  # cursor move keeps cached charts
-    assert "rpm" not in plot.cursor_values().lower() or "RPM" in plot.cursor_values()
-    plot.zoom(0.5, 1500.0)
-    assert plot.zoomed() and plot.view_end - plot.view_start == pytest.approx(1500.0)
-    plot.set_view(-100.0, 200.0)  # moved before start: kept inside lap
-    assert plot.view_start == 0.0 and plot.view_end == pytest.approx(300.0)
-    plot.reset_view()
-    assert not plot.zoomed()
-    parent.deleteLater()
-
-
 def test_compressed_lap_file_with_info(tmp_path):
     rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
     info = {"kind": "lap", "vehicle": "Car A", "sectors": [1.0, 2.0, 1.9]}
@@ -211,35 +112,6 @@ def test_old_lap_file_without_info(tmp_path):
     path.write_text("time,lap_time,distance\n0,0,0\n1,1,10\n", encoding="utf-8")
     lap = load_lap(str(path))
     assert lap.meta == {} and len(lap) == 2
-
-
-def test_lap_viewer_multiple_laps(ui_env, monkeypatch):
-    from PySide6.QtCore import Qt
-
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
-
-    folder = cfg.path.telemetry.rstrip("/")
-    write_lap(folder, 1, 92.0)
-    write_lap(folder, 2, 90.0)
-    write_lap(folder, 3, 91.0)
-    viewer = LapViewer(None)
-    try:
-        assert "1m30.000s" in viewer.reference_key  # best lap is reference
-        for item in viewer.lap_items():
-            item.setCheckState(0, Qt.CheckState.Checked)
-        assert len(viewer.plot.laps) == 3
-        assert viewer.plot.reference is not None and "1m30" in viewer.plot.reference.key
-        newest = viewer.lap_items()[-1]  # laps in driving order
-        viewer.set_reference_item(newest)
-        assert viewer.plot.reference.key == newest.data(0, Qt.ItemDataRole.UserRole)
-        viewer.toggle_channel("rpm", True)
-        assert "rpm" in [channel.column for channel in viewer.plot.channels]
-        viewer.reset_channels()
-        assert "rpm" not in [channel.column for channel in viewer.plot.channels]
-    finally:
-        viewer.close()
-        flush_deleted()
 
 
 def test_lap_bounds_drop_previous_and_next_lap_distance():
@@ -275,74 +147,6 @@ def test_load_lap_with_late_distance_reset(tmp_path):
     assert len(monotonic_distance(lap)[0]) > 400  # nearly every sample on its own distance
 
 
-def test_lap_viewer_added_file_not_in_theoretical_best(ui_env, tmp_path, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui import lap_viewer
-
-    folder = cfg.path.telemetry.rstrip("/")
-    info = {"sectors": [30.0, 30.0, 30.0]}
-    rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
-    module_recorder.save_lap(f"{folder}/", "Track - GT3", 1, 90.0, rows, 10, info=info)
-    other = tmp_path / "other"
-    module_recorder.save_lap(f"{other}/", "Other - GT3", 1, 60.0, rows, 10, info={"sectors": [20.0, 20.0, 20.0]})
-    other_file = next((other / "Other - GT3").glob("*.csv"))
-    monkeypatch.setattr(lap_viewer.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
-    viewer = lap_viewer.LapViewer(None)
-    try:
-        viewer.add_files()
-        assert viewer.lap_list.topLevelItemCount() == 2
-        assert "1:30.000" in viewer.label_best.text()  # other track sectors left out
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_lap_cache_is_bounded(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui import lap_viewer
-
-    monkeypatch.setattr(lap_viewer, "LAP_CACHE_SIZE", 5)
-    folder = cfg.path.telemetry.rstrip("/")
-    for lap in range(8):
-        write_lap(folder, lap, 90.0 + lap, samples=20)
-    viewer = lap_viewer.LapViewer(None)
-    try:
-        for entry in viewer.entries:
-            viewer.read_lap(entry.file.path)
-        assert len(viewer._lap_cache) == lap_viewer.LAP_CACHE_SIZE
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_side_views_keep_cached_drawing_on_cursor_move(ui_env):
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import GCircle, PlotLap, TrajectoryMap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(100)]
-    lap = LapData("a", {
-        "distance": distance, "pos_x": [d + 1 for d in distance], "pos_y": [d * 2 + 1 for d in distance],
-        "accel_lat": [1.0] * 100, "accel_long": [-1.0] * 100,
-    })
-    parent = QWidget()
-    for view_class in (TrajectoryMap, GCircle):
-        view = view_class(parent)
-        view.resize(200, 200)
-        view.set_laps([PlotLap("a", "a", lap, QColor("red"))])
-        view.grab()
-        cache = view._cache
-        view.set_cursor(40.0, (0.0, 0.0))
-        view.grab()
-        assert view._cache is cache  # cursor drawn over cached laps
-        view.set_cursor(40.0, (10.0, 50.0))
-        view.grab()
-        assert view._cache is not cache  # zoom redraws laps
-    parent.deleteLater()
-
-
 def test_delta_limit_ignores_aberrant_lap():
     from tinypedal.ui.lap_viewer import delta_limit
 
@@ -353,136 +157,6 @@ def test_delta_limit_ignores_aberrant_lap():
     assert delta_limit([aberrant]) == pytest.approx(69.0)  # alone: shown entirely
     assert delta_limit([]) == 0.1
     assert delta_limit([[0.0, 0.01]]) == 0.1
-
-
-def mouse(kind, x, y, button=None, modifiers=None):
-    from PySide6.QtCore import QPointF, Qt
-    from PySide6.QtGui import QMouseEvent
-
-    button = button or Qt.MouseButton.LeftButton
-    buttons = Qt.MouseButton.NoButton if kind == QMouseEvent.Type.MouseButtonRelease else button
-    return QMouseEvent(kind, QPointF(x, y), QPointF(x, y), button, buttons,
-                       modifiers or Qt.KeyboardModifier.NoModifier)
-
-
-def test_drag_channel_name_reorders_channels(ui_env):
-    from PySide6.QtGui import QMouseEvent
-
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer, load_visible_channels
-
-    folder = cfg.path.telemetry.rstrip("/")
-    write_lap(folder, 1, 90.0)
-    write_lap(folder, 2, 91.0)
-    viewer = LapViewer(None)
-    try:
-        plot = viewer.plot
-        plot.resize(800, 600)
-        columns = [channel.column for channel in plot.channels]
-        rect = plot.plot_rect()
-        panels = plot.panels(rect)
-        x = rect.left() / 2  # channel name area
-        speed_y = panels[1][1].center().y()
-        steering_y = panels[-1][1].center().y()
-        plot.mousePressEvent(mouse(QMouseEvent.Type.MouseButtonPress, x, speed_y))
-        plot.mouseMoveEvent(mouse(QMouseEvent.Type.MouseMove, x, steering_y))
-        assert not plot.grab().isNull()  # move indicator drawn
-        plot.mouseReleaseEvent(mouse(QMouseEvent.Type.MouseButtonRelease, x, steering_y))
-        expected = [column for column in columns if column != "speed_kph"] + ["speed_kph"]
-        assert [channel.column for channel in plot.channels] == expected
-        assert viewer.visible_channels == expected
-        assert load_visible_channels(viewer.filepath) == expected  # order kept
-        viewer.toggle_channel("rpm", True)
-        assert viewer.visible_channels[-1] == "rpm"  # new channel added at bottom, order kept
-        assert viewer.visible_channels[:-1] == expected
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_track_map_zoom_and_move(ui_env):
-    from PySide6.QtCore import QPoint, QPointF, Qt
-    from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import PlotLap, TrajectoryMap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(100)]
-    lap = LapData("a", {"distance": distance, "pos_x": [d + 1 for d in distance], "pos_y": [d * 2 + 1 for d in distance]})
-    parent = QWidget()
-    view = TrajectoryMap(parent)
-    view.resize(200, 200)
-    view.set_laps([PlotLap("a", "a", lap, QColor("red"))])
-    mouse_at = QPointF(150, 50)
-    before = view.to_screen(80.0, 161.0)
-
-    def wheel(delta):
-        view.wheelEvent(QWheelEvent(
-            mouse_at, mouse_at, QPoint(), QPoint(0, delta), Qt.MouseButton.NoButton,
-            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
-
-    wheel(120)
-    assert view.zoom == pytest.approx(1.25)
-    after = view.to_screen(80.0, 161.0)
-    # Point under mouse stays under mouse, others move away from it
-    assert (after - mouse_at).manhattanLength() == pytest.approx((before - mouse_at).manhattanLength() * 1.25, rel=0.01)
-    view.grab()
-    cache = view._cache
-    view.mousePressEvent(mouse(QMouseEvent.Type.MouseButtonPress, 100, 100))
-    view.mouseMoveEvent(mouse(QMouseEvent.Type.MouseMove, 110, 95))
-    view.mouseReleaseEvent(mouse(QMouseEvent.Type.MouseButtonRelease, 110, 95))
-    assert view.to_screen(80.0, 161.0) == after + QPointF(10, -5)
-    view.grab()
-    assert view._cache is not cache  # zoomed or moved view redrawn
-    for _ in range(3):
-        wheel(-120)
-    assert view.zoom == 1.0 and view.pan == QPointF()  # zoomed out: whole map, centered
-    wheel(120)
-    view.mouseDoubleClickEvent(None)
-    assert view.zoom == 1.0
-    parent.deleteLater()
-
-
-def test_track_map_draws_circuit_from_track_map_file(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
-    from tinypedal.userfile.track_map import save_track_map_file
-
-    folder = cfg.path.telemetry.rstrip("/")
-    write_lap(folder, 1, 90.0)  # positions not recorded by helper: (0, 0)
-    circuit = tuple((float(x), float(x % 7)) for x in range(0, 500, 10))
-    dists = tuple((float(index), 0.0) for index in range(len(circuit)))
-    save_track_map_file(cfg.path.track_map, "Track", "0 0 500 10", circuit, dists, (10, 20), 2)
-    viewer = LapViewer(None)
-    try:
-        assert viewer.trajectory.road == list(circuit)  # "Track - GT3" folder: track map "Track"
-        viewer.trajectory.resize(200, 400)
-        assert not viewer.trajectory.grab().isNull()
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_track_map_circuit_falls_back_to_reference_lap(ui_env):
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import PlotLap, TrajectoryMap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(0, 101, 10)]
-    reference = LapData("a", {"distance": distance, "pos_x": [d + 1 for d in distance], "pos_y": distance})
-    other = LapData("b", {"distance": distance, "pos_x": [d + 2 for d in distance], "pos_y": distance})
-    parent = QWidget()
-    view = TrajectoryMap(parent)
-    view.resize(200, 200)
-    view.set_laps([PlotLap("a", "a", reference, QColor("red")), PlotLap("b", "b", other, QColor("blue"))])
-    assert view.road == [(d + 1, d) for d in distance]  # no track map file: reference lap line
-    assert not view.grab().isNull()
-    view.set_laps([])
-    assert view.road == []
-    parent.deleteLater()
 
 
 def test_sector_lines_at_official_sector_times():
@@ -498,79 +172,6 @@ def test_sector_lines_at_official_sector_times():
     assert sector_bounds(LapData("a", columns)) == [1020.0, 2020.0]
     assert sector_bounds(LapData("b", columns, {"sectors": [33.0, 34.0, 33.0]})) == pytest.approx([990.0, 2010.0])
     assert sector_bounds(LapData("c", columns, {"sectors": [33.0, "x", 33.0]})) == [1020.0, 2020.0]  # invalid info
-
-
-def test_hidden_viewer_releases_laps_and_reloads(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
-
-    write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
-    write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
-    viewer = LapViewer(None)
-    try:
-        viewer.show()
-        viewer.plot.set_view(500.0, 1500.0)
-        viewer.release_laps()  # visible: kept
-        assert viewer.plot.laps and viewer._lap_cache
-        viewer.hide()
-        assert viewer._release_timer.isActive()  # released after a while in background
-        viewer.release_laps()
-        assert not viewer.plot.laps and not viewer._lap_cache
-        viewer.show()  # same laps & zoom again
-        assert len(viewer.plot.laps) == 2 and not viewer._release_timer.isActive()
-        assert (viewer.plot.view_start, viewer.plot.view_end) == (500.0, 1500.0)
-    finally:
-        viewer.close()
-        flush_deleted()
-
-
-def test_trajectory_colored_by_time_gain(ui_env):
-    import math
-
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QWidget
-
-    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR, PlotLap, TrajectoryMap
-    from tinypedal.userfile.telemetry_lap import LapData
-
-    distance = [float(index) for index in range(0, 2001, 10)]
-    xs = [500 * math.cos(d / 2000 * math.tau) for d in distance]
-    ys = [500 * math.sin(d / 2000 * math.tau) for d in distance]
-    reference = LapData("ref", {"distance": distance, "lap_time": [d / 50 for d in distance], "pos_x": xs, "pos_y": ys})
-    # Compared: slower on first half (40 m/s), faster on second half (60 m/s)
-    times = [d / 40 if d <= 1000 else 25 + (d - 1000) / 60 for d in distance]
-    compared = LapData("cmp", {"distance": distance, "lap_time": times, "pos_x": xs, "pos_y": ys})
-    parent = QWidget()
-    view = TrajectoryMap(parent)
-    view.resize(300, 300)
-    laps = [PlotLap("ref", "ref", reference, QColor("white")), PlotLap("cmp", "cmp", compared, QColor("cyan"))]
-    view.set_laps(laps)
-    assert not view._gain  # off by default
-    view.set_show_gain(True)
-    rates = {round(d): rate for d, _, _, rate in view._gain}
-    assert rates[500] > 0 > rates[1500]  # losing then gaining
-    assert view.gain_color(rates[500]) == LOSS_COLOR and view.gain_color(rates[1500]) == GAIN_COLOR
-    assert view.gain_color(0.0) == QColor("#9CA3AF")
-    image = view.grab().toImage()
-    colors = {image.pixelColor(x, y).name() for x in range(0, 300, 2) for y in range(0, 300, 2)}
-    assert LOSS_COLOR.name() in colors and GAIN_COLOR.name() in colors
-    view.set_laps(laps[:1])  # reference only: plain line
-    assert not view._gain
-    parent.deleteLater()
-
-
-def test_viewer_time_gain_option_saved(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer, load_viewer_setting
-
-    viewer = LapViewer(None)
-    try:
-        viewer.check_gain.setChecked(True)
-        assert viewer.trajectory.show_gain
-        assert load_viewer_setting(cfg.path.telemetry)["map_time_gain"] is True
-    finally:
-        viewer.close()
-        flush_deleted()
 
 
 def save_session_lap(folder, number, lap_time, timestamp, session="Practice", start=None, valid=True, kind="lap"):
@@ -607,11 +208,257 @@ def test_laps_grouped_by_session():
     assert numbers == [[6], [5, 1], [3], [2], [1], [1, 2, 3]]  # newest session first, laps in driving order
 
 
-def test_lap_list_shows_sessions(ui_env):
+# --- Viewer page (Qt Quick): state checked through its backend
+@pytest.fixture
+def open_viewer(ui_env):
+    """Open lap viewer dialogs, closed after test"""
+    from tinypedal.ui.lap_viewer import LapViewer
+
+    viewers = []
+
+    def opening():
+        viewer = LapViewer(None)
+        viewers.append(viewer)
+        return viewer
+
+    yield opening
+    import shiboken6
+
+    for viewer in viewers:
+        if shiboken6.isValid(viewer):
+            viewer.close()
+    flush_deleted()
+
+
+def lap_paths(backend) -> list[str]:
+    return [row["path"] for row in backend.lap_rows()]
+
+
+def test_lap_viewer_dialog(open_viewer):
+    from tinypedal.setting import cfg
+
+    write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
+    write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
+    viewer = open_viewer()
+    backend = viewer.backend
+    assert backend.currentTrack == "Track - GT3"
+    assert backend.data.reference is not None and len(backend.data.compared()) == 1
+    assert backend.data.deltas  # delta of compared lap
+    assert not viewer.view.errors() and viewer.view.rootObject() is not None
+    values = backend.cursorValues(1500.0)
+    assert len(values) == len(backend.panels) and backend.cursorTitle(1500.0) == "1500 m"
+
+
+def test_lap_viewer_multiple_laps(open_viewer):
+    from tinypedal.setting import cfg
+
+    folder = cfg.path.telemetry.rstrip("/")
+    write_lap(folder, 1, 92.0)
+    write_lap(folder, 2, 90.0)
+    write_lap(folder, 3, 91.0)
+    viewer = open_viewer()
+    backend = viewer.backend
+    assert "1m30.000s" in backend.reference_key  # best lap is reference
+    for path in lap_paths(backend):
+        backend.setLapChecked(path, True)
+    wait_loaded(viewer)
+    assert len(backend.data.laps) == 3
+    assert backend.data.reference is not None and "1m30" in backend.data.reference.key
+    newest = lap_paths(backend)[-1]  # laps in driving order
+    backend.setReference(newest)
+    assert backend.data.reference.key == newest and backend.legend[0]["reference"]
+    backend.setChannelVisible("rpm", True)
+    assert "rpm" in [panel["column"] for panel in backend.panels]
+    backend.resetChannels()
+    assert "rpm" not in [panel["column"] for panel in backend.panels]
+
+
+def test_trace_data_many_laps(ui_env, tmp_path):
+    from PySide6.QtGui import QColor
+
+    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from tinypedal.ui.quick.trace_data import TraceData
+
+    write_lap(tmp_path, 1, 90.0)
+    write_lap(tmp_path, 2, 91.0)
+    write_lap(tmp_path, 3, 92.0)
+    laps = [load_lap(lap.path) for lap in list_laps(f"{tmp_path}/", "Track - GT3")]
+    data = TraceData()
+    data.set_laps([PlotLap(str(index), lap.name, lap, QColor("red")) for index, lap in enumerate(laps)], "2")
+    assert data.reference is not None and data.reference.key == "2"
+    assert len(data.deltas) == 2  # one delta per compared lap
+    assert data.max_x() == pytest.approx(3000.0)
+    speed = CHANNEL_MAP["speed_kph"]
+    low, high = data.value_range(speed)
+    assert low < 180 < high
+    assert [text for _, text in data.values_at(speed, 1500.0)] == ["180", "180", "180"]
+
+
+def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, monkeypatch):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.quick import lap_backend
+
+    folder = cfg.path.telemetry.rstrip("/")
+    info = {"sectors": [30.0, 30.0, 30.0]}
+    rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
+    module_recorder.save_lap(f"{folder}/", "Track - GT3", 1, 90.0, rows, 10, info=info)
+    other = tmp_path / "other"
+    module_recorder.save_lap(f"{other}/", "Other - GT3", 1, 60.0, rows, 10, info={"sectors": [20.0, 20.0, 20.0]})
+    other_file = next((other / "Other - GT3").glob("*.csv"))
+    monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
+    backend = open_viewer().backend
+    backend.addFiles()
+    assert [row["kind"] for row in backend.lap_model.rows].count("session") == 2
+    assert "1:30.000" in backend.bestText  # other track sectors left out
+    assert len(backend.legend) == 2  # added lap shown
+
+
+def test_lap_cache_is_bounded(open_viewer, monkeypatch):
+    from tinypedal.setting import cfg
+    from tinypedal.ui import lap_viewer
+
+    monkeypatch.setattr(lap_viewer, "LAP_CACHE_SIZE", 5)
+    folder = cfg.path.telemetry.rstrip("/")
+    for lap in range(8):
+        write_lap(folder, lap, 90.0 + lap, samples=20)
+    backend = open_viewer().backend
+    for entry in backend.entries:
+        backend.read_lap(entry.file.path)
+    assert len(backend._lap_cache) == lap_viewer.LAP_CACHE_SIZE
+
+
+def test_channel_order_kept(open_viewer):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import load_visible_channels
+
+    folder = cfg.path.telemetry.rstrip("/")
+    write_lap(folder, 1, 90.0)
+    write_lap(folder, 2, 91.0)
+    backend = open_viewer().backend
+    columns = list(backend.visible)
+    backend.moveChannel(1, len(columns) - 1)  # speed dragged to bottom
+    expected = [column for column in columns if column != "speed_kph"] + ["speed_kph"]
+    assert [panel["column"] for panel in backend.panels] == expected
+    assert load_visible_channels(backend.folder) == expected  # order kept
+    backend.setChannelVisible("rpm", True)
+    assert backend.visible[-1] == "rpm" and backend.visible[:-1] == expected  # new channel added at bottom
+
+
+def test_track_map_draws_circuit_from_track_map_file(open_viewer):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.quick.lines import VertexStore
+    from tinypedal.userfile.track_map import save_track_map_file
+
+    folder = cfg.path.telemetry.rstrip("/")
+    write_lap(folder, 1, 90.0)  # positions not recorded by helper: (0, 0)
+    circuit = tuple((float(x), float(x % 7)) for x in range(0, 500, 10))
+    dists = tuple((float(index), 0.0) for index in range(len(circuit)))
+    save_track_map_file(cfg.path.track_map, "Track", "0 0 500 10", circuit, dists, (10, 20), 2)
+    backend = open_viewer().backend
+    assert backend._road.xs == [x for x, _ in circuit]  # "Track - GT3" folder: track map "Track"
+    track_map = backend.trackMap
+    assert VertexStore.get(track_map["road"]).vertex_count > 10
+    assert track_map["lines"] == [] and track_map["maxX"] == 490.0
+
+
+def test_track_map_circuit_falls_back_to_reference_lap(open_viewer):
+    from PySide6.QtGui import QColor
+
+    from tinypedal.ui.lap_viewer import PlotLap
+    from tinypedal.userfile.telemetry_lap import LapData
+
+    distance = [float(index) for index in range(0, 101, 10)]
+    times = [d / 10 for d in distance]
+    reference = LapData("a", {"distance": distance, "lap_time": times, "pos_x": [d + 1 for d in distance],
+                              "pos_y": distance})
+    other = LapData("b", {"distance": distance, "lap_time": times, "pos_x": [d + 2 for d in distance],
+                          "pos_y": distance})
+    backend = open_viewer().backend
+    backend.data.set_laps([PlotLap("a", "a", reference, QColor("red")), PlotLap("b", "b", other, QColor("blue"))])
+    backend.rebuild_chart()
+    assert backend._road.xs == [d + 1 for d in distance]  # no track map file: reference lap line
+    assert len(backend.trackMap["lines"]) == 2 and backend.trackMap["lines"][0]["reference"]
+    backend.data.set_laps([])
+    backend.rebuild_chart()
+    assert backend.trackMap == {}
+
+
+def test_hidden_viewer_releases_laps_and_reloads(open_viewer):
+    from tinypedal.setting import cfg
+
+    write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
+    write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
+    viewer = open_viewer()
+    backend = viewer.backend
+    restored = []
+    backend.viewRestored.connect(lambda start, end: restored.append((start, end)))
+    viewer.show()
+    backend.setChartView(500.0, 1500.0)
+    backend.release_laps()  # visible: kept
+    assert backend.data.laps and backend._lap_cache
+    viewer.hide()
+    assert backend._release_timer.isActive()  # released after a while in background
+    backend.release_laps()
+    backend.setChartView(0.0, 1.0)  # page emptied: chart view reset
+    assert not backend.data.laps and not backend._lap_cache and not backend.panels[0]["series"]
+    viewer.show()  # same laps & zoom again
+    assert len(backend.data.laps) == 2 and not backend._release_timer.isActive()
+    assert restored == [(500.0, 1500.0)]
+
+
+def test_map_colored_by_time_gain():
+    import math
+
+    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR, gain_color
+    from tinypedal.ui.quick import lap_map
+    from tinypedal.userfile.telemetry_lap import LapData
+
+    distance = [float(index) for index in range(0, 2001, 10)]
+    xs = [500 * math.cos(d / 2000 * math.tau) for d in distance]
+    ys = [500 * math.sin(d / 2000 * math.tau) for d in distance]
+    reference = LapData("ref", {"distance": distance, "lap_time": [d / 50 for d in distance], "pos_x": xs, "pos_y": ys})
+    # Compared: slower on first half (40 m/s), faster on second half (60 m/s)
+    times = [d / 40 if d <= 1000 else 25 + (d - 1000) / 60 for d in distance]
+    compared = LapData("cmp", {"distance": distance, "lap_time": times, "pos_x": xs, "pos_y": ys})
+    line = lap_map.map_line(compared)
+    assert line is not None
+    colors = dict(zip(line.distances, lap_map.gain_colors(reference, compared, line)))
+    assert colors[500.0] == LOSS_COLOR and colors[1500.0] == GAIN_COLOR  # losing then gaining
+    assert gain_color(0.0).name() == "#9ca3af"
+
+
+def test_map_mode_saved(open_viewer):
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import load_viewer_setting
+
+    backend = open_viewer().backend
+    assert backend.mapMode == "laps"
+    backend.setMapMode("speed")
+    backend.setMapMode("unknown")  # ignored
+    assert backend.mapMode == "speed"
+    assert load_viewer_setting(cfg.path.telemetry)["map_color_mode"] == "speed"
+    backend.parent().close()
+    flush_deleted()
+    assert open_viewer().backend.mapMode == "speed"  # remembered
+
+
+def test_former_time_gain_option_kept(ui_env):
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.setting import cfg
+    from tinypedal.ui.lap_viewer import save_viewer_setting
+    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+
+    save_viewer_setting(cfg.path.telemetry, map_time_gain=True)  # before color modes
+    parent = QWidget()
+    assert LapViewerBackend(parent, cfg.path.telemetry).mapMode == "gain"
+    parent.deleteLater()
+
+
+def test_lap_list_shows_sessions(open_viewer):
     import time
 
     from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
 
     folder = cfg.path.telemetry.rstrip("/")
     base = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
@@ -619,19 +466,18 @@ def test_lap_list_shows_sessions(ui_env):
         save_session_lap(folder, number, lap_time, base + number * 95, start=base)
     save_session_lap(folder, 1, 95.0, base + 7200, session="Race", start=base + 7000, valid=False)
     save_session_lap(folder, 2, 89.5, base + 7300, session="Race", start=base + 7000)
-    viewer = LapViewer(None)
-    try:
-        sessions = viewer.session_items()
-        assert [item.text(0) for item in sessions] == ["Race  03/10 15:56", "Practice  03/10 14:00"]
-        race, practice = sessions
-        assert race.text(1) == "1:29.500" and race.text(5) == "2 laps, Porsche 963"
-        assert [practice.child(i).text(0) for i in range(3)] == ["Lap 1", "★ Lap 2", "Lap 3"]  # fastest starred
-        assert practice.child(0).text(5) == ""  # vehicle shown once, on session row
-        assert "invalid" in race.child(0).text(5)
-        assert race.isExpanded()  # reference (best lap) inside
-        viewer.set_reference_item(race)  # session row: no lap
-        assert viewer.reference_key.endswith("1m29.500s.csv")
-        assert set(viewer.checked_paths()) <= {item.data(0, Qt.ItemDataRole.UserRole) for item in viewer.lap_items()}
-    finally:
-        viewer.close()
-        flush_deleted()
+    backend = open_viewer().backend
+    rows = backend.lap_model.rows
+    sessions = [row for row in rows if row["kind"] == "session"]
+    assert [row["title"] for row in sessions] == ["Race  03/10 15:56", "Practice  03/10 14:00"]
+    race, practice = sessions
+    assert race["time"] == "1:29.500" and race["count"] == 2 and race["info"] == "Porsche 963"
+    practice_laps = [row for row in rows if row["session"] == practice["session"] and row["kind"] == "lap"]
+    assert [row["title"] for row in practice_laps] == ["Lap 1", "Lap 2", "Lap 3"]
+    assert [row["fastest"] for row in practice_laps] == [False, True, False]  # fastest starred
+    assert practice_laps[0]["info"] == ""  # vehicle shown once, on session row
+    race_laps = [row for row in rows if row["session"] == race["session"] and row["kind"] == "lap"]
+    assert "invalid" in race_laps[0]["info"] and race_laps[0]["dim"]
+    assert race["session"] in backend.expanded  # reference (best lap) inside
+    backend.setReference("")  # session row: no lap
+    assert backend.reference_key.endswith("1m29.500s.csv")

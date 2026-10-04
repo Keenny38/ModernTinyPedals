@@ -56,6 +56,7 @@ COMMIT_KINDS = ("Added", "Fixed", "Changed")  # see tools/gen_release_notes.py
 _bold = re.compile(r"\*\*(.+?)\*\*")
 _code = re.compile(r"`([^`]+)`")
 _link = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_image = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")  # Markdown image line
 
 
 class NotesSection(NamedTuple):
@@ -78,7 +79,7 @@ def parse_sections(markdown: str) -> list[NotesSection]:
     sections: list[NotesSection] = []
     for raw_line in markdown.splitlines():
         line = raw_line.strip()
-        if not line:
+        if not line or _image.match(line):  # changelog screenshots are online only
             continue
         heading = re.match(r"^#{2,4}\s+(.*)$", line)
         if heading:

@@ -204,6 +204,7 @@ GLOBAL_DEFAULT = {
         "show_marked_coordinates": True,
         "show_osculating_circle": True,
         "show_highlighted_coordinates": True,
+        "show_elevation_profile": True,
         "inner_margin": 6,
         "position_increment_step": 5,
         "font_color_light": "#CCCCCC",
