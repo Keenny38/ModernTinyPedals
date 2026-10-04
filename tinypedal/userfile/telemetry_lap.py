@@ -48,6 +48,8 @@ _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
 _lap_number_name = re.compile(r"(?:^| )lap(\d+) ")
 SESSION_START_TOLERANCE = 120  # seconds, laps whose recorded session start differ less are same session
 SESSION_GAP = 1800  # seconds without lap: new session (laps recorded without session start)
+DISTANCE_SCALE_MIN = 0.01  # lap lengths differing less are the same (no distance scaling for delta)
+DISTANCE_SCALE_MAX = 0.10  # lap lengths differing more are not the same lap (lap cut short)
 EntryType = TypeVar("EntryType")
 
 
@@ -221,7 +223,6 @@ def parse_info(line: str) -> dict:
 
 def load_lap(path: str) -> LapData:
     """Load lap CSV file, raises OSError or ValueError if invalid"""
-    columns: dict[str, list[float]] = {}
     try:
         with open_lap_file(path) as file:
             first = file.readline()
@@ -231,20 +232,11 @@ def load_lap(path: str) -> LapData:
             header = next(reader, None)
             if not header or "distance" not in header:
                 raise ValueError("not a TinyPedal telemetry file")
-            for name in header:
-                columns[name] = []
-            values = tuple(columns.values())
-            for row in reader:
-                if len(row) != len(header):
-                    continue
-                try:
-                    numbers = [float(value) for value in row]
-                except ValueError:
-                    continue
-                for column, number in zip(values, numbers):
-                    column.append(number)
-    except (EOFError, gzip.BadGzipFile, UnicodeDecodeError) as error:
+            width = len(header)
+            rows = [row for row in reader if len(row) == width]
+    except (EOFError, gzip.BadGzipFile, UnicodeDecodeError, csv.Error) as error:
         raise ValueError(f"unreadable file: {error}") from error
+    columns = dict(zip(header, parse_columns(rows, width)))
     if not columns["distance"]:
         raise ValueError("no telemetry sample")
     start, end = lap_bounds(columns["distance"])
@@ -254,6 +246,24 @@ def load_lap(path: str) -> LapData:
     if times:
         columns["distance"] = smooth_distance(times, columns["distance"])
     return LapData(lap_stem(os.path.basename(path)), columns, info or None)
+
+
+def parse_columns(rows: list[list[str]], width: int) -> list[list[float]]:
+    """Text rows to number columns, rows with a non number value left out
+
+    Whole columns are converted at once (C loops), row by row only if a value is not a number.
+    """
+    try:
+        return [list(map(float, column)) for column in zip(*rows)] if rows else [[] for _ in range(width)]
+    except ValueError:
+        pass
+    numbers = []
+    for row in rows:
+        try:
+            numbers.append([float(value) for value in row])
+        except ValueError:
+            continue
+    return [list(column) for column in zip(*numbers)] if numbers else [[] for _ in range(width)]
 
 
 def lap_bounds(distances: list[float]) -> tuple[int, int]:
@@ -332,12 +342,34 @@ def monotonic_distance(lap: LapData, column: str = "lap_time") -> tuple[list[flo
     return distances, values
 
 
+def distance_scale(reference: LapData, compare: LapData) -> float:
+    """Factor bringing compared lap distances to reference lap length, 1 if lengths match
+
+    Recorded laps use track distance (same length every lap). An imported log may use driven
+    distance, a bit longer or shorter: its distances are scaled so corners line up. Lengths more
+    than 10% apart are not the same lap (cut short): left unscaled.
+    """
+    if len(reference) < 2 or len(compare) < 2:
+        return 1.0
+    ref_length, cmp_length = max(reference.distance), max(compare.distance)
+    if ref_length <= 0 or cmp_length <= 0:
+        return 1.0
+    ratio = ref_length / cmp_length
+    return ratio if DISTANCE_SCALE_MIN < abs(ratio - 1) < DISTANCE_SCALE_MAX else 1.0
+
+
 def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, float]]:
-    """Time delta (compare - reference) along distance, positive = compare slower"""
+    """Time delta (compare - reference) along distance, positive = compare slower
+
+    Compared lap distances scaled to reference lap length if they differ (see distance_scale).
+    """
     ref_dist, ref_time = monotonic_distance(reference)
     cmp_dist, cmp_time = monotonic_distance(compare)
     if len(ref_dist) < 2 or not cmp_dist:
         return []
+    scale = distance_scale(reference, compare)
+    if scale != 1.0:
+        cmp_dist = [distance * scale for distance in cmp_dist]
     return [
         (distance, lap_time - interpolate(ref_dist, ref_time, distance))
         for distance, lap_time in zip(cmp_dist, cmp_time)

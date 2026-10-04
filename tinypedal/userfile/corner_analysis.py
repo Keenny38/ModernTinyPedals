@@ -26,6 +26,8 @@ minimum speed, braking point, full throttle point and time spent between the two
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+from itertools import pairwise
 from typing import NamedTuple
 
 from .telemetry_lap import LapData, interpolate, monotonic_distance
@@ -60,6 +62,10 @@ class CornerStats(NamedTuple):
     trail_braking: float = 0.0  # seconds braking while turning
     coasting: float = 0.0  # seconds with no pedal pressed
     overlap: float = 0.0  # seconds with throttle & brake pressed together
+    entry_speed: float = 0.0  # km/h at corner start (top speed before braking)
+    exit_speed: float = 0.0  # km/h at corner end
+    apex_gear: int = 0  # gear at minimum speed, 0 if not recorded
+    peak_brake: float = 0.0  # highest brake pedal fraction
 
 
 class CornerComparison(NamedTuple):
@@ -76,13 +82,77 @@ class CornerComparison(NamedTuple):
 
 
 def resample(lap: LapData, column: str, grid: list[float]) -> list[float] | None:
-    """Column values at grid distances, None if column not recorded"""
+    """Column values at grid distances (ascending), None if column not recorded"""
     if column not in lap.columns or len(lap) < 2:
         return None
     distances, values = monotonic_distance(lap, column)
     if len(distances) < 2:
         return None
-    return [interpolate(distances, values, distance) for distance in grid]
+    return resample_sorted(distances, values, grid)
+
+
+def resample_sorted(distances: list[float], values: list[float], grid: list[float]) -> list[float]:
+    """Linear interpolation at ascending grid distances in one pass (no bisect per point)"""
+    result = []
+    count = len(distances)
+    index = 1
+    for distance in grid:
+        if distance <= distances[0]:
+            result.append(values[0])
+            continue
+        while index < count and distances[index] < distance:
+            index += 1
+        if index >= count:
+            result.append(values[-1])
+            continue
+        x0, x1 = distances[index - 1], distances[index]
+        if x1 <= x0:
+            result.append(values[index])
+        else:
+            result.append(values[index - 1] + (values[index] - values[index - 1]) * (distance - x0) / (x1 - x0))
+    return result
+
+
+class ResampledLap:
+    """Lap columns resampled once on its distance grid, sliced for each corner
+
+    Each column is resampled over the whole lap at first use, so comparing every corner costs
+    one pass per column instead of one per corner.
+    """
+
+    def __init__(self, lap: LapData, step: float = GRID_STEP):
+        self.lap = lap
+        self.grid = lap_grid(lap, step)
+        self._columns: dict[str, list[float] | None] = {}
+        self._monotonic: dict[str, tuple[list[float], list[float]]] = {}
+        self._times: tuple[list[float], list[float]] | None = None
+
+    def column(self, name: str) -> list[float] | None:
+        if name not in self._columns:
+            self._columns[name] = resample(self.lap, name, self.grid) if self.grid else None
+        return self._columns[name]
+
+    def indexes(self, start: float, end: float) -> tuple[int, int]:
+        """Grid index range [first, last) between distances"""
+        return bisect_left(self.grid, start), bisect_right(self.grid, end)
+
+    def value_at(self, name: str, distance: float) -> float | None:
+        """Column value at distance, None if column not recorded"""
+        if name not in self._monotonic:
+            self._monotonic[name] = monotonic_distance(self.lap, name) if name in self.lap.columns else ([], [])
+        distances, values = self._monotonic[name]
+        if not distances:
+            return None
+        return interpolate(distances, values, distance)
+
+    def time_at(self, distance: float) -> float | None:
+        """Lap time at distance, None if lap time not recorded"""
+        if self._times is None:
+            self._times = monotonic_distance(self.lap) if "lap_time" in self.lap.columns else ([], [])
+        distances, times = self._times
+        if len(distances) < 2:
+            return None
+        return interpolate(distances, times, distance)
 
 
 def smooth(values: list[float], points: int = SMOOTH_POINTS) -> list[float]:
@@ -104,10 +174,11 @@ def lap_grid(lap: LapData, step: float = GRID_STEP) -> list[float]:
     return [index * step for index in range(int(length / step) + 1)]
 
 
-def find_corners(lap: LapData, hysteresis: float = SPEED_HYSTERESIS) -> list[Corner]:
+def find_corners(lap: LapData | ResampledLap, hysteresis: float = SPEED_HYSTERESIS) -> list[Corner]:
     """Corners of lap from its speed, in lap order"""
-    grid = lap_grid(lap)
-    speeds = resample(lap, "speed_kph", grid)
+    sampled = lap if isinstance(lap, ResampledLap) else ResampledLap(lap)
+    grid = sampled.grid
+    speeds = sampled.column("speed_kph")
     if not speeds:
         return []
     speeds = smooth(speeds)
@@ -144,16 +215,23 @@ def find_corners(lap: LapData, hysteresis: float = SPEED_HYSTERESIS) -> list[Cor
     return corners
 
 
-def corner_stats(lap: LapData, corner: Corner) -> CornerStats | None:
+def corner_stats(lap: LapData | ResampledLap, corner: Corner) -> CornerStats | None:
     """Lap driving between corner start & end, None if lap has no speed"""
-    grid = [distance for distance in lap_grid(lap) if corner.start <= distance <= corner.end]
-    speeds = resample(lap, "speed_kph", grid)
-    times = resample(lap, "lap_time", [corner.start, corner.end])
-    if not speeds or not times:
+    sampled = lap if isinstance(lap, ResampledLap) else ResampledLap(lap)
+    first, last = sampled.indexes(corner.start, corner.end)
+    all_speeds = sampled.column("speed_kph")
+    start_time, end_time = sampled.time_at(corner.start), sampled.time_at(corner.end)
+    if not all_speeds or first >= last or start_time is None or end_time is None:
         return None
+
+    def part(name: str) -> list[float] | None:
+        values = sampled.column(name)
+        return values[first:last] if values else None
+
+    grid = sampled.grid[first:last]
+    speeds = all_speeds[first:last]
     lowest = min(range(len(speeds)), key=speeds.__getitem__)
-    brake = resample(lap, "brake", grid)
-    throttle = resample(lap, "throttle", grid)
+    brake, throttle = part("brake"), part("throttle")
     brake_point = -1.0
     if brake:
         brake_point = next((grid[index] for index in range(lowest + 1) if brake[index] >= BRAKE_ON), -1.0)
@@ -161,21 +239,32 @@ def corner_stats(lap: LapData, corner: Corner) -> CornerStats | None:
     if throttle:
         throttle_point = next(
             (grid[index] for index in range(lowest, len(grid)) if throttle[index] >= FULL_THROTTLE), -1.0)
-    trail, coast, overlap = driving_times(lap, grid, brake, throttle)
+    trail, coast, overlap = count_driving_times(part("lap_time"), part("steering"), brake, throttle)
+    gears = part("gear")
     return CornerStats(
-        speeds[lowest], grid[lowest], brake_point, throttle_point, times[1] - times[0], trail, coast, overlap)
+        speeds[lowest], grid[lowest], brake_point, throttle_point, end_time - start_time, trail, coast, overlap,
+        entry_speed=speeds[0], exit_speed=speeds[-1], apex_gear=round(gears[lowest]) if gears else 0,
+        peak_brake=max(brake) if brake else 0.0,
+    )
 
 
 def driving_times(
     lap: LapData, grid: list[float], brake: list[float] | None, throttle: list[float] | None,
 ) -> tuple[float, float, float]:
     """Seconds of trail braking, coasting & pedal overlap along grid (0 if pedals not recorded)"""
-    times = resample(lap, "lap_time", grid)
+    return count_driving_times(resample(lap, "lap_time", grid), resample(lap, "steering", grid), brake, throttle)
+
+
+def count_driving_times(
+    times: list[float] | None, steering: list[float] | None, brake: list[float] | None,
+    throttle: list[float] | None,
+) -> tuple[float, float, float]:
+    """Seconds of trail braking, coasting & pedal overlap from samples on the same grid"""
     if not times or brake is None or throttle is None:
         return 0.0, 0.0, 0.0
-    steering = resample(lap, "steering", grid) or [0.0] * len(grid)
+    steering = steering or [0.0] * len(times)
     trail = coast = overlap = 0.0
-    for index in range(len(grid) - 1):
+    for index in range(len(times) - 1):
         step = max(times[index + 1] - times[index], 0.0)
         pressed_brake, pressed_throttle = brake[index], throttle[index]
         if pressed_brake >= BRAKE_ON and abs(steering[index]) >= STEERING_ON:
@@ -191,12 +280,14 @@ def compare_corners(
     reference: LapData, compared: LapData | None = None, hysteresis: float = SPEED_HYSTERESIS,
 ) -> list[CornerComparison]:
     """Corner stats of reference lap, and of compared lap on the same corners"""
+    sampled_reference = ResampledLap(reference)
+    sampled_compared = ResampledLap(compared) if compared is not None else None
     result = []
-    for corner in find_corners(reference, hysteresis):
-        ref_stats = corner_stats(reference, corner)
+    for corner in find_corners(sampled_reference, hysteresis):
+        ref_stats = corner_stats(sampled_reference, corner)
         if ref_stats is None:
             continue
-        other = corner_stats(compared, corner) if compared is not None else None
+        other = corner_stats(sampled_compared, corner) if sampled_compared is not None else None
         result.append(CornerComparison(corner, ref_stats, other))
     return result
 
@@ -210,3 +301,34 @@ def straights_delta(rows: list[CornerComparison], reference: LapData, compared: 
     """Time lost on straights: lap delta not spent in corners (between top speed & braking)"""
     corners = sum(row.time_delta or 0.0 for row in rows)
     return lap_time_delta(reference, compared) - corners
+
+
+class IdealLap(NamedTuple):
+    """Best time of each lap part among laps (corners & straights between them)"""
+
+    time: float  # sum of best part times
+    bounds: list[float]  # part limits (reference lap distances): 0, corner start, corner end... lap end
+    best: list[int]  # index (in laps) of fastest lap in each part
+
+
+def ideal_lap(laps: list[LapData], corners: list[Corner]) -> IdealLap | None:
+    """Fastest time of every corner & straight among laps, None if under 2 laps with lap time"""
+    timed = [index for index, lap in enumerate(laps) if lap.lap_time > 0 and "lap_time" in lap.columns and len(lap) >= 2]
+    if len(timed) < 2 or not corners:
+        return None
+    bounds = [0.0]
+    for corner in corners:
+        for distance in (corner.start, corner.end):
+            if distance > bounds[-1]:
+                bounds.append(distance)
+    length = max(laps[0].distance)
+    if length > bounds[-1]:
+        bounds.append(length)
+    times = []
+    for index in timed:
+        sampled = ResampledLap(laps[index])
+        points = [0.0, *(sampled.time_at(distance) or 0.0 for distance in bounds[1:-1]), laps[index].lap_time]
+        times.append([max(end - start, 0.0) for start, end in pairwise(points)])
+    best = [min(range(len(timed)), key=lambda position: times[position][part]) for part in range(len(bounds) - 1)]
+    total = sum(times[position][part] for part, position in enumerate(best))
+    return IdealLap(total, bounds, [timed[position] for position in best])

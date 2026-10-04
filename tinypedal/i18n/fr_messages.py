@@ -236,4 +236,9 @@ MESSAGE_RULES = (
     (r"The browser warns once about this self-signed certificate\. Accept it only if its SHA-256 fingerprint is:(.*)",
      r"Le navigateur avertit une fois pour ce certificat auto-signé. Acceptez-le seulement si son empreinte SHA-256 est :\1"),
     (r"Web dashboard: unable to set up HTTPS \((.+)\)\.", r"Tableau de bord web : impossible de configurer HTTPS (\1)."),
+    (r"^New lap: ", "Nouveau tour : "),
+    (r"^Exporting ([0-9]+)/([0-9]+) laps\.\.\.$", r"Export de \1/\2 tours..."),
+    (r"^Loading laps: ([0-9]+)/([0-9]+)$", r"Chargement des tours : \1/\2"),
+    (r"^Unable to save picture: ", "Impossible d'enregistrer l'image : "),
+    (r"^Replay: (.+) at (.+)$", r"Rejeu : \1 à \2"),
 )

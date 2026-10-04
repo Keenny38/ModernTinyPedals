@@ -3,6 +3,80 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.18.0 (2026-10-04)
+
+### Visionneuse de télémétrie : analyse
+
+- **Légende interactive** au-dessus des courbes : survol pour surligner un tour (courbes, carte, cercle G), clic pour le garder surligné, double-clic pour en faire la référence, `×` pour le masquer, clic droit pour le menu.
+- **Couleurs stables** : chaque tour garde sa couleur tant qu'il est affiché, même quand on en coche ou décoche d'autres, ou qu'on change de référence.
+- **Écart à la référence** dans les bulles du curseur (`237 +4`, `9 % −3 %`). Quand une voie est trop petite pour sa bulle, les valeurs s'affichent sous son nom.
+- **Repères A et B** (clic droit ou touches `A` / `B`) et nouvel onglet **Plage** : temps de chaque tour entre les repères, écart à la référence, et min / max / moyenne de chaque voie affichée.
+- **Canaux calculés** : glissement de chaque roue (blocage au freinage, patinage à l'accélération), vitesse de braquage, carburant consommé, écart de température des pneus.
+- **Panneaux combinés** : les 4 roues dans une seule voie (températures, pressions, usure, freins, suspension…) et `Accélérateur et frein` superposés.
+- **Menu `Canaux`** : recherche, presets (Pédales, Pneus, Freins, Suspension), canaux non enregistrés grisés (et un message dans la voie plutôt qu'un graphe vide), **lissage** des voies bruitées, **fenêtre** du gain/perte de temps (20 à 150 m), **bande min / max** des tours affichés pour voir la régularité.
+- **Voies** : hauteur réglable en glissant leur bord (double-clic pour revenir), zoom vertical avec `Ctrl` + molette, défilement quand il y a beaucoup de voies.
+- **Lecture du tour** (bouton ▶ ou `Espace`, de 0,25× à 4×) : le curseur suit le tour de référence en temps réel.
+- **Clavier** : `←` `→` déplacent le curseur (`Maj` : la vue), `[` `]` virage précédent / suivant, `A` `B` repères, `Échap` les efface, `R` met le tour surligné en référence.
+- **Clic droit sur les courbes** : repères, zoom sur le secteur ou entre les repères, copier les valeurs ou l'image, ouvrir le replay à cet endroit.
+- **Clic sur `S1`, `S2`, `S3`** dans les courbes, ou sur un temps de secteur dans la liste : zoom sur le secteur.
+
+![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-telemetry-viewer.png)
+
+### Onglet Virages
+
+- **Tour comparé au choix** quand plusieurs tours sont affichés, et **tri par temps perdu** pour voir d'abord où gagner du temps.
+- Pour chaque virage : **vitesses d'entrée et de sortie**, **rapport** à la vitesse mini, **pression de freinage** maximale et **tour le plus rapide** dans ce virage.
+- **Tour idéal** : le meilleur passage de chaque virage et de chaque ligne droite parmi les tours affichés, avec l'écart au tour de référence.
+- La sensibilité de détection s'affiche dans ton unité de vitesse, et les virages sont recalculés au relâchement du curseur (3 fois plus vite qu'avant).
+
+![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-corners.png)
+
+### Carte de trajectoire
+
+- **Points de pilotage** de chaque tour dans chaque virage : ◆ freinage, ● point de corde (vitesse mini), ▲ sortie (retour à plein gaz, pointe dans le sens de la course). Au survol : virage, vitesse et distance, avec l'écart au tour de référence. Un clic zoome les courbes sur le virage. Option pour afficher la vitesse à côté de chaque point.
+- **7 colorations** : par tour, gain/perte, vitesse, pédales, **trajectoire** (le tour comparé à l'intérieur ou à l'extérieur de la référence), **rapport** et **altitude**.
+- **Suivi des voitures** pendant la lecture (ou avec les flèches du clavier) : la carte zoome sur les voitures et les garde au centre, et dézoome si elles s'écartent.
+- **Curseur** : une flèche par tour, orientée dans le sens de la course, avec l'écart à la référence (en secondes, ou en mètres sur l'axe en temps). Passer la souris sur la piste place le curseur des courbes au même endroit.
+- **Temps des secteurs** sur la piste avec l'écart du tour comparé, **flèches de sens**, **blocages des roues avant** et **patinage arrière**.
+- **Grande carte** par-dessus les courbes (bouton ⤢), **orientation auto** pour remplir la carte et rotation par quart de tour.
+- Étiquettes de virages qui ne se chevauchent plus (les plus gros écarts d'abord).
+
+![Carte : points de freinage, de corde et de sortie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-track-map.png)
+
+![Carte : coloration trajectoire](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-racing-line.png)
+
+### Liste des tours et outils
+
+- **Sélection** : `Maj` + clic coche tous les tours entre deux, menu de sélection rapide (meilleur tour vs dernier, 3 ou 5 meilleurs, tout décocher).
+- **Écart au meilleur tour** sur chaque tour, et conditions en bulle (températures piste et air, humidité, carburant consommé).
+- Un tour illisible est signalé dans la liste au lieu de disparaître sans rien dire.
+- **Mode `Direct`** : un nouveau tour enregistré apparaît tout seul et se compare au meilleur tour.
+- **Ouvrir le replay** à l'endroit du curseur quand un replay couvre ce tour.
+- **Export en image** (PNG) ou copie dans le presse-papiers, pour partager sur Discord.
+- La mise en page est mémorisée : largeur des colonnes, onglet de droite, hauteur des voies.
+
+### Cercle G
+
+- Le freinage est maintenant en bas et un virage à droite à droite (c'était inversé), avec les repères Gauche / Droite / Accélération / Freinage.
+- **Enveloppe d'adhérence** de chaque tour, et une échelle qui ignore les pics (vibreurs, contacts).
+
+### Corrections
+
+- **Les pages Qt Quick sont enfin en français** : la visionneuse de télémétrie et le Track Map Viewer restaient en anglais.
+- La carte de trajectoire n'est plus **en miroir** : elle a le même sens que la carte en jeu.
+- Le zoom des courbes est gardé quand on coche un tour.
+- Zoom à la molette fluide sur pavé tactile (courbes et carte).
+- En axe en temps, la carte et le cercle G montrent où est chaque tour à ce temps (au lieu de tous au même endroit).
+- Un tour importé de MoTeC dont la distance diffère un peu est recalé pour le delta.
+- Les réglages de la visionneuse ne peuvent plus être perdus si l'app s'arrête pendant leur écriture.
+- Couleurs lisibles en thème clair (meilleur tour, meilleurs secteurs, avertissements, gain/perte).
+
+### Performances
+
+- Les tours se chargent toujours en arrière-plan, avec la progression, et la lecture des fichiers est plus rapide.
+- Cocher un tour ne recalcule que ce tour, et l'export MoTeC de tout un circuit se fait en arrière-plan.
+- Le curseur demande un seul calcul par mouvement de souris pour les courbes, la carte et le cercle G.
+
 ## 0.17.0 (2026-10-04)
 
 ### Visionneuse de télémétrie refaite

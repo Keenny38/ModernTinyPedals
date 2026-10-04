@@ -114,7 +114,7 @@ def test_lap_viewer_corner_tab(ui_env, tmp_path):
                            (1500, 240)))
         show_laps(backend, [("a", reference), ("b", slower)])
         rows = backend.corners
-        assert len(rows) == 4  # 2 corners, straights, total
+        assert len(rows) == 5  # 2 corners, straights, total, ideal lap
         assert rows[0]["time"].startswith("+")  # time lost
         assert rows[0]["speed"] == "100 / 90"
         corner = backend._corner_rows[1].corner
@@ -140,8 +140,8 @@ def test_corner_tab_totals_and_sensitivity(ui_env, tmp_path):
         show_laps(backend, [("a", reference), ("b", slower)])
         rows = backend.corners
         corner_rows = backend._corner_rows
-        assert len(rows) == len(corner_rows) + 2  # corners, straights, total
-        straights, total = rows[-2], rows[-1]
+        assert len(rows) == len(corner_rows) + 3  # corners, straights, total, ideal lap
+        straights, total = rows[-3], rows[-2]
         corners = sum(row.time_delta for row in corner_rows)
         assert minus(straights["time"]) + corners == pytest.approx(minus(total["time"]), abs=0.011)
         assert minus(straights["time"]) > 0  # slower on first straight

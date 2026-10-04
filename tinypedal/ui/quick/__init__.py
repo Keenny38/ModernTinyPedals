@@ -112,6 +112,32 @@ class Theme(QObject):
     def hover(self) -> QColor:
         return self._color(QPalette.ColorRole.Midlight)
 
+    # Status colors, darker on light theme for contrast
+    def _status(self, dark: str, light: str) -> QColor:
+        return QColor(dark if self._color(QPalette.ColorRole.Window).lightness() < 128 else light)
+
+    @Property(QColor, notify=changed)
+    def gold(self) -> QColor:
+        """Fastest lap star"""
+        return self._status("#FACC15", "#B45309")
+
+    @Property(QColor, notify=changed)
+    def purple(self) -> QColor:
+        """Best sector, theoretical best"""
+        return self._status("#C084FC", "#7E22CE")
+
+    @Property(QColor, notify=changed)
+    def warning(self) -> QColor:
+        return self._status("#FB923C", "#C2410C")
+
+    @Property(QColor, notify=changed)
+    def gain(self) -> QColor:
+        return self._status("#4ADE80", "#15803D")
+
+    @Property(QColor, notify=changed)
+    def loss(self) -> QColor:
+        return self._status("#F87171", "#B91C1C")
+
     @Property(float, constant=True)
     def em(self) -> float:
         """Base font size in pixels, sizes scale with it like UIScaler.size"""
@@ -130,14 +156,18 @@ class Theme(QObject):
 
 
 class Translator(QObject):
-    """UI text translation for QML: i18n.tr("Text"), i18n.trm("Lap 3")"""
+    """UI text translation for QML: i18n.tr("Text"), i18n.trm("Lap 3")
 
-    @Slot(str, result=str, name="tr")
-    def translate(self, text: str) -> str:
+    Slots are called by Python method name: "tr" must be this class's own method, else QML gets
+    QObject.tr (Qt translator, no translation) and pages stay in English.
+    """
+
+    @Slot(str, result=str)
+    def tr(self, text: str) -> str:  # type: ignore[override]  # replaces QObject.tr for QML
         return tr(text)
 
-    @Slot(str, result=str, name="trm")
-    def translate_message(self, text: str) -> str:
+    @Slot(str, result=str)
+    def trm(self, text: str) -> str:
         return trm(text)
 
 

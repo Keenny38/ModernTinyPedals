@@ -36,13 +36,23 @@ from ...userfile.telemetry_lap import LapData, compute_delta, interpolate
 from ..lap_viewer import GAIN_WINDOW, gain_color, lap_positions
 from .lines import Vertices, band, colored_band
 
-MAP_MODES = ("laps", "gain", "speed", "pedals")
+MAP_MODES = ("laps", "gain", "speed", "pedals", "line", "gear", "elevation")
 SPEED_COLORS = (QColor("#3B82F6"), QColor("#22C55E"), QColor("#FACC15"), QColor("#EF4444"))  # slow to fast
+ELEVATION_COLORS = (QColor("#1E40AF"), QColor("#0D9488"), QColor("#84CC16"), QColor("#EAB308"), QColor("#B45309"))
+GEAR_COLORS = tuple(QColor(color) for color in (  # gear 1 to 8 (reverse & neutral grey)
+    "#EF4444", "#F97316", "#FACC15", "#84CC16", "#22C55E", "#06B6D4", "#3B82F6", "#A855F7",
+))
+LINE_COLORS = {"inside": QColor("#3B82F6"), "outside": QColor("#F97316"), "same": QColor("#9CA3AF")}
+LINE_FULL_SCALE = 3.0  # meters off reference line shown with full color (line mode)
+LINE_SAME = 0.4  # meters off reference line counted as same line
+LINE_SEARCH = 60.0  # meters of reference line searched around same distance for nearest point
 PEDAL_COLORS = {
     "throttle": QColor("#22C55E"), "brake": QColor("#EF4444"), "both": QColor("#F59E0B"), "coast": QColor("#9CA3AF"),
 }
 BRAKE_ON = 0.1  # brake pedal fraction counted as braking
 BRAKE_GAP = 60.0  # meters, braking points closer than this to previous braking end are the same braking
+SLIP_RATIO = 0.12  # wheel speed this much off car speed: locked or spinning wheel
+SLIP_SPEED = 40.0  # km/h, slip not checked slower
 
 
 class MapLine(NamedTuple):
@@ -54,10 +64,19 @@ class MapLine(NamedTuple):
 
 
 def map_line(lap: LapData) -> MapLine | None:
-    points = lap_positions(lap)
-    if len(points) < 2:
+    """Positions by strictly increasing distance (bisect & interpolate need sorted distances)"""
+    distances: list[float] = []
+    xs: list[float] = []
+    ys: list[float] = []
+    last = -math.inf
+    for distance, x, y in lap_positions(lap):
+        if distance > last:
+            distances.append(distance)
+            xs.append(x)
+            ys.append(y)
+            last = distance
+    if len(distances) < 2:
         return None
-    distances, xs, ys = (list(values) for values in zip(*points))
     return MapLine(distances, xs, ys)
 
 
@@ -111,17 +130,17 @@ def blend(colors: Sequence[QColor], amount: float) -> QColor:
     )
 
 
-def gain_colors(reference: LapData, compared: LapData, line: MapLine) -> list[QColor]:
+def gain_colors(reference: LapData, compared: LapData, line: MapLine, window: float = GAIN_WINDOW) -> list[QColor]:
     """Compared lap line colored by time lost (red) or gained (green) against reference lap"""
     delta = compute_delta(reference, compared)
     if len(delta) < 2:
         return []
     distances = [point[0] for point in delta]
     deltas = [point[1] for point in delta]
-    window = GAIN_WINDOW / 2
+    half = window / 2
     return [
-        gain_color((interpolate(distances, deltas, distance + window)
-                    - interpolate(distances, deltas, distance - window)) / GAIN_WINDOW)
+        gain_color((interpolate(distances, deltas, distance + half)
+                    - interpolate(distances, deltas, distance - half)) / window)
         for distance in line.distances
     ]
 
@@ -161,6 +180,98 @@ def pedal_colors(lap: LapData, line: MapLine) -> list[QColor]:
     return colors
 
 
+def gear_colors(lap: LapData, line: MapLine) -> list[QColor]:
+    """Line colored by gear (one color per gear)"""
+    gears = lap.columns.get("gear")
+    if not gears:
+        return []
+    neutral = QColor("#9CA3AF")
+    return [
+        GEAR_COLORS[gear - 1] if 1 <= (gear := round(interpolate(lap.distance, gears, distance))) <= len(GEAR_COLORS)
+        else neutral
+        for distance in line.distances
+    ]
+
+
+def elevation_colors(lap: LapData, line: MapLine) -> tuple[list[QColor], float, float]:
+    """Line colored by elevation, lowest blue to highest brown, with elevation range (meters)"""
+    heights = channel_at(lap, "pos_z", line)
+    if not heights or max(heights) - min(heights) < 0.5:  # not recorded (zeros) or flat
+        return [], 0.0, 0.0
+    low, high = min(heights), max(heights)
+    return [blend(ELEVATION_COLORS, (height - low) / (high - low)) for height in heights], low, high
+
+
+def line_offsets(reference: MapLine, compared: MapLine) -> list[float]:
+    """Distance of each compared line point to reference line: positive toward corner inside
+
+    Nearest reference point searched around the same lap distance. Inside or outside from the
+    reference line turning direction (straights: side has no meaning, offset kept unsigned positive).
+    """
+    count = len(reference.xs)
+    if count < 3:
+        return []
+    offsets = []
+    for distance, x, y in zip(compared.distances, compared.xs, compared.ys):
+        low = max(bisect.bisect_left(reference.distances, distance - LINE_SEARCH), 1)
+        high = min(bisect.bisect_right(reference.distances, distance + LINE_SEARCH), count - 1)
+        if low >= high:
+            offsets.append(0.0)
+            continue
+        nearest = min(range(low, high), key=lambda index: (reference.xs[index] - x) ** 2 + (reference.ys[index] - y) ** 2)
+        before, after = nearest - 1, nearest + 1
+        hx, hy = reference.xs[after] - reference.xs[before], reference.ys[after] - reference.ys[before]
+        length = math.hypot(hx, hy) or 1.0
+        side = (hx * (y - reference.ys[nearest]) - hy * (x - reference.xs[nearest])) / length  # left positive
+        turn = turning(reference, nearest)
+        if abs(turn) < 0.002:  # straight
+            offsets.append(abs(side) if abs(side) >= LINE_SAME else 0.0)
+        else:
+            offsets.append(side if turn > 0 else -side)
+    return offsets
+
+
+def turning(line: MapLine, index: int, span: int = 6) -> float:
+    """Heading change per meter around point (left positive), 0 at line ends"""
+    before, after = index - span, index + span
+    if before < 1 or after >= len(line.xs) - 1:
+        return 0.0
+    first = math.atan2(line.ys[index] - line.ys[before], line.xs[index] - line.xs[before])
+    second = math.atan2(line.ys[after] - line.ys[index], line.xs[after] - line.xs[index])
+    change = (second - first + math.pi) % math.tau - math.pi
+    meters = max((line.distances[after] - line.distances[before]) / 2, 1.0)  # between segment middles
+    return change / meters
+
+
+def line_colors(offsets: list[float]) -> list[QColor]:
+    """Line mode colors: blue inside of reference line, orange outside, grey on same line"""
+    neutral = LINE_COLORS["same"]
+    colors = []
+    for offset in offsets:
+        amount = 0.0 if abs(offset) < LINE_SAME else min((abs(offset) - LINE_SAME) / LINE_FULL_SCALE, 1.0)
+        target = LINE_COLORS["inside"] if offset > 0 else LINE_COLORS["outside"]
+        colors.append(QColor(
+            round(neutral.red() + (target.red() - neutral.red()) * amount),
+            round(neutral.green() + (target.green() - neutral.green()) * amount),
+            round(neutral.blue() + (target.blue() - neutral.blue()) * amount),
+        ))
+    return colors
+
+
+def direction_marks(line: MapLine, count: int = 14) -> list[tuple[float, float, float]]:
+    """Driving direction arrows evenly along line: x, y, heading (degrees, screen y down)"""
+    if len(line.distances) < 3:
+        return []
+    start, end = line.distances[0], line.distances[-1]
+    step = (end - start) / count
+    marks = []
+    for index in range(count):
+        distance = start + step * (index + 0.5)
+        x, y = point_at(line, distance)
+        marks.append((x, y, math.degrees(heading_at(line, distance))))
+    return marks
+
+
 def colored_line(line: MapLine, colors: list[QColor], half_width: float) -> Vertices:
     return colored_band(line.xs, line.ys, colors, half_width)
 
@@ -182,6 +293,61 @@ def braking_points(lap: LapData) -> list[float]:
         else:
             braking = False
     return points
+
+
+def slip_events(lap: LapData) -> list[tuple[float, str]]:
+    """Distances where front wheels lock under braking ("lock") or rear wheels spin on throttle ("spin")
+
+    Wheel slip from wheel speed against car speed, one event per slip episode.
+    """
+    columns = lap.columns
+    needed = ("speed_kph", "brake", "throttle", *(f"wheel_speed_{wheel}" for wheel in ("fl", "fr", "rl", "rr")))
+    if not all(column in columns for column in needed):
+        return []
+    events: list[tuple[float, str]] = []
+    last = {"lock": -math.inf, "spin": -math.inf}
+    active = {"lock": False, "spin": False}
+    for index, distance in enumerate(lap.distance):
+        speed = columns["speed_kph"][index]
+        if speed < SLIP_SPEED:
+            active = {"lock": False, "spin": False}
+            continue
+        front = min(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index])
+        rear = max(columns["wheel_speed_rl"][index], columns["wheel_speed_rr"][index])
+        if not rear and not max(columns["wheel_speed_fl"][index], columns["wheel_speed_fr"][index]):
+            continue  # every wheel at 0 while moving: wheel speed not recorded
+        states = {
+            "lock": columns["brake"][index] > BRAKE_ON and (front - speed) / speed < -SLIP_RATIO,
+            "spin": columns["throttle"][index] > 0.3 and (rear - speed) / speed > SLIP_RATIO,
+        }
+        for kind, slipping in states.items():
+            if slipping and not active[kind] and distance - last[kind] > BRAKE_GAP:
+                events.append((distance, kind))
+            if slipping:
+                last[kind] = distance
+            active[kind] = slipping
+    return events
+
+
+def rotate_line(line: MapLine, angle: float) -> MapLine:
+    """Driving line turned around origin (radians, counterclockwise)"""
+    if not angle:
+        return line
+    cos, sin = math.cos(angle), math.sin(angle)
+    return MapLine(line.distances, [x * cos - y * sin for x, y in zip(line.xs, line.ys)],
+                   [x * sin + y * cos for x, y in zip(line.xs, line.ys)])
+
+
+def principal_angle(xs: Sequence[float], ys: Sequence[float]) -> float:
+    """Direction of longest extent of points (radians), 0 if too few points"""
+    count = len(xs)
+    if count < 3:
+        return 0.0
+    mean_x, mean_y = sum(xs) / count, sum(ys) / count
+    sxx = sum((x - mean_x) ** 2 for x in xs)
+    syy = sum((y - mean_y) ** 2 for y in ys)
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    return 0.5 * math.atan2(2 * sxy, sxx - syy)
 
 
 def cross_mark(line: MapLine, distance: float, half_length: float) -> tuple[float, float, float, float]:

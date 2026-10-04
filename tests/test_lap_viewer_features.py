@@ -162,7 +162,7 @@ def test_corners_marked_and_driving_analysis(viewer):
     assert backend.trackMap["corners"][0]["delta"].startswith("+")  # compared lap slower
     rows = backend.corners
     assert rows[0]["label"] == "T1" and " / " in rows[0]["coast"] and rows[0]["overlap"].endswith(" s")
-    assert [row["kind"] for row in rows[-2:]] == ["sum", "total"]
+    assert [row["kind"] for row in rows[-3:]] == ["sum", "total", "ideal"]
     start, end = backend.cornerRange(0)
     assert start < marks[0]["x"] < end
 
@@ -190,7 +190,7 @@ def test_map_click_and_cursor(viewer):
     assert backend.distanceAt(position) == pytest.approx(line.distances[index], abs=1)
     points = backend.mapCursor(position)
     assert len(points) == 2 and points[0]["x"] == pytest.approx(line.xs[index], abs=1)
-    braking = backend.trackMap["braking"]
+    braking = [point for point in backend.trackMap["points"] if point["kind"] == "brake"]  # 2 corners, 2 laps
     assert len(braking) == 4 and {point["color"] for point in braking} == {lap.color.name() for lap in backend.data.laps}
     bounds = backend.mapBounds(0.0, 500.0)  # first quarter: right & top of oval
     assert bounds[0] > 0 and bounds[3] > 150
@@ -354,7 +354,8 @@ def test_motec_export(viewer, laps, tmp_path, monkeypatch):
     assert "Exported" in backend.status
     monkeypatch.setattr(lap_backend.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))
     os.makedirs(tmp_path / "all")
-    backend.exportMotecMany(True)  # every lap of track
+    backend.exportMotecMany(True)  # every lap of track, in background
+    wait_loaded(viewer)
     assert len(os.listdir(tmp_path / "all")) == len(laps)
 
 

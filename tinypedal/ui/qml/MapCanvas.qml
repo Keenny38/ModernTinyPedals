@@ -2,7 +2,8 @@ import QtQuick
 
 // Map view shared by track maps: world coordinates (meters) to screen, animated zoom & move.
 // Content items use canvas.matrix (GpuShape transform) or screenX/screenY (labels, markers).
-// Wheel: zoom at cursor, drag: move, double-click: whole map, click: clicked(world x, y).
+// Wheel: zoom at cursor, drag: move, double-click: whole map, click: clicked(world x, y),
+// mouse over map: hovered(world x, y), then hoverEnded() when mouse leaves.
 Item {
     id: canvas
     clip: true
@@ -35,7 +36,10 @@ Item {
     readonly property var matrix: Qt.matrix4x4(mapScale, 0, 0, tx, 0, ySign * mapScale, 0, ty, 0, 0, 1, 0, 0, 0, 0, 1)
 
     signal clicked(real x, real y)
-    signal settled()  // zoom & move stopped: rebuild what depends on scale
+    signal hovered(real x, real y)
+    signal hoverEnded()
+    signal settled()  // zoom stopped: rebuild what depends on scale
+    signal userZoomed(real zoom)  // zoom chosen with wheel or buttons
 
     Behavior on zoom { enabled: canvas.animate; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
     Behavior on panX { enabled: canvas.animate; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
@@ -54,12 +58,19 @@ Item {
     }
     function zoomAt(factor, px, py) {
         var next = Math.max(1, Math.min(zoom * factor, maxZoom))
+        userZoomed(next)
         var x = worldX(px), y = worldY(py)
         var scale = baseScale * next
         if (next === 1) setView(1, 0, 0, true)
         else setView(next, px - width / 2 - (x - centerX) * scale, py - height / 2 - ySign * (y - centerY) * scale, true)
     }
     function reset(animated) { setView(1, 0, 0, animated) }
+    // Center view on world point at zoom, at once (followed vehicle)
+    function centerOn(x, y, nextZoom) {
+        var next = Math.max(1, Math.min(nextZoom, maxZoom))
+        var scale = baseScale * next
+        setView(next, (centerX - x) * scale, ySign * (centerY - y) * scale, false)
+    }
     // Show area (world coordinates), keeping some room around it
     function fit(x0, y0, x1, y1, animated) {
         var areaWidth = Math.max(x1 - x0, 20), areaHeight = Math.max(y1 - y0, 20)
@@ -69,14 +80,23 @@ Item {
         setView(next, (centerX - (x0 + x1) / 2) * final, ySign * (centerY - (y0 + y1) / 2) * final, animated)
     }
 
-    onMapScaleChanged: settleTimer.restart()
-    onTxChanged: settleTimer.restart()
-    onTyChanged: settleTimer.restart()
-    Timer { id: settleTimer; interval: 120; onTriggered: canvas.settled() }
+    // Moving only: nothing to rebuild (followed vehicle moves view often).
+    // Zoom changing for long (followed vehicles drifting apart): settled at most twice a second meanwhile.
+    property double lastSettled: 0
+    onMapScaleChanged: {
+        if (Date.now() - lastSettled > 500 && settleTimer.running) settleTimer.triggered()
+        settleTimer.restart()
+    }
+    Timer {
+        id: settleTimer
+        interval: 120
+        onTriggered: { canvas.lastSettled = Date.now(); canvas.settled() }
+    }
 
     MouseArea {
         anchors.fill: parent
         enabled: canvas.interactive && canvas.hasBounds
+        hoverEnabled: true
         property real pressX: 0
         property real pressY: 0
         property real startPanX: 0
@@ -87,13 +107,15 @@ Item {
             pressX = mouse.x; pressY = mouse.y; startPanX = canvas.panX; startPanY = canvas.panY; moved = false
         }
         onPositionChanged: function(mouse) {
-            if (!pressed) return
+            if (!pressed) { canvas.hovered(canvas.worldX(mouse.x), canvas.worldY(mouse.y)); return }
             if (Math.abs(mouse.x - pressX) + Math.abs(mouse.y - pressY) > 4) moved = true
             if (moved && canvas.zoom > 1) canvas.setView(canvas.zoom, startPanX + mouse.x - pressX, startPanY + mouse.y - pressY, false)
         }
         onClicked: function(mouse) { if (!moved) canvas.clicked(canvas.worldX(mouse.x), canvas.worldY(mouse.y)) }
         onDoubleClicked: canvas.reset(true)
-        onWheel: function(wheel) { canvas.zoomAt(wheel.angleDelta.y > 0 ? 1.25 : 0.8, wheel.x, wheel.y) }
+        onExited: canvas.hoverEnded()
+        // Zoom follows wheel amount: smooth on touchpads & high resolution wheels
+        onWheel: function(wheel) { if (wheel.angleDelta.y !== 0) canvas.zoomAt(Math.pow(1.0019, wheel.angleDelta.y), wheel.x, wheel.y) }
     }
 
     Item {

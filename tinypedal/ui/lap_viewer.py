@@ -25,6 +25,7 @@ state in quick/lap_backend.py. This module keeps channels, value formats & viewe
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -56,50 +57,68 @@ GAIN_FULL_SCALE = 0.002  # seconds lost or gained per meter shown with full colo
 GAIN_COLOR = QColor("#22C55E")
 LOSS_COLOR = QColor("#EF4444")
 RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
-BACKGROUND_LOAD_COUNT = 3  # laps to read at once loaded in background (window stays responsive)
+BACKGROUND_LOAD_COUNT = 1  # laps to read loaded in background from this count (window stays responsive)
 
 
 class Channel(NamedTuple):
     """Plotted channel"""
 
-    column: str  # CSV column, "delta" for computed time delta
+    column: str  # CSV column, computed channel ("delta", "slip_fl"...) or combined panel ("all:...")
     title: str
     unit: str
     weight: float  # relative panel height
     fixed_range: tuple[float, float] | None = None
     group: str = ""  # menu group (per wheel channels)
     quantity: str = ""  # converted to user unit: speed, temperature, pressure, fuel (see display_units)
+    sources: tuple[str, ...] = ()  # recorded columns needed (computed channels), column itself if empty
+    parts: tuple[str, ...] = ()  # channels drawn together in one panel (combined panel)
+    noisy: bool = False  # smoothed by smoothing setting
 
 
-def wheel_channels(prefix: str, title: str, unit: str, quantity: str = "") -> tuple[Channel, ...]:
-    return tuple(
-        Channel(f"{prefix}_{wheel}", f"{title} {wheel.upper()}", unit, 0.8, group=title, quantity=quantity)
-        for wheel in ("fl", "fr", "rl", "rr")
+WHEELS = ("fl", "fr", "rl", "rr")
+
+
+def wheel_channels(prefix: str, title: str, unit: str, quantity: str = "", sources: tuple[str, ...] = (),
+                   noisy: bool = False) -> tuple[Channel, ...]:
+    """Channel of each wheel, then the 4 wheels in one panel"""
+    wheels = tuple(
+        Channel(f"{prefix}_{wheel}", f"{title} {wheel.upper()}", unit, 0.8, group=title, quantity=quantity,
+                sources=tuple(source.format(wheel=wheel) for source in sources), noisy=noisy)
+        for wheel in WHEELS
     )
+    combined = Channel(f"all:{prefix}", f"{title} \N{MULTIPLICATION SIGN}4", unit, 1.2, group=title,
+                       quantity=quantity, parts=tuple(channel.column for channel in wheels))
+    return (*wheels, combined)
 
 
 CHANNELS = (
     Channel("delta", "Delta", "s", 1.2),
-    Channel("delta_rate", "Time Gain/Loss", "s/100m", 1.0),
+    Channel("delta_rate", "Time Gain/Loss", "s/100m", 1.0, noisy=True),
     Channel("speed_kph", "Speed", "km/h", 2.0, quantity="speed"),
     Channel("throttle", "Throttle", "", 1.0, (0.0, 1.0)),
     Channel("brake", "Brake", "", 1.0, (0.0, 1.0)),
+    Channel("all:pedals", "Throttle & Brake", "", 1.2, (0.0, 1.0), parts=("throttle", "brake")),
     Channel("gear", "Gear", "", 0.8),
     Channel("steering", "Steering", "", 1.0, (-1.0, 1.0)),
+    Channel("steering_rate", "Steering Rate", "%/s", 0.8, sources=("steering", "lap_time"), noisy=True),
     Channel("rpm", "RPM", "rpm", 1.0),
     Channel("clutch", "Clutch", "", 0.6, (0.0, 1.0)),
     Channel("fuel", "Fuel", "l", 0.8, quantity="fuel"),
-    Channel("accel_lat", "Lateral G", "G", 1.0),
-    Channel("accel_long", "Longitudinal G", "G", 1.0),
+    Channel("fuel_used", "Fuel Used", "l", 0.8, quantity="fuel", sources=("fuel",)),
+    Channel("accel_lat", "Lateral G", "G", 1.0, noisy=True),
+    Channel("accel_long", "Longitudinal G", "G", 1.0, noisy=True),
     Channel("tc_active", "TC Active", "", 0.5, (0.0, 1.0)),
     Channel("abs_active", "ABS Active", "", 0.5, (0.0, 1.0)),
     Channel("battery", "Battery", "%", 0.8),
     Channel("pos_z", "Elevation", "m", 0.8),
     *wheel_channels("tyre_temp", "Tyre Temp", "°C", "temperature"),
+    Channel("tyre_temp_spread", "Tyre Temp Spread", "°C", 0.8, quantity="temperature_delta",
+            sources=tuple(f"tyre_temp_{wheel}" for wheel in WHEELS)),
     *wheel_channels("tyre_pres", "Tyre Pressure", "kPa", "pressure"),
     *wheel_channels("tyre_wear", "Tyre Wear", "%"),
     *wheel_channels("brake_temp", "Brake Temp", "°C", "temperature"),
     *wheel_channels("wheel_speed", "Wheel Speed", "km/h", "speed"),
+    *wheel_channels("slip", "Wheel Slip", "%", sources=("wheel_speed_{wheel}", "speed_kph"), noisy=True),
     *wheel_channels("ride_height", "Ride Height", "mm"),
     *wheel_channels("susp_defl", "Suspension", "mm"),
 )
@@ -108,6 +127,19 @@ TRACK_WIDTH = 12.0  # meters, circuit drawn under driving lines
 DEFAULT_CHANNELS = ("delta", "speed_kph", "throttle", "brake", "gear", "steering")
 PERCENT_RANGES = ((0.0, 1.0), (-1.0, 1.0))  # pedals & steering fractions shown in percent
 DELTA_CHANNELS = ("delta", "delta_rate")  # computed against reference lap, symmetric range
+CHANNEL_PRESETS = {  # channel menu presets: name, visible channels
+    "Default": DEFAULT_CHANNELS,
+    "Pedals": ("delta", "speed_kph", "all:pedals", "steering", "gear", "all:slip"),
+    "Tyres": ("speed_kph", "all:tyre_temp", "tyre_temp_spread", "all:tyre_pres", "all:tyre_wear"),
+    "Brakes": ("speed_kph", "brake", "all:brake_temp", "abs_active", "all:slip"),
+    "Suspension": ("speed_kph", "all:ride_height", "all:susp_defl", "accel_lat", "accel_long"),
+}
+PART_COLORS = {  # sub-channel colors of combined panels when one lap is shown
+    "throttle": "#22C55E", "brake": "#EF4444",
+    "fl": "#38BDF8", "fr": "#F97316", "rl": "#A3E635", "rr": "#E879F9",
+}
+SMOOTHING_LEVELS = (0, 3, 7, 15, 31)  # moving average samples of noisy channels, by smoothing setting
+DELTA_RATE_WINDOWS = (20, 40, 80, 150)  # meters, time gain/loss measured over (setting)
 
 
 def display_units() -> dict[str, tuple[Callable[[float], float] | None, str]]:
@@ -129,6 +161,9 @@ def display_units() -> dict[str, tuple[Callable[[float], float] | None, str]]:
         "speed": speed_unit,
         "temperature": (
             units.set_unit_temperature(temperature) if temperature == "Fahrenheit" else None,
+            units.set_symbol_temperature(temperature)),
+        "temperature_delta": (  # temperature difference: no offset
+            (lambda value: value * 1.8) if temperature == "Fahrenheit" else None,
             units.set_symbol_temperature(temperature)),
         "pressure": (
             units.set_unit_pressure(pressure) if pressure in ("psi", "bar") else None,
@@ -184,6 +219,26 @@ def channel_title(channel: Channel) -> str:
     if channel.group:
         return tr(channel.group) + channel.title[len(channel.group):]
     return tr(channel.title)
+
+
+def part_label(column: str) -> str:
+    """Short name of a combined panel sub-channel: FL, Throttle"""
+    if column[-3:-2] == "_" and column[-2:] in WHEELS:
+        return column[-2:].upper()
+    return tr(CHANNEL_MAP[column].title) if column in CHANNEL_MAP else column
+
+
+def part_color(column: str) -> str:
+    """Sub-channel color of a combined panel (one lap shown)"""
+    return PART_COLORS.get(column[-2:] if column[-3:-2] == "_" else column, "#9CA3AF")
+
+
+def shade(color: QColor, index: int, count: int) -> QColor:
+    """Lap color made lighter or darker for each sub-channel of a combined panel (several laps shown)"""
+    if count <= 1:
+        return QColor(color)
+    factor = 140 - int(80 * index / (count - 1))  # 140% lighter to 60% darker
+    return color.lighter(factor) if factor >= 100 else color.darker(int(10000 / factor))
 
 
 def format_value(value: float) -> str:
@@ -246,14 +301,22 @@ def load_viewer_setting(folder: str) -> dict:
 
 
 def save_viewer_setting(folder: str, **values):
-    """Update lap viewer settings, other saved values kept"""
+    """Update lap viewer settings, other saved values kept
+
+    Written to a temporary file then renamed: a crash while writing never leaves a broken file.
+    """
     setting = load_viewer_setting(folder)
     setting.update(values)
+    target = os.path.join(folder, VIEWER_SETTING)
+    temporary = f"{target}.tmp"
     try:
-        with open(os.path.join(folder, VIEWER_SETTING), "w", encoding="utf-8") as file:
+        with open(temporary, "w", encoding="utf-8") as file:
             json.dump(setting, file)
+        os.replace(temporary, target)
     except OSError as error:
         logger.warning("LAP VIEWER: unable to save setting: %s", error)
+        with contextlib.suppress(OSError):
+            os.remove(temporary)
 
 
 def save_visible_channels(folder: str, columns: list[str]):

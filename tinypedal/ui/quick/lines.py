@@ -35,7 +35,7 @@ import ctypes
 import math
 import struct
 from array import array
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import NamedTuple, cast
 
 from PySide6.QtCore import Property, Signal
@@ -95,6 +95,12 @@ class VertexStore:
         for key in [key for key in cls._data if key.startswith(prefix)]:
             del cls._data[key]
 
+    @classmethod
+    def retain(cls, prefix: str, keep: Collection[str]):
+        """Forget vertices of a page not in keep (laps no longer shown, former settings)"""
+        for key in [key for key in cls._data if key.startswith(prefix) and key not in keep]:
+            del cls._data[key]
+
 
 class GpuShape(QQuickItem):
     """One vertex buffer of VertexStore drawn in item coordinates (QML transform maps data to screen)
@@ -115,6 +121,8 @@ class GpuShape(QQuickItem):
         self._revision = 0
         self._uploaded: tuple = ()  # vertices & color in scene graph
         self._colored = False  # node material
+        # Hidden item is not drawn: data stored meanwhile is uploaded once shown again (else stale shape)
+        self.visibleChanged.connect(self.update)
 
     def _get_key(self) -> str:
         return self._key
@@ -152,7 +160,15 @@ class GpuShape(QQuickItem):
         vertices = VertexStore.get(self._key) if self._key else None
         if vertices is None or vertices.vertex_count < 2:
             self._uploaded = ()
-            return None  # old node deleted by scene graph
+            if old is None:
+                return None
+            # Node kept empty, not deleted: a node deleted then created again while item is hidden
+            # can be drawn with the deleted node's former vertices (stale shape)
+            empty = cast(QSGGeometryNode, old)
+            if empty.geometry().vertexCount():
+                empty.geometry().allocate(0)
+                empty.markDirty(QSGNode.DirtyStateBit.DirtyGeometry)
+            return empty
         node = cast(QSGGeometryNode, old)
         if old is None or self._colored != vertices.colored:
             node = self.new_node(vertices)
@@ -280,6 +296,15 @@ def merge_strips(strips: Sequence[Vertices]) -> Vertices:
         for first, second, third in zip(points, points[1:], points[2:]):
             data.extend((*first, *second, *third))
     return Vertices(data, len(data) // 2, TRIANGLES)
+
+
+def range_band(xs: Sequence[float], lows: Sequence[float], highs: Sequence[float]) -> Vertices:
+    """Filled area between low & high lines (min / max band of laps)"""
+    count = min(len(xs), len(lows), len(highs))
+    data = array("f")
+    for x, low, high in zip(xs[:count], lows[:count], highs[:count]):
+        data.extend((x, low, x, high))
+    return Vertices(data, count * 2 if count > 1 else 0, TRIANGLE_STRIP)
 
 
 def area(xs: Sequence[float], ys: Sequence[float], base: float) -> Vertices:

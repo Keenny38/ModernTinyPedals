@@ -2,8 +2,9 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Corner by corner comparison of first compared lap with reference lap, click a corner to zoom charts on it
+// Corner by corner comparison of a compared lap with reference lap, click a corner to zoom charts on it
 // Time: positive = compared lap slower. Braking: positive = brakes later. Full throttle: negative = earlier.
+// Ideal lap: fastest lap in every corner & straight among shown laps.
 Item {
     id: root
     property var chart
@@ -11,6 +12,8 @@ Item {
     readonly property real maxDelta: rows.reduce(function(top, row) {
         return row.kind === "corner" ? Math.max(top, Math.abs(row.bar)) : top }, 0.05)
     property int selected: -1
+
+    function tone(name, fallback) { return name === "loss" ? theme.loss : name === "gain" ? theme.gain : fallback }
 
     ColumnLayout {
         anchors.fill: parent
@@ -25,16 +28,51 @@ Item {
                 Layout.fillWidth: true
                 from: 3; to: 40; stepSize: 1
                 value: backend.hysteresis
-                onMoved: backend.setHysteresis(value)
+                // Corners found again once released (dragging stays smooth)
+                onPressedChanged: if (!pressed && Math.round(value) !== backend.hysteresis) backend.setHysteresis(Math.round(value))
                 ToolTip.visible: hovered
                 ToolTip.text: i18n.tr("Speed drop & rise counted as a corner: lower finds more corners")
             }
-            Text { text: Math.round(slider.value) + " km/h"; color: theme.text; font.features: { "tnum": 1 } }
+            Text {
+                text: Math.round(slider.value * backend.speedScale) + " " + backend.speedUnit
+                color: theme.text
+                font.features: { "tnum": 1 }
+            }
+        }
+
+        // Compared lap & order
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.rows.length > 0
+            spacing: theme.em * 0.4
+            Flow {
+                Layout.fillWidth: true
+                spacing: theme.em * 0.3
+                visible: backend.comparedLaps.length > 1
+                Text { text: i18n.tr("Compared:"); color: theme.dimText; height: theme.em * 1.8; verticalAlignment: Text.AlignVCenter }
+                Repeater {
+                    model: backend.comparedLaps
+                    TpButton {
+                        text: modelData.label
+                        flat: true
+                        implicitHeight: theme.em * 1.8
+                        checked: backend.compareKey === modelData.key
+                        onClicked: backend.setCompareKey(modelData.key)
+                    }
+                }
+            }
+            Item { Layout.fillWidth: true; visible: backend.comparedLaps.length <= 1 }
+            TpSegmented {
+                options: [i18n.tr("Track order"), i18n.tr("Time lost")]
+                currentIndex: backend.cornerSort === "loss" ? 1 : 0
+                onActivated: function(index) { backend.setCornerSort(index === 1 ? "loss" : "track") }
+            }
         }
 
         Text {
             visible: root.rows.length === 0
-            text: i18n.tr("No corner found: speed not recorded.")
+            text: backend.legend.length === 0 ? i18n.tr("Select recorded laps to compare.")
+                : i18n.tr("No corner found: speed not recorded.")
             color: theme.dimText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -113,12 +151,12 @@ Item {
                             Text {
                                 id: cornerLabel
                                 text: modelData.label
-                                color: theme.text
-                                font.weight: modelData.kind === "total" ? Font.Bold : Font.DemiBold
+                                color: modelData.kind === "ideal" ? theme.purple : theme.text
+                                font.weight: modelData.kind === "total" || modelData.kind === "ideal" ? Font.Bold : Font.DemiBold
                             }
                             Text {
                                 text: modelData.apex
-                                color: theme.dimText
+                                color: modelData.kind === "ideal" ? theme.purple : theme.dimText
                                 font.pointSize: theme.fontPoint * 0.8
                                 anchors.baseline: cornerLabel.baseline
                             }
@@ -136,7 +174,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 x: modelData.bar > 0 ? parent.width - half : parent.width - half - amount
                                 width: amount
-                                color: modelData.timeColor || theme.dimText
+                                color: root.tone(modelData.timeColor, theme.dimText)
                                 opacity: 0.55
                             }
                             Rectangle {
@@ -151,22 +189,23 @@ Item {
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.time
-                                color: modelData.timeColor || theme.text
+                                color: root.tone(modelData.timeColor, theme.text)
                                 font.weight: Font.DemiBold
                                 font.features: { "tnum": 1 }
                             }
                         }
                         Text {
-                            visible: rowItem.corner
+                            visible: rowItem.corner || modelData.kind === "ideal"
                             Layout.preferredWidth: theme.em * 5.5
                             horizontalAlignment: Text.AlignRight
                             text: modelData.speed || ""
-                            color: modelData.speedColor || theme.text
+                            color: modelData.kind === "ideal" ? theme.purple : root.tone(modelData.speedColor, theme.text)
                             font.features: { "tnum": 1 }
                         }
                     }
 
-                    // Driving details: braking & full throttle points, trail braking, coasting, overlap
+                    // Driving details: braking & full throttle points, trail braking, coasting, overlap,
+                    // entry & exit speed, gear at apex, brake pressure, fastest lap here
                     Text {
                         id: details
                         visible: rowItem.corner
@@ -177,7 +216,7 @@ Item {
                         font.pointSize: theme.fontPoint * 0.78
                         font.features: { "tnum": 1 }
                         function value(text, color) {
-                            return "<font color='" + (color || theme.text) + "'>" + text + "</font>"
+                            return "<font color='" + root.tone(color, theme.text) + "'>" + text.replace(/ /g, "&nbsp;") + "</font>"
                         }
                         text: !rowItem.corner ? "" : [
                             i18n.tr("Braking") + " " + value(modelData.brake),
@@ -185,7 +224,11 @@ Item {
                             i18n.tr("Trail Braking") + " " + value(modelData.trail),
                             i18n.tr("Coasting") + " " + value(modelData.coast, modelData.coastColor),
                             i18n.tr("Overlap") + " " + value(modelData.overlap, modelData.overlapColor),
-                        ].join(" &nbsp; ")
+                            i18n.tr("Entry") + " " + value(modelData.entry, modelData.entryColor),
+                            i18n.tr("Exit") + " " + value(modelData.exit, modelData.exitColor),
+                            i18n.tr("Gear") + " " + value(modelData.gear),
+                            i18n.tr("Brake Pressure") + " " + value(modelData.peakBrake),
+                        ].concat(modelData.best ? [i18n.tr("Fastest") + " " + value(modelData.best, "")] : []).join(" &nbsp; ")
                         ToolTip.visible: detailArea.containsMouse
                         ToolTip.delay: 500
                         ToolTip.text: [
@@ -194,6 +237,9 @@ Item {
                             i18n.tr("Seconds braking while turning: reference lap, compared lap"),
                             i18n.tr("Seconds without throttle nor brake: reference lap, compared lap (red: more than reference)"),
                             i18n.tr("Seconds with throttle & brake together: reference lap, compared lap (red: more than reference)"),
+                            i18n.tr("Speed at corner start & end: reference lap, compared lap"),
+                            i18n.tr("Gear at minimum speed, highest brake pressure: reference lap, compared lap"),
+                            i18n.tr("Fastest: lap with the best time in this corner (ideal lap)"),
                         ].join("\n")
                         MouseArea { id: detailArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                     }

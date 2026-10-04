@@ -2,12 +2,15 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Recorded laps grouped by session: click to compare, flag (or double-click) to set reference lap
+// Recorded laps grouped by session: click to compare (Shift+click: every lap between), flag (or double-click)
+// to set reference lap, click a sector time: zoom charts on sector
 Card {
     id: root
 
+    property var chart  // TraceChart
     property string menuPath: ""
     property bool menuKept: false
+    property string anchorPath: ""  // last clicked lap (Shift+click range start)
 
     // Right-click on lap: recorded laps of track can also be kept, noted & deleted
     function openLapMenu(path, item, x, y) {
@@ -38,6 +41,14 @@ Card {
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
         Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exportMotec(root.menuPath) }
     }
+    TpMenu {
+        id: selectMenu
+        Action { text: i18n.tr("Best vs Last Lap"); onTriggered: backend.compareBestLast() }
+        Action { text: i18n.tr("3 Best Laps"); onTriggered: backend.compareBest(3) }
+        Action { text: i18n.tr("5 Best Laps"); onTriggered: backend.compareBest(5) }
+        MenuSeparator {}
+        Action { text: i18n.tr("Uncheck All"); onTriggered: backend.clearSelection() }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -53,6 +64,15 @@ Card {
                 font.pointSize: theme.fontPoint * 1.25
                 font.weight: Font.DemiBold
                 Layout.fillWidth: true
+            }
+            TpButton {
+                id: selectButton
+                glyph: ""  // multi select
+                flat: true
+                implicitHeight: theme.em * 1.9
+                tip: i18n.tr("Quick selection: best vs last lap, best laps, uncheck all")
+                checked: selectMenu.visible
+                onClicked: selectMenu.visible ? selectMenu.close() : selectMenu.popup(selectButton, 0, selectButton.height + 4)
             }
             TpSwitch {
                 text: i18n.tr("Clean only")
@@ -93,6 +113,9 @@ Card {
                 required property bool dim
                 required property bool fastest
                 required property int count
+                required property bool error
+                required property string gap
+                required property string tip
 
                 readonly property bool isSession: kind === "session"
                 readonly property bool open: backend.expanded.indexOf(session) >= 0
@@ -177,6 +200,9 @@ Card {
                     color: row.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, lapArea.containsMouse ? 0.16 : 0.10)
                          : lapArea.containsMouse ? theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
+                    ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.error)
+                    ToolTip.text: row.error ? i18n.tr("Unable to read this lap file") : row.tip
+                    ToolTip.delay: 700
 
                     // Lap color bar when shown in charts
                     Rectangle {
@@ -198,8 +224,14 @@ Card {
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: function(mouse) {
-                            if (mouse.button === Qt.RightButton) root.openLapMenu(row.path, lapArea, mouse.x, mouse.y)
-                            else backend.toggleLap(row.path)
+                            if (mouse.button === Qt.RightButton) {
+                                root.openLapMenu(row.path, lapArea, mouse.x, mouse.y)
+                            } else if ((mouse.modifiers & Qt.ShiftModifier) && root.anchorPath !== "") {
+                                backend.selectRange(root.anchorPath, row.path, !row.checked)
+                            } else {
+                                backend.toggleLap(row.path)
+                                root.anchorPath = row.path
+                            }
                         }
                         onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.setReference(row.path) }
                     }
@@ -210,21 +242,21 @@ Card {
                         anchors.rightMargin: theme.em * 0.4
                         spacing: theme.em * 0.5
 
-                        // Check box
+                        // Check box (warning if lap file unreadable)
                         Rectangle {
                             implicitWidth: theme.em * 1.15
                             implicitHeight: implicitWidth
                             radius: theme.em * 0.3
-                            color: row.checked ? (row.color || theme.accent) : "transparent"
-                            border.width: row.checked ? 0 : 1.5
+                            color: row.error ? theme.warning : row.checked ? (row.color || theme.accent) : "transparent"
+                            border.width: row.checked || row.error ? 0 : 1.5
                             border.color: theme.dimText
                             Behavior on color { ColorAnimation { duration: 150 } }
                             Icon {
                                 anchors.centerIn: parent
-                                glyph: ""  // check mark
+                                glyph: row.error ? "" : ""  // warning, check mark
                                 size: theme.em * 0.75
                                 color: "white"
-                                opacity: row.checked ? 1 : 0
+                                opacity: row.checked || row.error ? 1 : 0
                                 Behavior on opacity { NumberAnimation { duration: 120 } }
                             }
                         }
@@ -236,7 +268,7 @@ Card {
                                 spacing: theme.em * 0.35
                                 Text {
                                     text: (row.fastest ? "★ " : "") + row.title
-                                    color: row.fastest ? "#FACC15" : theme.text
+                                    color: row.fastest ? theme.gold : theme.text
                                     font.weight: row.reference ? Font.Bold : Font.Normal
                                 }
                                 Rectangle {
@@ -256,6 +288,13 @@ Card {
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
+                                    visible: row.gap !== ""
+                                    text: row.gap
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.features: { "tnum": 1 }
+                                }
+                                Text {
                                     text: row.time
                                     color: row.dim ? theme.dimText : theme.text
                                     font.features: { "tnum": 1 }
@@ -268,10 +307,21 @@ Card {
                                     model: [[row.s1, row.best1], [row.s2, row.best2], [row.s3, row.best3]]
                                     Text {
                                         text: modelData[0]
-                                        color: modelData[1] ? "#A855F7" : theme.dimText
+                                        color: sectorArea.containsMouse ? theme.accent : modelData[1] ? theme.purple : theme.dimText
                                         font.pointSize: theme.fontPoint * 0.85
                                         font.features: { "tnum": 1 }
                                         font.weight: modelData[1] ? Font.DemiBold : Font.Normal
+                                        MouseArea {
+                                            id: sectorArea
+                                            anchors.fill: parent
+                                            enabled: modelData[0] !== "-" && root.chart !== undefined
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.chart.zoomSector(index + 1)
+                                            ToolTip.visible: containsMouse
+                                            ToolTip.text: i18n.tr("Zoom charts on this sector")
+                                            ToolTip.delay: 600
+                                        }
                                     }
                                 }
                                 Text {
@@ -303,7 +353,7 @@ Card {
         Text {
             visible: text !== ""
             text: backend.bestText
-            color: "#A855F7"
+            color: theme.purple
             font.weight: Font.DemiBold
             Layout.leftMargin: theme.em * 0.3
         }

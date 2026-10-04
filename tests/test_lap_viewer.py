@@ -219,6 +219,7 @@ def open_viewer(ui_env):
     def opening():
         viewer = LapViewer(None)
         viewers.append(viewer)
+        wait_loaded(viewer)  # laps read in background
         return viewer
 
     yield opening
@@ -308,6 +309,7 @@ def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, mo
     monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
     backend = open_viewer().backend
     backend.addFiles()
+    wait_loaded(backend)
     assert [row["kind"] for row in backend.lap_model.rows].count("session") == 2
     assert "1:30.000" in backend.bestText  # other track sectors left out
     assert len(backend.legend) == 2  # added lap shown
@@ -402,6 +404,7 @@ def test_hidden_viewer_releases_laps_and_reloads(open_viewer):
     backend.setChartView(0.0, 1.0)  # page emptied: chart view reset
     assert not backend.data.laps and not backend._lap_cache and not backend.panels[0]["series"]
     viewer.show()  # same laps & zoom again
+    wait_loaded(viewer)
     assert len(backend.data.laps) == 2 and not backend._release_timer.isActive()
     assert restored == [(500.0, 1500.0)]
 

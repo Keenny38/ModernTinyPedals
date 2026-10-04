@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from tests.test_lap_viewer import wait_loaded
 from tinypedal.module import module_recorder
 
 
@@ -39,6 +40,7 @@ def backend(ui_env):
     parent = QWidget()
     page = LapViewerBackend(parent, cfg.path.telemetry)
     page.refresh()
+    wait_loaded(page)  # laps read in background
     yield page
     page.release()
     parent.deleteLater()
@@ -97,6 +99,7 @@ def test_backend_toggle_and_reference(backend):
 
     unchecked = next(row["path"] for row in backend.lap_model.rows if row["kind"] == "lap" and not row["checked"])
     backend.toggleLap(unchecked)
+    wait_loaded(backend)
     assert len(backend.legend) == 3
     backend.setReference(unchecked)
     assert backend.legend[0]["reference"] and backend.reference_key == unchecked
@@ -309,4 +312,29 @@ def test_chart_view_kept_inside_lap(backend):
         assert not chart.property("zoomed")
         assert backend._chart_view == pytest.approx((0.0, 3000.0))  # view kept by backend
     finally:
+        parent.deleteLater()
+
+
+def test_qml_page_translated(backend):
+    """QML texts go through app translation (i18n.tr was QObject.tr: pages stayed in English)"""
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal import i18n
+    from tinypedal.ui.quick import Translator, create_quick_view
+
+    i18n.set_language("Français")
+    parent = QWidget()
+    try:
+        assert Translator().tr("Clean only") == "Tours propres"
+        view = create_quick_view(parent, "LapViewer.qml", {"backend": backend})
+        texts, stack = set(), [view.rootObject()]
+        while stack:
+            item = stack.pop()
+            text = item.property("text")
+            if isinstance(text, str):
+                texts.add(text)
+            stack.extend(item.childItems())
+        assert "Tours propres" in texts and "Clean only" not in texts
+    finally:
+        i18n.set_language("English")
         parent.deleteLater()
