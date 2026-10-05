@@ -1,5 +1,7 @@
 """Global hotkey tests: key strings, key codes, commands"""
 
+import sys
+
 import pytest
 
 from tinypedal.hotkey import command
@@ -232,6 +234,10 @@ def run_hotkeys(monkeypatch, key_states: list[set[int]], binds: dict[str, str]) 
     return ran
 
 
+WINDOWS_KEYS = pytest.mark.skipif(sys.platform != "win32", reason="global hotkeys: Windows key codes only")
+
+
+@WINDOWS_KEYS
 def test_hotkey_runs_once_per_key_press(ui_env, monkeypatch):
     from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
@@ -240,6 +246,7 @@ def test_hotkey_runs_once_per_key_press(ui_env, monkeypatch):
     assert run_hotkeys(monkeypatch, states, {"overlay_lock": "ctrl+a"}) == ["overlay_lock"] * 2
 
 
+@WINDOWS_KEYS
 def test_hotkey_not_repeated_when_longer_combo_released(ui_env, monkeypatch):
     from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 

@@ -79,6 +79,21 @@ def test_versioned_backup_without_interval_ignores_clock_resolution(tmp_path, mo
     assert not json_setting.create_versioned_backup("preset.json", folder, max_count=5, min_interval=600)
 
 
+def test_backup_timestamps_unique_with_coarse_clock(tmp_path, monkeypatch):
+    """Equal clock readings (15 ms clock of Python 3.11 on Windows) never give the same backup name"""
+    from tinypedal.userfile import driver_stats, json_setting
+
+    monkeypatch.setattr(json_setting, "time", lambda: 1_700_000_000.5)
+    first, second = json_setting.set_backup_timestamp(), json_setting.set_backup_timestamp()
+    assert first != second and len(first) == len(second) == len(".backup-2023-11-14-22-13-20-500000")
+    # Backup of an unreadable stats file is not overwritten by the temporary backup of the save
+    monkeypatch.setattr(driver_stats, "sleep", lambda seconds: None)
+    (tmp_path / "driver.stats").write_text("not json", encoding="utf-8")
+    driver_stats.save_driver_stats(("Track", "Car"), driver_stats.DriverStats(valid=1), f"{tmp_path.as_posix()}/")
+    backups = [path for path in tmp_path.iterdir() if path.name != "driver.stats"]
+    assert len(backups) == 1 and backups[0].read_text(encoding="utf-8") == "not json"
+
+
 # --- Package B audit fixes: calculations
 def test_session_time_rounds_whole_time():
     assert calc.sec2sessiontime(599.6) == "00:10:00"  # was "00:09:00" (minutes floored, seconds rounded)

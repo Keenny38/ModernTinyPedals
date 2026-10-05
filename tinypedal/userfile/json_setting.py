@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 from collections.abc import Callable
 from contextlib import suppress
 from time import localtime, monotonic, sleep, strftime, time
@@ -38,12 +39,24 @@ from . import atomic_write
 logger = logging.getLogger(__name__)
 
 
+_stamp_lock = threading.Lock()
+_last_stamp_us = 0  # last backup timestamp (microseconds), see set_backup_timestamp
+
+
 def set_backup_timestamp(prefix: str = FileExt.BACKUP, timestamp: bool = True) -> str:
-    """Set backup timestamp"""
+    """Set backup timestamp, unique in this process
+
+    A coarse clock (15 ms with Python 3.11 on Windows) gives equal times in a row: a backup
+    made just before saving (unreadable file) would get the same name as the temporary backup
+    of the save, then be deleted with it. Equal times are moved 1 microsecond later.
+    """
     if timestamp:
-        time_local = strftime("%Y-%m-%d-%H-%M-%S", localtime())
-        time_millisecond = str(time() % 1)[2:8]  # keep 6 decimals
-        time_stamp = f"-{time_local}-{time_millisecond}"
+        global _last_stamp_us
+        with _stamp_lock:
+            stamp_us = max(int(time() * 1_000_000), _last_stamp_us + 1)
+            _last_stamp_us = stamp_us
+        seconds, microseconds = divmod(stamp_us, 1_000_000)
+        time_stamp = f"-{strftime('%Y-%m-%d-%H-%M-%S', localtime(seconds))}-{microseconds:06d}"
     else:
         time_stamp = ""
     return f"{prefix}{time_stamp}"

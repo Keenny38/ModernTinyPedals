@@ -2,6 +2,7 @@
 during preset load, setup wizard, log, tables, hotkey & spectate pages, keyboard, theme colors,
 message icons, VR mirror window, about"""
 
+import sys
 import warnings
 from contextlib import suppress
 
@@ -481,7 +482,8 @@ def test_custom_theme_null_colors(tmp_path):
 
 
 # Item 26: empty path never points to drive root
-@pytest.mark.parametrize("text", ["", "  ", "/", "C:/"])
+@pytest.mark.parametrize("text", ["", "  ", "/", pytest.param("C:/", marks=pytest.mark.skipif(
+    sys.platform != "win32", reason="drive root on Windows only (a folder name elsewhere)"))])
 def test_empty_or_root_path_rejected(ui_env, text):
     from tinypedal.ui._option import FilePathEdit
 
