@@ -30,7 +30,6 @@ EXCLUDE_MODULES = [
     "lib2to3",
     "unittest",
     "xmlrpc",
-    "multiprocessing",
 ]
 
 # Files that must stay next to executable (loaded with relative path)
