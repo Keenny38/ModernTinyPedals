@@ -1,12 +1,30 @@
-TinyPedal relies on following third-party software:
+Modern Tiny Pedals (a modified version of TinyPedal, see NOTICE.md) relies on following third-party software:
 
 - Python 3, the Python Software Foundation License Version 2.
   website: https://www.python.org/
   license: https://docs.python.org/3/license.html
 
-- Qt for Python, the GNU LGPL version 3.
+- Qt for Python (PySide6 & shiboken6) and Qt, the GNU LGPL version 3.
   website: https://www.qt.io/qt-for-python
   license: https://www.qt.io/licensing/
+
+- cryptography, dual licensed under the Apache License 2.0 or the BSD 3-Clause License.
+  Includes OpenSSL, the Apache License 2.0 (web dashboard HTTPS certificate).
+  website: https://github.com/pyca/cryptography
+  license: https://github.com/pyca/cryptography/blob/main/LICENSE
+
+- cffi, the MIT license (used by cryptography).
+  website: https://github.com/python-cffi/cffi
+  license: https://github.com/python-cffi/cffi/blob/main/LICENSE
+
+- pycparser, the BSD 3-Clause License (used by cffi).
+  website: https://github.com/eliben/pycparser
+  license: https://github.com/eliben/pycparser/blob/main/LICENSE
+
+- pyopenvr, the BSD 3-Clause License, and OpenVR SDK (openvr_api library), the BSD 3-Clause License.
+  Windows release build only (SteamVR overlay).
+  website: https://github.com/cmbruns/pyopenvr, https://github.com/ValveSoftware/openvr
+  license: https://github.com/cmbruns/pyopenvr/blob/master/LICENSE, https://github.com/ValveSoftware/openvr/blob/master/LICENSE
 
 - rF2 Shared Memory Map Plugin, the GNU General Public License version 3.0.
   website: https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin

@@ -30,6 +30,7 @@ import json
 import zlib
 from typing import NamedTuple
 
+from ..validator import load_json_strict
 from . import write_text_file
 
 SHARE_PREFIX = "MTP1:"
@@ -63,10 +64,13 @@ def decode_preset(code: str) -> dict[str, dict]:
         compressed = base64.urlsafe_b64decode(code[len(SHARE_PREFIX):].encode("ascii"))
         decompressor = zlib.decompressobj()
         raw = decompressor.decompress(compressed, MAX_PRESET_SIZE)
-        if decompressor.unconsumed_tail:
-            raise ValueError("preset too large")
-        data = json.loads(raw.decode("utf-8"))
-    except (binascii.Error, zlib.error, UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (binascii.Error, zlib.error, ValueError) as error:
+        raise ValueError("damaged share code, copy it again") from error
+    if decompressor.unconsumed_tail:
+        raise ValueError("preset too large")
+    try:
+        data = load_json_strict(raw.decode("utf-8"))  # NaN & Infinity refused
+    except ValueError as error:  # UnicodeDecodeError & JSONDecodeError included
         raise ValueError("damaged share code, copy it again") from error
     if not isinstance(data, dict) or not data or not all(
             isinstance(key, str) and isinstance(value, dict) for key, value in data.items()):

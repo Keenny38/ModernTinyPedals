@@ -11,6 +11,7 @@ Card {
     property var chart  // TraceChart
     property string menuPath: ""
     property bool menuKept: false
+    property bool menuShown: false  // lap right-clicked is shown & not reference lap (setup differences)
     property string anchorPath: ""  // last clicked lap (Shift+click range start)
     property string menuSession: ""  // session header right-clicked
 
@@ -22,6 +23,7 @@ Card {
         var actions = backend.lapActions(path)
         menuPath = path
         menuKept = actions.kept
+        menuShown = backend.isCompared(path)
         if (actions.recorded) recordedMenu.popup(item, x, y)
         else addedMenu.popup(item, x, y)
     }
@@ -39,6 +41,11 @@ Card {
         }
         Action { text: i18n.tr("Note..."); onTriggered: backend.editNote(root.menuPath) }
         Action { text: i18n.tr("Use as Delta Best..."); onTriggered: backend.exportDeltaBest(root.menuPath) }
+        Action {
+            text: i18n.tr("Setup Differences with Reference...")
+            enabled: root.menuShown
+            onTriggered: setupDiff.show(root.menuPath)
+        }
         MenuSeparator {}
         Action { text: i18n.tr("Move to Trash"); onTriggered: backend.deleteLap(root.menuPath) }
     }
@@ -57,11 +64,31 @@ Card {
         Action { text: i18n.tr("Set as Reference"); onTriggered: backend.setReference(root.menuPath) }
         Action { text: i18n.tr("Export MoTeC..."); onTriggered: backend.exportMotec(root.menuPath) }
     }
+    // Setup differences of a shown lap with reference lap (lap list menu)
+    SetupDiff { id: setupDiff }
     TpMenu {
         id: selectMenu
         Action { text: i18n.tr("Best vs Last Lap"); onTriggered: backend.compareBestLast() }
         Action { text: i18n.tr("3 Best Laps"); onTriggered: backend.compareBest(3) }
         Action { text: i18n.tr("5 Best Laps"); onTriggered: backend.compareBest(5) }
+        // Lap looked at (first compared lap, else newest) against fastest lap driven in similar conditions
+        Action { text: i18n.tr("Best Lap in Similar Conditions"); onTriggered: backend.compareSimilarConditions() }
+        TpMenu {
+            id: toleranceMenu
+            title: i18n.tr("Similar Track Temperature")
+            Instantiator {
+                model: backend.similarTolerances
+                delegate: Action {
+                    required property var modelData
+                    text: modelData.text
+                    checkable: true
+                    checked: backend.similarTolerance === modelData.value
+                    onTriggered: backend.setSimilarTolerance(modelData.value)
+                }
+                onObjectAdded: function(index, object) { toleranceMenu.insertAction(index, object) }
+                onObjectRemoved: function(index, object) { toleranceMenu.removeAction(object) }
+            }
+        }
         MenuSeparator {}
         Action { text: i18n.tr("Uncheck All"); onTriggered: backend.clearSelection() }
         MenuSeparator {}

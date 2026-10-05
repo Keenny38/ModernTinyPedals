@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import KeysView
-from time import sleep
 from types import MappingProxyType
 from typing import Any
 
 from . import module, widget
 from .const_file import ConfigType
+from .plugin_loader import PLUGIN_ERRORS, PLUGIN_PREFIX
 from .setting import cfg
+from .thread_guard import wait_stopped
 from .widget._modern import create_widget
 
 logger = logging.getLogger(__name__)
@@ -81,16 +82,26 @@ class ModuleControl:
         else:
             self.__start_enabled()
 
-    def close(self, name: str = ""):
-        """Close module, specify name for selected module"""
-        if name:
-            self.__close_selected(name)
-        else:
-            self.__close_enabled()
+    def close(self, name: str = "", discard: bool = False):
+        """Close module, specify name for selected module
 
-    def reload(self, name: str = ""):
-        """Reload module"""
-        self.close(name)
+        Args:
+            name: selected module name, all modules if not set.
+            discard: discard data of module not saved yet (data reset), modules only.
+        """
+        if name:
+            self.__close_selected(name, discard)
+        else:
+            self.__close_enabled(discard)
+
+    def reload(self, name: str = "", discard: bool = False):
+        """Reload module
+
+        Args:
+            name: selected module name, all modules if not set.
+            discard: discard data of module not saved yet (data reset), modules only.
+        """
+        self.close(name, discard)
         self.start(name)
 
     def replace(self, name: str, new_module: Any):
@@ -133,30 +144,50 @@ class ModuleControl:
             self.__start_selected(_name)
 
     def __start_selected(self, name: str):
-        """Start selected module"""
+        """Start selected module, a module failing to start is skipped (error logged)"""
         if cfg.user.setting[name]["enable"] and name not in self._active_modules:
             # Create module instance and add to dict
             target = self._imported_modules[name]
-            if self.type_id == ConfigType.WIDGET:
-                instance = create_widget(target, cfg, name)  # modern design or classic
-            else:
-                instance = target.Realtime(cfg, name)
+            try:
+                if self.type_id == ConfigType.WIDGET:
+                    instance = create_widget(target, cfg, name)  # modern design or classic
+                else:
+                    instance = target.Realtime(cfg, name)
+            except Exception as error:  # plugin or invalid option must not stop app
+                self.__start_failed(name, error)
+                return
             self._active_modules[name] = instance
-            instance.start()
+            try:
+                instance.start()
+            except Exception as error:
+                self.__start_failed(name, error)
+                self.__close_selected(name)
 
-    def __close_enabled(self):
+    def __start_failed(self, name: str, error: Exception):
+        """Log module start error, shown in plugin manager for plugin widget"""
+        logger.error("ERROR: unable to start %s: %s", name, error, exc_info=True)
+        if name.startswith(PLUGIN_PREFIX):
+            PLUGIN_ERRORS[name] = f"{type(error).__name__}: {error}"
+
+    def __close_enabled(self, discard: bool = False):
         """Close all enabled module"""
         for _name in tuple(self._active_modules):
-            self.__close_selected(_name)
+            self.__close_selected(_name, discard)
 
-    def __close_selected(self, name: str):
-        """Close selected module"""
+    def __close_selected(self, name: str, discard: bool = False):
+        """Close selected module, wait (bounded) until closed"""
         if name in self._active_modules:
             _module = self._active_modules[name]  # get instance
             self._active_modules.pop(name)  # remove active reference
-            _module.stop()  # close module
-            while not _module.closed:  # wait finish
-                sleep(0.01)
+            try:
+                if discard and self.type_id == ConfigType.MODULE:
+                    _module.stop(discard=True)  # close module without saving data
+                else:
+                    _module.stop()  # close module
+            except Exception:  # widget failed half-way to start
+                logger.exception("ERROR: unable to close %s", name)
+                return
+            wait_stopped(lambda: _module.closed, name)  # wait finish
             _module = None  # remove final reference
 
     @property

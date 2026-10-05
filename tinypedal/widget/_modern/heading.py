@@ -31,5 +31,5 @@ from .restyle import Restyled, restyled_options
 class Realtime(Restyled, Classic):
     """Draw widget"""
 
-    options = restyled_options("heading")
     color_tokens = {"background_color_circle": "surface_alt"}
+    options = restyled_options("heading", color_tokens)

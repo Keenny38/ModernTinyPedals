@@ -26,7 +26,9 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -52,7 +54,9 @@ from ._common import (
     UIScaler,
     run_after_saving,
     table_item,
+    translate_filter,
 )
+from .game_rest import GameRequest
 from .toast import show_toast
 
 HEADER_BRANDS = "Vehicle name","Brand name"
@@ -69,11 +73,13 @@ class VehicleBrandEditor(BaseEditor):
         self.setMinimumSize(UIScaler.size(45), UIScaler.size(38))
 
         self.brands_temp = copy_setting(cfg.user.brands)
+        # Rest API asked in background, game takes seconds to answer if not running
+        self.rest_request = GameRequest(self, (), self.restapi_imported)
 
         # Set table
         self.table_brands = QTableWidget(self)
         self.table_brands.setColumnCount(len(HEADER_BRANDS))
-        self.table_brands.setHorizontalHeaderLabels(HEADER_BRANDS)
+        self.table_brands.setHorizontalHeaderLabels([tr(name) for name in HEADER_BRANDS])
         self.table_brands.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_brands.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
 
@@ -97,21 +103,21 @@ class VehicleBrandEditor(BaseEditor):
         # Menu
         import_menu = QMenu(self)
 
-        import_rf2 = import_menu.addAction("RF2 Rest API")
+        import_rf2 = import_menu.addAction(tr("RF2 Rest API"))
         import_rf2.triggered.connect(self.import_from_rf2)
 
-        import_lmu = import_menu.addAction("LMU Rest API (Primary)")
+        import_lmu = import_menu.addAction(tr("LMU Rest API (Primary)"))
         import_lmu.triggered.connect(self.import_from_lmu)
 
-        import_lmu_alt = import_menu.addAction("LMU Rest API (Alternative)")
+        import_lmu_alt = import_menu.addAction(tr("LMU Rest API (Alternative)"))
         import_lmu_alt.triggered.connect(self.import_from_lmu_alt)
 
         import_json = import_menu.addAction(tr("JSON file"))
         import_json.triggered.connect(self.import_from_file)
 
         # Button
-        button_import = CompactButton(tr("Import from"), has_menu=True)
-        button_import.setMenu(import_menu)
+        self.button_import = CompactButton(tr("Import from"), has_menu=True)
+        self.button_import.setMenu(import_menu)
 
         button_add = CompactButton(tr("Add"))
         button_add.clicked.connect(self.add_brand)
@@ -139,7 +145,7 @@ class VehicleBrandEditor(BaseEditor):
 
         # Set layout
         layout_button = QHBoxLayout()
-        layout_button.addWidget(button_import)
+        layout_button.addWidget(self.button_import)
         layout_button.addWidget(button_add)
         layout_button.addWidget(button_sort)
         layout_button.addWidget(button_delete)
@@ -191,15 +197,27 @@ class VehicleBrandEditor(BaseEditor):
         )
 
     def import_from_restapi(self, sim_name: str, url_host: str, url_port: int, resource_name: str):
-        """Import brand from Rest API"""
+        """Import brand from Rest API, asked in background (import button disabled until answered)"""
+        def requesting() -> tuple[str, Any]:
+            try:
+                return sim_name, request_vehicle_data(url_host, url_port, resource_name)
+            except (TimeoutError, AttributeError, TypeError, IndexError, KeyError, ValueError, OSError, EOFError):
+                return sim_name, None
+
+        if self.rest_request.start(requesting):
+            self.button_import.setEnabled(False)
+            self.setCursor(Qt.CursorShape.BusyCursor)
+
+    def restapi_imported(self, result: tuple[str, Any]):
+        """Rest API answer received (in GUI thread), vehicle data None if request failed"""
+        self.button_import.setEnabled(True)
+        self.unsetCursor()
+        sim_name, vehicles = result
         try:
-            url_host = resolve_hostname(url_host, url_port)
-            request_header = set_header_get(resource_name, url_host)
-            time_out = 3
-            raw_veh_data = asyncio.run(get_response(request_header, url_host, url_port, time_out))
-            self.parse_brand_data(json.loads(raw_veh_data))
-        except (AttributeError, TypeError, IndexError, KeyError, ValueError,
-                OSError, EOFError, asyncio.TimeoutError):
+            if vehicles is None:
+                raise ValueError
+            self.parse_brand_data(vehicles)
+        except (AttributeError, TypeError, IndexError, KeyError, ValueError):
             logger.error("Failed importing vehicle data from %s Rest API", sim_name)
             msg_text = (
                 f"Unable to import vehicle data from {sim_name} Rest API.<br><br>"
@@ -209,7 +227,7 @@ class VehicleBrandEditor(BaseEditor):
 
     def import_from_file(self):
         """Import brand from file"""
-        filename_full = QFileDialog.getOpenFileName(self, filter=FileFilter.JSON)[0]
+        filename_full = QFileDialog.getOpenFileName(self, filter=translate_filter(FileFilter.JSON))[0]
         if not filename_full:
             return
 
@@ -244,6 +262,8 @@ class VehicleBrandEditor(BaseEditor):
         else:
             raise KeyError
 
+        if not self.verify_table():  # duplicate names would be merged by import
+            return
         self.update_brands_temp()
         brands_db.update(self.brands_temp)
         self.brands_temp = brands_db
@@ -252,7 +272,7 @@ class VehicleBrandEditor(BaseEditor):
 
     def open_replace_dialog(self):
         """Open replace dialog"""
-        selector = {HEADER_BRANDS[1]: 1}
+        selector = {tr(HEADER_BRANDS[1]): 1}
         _dialog = TableBatchReplace(self, selector, self.table_brands)
         _dialog.open()
 
@@ -315,8 +335,24 @@ class VehicleBrandEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_setting()
-        self.accept()  # close
+        if self.save_setting():
+            self.accept()  # close
+
+    def verify_table(self) -> bool:
+        """Verify table before saving or importing, warn if a vehicle name is listed more than once"""
+        vehicle_names = set()
+        for index in range(self.table_brands.rowCount()):
+            key_name = table_item(self.table_brands, index, 0).text()
+            if key_name in vehicle_names:
+                self.table_brands.setCurrentCell(index, 0)  # show duplicate row
+                msg_text = (
+                    f"<b>{key_name}</b> is listed more than once.<br><br>"
+                    "Each name can only be listed once, rename or delete duplicate rows."
+                )
+                QMessageBox.warning(self, tr("Error"), trm(msg_text))
+                return False
+            vehicle_names.add(key_name)
+        return True
 
     def update_brands_temp(self):
         """Update temporary changes to brands temp first"""
@@ -326,13 +362,25 @@ class VehicleBrandEditor(BaseEditor):
             item_name = table_item(self.table_brands, index, 1).text()
             self.brands_temp[key_name] = item_name
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_brands_temp()
         cfg.user.brands = copy_setting(self.brands_temp)
         cfg.save(0, config_type=ConfigType.BRANDS)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True
+
+
+def request_vehicle_data(url_host: str, url_port: int, resource_name: str) -> Any:
+    """Vehicle data from Rest API (blocking: up to seconds if game is not running)"""
+    url_host = resolve_hostname(url_host, url_port)
+    request_header = set_header_get(resource_name, url_host)
+    time_out = 3
+    raw_veh_data = asyncio.run(get_response(request_header, url_host, url_port, time_out))
+    return json.loads(raw_veh_data)
 
 
 def parse_vehicle_name(vehicle):

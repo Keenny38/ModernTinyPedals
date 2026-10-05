@@ -77,17 +77,19 @@
             "url_port": "Set port for Rest API host address. Port value must match WebUI port value that sets in RF2 (UserData\\player\\player.JSON) setting file in order to successfully connect to Rest API and receive data. The default port value for RF2 is 5397.\n\nNote, WebUI port value from game setting file may change in some situations, and would require manual correction to match WebUI port value."
         },
         "application": {
-            "check_for_updates_on_startup": "Enable automatically checking for updates on startup, and display notification message in main window. This option is enabled by default.\n\nClick on the notification message will bring up a menu, where user can click View Updates On GitHub to open Latest Releases page in web browser, or Dismiss the message.\n\nNote, this option is checked only once per startup, and notification message will only be displayed if new updates is available. With the Windows installer version, notification menu also offers Download And Install, which downloads the new installer, verifies its SHA256 hash and installs it.\n\nUser can also manually check for updates any time by accessing Check for Updates option from…",
+            "check_for_updates_on_startup": "Enable automatically checking for updates on startup, and display notification message in main window. This option is enabled by default.\n\nClick on the notification message will bring up a menu, where user can click View Updates On GitHub to open Latest Releases page in web browser, show what is new in the update (release notes page), or Dismiss the message.\n\nNote, this option is checked only once per startup, and notification message will only be displayed if new updates is available. If main window is hidden in tray at startup, a tray message is shown instead of opening the window over the game.\n\nWith the Windows installer version, notification menu also offers Download And Install, which…",
             "enable_auto_load_preset": "Enable Auto load preset system to allow auto loading user-defined game-specific preset depends on active game (currently supports RF2 and LMU).\n\nAuto loading preset is triggered when a new or different game is started and active. Auto loading will only trigger once per game change. A preset must be tagged as primary for specific game before it can be auto loaded. See Preset Management section for details.\n\nThis option is disabled by default.",
             "enable_global_hotkey": "Enable Global Hotkey support. This option can be toggled from Hotkey Tab in main window.",
             "enable_high_dpi_scaling": "Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default.\n\nHigh DPI scaling mode can be quickly toggled via Scale button on main window status bar.\n\nOn Windows, scaling is determined by percentage value set in Display > Scale and Layout setting. For example, 200% scale in windows setting will double the size of main window dialog and also every widget.\n\nOn Linux, DPI scaling may already be forced ON in some system, which this option may not have effect.",
             "grid_move_size": "Set grid size for grid move, value in pixel. Default is 8 pixel. Minimum value is limited to 1.",
+            "home_quick_access": "Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example lap_viewer, race_calculator), pages (widget, module, preset, spectate, pacenotes, hotkey, tools) and actions (command_palette, bug_report, check_updates). Easier to set with Customize... next to Quick Access on home page (or right-click the buttons): check entries to show, drag or Up / Down to reorder, Reset for default. Empty: no quick access button. Default: Telemetry viewer, Race calculator, Driver stats viewer, Layout editor and Command palette.",
             "language": "Set user interface language: English or Français. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names and descriptions (tooltips) in config dialogs are also translated.",
             "maximum_loading_attempts": "Set maximum retry attempts for preset loading. Default value is 5. Minimum value is limited to 1 maximum attempt.\n\nNote, each attempt has a roughly 50ms delay. If all loading attempts failed, a backup copy will be created in settings folder, and preset will be reset to default. See How to restore your preset from backups for details.\n\nThis option does not affect global config preset, which always has 5 maximum loading attempts.",
             "maximum_saving_attempts": "Set maximum retry attempts for preset saving. Default value is 10. Minimum value is limited to 3 maximum attempts.\n\nNote, each attempt has a roughly 50ms delay. If all saving attempts failed, saving will be aborted, and old preset file will be restored to avoid preset file corruption.",
             "minimize_to_tray": "Minimize to tray when user clicks X close button.",
             "minimum_update_interval": "Set minimum refresh rate limit for widget and module in milliseconds. This option is used for preventing extremely low refresh rate that may cause performance issues in case user incorrectly sets update_interval and idle_update_interval values. Default value is 10, and should not be modified.",
             "number_of_automatic_backups": "Set number of automatic backups kept per preset file. A backup is created before saving a preset, at most once every 10 minutes. Backups can be restored from Restore Backup dialog. Set 0 to disable. Default is 10.",
+            "number_of_days_to_keep_deleted_presets": "Set number of days deleted presets are kept in preset trash (trash folder inside presets folder), where they can be restored from Trash button of Preset tab. Older ones are removed for good (checked at startup and when deleting a preset). Value range is 1 to 3650. Default is 30.",
             "position_x": "Define main window position on screen in pixels. Those values will be auto updated and saved while remember_position option is enabled.",
             "position_y": "Define main window position on screen in pixels. Those values will be auto updated and saved while remember_position option is enabled.",
             "rail_items": "Entries of the navigation bar of main window, in order, separated by comma: pages (home, widget, module, preset, spectate, pacenotes, hotkey, tools) and tools (dialog module name, for example lap_viewer, driver_stats_viewer, race_calculator; former fuel_calculator & tyre_strategy_planner entries open race calculator). Easier to set by right-clicking the navigation bar, Customize Navigation Bar...: check entries to show, drag or Up / Down to reorder, Reset for default. Ctrl+1 to Ctrl+9 open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows…",
@@ -98,7 +100,9 @@
             "show_confirmation_for_batch_toggle": "Show confirmation dialog for enabling or disabling all widgets or modules. This option is enabled by default.",
             "show_layout_guides": "Show alignment guides (grid, other widget edges and centers) while dragging a widget. Widgets also snap to centers while snapping is active. Default is enabled.",
             "show_option_group_title": "Show option group title in Config dialog.",
+            "show_overlay_previews": "Overlays page: show overlays as cards with a preview of each overlay (enabled), or as a compact list with the preview in a tooltip (disabled). Also switched by the view buttons at top right of Overlays page. Previews are drawn only while the page is shown. Default is enabled.",
             "show_setup_wizard_at_startup": "Show setup wizard at next startup. The wizard asks for language, game, window & overlay theme, starting preset and widgets. It is shown once on first launch, and can be opened any time from Help menu.",
+            "skipped_update_version": "Update version hidden by Skip This Version (kept by app, not shown in config dialog): its notice is not shown again at startup, a newer version is. Stored as one number (major * 1000000 + minor * 1000 + patch), 0 if none.",
             "snap_distance": "The distance (in pixels) at which the widget will snap to screen edges or other widgets. Default 10. Hold Ctrl to enable snapping.",
             "snap_gap": "The gap (in pixels) to leave between the widget and the snapped widget edges. Default 0.",
             "update_repository": "Set GitHub repository (owner/name) used by Check for Updates. Empty value disables update checks. Default is Keenny38/ModernTinyPedals (this fork), so updates never offer the upstream releases.",
@@ -117,6 +121,7 @@
             "show_battery_drain": "Show percentage battery charge drained in current lap.",
             "show_battery_regen": "Show percentage battery charge regenerated in current lap.",
             "show_estimated_net_change": "Show estimated battery charge net change from current lap. Positive value indicates net gain (regen higher than drain); negative indicates net loss (drain higher than regen).\n\nTotal net change reading is more accurate for vehicles that constantly consume battery charge, such as FE or Hypercar class. It is less useful for vehicles that only utilize electric motor for a short duration, such as Push to pass.\n\nNote, at least one full lap (excludes pit-out or first lap) is required to generate estimated net change data.",
+            "show_state_of_charge": "Modern design: show battery state of charge as shown by game (LMU), or battery charge (RF2), while electric motor is available. Off by default.",
             "warning_flash_highlight_duration": "Set color highlight duration for each warning flash. Default is 0.4 seconds. Minimum value is limited to 0.2.",
             "warning_flash_interval": "Set minimum time interval between each warning flash. Default is 0.4 seconds. Minimum value is limited to 0.2."
         },
@@ -478,6 +483,15 @@
             "show_suspension_integrity": "Show suspension integrity reading, measured from the wheel with the lowest suspension integrity.",
             "show_tyre_integrity": "Show tyre integrity reading, measured from the wheel with the lowest tread depth."
         },
+        "delta_graph": {
+            "delta_display_range": "Set maximum delta (gain or loss) in seconds shown at top and bottom of graph, accepts decimal place. Larger delta is drawn at graph edge. Default is 2 seconds.",
+            "deltabest_source": "Set lap time source for delta graph. Available values are: Best = all time best lap time, Session = session best lap time, Stint = stint best lap time, Last = last lap time.",
+            "display_height": "Set graph width and height in pixels.",
+            "display_width": "Set graph width and height in pixels.",
+            "show_delta_reading": "Show current delta reading above graph.",
+            "show_position_mark": "Show current position along the lap as a vertical line, with a dot at current delta.",
+            "show_previous_lap": "Show delta of previous lap as a faint line behind current lap."
+        },
         "deltabest": {
             "delta_bar_display_range": "Set maximum display range (gain or loss) in seconds for delta bar, accepts decimal place. Default is 2 seconds.",
             "delta_bar_height": "Set delta bar length and height in pixels.",
@@ -488,11 +502,14 @@
             "freeze_duration": "Set freeze duration (seconds) for displaying previous lap time difference against best lap time source after crossing finish line. Value range in 0 to 30 seconds. Default is 3 seconds. Set to 0 to disable.",
             "layout": "2 layouts are available: 0 = delta bar above deltabest text, 1 = delta bar below deltabest text.",
             "show_delta_bar": "Show visualized delta bar.",
+            "show_game_deltabest_if_available": "Show delta to best lap computed by game (LMU) instead of delta computed by APP, when game provides it. Game delta compares against best lap as defined by game (as shown in game), whatever deltabest_source is. Delta computed by APP is used when game delta is unavailable (RF2). Default is disabled.",
+            "show_invalid_lap_indicator": "Modern design: outline deltabest in loss color while game invalidated current lap (track limits). This option only works for LMU.",
             "swap_style": "Swap time gain and loss color between font and background color."
         },
         "deltabest_extended": {
             "show_all_time_deltabest": "Show deltabest against personal all time best lap time.",
             "show_deltalast": "Show delta against personal last lap time (deltalast). Note: deltalast will be reset upon ESC.",
+            "show_game_deltabest_if_available": "Show delta to best lap computed by game (LMU) instead of delta computed by APP, when game provides it. Game delta (best lap as defined by game) replaces session deltabest reading. Delta computed by APP is used when game delta is unavailable (RF2). Default is disabled.",
             "show_session_deltabest": "Show deltabest against current personal session best lap time. Note: session deltabest will be reset upon changing session, or reload preset/restart APP.",
             "show_stint_deltabest": "Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane."
         },
@@ -549,6 +566,7 @@
             "layout": "2 layouts are available: 0 = vertical layout, 1 = horizontal layout.",
             "overheat_threshold_oil": "Set temperature threshold for oil and water overheat color indicator, unit in Celsius.",
             "overheat_threshold_water": "Set temperature threshold for oil and water overheat color indicator, unit in Celsius.",
+            "show_game_overheating_warning": "Modern design: highlight oil and water temperature while game shows engine overheating warning, besides overheat_threshold_oil and overheat_threshold_water.",
             "show_oil_temperature": "Show oil temperature.",
             "show_power": "Show engine power.",
             "show_power_to_weight_ratio": "Show estimated (maximum recorded) power to (current) weight ratio. Final reading is affected by power and weight units setting, and resets after returning to garage. The accuracy depends on game API data, and may not be available on certain vehicles.",
@@ -563,6 +581,7 @@
             "overheat_threshold_water": "Set temperature threshold for oil and water overheat color indicator, unit in Celsius.",
             "rate_of_change_interval": "Set time interval in seconds for rate of change calculation. Default interval is 10 seconds. Minimum interval is limited to 1 second, maximum interval is limited to 60 seconds.",
             "rate_of_change_smoothing_samples": "Set number of samples for reducing data fluctuation. Lower value may result more fluctuated reading. Set 1 to disable smoothing.",
+            "show_game_overheating_warning": "Modern design: highlight oil and water temperature while game shows engine overheating warning, besides overheat_threshold_oil and overheat_threshold_water.",
             "show_net_change_per_lap": "Show temperature net change per lap.",
             "show_oil_temperature": "Show oil temperature.",
             "show_rate_of_change": "Show temperature rate of change for a specific time interval.",
@@ -573,6 +592,7 @@
             "disqualify_text": "Set custom text for finish and disqualify.",
             "finish_text": "Set custom text for finish and disqualify.",
             "font_color_pit_closed": "Set color indicator on pit timer when pit lane is closed.",
+            "full_course_yellow_text": "Set custom text for full course yellow, shown before phase.",
             "green_flag_duration": "Set display duration(seconds) for green flag text before it disappears. Default is 3.",
             "green_flag_text": "Set custom text for red lights and green flag.",
             "layout": "2 layouts are available: 0 = vertical layout, 1 = horizontal layout.",
@@ -586,15 +606,18 @@
             "pit_time_highlight_duration": "Set highlight duration for total amount time spent in pit after exit pit.",
             "red_lights_text": "Set custom text for red lights and green flag.",
             "scheduled_repairs_text": "Set custom text for scheduled repairs.",
+            "sector_yellow_flags_text": "Set custom text before sector numbers.",
             "show_blue_flag": "Show blue flag indicator with nearest leading vehicle class name displayed on the left, and total duration (seconds) under blue flag on the right. Note, the class name is limited and trimmed to 4 characters.",
             "show_blue_flag_for_race_only": "Only show blue flag indicator during race session.",
             "show_current_speed_while_limiter_on": "Show current vehicle speed while speed limiter is on. This option is enabled by default.",
             "show_finish_state": "Show finish or disqualify state.",
+            "show_full_course_yellow": "Show full course yellow phase: pending or pits closed (FCY), pits open for lead lap cars (LDR), pits open (PIT), last lap (END), resuming (GO), race halted (RED).",
             "show_low_fuel": "Show low fuel (or low virtual energy if available) indicator when below certain amount value. Only one indicator will be displayed for low fuel (LF) or low virtual energy (LE), depends on which one would deplete sooner.",
             "show_low_fuel_for_race_only": "Only show low fuel indicator during race session.",
             "show_pit_request": "Show pit request indicator and pit-in laps countdown alongside estimated remaining laps reading that current fuel or energy can run. Note, pit-in laps countdown value is always calculated towards the finish line of current stint's final lap, and thus is always less than or equal to estimated remaining laps reading. If countdown drops below 1.0 (laps), it indicates the final lap of current stint, and driver should pit in before the end of current lap to refuel. If countdown reaches zero or negative, there may still be some fuel or energy left in tank, however it will not be enough to complete another full lap.",
             "show_pit_timer": "Show pit timer, and total amount time spent in pit after exit pit.",
             "show_scheduled_repairs": "Show scheduled repairs notification and estimated repair time when damage repair is turned on. This option only works for LMU.",
+            "show_sector_yellow_flags": "Show sectors under local yellow flag (sector numbers, - for clear sector). This option follows show_yellow_flag_for_race_only.",
             "show_speed_limiter": "Show speed limiter indicator.",
             "show_start_lights": "Show race start lights indicator with light frame number for standing-type start.",
             "show_traffic": "Show nearest incoming on-track traffic indicator (time gap) while in pit lane or after pit-out.",
@@ -693,6 +716,13 @@
             "remaining_pitstop_threshold": "Set number of remaining pit stops threshold for auto calibrating target fuel (or energy) saving bias. Default value is 0.1.\n\nFuel (or energy) saving calculation is biased towards pit entry position when number of estimated remaining pit stops is greater than the threshold, otherwise biased towards finish line.",
             "show_rate_of_consumption": "Show fuel or energy consumption per second and current vehicle speed (meters per second) under RATE column.\n\nThis option shows how consumption rate changes with throttle, RPM, engine map, etc. It also helps to determine amount distance required to lift-and-coast to save corresponding amount fuel or energy.\n\nFor example, if energy consumption per second value is 0.05, and current speed value is 75m, it indicates it would take roughly 1 second and 75 meters of lift-and-coast time and distance to save 0.05 energy."
         },
+        "gap_trend": {
+            "number_of_laps": "Set number of laps kept in gap chart and used for gap change per lap. Value range in 2 to 50. Default is 8 laps.",
+            "show_closing_rate": "Show gap change per lap, in gain or loss color.",
+            "show_driver_name": "Show driver name of car ahead and car behind.",
+            "show_gaps_in_class": "Show gaps to car ahead and car behind in same class. Set false to show gaps to car ahead and car behind in overall position instead.",
+            "show_trend_chart": "Show gap at end of each lap as a small line chart."
+        },
         "gear": {
             "battery_bar_height": "Set battery bar height in pixels.",
             "consumption_progression_exponential_scale": "Apply exponential scale to consumption progression, value range in 1.0 to 10.0. This option affects visual only. Increase this option to scale up high end consumption range. Set to 1.0 to disable exponential scale. This option is useful to enlarge changes at high end consumption range for certain vehicles.",
@@ -720,6 +750,7 @@
             "show_speed": "Show speed reading.",
             "show_speed_below_gear": "Show speed reading below gear.",
             "show_speed_limiter": "Show pit speed limiter indicator.",
+            "show_speed_limiter_reminder": "Modern design: show outlined speed limiter reminder while driving in pit lane with pit speed limiter off (vehicle with pit speed limiter only).",
             "show_virtual_energy_if_available": "Show virtual energy consumption instead of fuel consumption if available.",
             "speed_limiter_text": "Set custom pit speed limiter text which shows when speed limiter is engaged."
         },
@@ -790,6 +821,7 @@
             "show_wear_sign": "Show tyre wear percentage sign."
         },
         "laps_and_position": {
+            "show_invalid_lap_indicator": "Modern design: show lap progress in loss color while game invalidated current lap (track limits). This option only works for LMU.",
             "show_laps": "Show your current lap number (lap progression) and total race laps. If total race laps is not available, such as in time-based session, estimated total laps will be displayed instead, and a ~ sign will be displayed before estimated total laps reading, and up to two decimal places will be kept.\n\nNote, estimated total laps reading is calculated based on local player's lap time pace, which can be different from in-game HUD reading.\n\nThis reading does not concern about race leader's lap time pace, which means there may be an extra final lap on top of it. See show_predicted_extra_laps option below for extra laps prediction.",
             "show_position_change": "Show overall driver position change relative to overall qualification position.",
             "show_position_change_in_class": "Show driver position change in class instead of overall. This option is enabled by default.",
@@ -832,9 +864,11 @@
             "module_force": "Enable force module."
         },
         "module_fuel": {
+            "enable_green_flag_consumption": "Estimate fuel and virtual energy consumption per lap from the median of the last valid green flag laps, instead of the last valid lap. Laps under full course yellow or safety car, pit in and out laps, and invalid laps (no lap time, or track limits in LMU) are left out, so a neutralisation never makes the estimate drop. The last valid lap is used until 3 green flag laps are driven. A real change of consumption (fuel map, fuel saving) shows a few laps later than with the last lap. Default is disabled.",
             "fuel_density": "Set fuel density (kg/liter), which affects the accuracy of fuel weight calculation. Fuel density may vary depending on the type of fuel used. Default is 0.75 kg/liter. Note, for pure electric vehicle, set density to 0, such as Formula E.",
             "minimum_delta_distance": "Set minimum recording distance (in meters) between each fuel usage sample. Default value is 5 meters. Lower value may result more samples recorded and bigger file size; higher value may result less samples recorded and inaccuracy. Recommended value range in 5 to 10 meters.",
-            "module_fuel": "Enable fuel module."
+            "module_fuel": "Enable fuel module.",
+            "number_of_green_flag_laps": "Set number of last valid green flag laps the median consumption is taken from. Default is 5 laps."
         },
         "module_hybrid": {
             "minimum_delta_distance": "Set minimum recording distance (in meters) between each battery charge usage sample. Default value is 5 meters. Lower value may result more samples recorded and bigger file size; higher value may result less samples recorded and inaccuracy. Recommended value range in 5 to 10 meters.",
@@ -981,6 +1015,14 @@
             "show_readings": "Show pedal input and force feedback readings. Note, while show_*_filtered option is enabled, only the highest reading between filtered and raw input is displayed.",
             "show_throttle": "Show throttle bar."
         },
+        "pit_lane_helper": {
+            "approach_distance": "Set distance in meters before pit lane entry from which widget is shown while pit stop is requested. Pit entry position is read from game (LMU), or learned by Mapping module. If pit entry position is unknown, distance to start/finish line is used instead. Default is 400 meters.",
+            "show_always": "Always show widget, also out of pit lane.",
+            "show_limiter_state": "Show speed limiter state.",
+            "show_pit_box_distance": "Show distance to pit box, with a bar filling up while approaching pit box.",
+            "show_planned_services": "Show estimated pit stop time, fuel (or virtual energy) added, and repair time, as planned in game pit menu.",
+            "show_speed": "Show vehicle speed and pit speed limit, in Speed Units."
+        },
         "pit_stop_estimate": {
             "actual_relative_refill": "Show actual relative refilling, as the total additional fuel or virtual energy that will be added in next pit stop according to remaining fuel or virtual energy and user refill setting from MFD Pitstop page.",
             "additional_pitstop_time": "Set additional pit stop time that is not part of pass_duration or stop_duration. Default value is 2 seconds, which is the average time it takes to decelerate and accelerate towards and away from pit spot.",
@@ -994,7 +1036,6 @@
             "show_pit_occupancy": "Show pit_occupancy and pit_requests columns.",
             "show_relative_refilling": "Show actual_relative_refill and total_relative_refill columns.",
             "stop_duration": "Show estimated pit stop time while making a service stop or serving a penalty, calculated according to each setting from MFD Pitstop page and underlying service timing and concurrency differences. Average accuracy is within 1 seconds.\n\nNote, for unscheduled pit stop (without requesting pit), game sometimes will add random amount extra delay (as part of pit crew preparation time) on top of pit stop time. To avoid this, always requests pit before entering pit.",
-            "stop_go_penalty_time": "Set stop go penalty time in seconds. Default value is 10 seconds. Note, this value is only used if penalty time data is not available from game API.",
             "total_relative_refill": "Show total relative refilling, as the total additional fuel or virtual energy that is required to finish the race. This is the same value as seen from refill column of Fuel Widget or Virtual energy Widget.\n\nWith both actual and total relative refilling readings, users can determine precisely how much fuel or virtual energy that will be added in next pit stop, and whether the refilling will be enough or more pit stops are required."
         },
         "preset_keybinding": {
@@ -1009,14 +1050,28 @@
             "show_activation_timer": "Show electric boost motor activation timer.",
             "show_battery_charge": "Show percentage available battery charge."
         },
+        "race_notifications": {
+            "display_duration": "Set how long each message is shown in seconds, fading out at the end. Value range in 1 to 60. Default is 5 seconds.",
+            "layout": "2 layouts are available: 0 = newest message at top, 1 = newest message at bottom.",
+            "number_of_notifications": "Set maximum number of messages shown at the same time, oldest message is removed first. Value range in 1 to 8. Default is 3.",
+            "show_blue_flag": "Show message when blue flag is shown to player, with class name of faster car.",
+            "show_class_fastest_lap": "Show message when a new fastest lap is set in player class.",
+            "show_full_course_yellow": "Show message when full course yellow starts and ends.",
+            "show_lap_invalidated": "Show message when game invalidates current lap.",
+            "show_penalty": "Show message when a new penalty is given.",
+            "show_position_change": "Show message when overall position, or position in class, is gained or lost.",
+            "show_position_change_in_class": "Show message when overall position, or position in class, is gained or lost."
+        },
         "race_plan": {
             "enable_live_replan": "Plan the rest of the race again at each lap & stop during a race, from the car: laps & time done, fuel, energy & tyres of now, stops done. Disabled: plan made before the race is followed.",
             "pit_window_laps": "Set number of laps before next stop from which next stop is highlighted with warning_color_pit_window.",
+            "show_consumption_estimate": "Modern design: show consumption estimate used by fuel (or energy) module: from game, from last lap, or median of recent laps (with number of laps). Default is disabled.",
             "show_energy": "Show virtual energy to add at next stop.",
             "show_next_stop": "Show lap of next stop, and laps to go in brackets. END is shown after last stop, --- when race calculator has no plan.",
             "show_pit_entry": "Show distance to pit lane entry (LMU, Rest API enable_race_info option), in warning_color_pit_entry on the lap ending with the next stop. -- in the pits or when unknown. Distance unit follows Distance Unit setting from Units config dialog.",
             "show_pit_menu": "Show pit menu check: refill set in game pit menu (fuel, or virtual energy for a car using it) against amount after next stop of the plan. OK when close (1 unit), menu>plan in warning_color_pit_menu otherwise, -- when game gives no refill.",
             "show_refuel": "Show fuel to add at next stop.",
+            "show_stint_limit": "Modern design: show what ends stints of the plan: fuel, energy, driver stint time, mandatory stops, or tyre life (highlighted). Default is disabled.",
             "show_stops_left": "Show stops left, and total stops of plan.",
             "show_target": "Show consumption per lap to hold to reach next stop (or the finish) with fuel of now (energy for a car using energy only), safety margin kept, in warning_color_target when last lap used more.",
             "show_tyres": "Show number of tyres to change at next stop, highlighted with highlight_color_tyre_change when tyres are changed. Tyres of race calculator tyre plan, or 4 tyres at stops proposed from minimum tread when tyre plan has no tyre."
@@ -1076,16 +1131,20 @@
             "additional_players_front": "Set additional players shown on relative list. Each value is limited to a maximum of 60 additional players (for a total of 120 additional players). Default is 0.",
             "brand_logo_width": "Set maximum brand logo display width in pixels. Note, maximum brand logo display height is automatically adapted to font_size.",
             "class_width": "Set class name display width, value is in chars, 4 = 4 chars wide. Set to 0 to hide class name while showing only class color.",
+            "column_average_laptime": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_best_laptime": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
+            "column_brand_logo": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_class": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_driver_name": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_energy_remaining": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_incidents": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_laptime": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
+            "column_lift_and_coast_time": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_pit_status": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_pitstop_count": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_position": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_position_change": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
+            "column_speed_trap": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_stint_laps": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_time_gap": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
             "column_tyre_compound": "Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, PEN with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).",
@@ -1153,13 +1212,21 @@
         },
         "ride_height": {
             "bottoming_height_*": "Set bottoming ride height (in millimeters). This option is used for vehicle that hits ground before ride height reading reaches zero.",
-            "ride_height_maximum_range": "Set visualized maximum ride height display range (millimeter)."
+            "ride_height_maximum_range": "Set visualized maximum ride height display range (millimeter).",
+            "show_axle_ride_height": "Modern design: show front and rear ride height from game (aerodynamic reference, in millimeters) between left and right tiles."
         },
         "rivals": {
             "*_color_time_interval_ahead": "Set custom time interval color of opponent ahead and behind.",
             "*_color_time_interval_behind": "Set custom time interval color of opponent ahead and behind.",
+            "column_average_laptime": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
+            "column_brand_logo": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_delta_laptime": "Modern design columns besides those of Relative: lap time difference to player over recent laps, and interval to player (car ahead in green, car behind in orange).",
+            "column_lift_and_coast_time": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
+            "column_speed_trap": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_time_interval": "Modern design columns besides those of Relative: lap time difference to player over recent laps, and interval to player (car ahead in green, car behind in orange).",
+            "show_highlighted_fastest_last_laptime": "Highlight the fastest last lap time within the same class if available.",
+            "show_lap_difference": "Show different font color based on lap difference between player and opponents. Note, this option will override font_color setting from position, driver name, vehicle name.",
+            "show_player_highlighted": "Highlight player row with customizable specific color.",
             "time_interval_align_center": "Align time interval in the center when enabled. Default is right alignment when disabled."
         },
         "roll_angle": {
@@ -1222,8 +1289,22 @@
             "speed_maximum_reset_cooldown": "Set cooldown duration (seconds) before resetting minimum or maximum speed value.",
             "speed_minimum_reset_cooldown": "Set cooldown duration (seconds) before resetting minimum or maximum speed value."
         },
+        "spotter": {
+            "bar_height": "Set side bar width and height in pixels.",
+            "bar_width": "Set side bar width and height in pixels.",
+            "critical_side_distance": "Set side distance in meters (between car centers) under which car alongside is shown in critical color. Default is 2.6 meters.",
+            "horizontal_gap": "Set gap between left and right side bars in pixels.",
+            "nearby_side_distance": "Set maximum side distance in meters (between car centers) for a car to be alongside. Default is 5 meters.",
+            "show_bar_background": "Always show side bar background, also while no car is alongside.",
+            "vehicle_length": "Set vehicle overall size (length and width), value in meters.",
+            "vehicle_width": "Set vehicle overall size (length and width), value in meters."
+        },
         "standings": {
+            "column_average_laptime": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
+            "column_brand_logo": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_delta_laptime": "Modern design columns besides those of Relative: lap time difference to player over recent laps (green if player was faster), and interval to car ahead. column_time_gap shows gap to leader (or to leader best lap outside race). Space separates class groups in multi-class split mode.",
+            "column_lift_and_coast_time": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
+            "column_speed_trap": "Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows brand_logo_width), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above lift_and_coast_highlight_threshold) after stint laps. With show_compound_for_each_wheel, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With show_class_style_for_position_in_class, position in class part of class pill is in class color.",
             "column_time_interval": "Modern design columns besides those of Relative: lap time difference to player over recent laps (green if player was faster), and interval to car ahead. column_time_gap shows gap to leader (or to leader best lap outside race). Space separates class groups in multi-class split mode.",
             "enable_multi_class_split_mode": "Enable multi-class split mode, which splits and displays each vehicle class in separated groups. This mode will only take effect when there is more than one vehicle class present in a session, otherwise it will automatically fall back to normal single class mode.",
             "enable_single_class_exclusive_mode": "Enable single-class exclusive mode, which displays vehicles from player's class only. This mode takes priority over all other display mode.",
@@ -1244,10 +1325,13 @@
             "show_best_laptime_from_recent_laps_in_race": "Show driver's best lap time from (five) most recent laps in race session. This option provides a better view of driver's recent performance during longer race.",
             "show_delta_laptime": "Show lap time difference (delta) between player and opponents from most recent laps (up to 5 recent lap time records). The default layout order shows delta lap time records from right side column (most recent lap) to left.\n\nA green color (default) delta indicates that player's recent lap time is faster than opponent, while orange color delta indicates the opposite.",
             "show_energy_remaining": "Show remaining virtual energy reading in percentage from each driver, with 4 different states: - Unavailable: virtual energy reading is not available currently, default color grey. - High: above 30% remaining, default color green. - low: from 30% to 10% remaining, default color orange. - critical: 10% or lower remaining, default color red.\n\nNote, for vehicle without virtual energy, remaining fuel (only if available) will be displayed instead. If fuel data is not available from game API, then nothing will be displayed.",
+            "show_highlighted_fastest_last_laptime": "Highlight the fastest last lap time within the same class if available.",
             "show_incidents": "Show total number of incidents for each driver from current session. This option helps tracking opponent's safeness and cleanness during long race. This option only works for LMU.\n\nNote, incidents are counted from vehicle contacts and track cuts only for each individual driver. Incidents are not counted towards team. Incidents are only counted while this APP is running, and reset if changed session or restarted this APP.",
             "show_inverted_delta_laptime_layout": "Enable this option to invert layout order for delta lap time records.",
+            "show_lap_difference": "Show different font color based on lap difference between player and opponents. Note, this option will override font_color setting from position, driver name, vehicle name.",
             "show_laptime": "Show driver's last lap time or pit stop duration if available. Invalid lap time is preceded by asterisk mark, such as *1:23.54.\n\nNote, if show_best_laptime is not enabled, this option will show driver's session best lap time in none-race sessions.",
             "show_lift_and_coast_time": "Show most recent recorded lift and coast time (in seconds) from each driver.",
+            "show_player_highlighted": "Highlight player row with customizable specific color.",
             "show_speed_trap": "Show fastest recorded speed of each driver per lap at user-defined speed trap position on track. This option can be useful to keep track of each driver's straight line performance from most recent lap.\n\nNote, speed trap position is defined in tracks.json preset, which can be customized via Track Info Editor. Default speed trap position is set at start/finish line.",
             "show_stint_laps": "Show number of completed laps from current stint and estimated total stint laps. Note, it may require a few laps to get accurate estimate.",
             "show_time_gap": "Show each driver's time gap behind overall leader in race session. In none race sessions, time gap is calculated from overall leader's session best lap time.",
@@ -1310,6 +1394,15 @@
             "show_wear_sign": "Show tyre wear percentage sign.",
             "stint_history_count": "Set the number of stint history display. Default is to show 2 most recent stints."
         },
+        "stint_timer": {
+            "maximum_stint_minutes": "Set maximum stint length in minutes for stint countdown. Countdown is shown in warning color near the end, and as negative time in loss color once exceeded. Set 0 to disable. Default is 0.",
+            "minimum_driving_minutes": "Set minimum driving time per driver in minutes, used as target. Set 0 to use fair share as target instead. Default is 0.",
+            "number_of_drivers": "Set number of drivers of the car, for fair share and number of driver rows. Set 0 to use number of drivers seen in session. Value range in 0 to 6. Default is 0.",
+            "show_driver_times": "Show fair share, and driving time of each driver with time left to target. Target is minimum driving time if set, otherwise fair share.",
+            "show_stint_countdown": "Show countdown to maximum stint length.",
+            "show_stint_laps": "Show laps of current stint.",
+            "stint_warning_minutes": "Set remaining stint minutes under which countdown is shown in warning color. Default is 5 minutes."
+        },
         "suspension_force": {
             "show_force_ratio": "Show percentage force ratio between each and total suspension force. Set false to show individual suspension force in Newtons."
         },
@@ -1340,6 +1433,7 @@
             "show_best": "Show personal all time best lap time.",
             "show_current": "Show personal current lap time.",
             "show_estimated": "Show personal current estimated lap time.",
+            "show_invalid_lap_indicator": "Modern design: highlight current lap time in loss color while game invalidated current lap (track limits). This option only works for LMU.",
             "show_last": "Show personal last lap time.",
             "show_session_best": "Show current session best lap time from all vehicle classes.",
             "show_session_best_from_same_class_only": "Show current session best lap time from same vehicle class only.",
@@ -1460,6 +1554,7 @@
         },
         "tyre_carcass": {
             "enable_heatmap_auto_matching": "Enable automatically heatmap style matching for specific tyre compounds defined in compounds.json preset. This option applies matching heatmap style to front and rear tyre compounds separately.\n\nNote, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.",
+            "enable_heatmap_from_optimal_temperature": "Modern design: color tyre temperature around optimal tyre temperature given by game (LMU): blue below, green around optimal, yellow to red above, in 10 degree Celsius steps (same colors as tyre_optimal_* heatmaps). Applies instead of enable_heatmap_auto_matching and heatmap_name while game gives optimal temperature, otherwise (RF2) they apply. Default is disabled.",
             "heatmap_name": "Set heatmap preset name that is defined in heatmap.json preset. Note, this option has no effect while enable_heatmap_auto_matching is enabled.",
             "leading_zero": "Set amount leading zeros for each temperature value. Default is 2. Minimum value is limited to 1.",
             "rate_of_change_interval": "Set time interval in seconds for rate of change calculation. Default interval is 5 seconds. Minimum interval is limited to 1 second, maximum interval is limited to 60 seconds.",
@@ -1475,6 +1570,7 @@
         },
         "tyre_inner_layer": {
             "enable_heatmap_auto_matching": "Enable automatically heatmap style matching for specific tyre compounds defined in compounds.json preset. This option applies matching heatmap style to front and rear tyre compounds separately.\n\nNote, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.",
+            "enable_heatmap_from_optimal_temperature": "Modern design: color tyre temperature around optimal tyre temperature given by game (LMU): blue below, green around optimal, yellow to red above, in 10 degree Celsius steps (same colors as tyre_optimal_* heatmaps). Applies instead of enable_heatmap_auto_matching and heatmap_name while game gives optimal temperature, otherwise (RF2) they apply. Default is disabled.",
             "heatmap_name": "Set heatmap preset name that is defined in heatmap.json preset. Note, this option has no effect while enable_heatmap_auto_matching is enabled.",
             "leading_zero": "Set amount leading zeros for each temperature value. Default is 2. Minimum value is limited to 1.",
             "show_compound_color_by_type": "Show different compound color by compound type, which can be customized in Tyre Compound Editor.",
@@ -1495,8 +1591,20 @@
             "show_tyre_compound": "Show tyre compound symbols (front and rear) that matches specific tyre compounds defined in compounds.json preset.",
             "swap_style": "Swap cold and hot pressure color."
         },
+        "tyre_temp_trend": {
+            "display_height": "Set chart width and height of each tyre in pixels.",
+            "display_width": "Set chart width and height of each tyre in pixels.",
+            "enable_heatmap_auto_matching": "Enable automatically heatmap style matching for specific tyre compounds defined in compounds.json preset. This option applies matching heatmap style to front and rear tyre compounds separately.\n\nNote, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.",
+            "heatmap_name": "Set heatmap preset name that is defined in heatmap.json preset. Note, this option has no effect while enable_heatmap_auto_matching is enabled.",
+            "number_of_laps": "Set number of laps shown while show_trend_by_lap is enabled. Value range in 2 to 100. Default is 10 laps.",
+            "show_degree_sign": "Set true to show degree sign for each temperature value.",
+            "show_optimal_temperature": "Show tyre optimal temperature as a dashed line (LMU).",
+            "show_trend_by_lap": "Show average temperature of each completed lap instead of last seconds.",
+            "trend_duration": "Set time span of chart in seconds, with one sample every 1/60 of time span. Minimum value is limited to 10. Default is 120 seconds."
+        },
         "tyre_temperature": {
             "enable_heatmap_auto_matching": "Enable automatically heatmap style matching for specific tyre compounds defined in compounds.json preset. This option applies matching heatmap style to front and rear tyre compounds separately.\n\nNote, separate compounds info for tyres on the same axle is not available from game API, which currently it is not possible to show left and right compounds separately.",
+            "enable_heatmap_from_optimal_temperature": "Modern design: color tyre temperature around optimal tyre temperature given by game (LMU): blue below, green around optimal, yellow to red above, in 10 degree Celsius steps (same colors as tyre_optimal_* heatmaps). Applies instead of enable_heatmap_auto_matching and heatmap_name while game gives optimal temperature, otherwise (RF2) they apply. Default is disabled.",
             "heatmap_name": "Set heatmap preset name that is defined in heatmap.json preset. Note, this option has no effect while enable_heatmap_auto_matching is enabled.",
             "leading_zero": "Set amount leading zeros for each temperature value. Default is 2. Minimum value is limited to 1.",
             "show_compound_color_by_type": "Show different compound color by compound type, which can be customized in Tyre Compound Editor.",
@@ -1541,6 +1649,8 @@
             "enable_attach_to_headset": "Attach overlay to headset (follows head movement), otherwise overlay is fixed in seated space.",
             "enable_vr_overlay": "Enable VR overlay.",
             "horizontal_offset_meters": "Set overlay position in meters, relative to seated position or headset.",
+            "mirror_position_x": "VR mirror window position on desktop, saved when the window is moved.",
+            "mirror_position_y": "VR mirror window position on desktop, saved when the window is moved.",
             "overlay_width_meters": "Set overlay width in meters. Default is 0.8.",
             "update_interval": "Set refresh interval in milliseconds. Default is 50.",
             "vertical_offset_meters": "Set overlay position in meters, relative to seated position or headset."
@@ -1555,6 +1665,7 @@
             "show_temperature": "Show track and ambient temperature.",
             "show_trend": "Show weather change trend for temperature, raininess, surface wetness readings.",
             "show_wetness": "Show average surface wetness in percentage.",
+            "show_wind": "Modern design: show wind speed in speed unit, with arrow of where wind blows relative to vehicle (up: tailwind, down: headwind, no arrow while calm).",
             "starting_rubber_*": "Set starting rubber coverage (percent) in corresponding sessions (practice, qualifying, race).\n\nNote, since session starting rubber coverage data is not available from game API, it is required to manually set the value.",
             "temperature_trend_interval": "Set weather change trend interval in seconds. Default interval is 60 seconds.\n\nIf weather readings increased within the interval, ▲ uparrow sign will be shown; if readings decreased within the interval, ▼ downarrow sign will be shown; If readings has not changed during the interval, ● sign will be shown after.",
             "wetness_trend_interval": "Set weather change trend interval in seconds. Default interval is 60 seconds.\n\nIf weather readings increased within the interval, ▲ uparrow sign will be shown; if readings decreased within the interval, ▼ downarrow sign will be shown; If readings has not changed during the interval, ● sign will be shown after."

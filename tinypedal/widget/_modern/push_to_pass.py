@@ -28,7 +28,8 @@ from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 
@@ -39,6 +40,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_battery_charge", "show_activation_timer", "activation_threshold_gear",
         "activation_threshold_speed", "activation_threshold_throttle", "minimum_activation_time_delay",
         "maximum_activation_time_per_lap",
+        *display_order_options("push_to_pass"),
     )
 
     def __init__(self, config, widget_name):
@@ -53,6 +55,7 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("charge", "P2P", "MAX", "strong"))
         if wcfg["show_activation_timer"]:
             stats.append(Stat("timer", "Active", "88.8"))
+        stats = self.display_ordered(stats, names={"charge": "battery_charge", "timer": "activation_timer"})
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
@@ -84,7 +87,7 @@ class Realtime(StatsMixin, ModernOverlay):
                 text = "MAX" if charge >= 100 else f"{charge:.0f}"
                 fills = (None, theme.tint(theme.positive, 70), theme.tint(theme.accent, 90), theme.tint(theme.warning, 80))
                 colors = (theme.text_faint, theme.positive, theme.accent, theme.warning)
-                values.append(Value(text, colors[min(state, 3)], fills[min(state, 3)], bar=min(charge / 100, 1.0),
+                values.append(Value(text, colors[min(state, 3)], fills[min(state, 3)], bar=fraction(charge / 100),
                                     bar_color=colors[min(state, 3)]))
             elif key == "timer":
                 active = hybrid.motorState == 2

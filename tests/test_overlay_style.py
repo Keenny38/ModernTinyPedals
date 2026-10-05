@@ -159,6 +159,9 @@ def test_edit_frame_resize(ui_env, monkeypatch):
         assert not frame.outline.isVisibleTo(widget)
         widget._edit_frame.handle.on_resized(2.0)
         assert cfg.user.setting["speedometer"]["font_size"] == font_size * 2
+        # Reload is queued: run it while still faked, else it reloads the real overlay in a later test
+        QCoreApplication.processEvents()
+        assert reloads == ["speedometer"]
     finally:
         cfg.user.setting["speedometer"]["font_size"] = font_size
         widget.stop()

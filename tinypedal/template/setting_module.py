@@ -50,6 +50,8 @@ MODULE_DEFAULT = {
         "idle_update_interval": 400,
         "minimum_delta_distance": 5,
         "fuel_density": 0.75,
+        "enable_green_flag_consumption": False,
+        "number_of_green_flag_laps": 5,
     },
     "module_hybrid": {
         "enable": True,

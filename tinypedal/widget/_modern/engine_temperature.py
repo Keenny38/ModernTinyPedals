@@ -30,7 +30,7 @@ from PySide6.QtGui import QPainter
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
-from .base import ModernOverlay
+from .base import STEADY, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
 
@@ -40,7 +40,8 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "overheat_threshold_oil", "overheat_threshold_water", "show_oil_temperature",
         "show_water_temperature", "show_rate_of_change", "show_net_change_per_lap", "rate_of_change_interval",
-        "rate_of_change_smoothing_samples",
+        "rate_of_change_smoothing_samples", "show_game_overheating_warning",
+        "display_order_oil_temperature", "display_order_water_temperature",
     )
 
     def __init__(self, config, widget_name):
@@ -56,11 +57,12 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("oil", "Oil", "888.8°", sub_sample="▲88.8  Δ+88.8"))
         if wcfg["show_water_temperature"]:
             stats.append(Stat("water", "Water", "888.8°", sub_sample="▲88.8  Δ+88.8"))
+        stats = self.display_ordered(stats, names={"oil": "oil_temperature", "water": "water_temperature"})
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0, show_sub=self.show_sub)
         self.set_size(width, height)
         self.rates = {"oil": 0.0, "water": 0.0}
-        self.last_temps = {"oil": 0.0, "water": 0.0}
+        self.last_temps: dict[str, float | None] = {"oil": None, "water": None}
         self.lap_start_temps = {"oil": 0.0, "water": 0.0}
         self.net = {"oil": 0.0, "water": 0.0}
         self.last_elapsed = 0.0
@@ -92,25 +94,34 @@ class Realtime(StatsMixin, ModernOverlay):
             self.last_elapsed = elapsed
         new_lap = self.last_lap_start != lap_start
         self.last_lap_start = lap_start
+        overheating = wcfg["show_game_overheating_warning"] and engine.overheating()  # game warning
         values = []
         for key in self.keys:
             temp = engine.oil_temperature() if key == "oil" else engine.water_temperature()
             if interval:
-                self.rates[key] = self.ema_rate(self.rates[key], (temp - self.last_temps[key]) * interval)
+                last = self.last_temps[key]
+                if last is not None:  # first reading: no rate yet (from 0 would be a fake spike)
+                    self.rates[key] = self.ema_rate(self.rates[key], (temp - last) * interval)
                 self.last_temps[key] = temp
             if new_lap:
                 start = self.lap_start_temps[key]
                 self.net[key] = temp - start if temp > 0 < start else 0.0
                 self.lap_start_temps[key] = temp
-            hot = temp >= wcfg[f"overheat_threshold_{key}"]
+            hot = temp >= wcfg[f"overheat_threshold_{key}"] or overheating
+            rate = self.change_text(self.rates[key])
+            steady = rate == STEADY
             parts = []
             if wcfg["show_rate_of_change"]:
-                parts.append(f"{'▲' if self.rates[key] > 0 else '▼'}{self.change_text(self.rates[key])}")
+                parts.append(rate if steady else f"{'▲' if self.rates[key] > 0 else '▼'}{rate}")
             if wcfg["show_net_change_per_lap"]:
-                parts.append(f"Δ{'+' if self.net[key] > 0 else '-'}{self.change_text(self.net[key])}")
-            heating = self.rates[key] > 0
+                net = self.change_text(self.net[key])
+                parts.append(f"Δ{net}" if net == STEADY else f"Δ{'+' if self.net[key] > 0 else '-'}{net}")
+            if steady:
+                rate_color = theme.text_dim
+            else:
+                rate_color = theme.orange if self.rates[key] > 0 else theme.lap_behind
             values.append(Value(
                 f"{self.unit_temp(temp):.1f}°", theme.negative if hot else None, theme.tint(theme.negative, 55) if hot else None,
-                "  ".join(parts), theme.orange if heating else theme.lap_behind,
+                "  ".join(parts), rate_color,
             ))
         self.refresh(tuple(values))

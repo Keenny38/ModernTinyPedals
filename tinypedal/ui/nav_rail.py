@@ -28,22 +28,14 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QVBoxLayout,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout
 
 from ..const_file import ConfigType
 from ..i18n import tr
 from ..setting import cfg
 from ..template.setting_global import GLOBAL_DEFAULT
-from ._common import BaseDialog, UIScaler
+from ._common import BaseEditor, FocusRingButton, UIScaler
+from .ordered_picker import OrderedPicker, PickerEntry, icon_font_family
 from .tools_view import RENAMED_TOOL_KEYS, TOOL_SECTIONS
 
 # Pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
@@ -66,6 +58,7 @@ TOOL_SHORT_LABELS = {
     "track_map_viewer": "Map",
     "lap_viewer": "Telemetry",
     "replay_view": "Replay",
+    "game_replays": "Replays",
     "heatmap_editor": "Heatmap",
     "brake_editor": "Brakes",
     "tyre_compound_editor": "Compounds",
@@ -128,78 +121,115 @@ def current_rail_items() -> list[str]:
     return parse_rail_items(cfg.application.get("rail_items", "")) or default_rail_items()
 
 
-class RailEditor(BaseDialog):
-    """Choose & order navigation rail entries"""
+class RailEditor(BaseEditor):
+    """Choose & order navigation rail entries (shown entries & available ones, see OrderedPicker)
+
+    Subclass for another list of entries: override TITLE, HELP, picker_entries, badge_text,
+    current_items, default_items & save_items. Changes are marked unsaved, Ctrl+S saves (page kept
+    open), Save saves & closes, Ctrl+Z / Ctrl+Y undo & redo.
+    """
+
+    TITLE = "Customize Navigation Bar"
+    HELP = (
+        "Drag entries to reorder, or use the arrows. Add entries from the list on the right. "
+        "Ctrl+1 to Ctrl+9 open the first 9 entries, hidden pages stay in command palette (Ctrl+K)."
+    )
 
     def __init__(self, parent, on_saved=None):
         super().__init__(parent)
-        self.set_utility_title(tr("Customize Navigation Bar"))
-        self.setMinimumSize(UIScaler.size(22), UIScaler.size(30))
+        self.set_utility_title(tr(self.TITLE))
+        self.setMinimumSize(UIScaler.size(26), UIScaler.size(30))
+        self.resize(UIScaler.size(48), UIScaler.size(36))
         self._on_saved = on_saved
-        label = QLabel(tr("Check entries to show, drag to reorder. Hidden pages stay in command palette (Ctrl+K)."))
+        label = QLabel(tr(self.HELP))
+        label.setObjectName("pickerHelp")
         label.setWordWrap(True)
-        self.list_entries = QListWidget(self)
-        self.list_entries.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.list_entries.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.fill(current_rail_items())
+        self.picker = OrderedPicker(self, self.picker_entries(), self.current_items(), icon_font_family(),
+                                    badge=self.badge_text)
+        self.picker.changed.connect(self.set_modified)
+        self.list_entries = self.picker.shown_list
+        self.enable_undo(self.picker.shown_keys, lambda keys: self.picker.set_shown(keys, notify=False))
 
-        button_up = QPushButton(tr("Up"))
-        button_up.clicked.connect(lambda: self.move_current(-1))
-        button_down = QPushButton(tr("Down"))
-        button_down.clicked.connect(lambda: self.move_current(1))
-        button_reset = QPushButton(tr("Reset"))
-        button_reset.clicked.connect(lambda: self.fill(default_rail_items()))
-        button_save = QPushButton(tr("Save"))
-        button_save.clicked.connect(self.saving)
-        button_cancel = QPushButton(tr("Close"))
-        button_cancel.clicked.connect(self.reject)
+        self.button_reset = FocusRingButton(tr("Reset"))
+        self.button_reset.setToolTip(tr("Back to default entries"))
+        self.button_reset.clicked.connect(self.reset)
+        self.button_cancel = FocusRingButton(tr("Close"))
+        self.button_cancel.clicked.connect(self.close)
+        self.button_save = FocusRingButton(tr("Save"))
+        self.button_save.setObjectName("editorPrimary")
+        self.button_save.setDefault(True)
+        self.button_save.clicked.connect(self.save_and_close)
         layout_button = QHBoxLayout()
-        for button in (button_up, button_down, button_reset):
-            layout_button.addWidget(button)
+        layout_button.addWidget(self.button_reset)
+        self.add_undo_buttons(layout_button)
         layout_button.addStretch(1)
-        layout_button.addWidget(button_save)
-        layout_button.addWidget(button_cancel)
+        layout_button.addWidget(self.button_cancel)
+        layout_button.addWidget(self.button_save)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(UIScaler.pixel(10))
         layout.addWidget(label)
-        layout.addWidget(self.list_entries, stretch=1)
+        layout.addWidget(self.picker, stretch=1)
         layout.addLayout(layout_button)
-        layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        layout.setContentsMargins(self.MARGIN * 2, self.MARGIN * 2, self.MARGIN * 2, self.MARGIN * 2)
+
+    def showEvent(self, event):
+        """Shown as page: page has its own Close button"""
+        super().showEvent(event)
+        if self.in_app_page:
+            self.button_cancel.hide()
+
+    # Entries
+    def picker_entries(self) -> dict[str, PickerEntry]:
+        """Every possible entry: pages, then tools"""
+        kinds = {True: (tr("Pages"), tr("Page")), False: (tr("Tools"), tr("Tool"))}
+        return {
+            key: PickerEntry(key, tr(entry.tooltip), entry.glyph, entry.letter, kinds[entry.page >= 0][0],
+                             tag=kinds[entry.page >= 0][1])
+            for key, entry in rail_entries().items()
+        }
+
+    def badge_text(self, row: int) -> str:
+        """Shortcut of entry (first 9 entries)"""
+        return f"Ctrl+{row + 1}" if row < 9 else ""
+
+    def current_items(self) -> list[str]:
+        return current_rail_items()
+
+    def default_items(self) -> list[str]:
+        return default_rail_items()
+
+    def save_items(self, keys: list[str]):
+        cfg.application["rail_items"] = ",".join(keys) if keys else ",".join(default_rail_items())
+
+    # Editing
+    def checked_items(self) -> list[str]:
+        """Shown entries in order"""
+        return self.picker.shown_keys()
 
     def fill(self, shown: list[str]):
-        """Shown entries first in rail order, then hidden ones"""
-        entries = rail_entries()
-        self.list_entries.clear()
-        for key in [*shown, *(key for key in entries if key not in shown)]:
-            entry = entries[key]
-            text = tr(entry.tooltip) if entry.page >= 0 else f"{tr(entry.tooltip)}  ({tr('Tool')})"
-            item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, key)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if key in shown else Qt.CheckState.Unchecked)
-            self.list_entries.addItem(item)
+        self.picker.set_shown(shown)
 
     def move_current(self, step: int):
-        row = self.list_entries.currentRow()
-        target = row + step
-        if row < 0 or not 0 <= target < self.list_entries.count():
-            return
-        item = self.list_entries.takeItem(row)
-        self.list_entries.insertItem(target, item)
-        self.list_entries.setCurrentRow(target)
+        self.picker.move_selected(step)
 
-    def checked_items(self) -> list[str]:
-        keys = []
-        for row in range(self.list_entries.count()):
-            item = self.list_entries.item(row)
-            if item.checkState() == Qt.CheckState.Checked:
-                keys.append(item.data(Qt.ItemDataRole.UserRole))
-        return keys
+    def reset(self):
+        """Default entries (saved with Save)"""
+        if self.checked_items() != self.default_items():
+            self.picker.set_shown(self.default_items())
 
-    def saving(self):
-        keys = self.checked_items()
-        cfg.application["rail_items"] = ",".join(keys) if keys else ",".join(default_rail_items())
+    def applying(self):
+        """Save, editor kept open (Ctrl+S)"""
+        self.save_items(self.checked_items())
         cfg.save(config_type=ConfigType.CONFIG)
         if self._on_saved is not None:
             self._on_saved()
+        self.set_unmodified()
+
+    def saving(self):
+        """Save (also asked when closing with unsaved changes)"""
+        self.applying()
+
+    def save_and_close(self):
+        self.applying()
         self.accept()

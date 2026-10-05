@@ -29,7 +29,8 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .quad import QuadMixin, Section, Tile
 
 SECTIONS = (
@@ -54,17 +55,17 @@ class Realtime(QuadMixin, ModernOverlay):
     options = (
         "font_size", "layout", "warning_threshold_remaining", "warning_threshold_wear", "warning_threshold_laps",
         "warning_threshold_minutes", *(f"show_{key}" for key, _, _ in SECTIONS),
+        *display_order_options("tyre_wear"),
     )
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
-        self.keys = tuple(key for key, _, _ in SECTIONS if wcfg.get(f"show_{key}", False))
+        self.keys = tuple(self.display_ordered(
+            [key for key, _, _ in SECTIONS if wcfg.get(f"show_{key}", False)], key=str))
         gauges = {key for key, _, gauge in SECTIONS if gauge}
-        sections = [
-            Section(key, label, "88.8", min_width=3.2 if key in gauges else 0.0)
-            for key, label, _ in SECTIONS if key in self.keys
-        ]
+        labels = {key: label for key, label, _ in SECTIONS}
+        sections = [Section(key, labels[key], "88.8", min_width=3.2 if key in gauges else 0.0) for key in self.keys]
         self.gauges = gauges
         self.set_size(*self.build_quads(sections, horizontal=wcfg["layout"] != 0))
 
@@ -119,5 +120,5 @@ class Realtime(QuadMixin, ModernOverlay):
         if key in self.gauges:
             color = theme.negative if warn else theme.positive
             return Tile((number(value),), colors=(theme.negative if warn else theme.text,),
-                        level=min(max(value / 100, 0.0), 1.0), level_color=theme.tint(color, 110))
+                        level=fraction(value / 100), level_color=theme.tint(color, 110))
         return Tile((number(value),), colors=(theme.negative if warn else theme.text,))

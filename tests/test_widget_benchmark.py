@@ -59,12 +59,10 @@ BASELINE = load_baseline()
 
 
 @pytest.fixture(scope="module")
-def live_api():
+def live_api(bundled_fonts):
     """Default settings, API reader on in-memory shared memory data"""
     from tinypedal.api_control import api
-    from tinypedal.main import load_bundled_fonts
 
-    load_bundled_fonts()
     cfg.default.set_default()
     backup = {name: getattr(cfg.user, name, None) for name in cfg.user.__slots__}
     for name in cfg.user.__slots__:
@@ -119,7 +117,7 @@ def fill_field(size: int):
         data.gapBehindLeaderInClass = place * 1.6
         data.tireCompoundName = "S"
         data.numPitStops = index % 3
-        data.energyRemaining = 60.0
+        data.energyRemaining = 0.6  # fraction of full (shown as 60%)
         data.estimatedStintLaps = 18.0
         data.currentStintLaps = 4.0
         data.relativeStraightDistance = (index - vehicles.playerIndex) * 40.0

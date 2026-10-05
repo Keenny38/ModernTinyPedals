@@ -27,6 +27,7 @@ float or integer (LMU & rF2 built-in loggers store scaled integers).
 
 from __future__ import annotations
 
+import logging
 import struct
 import time
 from array import array
@@ -34,6 +35,8 @@ from itertools import pairwise
 from typing import NamedTuple
 
 from .telemetry_lap import LapData, interpolate
+
+logger = logging.getLogger(__name__)
 
 HEAD = struct.Struct(
     "<I4xII20xI24xHHHI8sHHI4x16s16x16s16x64s64s64x64s64x1024xI66x64s126x"
@@ -193,8 +196,16 @@ def read_ld(filename: str) -> tuple[LdInfo, list[Channel]]:
         end = data_ptr + count * size
         if not typecode or frequency <= 0 or end > len(data):
             continue
-        raw = array(typecode)
-        raw.frombytes(data[data_ptr:end])
+        raw: array | tuple
+        try:
+            if typecode == "e":  # half float: no array type, read by struct
+                raw = struct.unpack_from(f"<{count}e", data, data_ptr)
+            else:
+                raw = array(typecode)
+                raw.frombytes(data[data_ptr:end])
+        except (ValueError, struct.error) as error:  # channel left out, others still read
+            logger.warning("MOTEC: channel %s skipped: %s", text(chan[12]), error)
+            continue
         shift, multiplier, scale, decimals = chan[8], chan[9], chan[10], chan[11]
         if (shift, multiplier, scale, decimals) == (0, 1, 1, 0) or not scale:
             values = [float(sample) for sample in raw]
@@ -257,7 +268,6 @@ def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
 
     Written to a temporary file renamed once complete: job stopped at app exit leaves no partial .ld file.
     """
-    import logging
     import os
     from contextlib import suppress
 
@@ -268,8 +278,25 @@ def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
         export_lap(load_cached_lap(folder, path), temporary, venue=venue, timestamp=os.path.getmtime(path))
         os.replace(temporary, target)
     except (OSError, ValueError) as error:
-        logging.getLogger(__name__).error("MOTEC: unable to export %s: %s", path, error)
+        logger.error("MOTEC: unable to export %s: %s", path, error)
         with suppress(OSError):
             os.remove(temporary)
-        return (error.strerror if isinstance(error, OSError) and error.strerror else str(error)) or type(error).__name__
+        return error_text(error)
     return ""
+
+
+def import_ld_job(filename: str, folder: str) -> tuple[list[str], str]:
+    """Import complete laps of MoTeC .ld file to folder (worker process job: a long log takes seconds to read),
+    returns lap file paths & error text ("" if imported)"""
+    from .motec_import import import_ld_file
+
+    try:
+        return import_ld_file(filename, folder), ""
+    except (OSError, ValueError) as error:
+        logger.error("MOTEC: unable to import %s: %s", filename, error)
+        return [], error_text(error)
+
+
+def error_text(error: Exception) -> str:
+    """Short reason of a failed export or import"""
+    return (error.strerror if isinstance(error, OSError) and error.strerror else str(error)) or type(error).__name__

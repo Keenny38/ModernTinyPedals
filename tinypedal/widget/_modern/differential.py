@@ -29,7 +29,8 @@ from PySide6.QtGui import QPainter
 from ...api_control import api
 from ...module_info import minfo
 from ..differential import DiffLockingTimer
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 ITEMS = (
@@ -47,6 +48,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_inverted_locking", "decimal_places", "off_throttle_threshold",
         "on_throttle_threshold", "power_locking_reset_cooldown", "coast_locking_reset_cooldown",
         *(f"show_{key}" for key, _, _, _ in ITEMS),
+        *display_order_options("differential"),
     )
 
     def __init__(self, config, widget_name):
@@ -59,6 +61,7 @@ class Realtime(StatsMixin, ModernOverlay):
             Stat(key, label, sample, accent=theme.positive if power else theme.blue)
             for key, label, power, _ in ITEMS if wcfg[f"show_{key}"]
         ]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         self.items = {key: (power, front) for key, _, power, front in ITEMS}
         self.timers = {
@@ -91,5 +94,5 @@ class Realtime(StatsMixin, ModernOverlay):
             value = self.locking[key]
             if wcfg["show_inverted_locking"]:
                 value = 1 - value
-            values.append(Value(f"{value:.{self.decimals}%}", bar=min(max(value, 0.0), 1.0)))
+            values.append(Value(f"{value:.{self.decimals}%}", bar=fraction(value)))
         self.refresh(tuple(values))

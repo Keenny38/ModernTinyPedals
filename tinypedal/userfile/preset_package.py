@@ -36,7 +36,7 @@ import zipfile
 from typing import NamedTuple
 
 from ..const_file import FileExt
-from ..validator import is_allowed_filename
+from ..validator import is_allowed_filename, load_json_strict
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,8 @@ def unique_filename(filepath: str, filename: str) -> str:
 def read_manifest(package: zipfile.ZipFile) -> dict:
     """Read & verify package manifest, raise ValueError if invalid"""
     try:
-        manifest = json.loads(package.read("manifest.json").decode("utf-8"))
-    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        manifest = load_json_strict(package.read("manifest.json").decode("utf-8"))
+    except (KeyError, ValueError) as error:  # UnicodeDecodeError & JSONDecodeError included
         raise ValueError("not a TinyPedal preset package") from error
     if not isinstance(manifest, dict) or manifest.get("format") != PACKAGE_FORMAT:
         raise ValueError("not a TinyPedal preset package")
@@ -193,10 +193,10 @@ def import_preset_package(
 
 
 def is_json_dict(data: bytes) -> bool:
-    """Check if data is valid json object"""
+    """Check if data is valid json object (NaN & Infinity not allowed)"""
     try:
-        return isinstance(json.loads(data.decode("utf-8")), dict)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        return isinstance(load_json_strict(data.decode("utf-8")), dict)
+    except ValueError:  # UnicodeDecodeError & JSONDecodeError included
         return False
 
 

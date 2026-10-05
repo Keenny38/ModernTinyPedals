@@ -60,7 +60,7 @@ def register_types():
 
 
 class Theme(QObject):
-    """App palette & sizes for QML, updated when app theme changes"""
+    """App palette, sizes & number format for QML, updated when app theme changes"""
 
     changed = Signal()
 
@@ -150,6 +150,13 @@ class Theme(QObject):
         return float(UIScaler.FONT_POINT)
 
     @Property(str, constant=True)
+    def decimalPoint(self) -> str:
+        """Decimal separator of app language (comma in French): numbers formatted in QML pages"""
+        from ..lap_viewer import decimal_point
+
+        return decimal_point()
+
+    @Property(str, constant=True)
     def iconFont(self) -> str:
         """Segoe Fluent Icons / MDL2 Assets, "" if none (icons hidden)"""
         from ..app import icon_font_family
@@ -199,13 +206,23 @@ class Translator(QObject):
         return trm(text)
 
 
-def create_quick_view(parent: QWidget, qml_name: str, context: dict[str, QObject]) -> QQuickWidget:
-    """QML page from ui/qml file in a widget, context objects available by name in QML"""
+def create_quick_view(
+    parent: QWidget,
+    qml_name: str,
+    context: dict[str, QObject],
+    samples: int = MSAA_SAMPLES,
+) -> QQuickWidget:
+    """QML page from ui/qml file in a widget, context objects available by name in QML
+
+    Args:
+        samples: multisample antialiasing, 0 for pages without chart lines (less GPU memory).
+    """
     register_types()
     view = QQuickWidget(parent)
-    surface = QSurfaceFormat(view.format())
-    surface.setSamples(MSAA_SAMPLES)
-    view.setFormat(surface)
+    if samples:
+        surface = QSurfaceFormat(view.format())
+        surface.setSamples(samples)
+        view.setFormat(surface)
     view.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
     view.setClearColor(QApplication.palette().color(QPalette.ColorRole.Window))
     view.engine().addImportPath(QML_FOLDER)

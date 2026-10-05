@@ -82,6 +82,32 @@ Item {
             }
         }
 
+        // Laps aligned on braking point of selected corner, corner report
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.rows.length > 0
+            spacing: theme.em * 0.4
+            TpButton {
+                readonly property bool aligned: backend.alignment.index !== undefined && backend.alignment.index === root.selected
+                text: "↔ " + i18n.tr("Align on Braking")
+                flat: true
+                implicitHeight: theme.em * 1.8
+                enabled: root.selected >= 0 && backend.comparedLaps.length > 0
+                checked: aligned
+                tip: i18n.tr("Shift laps along distance so their braking starts in selected corner line up with reference lap")
+                onClicked: backend.alignBraking(aligned ? -1 : root.selected)
+            }
+            Item { Layout.fillWidth: true }
+            TpButton {
+                glyph: ""  // export
+                text: i18n.tr("Report...")
+                flat: true
+                implicitHeight: theme.em * 1.8
+                tip: i18n.tr("Export corner report: table, deltas, coaching notes & map (HTML or PDF)")
+                onClicked: backend.exportCornerReport()
+            }
+        }
+
         // Where compared lap loses most time
         Rectangle {
             visible: backend.coaching.length > 0

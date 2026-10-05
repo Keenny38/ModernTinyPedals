@@ -25,10 +25,35 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from time import monotonic, sleep
 
 from . import app_signal
 
 logger = logging.getLogger(__name__)
+
+STOP_TIMEOUT = 5.0  # seconds, wait for a thread to stop before giving up
+
+
+def wait_stopped(is_stopped: Callable[[], bool], name: str, timeout: float | None = None) -> bool:
+    """Wait (bounded) until a thread reports stopped, so a stuck thread never hangs reload or quit
+
+    Args:
+        is_stopped: returns True once thread stopped.
+        name: display name for log.
+        timeout: maximum wait (seconds), default STOP_TIMEOUT.
+
+    Returns:
+        True if stopped within timeout, False if gave up (error logged).
+    """
+    if timeout is None:
+        timeout = STOP_TIMEOUT
+    deadline = monotonic() + timeout
+    while not is_stopped():
+        if monotonic() >= deadline:
+            logger.error("ERROR: %s not stopped after %ss, continue anyway", name, timeout)
+            return False
+        sleep(0.01)
+    return True
 
 
 def run_supervised(

@@ -182,12 +182,12 @@ def test_fuel_estimate_from_record_first(tele, tmp_path):
 # --- Race calculator: team tab, game estimate, tyre allocation
 @pytest.fixture
 def page(ui_env, monkeypatch):
-    from tinypedal.ui import race_calculator, tyre_strategy_planner
+    from tinypedal.ui import race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(BaseEditor, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: None))
-    monkeypatch.setattr(tyre_strategy_planner, "show_toast", lambda *args, **kwargs: None)
+    monkeypatch.setattr(race_calculator, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
     dialog = race_calculator.RaceCalculator(None)
     yield dialog
@@ -209,68 +209,85 @@ def wait_request(request, timeout=5.0):
 
 
 def test_team_stints_from_game(page, monkeypatch):
-    from tinypedal.i18n import tr
     from tinypedal.ui import game_rest
+    from tinypedal.ui.quick.race_backend import TABS
 
     answers = {"/rest/strategy/usage": USAGE, "/rest/garage/UIScreen/RepairAndRefuel": {"fuelInfo": {"maxFuel": 100.0}}}
     monkeypatch.setattr(game_rest, "request_game", answers.get)
-    panel = page.panel_team
-    assert page.tabs.tabText(2) == tr("Team")
-    assert panel.table.isHidden() and not panel.label_empty.isHidden()  # nothing asked yet
-    panel.refresh()
-    wait_request(panel.request)
-    assert panel.table.rowCount() == 2 and not panel.table.isHidden()
-    assert panel.capacity == 100.0
-    assert panel.table.item(0, 4).text() == "3.000"  # 0.03 of 100 L tank
-    assert "Driver A" in panel.label_drivers.text() and "Driver B" in panel.label_drivers.text()
+    backend = page.backend
+    assert TABS[2] == "team"
+    assert not backend.team["rows"]  # nothing asked yet
+    backend.refreshTeam()
+    wait_request(backend.team_request)
+    team = backend.team
+    assert len(team["rows"]) == 2 and backend.team_capacity == 100.0
+    assert team["rows"][0]["cells"][4] == "3.000"  # 0.03 of 100 L tank
+    assert [driver["name"] for driver in team["drivers"]] == ["Driver A", "Driver B"]
+    assert "Updated from game" in team["status"] and team["canFill"]
     # Fill in selected stint (B), then all stints
-    calc = page.panel_calculator
-    panel.table.selectRow(1)
-    panel.fill_in()
-    assert calc.input_fuel.fuel_used.value() == pytest.approx(4.0)
-    assert calc.input_tyre.wear_lap.value() == pytest.approx(0.6)
-    assert calc.input_fuel.capacity.value() == pytest.approx(100.0)
-    panel.table.clearSelection()
-    panel.fill_in()
-    assert calc.input_fuel.fuel_used.value() == pytest.approx(3.4)  # (3 * 3 + 2 * 4) / 5
+    backend.selectStint(1, 0)
+    backend.fillInTeam()
+    assert backend.values["input_fuel_per_lap"] == pytest.approx(4.0)
+    assert backend.values["input_wear_per_lap"] == pytest.approx(0.6)
+    assert backend.values["input_tank_capacity"] == pytest.approx(100.0)
+    backend.selectStint(1, 1)  # unselected
+    backend.fillInTeam()
+    assert backend.values["input_fuel_per_lap"] == pytest.approx(3.4)  # (3 * 3 + 2 * 4) / 5
+
+
+def test_team_asked_while_team_tab_shown(page, monkeypatch):
+    from tinypedal.ui import game_rest
+
+    asked = []
+    monkeypatch.setattr(game_rest, "request_game", lambda resource: asked.append(resource))
+    backend = page.backend
+    backend.set_active(True)
+    assert not backend._team_timer.isActive()
+    backend.setTab(2)
+    assert backend._team_timer.isActive()
+    wait_request(backend.team_request)
+    assert asked  # asked at once
+    backend.set_active(False)  # page hidden: no more asking
+    assert not backend._team_timer.isActive()
+    backend.setTab(0)
 
 
 def test_team_stints_game_not_running(page, monkeypatch):
     from tinypedal.ui import game_rest
 
     monkeypatch.setattr(game_rest, "request_game", lambda resource: None)
-    panel = page.panel_team
-    panel.refresh()
-    wait_request(panel.request)
-    assert panel.table.rowCount() == 0 and not panel.button_fill.isEnabled()
-    assert panel.label_status.text()
+    backend = page.backend
+    backend.refreshTeam()
+    wait_request(backend.team_request)
+    team = backend.team
+    assert not team["rows"] and not team["canFill"] and team["status"]
 
 
 def test_fill_in_game_estimate_without_valid_lap(page, monkeypatch):
-    calc = page.panel_calculator
+    backend = page.backend
     monkeypatch.setattr(api.read.engine, "expected_fuel_consumption", lambda: 2.78)
     monkeypatch.setattr(api.read.engine, "expected_energy_consumption", lambda: 3.26)
     monkeypatch.setattr(api.read.engine, "tank_capacity", lambda *args: 120.0)
-    calc.fill_in_data([])
-    assert calc.input_fuel.fuel_used.value() == pytest.approx(2.78, abs=0.01)
-    assert calc.input_fuel.energy_used.value() == pytest.approx(3.26, abs=0.01)
-    assert calc.input_fuel.capacity.value() == pytest.approx(120.0)
-    assert calc.label_fill_source.text()
+    backend.fill_in_data([])
+    assert backend.values["input_fuel_per_lap"] == pytest.approx(2.78, abs=0.01)
+    assert backend.values["input_energy_per_lap"] == pytest.approx(3.26, abs=0.01)
+    assert backend.values["input_tank_capacity"] == pytest.approx(120.0)
+    assert backend.notes["fillSource"]
     # File source: no game estimate
-    calc.input_fuel.fuel_used.setValue(0)
-    calc.fill_in_data([], live=False)
-    assert calc.input_fuel.fuel_used.value() == 0
+    backend.setInput("input_fuel_per_lap", 0)
+    backend.fill_in_data([], live=False)
+    assert backend.values["input_fuel_per_lap"] == 0
 
 
 def test_tyre_allocation_from_game(page, monkeypatch):
     from tinypedal.ui import game_rest
 
-    rule_panel = page.tyre_planner.tyre_rule_panel
+    backend = page.backend
     monkeypatch.setattr(game_rest, "request_game", lambda resource: TYRE_SCREEN)
-    rule_panel.button_game.click()
-    wait_request(rule_panel._game_request)
-    assert rule_panel.max_allowed() == 8
+    backend.tyreAllocationFromGame()
+    wait_request(backend.tyre_request)
+    assert backend.tyrePlan["rule"]["maximum_tyre"] == 8
     monkeypatch.setattr(game_rest, "request_game", lambda resource: None)  # game not running: kept
-    rule_panel.button_game.click()
-    wait_request(rule_panel._game_request)
-    assert rule_panel.max_allowed() == 8
+    backend.tyreAllocationFromGame()
+    wait_request(backend.tyre_request)
+    assert backend.tyrePlan["rule"]["maximum_tyre"] == 8 and not backend.askingGame

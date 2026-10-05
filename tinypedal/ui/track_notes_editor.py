@@ -22,8 +22,9 @@ Track & pace notes editor
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import cast
 
 from PySide6.QtCore import QPoint, Qt
@@ -50,8 +51,11 @@ from ..const_common import EMPTY_DICT
 from ..i18n import tr, trm, untr
 from ..setting import cfg
 from ..userfile.track_notes import (
+    COLUMN_COMMENT,
     COLUMN_DISTANCE,
+    COLUMN_PACENOTE,
     COLUMN_TAGS,
+    COLUMN_TRACKNOTE,
     NOTESTYPE_PACE,
     NOTESTYPE_TRACK,
     TAG_PITNOTES,
@@ -73,12 +77,36 @@ from ._common import (
     FloatTableItem,
     TableBatchReplace,
     UIScaler,
+    original_filter,
     table_item,
+    translate_filter,
 )
 from .toast import show_toast
 from .track_map_widget import MapView
 
 DECIMALS = 2
+# Shown names (translated) of notes columns & metadata fields, which are file keys
+COLUMN_LABELS = {
+    COLUMN_DISTANCE: "Distance",
+    COLUMN_PACENOTE: "Pace Note",
+    COLUMN_TRACKNOTE: "Track Note",
+    COLUMN_COMMENT: "Comment",
+    COLUMN_TAGS: "Tags",
+}
+METADATA_LABELS = {
+    "TITLE": "Title:",
+    "AUTHOR": "Author:",
+    "DATE": "Date:",
+    "DESCRIPTION": "Description:",
+}
+NOTES_NAME_HINTS = {NOTESTYPE_PACE: "Pace Notes Name", NOTESTYPE_TRACK: "Track Notes Name"}
+
+logger = logging.getLogger(__name__)
+
+
+def column_label(fieldname: str) -> str:
+    """Translated name of notes column"""
+    return tr(COLUMN_LABELS.get(fieldname, fieldname))
 
 
 def set_file_path(notes_type: str, filename: str = "") -> str:
@@ -132,7 +160,7 @@ class TrackNotesEditor(BaseEditor):
     def toggle_trackmap_panel(self, checked: bool):
         """Toggle trackmap panel"""
         self.trackmap_panel.setHidden(not checked)
-        self.button_showmap.setText("Hide Map" if checked else "Show Map")
+        self.button_showmap.setText(tr("Hide Map") if checked else tr("Show Map"))
 
     def set_layout_trackmap(self):
         """Set track map panel"""
@@ -273,8 +301,8 @@ class TrackNotesEditor(BaseEditor):
         """Set notes type"""
         self.notes_type = notes_type
         self.notes_header = set_notes_header(notes_type)
-        self.status_bar.showMessage(trm(f"Edit Mode: {notes_type}"), 0)
-        self.filename_entry.setPlaceholderText(trm(f"{notes_type} Name"))
+        self.status_bar.showMessage(trm(f"Edit Mode: {tr(notes_type)}"), 0)
+        self.filename_entry.setPlaceholderText(tr(NOTES_NAME_HINTS.get(notes_type, notes_type)))
 
     def create_pacenotes(self):
         """Create pace notes file"""
@@ -310,13 +338,15 @@ class TrackNotesEditor(BaseEditor):
         if not self.confirm_discard():
             return
 
+        notes_filter = set_notes_filter(notes_type)
         filename_full, file_filter = QFileDialog.getOpenFileName(
             self,
             dir=set_file_path(notes_type),
-            filter=set_notes_filter(notes_type),
+            filter=translate_filter(notes_filter),
         )
         if not filename_full:
             return
+        file_filter = original_filter(notes_filter, file_filter)
 
         filepath = os.path.dirname(filename_full) + "/"
         filename = os.path.basename(filename_full)
@@ -346,7 +376,7 @@ class TrackNotesEditor(BaseEditor):
         """Refresh notes table"""
         self.table_notes.setRowCount(0)
         self.table_notes.setColumnCount(len(self.notes_header))
-        self.table_notes.setHorizontalHeaderLabels(self.notes_header)
+        self.table_notes.setHorizontalHeaderLabels([column_label(name) for name in self.notes_header])
         self.table_notes.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.table_notes.setColumnWidth(0, UIScaler.size(6))
         self.table_notes.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
@@ -377,13 +407,13 @@ class TrackNotesEditor(BaseEditor):
     def open_replace_dialog(self):
         """Open replace dialog"""
         excludes = (COLUMN_DISTANCE, COLUMN_TAGS)
-        selector = {name: index for index, name in enumerate(self.notes_header) if name not in excludes}
+        selector = {column_label(name): index for index, name in enumerate(self.notes_header) if name not in excludes}
         _dialog = TableBatchReplace(self, selector, self.table_notes)
         _dialog.open()
 
     def open_metadata_dialog(self):
         """Open metadata dialog"""
-        _dialog = MetaDataEditor(self, self.notes_metadata)
+        _dialog = MetaDataEditor(self, self.notes_metadata, self.set_modified)
         _dialog.open()
 
     def open_offset_dialog(self):
@@ -510,21 +540,41 @@ class TrackNotesEditor(BaseEditor):
         """Save notes"""
         self.save_notes(self.notes_type)
 
-    def save_notes(self, notes_type: str):
-        """Save notes"""
+    def save_action(self):
+        """Ctrl+S: save notes (file name asked, editor kept open)"""
+        return self.saving
+
+    def confirm_discard(self) -> bool:
+        """Confirm save or discard changes, notes not saved (canceled or error) keep editor open"""
+        if not self.is_modified():
+            return True
+
+        confirm = QMessageBox.question(
+            self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+            buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+
+        if confirm == QMessageBox.StandardButton.Save:
+            return self.save_notes(self.notes_type)
+
+        return confirm == QMessageBox.StandardButton.Discard
+
+    def save_notes(self, notes_type: str) -> bool:
+        """Save notes, True if saved"""
         self.sort_notes()
 
         filename = self.filename_entry.text()
         if not filename:  # try find track name if file name was not set
             filename = self.get_track_name()
 
+        notes_filter = set_notes_filter(notes_type)
         filename_full, file_filter = QFileDialog.getSaveFileName(
             self,
             dir=set_file_path(notes_type, filename),
-            filter=set_notes_filter(notes_type),
+            filter=translate_filter(notes_filter),
         )
         if not filename_full:  # save canceled
-            return
+            return False
+        file_filter = original_filter(notes_filter, file_filter)
 
         output_header = set_notes_header_by_filter(file_filter)
         if not output_header:  # fallback to current header
@@ -533,22 +583,32 @@ class TrackNotesEditor(BaseEditor):
 
         if not output_notes:
             QMessageBox.warning(self, tr("Error"), tr("Nothing to save."))
-            return
+            return False
 
         filepath = os.path.dirname(filename_full) + "/"
         filename = os.path.basename(filename_full)
-        save_notes_file(
-            filepath=filepath,
-            filename=filename,
-            table_header=output_header,
-            dataset=output_notes,
-            metadata=self.notes_metadata,
-            writer=set_notes_writer(file_filter),
-        )
+        try:
+            save_notes_file(
+                filepath=filepath,
+                filename=filename,
+                table_header=output_header,
+                dataset=output_notes,
+                metadata=self.notes_metadata,
+                writer=set_notes_writer(file_filter),
+            )
+        except OSError as error:  # read-only folder, file used by another program
+            logger.error("Failed saving notes %s: %s", filename_full, error)
+            msg_text = (
+                f"Unable to save notes at:<br><b>{filename_full}</b><br><br>"
+                "Make sure the folder is writable, or save notes to another folder."
+            )
+            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+            return False
         self.filename_entry.setText(filename)
         self.set_unmodified()
         msg_text = f"Notes saved at:<br><b>{filename_full}</b>"
         show_toast(self, trm(msg_text))
+        return True
 
     def column_selection_count(self, column_index: int = 0) -> int:
         """Column selection count"""
@@ -662,13 +722,19 @@ class TrackNotesEditor(BaseEditor):
 
 
 class MetaDataEditor(BaseDialog):
-    """Metadata editor"""
+    """Metadata editor
 
-    def __init__(self, parent, metadata: dict):
+    Args:
+        metadata: notes metadata, edited in place.
+        on_change: called if any metadata value is changed (notes need saving).
+    """
+
+    def __init__(self, parent, metadata: dict, on_change: Callable[[], object]):
         super().__init__(parent)
         self.setWindowTitle(tr("Metadata Info"))
 
         self.metadata = metadata
+        self.on_change = on_change
         self.option_metadata = {}
 
         # Label & Edit
@@ -676,7 +742,7 @@ class MetaDataEditor(BaseDialog):
         layout_option.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         for index, fieldname in enumerate(metadata):
-            desc_label = QLabel(f"{fieldname.capitalize()}:")
+            desc_label = QLabel(tr(METADATA_LABELS.get(fieldname, f"{fieldname.capitalize()}:")))
             edit_entry = QLineEdit()
             edit_entry.setText(metadata[fieldname])
             layout_option.addWidget(desc_label, index, 0)
@@ -705,5 +771,8 @@ class MetaDataEditor(BaseDialog):
 
     def saving(self):
         """Save metadata"""
-        self.metadata.update({key:edit.text() for key, edit in self.option_metadata.items()})
+        edited = {key:edit.text() for key, edit in self.option_metadata.items()}
+        if any(self.metadata.get(key) != value for key, value in edited.items()):
+            self.metadata.update(edited)
+            self.on_change()
         self.accept()

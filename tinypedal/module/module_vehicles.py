@@ -63,12 +63,19 @@ class Realtime(DataModule):
                     last_veh_total = -1
                     last_session_elapsed = -1.0
                     last_in_race = -1
+                    last_scoring_time = -1.0
+                    last_tick_veh_total = -1
 
                 veh_total = output.totalVehicles = api.read.vehicle.total_vehicles()
                 if veh_total > 0:
                     update_low_priority = next(gen_low_priority_timer)
                     session_elapsed = api.read.timing.elapsed()
                     in_race = api.read.session.in_race()
+                    # Game scoring (pit state, laps, distance of cars) updated (5 times per second)
+                    scoring_time = api.read.session.elapsed()
+                    update_scoring = last_scoring_time != scoring_time or last_tick_veh_total != veh_total
+                    last_scoring_time = scoring_time
+                    last_tick_veh_total = veh_total
 
                     update_vehicle_data(
                         output,
@@ -77,6 +84,7 @@ class Realtime(DataModule):
                         update_low_priority,
                         session_elapsed,
                         in_race,
+                        update_scoring,
                     )
 
                     if update_low_priority:
@@ -93,6 +101,7 @@ class Realtime(DataModule):
                             output.finishTimeOffset = 0.0
                             output.finishAsLap = True
                             output.finishLapOffset = 0.0
+                            output.finishLapOffsetLeader = 0.0
 
                         last_veh_total = veh_total
                         last_session_elapsed = session_elapsed
@@ -107,6 +116,7 @@ class Realtime(DataModule):
         output.finishTimeOffset = 0.0
         output.finishAsLap = True
         output.finishLapOffset = 0.0
+        output.finishLapOffsetLeader = 0.0
 
 
 def update_vehicle_data(
@@ -116,8 +126,14 @@ def update_vehicle_data(
     update_low_priority: bool,
     elapsed_time: float,
     in_race: bool,
+    update_scoring: bool = True,
 ) -> None:
-    """Update vehicle data"""
+    """Update vehicle data
+
+    Scoring data of a car (pit state, laps, distance) only changes with game scoring update,
+    so it is read (pit timer & speed trap updated) on scoring update or while in pits only.
+    Throttle & brake (lift and coast timer) are read again only after car telemetry update.
+    """
     nearest_line = MAX_METERS
     nearest_time_behind = -MAX_SECONDS
     nearest_yellow_ahead = MAX_METERS
@@ -147,23 +163,31 @@ def update_vehicle_data(
 
     # Update dataset from all vehicles in current session
     for index, data in zip(range(output.totalVehicles), output.dataSet):
-        # Temp var only
-        laps_completed = api.read.lap.completed_laps(index)
-        lap_distance = api.read.lap.distance(index)
         data.speed = speed = api.read.vehicle.speed(index)
 
         # Update high priority info
         data.isPlayer = api.read.vehicle.is_player(index)
-        data.inPit = api.read.vehicle.in_paddock(index)
+        read_scoring = update_scoring or update_low_priority or data.inPit
+        if read_scoring:
+            laps_completed = api.read.lap.completed_laps(index)
+            lap_distance = api.read.lap.distance(index)
+            data.inPit = api.read.vehicle.in_paddock(index)
+            data.pitTimer.update(data.inPit, elapsed_time, laps_completed, speed)
         data.isYellow = speed < 8 and data.inPit != 2
-        data.pitTimer.update(data.inPit, elapsed_time, laps_completed, speed)
+        opt_etime = elapsed_time if data.isPlayer else api.read.timing.elapsed(index)
 
         if data.inPit:
             data.licoTimer.elapsed = 0.0
             data.speedTrap.speed = 0.0
         else:
-            data.licoTimer.update(elapsed_time, api.read.inputs.throttle_raw(index), api.read.inputs.brake_raw(index))
-            data.speedTrap.update(speed, lap_distance, speedtrap_distance, track_length)
+            lico = data.licoTimer
+            if lico.input_time != opt_etime:  # car telemetry updated
+                lico.input_time = opt_etime
+                lico.throttle = api.read.inputs.throttle_raw(index)
+                lico.brake = api.read.inputs.brake_raw(index)
+            lico.update(elapsed_time, lico.throttle, lico.brake)
+            if read_scoring:  # distance unchanged otherwise
+                data.speedTrap.update(speed, lap_distance, speedtrap_distance, track_length)
 
         if data.isPlayer:
             data.elapsedTime = elapsed_time
@@ -175,7 +199,6 @@ def update_vehicle_data(
                 nearest_yellow_behind = 0.0
         else:
             # Relative position & orientation
-            opt_etime = api.read.timing.elapsed(index)
             if data.elapsedTime != opt_etime:
                 opt_pos_x = api.read.vehicle.position_longitudinal(index)
                 opt_pos_y = api.read.vehicle.position_lateral(index)
@@ -330,10 +353,14 @@ def update_finish_time(output: VehiclesInfo, max_finish_time_diff: float) -> Non
         else:
             final_pit_time = 0.0
 
-        # Leader time
-        if leader_index == player_index or output.dataSet[leader_index].isFinished:
-            leader_finish_offset = 0.0
-            player_lap_offset = 0.0
+        # Leader time, no offset without valid lap pace yet (formation & first lap)
+        if (
+            leader_index == player_index
+            or output.dataSet[leader_index].isFinished
+            or not 0 < leader_pace < MAX_SECONDS
+            or not 0 < player_pace < MAX_SECONDS
+        ):
+            player_lap_offset = laps_gain_from_leader = 0.0
         else:
             leader_lap_into = api.read.lap.progress(leader_index)
             player_lap_into = api.read.lap.progress(player_index)
@@ -364,7 +391,11 @@ def update_finish_time(output: VehiclesInfo, max_finish_time_diff: float) -> Non
         output.finishTimeOffset = 0.0
         output.finishAsLap = True
         output.finishLapOffset = player_lap_offset
+        # Leader part alone for fuel module: final pit part comes from its own pit stop estimate
+        output.finishLapOffsetLeader = laps_gain_from_leader
         return
+
+    output.finishLapOffsetLeader = 0.0  # leader finish in finish time offset
 
     # Leader time
     if leader_index >= 0 and 0 < leader_pace < MAX_SECONDS:

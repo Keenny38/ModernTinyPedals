@@ -17,24 +17,22 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Module & widget list view
+Module list view (overlays have their own page, see overlay_view)
 
 Each row: name, settings (gear) button and an on/off switch. Search box and All / Active /
-Inactive filter on top, so a widget is found among dozens without scrolling.
+Inactive filter on top.
 """
 
-import logging
 import unicodedata
-from functools import lru_cache, partial
+from functools import partial
 from typing import cast
 
 import shiboken6
-from PySide6.QtCore import Property, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRectF, QSize, Qt, Slot
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtCore import Property, QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, Slot
+from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -54,74 +52,10 @@ from ..setting import cfg
 from ._common import UIScaler
 from .config import UserConfig
 
-logger = logging.getLogger(__name__)
-
 FILTER_ALL = 0
 FILTER_ACTIVE = 1
 FILTER_INACTIVE = 2
 GEAR_SYMBOL = "\u2699\ufe0e"  # gear, text style (not color emoji)
-
-# Widget categories: (name, widget name prefixes), first match wins, unmatched (plugins) are "Other"
-WIDGET_CATEGORIES = (
-    ("Timing", (
-        "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "race_plan", "relative", "rivals",
-        "sectors", "session", "standings", "stint_history", "timing", "track_clock",
-    )),
-    ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
-    ("Brakes", ("brake_",)),
-    ("Driver Inputs", ("pedal", "steering_", "trailing")),
-    ("Engine & Energy", (
-        "battery", "cruise", "drs", "electric_motor", "engine", "fuel", "gear", "instrument", "lift_and_coast",
-        "push_to_pass", "rpm_led", "speedometer", "virtual_energy",
-    )),
-    ("Chassis", (
-        "acceleration", "damage", "differential", "force", "rake_angle", "ride_height", "roll_angle",
-        "suspension_", "weight_distribution",
-    )),
-    ("Track & Traffic", (
-        "black_box", "chat", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
-        "weather",
-    )),
-)
-CATEGORY_ALL = "All Categories"
-CATEGORY_OTHER = "Other"
-# Category color dot on each widget row & in category filter (legend), readable on light & dark theme
-CATEGORY_COLORS = {
-    "Timing": "#4C8DFF",
-    "Tyres & Wheels": "#A371F7",
-    "Brakes": "#E5534B",
-    "Driver Inputs": "#3FB950",
-    "Engine & Energy": "#F0883E",
-    "Chassis": "#22B8C8",
-    "Track & Traffic": "#D4A72C",
-    CATEGORY_OTHER: "#8B949E",
-}
-
-
-def widget_category(name: str) -> str:
-    """Category of widget, by name prefix"""
-    for category, prefixes in WIDGET_CATEGORIES:
-        if name.startswith(prefixes):
-            return category
-    return CATEGORY_OTHER
-
-
-@lru_cache(maxsize=16)
-def category_icon(category: str, size: int) -> QIcon:
-    """Round color dot of widget category"""
-    ratio = 2  # sharp on high DPI screens
-    pixmap = QPixmap(size * ratio, size * ratio)
-    pixmap.setDevicePixelRatio(ratio)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(CATEGORY_COLORS.get(category, CATEGORY_COLORS[CATEGORY_OTHER])))
-    dot = size * 0.6
-    painter.drawEllipse(QRectF((size - dot) / 2, (size - dot) / 2, dot, dot))
-    painter.end()
-    return QIcon(pixmap)
-
 
 def reload_module(module_control, module_name: str, item=None):
     """Reload module (after config saved), then state of its list item if still shown"""
@@ -219,66 +153,8 @@ def sort_key(text: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
-class PreviewPopup(QLabel):
-    """Widget preview shown next to cursor while hovering a widget row"""
-
-    def __init__(self):
-        super().__init__(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-        self.setObjectName("previewPopup")
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setMargin(UIScaler.pixel(6))
-        self._cache: dict[str, QPixmap | str] = {}
-        self._name = ""
-
-    def clear_cache(self):
-        self._cache.clear()
-
-    def show_widget(self, name: str, global_pos: QPoint):
-        """Render (cached) & show preview of widget"""
-        if name != self._name:
-            self._name = name
-            preview = self._cache.get(name)
-            if preview is None:
-                preview = self._render(name)
-                self._cache[name] = preview
-            if isinstance(preview, QPixmap):
-                self.setPixmap(preview)
-            else:
-                self.setText(preview)
-            self.adjustSize()
-        offset = UIScaler.pixel(18)
-        screen = self.screen().availableGeometry() if self.screen() else None
-        x, y = global_pos.x() + offset, global_pos.y() + offset
-        if screen is not None:
-            x = min(x, screen.right() - self.width())
-            y = min(y, screen.bottom() - self.height())
-            if x < global_pos.x() < x + self.width() and y < global_pos.y() < y + self.height():
-                y = global_pos.y() - self.height() - offset  # never under cursor
-        self.move(x, y)
-        self.show()
-
-    def hide_preview(self):
-        self._name = ""
-        self.hide()
-
-    @staticmethod
-    def _render(name: str) -> QPixmap | str:
-        from .widget_preview import render_widget
-
-        try:
-            pixmap = render_widget(cfg, name, dict(cfg.user.setting[name]))
-        except Exception as error:  # plugins & widgets that need live data
-            logger.debug("Preview error: %s", error, exc_info=True)
-            return tr("Preview not available")
-        limit = UIScaler.size(30)
-        if pixmap.width() > limit or pixmap.height() > limit:
-            pixmap = pixmap.scaled(limit, limit, Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
-        return pixmap
-
-
 class ModuleList(QWidget):
-    """Module & widget list view"""
+    """Module list view"""
 
     def __init__(self, parent, module_control: ModuleControl):
         """Initialize module list setting
@@ -306,19 +182,10 @@ class ModuleList(QWidget):
             chip.setObjectName("filterChip")
             chip.setCheckable(True)
             chip.setChecked(filter_id == FILTER_ALL)
-            chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            chip.setFocusPolicy(Qt.FocusPolicy.TabFocus)  # reached by Tab, mouse click keeps search focus
             self.filter_group.addButton(chip, filter_id)
             layout_filter.addWidget(chip)
         self.filter_group.idClicked.connect(self.apply_filter)
-        # Category filter, widgets only
-        self.category_box = QComboBox(self)
-        self.category_box.setVisible(module_control.type_id == "widget")
-        self.category_box.addItem(tr(CATEGORY_ALL), CATEGORY_ALL)
-        icon_size = self.fontMetrics().height()
-        for category in (*(category for category, _ in WIDGET_CATEGORIES), CATEGORY_OTHER):
-            self.category_box.addItem(category_icon(category, icon_size), tr(category), category)
-        self.category_box.currentIndexChanged.connect(self.apply_filter)
-        layout_filter.addWidget(self.category_box)
         layout_filter.addStretch(1)
         self.label_loaded = QLabel("")
         self.label_loaded.setObjectName("countBadge")
@@ -329,15 +196,11 @@ class ModuleList(QWidget):
         self.listbox_module.setUniformItemSizes(True)
         # No selection: rows only carry their switch, a selected row would look enabled
         self.listbox_module.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.listbox_module.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Reached by Tab: arrow keys move current row, Space toggles it, Enter opens its config
+        self.listbox_module.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.listbox_module.installEventFilter(self)
         self.create_list()
-        # Widget preview on hover
-        self.preview_popup: PreviewPopup | None = None
-        if module_control.type_id == "widget":
-            self.preview_popup = PreviewPopup()
-            self.destroyed.connect(self.preview_popup.deleteLater)
-            self.listbox_module.setMouseTracking(True)
-            self.listbox_module.viewport().installEventFilter(self)
+        self.refresh_label()  # count badge shown from start, not after first toggle
 
         # Button
         button_enable = QPushButton(tr("Enable All"))
@@ -364,60 +227,52 @@ class ModuleList(QWidget):
 
     def create_list(self):
         """Create module list"""
-        is_widget = self.module_control.type_id == "widget"
-        icon_size = self.fontMetrics().height()
         for _name in sorted(self.module_control.names, key=lambda name: sort_key(module_label(name))):
             item = QListWidgetItem()
             item.setText(module_label(_name))
             item.setData(Qt.ItemDataRole.UserRole, _name)
-            if is_widget:  # category at a glance, colors listed in category filter
-                item.setIcon(category_icon(widget_category(_name), icon_size))
             self.items[_name] = item
             self.listbox_module.addItem(item)
             module_item = ModuleControlItem(self, _name, self.module_control)
             self.listbox_module.setItemWidget(item, module_item)
             self.update_item_style(_name)
 
+    def list_key_pressed(self, key: int) -> bool:
+        """Keyboard on module list: Space toggles current row, Enter opens its config, True if used"""
+        listbox = self.listbox_module
+        if listbox.currentRow() < 0 or listbox.currentItem().isHidden():
+            first = next((row for row in range(listbox.count()) if not listbox.item(row).isHidden()), -1)
+            listbox.setCurrentRow(first)
+            if key not in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                return first >= 0  # first key shows current row
+        item = listbox.currentItem()
+        row_widget = listbox.itemWidget(item) if item is not None else None
+        if not isinstance(row_widget, ModuleControlItem):
+            return False
+        if key == Qt.Key.Key_Space:
+            row_widget.button_toggle.click()
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            row_widget.open_config_dialog()
+            return True
+        return False
+
     def eventFilter(self, watched, event):
-        """Show widget preview while hovering row name"""
-        popup = self.popup()
-        if popup is not None and watched is self.listbox_module.viewport():
-            event_type = event.type()
-            if event_type == QEvent.Type.MouseMove:
-                item = self.listbox_module.itemAt(event.position().toPoint())
-                # Only over the name, not over switch & settings button
-                if item is not None and event.position().x() < self.listbox_module.viewport().width() * 0.55:
-                    popup.show_widget(item.data(Qt.ItemDataRole.UserRole), event.globalPosition().toPoint())
-                else:
-                    popup.hide_preview()
-            elif event_type in (QEvent.Type.Leave, QEvent.Type.Hide, QEvent.Type.Wheel):
-                popup.hide_preview()
+        """Keyboard on module list"""
+        if watched is self.listbox_module and event.type() == QEvent.Type.KeyPress:
+            if self.list_key_pressed(event.key()):
+                return True
         return super().eventFilter(watched, event)
-
-    def popup(self) -> PreviewPopup | None:
-        """Widget preview popup, None if none or already deleted (app closing)"""
-        popup = self.preview_popup
-        if popup is None or not shiboken6.isValid(popup):
-            return None
-        return popup
-
-    def hideEvent(self, event):
-        popup = self.popup()
-        if popup is not None:
-            popup.hide_preview()
-        super().hideEvent(event)
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
         """Refresh module & button toggle state"""
-        popup = self.popup()
-        if popup is not None:
-            popup.clear_cache()  # setting or preset changed
         listbox_module = self.listbox_module
         for row_index in range(listbox_module.count()):
             item = listbox_module.item(row_index)
             cast(ModuleControlItem, listbox_module.itemWidget(item)).update_state()
         self.apply_filter()
+        self.refresh_label()
 
     def refresh_label(self):
         """Refresh count badge"""
@@ -445,16 +300,15 @@ class ModuleList(QWidget):
         super().changeEvent(event)
 
     def apply_filter(self, *_args):
-        """Show rows matching search text and All / Active / Inactive filter"""
-        text = self.search_box.text().strip().lower()
+        """Show rows matching search words (case & accents ignored) and All / Active / Inactive filter"""
+        words = sort_key(self.search_box.text()).split()
         mode = self.filter_group.checkedId()
-        category = self.category_box.currentData() if self.module_control.type_id == "widget" else CATEGORY_ALL
         for name, item in self.items.items():
             enabled = self.is_enabled(name)
+            found = sort_key(f"{item.text()} {name.replace('_', ' ')}")
             visible = (
-                (not text or text in item.text().lower() or text in name.lower())
+                all(word in found for word in words)
                 and (mode == FILTER_ALL or (mode == FILTER_ACTIVE) == enabled)
-                and category in (CATEGORY_ALL, widget_category(name))
             )
             item.setHidden(not visible)
 

@@ -101,6 +101,22 @@ def test_preset_share_code():
             decode_preset(bad)
 
 
+def test_share_code_and_package_refuse_nan():
+    import base64
+    import zlib
+
+    import pytest
+
+    from tinypedal.userfile.preset_package import is_json_dict
+    from tinypedal.userfile.preset_share import decode_preset
+
+    raw = b'{"speedometer": {"opacity": NaN, "font_size": 1e999}}'
+    for data in (raw, b"[" * 100_000):  # non-finite numbers, too deeply nested
+        with pytest.raises(ValueError, match="damaged"):
+            decode_preset("MTP1:" + base64.urlsafe_b64encode(zlib.compress(data)).decode("ascii"))
+    assert not is_json_dict(raw) and is_json_dict(b'{"speedometer": {"opacity": 0.5}}')
+
+
 def test_import_share_code_dialog(ui_env, monkeypatch):
     import os
 

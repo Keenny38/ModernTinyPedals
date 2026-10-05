@@ -22,6 +22,8 @@ Stint module
 
 from __future__ import annotations
 
+from collections import deque
+
 from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
@@ -33,7 +35,7 @@ from ..userfile.consumption_history import (
 )
 from ..userfile.heatmap import select_compound_symbol
 from ..validator import generator_init
-from ._base import DataModule
+from ._base import MODULE_STOP, DataModule
 
 
 class Realtime(DataModule):
@@ -79,6 +81,15 @@ class Realtime(DataModule):
                     reset = False
                     update_interval = self.idle_interval
 
+        self.save_on_stop(gen_consumption_history)
+
+
+def prepend(dataset: deque, item) -> deque:
+    """New data set with item added in front (copy on write), as GUI may be iterating current one"""
+    new_dataset = deque(dataset, dataset.maxlen)
+    new_dataset.appendleft(item)
+    return new_dataset
+
 
 @generator_init
 def record_consumption_history(output: HistoryInfo, filepath: str):
@@ -102,8 +113,8 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
                 )
                 delayed_save = False
 
-            # Delay reset until driving
-            if not realtime_state.active:
+            # Delay reset until driving (module stopping: data saved only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 
@@ -113,8 +124,8 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
                 filepath=filepath,
                 filename=combo_name,
             )
-            output.consumptionDataSet.clear()
-            output.consumptionDataSet.extend(dataset)
+            # New data set (copy on write), as GUI may be iterating current one
+            output.consumptionDataSet = deque(dataset, output.consumptionDataSet.maxlen)
             output.consumptionDataVersion += 1
 
         # Update at start of lap
@@ -131,7 +142,8 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             output.consumptionDataSet[0].lapTimeLast != minfo.delta.lapTimeLast
             or output.consumptionDataSet[0].lapNumber != lap_number
         ):
-            output.consumptionDataSet.appendleft(
+            output.consumptionDataSet = prepend(
+                output.consumptionDataSet,
                 ConsumptionDataSet(
                     lapNumber=lap_number,
                     isValidLap=int(minfo.delta.isValidLap),
@@ -142,7 +154,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
                     batteryRegenLast=minfo.hybrid.batteryRegenLast,
                     tyreAvgWearLast=calc.mean(minfo.wheels.lastLapTreadWear),
                     capacityFuel=minfo.fuel.capacity,
-                )
+                ),
             )
             output.consumptionDataVersion += 1
             delayed_save = True
@@ -159,7 +171,6 @@ def record_stint_history(
     last_reset = None  # reset check
 
     stint_data = output.stintDataCurrent
-    history_data = output.stintDataSet
 
     # Stint stats
     reset_stint = True
@@ -226,7 +237,8 @@ def record_stint_history(
 
         if update_stint_history:
             update_stint_history = False
-            history_data.appendleft(
+            output.stintDataSet = prepend(
+                output.stintDataSet,
                 StintDataSet(
                     totalLaps=stint_data.totalLaps,
                     totalTime=stint_data.totalTime,
@@ -236,7 +248,7 @@ def record_stint_history(
                     lapTimeDelta=stint_data.lapTimeDelta,
                     lapTimeConsistency=stint_data.lapTimeConsistency,
                     tyreCompound=stint_data.tyreCompound,
-                )
+                ),
             )
             output.stintDataVersion += 1
 

@@ -2,40 +2,67 @@
 
 import hashlib
 import http.server
+import io
 import json
 import threading
+import zipfile
 
 import pytest
 
 from tinypedal import update
 
+DIGEST = "ab" * 32
 
-def release_body(assets):
+
+def release_body(assets, body=""):
+    """Release response, assets (name, url) or (name, url, digest)"""
     return b"HTTP/1.1 200 OK\r\n\r\n" + json.dumps({
-        "tag_name": "v2.60.0", "published_at": "2026-10-01T00:00:00Z",
-        "assets": [{"name": name, "browser_download_url": url} for name, url in assets],
+        "tag_name": "v2.60.0", "published_at": "2026-10-01T00:00:00Z", "body": body,
+        "assets": [{"name": asset[0], "browser_download_url": asset[1],
+                    **({"digest": asset[2]} if len(asset) > 2 else {})} for asset in assets],
     }).encode()
 
 
 def test_parse_installer():
     base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
     found = update.parse_installer(release_body([
-        ("TinyPedal-2.60.0-windows.zip", base + "TinyPedal-2.60.0-windows.zip"),
-        ("TinyPedal-2.60.0-windows-setup.exe", base + "TinyPedal-2.60.0-windows-setup.exe"),
-        ("TinyPedal-2.60.0-windows-setup.exe.sha256", base + "TinyPedal-2.60.0-windows-setup.exe.sha256"),
+        ("ModernTinyPedals-2.60.0-source.zip", base + "ModernTinyPedals-2.60.0-source.zip", f"sha256:{'cd' * 32}"),
+        ("ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip", f"sha256:{DIGEST.upper()}"),
     ]))
     assert found == update.InstallerAsset(
-        "TinyPedal-2.60.0-windows-setup.exe",
-        base + "TinyPedal-2.60.0-windows-setup.exe",
-        base + "TinyPedal-2.60.0-windows-setup.exe.sha256",
-    )
+        "ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip", DIGEST)
+
+
+def test_parse_installer_hash_from_release_notes():
+    """No asset digest: hash from SHA256 list of release notes"""
+    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
+    notes = (f"### SHA256\n\n- `{'cd' * 32}  ModernTinyPedals-2.60.0-source.zip`\n"
+             f"- `{DIGEST}  ModernTinyPedals-2.60.0-setup.zip`\n")
+    found = update.parse_installer(release_body([
+        ("ModernTinyPedals-2.60.0-source.zip", base + "ModernTinyPedals-2.60.0-source.zip"),
+        ("ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip"),
+    ], notes))
+    assert found is not None and found.sha256 == DIGEST
+
+
+def test_parse_installer_of_older_release():
+    """Releases before setup.zip: installer attached itself"""
+    base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v0.19.3/"
+    found = update.parse_installer(release_body([
+        ("ModernTinyPedals-0.19.3-windows.zip", base + "ModernTinyPedals-0.19.3-windows.zip", f"sha256:{'cd' * 32}"),
+        ("ModernTinyPedals-0.19.3-windows-setup.exe", base + "ModernTinyPedals-0.19.3-windows-setup.exe",
+         f"sha256:{DIGEST}"),
+    ]))
+    assert found is not None and found.name.endswith("-windows-setup.exe") and found.sha256 == DIGEST
 
 
 def test_parse_installer_requires_hash_and_github_url():
-    assert update.parse_installer(release_body([("TinyPedal-1.0.0-windows-setup.exe", "https://github.com/a")])) is None
+    assert update.parse_installer(release_body([("TinyPedal-1.0.0-setup.zip", "https://github.com/a")])) is None
     assert update.parse_installer(release_body([
-        ("x-windows-setup.exe", "https://evil.example/x.exe"),
-        ("x-windows-setup.exe.sha256", "https://evil.example/x.sha256"),
+        ("TinyPedal-1.0.0-setup.zip", "https://github.com/a", "md5:abc"),  # not a sha256 digest
+    ])) is None
+    assert update.parse_installer(release_body([
+        ("x-setup.zip", "https://evil.example/x.zip", f"sha256:{DIGEST}"),
     ])) is None
     assert update.parse_installer(b"") is None
 
@@ -68,14 +95,22 @@ def file_server():
     server.server_close()
 
 
+def setup_zip(files: dict[str, bytes]) -> bytes:
+    """Setup ZIP with files (name: content)"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
 @pytest.mark.parametrize("valid", [True, False])
 def test_download_installer_verifies_hash(file_server, tmp_path, valid):
     files, base = file_server
     content = b"installer" * 1000
     files["/setup.exe"] = content
     digest = hashlib.sha256(content if valid else b"other").hexdigest()
-    files["/setup.exe.sha256"] = f"{digest}  setup.exe\n".encode()
-    asset = update.InstallerAsset("setup.exe", f"{base}/setup.exe", f"{base}/setup.exe.sha256")
+    asset = update.InstallerAsset("setup.exe", f"{base}/setup.exe", digest)
     if valid:
         path = update.download_installer(asset, str(tmp_path))
         with open(path, "rb") as file:
@@ -84,6 +119,52 @@ def test_download_installer_verifies_hash(file_server, tmp_path, valid):
         with pytest.raises(ValueError):
             update.download_installer(asset, str(tmp_path))
         assert not (tmp_path / "setup.exe").exists()
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_download_setup_zip_extracts_installer(file_server, tmp_path, valid):
+    files, base = file_server
+    installer = b"MZ installer" * 1000
+    archive = setup_zip({"ModernTinyPedals-2.60.0-windows-setup.exe": installer})
+    files["/ModernTinyPedals-2.60.0-setup.zip"] = archive
+    digest = hashlib.sha256(archive if valid else b"other").hexdigest()
+    asset = update.InstallerAsset("ModernTinyPedals-2.60.0-setup.zip", f"{base}/ModernTinyPedals-2.60.0-setup.zip", digest)
+    if valid:
+        path = update.download_installer(asset, str(tmp_path))
+        assert path == str(tmp_path / "ModernTinyPedals-2.60.0-windows-setup.exe")
+        with open(path, "rb") as file:
+            assert file.read() == installer
+        assert [item.name for item in tmp_path.iterdir()] == ["ModernTinyPedals-2.60.0-windows-setup.exe"]  # ZIP removed
+    else:
+        with pytest.raises(ValueError):
+            update.download_installer(asset, str(tmp_path))
+        assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("files", [
+    {},  # no installer
+    {"readme.txt": b"text"},
+    {"a-setup.exe": b"MZ", "b-setup.exe": b"MZ"},  # which one?
+])
+def test_setup_zip_must_hold_one_installer(tmp_path, files):
+    (tmp_path / "setup.zip").write_bytes(setup_zip(files))
+    with pytest.raises(ValueError):
+        update.extract_installer(str(tmp_path / "setup.zip"), str(tmp_path))
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["setup.zip"]
+
+
+def test_setup_zip_never_extracts_outside_folder(tmp_path):
+    folder = tmp_path / "download"
+    folder.mkdir()
+    (folder / "setup.zip").write_bytes(setup_zip({"../../evil/x-setup.exe": b"MZ"}))
+    path = update.extract_installer(str(folder / "setup.zip"), str(folder))
+    assert path == str(folder / "x-setup.exe") and not (tmp_path / "evil").exists()
+
+
+def test_invalid_setup_zip(tmp_path):
+    (tmp_path / "setup.zip").write_bytes(b"not a zip")
+    with pytest.raises(ValueError):
+        update.extract_installer(str(tmp_path / "setup.zip"), str(tmp_path))
 
 
 def test_parse_release_notes():

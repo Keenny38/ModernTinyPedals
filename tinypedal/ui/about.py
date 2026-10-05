@@ -34,7 +34,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..const_app import APP_NAME, COPYRIGHT, DESCRIPTION, LICENSE, URL_WEBSITE, VERSION
+from ..const_app import (
+    APP_NAME,
+    COPYRIGHT,
+    DESCRIPTION,
+    LICENSE,
+    MODIFICATION_NOTICE,
+    URL_FORK,
+    URL_WEBSITE,
+    VERSION,
+)
 from ..i18n import tr, trm
 from ..setting import cfg
 from . import app_icon_file, resolve_color_theme
@@ -93,7 +102,7 @@ class About(BaseDialog):
                 return text_file.read()
         except FileNotFoundError:
             logger.error("MISSING: %s file not found", filepath)
-            error_text = "Error: file not found."
+            error_text = tr("Error: file not found.")
             link_text = trm(f"See link: {URL_WEBSITE}/blob/master/")
             return f"{error_text} \n{link_text}{filepath}"
 
@@ -125,10 +134,14 @@ class About(BaseDialog):
         label_version = QLabel(trm(f"Version {VERSION}"))
         label_version.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Modified version (GPL section 5a): notice & own link, upstream copyright & link kept
         label_desc = QLabel(
-            f"<p>{COPYRIGHT}</p><p>{DESCRIPTION}</p><p>{LICENSE}</p>"
-            f"<p><a href={URL_WEBSITE}>{URL_WEBSITE}</a></p>"
+            f"<p>{tr(MODIFICATION_NOTICE)}<br><a href={URL_FORK}>{URL_FORK}</a></p>"
+            f"<p>{tr('Based on TinyPedal:')} {COPYRIGHT}<br><a href={URL_WEBSITE}>{URL_WEBSITE}</a></p>"
+            f"<p>{tr(DESCRIPTION)}</p><p>{tr(LICENSE)}</p>"
         )
+        label_desc.setObjectName("labelAbout")
+        label_desc.setWordWrap(True)
         label_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label_desc.setOpenExternalLinks(True)
 

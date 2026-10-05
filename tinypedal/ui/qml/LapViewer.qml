@@ -32,6 +32,10 @@ TpPage {
         onActivated: backend.undoDelete()
     }
 
+    // Math channels editor (channel menu), setup differences (lap chip menu)
+    MathChannels { id: mathEditor; objectName: "mathEditor"; onClosed: chart.forceActiveFocus() }
+    SetupDiff { id: setupDiff; objectName: "setupDiff"; onClosed: chart.forceActiveFocus() }
+
     // Keyboard & mouse help (? key on charts, help button)
     Popup {
         id: helpPopup
@@ -74,8 +78,10 @@ TpPage {
                             ["?", i18n.tr("This help")],
                         ]],
                         [i18n.tr("Track Map"), [
-                            ["F", i18n.tr("Fit whole circuit")], ["R", i18n.tr("Turn map")], ["1-8", i18n.tr("Line coloring")],
+                            ["F", i18n.tr("Fit whole circuit")], ["R", i18n.tr("Turn map")], ["1-9", i18n.tr("Line coloring")],
+                            ["+ / −", i18n.tr("Zoom")], ["← ↑ → ↓", i18n.tr("Move map")],
                             ["B C S O", i18n.tr("Driving points")], ["L", i18n.tr("Lockups & wheelspin")],
+                            ["G", i18n.tr("Off track")], ["X", i18n.tr("Track limits exceeded")],
                             ["Z", i18n.tr("Pedal zones")], ["T", i18n.tr("Cursor trail")], ["M", i18n.tr("Measure distance")],
                         ]],
                         [i18n.tr("Laps"), [
@@ -174,21 +180,22 @@ TpPage {
                     }
                 }
                 delegate: ItemDelegate {
+                    id: trackItem
                     required property string modelData
                     required property int index
                     width: trackBox.width - 8
                     height: theme.em * 2.2
                     highlighted: trackBox.highlightedIndex === index
                     contentItem: Text {
-                        text: parent.modelData
+                        text: trackItem.modelData
                         color: theme.text
-                        font.weight: trackBox.currentIndex === parent.index ? Font.DemiBold : Font.Normal
+                        font.weight: trackBox.currentIndex === trackItem.index ? Font.DemiBold : Font.Normal
                         verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight
                     }
                     background: Rectangle {
                         radius: theme.em * 0.4
-                        color: parent.highlighted ? theme.hover : "transparent"
+                        color: trackItem.highlighted ? theme.hover : "transparent"
                     }
                 }
             }
@@ -199,6 +206,11 @@ TpPage {
                 text: i18n.tr("Imported Laps...")
                 tip: i18n.tr("Laps imported from MoTeC logs: add to viewer, rename, delete")
                 onClicked: backend.openLibrary()
+            }
+            TpButton {
+                text: i18n.tr("Import Folder...")
+                tip: i18n.tr("Import laps of this track & class from another folder (teammate, shared folder): marked as foreign")
+                onClicked: backend.importFolder()
             }
             TpButton {
                 id: exportButton
@@ -218,6 +230,7 @@ TpPage {
                     Action { text: i18n.tr("Reference Lap as Delta Best..."); onTriggered: backend.exportDeltaBest("") }
                     MenuSeparator {}
                     Action { text: i18n.tr("CSV, Displayed Laps..."); onTriggered: backend.exportCsv() }
+                    Action { text: i18n.tr("CSV, Displayed Laps on Time Base..."); onTriggered: backend.exportTimeCsv() }
                     Action {
                         text: i18n.tr("CSV, Passage A ↔ B...")
                         enabled: chart.hasRange
@@ -395,7 +408,7 @@ TpPage {
                         }
                         TpSegmented {
                             Layout.alignment: Qt.AlignHCenter
-                            options: backend.deltaWindows.map(function(meters) { return meters + " m" })
+                            options: backend.deltaWindowTexts
                             currentIndex: backend.deltaWindows.indexOf(backend.deltaWindow)
                             onActivated: function(index) { backend.setDeltaWindow(backend.deltaWindows[index]) }
                         }
@@ -410,6 +423,13 @@ TpPage {
                             tip: i18n.tr("Delta & time gain/loss against ideal lap: fastest clean shown lap in each mini-sector")
                             checked: backend.idealDelta
                             onToggled: backend.setIdealDelta(checked)
+                        }
+                        TpButton {
+                            Layout.fillWidth: true
+                            text: i18n.tr("Math Channels...")
+                            flat: true
+                            tip: i18n.tr("Channels computed from others: understeer angle, pedal rates, your own expressions")
+                            onClicked: { channelPopup.close(); mathEditor.open() }
                         }
                         TpButton {
                             Layout.fillWidth: true
@@ -463,6 +483,7 @@ TpPage {
                         onPictureRequested: function(copy) { page.grabPicture(copy) }
                         onRangeSet: backend.setSideTab(3)
                         onHelpRequested: helpPopup.open()
+                        onSetupRequested: function(lapKey) { setupDiff.show(lapKey) }
                     }
                 }
 

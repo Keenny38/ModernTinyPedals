@@ -28,7 +28,8 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 ITEMS = (
@@ -41,8 +42,11 @@ ITEMS = (
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
 
-    options = ("font_size", "layout", "show_percentage_sign", "decimal_places", "smoothing_samples",
-               *(f"show_{key}" for key, _, _ in ITEMS))
+    options = (
+        "font_size", "layout", "show_percentage_sign", "decimal_places", "smoothing_samples",
+               *(f"show_{key}" for key, _, _ in ITEMS),
+        *display_order_options("weight_distribution"),
+    )
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
@@ -53,6 +57,7 @@ class Realtime(StatsMixin, ModernOverlay):
         self.items = {key: attr for key, _, attr in ITEMS}
         self.ratios = {key: 0.5 for key, _, _ in ITEMS}
         stats = [Stat(key, label, "88." + "8" * self.decimals + self.sign) for key, label, _ in ITEMS if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
@@ -69,6 +74,6 @@ class Realtime(StatsMixin, ModernOverlay):
         for key in self.keys:
             self.ratios[key] = self.ema(self.ratios[key], getattr(minfo.wheels, self.items[key]))
             ratio = self.ratios[key]
-            values.append(Value(f"{ratio * 100:.{self.decimals}f}{self.sign}", bar=min(max(ratio, 0.0), 1.0),
+            values.append(Value(f"{ratio * 100:.{self.decimals}f}{self.sign}", bar=fraction(ratio),
                                 bar_color=self.theme.accent))
         self.refresh(tuple(values))

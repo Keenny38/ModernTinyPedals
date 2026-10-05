@@ -112,8 +112,14 @@ def shorten_driver_name(name: str) -> str:
 
 
 def strip_invalid_char(name: str) -> str:
-    """Strip invalid characters"""
-    return rex_invalid_char.sub("", name)
+    """Strip invalid characters, and trailing space & dot (not allowed at end of Windows file name)
+
+    Name made only of invalid characters gives "unknown", empty name stays empty.
+    """
+    stripped = rex_invalid_char.sub("", name).rstrip(" .")
+    if stripped or not name:
+        return stripped
+    return "unknown"
 
 
 def laptime_string_to_seconds(laptime: str) -> float:

@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from . import api_connector, realtime_state
 from .const_api import API_MAP_ALIAS
-from .const_app import PLATFORM
 from .setting import cfg
 
 if TYPE_CHECKING:
@@ -37,19 +36,12 @@ logger = logging.getLogger(__name__)
 
 
 def _set_available_api(enable_legacy: bool):
-    """Set available API"""
-    if PLATFORM.WINDOWS:
-        available_api = (
-            api_connector.SimLMU,
-            api_connector.SimLMULegacy,
-            api_connector.SimRF2,
-        )
-    else:
-        available_api = (
-            api_connector.SimLMU,
-            api_connector.SimLMULegacy,
-            api_connector.SimRF2,
-        )
+    """Set available API (same on every platform)"""
+    available_api = (
+        api_connector.SimLMU,
+        api_connector.SimLMULegacy,
+        api_connector.SimRF2,
+    )
     # Sort API by name
     api_gen = (_api for _api in available_api if not _api.LEGACY or enable_legacy)
     return tuple(sorted(api_gen, key=lambda _api:_api.NAME))
@@ -168,6 +160,16 @@ class APIControl:
     def replay_header(self) -> dict:
         """Replay file header of connected API (source name, zone layout)"""
         return self._connected.replay_header()
+
+    def replay_layout(self) -> list[list]:
+        """Shared memory zones of connected API replay frame: [name, size], ..."""
+        return self._connected.replay_layout()
+
+    def health(self) -> api_connector.ConnectorHealth | None:
+        """Game data connection state of connected API, None if not connected"""
+        if self._api is None:
+            return None
+        return self._api.health()
 
     @property
     def available(self):

@@ -248,7 +248,6 @@ WIDGET_FUEL = {
         "bar_padding": 0.2,
         "bar_width": 5,
         "bar_gap": 0,
-        "stop_go_penalty_time": 10,
         "additional_pitstop_time": 2,
         "lengthy_stop_duration_threshold": 60,
         "warning_color_lengthy_stop": "#FF2200",

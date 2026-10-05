@@ -57,6 +57,7 @@ TOKEN_COLORS = {
 
 BORDER_ALPHA = 20  # panel hairline border (white)
 HIGHLIGHT_ALPHA = 46  # player row tint
+_tints: dict[tuple[int, int], QColor] = {}  # (color rgba, alpha): tinted color
 
 
 class Theme(NamedTuple):
@@ -84,9 +85,18 @@ class Theme(NamedTuple):
     highlight: QColor  # player row background tint
 
     def tint(self, color: QColor, alpha: int) -> QColor:
-        """Same color with alpha"""
-        tinted = QColor(color)
-        tinted.setAlpha(alpha)
+        """Same color with alpha (shared color, never modified)
+
+        Asked for on every paint by rows & tiles: cached per color & alpha.
+        """
+        key = (color.rgba(), alpha)
+        tinted = _tints.get(key)
+        if tinted is None:
+            tinted = QColor(color)
+            tinted.setAlpha(alpha)
+            if len(_tints) > 1024:
+                _tints.clear()
+            _tints[key] = tinted
         return tinted
 
 

@@ -12,7 +12,9 @@ Item {
     readonly property var laps: session.laps || []
     readonly property var trend: session.trend || ({})
     property int hoverIndex: -1
-    function signedText(value, decimals) { return (value >= 0 ? "+" : "−") + Math.abs(value).toFixed(decimals) }
+    // Numbers with decimal separator of app language (lap times keep their dot)
+    function num(value, decimals) { return Number(value).toFixed(decimals).replace(".", theme.decimalPoint) }
+    function signedText(value, decimals) { return (value >= 0 ? "+" : "−") + num(Math.abs(value), decimals) }
 
     function lapsWith(name) {
         return laps.filter(function(lap) { return lap[name] !== undefined && lap[name] !== null && lap[name] >= 0 })
@@ -71,14 +73,14 @@ Item {
             Text { text: i18n.tr("Best") + " " + root.timeText(root.session.best); color: theme.gold; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
             Text { text: i18n.tr("Average") + " " + root.timeText(root.stats.mean); color: theme.text; font.features: { "tnum": 1 } }
             Text {
-                text: i18n.tr("Consistency") + " ±" + root.stats.deviation.toFixed(3) + " s"
+                text: i18n.tr("Consistency") + " ±" + root.num(root.stats.deviation, 3) + " s"
                 color: theme.text
                 font.features: { "tnum": 1 }
                 visible: root.stats.count > 1
             }
             Text {
                 visible: root.stats.fuelCount > 0
-                text: i18n.tr("Fuel") + " " + (root.stats.fuel * (root.session.fuelScale || 1) / Math.max(root.stats.fuelCount, 1)).toFixed(2)
+                text: i18n.tr("Fuel") + " " + root.num(root.stats.fuel * (root.session.fuelScale || 1) / Math.max(root.stats.fuelCount, 1), 2)
                       + " " + (root.session.fuelUnit || "") + "/" + i18n.tr("lap")
                 color: theme.text
                 font.features: { "tnum": 1 }
@@ -263,8 +265,8 @@ Item {
                         Text { text: modelData[1]; color: theme.dimText; font.pointSize: theme.fontPoint * 0.7 }
                         Text {
                             anchors.bottom: parent.bottom
-                            text: strip.name === "fuel" ? (strip.high * (root.session.fuelScale || 1)).toFixed(2) + " " + (root.session.fuelUnit || "")
-                                                        : strip.high.toFixed(1) + " %"
+                            text: strip.name === "fuel" ? root.num(strip.high * (root.session.fuelScale || 1), 2) + " " + (root.session.fuelUnit || "")
+                                                        : root.num(strip.high, 1) + " %"
                             color: theme.dimText
                             font.pointSize: theme.fontPoint * 0.7
                             font.features: { "tnum": 1 }
@@ -333,9 +335,9 @@ Item {
                         var lines = [i18n.tr("Lap") + " " + lap.number + " · " + lap.text + (lap.valid ? "" : " · " + i18n.tr("invalid"))
                                      + (lap.outlier ? " · " + i18n.tr("left out of long run") : "")]
                         var details = []
-                        if (lap.fuel >= 0) details.push(i18n.tr("Fuel") + " " + (lap.fuel * (root.session.fuelScale || 1)).toFixed(2) + " " + (root.session.fuelUnit || ""))
-                        if (lap.wear >= 0) details.push(i18n.tr("Tyre wear") + " " + lap.wear.toFixed(2) + " %")
-                        if (lap.temp !== null) details.push(i18n.tr("Track Temp") + " " + lap.temp.toFixed(1) + "°")
+                        if (lap.fuel >= 0) details.push(i18n.tr("Fuel") + " " + root.num(lap.fuel * (root.session.fuelScale || 1), 2) + " " + (root.session.fuelUnit || ""))
+                        if (lap.wear >= 0) details.push(i18n.tr("Tyre wear") + " " + root.num(lap.wear, 2) + " %")
+                        if (lap.temp !== null) details.push(i18n.tr("Track Temp") + " " + root.num(lap.temp, 1) + (root.session.temperatureUnit || "°C"))
                         if (details.length) lines.push(details.join(" · "))
                         var events = []
                         if (lap.limits >= 0) events.push("✕ " + i18n.tr("Track limits exceeded") + " " + lap.limits)

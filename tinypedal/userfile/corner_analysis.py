@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from itertools import pairwise
 from typing import NamedTuple
 
-from .telemetry_lap import LapData, interpolate, monotonic_distance
+from .telemetry_lap import LapData, interpolate, monotonic_distance, official_lap_time
 
 GRID_STEP = 5.0  # meters between resampled points
 SMOOTH_POINTS = 5  # moving average width (25 m), removes speed noise
@@ -396,9 +396,14 @@ def compare_corners(
     return result
 
 
+def total_lap_time(lap: LapData) -> float:
+    """Lap time timed by game if known, else last recorded sample (a few hundredths short of the line)"""
+    return official_lap_time(lap) or lap.lap_time
+
+
 def lap_time_delta(reference: LapData, compared: LapData) -> float:
     """Lap time difference (compared - reference)"""
-    return compared.lap_time - reference.lap_time
+    return total_lap_time(compared) - total_lap_time(reference)
 
 
 def straights_delta(rows: list[CornerComparison], reference: LapData, compared: LapData) -> float:
@@ -437,7 +442,7 @@ def ideal_lap(laps: Sequence[LapData | ResampledLap], corners: list[Corner], sca
         bounds.append(length)
     times = []
     for index in timed:
-        points = [0.0, *(sampled[index].time_at(distance) or 0.0 for distance in bounds[1:-1]), datas[index].lap_time]
+        points = [0.0, *(sampled[index].time_at(distance) or 0.0 for distance in bounds[1:-1]), total_lap_time(datas[index])]
         times.append([max(end - start, 0.0) for start, end in pairwise(points)])
     best = [min(range(len(timed)), key=lambda position: times[position][part]) for part in range(len(bounds) - 1)]
     total = sum(times[position][part] for part, position in enumerate(best))

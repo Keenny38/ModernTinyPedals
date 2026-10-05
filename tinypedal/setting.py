@@ -547,8 +547,10 @@ class Setting:
                         self.is_saving = False  # set within lock, so new task can start new thread
                         self._save_done.set()
                         break
-                    filename = next(iter(self._save_queue))  # get next file in queue
-                    filepath, dict_user = self._save_queue[filename]
+                    # Take next file out of queue before copying its data, so a change made while
+                    # saving queues the file again (saved once more) instead of being lost
+                    filename = next(iter(self._save_queue))
+                    filepath, dict_user = self._save_queue.pop(filename)
                 try:
                     if filepath == self.path.settings:  # user & style presets
                         create_versioned_backup(
@@ -562,8 +564,6 @@ class Setting:
                     )
                 except Exception:  # never leave saving state locked, see is_saving
                     logger.exception("USERDATA: unexpected error while saving %s", filename)
-                with self._save_lock:
-                    self._save_queue.pop(filename, None)
         except BaseException:
             with self._save_lock:
                 self.is_saving = False

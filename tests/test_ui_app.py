@@ -74,7 +74,7 @@ def test_navigation_rail(ui_env, monkeypatch):
     import os
 
     from tinypedal.ui import app as app_module
-    from tinypedal.ui.tools_view import TOOL_SECTIONS, ToolCard
+    from tinypedal.ui.tools_view import TOOL_SECTIONS, ToolCard, ToolsView
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -83,7 +83,7 @@ def test_navigation_rail(ui_env, monkeypatch):
     try:
         view = window.centralWidget()
         assert view.current_index() == app_module.PAGE_INDEX["tools"]  # restored
-        cards = view.findChildren(ToolCard)
+        cards = view.findChild(ToolsView).findChildren(ToolCard)  # home page quick access has tool cards too
         assert len(cards) == sum(len(tools) for _, tools in TOOL_SECTIONS)
         if os.environ.get("RAIL_SHOT"):
             window.resize(560, 820)
@@ -211,23 +211,6 @@ def test_command_palette(ui_env, monkeypatch):
         QCoreApplication.processEvents()
 
 
-def test_widget_categories(ui_env):
-    from tinypedal.module_control import wctrl
-    from tinypedal.template.setting_widget import WIDGET_FILENAME
-    from tinypedal.ui.module_view import CATEGORY_OTHER, ModuleList, widget_category
-
-    assert widget_category("tyre_pressure") == "Tyres & Wheels"
-    assert widget_category("brake_wear") == "Brakes"
-    assert widget_category("plugin_xyz") == CATEGORY_OTHER
-    others = [name for name in WIDGET_FILENAME if widget_category(name) == CATEGORY_OTHER]
-    assert len(others) <= 3  # new built-in widgets belong to a category
-    view = ModuleList(None, wctrl)
-    view.category_box.setCurrentIndex(view.category_box.findData("Brakes"))
-    shown = [name for name, item in view.items.items() if not item.isHidden()]
-    assert shown and all(name.startswith("brake_") for name in shown)
-    view.deleteLater()
-
-
 def test_toast(ui_env):
     from PySide6.QtWidgets import QWidget
 
@@ -278,28 +261,6 @@ def test_file_drop(ui_env, tmp_path):
     assert file_drop.classify(str(other)) == ""
 
 
-def test_widget_hover_preview(ui_env):
-    from PySide6.QtCore import QPoint
-
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui.module_view import ModuleList
-
-    view = ModuleList(None, wctrl)
-    try:
-        popup = view.preview_popup
-        assert popup is not None
-        popup.show_widget("speedometer", QPoint(100, 100))
-        assert popup.isVisible() and popup.pixmap() is not None and not popup.pixmap().isNull()
-        assert "speedometer" in popup._cache
-        popup.hide_preview()
-        assert not popup.isVisible()
-        view.refresh()
-        assert not popup._cache
-    finally:
-        view.deleteLater()
-        QCoreApplication.processEvents()
-
-
 def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
     import json
 
@@ -314,22 +275,6 @@ def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
     for path in (classes, other):
         with pytest.raises(ValueError):
             file_drop.import_preset_file(str(path), cfg.path.settings)
-
-
-def test_widget_rows_show_category_color(ui_env):
-    from tinypedal.module_control import mctrl, wctrl
-    from tinypedal.ui.module_view import CATEGORY_COLORS, CATEGORY_OTHER, WIDGET_CATEGORIES, ModuleList
-
-    assert set(CATEGORY_COLORS) == {category for category, _ in WIDGET_CATEGORIES} | {CATEGORY_OTHER}
-    widgets = ModuleList(None, wctrl)
-    modules = ModuleList(None, mctrl)
-    try:
-        assert all(not item.icon().isNull() for item in widgets.items.values())
-        assert all(item.icon().isNull() for item in modules.items.values())  # modules have no category
-        assert not widgets.category_box.itemIcon(1).isNull()  # legend in category filter
-    finally:
-        widgets.deleteLater()
-        modules.deleteLater()
 
 
 def test_plugin_manager_status_badges(ui_env, monkeypatch):
@@ -363,17 +308,14 @@ def test_plugin_manager_status_badges(ui_env, monkeypatch):
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # frees single instance dialog
 
 
-def test_module_list_hide_after_preview_deleted(ui_env):
-    """App closing: preview popup may be deleted before widget list is hidden"""
-    import shiboken6
-
-    from tinypedal.module_control import wctrl
+def test_module_list_count_badge_from_start(ui_env):
+    """Count badge shown as soon as module page is built (was empty until first toggle)"""
+    from tinypedal.module_control import mctrl
     from tinypedal.ui.module_view import ModuleList
 
-    view = ModuleList(None, wctrl)
-    view.show()
-    shiboken6.delete(view.preview_popup)
-    assert view.popup() is None
-    view.hide()  # was RuntimeError: Internal C++ object (PreviewPopup) already deleted
-    view.refresh()
+    view = ModuleList(None, mctrl)
+    assert view.label_loaded.text() == f"{mctrl.number_active} / {mctrl.number_total}"
+    view.search_box.setText("delta")  # search words, case & accents ignored
+    shown = [name for name, item in view.items.items() if not item.isHidden()]
+    assert shown and all("delta" in name for name in shown)
     view.deleteLater()

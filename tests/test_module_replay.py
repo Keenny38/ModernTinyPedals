@@ -317,3 +317,127 @@ def test_telemetry_recorder_background_saver(sim_api, tmp_path):
         saver=lambda pending, options, valid: saved.append((pending.lap_time, valid)))
     run_recorder(sim, gen)
     assert saved == [(90.0, True)]
+
+
+# --- Audit fixes (package A)
+def test_lap_samples_same_csv_as_rows():
+    """Samples stored in typed columns: same values & types back, CSV unchanged"""
+    from array import array
+
+    from tinypedal.module import module_recorder
+
+    rows = [
+        (1.5, 2, 0, "x", True, 7.25, 1e-7),
+        (2.25, 3, 1.5, "y", False, 0, 123456.789),  # int 0 in float column (invalid value check)
+        (3.0, -1, 2.0, "z", True, 1.0, -0.0),
+    ]
+    samples = module_recorder.LapSamples()
+    for row in rows:
+        samples.append(row)
+    assert len(samples) == 3 and list(samples) == rows and samples[-1] == rows[-1]
+    assert module_recorder.lap_text(samples, {"kind": "lap"}) == module_recorder.lap_text(rows, {"kind": "lap"})
+    assert isinstance(samples.column(0), array) and isinstance(samples.column(1), array)  # stable types
+    assert list(samples.column(5)) == [7.25, 0, 1.0] and type(samples.column(5)[1]) is int
+    empty = module_recorder.LapSamples()
+    assert not empty and list(empty.column(2)) == []
+    with pytest.raises(ValueError):
+        samples.append((1.0,))
+
+
+def test_recorder_samples_written_as_before(sim_api, tmp_path):
+    """Lap file content from typed columns equals content from rows of tuples"""
+    from tinypedal.module import module_recorder
+
+    saved = []
+    sim = LapSim([95.0, 90.0])
+    sim_api(sim)
+    gen = module_recorder.record_telemetry(
+        filepath=f"{tmp_path}/", min_lap_fraction=0.9, max_saved_laps=10,
+        saver=lambda pending, options, valid: saved.append(pending))
+    run_recorder(sim, gen)
+    rows = saved[0].rows
+    assert isinstance(rows, module_recorder.LapSamples) and len(rows) > 4000
+    assert module_recorder.lap_text(rows) == module_recorder.lap_text([tuple(row) for row in rows])
+
+
+def test_recorder_module_saves_pending_lap_on_stop(ui_env, monkeypatch):
+    """Module stopped (reload, quit) right after a lap: lap waiting for validation is saved, saver awaited"""
+    import time
+
+    from tinypedal.module import module_recorder
+    from tinypedal.setting import cfg
+
+    sends = []
+
+    def fake_recorder(**kwargs):
+        def recorder():
+            while True:
+                sends.append((yield None))
+
+        gen = recorder()
+        next(gen)
+        return gen
+
+    waits = []
+    monkeypatch.setattr(module_recorder, "record_telemetry", fake_recorder)
+    monkeypatch.setattr(module_recorder, "wait_lap_saver", lambda timeout=None: waits.append(timeout) or True)
+    monkeypatch.setattr(realtime_state, "active", True)
+    module = module_recorder.Realtime(cfg, "module_recorder")
+    module.start()
+    end = time.monotonic() + 5
+    while len(sends) < 2 and time.monotonic() < end:
+        time.sleep(0.01)
+    module.stop()
+    while not module.closed and time.monotonic() < end:
+        time.sleep(0.01)
+    assert module.closed and sends[0] is not None
+    assert sends[-1] is None and waits  # pending lap flushed, then saving awaited
+
+
+def test_wait_lap_saver():
+    import threading
+
+    from tinypedal.module import module_recorder
+
+    release = threading.Event()
+    module_recorder.LAP_SAVER.submit(release.wait, 5)
+    assert not module_recorder.wait_lap_saver(0.05)  # lap still being written
+    release.set()
+    assert module_recorder.wait_lap_saver(5)
+
+
+def test_remove_old_laps_skips_locked_file(tmp_path, monkeypatch):
+    """A lap open in lap viewer (Windows: PermissionError) must not stop rotation"""
+    import os
+
+    from tinypedal.module import module_recorder
+
+    folder = tmp_path / "T - C"
+    for lap in range(5):
+        module_recorder.save_lap(f"{tmp_path}/", "T - C", lap, 90.0 + lap, [], max_saved_laps=99, timestamp=1000.0 + lap)
+    paths = sorted(folder.glob("*.csv"))
+    for index, path in enumerate(paths):
+        os.utime(path, (1000 + index, 1000 + index))
+    locked = str(paths[0])
+    remove = os.remove
+
+    def locked_remove(path):
+        if os.path.normpath(path) == os.path.normpath(locked):
+            raise PermissionError(13, "used by another process")
+        remove(path)
+
+    monkeypatch.setattr(module_recorder.os, "remove", locked_remove)
+    module_recorder.remove_old_laps(str(folder), 3)
+    remaining = sorted(folder.glob("*.csv"))
+    assert remaining == [paths[0], paths[3], paths[4]]  # locked kept, next oldest removed instead
+
+
+def test_lap_folder_name_valid_on_windows(tmp_path):
+    from tinypedal.module import module_recorder
+
+    name = module_recorder.lap_folder_name
+    assert name("Spa - ") == "Spa"  # empty class: Windows drops trailing space, files not writable
+    assert name("Spa - GT3.") == "Spa - GT3" and name("Spa - GT3") == "Spa - GT3"
+    assert name("") == "unknown" and name(" . ") == "unknown" and name("CON") == "CON_"
+    assert module_recorder.save_lap(f"{tmp_path}/", "Spa - ", 1, 90.0, [], max_saved_laps=5)
+    assert len(list((tmp_path / "Spa").glob("*.csv"))) == 1

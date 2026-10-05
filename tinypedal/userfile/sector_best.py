@@ -28,40 +28,50 @@ from typing import Any
 
 from ..const_common import MAX_SECONDS
 from ..const_file import FileExt
-from ..validator import invalid_save_name
+from ..validator import invalid_save_name, is_finite_number, is_same_session
 from . import atomic_write
 
 logger = logging.getLogger(__name__)
 
 
+def valid_sector_row(row: list[Any], defaults: tuple[float, float, float]) -> list[float]:
+    """Sector times of row, invalid time (not a positive number) replaced by default"""
+    return [
+        value if is_finite_number(value) and value > 0 else default
+        for value, default in zip(row[:3], defaults)
+    ] + list(defaults[len(row):])
+
+
 def load_sector_best_file(
     filepath: str,
     filename: str,
-    session_id: tuple[int, ...],
+    session_id: tuple[float, ...],
     defaults: tuple[float, float, float],
     extension: str = FileExt.SECTOR,
 ) -> tuple[list, list, list, list]:
-    """Load sector best file (*.sector)"""
+    """Load sector best file (*.sector)
+
+    Args:
+        session_id: session token (see validator.session_token), session best data loaded
+            only if same session as saved one.
+    """
     try:
         with open(f"{filepath}{filename}{extension}", newline="", encoding="utf-8") as csvfile:
             temp_list: list[list[Any]] = list(csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC))
-        # Check if same session
-        if (temp_list[0][0] == session_id[0] and  # session_stamp
-            temp_list[0][1] <= session_id[1] and  # session_etime
-            temp_list[0][2] <= session_id[2]):    # session_tlaps
-            # Session best data
-            best_s_tb = [temp_list[1][0], temp_list[1][1], temp_list[1][2]]
-            best_s_pb = [temp_list[2][0], temp_list[2][1], temp_list[2][2]]
+        # Session best data, if same session
+        if is_same_session(tuple(temp_list[0]), session_id):
+            best_s_tb = valid_sector_row(temp_list[1], defaults)
+            best_s_pb = valid_sector_row(temp_list[2], defaults)
         else:
             best_s_tb = list(defaults)
             best_s_pb = list(defaults)
         # All time best data
-        all_best_s_tb = [temp_list[3][0], temp_list[3][1], temp_list[3][2]]
-        all_best_s_pb = [temp_list[4][0], temp_list[4][1], temp_list[4][2]]
+        all_best_s_tb = valid_sector_row(temp_list[3], defaults)
+        all_best_s_pb = valid_sector_row(temp_list[4], defaults)
         return best_s_tb, best_s_pb, all_best_s_tb, all_best_s_pb
     except FileNotFoundError:
         logger.info("MISSING: sector best (%s) data", extension)
-    except (IndexError, ValueError, TypeError, OSError):
+    except (IndexError, ValueError, TypeError, OSError, csv.Error):
         logger.info("MISSING: invalid sector best (%s) data", extension)
     return list(defaults), list(defaults), list(defaults), list(defaults)
 
@@ -72,7 +82,7 @@ def load_theoretical_best(filepath: str, filename: str, extension: str = FileExt
         with open(f"{filepath}{filename}{extension}", newline="", encoding="utf-8") as csvfile:
             rows: list[list[Any]] = list(csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC))
         sectors = rows[3][:3]
-    except (IndexError, ValueError, TypeError, OSError):  # no file, invalid data
+    except (IndexError, ValueError, TypeError, OSError, csv.Error):  # no file, invalid data
         return 0.0
     if len(sectors) != 3 or not all(isinstance(value, float) and 0 < value < MAX_SECONDS for value in sectors):
         return 0.0
@@ -82,7 +92,7 @@ def load_theoretical_best(filepath: str, filename: str, extension: str = FileExt
 def save_sector_best_file(
     filepath: str,
     filename: str,
-    session_id: tuple[int, ...],
+    session_id: tuple[float, ...],
     session_best_tb: list[float],
     session_best_pb: list[float],
     alltime_best_tb: list[float],
@@ -92,13 +102,13 @@ def save_sector_best_file(
     """Save sector best file (*.sector)
 
     Sector(CSV) file structure:
-        Line 0: session stamp, session elapsed time, session total laps
+        Line 0: session stamp, session elapsed time, session total laps, time read (session token)
         Line 1: session theoretical best sector time
         Line 2: session personal best sector time
         Line 3: all time theoretical best sector time
         Line 4: all time personal best sector time
     """
-    if len(session_id) != 3 or invalid_save_name(filename):
+    if len(session_id) not in (3, 4) or invalid_save_name(filename):
         return
     with atomic_write(f"{filepath}{filename}{extension}", newline="") as csvfile:
         data_writer = csv.writer(csvfile)

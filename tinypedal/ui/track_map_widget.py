@@ -46,7 +46,7 @@ from ..const_file import ConfigType, FileExt, FileFilter
 from ..i18n import tr, trm, untr
 from ..setting import cfg
 from ..userfile.track_map import load_track_map_file
-from ._common import CompactButton
+from ._common import CompactButton, translate_filter
 from .config import UserConfig
 from .track_map_geometry import curve_description, section_height_delta, section_indices, section_length
 
@@ -236,8 +236,8 @@ class MapView(QWidget):
         self.update()
 
     def update_marked_coords(self, temp_dists: set):
-        """Update marked coordinates"""
-        if not temp_dists or not self.raw_coords:
+        """Update marked coordinates, all marks cleared if no distance"""
+        if not self.raw_coords:
             return
         if temp_dists == self.marked_dists:
             return
@@ -273,7 +273,7 @@ class MapView(QWidget):
             if key is None:
                 menu.addSeparator()
                 continue
-            option = menu.addAction(key.replace("show_", "").replace("_", " ").title())
+            option = menu.addAction(tr(key.replace("show_", "").replace("_", " ").title()))
             option.setCheckable(True)
             option.setChecked(self.ecfg[key])
         return menu
@@ -303,7 +303,7 @@ class MapView(QWidget):
 
     def open_trackmap(self):
         """Open trackmap"""
-        filename_full = QFileDialog.getOpenFileName(self, dir=cfg.path.track_map, filter=FileFilter.SVG)[0]
+        filename_full = QFileDialog.getOpenFileName(self, dir=cfg.path.track_map, filter=translate_filter(FileFilter.SVG))[0]
         if not filename_full:
             return
 
@@ -603,19 +603,20 @@ class MapView(QWidget):
         if self.ecfg["show_map_info"]:
             painter.drawText(
                 self.rect_info, Qt.AlignmentFlag.AlignRight,
-                f"{self.map_length:.3f}m ({self.map_nodes} nodes)"
+                f"{self.map_length:.3f}m ({self.map_nodes} {tr('nodes')})"
             )
 
     def draw_curve_info(
         self, painter, curve_length, arc_radius, arc_angle, curve_desc, length_desc):
         """Draw curve info"""
         if self.ecfg["show_curve_info"]:
+            curve_desc = " ".join(tr(word) for word in curve_desc.split(" "))  # "Right 3"
             painter.drawText(
                 self.rect_info, Qt.AlignmentFlag.AlignLeft,
                 (
-                    f"Curve: {curve_length:.3f}m ({length_desc})\n"
-                    f"Radius: {arc_radius:.3f}m ({curve_desc})\n"
-                    f"Angle: {arc_angle:.3f}°"
+                    f"{tr('Curve:')} {curve_length:.3f}m ({tr(length_desc)})\n"
+                    f"{tr('Radius:')} {arc_radius:.3f}m ({curve_desc})\n"
+                    f"{tr('Angle:')} {arc_angle:.3f}°"
                     #f"Curvature: {calc.curvature(arc_radius):.6f}"
                 )
             )
@@ -626,9 +627,9 @@ class MapView(QWidget):
             painter.drawText(
                 self.rect_info, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
                 (
-                    f"Slope: {slope_percent:.3%} ({slope_desc})\n"
-                    f"Angle: {slope_angle:.3f}°\n"
-                    f"Delta: {slope_delta:.3f}m"
+                    f"{tr('Slope:')} {slope_percent:.3%} ({tr(slope_desc)})\n"
+                    f"{tr('Angle:')} {slope_angle:.3f}°\n"
+                    f"{tr('Delta:')} {slope_delta:.3f}m"
                 )
             )
 
@@ -638,7 +639,7 @@ class MapView(QWidget):
             painter.drawText(
                 self.rect_info, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom,
                 (
-                    f"{pos_dist:.3f}m (node {self.map_seek_index + 1})\n"
+                    f"{pos_dist:.3f}m ({tr('node')} {self.map_seek_index + 1})\n"
                     f"{pos_x:.3f}m, {pos_y:.3f}m, {pos_z:.3f}m"
                 )
             )

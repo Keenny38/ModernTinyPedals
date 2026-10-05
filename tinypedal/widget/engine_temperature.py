@@ -60,6 +60,8 @@ class Realtime(Overlay):
 
         # Config units
         self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
+        # Temperature difference (rate of change, net change): scale only, no offset
+        self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0
 
         self.bar_style_rate = (
             self.wcfg["font_color_rate_loss"],
@@ -179,8 +181,8 @@ class Realtime(Overlay):
         # Last data
         self.last_lap_etime = 0.0
         self.last_lap_stime = 0.0
-        self.last_temp_oil = 0.0
-        self.last_temp_water = 0.0
+        self.last_temp_oil: float | None = None
+        self.last_temp_water: float | None = None
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -205,12 +207,13 @@ class Realtime(Overlay):
             self.update_oil(self.bar_oil_temp, temp_oil)
 
             if self.wcfg["show_rate_of_change"] and interval:
-                rate_oil = self.calc_ema_rdiff(
-                    self.bar_oil_rate.last,
-                    (temp_oil - self.last_temp_oil) * interval
-                )
+                if self.last_temp_oil is not None:  # first reading: no rate yet (from 0 is a fake spike)
+                    rate_oil = self.calc_ema_rdiff(
+                        self.bar_oil_rate.last,
+                        (temp_oil - self.last_temp_oil) * interval
+                    )
+                    self.update_rate(self.bar_oil_rate, rate_oil)
                 self.last_temp_oil = temp_oil
-                self.update_rate(self.bar_oil_rate, rate_oil)
 
             if self.wcfg["show_net_change_per_lap"] and new_lap:
                 self.update_net(self.bar_oil_net, temp_oil, self.bar_oil_net.last)
@@ -221,12 +224,13 @@ class Realtime(Overlay):
             self.update_water(self.bar_water_temp, temp_water)
 
             if self.wcfg["show_rate_of_change"] and interval:
-                rate_water = self.calc_ema_rdiff(
-                    self.bar_water_rate.last,
-                    (temp_water - self.last_temp_water) * interval
-                )
+                if self.last_temp_water is not None:  # first reading: no rate yet
+                    rate_water = self.calc_ema_rdiff(
+                        self.bar_water_rate.last,
+                        (temp_water - self.last_temp_water) * interval
+                    )
+                    self.update_rate(self.bar_water_rate, rate_water)
                 self.last_temp_water = temp_water
-                self.update_rate(self.bar_water_rate, rate_water)
 
             if self.wcfg["show_net_change_per_lap"] and new_lap:
                 self.update_net(self.bar_water_net, temp_water, self.bar_water_net.last)
@@ -254,7 +258,7 @@ class Realtime(Overlay):
         """Rate of change"""
         if target.last != data:
             target.last = data
-            temp = self.unit_temp(abs(data))
+            temp = abs(data) * self.temp_scale
             if temp > 9.94:
                 text = f"{temp:.0f}"
             else:
@@ -271,7 +275,7 @@ class Realtime(Overlay):
                 change = data - last
             else:
                 change = 0
-            temp = self.unit_temp(abs(change))
+            temp = abs(change) * self.temp_scale
             if temp > 9.94:
                 text = f"{temp:.0f}"
             else:

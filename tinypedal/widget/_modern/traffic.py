@@ -31,7 +31,7 @@ from ...api_control import api
 from ...const_common import MAX_SECONDS
 from ...formatter import shorten_driver_name
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .rows import DASH, class_style
 from .stats import Stat, StatsMixin, Value
 
@@ -43,7 +43,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "show_race_leader", "show_slower_ahead", "show_faster_behind",
         "show_class", "show_driver_name_instead_of_class", "driver_name_shorten", "driver_name_uppercase",
         "show_estimated_laps", "decimal_places_estimated_laps", "show_time_interval", "decimal_places_time_interval",
-        "enable_traffic_highlight_from_current_lap",
+        "enable_traffic_highlight_from_current_lap", *display_order_options("traffic"),
     )
 
     def __init__(self, config, widget_name):
@@ -56,10 +56,11 @@ class Realtime(StatsMixin, ModernOverlay):
             ("leader", "Leader", wcfg["show_race_leader"]),
             ("faster", "Faster behind", wcfg["show_faster_behind"]),
         )
-        self.keys = tuple(key for key, _, show in items if show)
         sample = f"8.{'8' * self.dec_laps}L" if wcfg["show_estimated_laps"] else f"88.{'8' * self.dec_time}s"
         sub_sample = "M. Laurent  88.88s" if wcfg["show_driver_name_instead_of_class"] else "LMGT3  88.88s"
         stats = [Stat(key, label, sample, "strong", sub_sample=sub_sample) for key, label, show in items if show]
+        stats = self.display_ordered(stats)
+        self.keys = tuple(stat.key for stat in stats)
         self.show_sub = wcfg["show_class"] or (wcfg["show_estimated_laps"] and wcfg["show_time_interval"])
         width, height = self.build_stats(stats, show_sub=self.show_sub)
         self.set_size(width, height)

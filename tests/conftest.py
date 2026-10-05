@@ -137,3 +137,11 @@ class _FakeReader:
         group = _FakeGroup(APIDataReader.__annotations__.get(name))
         setattr(self, name, group)  # cache, so the same object is returned next time
         return group
+
+
+@pytest.fixture(scope="session")
+def bundled_fonts():
+    """Bundled fonts (Barlow...) loaded once: widgets render & size text as in the app, on every platform"""
+    from tinypedal.main import load_bundled_fonts
+
+    load_bundled_fonts()

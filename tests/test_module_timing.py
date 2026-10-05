@@ -260,3 +260,161 @@ def test_force_g_downforce_and_braking(tele):
     tele.update({"timing.elapsed": 11.0, "vehicle.impact_time": 10.5})
     gen.send(0)
     assert output.brakingRate == 0.0
+
+
+# --- Session & saved data (audit fixes)
+@pytest.fixture
+def wall_clock(monkeypatch):
+    """Wall clock of session tokens (validator.session_token), set by test"""
+    import time
+    from types import SimpleNamespace
+
+    from tinypedal import validator
+
+    clock = {"now": 10_300.0}
+    monkeypatch.setattr(validator, "time", SimpleNamespace(time=lambda: clock["now"], strftime=time.strftime))
+    return clock
+
+
+def load_sectors(tele: dict, tmp_path, identifier: tuple) -> tuple[SectorData, SectorData]:
+    tele.update({"session.identifier": identifier, "lap.sector_index": 0, "timing.last_laptime": -1.0,
+                 "timing.last_sector2": -1.0})
+    session, alltime = SectorData(), SectorData()
+    gen = module_sectors.record_sectors(session, alltime, f"{tmp_path}/")
+    gen.send(0)
+    return session, alltime
+
+
+def test_sector_session_best_only_reloaded_in_same_session(tele, tmp_path, wall_clock):
+    # Session started at 10000 (wall clock), driven at 300 s elapsed
+    tele["session.identifier"] = (360001, 300, 3)
+    gen = module_sectors.record_sectors(SectorData(), SectorData(), f"{tmp_path}/")
+    drive_sectors(tele, gen, [(30.0, 40.0, 20.0), (29.0, 39.0, 19.0)])
+    gen.send(1)  # save
+    # Same session, later
+    wall_clock["now"] = 10_600.0
+    session, alltime = load_sectors(tele, tmp_path, (360001, 600, 6))
+    assert session.sectorBestTB == pytest.approx([29.0, 39.0, 19.0])
+    # Restarted session of same length & type (started at 20000), going out later: not same session
+    wall_clock["now"] = 20_500.0
+    session, alltime = load_sectors(tele, tmp_path, (360001, 500, 5))
+    assert session.sectorBestTB == [MAX_SECONDS] * 3
+    assert alltime.sectorBestTB == pytest.approx([29.0, 39.0, 19.0])  # all time best kept
+
+
+def test_sector_best_invalid_values_ignored(tele, tmp_path):
+    (tmp_path / "SimTrack - SimCar.sector").write_text(
+        '360001,0,0,1\n"bad",40.0,20.0\n30.0,40.0,20.0\n30.0,-5.0,nan\n"x",40.0\n', encoding="utf-8")
+    _session, alltime = load_sectors(tele, tmp_path, (1, 0, 0))
+    assert alltime.sectorBestTB == [30.0, MAX_SECONDS, MAX_SECONDS]  # negative S2 never a best, nan dropped
+    assert alltime.sectorBestPB == [MAX_SECONDS, 40.0, MAX_SECONDS]
+
+
+def test_csv_files_with_huge_field_fall_back_to_defaults(tmp_path):
+    from tinypedal.userfile.consumption_history import load_consumption_history_file
+    from tinypedal.userfile.delta_best import load_delta_best_file
+    from tinypedal.userfile.fuel_delta import load_fuel_delta_file
+    from tinypedal.userfile.sector_best import load_sector_best_file
+
+    huge = "1" * 200_000 + "\n"  # csv.Error (field larger than field limit), not a ValueError
+    for extension in (".sector", ".csv", ".fuel", ".consumption"):
+        (tmp_path / f"huge{extension}").write_text(huge, encoding="utf-8")
+    folder = f"{tmp_path}/"
+    defaults = (1.0, 2.0, 3.0)
+    assert load_sector_best_file(folder, "huge", (1, 0, 0, 0.0), defaults) == ([1.0, 2.0, 3.0],) * 4
+    assert load_delta_best_file(folder, "huge", ("default", 0.0)) == ("default", 0.0)
+    assert load_fuel_delta_file(folder, "huge", ".fuel", ("default", 0.0, 0.0)) == ("default", 0.0, 0.0)
+    assert len(load_consumption_history_file(folder, "huge")) == 1  # placeholder
+
+
+def test_delta_file_with_nan_rejected(tmp_path):
+    from tinypedal.userfile.delta_best import load_delta_best_file
+
+    rows = "".join(f"{index * 10.0},{index * 0.5}\n" for index in range(20)) + "200.0,nan\n"
+    (tmp_path / "nan.csv").write_text(rows, encoding="utf-8")
+    assert load_delta_best_file(f"{tmp_path}/", "nan", ("default", 0.0)) == ("default", 0.0)
+
+
+def test_consumption_history_line_with_nan_left_out(tmp_path):
+    from tinypedal.userfile.consumption_history import load_consumption_history_file
+
+    (tmp_path / "laps.consumption").write_text(
+        "lapNumber,lapTimeLast,lastLapUsedFuel\n2,91.0,nan\n1,90.0,3.0\n", encoding="utf-8")
+    dataset = load_consumption_history_file(f"{tmp_path}/", "laps")
+    assert [lap.lapNumber for lap in dataset] == [1]
+
+
+def test_sectors_saved_when_module_stops(tele, tmp_path):
+    from tinypedal.module._base import MODULE_STOP
+
+    gen = module_sectors.record_sectors(SectorData(), SectorData(), f"{tmp_path}/")
+    drive_sectors(tele, gen, [(30.0, 40.0, 20.0), (29.0, 39.0, 19.0)])
+    assert not (tmp_path / "SimTrack - SimCar.sector").exists()  # saved on next reset only
+    tele["session.combo_name"] = "Other - Car"  # module stopping: data saved, nothing reloaded
+    gen.send(MODULE_STOP)
+    assert (tmp_path / "SimTrack - SimCar.sector").exists()
+    assert not (tmp_path / "Other - Car.sector").exists()
+
+
+def test_module_save_on_stop_unless_discarded():
+    from tinypedal.module._base import MODULE_STOP, DataModule
+
+    sent = []
+
+    class Generator:
+        def send(self, value):
+            sent.append(value)
+
+    module = DataModule.__new__(DataModule)
+    module.discard = False
+    module.save_on_stop(Generator(), None)
+    assert sent == [MODULE_STOP]
+    module.discard = True  # data reset (menu): data not saved
+    module.save_on_stop(Generator())
+    assert sent == [MODULE_STOP]
+
+
+def test_consumption_history_replaced_not_changed_in_place(tele, monkeypatch, tmp_path):
+    """GUI iterates history while module adds laps: never changed in place (copy on write)"""
+    monkeypatch.setattr(minfo, "delta", SimpleNamespace(lapTimeCurrent=5.0, lapTimeLast=90.0, isValidLap=True))
+    monkeypatch.setattr(minfo, "fuel", SimpleNamespace(lastLapConsumption=3.0, capacity=100.0))
+    monkeypatch.setattr(minfo, "energy", SimpleNamespace(lastLapConsumption=0.0))
+    monkeypatch.setattr(minfo, "hybrid", SimpleNamespace(batteryDrainLast=0.0, batteryRegenLast=0.0))
+    monkeypatch.setattr(minfo, "wheels", SimpleNamespace(lastLapTreadWear=(1.0, 1.0, 1.0, 1.0)))
+    history = HistoryInfo()
+    gen = module_stint.record_consumption_history(history, f"{tmp_path}/")
+    tele["lap.number"] = 1
+    gen.send(0)
+    shown = history.consumptionDataSet  # held by GUI
+    shown_laps = list(shown)
+    tele["lap.number"] = 2
+    gen.send(0)
+    assert list(shown) == shown_laps
+    assert history.consumptionDataSet is not shown and history.consumptionDataSet[0].lapNumber == 2
+    assert history.consumptionDataSet.maxlen == shown.maxlen
+
+
+def test_stint_history_replaced_not_changed_in_place(stint_env):
+    history = HistoryInfo()
+    shown = history.stintDataSet  # held by GUI
+    gen = module_stint.record_stint_history(history, 60, 3, 50)
+    elapsed = drive_stint(stint_env, gen, [90.0, 90.0, 90.0])
+    pit_stop(stint_env, gen, elapsed, refuel=20.0)
+    assert len(shown) == 1 and history.stintDataSet[0].totalLaps == 3
+
+
+def test_hybrid_net_change_reference_skips_pit_lap(tele):
+    output = HybridInfo()
+    gen = module_hybrid.calc_motor(output, min_delta_distance=5)
+    elapsed = drive_hybrid(tele, gen, [80], [2])  # before first lap start
+    # Lap A: recorded, 10% drained
+    elapsed = drive_hybrid(tele, gen, [78, 76, 74, 72, 70], [2] * 5, lap_start=elapsed + 0.5, elapsed=elapsed)
+    # Lap B: pit lap, 6% regen
+    lap_start = elapsed + 0.5
+    elapsed = drive_hybrid(tele, gen, [72], [3], lap_start=lap_start, elapsed=elapsed)
+    tele["vehicle.in_pits"] = True
+    elapsed = drive_hybrid(tele, gen, [74, 76], [3] * 2, lap_start=lap_start, elapsed=elapsed)
+    tele["vehicle.in_pits"] = False
+    # Lap C: estimate from lap A (reference lap), not from pit lap net change
+    drive_hybrid(tele, gen, [76], [1], lap_start=elapsed + 0.5, elapsed=elapsed)
+    assert output.batteryNetChange < 0

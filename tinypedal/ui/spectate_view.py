@@ -49,7 +49,7 @@ class SpectateList(QWidget):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self._driver_none = "Anonymous"
+        self._driver_none = tr("Anonymous")  # first row, no driver spectated
         self.last_enabled = None
         self.last_driver_name = ""
         self.last_total_vehicles = 0
@@ -147,8 +147,11 @@ class SpectateList(QWidget):
 
     def set_enable_state(self, enabled: bool):
         """Set enable state"""
+        # Shown state only: toggle signal saves setting & restarts API (user click)
+        blocked = self.button_toggle.blockSignals(True)
         self.button_toggle.setChecked(enabled)
-        self.button_toggle.setText("Enabled" if enabled else "Disabled")
+        self.button_toggle.blockSignals(blocked)
+        self.button_toggle.setText(tr("Enabled") if enabled else tr("Disabled"))
         self.listbox_spectate.setDisabled(not enabled)
         self.button_spectate.setDisabled(not enabled)
         self.button_refresh.setDisabled(not enabled)

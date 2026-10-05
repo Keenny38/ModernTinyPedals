@@ -33,11 +33,11 @@ from ...api_control import api
 from ...const_common import TEXT_NA
 from ...i18n import tr_overlay
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, clock_samples, display_order_options
 from .stats import Stat, StatsMixin, Value
 
-# Sunlight phase index -> label, is night coming
-PHASES = {0: ("Sunrise", False), 1: ("Sunrise", False), 2: ("Sunset", True), 3: ("Sunset", True)}
+# Sunlight phase index (see module_mapping.set_sunlight_phase) -> label, is night coming
+PHASES = {0: ("Sunrise", False), 1: ("Midday", False), 2: ("Sunset", True), 3: ("Midnight", True)}
 
 
 class Realtime(StatsMixin, ModernOverlay):
@@ -47,6 +47,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_track_clock", "enable_track_clock_synchronization",
         "track_clock_time_scale", "track_clock_format", "show_time_scale",
         "show_sunlight_phase_countdown", "enable_time_scaled_countdown",
+        *display_order_options("track_clock"),
     )
 
     def __init__(self, config, widget_name):
@@ -54,11 +55,14 @@ class Realtime(StatsMixin, ModernOverlay):
         wcfg = self.wcfg
         stats = []
         if wcfg["show_track_clock"]:
-            stats.append(Stat("track_clock", "Track time", "88:88PM", "strong", self.theme.warning))
+            sample = self.widest("strong", clock_samples(wcfg["track_clock_format"]))
+            stats.append(Stat("track_clock", "Track time", sample, "strong", self.theme.warning))
         if wcfg["show_time_scale"]:
             stats.append(Stat("time_scale", "Scale", "x88"))
         if wcfg["show_sunlight_phase_countdown"]:
-            stats.append(Stat("countdown", "Next phase", "-8:88:88"))
+            phase = self.widest("small", (tr_overlay(label).upper() for label, _ in PHASES.values()))
+            stats.append(Stat("countdown", "Next phase", "-88:88:88", sub_sample=phase))
+        stats = self.display_ordered(stats, names={"countdown": "sunlight_phase_countdown"})
         self.keys = tuple(stat.key for stat in stats)
         self.time_scale_override = max(int(wcfg["track_clock_time_scale"]), 0)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0, show_sub=wcfg["show_sunlight_phase_countdown"])

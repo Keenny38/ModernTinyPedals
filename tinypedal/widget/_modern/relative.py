@@ -34,14 +34,15 @@ class Realtime(DriverTable):
     """Draw widget"""
 
     COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "energy_remaining",
-        "vehicle_integrity", "incidents", "stint_laps", "time_gap",
+        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
+        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "energy_remaining",
+        "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time", "time_gap",
     )
     options = (
         *DRIVER_OPTIONS,
+        "show_vehicle_in_garage",  # read by relative module
         "additional_players_front", "additional_players_behind",
-        "column_time_gap", "show_time_gap_sign", "decimal_places_time_gap",
+        "column_time_gap", "show_time_gap_sign", "decimal_places_time_gap", "display_order_time_gap",
         "show_highlighted_nearest_time_gap", "nearest_time_gap_threshold_front", "nearest_time_gap_threshold_behind",
     )
 
@@ -61,7 +62,7 @@ class Realtime(DriverTable):
 
     def extra_column(self, key: str) -> Column | None:
         if key == "time_gap":
-            sample = "+88." + "8" * self.gap_decimals if self.gap_decimals else "+88"
+            sample = "+888." + "8" * self.gap_decimals if self.gap_decimals else "+888"
             return Column(key, self.text_width("strong", sample), RIGHT)
         return None
 

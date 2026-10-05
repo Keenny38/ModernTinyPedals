@@ -27,9 +27,12 @@ from collections.abc import Callable
 from contextlib import suppress
 from functools import wraps
 from time import monotonic, perf_counter
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import psutil
+
+if TYPE_CHECKING:
+    from .api_connector import ConnectorHealth
 
 
 class PerfStats(NamedTuple):
@@ -208,3 +211,34 @@ class ProcessMonitor:
         )
         self._last_time, self._last_threads, self._last_total = now, threads_now, total_now
         return process, stats
+
+
+class EndpointRow(NamedTuple):
+    """Rest API resource status for display"""
+
+    path: str
+    state: str  # see adapter.restapi_connector.EndpointStatus
+    age: float  # seconds since last answer, -1 if never
+    error: str  # last error, empty if none
+
+
+def connection_health() -> ConnectorHealth | None:
+    """Game data connection state of connected API (shared memory, Rest API), None if not connected"""
+    from .api_control import api
+
+    return api.health()
+
+
+def endpoint_rows(health: ConnectorHealth, now: float | None = None) -> list[EndpointRow]:
+    """Rest API resource status rows, sorted by path"""
+    if now is None:
+        now = monotonic()
+    return sorted(
+        EndpointRow(
+            path=status.path,
+            state=status.state,
+            age=now - status.updated if status.updated > 0 else -1.0,
+            error=status.error,
+        )
+        for status in health.rest
+    )

@@ -247,7 +247,7 @@ class Realtime(Overlay):
             # Calculate effective thickness in millimeters
             failure_thickness = minfo.wheels.failureBrakeThickness[idx]
             max_thickness = minfo.wheels.maxBrakeThickness[idx] - failure_thickness
-            brake_curr -= failure_thickness
+            brake_curr = max(brake_curr - failure_thickness, 0.0)  # worn past failure thickness: no lifespan left
             live_wear = minfo.wheels.currentlapBrakeWear[idx]
             est_wear = minfo.wheels.estimatedBrakeWear[idx]
             est_valid_wear = minfo.wheels.estimatedValidBrakeWear[idx]

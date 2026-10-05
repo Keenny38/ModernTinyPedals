@@ -88,7 +88,7 @@ class TrackInfoEditor(BaseEditor):
         # Set table
         self.table_tracks = QTableWidget(self)
         self.table_tracks.setColumnCount(len(HEADER_TRACKS))
-        self.table_tracks.setHorizontalHeaderLabels(HEADER_TRACKS)
+        self.table_tracks.setHorizontalHeaderLabels([tr(name) for name in HEADER_TRACKS])
         self.table_tracks.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table_tracks.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for column_index in range(1, len(HEADER_TRACKS)):
@@ -222,8 +222,8 @@ class TrackInfoEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_setting()
-        self.accept()  # close
+        if self.save_setting():
+            self.accept()  # close
 
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
@@ -288,6 +288,22 @@ class TrackInfoEditor(BaseEditor):
         table_item(self.table_tracks, row_index, 4, FloatTableItem).setValue(position)
         self.table_tracks.setCurrentCell(-1, -1)  # deselect to avoid mis-clicking
 
+    def verify_table(self) -> bool:
+        """Verify table before saving, warn if a track name is listed more than once"""
+        track_names = set()
+        for row_index in range(self.table_tracks.rowCount()):
+            track_name = table_item(self.table_tracks, row_index, 0).text()
+            if track_name in track_names:
+                self.table_tracks.setCurrentCell(row_index, 0)  # show duplicate row
+                msg_text = (
+                    f"<b>{track_name}</b> is listed more than once.<br><br>"
+                    "Each name can only be listed once, rename or delete duplicate rows."
+                )
+                QMessageBox.warning(self, tr("Error"), trm(msg_text))
+                return False
+            track_names.add(track_name)
+        return True
+
     def update_tracks_temp(self):
         """Update temporary changes to tracks temp first"""
         self.tracks_temp.clear()
@@ -298,10 +314,13 @@ class TrackInfoEditor(BaseEditor):
                 for column_index, key in enumerate(TRACKINFO_DEFAULT, start=1)
             }
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_tracks_temp()
         cfg.user.tracks = copy_setting(self.tracks_temp)
         cfg.save(0, config_type=ConfigType.TRACKS)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True

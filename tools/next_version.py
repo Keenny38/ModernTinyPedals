@@ -6,6 +6,8 @@ Semantic versioning, MAJOR.MINOR.PATCH:
     - a commit title starting with "Add" (new feature) since last release: minor + 1, patch 0
     - otherwise (fixes, changes): patch + 1
     - no commit since last release: prints nothing (no release)
+Commits that only change documentation (wiki pages, README, changelogs, CONTRIBUTING...,
+see DOCS_ONLY) do not publish a release on their own: they are listed in the next one.
 A major version (1.0.0...) is chosen by hand: run the release workflow with bump "major".
 
 Usage (from project root):
@@ -22,10 +24,23 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from gen_release_notes import commits, kind_of, release_tags
+from gen_release_notes import commits, git, kind_of, release_tags
 
 VERSION_FILE = os.path.join("tinypedal", "version.py")
 VERSION_LINE = re.compile(r'^__version__ = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
+# Documentation files: a commit changing only these does not change the app
+DOCS_ONLY = re.compile(
+    r"^(?:docs/wiki/|docs/changes/|docs/changelog/|\.github/ISSUE_TEMPLATE/"
+    r"|(?:README|CHANGELOG(?:\.[\w-]+)?|CONTRIBUTING|SECURITY)\.md$"
+    r"|docs/(?:ROADMAP|AUDIT)\.md$|images/readme_preview\.png$)"
+)
+
+
+def is_docs_only(sha: str) -> bool:
+    """Commit only changes documentation files"""
+    files = [path for path in git("diff-tree", "-z", "--no-commit-id", "--name-only", "-r", "--root", sha)
+             .split("\0") if path]
+    return bool(files) and all(DOCS_ONLY.match(path) for path in files)
 
 
 def file_version() -> tuple[int, int, int]:
@@ -51,7 +66,7 @@ def next_version(bump: str = "auto") -> str:
         return "{}.{}.{}".format(*file_version())
     last = tags[0][0]
     major, minor, patch = (int(part) for part in last.lstrip("v").split("."))
-    items = commits(f"{last}..HEAD")
+    items = [commit for commit in commits(f"{last}..HEAD") if not is_docs_only(commit.sha)]
     if not items and bump == "auto":
         return ""
     if bump == "auto":

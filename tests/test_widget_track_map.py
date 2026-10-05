@@ -17,7 +17,7 @@ LENGTH = 4000.0
 
 
 @pytest.fixture
-def track(ui_env, monkeypatch):
+def track(ui_env, bundled_fonts, monkeypatch):
     """Recorded oval map, 20 cars on it, best lap delta data, API reader on in-memory shared memory"""
     from tinypedal.api_control import api
 

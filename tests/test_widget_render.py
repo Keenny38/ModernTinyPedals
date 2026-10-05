@@ -25,12 +25,10 @@ WIDGET_NAMES = sorted(
 
 
 @pytest.fixture(scope="module")
-def default_setting():
+def default_setting(bundled_fonts):
     """Use factory default settings only (never read or write user files)"""
     from tinypedal.api_control import api
-    from tinypedal.main import load_bundled_fonts
 
-    load_bundled_fonts()
     cfg.default.set_default()
     backup = {name: getattr(cfg.user, name, None) for name in cfg.user.__slots__}
     for name in cfg.user.__slots__:

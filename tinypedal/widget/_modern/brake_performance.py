@@ -27,7 +27,7 @@ from __future__ import annotations
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 
@@ -38,6 +38,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_transient_maximum_braking_rate", "show_maximum_braking_rate",
         "show_delta_braking_rate", "show_delta_braking_rate_in_percentage", "show_front_wheel_lock_duration",
         "show_rear_wheel_lock_duration",
+        *display_order_options("brake_performance"),
     )
 
     def __init__(self, config, widget_name):
@@ -51,6 +52,7 @@ class Realtime(StatsMixin, ModernOverlay):
             ("rear_wheel_lock_duration", "Lock R", "88.8s"),
         )
         stats = [Stat(key, label, sample) for key, label, sample in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)

@@ -26,6 +26,7 @@ import ctypes
 import logging
 import threading
 from collections.abc import Sequence
+from contextlib import suppress
 from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,10 +41,12 @@ from pyRfactor2SharedMemory.rF2MMap import (
     rFactor2Constants,
 )
 
+from .. import app_signal
 from ..replay import ReplayMMap, ReplayPlayer
 from ..thread_guard import run_supervised
 
 logger = logging.getLogger(__name__)
+STOP_TIMEOUT = 3.0  # seconds to wait for update thread to stop
 
 # Shared memory zones recorded in replay frame, in order: (name, structure)
 REPLAY_ZONES: tuple[tuple[str, Any], ...] = (
@@ -58,6 +61,11 @@ REPLAY_ZONES: tuple[tuple[str, Any], ...] = (
 def replay_layout() -> list[list]:
     """Replay zone layout: [name, size], ..."""
     return [[name, ctypes.sizeof(data_struct)] for name, data_struct in REPLAY_ZONES]
+
+
+def default_tele_indexes() -> dict[int, int]:
+    """Telemetry index of slot id, before any match (same index)"""
+    return {_index: _index for _index in range(128)}
 
 
 def copy_struct(struct_data):
@@ -127,11 +135,31 @@ class MMapDataSet:
             access_mode: 0 = copy access, 1 = direct access.
             rf2_pid: rF2 Process ID for accessing server data.
         """
-        self.scor.create(access_mode, rf2_pid)
-        self.tele.create(access_mode, rf2_pid)
-        self.ext.create(1, rf2_pid)
-        self.ffb.create(1, rf2_pid)
-        self.rule.create(1, rf2_pid)
+        created = []
+        try:
+            for zone, mode in (
+                (self.scor, access_mode),
+                (self.tele, access_mode),
+                (self.ext, 1),
+                (self.ffb, 1),
+                (self.rule, 1),
+            ):
+                zone.create(mode, rf2_pid)
+                created.append(zone)
+        except (OSError, ValueError):  # close zones already opened, nothing left half open
+            for zone in created:
+                with suppress(OSError, ValueError, TypeError):
+                    zone.close()
+            raise
+
+    def set_unavailable(self) -> None:
+        """Zeroed data while shared memory cannot be opened (not connected state)"""
+        for zone, (_, data_struct) in zip(self.zones(), REPLAY_ZONES):
+            zone.data = data_struct()
+
+    def replay_paused(self) -> bool:
+        """Whether replay player is paused: frame held on purpose, not a frozen game"""
+        return self.replaying and bool(getattr(self.scor, "paused", False))
 
     def close_mmap(self) -> None:
         """Close mmap instance"""
@@ -172,6 +200,8 @@ class SyncData:
         player_scor_index: Local player scoring index.
         player_scor: Local player scoring data.
         player_tele: Local player telemetry data.
+        error: why shared memory could not be opened, empty if opened.
+        last_update: monotonic time of last game data change, 0 if none.
     """
 
     __slots__ = (
@@ -188,13 +218,15 @@ class SyncData:
         "player_scor",
         "player_tele",
         "dataset",
+        "error",
+        "last_update",
     )
 
     def __init__(self) -> None:
         self._updating = False
         self._update_thread: threading.Thread | None = None
         self._event = threading.Event()
-        self._tele_indexes = {_index: _index for _index in range(128)}
+        self._tele_indexes = default_tele_indexes()
 
         self.paused = False
         self.synced = False
@@ -205,6 +237,8 @@ class SyncData:
         self.player_scor: Any = None  # set by sync before use
         self.player_tele: Any = None
         self.dataset = MMapDataSet()
+        self.error = ""
+        self.last_update = 0.0
 
     def __del__(self):
         if logger is not None:  # module globals are cleared at interpreter exit
@@ -277,25 +311,47 @@ class SyncData:
         """
         if self._updating:
             logger.warning("sharedmemory: UPDATING: already started")
-        else:
-            self._updating = True
-            # Initialize mmap data
+            return
+        # Initialize mmap data
+        try:
             self.dataset.create_mmap(access_mode, rf2_pid)
-            self.__update_tele_indexes(
-                self.dataset.tele.data.mNumVehicles,
-                self.dataset.tele.data,
-                self._tele_indexes,
-            )
-            if not self.__sync_player_data():
-                self.__sync_player_scor()
-                self.__sync_player_tele()
-            # Setup updating thread
-            self._event.clear()
-            self._update_thread = threading.Thread(target=self.__update, daemon=True, name="rF2 shared memory")
-            self._update_thread.start()
-            logger.info("sharedmemory: UPDATING: thread started")
-            logger.info("sharedmemory: player index override: %s", self.override_player_index)
-            logger.info("sharedmemory: server process ID: %s", rf2_pid if rf2_pid else "DISABLED")
+        except (OSError, ValueError) as error:  # existing mapping of another size (other tool, older plugin)
+            self.__set_unavailable(error)
+            return
+        self.error = ""
+        self._updating = True
+        self._tele_indexes = default_tele_indexes()
+        self.__update_tele_indexes(
+            self.dataset.tele.data.mNumVehicles,
+            self.dataset.tele.data,
+            self._tele_indexes,
+        )
+        if not self.__sync_player_data():
+            self.__sync_player_scor()
+            self.__sync_player_tele()
+        # Setup updating thread
+        self._event.clear()
+        self._update_thread = threading.Thread(target=self.__update, daemon=True, name="rF2 shared memory")
+        self._update_thread.start()
+        logger.info("sharedmemory: UPDATING: thread started")
+        logger.info("sharedmemory: player index override: %s", self.override_player_index)
+        logger.info("sharedmemory: server process ID: %s", rf2_pid if rf2_pid else "DISABLED")
+
+    def __set_unavailable(self, error: Exception) -> None:
+        """Not connected state: zeroed data, paused, no updating thread"""
+        self.error = str(error)
+        logger.error(
+            "sharedmemory: unable to open rF2 shared memory (%s): %s. Shared memory may exist with another size "
+            "(other telemetry tool or older plugin running), restart game & close other tools.",
+            ", ".join(f"{name} {size} bytes" for name, size in replay_layout()), error,
+        )
+        app_signal.error.emit("Unable to open game shared memory, see log for details.")
+        self.dataset.set_unavailable()
+        self.player_scor_index = INVALID_INDEX
+        self.__sync_player_scor()
+        self.__sync_player_tele()
+        self.paused = True
+        self.synced = False
 
     def stop(self) -> None:
         """Join and stop updating thread, close mmap"""
@@ -303,17 +359,22 @@ class SyncData:
             self._event.set()
             self._updating = False
             if self._update_thread is not None:
-                self._update_thread.join()
+                self._update_thread.join(STOP_TIMEOUT)
             # Make final copy before close, otherwise mmap won't close if using direct access
-            self.player_scor = copy_struct(self.player_scor)
-            self.player_tele = copy_struct(self.player_tele)
+            if self.player_scor is not None:
+                self.player_scor = copy_struct(self.player_scor)
+            if self.player_tele is not None:
+                self.player_tele = copy_struct(self.player_tele)
             self.dataset.close_mmap()
         else:
             logger.warning("sharedmemory: UPDATING: already stopped")
 
     def __update(self) -> None:
         """Run update loop, restart after unexpected error"""
-        run_supervised(self.__update_loop, "sharedmemory (rF2) update", self._event)
+        if not run_supervised(self.__update_loop, "sharedmemory (rF2) update", self._event) and not self._event.is_set():
+            # Stopped after repeated errors: hide overlays instead of showing frozen values
+            self.paused = True
+            self.synced = False
 
     def __update_loop(self) -> None:
         """Update synced player data"""
@@ -333,12 +394,14 @@ class SyncData:
 
         while not _event_wait(update_delay):
             self.dataset.update_mmap()
+            session_timestamp = self.dataset.scor.data.mScoringInfo.mCurrentET
+            if session_timestamp < last_session_timestamp:  # session changed: forget slot ids of previous session
+                self._tele_indexes = default_tele_indexes()
             self.__update_tele_indexes(
                 self.dataset.tele.data.mNumVehicles,
                 self.dataset.tele.data,
                 self._tele_indexes,
             )
-            session_timestamp = self.dataset.scor.data.mScoringInfo.mCurrentET
 
             # Update player data & index
             if not data_freezed:
@@ -367,7 +430,7 @@ class SyncData:
                 ):
                     self.resets += 1
 
-                last_update_time = monotonic()
+                last_update_time = self.last_update = monotonic()
                 last_session_timestamp = session_timestamp
                 last_in_garage = in_garage
                 last_slot_id = slot_id
@@ -381,6 +444,9 @@ class SyncData:
                         "sharedmemory: UPDATING: resumed, data timestamp %s",
                         last_session_timestamp,
                     )
+            # Paused replay (frame by frame, opened at lap position) holds data on purpose
+            elif self.dataset.replay_paused():
+                last_update_time = monotonic()
             # Check while NOT IN freeze state
             # Set freeze state if data stopped updating after 2s
             elif monotonic() - last_update_time > 2:
@@ -448,9 +514,12 @@ class RF2Info:
         self._scor, self._tele, self._ext, self._ffb, self._rule = dataset.zones()
 
     @property
-    def rawData(self) -> bytes:
-        """Every shared memory zone back to back, for replay recording"""
-        return b"".join(bytes(zone.data) for zone in self._sync.dataset.zones())
+    def rawData(self) -> bytes | None:
+        """Every shared memory zone back to back, for replay recording, None before shared memory opened"""
+        zones = self._sync.dataset.zones()
+        if any(zone.data is None for zone in zones):
+            return None
+        return b"".join(bytes(zone.data) for zone in zones)
 
     def stop(self) -> None:
         """Stop data updating thread"""
@@ -552,3 +621,15 @@ class RF2Info:
     def vehicleResets(self) -> int:
         """Number of player vehicle resets"""
         return self._sync.resets
+
+    @property
+    def dataAge(self) -> float:
+        """Seconds since game data last changed, -1 if never"""
+        if self._sync.last_update <= 0:
+            return -1.0
+        return monotonic() - self._sync.last_update
+
+    @property
+    def openError(self) -> str:
+        """Why shared memory could not be opened, empty if opened"""
+        return self._sync.error

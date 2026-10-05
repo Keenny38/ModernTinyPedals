@@ -31,7 +31,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 ITEMS = (
@@ -53,6 +53,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "wheel_track_front", "wheelbase", "manual_steering_range",
         "minimum_oversteer_slip_angle_difference", "minimum_understeer_slip_angle_difference",
         "show_inverted_yaw_rate_sign", *(f"show_{key}" for key, _, _ in ITEMS),
+        *display_order_options("steering_angle"),
     )
 
     def __init__(self, config, widget_name):
@@ -64,6 +65,7 @@ class Realtime(StatsMixin, ModernOverlay):
         self.wheelbase = max(wcfg["wheelbase"], 1)
         self.ema_slip = 0.0
         stats = [Stat(key, label, sample) for key, label, sample in ITEMS if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)

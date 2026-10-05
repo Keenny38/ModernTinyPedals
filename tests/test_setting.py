@@ -280,3 +280,50 @@ def test_recorder_module_enabled_in_existing_presets_once():
     updated["module_recorder"]["enable"] = False  # disabled again by user afterwards: kept
     again = setting_validator.PresetValidator.user_preset(updated, default)
     assert again["module_recorder"]["enable"] is False
+
+
+# Audit fixes
+def test_change_made_while_saving_not_lost(config, monkeypatch):
+    """Option changed while its file is being written: saved again, never lost (was: memory 42, disk 0)"""
+    import threading
+
+    config.load_user()
+    config.user.setting["overlay"]["fixed_position"] = False
+    writing, release = threading.Event(), threading.Event()
+    save_file = setting_module.save_and_verify_json_file
+
+    def slow_save(**kwargs):
+        writing.set()
+        release.wait(5)
+        save_file(**kwargs)
+
+    monkeypatch.setattr(setting_module, "save_and_verify_json_file", slow_save)
+    config.save(delay=0)
+    assert writing.wait(5)
+    config.user.setting["overlay"]["fixed_position"] = True  # changed during write
+    config.save(delay=0)
+    release.set()
+    assert config.flush(timeout=5)
+    wait_saved(config)
+    assert read_json(f"{config.path.settings}default.json")["overlay"]["fixed_position"] is True
+
+
+def test_invalid_section_reset_alone(config):
+    """A section that is not a dict resets that section only, rest of preset kept"""
+    widget = next(name for name, value in config.default.setting.items() if "enable" in value)
+    enabled = not config.default.setting[widget]["enable"]
+    with open(f"{config.path.settings}default.json", "w", encoding="utf-8") as file:
+        json.dump({widget: {"enable": enabled}, "overlay": 5, "speedometer": [1, 2]}, file)
+    config.load_user()
+    assert config.user.setting[widget]["enable"] is enabled  # kept
+    assert config.user.setting["overlay"] == dict(config.default.setting["overlay"])
+    assert not any(FileExt.BACKUP in name for name in os.listdir(config.path.settings))  # file was valid
+
+
+def test_nan_and_infinity_values_rejected():
+    from tinypedal import setting_validator
+
+    default = {"widget": {"opacity": 0.9, "position_x": 100, "font_name": "Arial"}}
+    user = json.loads('{"widget": {"opacity": NaN, "position_x": 1e999, "font_name": "Consolas"}}')
+    result = setting_validator.PresetValidator._validate(user, default)  # validation without migration
+    assert result["widget"] == {"opacity": 0.9, "position_x": 100, "font_name": "Consolas"}

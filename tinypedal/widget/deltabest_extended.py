@@ -23,6 +23,7 @@ Deltabest extended Widget
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import game_deltabest
 
 
 class Realtime(Overlay):
@@ -158,6 +159,8 @@ class Realtime(Overlay):
             session_best = minfo.delta.deltaSession
             stint_best = minfo.delta.deltaStint
             delta_last = minfo.delta.deltaLast
+            if self.wcfg["show_game_deltabest_if_available"]:  # game delta: to session best lap
+                session_best = game_deltabest(session_best)
 
         # All time deltabest
         if self.wcfg["show_all_time_deltabest"]:
@@ -172,7 +175,7 @@ class Realtime(Overlay):
             self.update_deltabest(self.bar_stbest, stint_best, self.prefix_stbest)
 
         # Deltalast
-        if self.wcfg["show_stint_deltabest"]:
+        if self.wcfg["show_deltalast"]:
             self.update_deltabest(self.bar_labest, delta_last, self.prefix_labest)
 
     # GUI update methods

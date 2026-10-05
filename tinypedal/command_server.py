@@ -30,7 +30,9 @@ Local HTTP server, disabled by default, only listens on 127.0.0.1:
 The required header prevents web pages opened in browser from triggering commands,
 as browsers cannot send custom header to other site without CORS approval.
 Host header is also verified, to block DNS rebinding (malicious domain resolved to 127.0.0.1).
-WebSocket is not covered by CORS, so /stream also rejects browser pages from other origins.
+WebSocket is not covered by CORS, so /stream also rejects browser pages from other origins,
+and "null" origin (sandboxed frame of any web site, page opened from a local file): only pages
+served from http://localhost or http://127.0.0.1 (and clients without Origin) can read telemetry.
 """
 
 from __future__ import annotations
@@ -79,11 +81,13 @@ def is_allowed_host(host: str | None, port: int) -> bool:
 
 
 def is_allowed_origin(origin: str | None) -> bool:
-    """Allow non-browser clients (no Origin) and local pages only"""
+    """Allow non-browser clients (no Origin) and pages served from local host only
+
+    Origin "null" (sandboxed frame of any site, local file) is refused.
+    """
     if origin is None:
         return True
-    origin = origin.strip().lower()
-    return origin == "null" or urlsplit(origin).hostname in {"127.0.0.1", "localhost"}
+    return urlsplit(origin.strip().lower()).hostname in {"127.0.0.1", "localhost"}
 
 
 def websocket_accept(key: str) -> str:

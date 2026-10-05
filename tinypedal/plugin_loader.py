@@ -30,18 +30,26 @@ Plugin code is only executed after user trusted it (Plugin Manager, or install f
 Trust is bound to SHA-256 digest of all Python files in plugin folder, so any code change
 requires trusting again. Digests are stored in config folder, plugins shipped with TinyPedal
 are trusted by digest listed in BUNDLED_PLUGINS.
+
+Widget code runs from the very bytes checked against trusted digest (never from compiled
+bytecode, which is not covered by digest): compiled files in plugin folder are removed before
+loading, and none is written while loading.
 """
 
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import logging
 import os
 import re
 import sys
+from contextlib import suppress
 from types import MappingProxyType, ModuleType
+from typing import Any
+
+from . import safe_mode
+from .validator import is_finite_number
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +72,14 @@ PLUGIN_BASE_DEFAULT = MappingProxyType({
 _valid_name = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 PLUGIN_ERRORS: dict[str, str] = {}  # widget name: last loading error
 ALLOWED_PACKAGE_FILES = (".py", ".json", ".png", ".svg", ".txt", ".md")
+BYTECODE_FILES = (".pyc", ".pyo")
+WINDOWS_DEVICE_NAMES = frozenset((
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+    *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
+))
 TRUST_FILE = "plugin_trust.json"
 UNTRUSTED_ERROR = "Not trusted: review plugin code, then trust it in Plugin Manager"
+SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart Modern Tiny Pedals to load it"
 # Plugins shipped with TinyPedal: widget name: plugin digest
 BUNDLED_PLUGINS = MappingProxyType({
     "plugin_example_speed": "599d71d9f3644b7e02fe0efb2722d802a70eecd45a2d7c25a407bbb12a67c36f",
@@ -101,9 +115,37 @@ def load_plugin_defaults(folder: str = PLUGIN_FOLDER) -> dict[str, dict]:
         except (OSError, ValueError) as error:
             logger.error("PLUGIN: unable to load %s setting: %s", widget_name, error)
             continue
-        defaults[widget_name] = {**PLUGIN_BASE_DEFAULT, **setting}
+        defaults[widget_name] = {**PLUGIN_BASE_DEFAULT, **valid_plugin_setting(widget_name, setting)}
         logger.info("PLUGIN: found %s", widget_name)
     return defaults
+
+
+def is_valid_option_value(value: Any, default: Any = None) -> bool:
+    """Is valid plugin option value: same type as base option default, else number (finite),
+    bool, string or list of them"""
+    if default is not None:  # base option
+        if isinstance(default, bool):
+            return isinstance(value, bool)
+        if isinstance(default, int):
+            return isinstance(value, int) and not isinstance(value, bool)
+        if isinstance(default, float):
+            return is_finite_number(value)
+        return isinstance(value, type(default))
+    if isinstance(value, list):
+        return all(not isinstance(item, list) and is_valid_option_value(item) for item in value)
+    return isinstance(value, (bool, str)) or is_finite_number(value)
+
+
+def valid_plugin_setting(widget_name: str, setting: dict) -> dict:
+    """Plugin options with valid value type only (invalid option: base default used, or left out),
+    so a wrong value in setting.json never stops widget or app from starting"""
+    valid = {}
+    for key, value in setting.items():
+        if is_valid_option_value(value, PLUGIN_BASE_DEFAULT.get(key)):
+            valid[key] = value
+        else:
+            logger.warning("PLUGIN: %s option %s has invalid value %r, ignored", widget_name, key, value)
+    return valid
 
 
 def plugin_path(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
@@ -122,14 +164,43 @@ def plugin_code_files(path: str) -> list[str]:
     return code_files
 
 
-def plugin_digest(path: str) -> str:
-    """SHA-256 digest of all Python files in plugin folder (relative path & content, line ending neutral)"""
-    digest = hashlib.sha256()
+def plugin_sources(path: str) -> dict[str, bytes]:
+    """Content of all Python files in plugin folder, relative path: content"""
+    sources = {}
     for relative in plugin_code_files(path):
         with open(os.path.join(path, relative), "rb") as file:
-            content = file.read().replace(b"\r\n", b"\n")
-        digest.update(relative.encode("utf-8") + b"\0" + content + b"\0")
+            sources[relative] = file.read()
+    return sources
+
+
+def sources_digest(sources: dict[str, bytes]) -> str:
+    """SHA-256 digest of plugin Python files (relative path & content, line ending neutral)"""
+    digest = hashlib.sha256()
+    for relative, content in sources.items():
+        digest.update(relative.encode("utf-8") + b"\0" + content.replace(b"\r\n", b"\n") + b"\0")
     return digest.hexdigest()
+
+
+def plugin_digest(path: str) -> str:
+    """SHA-256 digest of all Python files in plugin folder (relative path & content, line ending neutral)"""
+    return sources_digest(plugin_sources(path))
+
+
+def remove_bytecode(path: str) -> None:
+    """Remove compiled Python files (not covered by trusted digest) from plugin folder
+
+    Raises:
+        OSError: unable to remove a compiled file.
+    """
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            if name.lower().endswith(BYTECODE_FILES):
+                os.remove(os.path.join(root, name))
+                logger.info("PLUGIN: removed compiled file %s", os.path.join(root, name))
+        for name in dirs:
+            if name == "__pycache__":
+                with suppress(OSError):  # other files left, not code
+                    os.rmdir(os.path.join(root, name))
 
 
 def trust_filename() -> str:
@@ -153,7 +224,11 @@ def load_trusted() -> dict[str, str]:
 
 def is_trusted(widget_name: str, folder: str = PLUGIN_FOLDER) -> bool:
     """Check if plugin code matches trusted digest"""
-    digest = plugin_digest(plugin_path(widget_name, folder))
+    return is_trusted_digest(widget_name, plugin_digest(plugin_path(widget_name, folder)))
+
+
+def is_trusted_digest(widget_name: str, digest: str) -> bool:
+    """Check if plugin code digest is trusted"""
     return digest in (BUNDLED_PLUGINS.get(widget_name), load_trusted().get(widget_name))
 
 
@@ -176,11 +251,25 @@ def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
 
 
 def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLDER) -> ModuleType:
-    """Load plugin widget module as "<package>.<widget_name>", or error placeholder if failed"""
+    """Load plugin widget module as "<package>.<widget_name>", or error placeholder if failed
+
+    Code is read once: digest checked & code run from the same bytes (never from bytecode).
+    Safe mode: no plugin code run at all.
+    """
     module_name = f"{package}.{widget_name}"
-    path = os.path.join(plugin_path(widget_name, folder), "widget.py")
+    if safe_mode.state.enabled:
+        logger.warning("PLUGIN: %s not loaded (safe mode)", widget_name)
+        PLUGIN_ERRORS[widget_name] = SAFE_MODE_ERROR
+        placeholder = error_placeholder(module_name, widget_name, SAFE_MODE_ERROR)
+        sys.modules[module_name] = placeholder
+        return placeholder
+    plugin_folder = plugin_path(widget_name, folder)
+    path = os.path.join(plugin_folder, "widget.py")
+    sources: dict[str, bytes] = {}
     try:
-        trusted = is_trusted(widget_name, folder)
+        remove_bytecode(plugin_folder)
+        sources = plugin_sources(plugin_folder)
+        trusted = is_trusted_digest(widget_name, sources_digest(sources))
     except OSError as error:
         trusted = False
         logger.error("PLUGIN: unable to read %s code: %s", widget_name, error)
@@ -190,13 +279,18 @@ def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLD
         placeholder = error_placeholder(module_name, widget_name, UNTRUSTED_ERROR)
         sys.modules[module_name] = placeholder
         return placeholder
+    write_bytecode = sys.dont_write_bytecode
     try:
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
+        source = sources.get("widget.py")
+        if source is None:
             raise ImportError(f"cannot load {path}")
-        module = importlib.util.module_from_spec(spec)
+        code = compile(source, path, "exec", dont_inherit=True)
+        module = ModuleType(module_name)
+        module.__file__ = path
+        module.__package__ = package
         sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        sys.dont_write_bytecode = True  # modules imported by plugin: no compiled file in plugin folder
+        exec(code, module.__dict__)  # trusted plugin code
         if not hasattr(module, "Realtime"):
             raise AttributeError("widget.py has no Realtime class")
         PLUGIN_ERRORS.pop(widget_name, None)
@@ -208,6 +302,8 @@ def load_plugin_widget(package: str, widget_name: str, folder: str = PLUGIN_FOLD
         placeholder = error_placeholder(module_name, widget_name, str(error))
         sys.modules[module_name] = placeholder
         return placeholder
+    finally:
+        sys.dont_write_bytecode = write_bytecode
 
 
 def error_placeholder(module_name: str, widget_name: str, message: str) -> ModuleType:
@@ -260,15 +356,42 @@ def install_plugin_package(zip_filename: str, folder: str = PLUGIN_FOLDER) -> st
         target = os.path.join(folder, name)
         if os.path.exists(target):
             raise ValueError(f"plugin {name} already exists")
+        real_target = os.path.realpath(target)
         for relative, info in files.items():
             parts = relative.split("/")
-            if any(part in ("", ".", "..") for part in parts) or not relative.lower().endswith(ALLOWED_PACKAGE_FILES):
+            if not is_safe_package_path(parts) or not relative.lower().endswith(ALLOWED_PACKAGE_FILES):
                 continue  # skip unsafe or unexpected file
             if info.file_size > 10 * 1024 * 1024:
                 continue
             path = os.path.join(target, *parts)
+            if not is_inside_folder(path, real_target):
+                continue  # outside plugin folder
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as file:
                 file.write(package.read(info))
     logger.info("PLUGIN: installed %s", name)
     return f"{PLUGIN_PREFIX}{name}"
+
+
+def is_inside_folder(path: str, real_folder: str) -> bool:
+    """Check if path (links resolved) is inside folder (real path)"""
+    try:
+        return os.path.commonpath([os.path.realpath(path), real_folder]) == real_folder
+    except ValueError:  # other drive
+        return False
+
+
+def is_safe_package_path(parts: list[str]) -> bool:
+    """Check if path parts of package file stay inside plugin folder
+
+    Not allowed: empty, relative (. ..), absolute or drive part ("C:", "D:pwn.py"), Windows device
+    name, and compiled Python cache (not covered by trusted digest).
+    """
+    for part in parts:
+        if part in ("", ".", "..", "__pycache__") or ":" in part or "\\" in part or "\0" in part:
+            return False
+        if os.path.isabs(part) or os.path.splitdrive(part)[0]:
+            return False
+        if part.split(".", 1)[0].strip().upper() in WINDOWS_DEVICE_NAMES or part.endswith((" ", ".")):
+            return False
+    return True

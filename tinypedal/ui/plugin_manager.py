@@ -60,18 +60,21 @@ from ..plugin_loader import (
     trust_plugin,
 )
 from ..setting import cfg
+from . import status_color
 from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
 from .toast import show_toast
 
 COLUMNS = ("Plugin", "Status", "Enabled")
 ROLE_NAME = Qt.ItemDataRole.UserRole
-ROLE_BADGE = Qt.ItemDataRole.UserRole + 1  # badge color of status & enabled cells
-BADGE_COLORS = {
-    "loaded": "#2DA44E",
-    "error": "#D1242F",
-    "untrusted": "#BF8700",
-    "restart": "#6E7781",
-    "off": "#6E7781",
+ROLE_BADGE = Qt.ItemDataRole.UserRole + 1  # badge color name of status & enabled cells
+BADGE_ACCENT = "accent"  # palette highlight color
+BADGE_COLORS = {  # status color names (see status_color), colors read when painted (theme may change)
+    "loaded": "badge_success",
+    "error": "badge_danger",
+    "untrusted": "badge_warning",
+    "restart": "badge_neutral",
+    "off": "badge_neutral",
+    "on": BADGE_ACCENT,
 }
 
 
@@ -86,17 +89,27 @@ def plugin_status_kind(widget_name: str) -> tuple[str, str, str]:
         return "restart", tr("Restart required"), tr("Plugin found after start, restart Modern Tiny Pedals to load it.")
     if PLUGIN_ERRORS.get(widget_name) == UNTRUSTED_ERROR:
         return "untrusted", tr("Not trusted"), tr(UNTRUSTED_ERROR)
-    if widget_name in PLUGIN_ERRORS:
-        return "error", tr("Error"), PLUGIN_ERRORS[widget_name]
+    if widget_name in PLUGIN_ERRORS:  # known error texts translated (safe mode...), others as is
+        return "error", tr("Error"), tr(PLUGIN_ERRORS[widget_name])
     return "loaded", tr("Loaded"), ""
 
 
+def badge_colors(badge: str, palette: QPalette) -> tuple[QColor, QColor]:
+    """Badge background & text colors of window theme in use"""
+    if badge == BADGE_ACCENT:
+        return (
+            palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight),
+            palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText),
+        )
+    return QColor(status_color(badge, palette)), QColor(status_color("badge_text", palette))
+
+
 class BadgeDelegate(QStyledItemDelegate):
-    """Draw cell text as a filled pill badge (status at a glance), color from ROLE_BADGE"""
+    """Draw cell text as a filled pill badge (status at a glance), color name from ROLE_BADGE"""
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
-        color = index.data(ROLE_BADGE)
-        if not color:
+        badge = index.data(ROLE_BADGE)
+        if not badge:
             super().paint(painter, option, index)
             return
         # Row selection & hover background, without text
@@ -112,12 +125,13 @@ class BadgeDelegate(QStyledItemDelegate):
         width = metrics.horizontalAdvance(text) + height
         cell = QRectF(option.rect)
         pill = QRectF(cell.center().x() - width / 2, cell.center().y() - height / 2, width, height)
+        background, foreground = badge_colors(badge, option.palette)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(color))
+        painter.setBrush(background)
         painter.drawRoundedRect(pill, height / 2, height / 2)
-        painter.setPen(QColor("#FFFFFF"))
+        painter.setPen(foreground)
         painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)
         painter.restore()
 
@@ -191,14 +205,13 @@ class PluginManager(BaseDialog):
         selected = self.selected_name()
         names = self.plugin_names()
         self.table.setRowCount(len(names))
-        accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight).name()
         for row, name in enumerate(names):
             kind, status, _ = plugin_status_kind(name)
             enabled = bool(cfg.user.setting.get(name, {}).get("enable", False))
             cells = (
                 (name[len(PLUGIN_PREFIX):], ""),
                 (status, BADGE_COLORS[kind]),
-                (tr("On") if enabled else tr("Off"), accent if enabled else BADGE_COLORS["off"]),
+                (tr("On") if enabled else tr("Off"), BADGE_COLORS["on" if enabled else "off"]),
             )
             for column, (text, badge) in enumerate(cells):
                 item = QTableWidgetItem(text)
@@ -234,7 +247,7 @@ class PluginManager(BaseDialog):
             return
         error = reload_plugin(name)
         if error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Plugin reloaded with error:<br>{error}"))
+            QMessageBox.warning(self, tr("Error"), trm(f"Plugin reloaded with error:<br>{tr(error)}"))
         self.refresh()
         self.show_detail()
 
@@ -251,11 +264,12 @@ class PluginManager(BaseDialog):
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to read plugin:<br>{error}"))
             return
         file_list = "<br>".join(html.escape(file) for file in files) or "-"
+        plugin_name = html.escape(name[len(PLUGIN_PREFIX):])
         if not self.confirm_operation(
             tr("Trust..."),
             (
                 "Plugins run as normal Python code with full access to your computer."
-                f"<br>Only trust <b>{name[len(PLUGIN_PREFIX):]}</b> if you reviewed its code or trust its author."
+                f"<br>Only trust <b>{plugin_name}</b> if you reviewed its code or trust its author."
                 f"<br><br>Code files:<br>{file_list}<br><br>SHA-256: <code>{digest[:32]}<br>{digest[32:]}</code>"
                 "<br><br>Trust this plugin? Any later code change requires trusting again."
             ),
@@ -269,7 +283,7 @@ class PluginManager(BaseDialog):
         if name in wctrl.names:
             load_error = reload_plugin(name)
             if load_error:
-                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{load_error}"))
+                QMessageBox.warning(self, tr("Error"), trm(f"Plugin loaded with error:<br>{tr(load_error)}"))
         self.refresh()
         self.show_detail()
 

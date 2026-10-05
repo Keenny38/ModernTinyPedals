@@ -46,7 +46,7 @@ def load_delta_best_file(
         return bestlist, laptime_best
     except FileNotFoundError:
         logger.info("MISSING: delta best (%s) data", extension)
-    except (IndexError, ValueError, TypeError, OSError):
+    except (IndexError, ValueError, TypeError, OSError, csv.Error):
         logger.info("MISSING: invalid delta best (%s) data", extension)
     return defaults
 

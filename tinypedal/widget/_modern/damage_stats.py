@@ -28,7 +28,8 @@ from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from ...const_common import TEXT_NA
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 ITEMS = (
@@ -45,6 +46,7 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "decimal_places",
         *(option for key, _ in ITEMS for option in (f"show_{key}_integrity", f"low_{key}_integrity_threshold")),
+        *display_order_options("damage_stats"),
     )
 
     def __init__(self, config, widget_name):
@@ -52,6 +54,10 @@ class Realtime(StatsMixin, ModernOverlay):
         self.decimals = max(int(self.wcfg["decimal_places"]), 0)
         sample = "100." + "8" * self.decimals + "%" if self.decimals else "100%"
         stats = [Stat(key, label, sample) for key, label in ITEMS if self.wcfg[f"show_{key}_integrity"]]
+        stats = self.display_ordered(stats, names={
+            "aero": "aero_integrity", "body": "body_integrity", "suspension": "suspension_integrity",
+            "tyre": "tyre_integrity",
+        })
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=self.wcfg["layout"] == 0)
         self.set_size(width, height)
@@ -83,5 +89,5 @@ class Realtime(StatsMixin, ModernOverlay):
             value = max(value, 0.0)
             low = value <= self.wcfg[f"low_{key}_integrity_threshold"]
             color = theme.negative if low else theme.positive
-            values.append(Value(f"{value:.{self.decimals}%}", theme.negative if low else None, bar=min(value, 1.0), bar_color=color))
+            values.append(Value(f"{value:.{self.decimals}%}", theme.negative if low else None, bar=fraction(value), bar_color=color))
         self.refresh(tuple(values))

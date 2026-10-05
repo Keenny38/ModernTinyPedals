@@ -2,26 +2,38 @@ name: Checks
 
 on:
   push:
+    branches: [master]  # other branches: checked through their pull request (no duplicate runs)
   pull_request:
   workflow_dispatch:
 
+# A newer push of the same branch or pull request cancels the outdated run
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   checks:
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.13", "3.14"]
+        python-version: ["3.11", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
 
     steps:
     - name: Checkout master
-      uses: actions/checkout@v6
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -32,8 +44,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt pytest pytest-cov ruff mypy
-        pip install pyxdg
+        pip install -r requirements.txt pytest pytest-cov pytest-timeout ruff mypy
       shell: bash
 
     - name: Lint
@@ -43,7 +54,8 @@ jobs:
       run: mypy tinypedal
 
     - name: Tests (with coverage)
-      run: pytest -v --cov=tinypedal --cov-report=term --cov-report=xml:coverage.xml
+      # A hung test (QML page load, worker process) fails after 5 minutes instead of blocking the runner
+      run: pytest -v --timeout=300 --cov=tinypedal --cov-report=term --cov-report=xml:coverage.xml
 
     - name: Widget benchmark
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
@@ -54,14 +66,17 @@ jobs:
 
     - name: Coverage summary
       if: always() && hashFiles('.coverage') != ''
+      env:
+        MATRIX_OS: ${{ matrix.os }}
+        PYTHON_VERSION: ${{ matrix.python-version }}
       run: |
-        echo "## Test coverage (${{ matrix.os }}, Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
+        echo "## Test coverage ($MATRIX_OS, Python $PYTHON_VERSION)" >> $GITHUB_STEP_SUMMARY
         python -m coverage report --format=markdown --skip-covered >> $GITHUB_STEP_SUMMARY
       shell: bash
 
     - name: Upload coverage report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
         path: coverage.xml
@@ -69,7 +84,7 @@ jobs:
 
     - name: Upload widget renders (visual review)
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: widget-renders-${{ matrix.os }}-py${{ matrix.python-version }}
         path: tests/_render/
@@ -78,16 +93,18 @@ jobs:
   visual-regression:
     # Compare widget renders with the base commit, rendered on the same runner (fonts & platform match)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         fetch-depth: 0
+        persist-credentials: false
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: "3.13"
 
@@ -95,36 +112,61 @@ jobs:
       run: |
         sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libgl1 libpulse0
         python -m pip install --upgrade pip
-        pip install -r requirements.txt pytest pyxdg
+        pip install -r requirements.txt pytest pytest-timeout
 
+    # Base: pull request base, or commit before the push (all pushed commits compared, not only the last one)
     - name: Find base commit
       id: base
+      env:
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PUSH_BEFORE_SHA: ${{ github.event.before }}
       run: |
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          echo "sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+        if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          base="$PR_BASE_SHA"
         else
-          echo "sha=$(git rev-parse HEAD~1 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          base="$PUSH_BEFORE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=$(git rev-parse HEAD~1 2>/dev/null || true)
+          fi
         fi
+        echo "sha=$base" >> "$GITHUB_OUTPUT"
+        # Intended visual change: before / after image added in docs/changes (tools/make_change_visual.py),
+        # or "[visual]" in a commit message. Changes are then reported without failing.
+        intended=false
+        if [ -n "$base" ]; then
+          added_visuals=$(git diff --name-only --diff-filter=A "$base" HEAD -- 'docs/changes/*.png')
+          if [ -n "$added_visuals" ] || git log --format=%B "$base..HEAD" | grep -qi '\[visual\]'; then
+            intended=true
+          fi
+        fi
+        echo "intended=$intended" >> "$GITHUB_OUTPUT"
 
     - name: Render widgets (changed)
       if: steps.base.outputs.sha != ''
       run: |
-        pytest tests/test_widget_render.py -q -p no:cacheprovider
+        pytest tests/test_widget_render.py -q -p no:cacheprovider --timeout=300
         mkdir -p visual && mv tests/_render visual/renders_new
 
     - name: Render widgets (base)
       if: steps.base.outputs.sha != ''
+      env:
+        BASE_SHA: ${{ steps.base.outputs.sha }}
       run: |
-        git worktree add "$RUNNER_TEMP/base" "${{ steps.base.outputs.sha }}"
-        cd "$RUNNER_TEMP/base" && pytest tests/test_widget_render.py -q -p no:cacheprovider || true
+        git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+        cd "$RUNNER_TEMP/base" && pytest tests/test_widget_render.py -q -p no:cacheprovider --timeout=300 || true
 
     - name: Compare renders
       if: steps.base.outputs.sha != ''
-      run: python tools/visual_diff.py "$RUNNER_TEMP/base/tests/_render" visual/renders_new visual/diff
+      env:
+        INTENDED: ${{ steps.base.outputs.intended }}
+      run: |
+        allow=""
+        if [ "$INTENDED" = "true" ]; then allow="--allow-changes"; fi
+        python tools/visual_diff.py $allow "$RUNNER_TEMP/base/tests/_render" visual/renders_new visual/diff
 
     - name: Upload visual diff
-      if: failure()
-      uses: actions/upload-artifact@v4
+      if: always() && steps.base.outputs.sha != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: widget-visual-diff
         path: visual/

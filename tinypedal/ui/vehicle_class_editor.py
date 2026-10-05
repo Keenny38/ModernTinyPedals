@@ -36,8 +36,9 @@ from ..api_control import api
 from ..const_common import EMPTY_DICT
 from ..const_file import ConfigType
 from ..formatter import random_color_class
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
+from ..validator import is_hex_color
 from ._common import (
     QVAL_COLOR,
     BaseEditor,
@@ -64,7 +65,7 @@ class VehicleClassEditor(BaseEditor):
         # Set table
         self.table_classes = QTableWidget(self)
         self.table_classes.setColumnCount(len(HEADER_CLASSES))
-        self.table_classes.setHorizontalHeaderLabels(HEADER_CLASSES)
+        self.table_classes.setHorizontalHeaderLabels([tr(name) for name in HEADER_CLASSES])
         self.table_classes.verticalHeader().setVisible(False)
         self.table_classes.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table_classes.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -201,8 +202,32 @@ class VehicleClassEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_setting()
-        self.accept()  # close
+        if self.save_setting():
+            self.accept()  # close
+
+    def verify_table(self) -> bool:
+        """Verify table before saving, warn if a class name is listed twice or a color is invalid"""
+        class_names = set()
+        for index in range(self.table_classes.rowCount()):
+            class_name = table_item(self.table_classes, index, 0).text()
+            color_string = cast(ColorEdit, self.table_classes.cellWidget(index, 2)).text()
+            if class_name in class_names:
+                msg_text = (
+                    f"<b>{class_name}</b> is listed more than once.<br><br>"
+                    "Each name can only be listed once, rename or delete duplicate rows."
+                )
+            elif not is_hex_color(color_string):
+                msg_text = (
+                    f"Invalid color <b>{color_string}</b> for <b>{class_name}</b>.<br><br>"
+                    "Use #RGB, #RRGGBB or #AARRGGBB format."
+                )
+            else:
+                class_names.add(class_name)
+                continue
+            self.table_classes.setCurrentCell(index, 0)  # show invalid row
+            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+            return False
+        return True
 
     def update_classes_temp(self):
         """Update temporary changes to class temp first"""
@@ -218,10 +243,13 @@ class VehicleClassEditor(BaseEditor):
                 "preset": loaded.get(class_name, EMPTY_DICT).get("preset", ""),
             }
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_classes_temp()
         cfg.user.classes = copy_setting(self.classes_temp)
         cfg.save(0, config_type=ConfigType.CLASSES)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True

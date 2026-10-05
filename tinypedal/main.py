@@ -20,7 +20,6 @@
 Launcher
 """
 
-import io
 import logging
 import os
 import sys
@@ -31,15 +30,15 @@ from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QIcon, QPixmapCache
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from . import realtime_state, version_check
+from . import realtime_state, safe_mode, version_check
 from .const_app import APP_NAME, PLATFORM, VERSION
 from .const_file import ConfigType, FontFile, LogFile
-from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language
-from .log_handler import set_logging_level
+from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
+from .log_handler import BoundedLogStream, set_logging_level
 from .setting import cfg
 
 logger = logging.getLogger(__package__)
-log_stream = io.StringIO()
+log_stream = BoundedLogStream()  # latest log text only (log dialog, bug report), see getvalue()
 
 
 def save_pid_file():
@@ -201,6 +200,34 @@ def load_overlay_themes():
     set_custom_themes(load_custom_themes(cfg.path.config, BUILTIN_THEMES))
 
 
+def ask_safe_mode() -> bool:
+    """Previous start did not finish: ask whether to start in safe mode"""
+    answer = QMessageBox.question(
+        None,
+        f"{APP_NAME} v{VERSION}",
+        tr("Modern Tiny Pedals did not finish starting last time.\n\n"
+           "Start in safe mode? Plugins and overlays are not started, so settings can be fixed, "
+           "then Modern Tiny Pedals restarted normally (Window menu, Restart Modern Tiny Pedals)."),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.Yes,
+    )
+    return answer == QMessageBox.StandardButton.Yes
+
+
+def check_safe_mode(flag: bool):
+    """Safe mode from command line flag, or asked when previous start did not finish (start
+    marked as under way until it finishes, see loader.start)"""
+    if flag:
+        safe_mode.state.enable("flag")
+    elif safe_mode.unfinished_start(cfg.path.config):
+        logger.warning("SAFE MODE: previous start did not finish")
+        if ask_safe_mode():
+            safe_mode.state.enable("crash")
+        else:
+            logger.info("SAFE MODE: declined, normal start")
+    safe_mode.write_marker(cfg.path.config)
+
+
 def start_app(cli_args):
     """Init main window"""
     single_instance_check(bool(cli_args.single_instance))
@@ -209,12 +236,14 @@ def start_app(cli_args):
     get_version()
     # load global config
     cfg.load_global()
-    load_overlay_themes()
     cfg.save(config_type=ConfigType.CONFIG)
     cfg.save(config_type=ConfigType.SHORTCUTS)
     set_environment()
     # Main GUI
     root = init_gui()
+    # Safe mode decided before widgets & plugins are imported (overlay themes import them)
+    check_safe_mode(bool(getattr(cli_args, "safe_mode", False)))
+    load_overlay_themes()
     # Load core modules
     from . import loader
     loader.start()

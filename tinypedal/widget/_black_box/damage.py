@@ -161,9 +161,13 @@ class DamagePainter:
                 painter.fillRect(part, color)
         painter.restore()
         # Thin outline keeps the car shape readable at a glance, whatever the damage
+        painter.strokePath(shapes.shell, self.damage_edge_pen())
+
+    def damage_edge_pen(self) -> QPen:
+        """Body shell outline"""
         edge = QColor(self.wcfg["damage_panel_body_color"]).lighter(150)
         edge.setAlpha(170)
-        painter.strokePath(shapes.shell, QPen(edge, max(self.unit * 0.05, 1)))
+        return QPen(edge, max(self.unit * 0.05, 1))
 
     def draw_damage_wheels(self, painter: QPainter, shapes: DamageGeometry, strength: float):
         wcfg = self.wcfg
@@ -200,8 +204,8 @@ class DamagePainter:
         source = "integrity_aero" if self.uses_aero_integrity() else "integrity_body"
         self.draw_fit_text(painter, shapes.caption, self.text[source], self.font_label, align)
         painter.setPen(color)
-        self.draw_fit_text(painter, shapes.integrity, f"{value:.0%}", self.grown_font(self.font(), shapes.integrity),
-                           align)
+        self.draw_fit_text(painter, shapes.integrity, self.integrity_text(value),
+                           self.grown_font(self.font(), shapes.integrity), align)
         gauge = shapes.gauge
         fill_chip(painter, gauge, wcfg["indicator_inactive_color"])
         if value > 0.005:
@@ -228,6 +232,10 @@ class DamagePainter:
             int(16 * (raw_angle - 90 - angle * 0.5)), int(16 * angle),
         )
         painter.restore()
+
+    def integrity_text(self, value: float) -> str:
+        """Integrity reading text"""
+        return f"{value:.0%}"
 
     def uses_aero_integrity(self) -> bool:
         return bool(self.wcfg["show_damage_panel_aero_integrity"]) and self.damage_aero >= 0

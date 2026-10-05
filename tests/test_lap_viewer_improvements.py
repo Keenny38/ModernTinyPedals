@@ -316,7 +316,7 @@ def test_worker_stopped_with_page_and_hooked_to_app_quit(viewer, laps):  # noqa:
     from tinypedal.ui.quick import lap_backend
 
     assert lap_backend.worker_pool() is not None and lap_backend._quit_hooked
-    handle = lap_backend.start_job("sleep", time.sleep, 30)
+    handle = lap_backend.start_job("sleep", time.sleep, 10)
     viewer.backend.release()  # page closed: worker & its job dropped
     assert lap_backend._worker is None
     handle.join()
@@ -581,7 +581,7 @@ def test_app_exit_waits_for_exports_only(laps):  # noqa: F811
 
     export = lap_backend.start_job("MoTeC export", time.sleep, 0.3)
     lap_backend.stop_worker(finish=True)  # viewer closed while exporting: export goes on
-    other = lap_backend.start_job("sleep", time.sleep, 30)
+    other = lap_backend.start_job("sleep", time.sleep, 10)
     start = time.monotonic()
     lap_backend.quit_workers()
     assert export.future.done() and not export.future.cancelled() and export.future.exception() is None
@@ -686,3 +686,40 @@ def test_playback_skip_and_speed(viewer, laps):  # noqa: F811
     for _ in speeds:
         call("changeSpeed", -1)
     assert chart.property("playSpeed") == speeds[0]
+
+
+# --- Cursor value bubbles: rows placed by bindings, not Column / Row (positioners lay out while frame is drawn and
+# ask for a second frame each cursor move: playback stutters), empty values skipped, bubble as wide as widest row
+def test_value_bubbles_without_positioners(viewer, laps):  # noqa: F811
+    from PySide6.QtCore import Q_ARG, QMetaObject
+    from PySide6.QtWidgets import QApplication
+
+    def tree(item):
+        yield item
+        for child in item.childItems():
+            yield from tree(child)
+
+    check_only(viewer, [laps[1], laps[2]])
+    chart = next(item for item in tree(viewer.view.rootObject())
+                 if item.metaObject().className().startswith("TraceChart"))
+    QMetaObject.invokeMethod(chart, "setCursor", Q_ARG("QVariant", chart.property("maxX") / 2),
+                             Q_ARG("QVariant", "pin"))
+    QApplication.processEvents()
+    bubbles = [item for item in tree(chart) if item.property("panelIndex") is not None]
+    assert bubbles
+    assert not any(item.metaObject().className().startswith(("QQuickColumn", "QQuickRow"))
+                   for bubble in bubbles for item in tree(bubble))
+    shown = 0
+    for bubble in bubbles:
+        if not bubble.isVisible():  # panel too small: values under channel name
+            continue
+        column = bubble.childItems()[0]
+        row_height = column.property("rowHeight")
+        rows = sorted((row for row in column.childItems()  # delegates of rows repeater, empty values hidden
+                       if row.isVisible() and not row.metaObject().className().startswith("QQuickRepeater")),
+                      key=lambda row: row.y())
+        assert [row.y() for row in rows] == pytest.approx([index * row_height for index in range(len(rows))])
+        assert column.height() == pytest.approx(len(rows) * row_height)
+        assert column.width() == pytest.approx(max((row.width() for row in rows), default=0))
+        shown += len(rows)
+    assert shown >= 2  # a value of each lap at least

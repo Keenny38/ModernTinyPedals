@@ -62,8 +62,11 @@ def test_release_date_in_current_language():
 
 
 @pytest.fixture
-def notes_page(ui_env):
+def notes_page(ui_env, monkeypatch):
+    from tinypedal.ui import release_notes
     from tinypedal.ui.release_notes import ReleaseNotesDialog
+
+    monkeypatch.setattr(release_notes, "app_version", "0.10.0")  # source checkout reports its last release
 
     pages = []
 

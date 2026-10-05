@@ -29,6 +29,7 @@ from .chassis import WIDGET_CHASSIS
 from .driver import WIDGET_DRIVER
 from .engine import WIDGET_ENGINE
 from .fuel import WIDGET_FUEL
+from .race_aids import WIDGET_RACE_AIDS
 from .standings import WIDGET_STANDINGS
 from .timing import WIDGET_TIMING
 from .track import WIDGET_TRACK
@@ -44,6 +45,7 @@ WIDGET_CATEGORIES = (
     WIDGET_STANDINGS,
     WIDGET_TRACK,
     WIDGET_DRIVER,
+    WIDGET_RACE_AIDS,
 )
 
 # Config dialog extras for widgets with many options: sections, simple mode, color themes,
@@ -67,6 +69,7 @@ WIDGET_DISPLAY_ORDER = (
     "cruise",
     "damage",
     "damage_stats",
+    "delta_graph",
     "deltabest",
     "deltabest_extended",
     "differential",
@@ -80,6 +83,7 @@ WIDGET_DISPLAY_ORDER = (
     "friction_circle",
     "fuel",
     "fuel_energy_saver",
+    "gap_trend",
     "gear",
     "heading",
     "instrument",
@@ -90,8 +94,10 @@ WIDGET_DISPLAY_ORDER = (
     "onboard_setting",
     "pace_notes",
     "pedal",
+    "pit_lane_helper",
     "pit_stop_estimate",
     "push_to_pass",
+    "race_notifications",
     "race_plan",
     "radar",
     "rake_angle",
@@ -106,11 +112,13 @@ WIDGET_DISPLAY_ORDER = (
     "slip_angle",
     "slip_ratio",
     "speedometer",
+    "spotter",
     "standings",
     "steering_angle",
     "steering_meter",
     "steering_wheel",
     "stint_history",
+    "stint_timer",
     "suspension_force",
     "suspension_position",
     "suspension_travel",
@@ -126,6 +134,7 @@ WIDGET_DISPLAY_ORDER = (
     "tyre_inner_layer",
     "tyre_load",
     "tyre_pressure",
+    "tyre_temp_trend",
     "tyre_temperature",
     "tyre_wear",
     "virtual_energy",

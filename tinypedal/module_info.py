@@ -291,6 +291,9 @@ class LicoTimer:
     Attributes:
         idling: time since last lico.
         elapsed: last recorded lico time.
+        input_time: telemetry time of throttle & brake read (unchanged until next telemetry update).
+        throttle: last throttle read.
+        brake: last brake read.
     """
 
     __slots__ = (
@@ -299,6 +302,9 @@ class LicoTimer:
         "_warmup_time",
         "idling",
         "elapsed",
+        "input_time",
+        "throttle",
+        "brake",
     )
 
     def __init__(self):
@@ -307,6 +313,9 @@ class LicoTimer:
         self._warmup_time = 0.0
         self.idling = 0.0
         self.elapsed = 0.0
+        self.input_time = -1.0
+        self.throttle = 0.0
+        self.brake = 0.0
 
     def update(self, elapsed_time: float, throttle_raw: float, brake_raw: float):
         """Update lico timer"""
@@ -664,6 +673,8 @@ class FuelInfo:
         "oneLessPitConsumption",
         "rateOfConsumption",
         "weight",
+        "consumptionMethod",
+        "consumptionLaps",
     )
 
     def __init__(self):
@@ -690,10 +701,17 @@ class FuelInfo:
         self.oneLessPitConsumption: float = 0.0
         self.rateOfConsumption: float = 0.0
         self.weight: float = 0.0
+        # Consumption estimate: "game" (estimate of game), "last_lap" (last valid lap),
+        # "median" (median of last valid green flag laps, consumptionLaps laps)
+        self.consumptionMethod: str = "game"
+        self.consumptionLaps: int = 0
 
 
 class HistoryInfo:
-    """History output data"""
+    """History output data
+
+    Data sets (deque) are iterated by GUI thread: never changed in place, replaced by a new one.
+    """
 
     __slots__ = (
         "consumptionDataVersion",
@@ -714,8 +732,7 @@ class HistoryInfo:
         """Reset stint data"""
         self.stintDataVersion = 0
         self.stintDataCurrent.reset()
-        self.stintDataSet.clear()
-        self.stintDataSet.appendleft(StintDataSet())
+        self.stintDataSet = deque([StintDataSet()], self.stintDataSet.maxlen)
 
 
 class HybridInfo:
@@ -917,6 +934,7 @@ class VehiclesInfo:
         "finishTimeOffset",
         "finishAsLap",
         "finishLapOffset",
+        "finishLapOffsetLeader",
     )
 
     def __init__(self):
@@ -941,6 +959,7 @@ class VehiclesInfo:
         self.finishTimeOffset: float = 0.0
         self.finishAsLap: bool = True
         self.finishLapOffset: float = 0.0
+        self.finishLapOffsetLeader: float = 0.0  # part of finishLapOffset from leader finishing first
 
 
 class WheelsInfo:

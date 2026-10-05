@@ -22,12 +22,14 @@ Overlay base common class.
 
 from __future__ import annotations
 
+from math import isfinite
 from time import monotonic
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QWidget
 
+from ..api_control import api
 from ..validator import generator_init
 
 
@@ -197,6 +199,17 @@ class MousePosition:
         pos.setX(new_x)
         pos.setY(new_y)
         return pos
+
+
+def game_deltabest(app_delta: float) -> float:
+    """Delta to best lap computed by game (LMU), app computed delta if game gives none (0)"""
+    delta = api.read.timing.delta_best()
+    return delta if delta and isfinite(delta) else app_delta
+
+
+def tyre_punctured() -> tuple[bool, ...]:
+    """Flat tyre state from game, or tyre worn through (tread at 1% or less, game state missed)"""
+    return tuple(flat or worn for flat, worn in zip(api.read.tyre.flat(), api.read.tyre.puncture()))
 
 
 @generator_init

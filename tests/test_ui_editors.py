@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -313,6 +314,10 @@ def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeyp
 
     monkeypatch.setattr(vehicle_brand_editor, "resolve_hostname", refused)
     brand_editor.import_from_lmu()
+    # Request runs in background: warning shown once its answer comes back
+    deadline = time.monotonic() + 5
+    while not editor_env.warnings and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
     assert editor_env.warnings
 
 

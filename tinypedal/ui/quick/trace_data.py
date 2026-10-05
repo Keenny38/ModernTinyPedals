@@ -26,6 +26,7 @@ computed channels (wheel slip, steering rate...), smoothing of noisy channels.
 from __future__ import annotations
 
 import math
+import zlib
 from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
 from itertools import accumulate
@@ -37,12 +38,14 @@ from ...userfile.telemetry_lap import (
     delta_to_curve,
     distance_scale,
     interpolate,
+    lap_time_curve,
     monotonic_distance,
     sector_bounds,
 )
 from ..lap_viewer import (
     CHANNEL_MAP,
     DELTA_CHANNELS,
+    MATH_PREFIX,
     SETTING_CHANNELS,
     WHEELS,
     Channel,
@@ -51,11 +54,13 @@ from ..lap_viewer import (
     display_units,
     format_channel_value,
 )
+from .math_channels import YAW_RATE, MathError, derivative, evaluate, input_names, parse_expression, unwrapped
 
 ENVELOPE_POINTS = 1500  # grid points of min / max band over displayed laps
 SLIP_MIN_SPEED = 30.0  # km/h, wheel slip not computed slower (division by small speed)
 SLIP_ANGLE_MIN_SPEED = 5.0  # m/s, body slip angle not computed slower
 PLACEMENT_COLUMNS = ("path_lateral", "track_position")  # measured on map when circuit & edges known
+AUTOSCALE_MARGIN = 0.05  # share of visible value range added above & below (autoscaled panel)
 
 
 def moving_average(values: Sequence[float], points: int) -> list[float]:
@@ -89,6 +94,9 @@ class TraceData:
     Cached series of laps still shown are kept when laps change (only new laps are computed),
     those depending on reference lap (delta) only while reference stays the same.
     Delta is measured against reference lap, or against ideal lap (fastest clean shown lap in each mini-sector).
+    Laps aligned on a braking point (offsets) are shifted along distance axis: same braking start on charts
+    (deltas & time axis never shifted).
+    Math channels (user expressions) are computed from recorded & computed channels of each lap.
     """
 
     def __init__(self):
@@ -105,6 +113,7 @@ class TraceData:
         self.delta_window = 40.0  # meters, time gain/loss measured over
         self.units = display_units()
         self._times: dict[str, tuple[Sequence[float], Sequence[float]]] = {}
+        self._samples: dict[str, Sequence[float]] = {}  # lap time of each recorded sample (no lap start & end)
         self._series: dict[tuple, tuple[Sequence[float], Sequence[float]]] = {}
         self._ranges: dict[tuple, tuple[float, float]] = {}
         self._mini: dict | None = None
@@ -114,6 +123,31 @@ class TraceData:
         # distances, distance to track middle (m, left positive), track position (%): every lap, even without game data
         self.placements: dict[str, tuple[list[float], list[float], list[float]]] = {}
         self.placement_version = 0
+        self.offsets: dict[str, float] = {}  # lap key: meters added along distance axis (aligned on braking point)
+        self.math: dict[str, str] = {}  # math channel column: expression
+        self._math_names: dict[str, list[str] | None] = {}  # expression: channel names used (None: invalid)
+
+    def set_math(self, expressions: dict[str, str]):
+        """Math channel expressions by column: series of changed ones computed again"""
+        changed = {column for column in set(self.math) | set(expressions)
+                   if self.math.get(column) != expressions.get(column)}
+        self.math = dict(expressions)
+        if changed:
+            self._series = {key: value for key, value in self._series.items() if key[1] not in changed}
+            self._ranges = {}
+
+    def set_offsets(self, offsets: dict[str, float]):
+        """Distance added to each lap along distance axis (0: not shifted), shifted series computed again"""
+        offsets = {key: value for key, value in offsets.items() if value}
+        if offsets != self.offsets:
+            self.offsets = offsets
+            self._series = {key: value for key, value in self._series.items() if not key[3]}
+            self._ranges = {}
+
+    def shift_of(self, lap: PlotLap, time_axis: bool | None = None) -> float:
+        """Meters lap is shifted by on distance axis (none on time axis)"""
+        use_time = self.time_axis if time_axis is None else time_axis
+        return 0.0 if use_time else self.offsets.get(lap.key, 0.0)
 
     def set_placements(self, placements: dict[str, tuple[list[float], list[float], list[float]]]):
         """Lap placements measured on map (track position & distance to center series drawn again)"""
@@ -164,6 +198,7 @@ class TraceData:
             if key[0] in kept and (same_reference or key[1] not in DELTA_CHANNELS)
         }
         self._times = {key: value for key, value in self._times.items() if key in kept}
+        self._samples = {key: value for key, value in self._samples.items() if key in kept}
         self._ranges = {}
         self._mini = None
         self._ideal = None
@@ -179,7 +214,8 @@ class TraceData:
         if not self.units_changed():
             return False
         self.units = display_units()
-        self._series = {key: value for key, value in self._series.items() if not CHANNEL_MAP[key[1]].quantity}
+        self._series = {key: value for key, value in self._series.items()  # removed math channels dropped too
+                        if key[1] in CHANNEL_MAP and not CHANNEL_MAP[key[1]].quantity}
         self._ranges = {}
         return True
 
@@ -210,9 +246,11 @@ class TraceData:
 
     # Mini-sectors & ideal lap: lap split in equal parts, fastest clean shown lap in each part
     def mini_sectors(self) -> dict:
-        """Mini-sector bounds (reference distances), winner lap index & time of each lap in each part, ideal time
+        """Mini-sector bounds (reference distances, lap start to lap end), winner lap index & time of each lap in
+        each part, ideal time
 
-        Invalid, out & in laps never win a part (cut track) unless no clean lap is shown.
+        Invalid, out & in laps never win a part (cut track) unless no clean lap is shown. Laps of another circuit
+        & laps without lap time never do.
         """
         reference = self.reference
         if reference is None or len(reference.data) < 2:
@@ -221,10 +259,11 @@ class TraceData:
             return self._mini
         from .lap_map import mini_sector_bounds, mini_sector_times, mini_sector_winners
 
-        bounds = mini_sector_bounds(reference.data.distance[-1])
-        usable = [lap.clean for lap in self.laps]
+        bounds = mini_sector_bounds(self.lap_end(reference))
+        comparable = [lap.comparable and "lap_time" in lap.data.columns for lap in self.laps]
+        usable = [lap.clean and use for lap, use in zip(self.laps, comparable)]
         if not any(usable):
-            usable = [True] * len(self.laps)
+            usable = comparable
         times: list[list[float]] = []
         for lap, use in zip(self.laps, usable):
             if not use:
@@ -288,7 +327,8 @@ class TraceData:
         """Moving average of noisy channels (series recomputed)"""
         if points != self.smoothing:
             self.smoothing = points
-            self._series = {key: value for key, value in self._series.items() if not CHANNEL_MAP[key[1]].noisy}
+            self._series = {key: value for key, value in self._series.items()  # removed math channels dropped too
+                            if key[1] in CHANNEL_MAP and not CHANNEL_MAP[key[1]].noisy}
             self._ranges = {}
 
     def set_delta_window(self, meters: float):
@@ -312,20 +352,36 @@ class TraceData:
             parts.append(f"w{self.delta_window:g}")
         if channel.column in PLACEMENT_COLUMNS:
             parts.append(f"p{self.placement_version}")
+        if channel.column in self.math:  # expression edited: drawn again
+            parts.append(f"x{zlib.crc32(self.math[channel.column].encode('utf-8')):x}")
         return "|".join(parts)
 
     # Axis conversion
     def lap_times(self, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
-        """Distances & lap times of lap, increasing distance"""
+        """Distances & lap times of lap, increasing distance, from lap start to lap end (see lap_time_curve)"""
         cached = self._times.get(lap.key)
         if cached is None:
             if "lap_time" in lap.data.columns:
-                cached = monotonic_distance(lap.data, "lap_time")
+                cached = lap_time_curve(lap.data)
             else:  # no time recorded: distance used
                 distances = monotonic_distance(lap.data, "distance")[0]
                 cached = (distances, list(distances))
             self._times[lap.key] = cached
         return cached
+
+    def sample_times(self, lap: PlotLap) -> Sequence[float]:
+        """Lap time of each recorded sample by increasing distance (same samples as recorded channels)"""
+        cached = self._samples.get(lap.key)
+        if cached is None:
+            cached = (monotonic_distance(lap.data, "lap_time")[1] if "lap_time" in lap.data.columns
+                      else self.lap_times(lap)[1])
+            self._samples[lap.key] = cached
+        return cached
+
+    def lap_end(self, lap: PlotLap) -> float:
+        """Lap distance at lap end: track length if lap reaches the line (see lap_time_curve), else last sample"""
+        distances = self.lap_times(lap)[0]
+        return distances[-1] if distances else (lap.data.distance[-1] if len(lap.data) else 0.0)
 
     def x_at_distance(self, distance: float) -> float:
         """Axis position of reference lap distance"""
@@ -346,6 +402,7 @@ class TraceData:
         at that lap time"""
         if not self.time_axis:
             scale = self.scale_of(lap)
+            x -= self.shift_of(lap)
             return x / scale if scale != 1.0 else x
         distances, times = self.lap_times(lap)
         return interpolate(times, distances, x) if times else x
@@ -353,7 +410,7 @@ class TraceData:
     def x_at_lap_distance(self, lap: PlotLap, distance: float) -> float:
         """Axis position of lap at its own distance"""
         if not self.time_axis:
-            return distance * self.scale_of(lap)
+            return distance * self.scale_of(lap) + self.shift_of(lap)
         distances, times = self.lap_times(lap)
         return interpolate(distances, times, distance) if distances else distance
 
@@ -376,7 +433,7 @@ class TraceData:
         if self.time_axis:
             return max((self.lap_times(lap)[1][-1] for lap in self.laps if self.lap_times(lap)[1]),
                        default=1.0) or 1.0
-        return max((lap.data.distance[-1] * self.scale_of(lap) for lap in self.laps if len(lap.data)),
+        return max((self.lap_end(lap) * self.scale_of(lap) for lap in self.laps if len(lap.data)),
                    default=1.0) or 1.0
 
     # Values
@@ -393,6 +450,8 @@ class TraceData:
             return bool(self.deltas)
         if channel.column in PLACEMENT_COLUMNS and any(lap.key in self.placements for lap in self.laps):
             return True
+        if channel.column.startswith(MATH_PREFIX):
+            return any(self.math_available(channel.column, lap) for lap in self.laps)
         sources = channel_sources(channel)
         return any(
             all(source in lap.data.columns for source in sources)
@@ -402,11 +461,84 @@ class TraceData:
             for lap in self.laps
         )
 
+    # Math channels: expression over recorded & computed channels of each lap, on its recorded samples
+    def math_names(self, column: str) -> list[str] | None:
+        """Channel names used by math channel expression, None if not a valid expression"""
+        expression = self.math.get(column, "")
+        if expression not in self._math_names:
+            try:
+                self._math_names[expression] = input_names(parse_expression(expression))
+            except MathError:
+                self._math_names[expression] = None
+        return self._math_names[expression]
+
+    def math_available(self, column: str, lap: PlotLap) -> bool:
+        """Whether every input of math channel is recorded (or can be computed) in lap"""
+        names = self.math_names(column)
+        if names is None:
+            return False
+        columns = lap.data.columns
+        for name in names:
+            if name == YAW_RATE:
+                found = "yaw" in columns and "lap_time" in columns
+            elif name in columns:
+                found = True
+            else:
+                channel = CHANNEL_MAP.get(name)
+                if channel is None or channel.parts or name.startswith(MATH_PREFIX):
+                    found = False
+                elif name in DELTA_CHANNELS:
+                    found = lap.key in self.deltas
+                else:
+                    found = all(source in columns for source in channel_sources(channel))
+            if not found:
+                return False
+        return True
+
+    def math_input(self, lap: PlotLap, name: str) -> tuple[Sequence[float], Sequence[float]] | None:
+        """Distances & values of a math channel input: recorded column, computed channel or yaw rate (radians
+        per second), None if missing"""
+        columns = lap.data.columns
+        if name == YAW_RATE:
+            if "yaw" not in columns or "lap_time" not in columns:
+                return None
+            distances, yaws = monotonic_distance(lap.data, "yaw")
+            return distances, derivative(unwrapped(yaws), monotonic_distance(lap.data, "lap_time")[1])
+        if name in columns:
+            return monotonic_distance(lap.data, name)
+        channel = CHANNEL_MAP.get(name)
+        if channel is None or channel.parts or name.startswith(MATH_PREFIX):
+            return None
+        found = self.computed(channel, lap)
+        return found if len(found[0]) > 1 else None
+
+    def math_series(self, column: str, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
+        """Distances & values of math channel along recorded samples of lap, empty if an input is missing"""
+        names = self.math_names(column)
+        grid = monotonic_distance(lap.data, "distance")[0] if len(lap.data) else []
+        if names is None or len(grid) < 2:
+            return [], []
+        inputs: dict[str, Sequence[float]] = {}
+        for name in names:
+            found = self.math_input(lap, name)
+            if found is None:
+                return [], []
+            distances, values = found
+            same = len(distances) == len(grid) and distances[0] == grid[0] and distances[-1] == grid[-1]
+            inputs[name] = values if same else resample_sorted(distances, values, grid)
+        times = monotonic_distance(lap.data, "lap_time")[1] if "lap_time" in lap.data.columns else grid
+        try:
+            return grid, evaluate(self.math.get(column, ""), inputs, times, len(grid))
+        except (MathError, ArithmeticError):
+            return [], []
+
     def computed(self, channel: Channel, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
         """Distances & values of channel (recorded or computed) by increasing distance, recorded unit"""
         column = channel.column
         columns = lap.data.columns
         distances: Sequence[float]
+        if column.startswith(MATH_PREFIX):
+            return self.math_series(column, lap)
         if column == "delta":
             return self.deltas.get(lap.key, ([], []))
         if column == "delta_rate":
@@ -468,13 +600,24 @@ class TraceData:
             ]
         return monotonic_distance(lap.data, column)
 
-    def series(self, channel: Channel, lap: PlotLap, time_axis: bool | None = None,
+    def series(self, channel: Channel, lap: PlotLap, time_axis: bool | None = None, aligned: bool = True,
                ) -> tuple[Sequence[float], Sequence[float]]:
-        """Channel samples of lap by increasing axis position, in user units, cached"""
+        """Channel samples of lap by increasing axis position, in user units, cached
+
+        Args:
+            aligned: lap shifted like on charts (aligned on a braking point), else at its place on track.
+        """
         use_time = self.time_axis if time_axis is None else time_axis
-        key = (lap.key, channel.column, use_time)
+        along_reference = channel.column in DELTA_CHANNELS  # delta distances are reference distances already
+        shift = self.shift_of(lap, use_time) if aligned and not along_reference else 0.0
+        key = (lap.key, channel.column, use_time, shift)
         cached = self._series.get(key)
         if cached is not None:
+            return cached
+        if shift:  # same values as on track, shifted
+            xs, ys = self.series(channel, lap, use_time, aligned=False)
+            cached = ([x + shift for x in xs], ys)
+            self._series[key] = cached
             return cached
         distances, values = self.computed(channel, lap)
         convert = self.units.get(channel.quantity, (None, ""))[0] if channel.quantity else None
@@ -484,11 +627,12 @@ class TraceData:
             values = moving_average(values, self.smoothing)
         xs = distances
         scale = self.scale_of(lap)
-        along_reference = channel.column in DELTA_CHANNELS  # delta distances are reference distances already
         if use_time and distances:
             lap_distances, times = self.lap_times(lap)
-            if len(lap_distances) == len(distances):  # same samples
-                xs = times
+            # Same samples: delta has one point per lap time curve point, recorded channels one per sample
+            same = times if along_reference else self.sample_times(lap)
+            if len(same) == len(distances):
+                xs = same
             else:
                 factor = 1 / scale if along_reference else 1.0
                 xs = [interpolate(lap_distances, times, distance * factor) for distance in distances]
@@ -525,6 +669,27 @@ class TraceData:
             result = (low - padding, high + padding)
         self._ranges[key] = result
         return result
+
+    def visible_range(self, channel: Channel, start: float, end: float) -> tuple[float, float]:
+        """Value range of shown laps between axis positions (margin added), whole lap range if no value there
+
+        Samples just outside are counted too: lines reaching panel edges stay inside panel.
+        """
+        low, high = math.inf, -math.inf
+        for part in channel.parts or (channel.column,):
+            for lap in self.laps:
+                xs, ys = self.series(CHANNEL_MAP[part], lap)
+                first, last = max(bisect_left(xs, start) - 1, 0), min(bisect_right(xs, end) + 1, len(xs))
+                if first < last:
+                    shown = ys[first:last]
+                    low, high = min(low, min(shown)), max(high, max(shown))
+        if low > high:
+            return self.value_range(channel)
+        if high - low < 1e-6:  # flat line: kept in panel middle
+            half = max(abs(high) * AUTOSCALE_MARGIN, 0.01)
+            return low - half, high + half
+        padding = (high - low) * AUTOSCALE_MARGIN
+        return low - padding, high + padding
 
     def value_at(self, channel: Channel, lap: PlotLap, x: float) -> float | None:
         """Value of lap at axis position, None past end of lap"""
@@ -577,7 +742,7 @@ class TraceData:
             time_taken = interpolate(distances, times, finish) - interpolate(distances, times, begin)
             values = []
             for channel in channels:
-                xs, ys = self.series(channel, lap, time_axis=False)  # reference distances
+                xs, ys = self.series(channel, lap, time_axis=False, aligned=False)  # reference distances
                 low, high = bisect_left(xs, low_distance), bisect_right(xs, high_distance)
                 part = ys[low:high]
                 values.append((min(part), max(part), sum(part) / len(part)) if part else None)

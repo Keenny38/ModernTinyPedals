@@ -19,7 +19,8 @@
 """
 Brake pressure Widget, modern design
 
-Brake pressure per wheel with gauge.
+Brake pressure per wheel with gauge, mark of raw brake input split by brake bias (pressure
+asked by pedal, compare with pressure applied).
 """
 
 from __future__ import annotations
@@ -31,12 +32,17 @@ from .gauge_quad import GaugeQuad
 class Realtime(GaugeQuad):
     """Draw widget"""
 
-    options = GaugeQuad.common_options
+    options = (*GaugeQuad.common_options, "show_brake_input")
     label = "Brake pressure"
 
     def read(self) -> tuple:
         theme = self.theme
+        marks: tuple[float, ...] = (-1.0,) * 4
+        if self.wcfg["show_brake_input"]:
+            brake = max(api.read.inputs.brake_raw(), 0.0)
+            bias = api.read.brake.bias_front()
+            marks = (brake * bias, brake * bias, brake * (1 - bias), brake * (1 - bias))
         return tuple(
-            self.gauge(value, value, value / 100, theme.accent)
-            for value in api.read.brake.pressure(scale=100)
+            self.gauge(value, value, value / 100, theme.accent, mark=mark)
+            for value, mark in zip(api.read.brake.pressure(scale=100), marks)
         )

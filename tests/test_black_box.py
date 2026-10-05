@@ -26,6 +26,7 @@ def widget(ui_env, monkeypatch):
             wear=lambda: (0.9, 0.8, 0.5, 0.2),
             surface_temperature_ico=lambda: (70.0, 80.0, 90.0) * 4,
             puncture=lambda: (False, False, False, True),
+            flat=lambda: (False, False, False, False),
             compound_class=lambda: ("", "", "", ""),
         ),
         brake=SimpleNamespace(temperature=lambda: (400.0, 410.0, 300.0, 310.0), bias_front=lambda: 0.56),

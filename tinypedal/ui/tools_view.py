@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr
+from . import draw_focus_ring
 from ._common import UIScaler, find_dialog_host
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ class ToolCard(QAbstractButton):
         painter.setPen(accent if hover else border)
         painter.setBrush(fill)
         painter.drawRoundedRect(area, radius, radius)
+        draw_focus_ring(painter, self, area, radius)
         # Icon
         icon_size = area.height()
         icon_font = QFont(self.icon_font)

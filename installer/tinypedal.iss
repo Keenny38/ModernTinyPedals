@@ -49,6 +49,11 @@ Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; Program files of previous version: lib is rebuilt by each release (Python, Qt & QML modules change),
+; stale files would pile up. User data (presets, telemetry...) is next to the executable, not in lib.
+Type: filesandordirs; Name: "{app}\lib"
+
 [Files]
 Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

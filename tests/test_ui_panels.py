@@ -24,18 +24,18 @@ def test_fuel_history_table_keeps_its_columns_and_highlight(ui_env):
 
     dialog = RaceCalculator(None)
     try:
-        dialog.panel_history.refresh([lap(1), lap(2, valid=False), lap(3)])
-        table = dialog.panel_history.table_history
-        assert table.rowCount() == 3
-        assert table.columnCount() == 10
-        assert table.item(0, 0).text() == "1"  # lap number
-        assert table.item(0, 1).text() == "1:36.000"  # lap time, formatted
-        # Only the invalid lap's time is recoloured; the rows around it are not
-        invalid = table.item(1, 1).foreground().color().name()
-        assert invalid == "#ff4400"
-        assert table.item(0, 1).foreground().color().name() != invalid
+        backend = dialog.backend
+        backend.refresh_history([lap(1), lap(2, valid=False), lap(3)])
+        history = backend.history
+        rows = history["rows"]
+        assert len(rows) == 3
+        assert len(history["columns"]) == 10 and all(len(row["cells"]) == 10 for row in rows)
+        assert rows[0]["cells"][0] == "1"  # lap number
+        assert rows[0]["cells"][1] == "1:36.000"  # lap time, formatted
+        # Only the invalid lap is marked (its time, fuel & energy shown in invalid color)
+        assert [row["valid"] for row in rows] == [True, False, True] and history["invalidColor"] == "#FF4400"
         # A column without a highlight colour is still filled in
-        assert table.item(1, 0).text() == "2"
+        assert rows[1]["cells"][0] == "2"
     finally:
         dialog.close()
         dialog.deleteLater()
@@ -46,8 +46,8 @@ def test_fuel_history_table_accepts_an_empty_history(ui_env):
 
     dialog = RaceCalculator(None)
     try:
-        dialog.panel_history.refresh([])
-        assert dialog.panel_history.table_history.rowCount() == 0
+        dialog.backend.refresh_history([])
+        assert dialog.backend.history["rows"] == [] and dialog.backend.history["empty"]
     finally:
         dialog.close()
         dialog.deleteLater()
@@ -88,23 +88,25 @@ def test_unit_hint_handles_any_stored_number(value):
 
 
 def test_module_list_search_filter_and_switch(ui_env):
-    from tinypedal.module_control import wctrl
+    from tinypedal.module_control import mctrl
     from tinypedal.ui.module_view import FILTER_ACTIVE, FILTER_INACTIVE, ModuleList, ToggleSwitch
 
-    for name in wctrl.names:
-        cfg.user.setting[name]["enable"] = name == "flag"
-    view = ModuleList(None, wctrl)
+    names = list(mctrl.names)
+    first = names[0]
+    for name in names:
+        cfg.user.setting[name]["enable"] = name == first
+    view = ModuleList(None, mctrl)
     try:
         visible = lambda: {name for name, item in view.items.items() if not item.isHidden()}
-        assert len(visible()) == len(wctrl.names)
-        view.search_box.setText("brake")
-        assert visible() and all("brake" in name for name in visible())
+        assert len(visible()) == len(names)
+        view.search_box.setText("module")
+        assert visible() and all("module" in name for name in visible())
         view.search_box.clear()
         view.filter_group.button(FILTER_ACTIVE).click()
-        assert visible() == {"flag"}
+        assert visible() == {first}
         view.filter_group.button(FILTER_INACTIVE).click()
-        assert "flag" not in visible() and len(visible()) == len(wctrl.names) - 1
-        switch = view.listbox_module.itemWidget(view.items["flag"]).button_toggle
+        assert first not in visible() and len(visible()) == len(names) - 1
+        switch = view.listbox_module.itemWidget(view.items[first]).button_toggle
         assert isinstance(switch, ToggleSwitch) and switch.isChecked()
         view.grab()
     finally:

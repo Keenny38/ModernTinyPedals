@@ -39,7 +39,7 @@ from ..userfile.car_setup import (
 from ..userfile.driver_history import append_record, session_record, worth_recording
 from ..userfile.driver_stats import DriverStats, load_driver_stats, save_driver_stats
 from ..validator import generator_init
-from ._base import DataModule
+from ._base import MODULE_STOP, DataModule
 
 
 class Realtime(DataModule):
@@ -93,6 +93,8 @@ class Realtime(DataModule):
                 if reset:
                     reset = False
                     update_interval = self.idle_interval
+
+        self.save_on_stop(gen_record_driver_stats, gen_auto_backup_car_setup)
 
 
 def stats_keys(vehicle_classification: str) -> tuple[str, str]:
@@ -172,8 +174,8 @@ def record_driver_stats(
                     ))
                 delayed_save = False
 
-            # Delay reset until driving
-            if not realtime_state.active:
+            # Delay reset until driving (module stopping: data saved only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 
@@ -324,8 +326,8 @@ def auto_backup_car_setup(filepath: str):
                     )
                 data_available = False
 
-            # Delay reset until driving
-            if not realtime_state.active:
+            # Delay reset until driving (module stopping: data saved only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 

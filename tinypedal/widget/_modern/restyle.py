@@ -22,10 +22,13 @@ Modern overlay design: classic drawing in modern design colors & font
 For graphic widgets (maps, radar, circles, plots) whose drawing is already custom: the classic
 widget draws, with options still at default value replaced by design values: design font,
 panel color as background, theme colors by role. Options customized by user are kept.
+Colors the design does not replace stay classic colors (recolored by overlay theme palette),
+their options are shown so they can still be customized.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from PySide6.QtGui import QColor
@@ -38,11 +41,22 @@ from .theme import build_theme
 DESIGN_WEIGHT = "Semi Bold"
 
 
-def restyled_options(name: str) -> tuple[str, ...]:
-    """Options shown for restyled widget: all but colors & font face (design sets them)"""
+BACKGROUND_OPTIONS = ("background_color",)
+
+
+def restyled_options(name: str, color_tokens: Iterable[str] = (),
+                     background_options: Iterable[str] = BACKGROUND_OPTIONS) -> tuple[str, ...]:
+    """Options shown for restyled widget: all but font face & colors design sets (background
+    & color_tokens of widget class); other colors stay customizable
+
+    Color options are those holding a color string: on/off options with "color" in name
+    (show_custom_player_color_in_multi_class...) stay shown.
+    """
+    remapped = {*color_tokens, *background_options}
     return tuple(
-        key for key in WIDGET_DEFAULT.get(name, {})
-        if "color" not in key and not key.endswith(("font_name", "font_weight"))
+        key for key, value in WIDGET_DEFAULT.get(name, {}).items()
+        if not ("color" in key and isinstance(value, str) and key in remapped)
+        and not key.endswith(("font_name", "font_weight"))
     )
 
 
@@ -51,7 +65,7 @@ class Restyled:
 
     # Option -> theme token, or (token, alpha) to set alpha (default: keep alpha of default color)
     color_tokens: ClassVar[dict[str, str | tuple[str, int]]] = {}
-    background_options: ClassVar[tuple[str, ...]] = ("background_color",)
+    background_options: ClassVar[tuple[str, ...]] = BACKGROUND_OPTIONS
 
     cfg: Any
     widget_name: Any

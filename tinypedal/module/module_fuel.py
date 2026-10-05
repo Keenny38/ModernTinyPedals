@@ -18,12 +18,19 @@
 
 """
 Fuel module
+
+Consumption per lap estimate: last valid lap (default), or median of the last valid green flag
+laps (option): laps under full course yellow or safety car, pit in & out laps and invalid laps
+(lap time or track limits) left out, last valid lap used until enough green flag laps are driven.
+Game estimate until a lap of car & track is recorded.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from math import ceil
+from statistics import median
 
 from .. import calculation as calc
 from .. import realtime_state
@@ -34,7 +41,13 @@ from ..const_file import FileExt
 from ..module_info import FuelInfo, minfo
 from ..userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 from ..validator import generator_init, valid_delta_raw
-from ._base import DataModule, round6
+from ._base import MODULE_STOP, DataModule, round6
+
+# Consumption estimate method in use (FuelInfo.consumptionMethod)
+METHOD_GAME = "game"  # game estimate, no lap of car & track recorded yet
+METHOD_LAST_LAP = "last_lap"  # last valid lap
+METHOD_MEDIAN = "median"  # median of last valid green flag laps
+MEDIAN_MIN_LAPS = 3  # green flag laps needed before median replaces last valid lap
 
 
 class Realtime(DataModule):
@@ -51,6 +64,10 @@ class Realtime(DataModule):
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval
+        green_flag_laps = (
+            max(self.mcfg["number_of_green_flag_laps"], 1)
+            if self.mcfg["enable_green_flag_consumption"] else 0
+        )
 
         gen_fuel_usage = calc_consumption(
             output=minfo.fuel,
@@ -59,6 +76,7 @@ class Realtime(DataModule):
             extension=FileExt.FUEL,
             min_delta_distance=self.mcfg["minimum_delta_distance"],
             fuel_density=max(self.mcfg["fuel_density"], 0.0),
+            green_flag_laps=green_flag_laps,
         )
         gen_energy_usage = calc_consumption(
             output=minfo.energy,
@@ -67,6 +85,7 @@ class Realtime(DataModule):
             extension=FileExt.ENERGY,
             min_delta_distance=self.mcfg["minimum_delta_distance"],
             fuel_density=0.0,
+            green_flag_laps=green_flag_laps,
         )
 
         while not _event_wait(update_interval):
@@ -98,6 +117,8 @@ class Realtime(DataModule):
                 if reset:
                     reset = False
                     update_interval = self.idle_interval
+
+        self.save_on_stop(gen_fuel_usage, gen_energy_usage)
 
 
 def detect_consumption_type(is_energy: bool) -> Callable:
@@ -140,6 +161,18 @@ def expected_energy() -> float:
     return api.read.engine.expected_energy_consumption()
 
 
+def under_full_course_yellow() -> bool:
+    """Full course yellow or safety car: taken at the line, or yellow flag state of session"""
+    return api.read.vehicle.under_yellow() or api.read.session.yellow_flag_state() > 0
+
+
+def green_flag_median(laps: deque[float], minimum: int) -> float:
+    """Median consumption of green flag laps, 0 while fewer than minimum laps"""
+    if len(laps) < max(minimum, 1):
+        return 0.0
+    return median(laps)
+
+
 @generator_init
 def calc_consumption(
     output: FuelInfo,
@@ -148,8 +181,14 @@ def calc_consumption(
     extension: str,
     min_delta_distance: float,
     fuel_density: float,
+    green_flag_laps: int = 0,
 ):
-    """Calculate consumption data"""
+    """Calculate consumption data
+
+    Args:
+        green_flag_laps: estimate from median of this many last valid green flag laps, 0 = from
+            last valid lap (laps under yellow & invalid laps count as valid then).
+    """
     last_reset = None  # reset check
     delayed_save = False
 
@@ -157,6 +196,10 @@ def calc_consumption(
     delta_array_last: tuple[tuple[float, ...], ...] = ()
     used_last_valid = 0.0
     laptime_pace = 0.0
+    use_median = green_flag_laps > 0
+    median_min_laps = min(MEDIAN_MIN_LAPS, max(green_flag_laps, 1))
+    green_laps: deque[float] = deque(maxlen=max(green_flag_laps, 1))  # kept over resets of same car & track
+    green_combo = ""
 
     while True:
         reset = yield None
@@ -173,8 +216,8 @@ def calc_consumption(
                 )
                 delayed_save = False
 
-            # Delay reset until driving
-            if not realtime_state.active:
+            # Delay reset until driving (module stopping: data saved only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 
@@ -184,10 +227,15 @@ def calc_consumption(
             delayed_save = False
             validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
+            is_yellow_lap = False  # lap under full course yellow or safety car (median only)
+            is_invalid_lap = False  # lap invalidated by game, track limits (median only)
 
             telemetry_func = detect_consumption_type(is_energy)
             expected_func = expected_energy if is_energy else expected_fuel  # until a lap is recorded
             combo_name = api.read.session.combo_name()
+            if green_combo != combo_name:
+                green_combo = combo_name
+                green_laps.clear()
 
             delta_array_last, used_last_valid, laptime_pace = load_fuel_delta_file(
                 filepath=filepath,
@@ -260,7 +308,9 @@ def calc_consumption(
 
         # Lap start & finish detection
         if lap_stime > last_lap_stime:
-            if not is_pit_lap and valid_delta_raw(delta_array_raw, used_curr, 1):
+            # Median: laps under yellow & invalid laps never become reference lap
+            green_lap = not (is_yellow_lap or is_invalid_lap)
+            if not is_pit_lap and green_lap and valid_delta_raw(delta_array_raw, used_curr, 1):
                 delta_array_raw.append((  # set end value
                     round6(pos_last + 10),
                     round6(used_curr),
@@ -274,7 +324,15 @@ def calc_consumption(
             used_curr = 0
             recording = laptime_curr < 1
             is_pit_lap = 0
+            is_yellow_lap = is_invalid_lap = False
         last_lap_stime = lap_stime  # reset
+
+        # Yellow & track limits of lap in progress (yellow taken at the line counts for new lap),
+        # track limits read once lap is under way (flag of lap just completed may stay a moment)
+        if use_median:
+            is_yellow_lap |= under_full_course_yellow()
+            if laptime_curr > 1:
+                is_invalid_lap |= api.read.lap.invalidated()
 
         # Distance desync check at start of new lap, reset if higher than normal distance
         if 0 < laptime_curr < 1 and pos_curr > 300:
@@ -299,6 +357,8 @@ def calc_consumption(
                 delta_array_temp = DELTA_DEFAULT
                 delayed_save = True
                 validating = 0
+                if use_median:  # only green flag laps are validated with median
+                    green_laps.append(used_last_raw)
 
         # Calc delta
         if pos_synced_last != pos_synced:
@@ -311,12 +371,19 @@ def calc_consumption(
                 laptime_curr > 0.3 and not in_garage,  # 300ms delay
             )
 
-        # Last valid lap, else game estimate (no lap of car & track recorded yet, no delta)
-        used_ref = used_last_valid if used_last_valid > 0 else max(expected_func(), 0.0)
+        # Median of green flag laps, else last valid lap, else game estimate (no lap of car &
+        # track recorded yet, no delta)
+        used_median = green_flag_median(green_laps, median_min_laps) if use_median else 0.0
+        if used_median > 0:
+            used_ref, method = used_median, METHOD_MEDIAN
+        elif used_last_valid > 0:
+            used_ref, method = used_last_valid, METHOD_LAST_LAP
+        else:
+            used_ref, method = max(expected_func(), 0.0), METHOD_GAME
 
-        # Exclude first lap & pit in/out lap
+        # Exclude first lap & pit in/out lap (& lap under yellow: slower, using less)
         used_est = calc.end_lap_consumption(
-            used_ref, delta_fuel, 0 == is_pit_lap < laps_done)
+            used_ref, delta_fuel, 0 == is_pit_lap < laps_done and not is_yellow_lap)
 
         # Total refuel = laps left * last consumption - remaining fuel
         if api.read.session.finish_type(minfo.vehicles.finishAsLap):  # lap-type
@@ -328,7 +395,8 @@ def calc_consumption(
             time_left -= minfo.vehicles.finishTimeOffset
             end_timer_laps_left = calc.end_timer_laps_remain(
                 lap_into, laptime_pace, time_left)
-            full_laps_left = ceil(end_timer_laps_left)
+            # Leader finishing first: lap driven after timer ends (as the strategy plans it)
+            full_laps_left = max(ceil(end_timer_laps_left) + round(minfo.vehicles.finishLapOffsetLeader), 0)
             laps_left = calc.time_type_laps_remain(
                 full_laps_left, lap_into)
 
@@ -373,5 +441,7 @@ def calc_consumption(
         output.estimatedNumPitStopsEarly = est_pits_early
         output.deltaConsumption = delta_fuel
         output.oneLessPitConsumption = used_est_less
+        output.consumptionMethod = method
+        output.consumptionLaps = len(green_laps) if method == METHOD_MEDIAN else 0
         if not is_energy:
             output.weight = fuel_density * amount_curr

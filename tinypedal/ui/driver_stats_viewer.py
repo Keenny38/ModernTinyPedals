@@ -49,6 +49,7 @@ class DriverStatsViewer(BaseDialog):
         QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self, self.backend.undo)
         QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.backend.redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.backend.redo)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Refresh), self, self.backend.reload)  # F5, focus anywhere
 
     def showEvent(self, event):
         self.backend.page_shown()

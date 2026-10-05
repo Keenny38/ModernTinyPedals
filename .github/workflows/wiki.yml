@@ -1,0 +1,65 @@
+name: Wiki
+
+# Publishes docs/wiki to the GitHub wiki of the repository after each push to master that changes it.
+# docs/wiki is the source of the wiki: pages edited on the wiki itself are overwritten.
+# The wiki must exist first: Settings > General > Features > Wikis (with "Restrict editing to users
+# in teams with push access only"), then "Create the first page" once on the Wiki tab.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+# Read only by default, only the publish job can write (wiki repository)
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # push to the wiki repository
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+
+    # GitHub CLI of the runner as git credential helper: the token never appears in a URL or a command line
+    - name: Publish docs/wiki to the wiki
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHA: ${{ github.sha }}
+      run: |
+        gh auth setup-git
+        if ! git clone --depth 1 "https://github.com/${GITHUB_REPOSITORY}.wiki.git" wiki; then
+          echo "::error::No wiki repository: enable Wikis in the repository settings and create the first page once"
+          exit 1
+        fi
+        # The wiki is a copy of docs/wiki: a page removed from docs/wiki is removed from the wiki
+        find wiki -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+        cp -r docs/wiki/. wiki/
+        # Links between pages are written "Page.md" (they also work when browsing the repository),
+        # the wiki links pages by name: "Page"
+        find wiki -name "*.md" -not -path "wiki/.git/*" \
+          -exec sed -i -E 's/\]\(([A-Za-z0-9_-]+)\.md(#[^)]*)?\)/](\1\2)/g' {} +
+        cd wiki
+        git add -A
+        if git diff --cached --quiet; then
+          echo "Wiki already up to date"
+          exit 0
+        fi
+        git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+          commit -q -m "Update wiki from ${SHA::7}"
+        git push origin HEAD

@@ -53,7 +53,7 @@ from ..module_info import minfo
 from ..setting import cfg
 from ..userfile import set_relative_path
 from ..userfile.track_notes import COLUMN_PACENOTE
-from ._common import CompactButton, UIScaler
+from ._common import CompactButton, UIScaler, translate_filter
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +324,7 @@ class PaceNotesControl(QWidget):
     def set_notes_path(self):
         """Set pace notes file path"""
         filepath = self.mcfg["pace_notes_file_name"]
-        filename_full = QFileDialog.getOpenFileName(self, dir=filepath, filter=FileFilter.TPPN)[0]
+        filename_full = QFileDialog.getOpenFileName(self, dir=filepath, filter=translate_filter(FileFilter.TPPN))[0]
         if not filename_full:
             return
         self.file_selector.setText(filename_full)

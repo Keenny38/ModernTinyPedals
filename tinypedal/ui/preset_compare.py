@@ -22,6 +22,8 @@ Preset comparison dialog
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -71,7 +73,7 @@ class PresetCompare(BaseEditor):
         super().__init__(parent)
         self.set_utility_title(tr("Preset Comparison"))
         self.presets: dict[str, dict] = {}  # file name: loaded (possibly edited) preset
-        self.modified: set[str] = set()
+        self.edits: dict[str, dict[tuple[str, str], Any]] = {}  # file name: copied values by (section, key)
 
         files = [f"{name}{FileExt.JSON}" for name in cfg.preset_files()]
         self.combo_a = QComboBox(self)
@@ -186,23 +188,44 @@ class PresetCompare(BaseEditor):
         if target in cfg.user.filelock:
             QMessageBox.warning(self, tr("Error"), trm("Changes to locked preset will not be saved."))
             return
-        if copy_values(self.preset(target), self.preset(source), items):
-            self.modified.add(target)
+        target_preset, source_preset = self.preset(target), self.preset(source)
+        if copy_values(target_preset, source_preset, items):
+            edits = self.edits.setdefault(target, {})
+            for section, key in items:
+                if key in source_preset.get(section, {}):
+                    edits[section, key] = source_preset[section][key]
             self.set_modified()
             self.refresh()
 
+    def save_action(self):
+        """Ctrl+S: save modified presets"""
+        return self.saving
+
     def saving(self):
-        """Save modified presets"""
+        """Save modified presets
+
+        Presets are read when shown, then may change elsewhere (loaded preset: widgets moved,
+        options edited), so only copied values are written into a fresh copy of each preset.
+        """
         reload_loaded = False
-        for filename in sorted(self.modified):
-            save_and_verify_json_file(
-                dict_user=self.presets[filename], filename=filename, filepath=cfg.path.settings,
-                max_attempts=cfg.max_saving_attempts,
-            )
-            if cfg.is_loaded(filename):
+        for filename in sorted(self.edits):
+            is_loaded = cfg.is_loaded(filename)
+            # Loaded preset is live (saved by app), others are read from file again
+            preset = cfg.user.setting if is_loaded else load_preset(filename)
+            for (section, key), value in self.edits[filename].items():
+                preset.setdefault(section, {})[key] = value
+            if is_loaded:
+                cfg.save(0)
                 reload_loaded = True
-        self.modified.clear()
+            else:
+                save_and_verify_json_file(
+                    dict_user=preset, filename=filename, filepath=cfg.path.settings,
+                    max_attempts=cfg.max_saving_attempts,
+                )
+        self.edits.clear()
+        self.presets.clear()  # read again, with changes made elsewhere
         self.set_unmodified()
         if reload_loaded:
             cfg.set_next_to_load(cfg.filename.setting)
-            loader.reload(reload_preset=True)
+            loader.reload(reload_preset=True)  # waits for saving
+        self.refresh()

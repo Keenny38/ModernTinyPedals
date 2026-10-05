@@ -31,6 +31,7 @@ from typing import Any
 
 from ..const_common import CRLF
 from ..const_file import FileFilter
+from . import atomic_write
 
 NOTESTYPE_PACE = "Pace Notes"
 NOTESTYPE_TRACK = "Track Notes"
@@ -204,7 +205,7 @@ def load_notes_file(
 
     except FileNotFoundError:
         logger.info("MISSING: track notes (%s) data", extension)
-    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError):
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError, csv.Error):
         logger.info("MISSING: invalid track notes (%s) data", extension)
     return None
 
@@ -271,10 +272,14 @@ def save_notes_file(
     filepath: str, filename: str, table_header: tuple, dataset: list, metadata: dict,
     writer: Callable = write_csv_notes, extension: str = ""
 ) -> None:
-    """Save notes file"""
+    """Save notes file atomically (notes module may load it meanwhile)
+
+    Raises:
+        OSError: unable to save file.
+    """
     if len(dataset) < 1:
         return
-    with open(f"{filepath}{filename}{extension}", "w", newline="", encoding="utf-8") as temp_file:
+    with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as temp_file:
         writer(temp_file, table_header, dataset, metadata, filename)
 
 

@@ -80,7 +80,8 @@ class Realtime(Overlay):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
-        fill_rect(painter, self.rect_drs, self.drs_color[self.drs_state][1])
-        self.pen_text.setColor(self.drs_color[self.drs_state][0])
+        fg_color, bg_color = self.drs_color[max(self.drs_state, 0)]  # not available before first update
+        fill_rect(painter, self.rect_drs, bg_color)
+        self.pen_text.setColor(fg_color)
         painter.setPen(self.pen_text)
         painter.drawText(self.rect_text, Qt.AlignmentFlag.AlignCenter, self.wcfg["drs_text"])

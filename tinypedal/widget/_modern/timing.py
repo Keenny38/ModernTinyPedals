@@ -20,7 +20,8 @@
 Timing Widget, modern design
 
 Lap times: session best, personal best, last, current, estimated, session personal best,
-stint best, average pace. Colored mark before each label.
+stint best, average pace. Colored mark before each label. Current lap highlighted in loss color
+while game invalidated it (track limits).
 """
 
 from __future__ import annotations
@@ -44,6 +45,10 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout",
         "show_session_best", "show_session_best_from_same_class_only", "show_best", "show_last",
         "show_current", "show_estimated", "show_session_personal_best", "show_stint_best", "show_average_pace",
+        "show_invalid_lap_indicator",
+        "display_order_session_best", "display_order_best", "display_order_last", "display_order_current",
+        "display_order_estimated", "display_order_session_personal_best", "display_order_stint_best",
+        "display_order_average_pace",
     )
 
     def __init__(self, config, widget_name):
@@ -60,8 +65,10 @@ class Realtime(StatsMixin, ModernOverlay):
             ("stint_best", "Stint", theme.orange),
             ("average_pace", "Pace", theme.text_muted),
         )
-        self.keys = tuple(key for key, _, _ in items if wcfg[f"show_{key}"])
-        stats = [Stat(key, label, SAMPLE, "value", accent) for key, label, accent in items if key in self.keys]
+        stats = [Stat(key, label, SAMPLE, "value", accent) for key, label, accent in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
+        self.keys = tuple(stat.key for stat in stats)
+        self.show_invalid = wcfg["show_invalid_lap_indicator"]
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
         self.player_index = 0
@@ -89,7 +96,11 @@ class Realtime(StatsMixin, ModernOverlay):
                 valid = minfo.delta.isValidLap
                 values.append(Value(laptime(minfo.delta.lapTimeLast), None if valid else theme.negative))
             elif key == "current":
-                values.append(Value(laptime(minfo.delta.lapTimeCurrent)))
+                if self.show_invalid and api.read.lap.invalidated():
+                    values.append(Value(laptime(minfo.delta.lapTimeCurrent), theme.negative,
+                                        theme.tint(theme.negative, 55)))
+                else:
+                    values.append(Value(laptime(minfo.delta.lapTimeCurrent)))
             elif key == "estimated":
                 values.append(Value(laptime(minfo.delta.lapTimeEstimated)))
             elif key == "session_personal_best":

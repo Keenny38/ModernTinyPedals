@@ -170,11 +170,12 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
             if delta_reset:
                 delta_reset = False
                 if len(delta_array_raw) > 1 and not is_pit_lap:
+                    # Net change of same lap as delta array (pit lap left out of both)
                     delta_array_last = tuple(delta_array_raw)
+                    net_change_last = battery_regen_last - battery_drain_last
                 delta_array_raw[:] = DELTA_DEFAULT
                 pos_last = pos_curr
                 delta_recording = laptime_curr < 1
-                net_change_last = battery_regen_last - battery_drain_last
                 is_valid_delta = len(delta_array_last) > 1
                 is_pit_lap = 0
 

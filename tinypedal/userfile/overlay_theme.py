@@ -47,11 +47,14 @@ def validate_themes(data: object, builtin_names: tuple[str, ...]) -> dict[str, d
         if not isinstance(name, str) or not name.strip() or name in builtin_names or not isinstance(theme, dict):
             continue
         base = theme.get("base", "Modern Dark")
-        if base not in builtin_names:
+        if not isinstance(base, str) or base not in builtin_names:
             base = "Modern Dark"
+        source_colors = theme.get("colors")
+        if not isinstance(source_colors, dict):  # null, list... (hand edited file): no color
+            source_colors = {}
         colors = {
             str(source).upper(): str(target).upper()
-            for source, target in dict(theme.get("colors", {})).items()
+            for source, target in source_colors.items()
             if _rgb.match(str(source).upper()) and _rgb.match(str(target).upper())
         }
         themes[name.strip()] = {"base": base, "colors": colors}
@@ -65,7 +68,7 @@ def load_custom_themes(filepath: str, builtin_names: tuple[str, ...]) -> dict[st
             return validate_themes(json.load(file), builtin_names)
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:  # never blocks startup
         logger.error("USERDATA: invalid %s: %s", FILENAME, error)
         return {}
 
@@ -91,7 +94,10 @@ def import_themes(filename: str, builtin_names: tuple[str, ...]) -> dict[str, di
         content = file.read(MAX_THEME_FILE_SIZE + 1)
     if len(content) > MAX_THEME_FILE_SIZE:
         raise ValueError("file too large")
-    data = json.loads(content)
+    try:
+        data = json.loads(content)
+    except RecursionError as error:  # too deeply nested
+        raise ValueError("invalid theme file") from error
     if isinstance(data, dict) and data.get("format") == THEME_FILE_FORMAT:
         data = data.get("themes")
     themes = validate_themes(data, builtin_names)

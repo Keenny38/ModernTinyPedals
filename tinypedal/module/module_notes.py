@@ -85,6 +85,7 @@ class Realtime(DataModule):
                     output_tracknotes_out.reset()
                     output_tracknotes_pit.reset()
                     track_name = api.read.session.track_name()
+                    track_length = api.read.lap.track_length()
 
                     # Load pace notes
                     pace_notes = load_pace_notes_file(
@@ -123,7 +124,7 @@ class Realtime(DataModule):
 
                 # Update position
                 pos_synced = minfo.delta.lapDistance
-                pos_offset = pos_synced + setting_playback["pace_notes_global_offset"]
+                pos_offset = offset_position(pos_synced, setting_playback["pace_notes_global_offset"], track_length)
 
                 # Update pace notes
                 if gen_pacenotes_out:
@@ -141,6 +142,14 @@ class Realtime(DataModule):
                 if reset:
                     reset = False
                     update_interval = self.idle_interval
+
+
+def offset_position(position: float, offset: float, track_length: float) -> float:
+    """Position with playback offset, wrapped into lap (notes past finish line played on time)"""
+    position += offset
+    if track_length > 0:
+        return position % track_length
+    return position
 
 
 def load_pace_notes_file(

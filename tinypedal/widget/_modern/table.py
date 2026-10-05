@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPixmap
 
 from ...i18n import tr_overlay as tr
 from .base import CENTER, DASH, LEFT, RIGHT
@@ -42,8 +42,12 @@ CHANGE = 3  # position change: extra = signed number of places gained
 COMPOUND = 4  # tyre compounds: extra = ((symbol, color), ...)
 PILL = 5  # status pill (pit, garage, flag): text, color, fill
 DELTAS = 6  # lap time deltas to player: extra = (seconds, ...), MAX_SECONDS if unknown
+LOGO = 7  # brand logo image: text = brand name (logo file name)
 
 SEPARATOR = "separator"  # row list item: space between class groups
+CHANGE_ARROW = 0.42  # position change arrow size, in row height
+COMPOUND_SIZE = 0.62  # tyre compound square, in row height
+COMPOUND_GRID = 0.9  # per wheel compounds 2x2 grid height, in row height
 
 
 class Column(NamedTuple):
@@ -172,12 +176,12 @@ class TableMixin:
         if edge is not None:
             accent_edge(painter, rect, edge, self.table.stripe, radius)
 
-    def draw_rows(self: Any, painter: QPainter, rows: tuple):
-        """Draw every row of table (Row, None for empty row, SEPARATOR)"""
+    def draw_rows(self: Any, painter: QPainter, rows: tuple, start: int = 0):
+        """Draw every row of table (Row, None for empty row, SEPARATOR), first one at row index start"""
         table = self.table
-        top = table.pad + table.header
+        top = table.pad + table.header + start * (table.row_height + table.row_gap)
         width = table.width - table.pad * 2
-        index = 0
+        index = start
         for row in rows:
             if row is SEPARATOR:
                 top += table.separator
@@ -215,6 +219,8 @@ class TableMixin:
             self.draw_compounds(painter, rect, cell.extra)
         elif kind == DELTAS:
             self.draw_deltas(painter, rect, cell.extra)
+        elif kind == LOGO:
+            self.draw_logo(painter, rect, cell.text)
         elif kind == PILL:
             if not cell.text:
                 return
@@ -223,20 +229,23 @@ class TableMixin:
             self.draw_text(painter, box, cell.text, "label", cell.color, CENTER, elide=False)
 
     def draw_class_pill(self: Any, painter: QPainter, rect: QRectF, cell: Cell):
-        """Class color pill with alias, then position in class on darker part"""
+        """Class color pill with alias, then position in class on darker part (or on cell color:
+        class styled position)"""
         theme = self.theme
         box = rect.adjusted(0, rect.height() * 0.17, 0, -rect.height() * 0.17)
         radius = self.radius(0.25)
         fill = cell.fill or theme.surface_raised
         if cell.extra:
-            rounded(painter, box, radius, theme.surface_raised)
+            pos_fill = cell.color or theme.surface_raised
+            rounded(painter, box, radius, pos_fill)
             split = box.width() * 0.6
             alias_box = QRectF(box.left(), box.top(), split, box.height())
             rounded(painter, alias_box, radius, fill)
             painter.fillRect(QRectF(alias_box.right() - radius, box.top(), radius, box.height()), fill)
             self.draw_text(painter, alias_box, cell.text, "small", readable_on(fill), CENTER)
             pos_box = QRectF(box.left() + split, box.top(), box.width() - split, box.height())
-            self.draw_text(painter, pos_box, cell.extra, "small", theme.text, CENTER, elide=False)
+            pos_color = readable_on(pos_fill) if cell.color is not None else theme.text
+            self.draw_text(painter, pos_box, cell.extra, "small", pos_color, CENTER, elide=False)
         else:
             rounded(painter, box, radius, fill)
             self.draw_text(painter, box, cell.text, "small", readable_on(fill), CENTER)
@@ -248,7 +257,7 @@ class TableMixin:
             self.draw_text(painter, rect, DASH, "dim", theme.text_faint, CENTER)
             return
         color = theme.positive if places > 0 else theme.negative
-        size = rect.height() * 0.42
+        size = rect.height() * CHANGE_ARROW
         arrow = QRectF(rect.left(), rect.center().y() - size / 2, size, size)
         triangle(painter, arrow, places > 0, color)
         text_rect = QRectF(arrow.right() + size * 0.3, rect.top(), rect.width() - size * 1.3, rect.height())
@@ -273,23 +282,75 @@ class TableMixin:
             self.draw_text(painter, box, text, "small", color, RIGHT, elide=False)
 
     def draw_compounds(self: Any, painter: QPainter, rect: QRectF, compounds: tuple):
-        """Tyre compound letters on compound colored squares"""
+        """Tyre compound letters on compound colored squares: one per axle side by side, or 4 in
+        a 2x2 grid (front left, front right, rear left, rear right) when wheels of an axle differ"""
         if not compounds:
             return
-        size = rect.height() * 0.62
+        radius = self.radius(0.2)
+        if len(compounds) == 4:
+            role = "tiny" if "tiny" in self.fonts else "label"
+            grid = rect.height() * COMPOUND_GRID
+            gap = grid * 0.08
+            size = (grid - gap) / 2
+            top = rect.center().y() - grid / 2
+            for index, (symbol, color) in enumerate(compounds):
+                row, column = divmod(index, 2)
+                box = QRectF(rect.left() + column * (size + gap), top + row * (size + gap), size, size)
+                rounded(painter, box, radius * 0.7, color)
+                self.draw_text(painter, box, symbol, role, readable_on(color), CENTER, elide=False)
+            return
+        size = rect.height() * COMPOUND_SIZE
         gap = size * 0.18
         left = rect.left()
         top = rect.center().y() - size / 2
-        radius = self.radius(0.2)
         for symbol, color in compounds:
             box = QRectF(left, top, size, size)
             rounded(painter, box, radius, color)
             self.draw_text(painter, box, symbol, "label", readable_on(color), CENTER, elide=False)
             left += size + gap
 
+    def draw_logo(self: Any, painter: QPainter, rect: QRectF, brand: str):
+        """Brand logo centered in cell"""
+        if not brand:
+            return
+        pixmap = self.brand_logo(brand, rect.width(), rect.height() * 0.72)
+        if pixmap.isNull():
+            return
+        ratio = pixmap.devicePixelRatio() or 1.0
+        width = pixmap.width() / ratio
+        height = pixmap.height() / ratio
+        target = QRectF(rect.center().x() - width / 2, rect.center().y() - height / 2, width, height)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+        painter.restore()
+
+    def brand_logo(self: Any, brand: str, width: float, height: float) -> QPixmap:
+        """Brand logo from brand logo folder scaled to fit cell, loaded once per brand (empty
+        pixmap if none)"""
+        from ...userfile.custom_image import load_brand_logo_image
+
+        cache = self.__dict__.setdefault("_logo_cache", {})
+        pixmap = cache.get(brand)
+        if pixmap is None:
+            scale = 2.0  # sharp on high DPI screen
+            pixmap = load_brand_logo_image(
+                filepath=self.cfg.path.brand_logo, filename=brand,
+                max_width=max(round(width * scale), 1), max_height=max(round(height * scale), 1),
+            )
+            if not pixmap.isNull():
+                pixmap.setDevicePixelRatio(scale)
+            cache[brand] = pixmap
+        return pixmap
+
 
 def compounds_width(unit: float, row_scale: float, count: int) -> float:
     """Width of compound cell for count compounds"""
-    size = unit * row_scale * 0.62
+    size = unit * row_scale * COMPOUND_SIZE
     return size * count + size * 0.18 * max(count - 1, 0)
+
+
+def change_width(unit: float, row_scale: float, digit_width: float, digits: int = 2) -> float:
+    """Width of position change cell: arrow & gap, then number of places"""
+    return unit * row_scale * CHANGE_ARROW * 1.3 + digit_width * digits
 

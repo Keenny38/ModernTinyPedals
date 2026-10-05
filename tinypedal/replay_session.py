@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 
 from . import realtime_state
@@ -34,8 +35,19 @@ from .setting import cfg
 logger = logging.getLogger(__name__)
 
 MANUAL_PREFIX = "replay-"
-AUTO_PREFIX = "replay-auto-"  # only automatic recordings are removed over limit
+AUTO_PREFIX = "replay-auto-"
+# Only automatic recordings are removed over limit: exact name of automatic recording,
+# so a section saved from it ("...-12-345") or a renamed file is never removed
+AUTO_NAME = re.compile(re.escape(AUTO_PREFIX) + r"\d{4}(-\d{2}){5}" + re.escape(FILE_EXT))
 SESSION_NAMES = ("Test day", "Practice", "Qualify", "Warmup", "Race")
+
+
+def section_filename(filename: str, start: float, end: float) -> str:
+    """Default file name of replay section, never an automatic recording name (removed over limit)"""
+    folder, name = os.path.split(os.path.splitext(filename)[0])
+    if name.startswith(AUTO_PREFIX):
+        name = MANUAL_PREFIX + name[len(AUTO_PREFIX):]
+    return os.path.join(folder, f"{name}-{int(start)}-{int(end)}{FILE_EXT}")
 
 
 def api_supported() -> bool:
@@ -64,7 +76,7 @@ def skip_inactive_frames() -> bool:
 
 
 def start_api_recording(auto: bool = False) -> str:
-    """Start recording current API to telemetry folder, return file name"""
+    """Start recording current API to telemetry folder, return file name (empty if already recording)"""
     folder = cfg.path.telemetry or "."
     os.makedirs(folder, exist_ok=True)
     prefix = AUTO_PREFIX if auto else MANUAL_PREFIX
@@ -76,7 +88,8 @@ def start_api_recording(auto: bool = False) -> str:
         lap=lambda: api.read.lap.number(),
         info=recording_info,
     )
-    replay.start_recording(filename, sources, header_extra=api.replay_header())
+    if not replay.start_recording(filename, sources, header_extra=api.replay_header()):
+        return ""  # started meanwhile from another thread (replay window, recorder module)
     return filename
 
 
@@ -105,8 +118,9 @@ class AutoReplay:
             self.inactive_since = None
             if not replay.recording and not self.user_stopped:
                 filename = start_api_recording(auto=True)
-                self.started = True
-                logger.info("RECORDER: automatic replay recording %s", os.path.basename(filename))
+                if filename:
+                    self.started = True
+                    logger.info("RECORDER: automatic replay recording %s", os.path.basename(filename))
             return
         self.user_stopped = False
         if self.started:
@@ -122,5 +136,5 @@ class AutoReplay:
         self.started = False
         self.inactive_since = None
         replay.stop_recording()
-        for name in remove_old_replays(cfg.path.telemetry or ".", AUTO_PREFIX, self.keep):
+        for name in remove_old_replays(cfg.path.telemetry or ".", AUTO_NAME, self.keep):
             logger.info("RECORDER: removed old replay %s", name)

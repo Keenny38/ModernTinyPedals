@@ -32,7 +32,7 @@ from ... import units
 from ...api_control import api
 from ...userfile.heatmap import HEATMAP_DEFAULT_BRAKE, select_brake_heatmap_name, set_predefined_brake_name
 from .base import DASH, ModernOverlay
-from .quad import QuadMixin, Section, Tile, heat_color, heatmap
+from .quad import QuadMixin, Section, Tile, heat_color, heatmap, reload_heatmaps
 
 
 class Realtime(QuadMixin, ModernOverlay):
@@ -55,6 +55,7 @@ class Realtime(QuadMixin, ModernOverlay):
         samples = int(min(max(wcfg["average_sampling_duration"], 1), 600) / (interval * 0.001))
         self.ema_temp = calc.ema_filter(samples)
         self.averages = [0.0] * 4
+        reload_heatmaps()  # new widget: latest saved heatmaps
         steps = heatmap(wcfg["heatmap_name"], HEATMAP_DEFAULT_BRAKE)
         self.heat = [steps] * 4
         self.last_in_pits = -1

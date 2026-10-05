@@ -65,6 +65,7 @@ class Tile(NamedTuple):
     sub_color: QColor | None = None
     level: float = -1.0  # 0-1 gauge filling neutral tile from left, -1 = none
     level_color: QColor | None = None
+    mark: float = -1.0  # 0-1 mark on gauge (reference: input, third spring...), -1 = none
 
 
 class SectionSlot(NamedTuple):
@@ -82,9 +83,29 @@ def heatmap(name: str, default: str) -> tuple:
     return tuple((value, QColor(color)) for value, (color, _) in load_heatmap_color(name, default))
 
 
+def reload_heatmaps():
+    """Heatmaps read again from preset by widgets created from now on (heatmap edited, preset
+    switched: widgets are created again on reload)"""
+    heatmap.cache_clear()
+
+
 def heat_color(steps: tuple, value: float) -> QColor:
     """Heatmap color of value"""
     return calc.select_grade(steps, value)
+
+
+_shades: dict[int, tuple[QColor, QColor]] = {}
+
+
+def tile_shades(fill: QColor) -> tuple[QColor, QColor]:
+    """Top & bottom color of heat colored tile gradient (few heatmap colors: cached)"""
+    key = fill.rgba()
+    shades = _shades.get(key)
+    if shades is None:
+        if len(_shades) > 512:
+            _shades.clear()
+        shades = _shades[key] = (fill.lighter(112), fill.darker(112))
+    return shades
 
 
 class QuadMixin:
@@ -175,6 +196,12 @@ class QuadMixin:
                 if width >= 1:
                     rounded(painter, QRectF(left, rect.top(), width, rect.height()), min(radius, width / 2),
                             tile.level_color or theme.tint(theme.accent, 110))
+                if tile.mark >= 0:  # thin line across tile, same direction as gauge
+                    mark_w = max(self.unit * 0.12, 2.0)
+                    offset = (rect.width() - mark_w) * min(tile.mark, 1.0)
+                    mark_left = rect.left() + offset if wheel % 2 else rect.right() - mark_w - offset
+                    painter.fillRect(QRectF(mark_left, rect.top() + rect.height() * 0.12, mark_w,
+                                            rect.height() * 0.76), theme.text_dim)
                 inset = self.unit * 0.4
                 text_rect = rect.adjusted(inset, 0, -inset, 0)
                 align = RIGHT if wheel % 2 else LEFT
@@ -183,6 +210,11 @@ class QuadMixin:
             if section.sub:
                 text_rect = QRectF(rect.left(), rect.top(), rect.width(), rect.height() * 0.62)
                 sub_rect = QRectF(rect.left(), rect.top() + rect.height() * 0.56, rect.width(), rect.height() * 0.4)
+                if tile.sub and tile.sub_color is not None and fill is not None:  # colored text on dark chip
+                    chip_w = min(self.text_width("small", tile.sub) + self.unit * 0.5, rect.width())
+                    chip = QRectF(sub_rect.center().x() - chip_w / 2, sub_rect.top() + sub_rect.height() * 0.06,
+                                  chip_w, sub_rect.height() * 0.88)
+                    rounded(painter, chip, chip.height() / 2 * min(self.corner, 1.0), theme.tint(theme.surface, 210))
                 sub_color = tile.sub_color or (readable_on(fill) if fill is not None else theme.text_dim)
                 self.draw_text(painter, sub_rect, tile.sub, "small", sub_color, CENTER, elide=False)
             self.draw_text(painter, text_rect, tile.texts[0] if tile.texts else "", section.role, color, align, elide=False)
@@ -205,9 +237,10 @@ class QuadMixin:
             rounded(painter, rect, radius, self.theme.surface_alt)
             return
         if self.depth_effects:
+            top, bottom = tile_shades(fill)
             gradient = QLinearGradient(0, rect.top(), 0, rect.bottom())
-            gradient.setColorAt(0.0, fill.lighter(112))
-            gradient.setColorAt(1.0, fill.darker(112))
+            gradient.setColorAt(0.0, top)
+            gradient.setColorAt(1.0, bottom)
             rounded(painter, rect, radius, QBrush(gradient))
         else:
             rounded(painter, rect, radius, fill)
@@ -219,15 +252,25 @@ class QuadMixin:
             self.draw_text(painter, cell, text, "small", color or self.theme.text_dim, CENTER, elide=False)
 
     def draw_center_badges(self: Any, painter: QPainter, slot: SectionSlot, badges: tuple):
-        """Compound badges in center column: (front, rear) of (symbol, QColor)"""
+        """Compound badges in center column: (front, rear) of axle badges, each ((symbol, QColor),)
+        or left & right badges side by side when wheels of axle differ"""
         size = min(slot.center[0].width(), slot.center[0].height() * 0.7)
-        for cell, badge in zip(slot.center, badges):
-            if not badge:
+        for cell, axle in zip(slot.center, badges):
+            if not axle:
                 continue
-            symbol, color = badge
             box = QRectF(cell.center().x() - size / 2, cell.center().y() - size / 2, size, size)
-            rounded(painter, box, self.radius(0.25), color)
-            self.draw_text(painter, box, symbol, "label", readable_on(color), CENTER, elide=False)
+            if len(axle) == 1:
+                symbol, color = axle[0]
+                rounded(painter, box, self.radius(0.25), color)
+                self.draw_text(painter, box, symbol, "label", readable_on(color), CENTER, elide=False)
+                continue
+            gap = size * 0.08
+            half = (size - gap) / 2
+            role = "tiny" if "tiny" in self.fonts else "label"
+            for index, (symbol, color) in enumerate(axle[:2]):
+                part = QRectF(box.left() + index * (half + gap), box.top(), half, size)
+                rounded(painter, part, self.radius(0.2), color)
+                self.draw_text(painter, part, symbol, role, readable_on(color), CENTER, elide=False)
 
 
 def wheel_values(values, fmt) -> tuple:

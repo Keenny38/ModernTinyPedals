@@ -41,7 +41,10 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "overheat_threshold_oil", "overheat_threshold_water", "show_oil_temperature",
         "show_water_temperature", "show_turbo_pressure", "show_rpm", "show_rpm_maximum", "show_torque",
-        "show_power", "show_power_to_weight_ratio",
+        "show_power", "show_power_to_weight_ratio", "show_game_overheating_warning",
+        "display_order_oil", "display_order_water", "display_order_turbo", "display_order_rpm",
+        "display_order_rpm_maximum", "display_order_torque", "display_order_power",
+        "display_order_power_to_weight_ratio",
     )
 
     def __init__(self, config, widget_name):
@@ -65,9 +68,16 @@ class Realtime(StatsMixin, ModernOverlay):
             ("power_to_weight_ratio", "P/W", "8.888"),
         )
         stats = [Stat(key, label, sample) for key, label, sample in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats, names={
+            "oil_temperature": "oil", "water_temperature": "water", "turbo_pressure": "turbo",
+        })
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
+        self.post_update()
+
+    def post_update(self):
+        """Peak power found again for next car (power to weight ratio)"""
         self.ema_power = 0.0
         self.max_power_kw = 0.0
 
@@ -77,9 +87,9 @@ class Realtime(StatsMixin, ModernOverlay):
     def paint(self, painter: QPainter):
         self.draw_stats(painter, self.state)
 
-    def temperature(self, value: float, threshold: float) -> Value:
-        """Temperature, highlighted if overheating"""
-        hot = value >= threshold
+    def temperature(self, value: float, threshold: float, overheating: bool = False) -> Value:
+        """Temperature, highlighted if overheating (above threshold, or game warning)"""
+        hot = value >= threshold or overheating
         theme = self.theme
         return Value(f"{self.unit_temp(value):.1f}°", theme.negative if hot else None, theme.tint(theme.negative, 55) if hot else None)
 
@@ -96,12 +106,14 @@ class Realtime(StatsMixin, ModernOverlay):
             if max_ve > 0:  # from energy consumption if torque not available
                 power_kw = minfo.energy.rateOfConsumption * max_ve / 100_000
                 torque = calc.engine_torque(power_kw, rpm)
+        overheating = self.wcfg["show_game_overheating_warning"] and engine.overheating()
         values = []
         for key in self.keys:
             if key == "oil_temperature":
-                values.append(self.temperature(engine.oil_temperature(), self.wcfg["overheat_threshold_oil"]))
+                values.append(self.temperature(engine.oil_temperature(), self.wcfg["overheat_threshold_oil"], overheating))
             elif key == "water_temperature":
-                values.append(self.temperature(engine.water_temperature(), self.wcfg["overheat_threshold_water"]))
+                values.append(self.temperature(engine.water_temperature(), self.wcfg["overheat_threshold_water"],
+                                               overheating))
             elif key == "turbo_pressure":
                 values.append(Value(f"{self.unit_pres(int(engine.turbo()) * 0.001):.3f}"[:5] + self.symbol_pres))
             elif key == "rpm":

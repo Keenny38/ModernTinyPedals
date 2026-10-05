@@ -1,0 +1,5 @@
+# Release build (Windows executable): pinned runtime & build tools, used by the Build and Release workflow
+#   pip install -r requirements-build.txt
+-r requirements-lock.txt
+pyinstaller==6.22.3
+openvr==2.12.1401

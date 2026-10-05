@@ -21,28 +21,41 @@ Loaded laps kept in binary form (lap viewer): reading a lap again takes a few ms
 
 One file per lap in a hidden folder of telemetry folder, found by lap file path, valid while lap file
 size & modification time are the same (and cache format version). Oldest files removed over size limit.
+
+File format (also used for track limits parts, see lap_geometry): magic, format version & JSON header length,
+JSON header (values, then name, type & length of each array), then raw little endian arrays. Plain data only:
+a cache file from a shared telemetry folder never runs code (older pickled caches are ignored & rebuilt).
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
-import pickle
+import struct
+import sys
 import threading
 import time
 from array import array
+from collections.abc import Mapping
 from contextlib import suppress
 
-from .telemetry_lap import EXACT_COLUMNS, LapData, column_type, load_lap
+from .telemetry_lap import EXACT_COLUMNS, Column, LapData, column_type, load_lap
 
 logger = logging.getLogger(__name__)
 
 CACHE_FOLDER = ".lap_cache"  # in telemetry folder (hidden: not a track)
-CACHE_VERSION = 2  # loaded lap processing changed: cached laps read again from CSV
+CACHE_VERSION = 3  # loaded lap processing or file format changed: cached laps read again from CSV
 CACHE_LIMIT = 600 * 1024 * 1024  # bytes kept, oldest used removed over it
 STALE_TEMP = 600  # seconds, older temporary files are left over from a crash (newer ones may be written now)
-__all__ = ("EXACT_COLUMNS", "load_cached_lap", "prune_cache", "remove_cached_lap")
+ARRAYS_MAGIC = b"TPLA"  # arrays file: header & packed arrays
+ARRAYS_FORMAT = 1
+ARRAYS_HEAD = struct.Struct("<4sII")  # magic, format version, JSON header length
+ARRAY_TYPES = ("d", "f", "i")  # array type codes stored (8, 4 & 4 bytes)
+MAX_HEADER = 16 * 1024 * 1024  # bytes, larger header: not an arrays file
+__all__ = ("EXACT_COLUMNS", "load_cached_lap", "prune_cache", "read_arrays_file", "remove_cached_lap",
+           "write_arrays_file")
 
 
 def cache_file(folder: str, path: str) -> str:
@@ -56,18 +69,82 @@ def file_stamp(path: str) -> tuple[int, int]:
     return stat.st_size, stat.st_mtime_ns
 
 
+def write_arrays_file(target: str, values: dict, arrays: Mapping[str, array]):
+    """Write values (JSON) & packed arrays to file atomically (temporary file renamed), raises OSError"""
+    names = list(arrays)
+    header = json.dumps({"values": values, "arrays": [
+        [name, arrays[name].typecode, len(arrays[name])] for name in names]}).encode("utf-8")
+    temp = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"  # threads & processes never share one
+    try:
+        with open(temp, "wb") as file:
+            file.write(ARRAYS_HEAD.pack(ARRAYS_MAGIC, ARRAYS_FORMAT, len(header)))
+            file.write(header)
+            for name in names:
+                values_array = arrays[name]
+                if sys.byteorder != "little":
+                    values_array = array(values_array.typecode, values_array)
+                    values_array.byteswap()
+                file.write(values_array.tobytes())
+        os.replace(temp, target)
+    except OSError:
+        with suppress(OSError):
+            os.remove(temp)
+        raise
+
+
+def read_arrays_file(path: str) -> tuple[dict, dict[str, array]] | None:
+    """Values & packed arrays of file written by write_arrays_file, None if missing, damaged or another format"""
+    try:
+        with open(path, "rb") as file:
+            data = file.read()
+    except OSError:
+        return None
+    if len(data) < ARRAYS_HEAD.size:
+        return None
+    magic, version, size = ARRAYS_HEAD.unpack_from(data, 0)
+    if magic != ARRAYS_MAGIC or version != ARRAYS_FORMAT or size > min(MAX_HEADER, len(data) - ARRAYS_HEAD.size):
+        return None
+    offset = ARRAYS_HEAD.size + size
+    try:
+        header = json.loads(data[ARRAYS_HEAD.size:offset].decode("utf-8"))
+        values, entries = header["values"], header["arrays"]
+        if not isinstance(values, dict) or not isinstance(entries, list):
+            return None
+        arrays: dict[str, array] = {}
+        view = memoryview(data)
+        for name, typecode, count in entries:
+            if typecode not in ARRAY_TYPES or not isinstance(count, int) or count < 0:
+                return None
+            column = array(typecode)
+            end = offset + count * column.itemsize
+            if end > len(data):
+                return None
+            column.frombytes(view[offset:end])
+            if sys.byteorder != "little":
+                column.byteswap()
+            arrays[str(name)] = column
+            offset = end
+    except (ValueError, TypeError, KeyError):  # UnicodeDecodeError & JSON errors are ValueError
+        return None
+    return values, arrays
+
+
 def load_cached_lap(folder: str, path: str) -> LapData:
     """Lap from cache if lap file did not change, else loaded from CSV & cached, raises OSError or ValueError"""
     stamp = file_stamp(path)
     target = cache_file(folder, path) if folder else ""
     if target:
-        with suppress(OSError, ValueError, EOFError, pickle.UnpicklingError, KeyError, TypeError, AttributeError):
-            with open(target, "rb") as file:
-                saved = pickle.load(file)
-            if saved["version"] == CACHE_VERSION and tuple(saved["stamp"]) == stamp:
+        found = read_arrays_file(target)
+        if found is not None:
+            values, arrays = found
+            info = values.get("info")
+            if (values.get("version") == CACHE_VERSION and values.get("stamp") == list(stamp)
+                    and isinstance(values.get("name"), str) and isinstance(info, (dict, type(None)))
+                    and all(column.typecode == column_type(name) for name, column in arrays.items())):
                 with suppress(OSError):
                     os.utime(target)  # recently used: kept when pruning
-                return LapData(saved["name"], dict(saved["columns"]), saved["info"])  # packed arrays kept
+                columns: dict[str, Column] = dict(arrays)
+                return LapData(values["name"], columns, info)  # packed arrays kept
     lap = load_lap(path)
     if target:
         save_cached_lap(target, stamp, lap)
@@ -76,20 +153,13 @@ def load_cached_lap(folder: str, path: str) -> LapData:
 
 def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData):
     """Write lap cache file atomically (laps loaded in threads)"""
-    temp = f"{target}.{os.getpid()}.{threading.get_ident()}.tmp"  # threads & processes never share one
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(temp, "wb") as file:
-            pickle.dump({
-                "version": CACHE_VERSION, "stamp": stamp, "name": lap.name, "info": lap.info,
-                "columns": {name: values if isinstance(values, array) and values.typecode == column_type(name)
-                            else array(column_type(name), values) for name, values in lap.columns.items()},
-            }, file, protocol=pickle.HIGHEST_PROTOCOL)
-        os.replace(temp, target)
-    except (OSError, OverflowError, TypeError) as error:
+        write_arrays_file(target, {"version": CACHE_VERSION, "stamp": list(stamp), "name": lap.name, "info": lap.info},
+                          {name: values if isinstance(values, array) and values.typecode == column_type(name)
+                           else array(column_type(name), values) for name, values in lap.columns.items()})
+    except (OSError, OverflowError, TypeError, ValueError) as error:
         logger.debug("LAP CACHE: unable to save %s: %s", target, error)
-        with suppress(OSError):
-            os.remove(temp)
 
 
 def remove_cached_lap(folder: str, path: str):

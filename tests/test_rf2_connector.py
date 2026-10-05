@@ -147,3 +147,117 @@ def test_sync_data_double_start_warns(game):
     info.start()
     sync.start(0, "")  # already started: ignored
     assert sync._updating
+
+
+# --- Audit fixes (package A)
+class FailingZone(Zone):
+    """Zone whose shared memory exists with another size (older plugin, other tool)"""
+
+    def __init__(self, data):
+        super().__init__(None)
+        self.closed = False
+
+    def create(self, *args):
+        raise PermissionError(5, "Access is denied")
+
+
+class OpenedZone(Zone):
+    def __init__(self, data):
+        super().__init__(data)
+        self.closed = False
+
+    def create(self, *args):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+def test_shared_memory_open_failure_not_connected(monkeypatch):
+    """Opening error must not stop app start: not connected state, stop safe"""
+    from tinypedal import app_signal
+
+    errors: list[str] = []
+    app_signal.error.connect(errors.append)
+    info = RF2Info()
+    dataset = MemoryDataSet()
+    dataset.scor = OpenedZone(rF2data.rF2Scoring())
+    dataset.tele = FailingZone(None)
+    dataset.live = (dataset.scor, dataset.tele, dataset.ext, dataset.ffb, dataset.rule)
+    info._sync.dataset = dataset
+    info.setReplay(None)
+    try:
+        info.start()  # no exception
+        assert dataset.scor.closed  # zone opened before failure closed again
+        assert info.isPaused and not info.isActive and not info._sync._updating
+        assert "Access is denied" in info.openError and errors
+        assert info.rf2ScorInfo.mCurrentET == 0.0 and info.rf2TeleVeh().mID == 0  # zeroed data readable
+        assert info.rawData is not None
+        info.stop()  # warning only, no crash on missing copy
+    finally:
+        app_signal.error.disconnect(errors.append)
+
+
+def test_lmu_shared_memory_open_failure_not_connected():
+    from tinypedal.adapter import lmu_connector
+
+    info = lmu_connector.LMUInfo()
+    info._sync.dataset.shmm = FailingZone(None)
+    info._shmm = info._sync.dataset.shmm
+    info.start()
+    assert info.isPaused and not info.isActive and info.openError
+    assert info.lmuScorInfo.mNumVehicles == 0 and info.lmuTeleVeh().mID == 0
+    info.stop()
+
+
+def test_gave_up_after_errors_hides_overlays(game, monkeypatch):
+    """Update thread stopped after repeated crashes: no frozen values left visible"""
+    info, _, _, _ = game
+    info._sync.paused = False
+    info._sync.synced = True
+    monkeypatch.setattr(rf2_connector, "run_supervised", lambda *args: False)
+    info._sync._SyncData__update()
+    assert info._sync.paused and not info._sync.synced and not info.isActive
+
+
+def test_lmu_gave_up_after_errors_hides_overlays(monkeypatch):
+    from tinypedal.adapter import lmu_connector
+
+    sync = lmu_connector.SyncData()
+    sync.synced = True
+    monkeypatch.setattr(lmu_connector, "run_supervised", lambda *args: False)
+    sync._SyncData__update()
+    assert sync.paused and not sync.synced
+
+
+def test_lmu_telemetry_matched_on_active_vehicles():
+    from pyLMUSharedMemory import lmu_data
+    from tinypedal.adapter import lmu_connector
+
+    telemetry = lmu_data.LMUTelemetryData()
+    telemetry.activeVehicles = 2
+    for index, slot_id in enumerate((7, 3, 9)):  # third entry left from a car that left
+        telemetry.telemInfo[index].mID = slot_id
+    indexes: dict = {}
+    lmu_connector.SyncData._SyncData__update_tele_indexes(telemetry, indexes)
+    assert indexes == {7: 0, 3: 1}
+
+
+def test_telemetry_slots_forgotten_on_session_change(game):
+    info, scor, tele, _ = game
+    info.start()
+    scor.mScoringInfo.mCurrentET = 50.0
+    tele.mVehicles[0].mID = 42  # slot of current session
+    assert wait_until(lambda: info._sync._tele_indexes.get(42) == 0)
+    tele.mVehicles[0].mID = 5
+    scor.mScoringInfo.mCurrentET = 1.0  # new session
+    assert wait_until(lambda: info._sync._tele_indexes.get(42) == 42)  # back to default, not old slot
+
+
+def test_rf2_replay_paused_state():
+    dataset = MemoryDataSet()
+    assert not dataset.replay_paused()
+    dataset.scor.paused = True
+    assert not dataset.replay_paused()  # live data never treated as replay
+    dataset.replaying = True
+    assert dataset.replay_paused()

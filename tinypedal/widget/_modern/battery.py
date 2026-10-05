@@ -19,17 +19,19 @@
 """
 Battery Widget, modern design
 
-Battery charge with gauge (low / high charge warning), drain & regen this lap, estimated net
-change, motor activation timer.
+Battery charge with gauge (low / high charge warning), state of charge shown by game, drain &
+regen this lap, estimated net change, motor activation timer.
 """
 
 from __future__ import annotations
 
 from PySide6.QtGui import QPainter
 
+from ...api_control import api
 from ...module_info import minfo
 from .._common import warning_flash
-from .base import ModernOverlay
+from .base import DASH, ModernOverlay
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 
@@ -39,8 +41,10 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "show_battery_charge", "high_battery_threshold", "low_battery_threshold",
         "show_battery_charge_warning_flash", "number_of_warning_flashes", "warning_flash_highlight_duration",
-        "warning_flash_interval", "show_battery_drain", "show_battery_regen", "show_estimated_net_change",
-        "show_activation_timer", "freeze_duration",
+        "warning_flash_interval", "show_state_of_charge", "show_battery_drain", "show_battery_regen",
+        "show_estimated_net_change", "show_activation_timer", "freeze_duration",
+        "display_order_battery_charge", "display_order_battery_drain", "display_order_battery_regen",
+        "display_order_estimated_net_change", "display_order_activation_timer",
     )
 
     def __init__(self, config, widget_name):
@@ -51,6 +55,8 @@ class Realtime(StatsMixin, ModernOverlay):
         stats = []
         if wcfg["show_battery_charge"]:
             stats.append(Stat("charge", "Battery", "100.00%", "strong", theme.positive))
+        if wcfg["show_state_of_charge"]:  # as shown by game (LMU), battery charge on rF2
+            stats.append(Stat("soc", "SoC", "100.0%", "value", theme.accent))
         if wcfg["show_battery_drain"]:
             stats.append(Stat("drain", "Drain", "-88.88", "value", theme.negative))
         if wcfg["show_battery_regen"]:
@@ -59,6 +65,10 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("net", "Net", "+88.88"))
         if wcfg["show_activation_timer"]:
             stats.append(Stat("timer", "Motor", "888.88s"))
+        stats = self.display_ordered(stats, names={
+            "charge": "battery_charge", "soc": "battery_charge", "drain": "battery_drain",
+            "regen": "battery_regen", "net": "estimated_net_change", "timer": "activation_timer",
+        })
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
@@ -100,8 +110,14 @@ class Realtime(StatsMixin, ModernOverlay):
                 warn_color = (None, theme.negative, theme.warning)[warning]
                 values.append(Value(f"{charge:.2f}%", warn_color,
                                     theme.tint(warn_color, 55) if warn_color is not None else None,
-                                    bar=min(max(charge / 100, 0), 1),
+                                    bar=fraction(charge / 100),
                                     bar_color=theme.negative if charge <= self.wcfg["low_battery_threshold"] else theme.positive))
+            elif key == "soc":
+                if hybrid.motorState > 0:  # electric motor available
+                    soc = min(max(api.read.emotor.state_of_charge(), 0.0), 100.0)
+                    values.append(Value(f"{soc:.1f}%", bar=fraction(soc / 100)))
+                else:
+                    values.append(Value(DASH, theme.text_faint))
             elif key == "drain":
                 values.append(Value(f"-{drain:.2f}"))
             elif key == "regen":

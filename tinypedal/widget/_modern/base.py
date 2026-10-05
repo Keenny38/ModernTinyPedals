@@ -29,8 +29,11 @@ scale), so a widget scales as a whole.
 
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
+from collections.abc import Iterable
 from math import ceil
+from time import gmtime, strftime
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -48,6 +51,7 @@ RIGHT = Align.AlignRight
 CENTER = Align.AlignHCenter
 
 DASH = chr(0x2013)  # en dash: missing value
+STEADY = "0.0"  # temperature difference text when steady (shown without arrow or sign)
 DEFAULT_CORNER_SCALE = 0.05  # global corner_radius_scale default, = radius unit 1
 # Unit = font_size option x this: design font is lighter & narrower than classic monospace
 # fonts, same font_size option reads about as large
@@ -64,6 +68,25 @@ WEIGHTS = {
 def design_font_family(style: dict) -> str:
     """Font family of modern design"""
     return style.get("modern_design_font_name") or FontFile.DESIGN_FAMILY
+
+
+def display_order_options(name: str) -> tuple[str, ...]:
+    """Display order options of widget (listed in options of designs that honour them)"""
+    from ...template.setting_widget import WIDGET_DEFAULT
+
+    return tuple(key for key in WIDGET_DEFAULT.get(name, {}) if key.startswith("display_order_"))
+
+
+def clock_samples(clock_format: str) -> tuple[str, ...]:
+    """Texts of clock format to size its value: morning & afternoon (AM / PM, day name...),
+    every digit as 8 (widest digit, digits are tabular)"""
+    try:
+        return tuple(
+            re.sub(r"\d", "8", strftime(clock_format, gmtime(seconds)))
+            for seconds in (3600 * 10, 3600 * 22, 86400 * 3 + 3600 * 10)  # Thursday & Sunday
+        )
+    except ValueError:  # invalid format
+        return (clock_format,)
 
 
 class ModernOverlay(Overlay):
@@ -96,6 +119,36 @@ class ModernOverlay(Overlay):
         self.add_font("dim", 1.0, "medium")
         self.add_font("small", 0.8, "semibold")
         self.add_font("label", 0.68, "bold", spacing=106, caps=True)
+
+    # Options
+    def user_text(self, key: str, design_text: str) -> str:
+        """Text option changed by user, else design text (translated label): classic text options
+        default to short codes (P, G, LDR...) that design replaces by its own labels"""
+        text = self.wcfg.get(key, "")
+        if text and text != self.cfg.default.setting.get(self.widget_name, {}).get(key, text):
+            return text
+        return design_text
+
+    def display_ordered(self, items: list, key: Any = None, names: dict[str, str] | None = None) -> list:
+        """Items in display_order_* option order, once user changed one of them (design order kept
+        while every display order option is at default value)
+
+        Args:
+            items: rows, tiles or columns in design order.
+            key: function returning item name (default: item.key).
+            names: item name -> display order option suffix, if different.
+        """
+        get_key = key or (lambda item: item.key)
+        names = names or {}
+        options = [f"display_order_{names.get(name, name)}" for name in map(get_key, items)]
+        default = self.cfg.default.setting.get(self.widget_name, {})
+        wcfg = self.wcfg
+        if all(wcfg.get(option) == default.get(option) for option in options):
+            return items
+        last = max((wcfg[option] for option in options if isinstance(wcfg.get(option), int)), default=0)
+        orders = [wcfg[option] if isinstance(wcfg.get(option), int) else last + 1 + index
+                  for index, option in enumerate(options)]  # items without option keep their place after
+        return [item for _, item in sorted(zip(orders, items), key=lambda pair: pair[0])]
 
     # Sizes
     def design_unit(self) -> float:
@@ -140,6 +193,10 @@ class ModernOverlay(Overlay):
             text = text.upper()
         return self.metrics[role].horizontalAdvance(text)
 
+    def widest(self, role: str, texts: Iterable[str]) -> str:
+        """Widest of texts with role font (sizing sample of values that vary by unit or language)"""
+        return max(texts, key=lambda text: self.text_width(role, text), default="")
+
     def advance(self, role: str, text: str) -> float:
         """Cached text advance width (text already in role capitalization)"""
         key = (role, text)
@@ -156,7 +213,8 @@ class ModernOverlay(Overlay):
         return self.metrics[role].horizontalAdvance("0")
 
     def static_text(self, role: str, text: str) -> QStaticText:
-        """Cached text layout"""
+        """Cached text layout, least recently drawn dropped first (names & labels drawn every
+        update stay cached in long races, changing values make way)"""
         key = (role, text)
         cache = self._text_cache
         static = cache.get(key)
@@ -168,6 +226,8 @@ class ModernOverlay(Overlay):
             cache[key] = static
             if len(cache) > TEXT_CACHE_SIZE:
                 cache.popitem(last=False)
+        else:
+            cache.move_to_end(key)
         return static
 
     def elided(self, role: str, text: str, width: float) -> str:
@@ -211,6 +271,11 @@ class ModernOverlay(Overlay):
         if state != self.state:
             self.state = state
             self.update()
+
+    def redraw_static(self):
+        """Background parts changed (rarely changing data drawn in static layer): draw it again"""
+        self._static_layer = None
+        self.update()
 
     def static_layer(self) -> QPixmap:
         """Background drawn once per size & screen scale"""

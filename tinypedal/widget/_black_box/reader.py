@@ -42,6 +42,7 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
+from .._common import tyre_punctured
 from .common import REAR_MAX_STEER
 from .recorder import EXPORT_QUEUE, IncidentBrowse, RaceReadings, Sample, index_of, log_race_events
 from .sizing import Presence
@@ -258,7 +259,7 @@ class DataReader:
         braking = self.show_brake_peak and api.read.inputs.brake_raw() > 0.05
         if wcfg["show_tyre_status"]:
             detached = api.read.wheel.is_detached()
-            puncture = api.read.tyre.puncture()
+            puncture = tyre_punctured()
             locking_wear = minfo.wheels.lockingTreadWear if self.use_wheels else WHEELS_ZERO
         else:
             detached = puncture = NO_STATUS
@@ -553,7 +554,7 @@ class DataReader:
         """Wheel, tyre & aero damage, last impact (same data as the Damage widget)"""
         self.damage_suspension = tuple(suspension)
         self.damage_detached = tuple(api.read.wheel.is_detached())
-        self.damage_puncture = tuple(api.read.tyre.puncture())
+        self.damage_puncture = tyre_punctured()
         self.damage_aero = api.read.vehicle.aero_damage()
         if not self.wcfg["show_damage_panel_impact_cone"]:
             return

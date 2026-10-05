@@ -56,7 +56,7 @@ def covers(cert_file: str, addresses: list[str]) -> bool:
     except (OSError, ValueError, x509.ExtensionNotFound):
         return False
     expiry = cert.not_valid_after_utc
-    if expiry - datetime.timedelta(days=RENEW_DAYS) < datetime.datetime.now(datetime.timezone.utc):
+    if expiry - datetime.timedelta(days=RENEW_DAYS) < datetime.datetime.now(datetime.UTC):
         return False
     known = {str(ip) for ip in names.get_values_for_type(x509.IPAddress)}
     return set(addresses) <= known
@@ -71,7 +71,7 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
 
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "TinyPedal web dashboard")])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     alt_names: list[x509.GeneralName] = [x509.DNSName("localhost")]
     alt_names.extend(x509.IPAddress(ipaddress.ip_address(address)) for address in addresses)
     cert = (

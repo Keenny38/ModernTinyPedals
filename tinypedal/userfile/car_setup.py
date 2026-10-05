@@ -28,6 +28,7 @@ import os
 from ..const_common import CRLF, FLOAT_INF
 from ..const_file import FileExt
 from ..regex_pattern import rex_special_char
+from . import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,10 @@ def save_car_setup_file(
     filepath: str, filename: str, dataset: tuple[str, ...],
     extension: str = FileExt.SVM
 ) -> None:
-    """Save car setup file"""
+    """Save car setup file atomically, error logged (never stops stats module)"""
     if len(dataset) < 2:
         return
-    with open(f"{filepath}{filename}{extension}", "w", newline="", encoding="utf-8") as temp_file:
+    with atomic_write(f"{filepath}{filename}{extension}", newline="") as temp_file:
         for line in dataset:
             temp_file.write(line)
             temp_file.write(CRLF)

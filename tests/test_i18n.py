@@ -41,6 +41,17 @@ def test_french_messages(french):
     assert i18n.trm("Unknown message stays") == "Unknown message stays"
 
 
+def test_french_game_data_messages(french):
+    """Audit fixes (package A): replay & connection messages"""
+    assert i18n.trm("Saving section: 45%") == "Enregistrement de la section : 45 %"
+    assert i18n.trm("Shared memory: last update 0.1 s ago") == "Mémoire partagée : dernière mise à jour il y a 0.1 s"
+    assert i18n.trm("Replay recorded with rFactor 2 API, select rFactor 2 API to play it.") == (
+        "Rejeu enregistré avec l'API rFactor 2, sélectionnez l'API rFactor 2 pour le lire.")
+    assert i18n.trm("Unable to open game shared memory, see log for details.").startswith("Impossible d'ouvrir")
+    assert i18n.trm("Replay not compatible with rFactor 2 API, reading game data.").startswith("Rejeu non compatible")
+    assert i18n.tr("Receiving data") == "Réception des données"
+
+
 def test_language_pack(tmp_path):
     import json
 

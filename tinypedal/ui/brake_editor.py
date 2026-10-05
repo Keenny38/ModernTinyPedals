@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 from ..api_control import api
 from ..const_file import ConfigType
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
 from ..userfile.heatmap import HEATMAP_DEFAULT_BRAKE, set_predefined_brake_name
 from ._common import (
@@ -66,7 +66,7 @@ class BrakeEditor(BaseEditor):
         # Set table
         self.table_brakes = QTableWidget(self)
         self.table_brakes.setColumnCount(len(HEADER_BRAKES))
-        self.table_brakes.setHorizontalHeaderLabels(HEADER_BRAKES)
+        self.table_brakes.setHorizontalHeaderLabels([tr(name) for name in HEADER_BRAKES])
         self.table_brakes.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table_brakes.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # Thickness column
@@ -154,7 +154,7 @@ class BrakeEditor(BaseEditor):
 
     #def open_replace_dialog(self):
     #    """Open replace dialog"""
-    #    selector = {HEADER_BRAKES[0]: 0}
+    #    selector = {tr(HEADER_BRAKES[0]): 0}
     #    _dialog = TableBatchReplace(self, selector, self.table_brakes)
     #    _dialog.open()
 
@@ -226,14 +226,30 @@ class BrakeEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_setting()
-        self.accept()  # close
+        if self.save_setting():
+            self.accept()  # close
 
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
         self.set_modified()
         if column_index == 1:  # failure thickness column
             table_item(self.table_brakes, row_index, column_index, FloatTableItem).validate()
+
+    def verify_table(self) -> bool:
+        """Verify table before saving, warn if a brake name is listed more than once"""
+        brake_names = set()
+        for index in range(self.table_brakes.rowCount()):
+            class_name = table_item(self.table_brakes, index, 0).text()
+            if class_name in brake_names:
+                self.table_brakes.setCurrentCell(index, 0)  # show duplicate row
+                msg_text = (
+                    f"<b>{class_name}</b> is listed more than once.<br><br>"
+                    "Each name can only be listed once, rename or delete duplicate rows."
+                )
+                QMessageBox.warning(self, tr("Error"), trm(msg_text))
+                return False
+            brake_names.add(class_name)
+        return True
 
     def update_brakes_temp(self):
         """Update temporary changes to brakes temp first"""
@@ -247,10 +263,13 @@ class BrakeEditor(BaseEditor):
                 "heatmap": heatmap_name,
             }
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_brakes_temp()
         cfg.user.brakes = copy_setting(self.brakes_temp)
         cfg.save(0, config_type=ConfigType.BRAKES)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True

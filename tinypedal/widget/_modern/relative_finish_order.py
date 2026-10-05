@@ -34,6 +34,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...const_common import ENERGY_TYPE_ID, MAX_SECONDS, RACELENGTH_TYPE_ID
+from ...i18n import tr_overlay
 from ...module_info import minfo
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
@@ -69,7 +70,11 @@ class Realtime(ModernOverlay):
 
         pad = unit * 0.3
         gap = unit * 0.14
-        cell_w = max(self.text_width("value", "8" * self.char_width), self.text_width("label", "LAPS")) + unit * 0.6
+        labels = ["LAPS", tr_overlay("LDR"), tr_overlay("DIFF")]  # first column labels
+        if self.rows > 5:
+            labels.append(f"{tr_overlay('EX+')}{self.extra_laps}")
+        cell_w = max(self.text_width("value", "8" * self.char_width), *(self.text_width("label", text) for text in labels))
+        cell_w += unit * 0.6
         value_h = unit * 1.45
         label_h = unit * 1.0
         heights = [label_h if row in LABEL_ROWS else value_h for row in range(self.rows)]
@@ -104,10 +109,11 @@ class Realtime(ModernOverlay):
                 fill = theme.surface_raised if slot == 0 else theme.tint(theme.surface_alt, 170)
                 rounded(painter, rect, self.radius(0.25), fill)
         # Fixed labels
-        self.draw_text(painter, self.cells[1][0], "LDR", "label", theme.text_dim, CENTER)
+        self.draw_text(painter, self.cells[1][0], tr_overlay("LDR"), "label", theme.text_dim, CENTER)
         if self.rows > 5:
-            self.draw_text(painter, self.cells[5][0], f"EX+{self.extra_laps}", "label", theme.text_dim, CENTER)
-        self.draw_text(painter, self.cells[3][0], "DIFF", "label", theme.text_muted, CENTER)
+            self.draw_text(painter, self.cells[5][0], f"{tr_overlay('EX+')}{self.extra_laps}", "label", theme.text_dim,
+                           CENTER)
+        self.draw_text(painter, self.cells[3][0], tr_overlay("DIFF"), "label", theme.text_muted, CENTER)
 
     def paint(self, painter: QPainter):
         theme = self.theme

@@ -28,6 +28,7 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...module_info import minfo
+from .._common import game_deltabest
 from .base import ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
@@ -38,6 +39,8 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "decimal_places", "delta_display_range", "freeze_duration",
         "show_all_time_deltabest", "show_session_deltabest", "show_stint_deltabest", "show_deltalast",
+        "show_game_deltabest_if_available", "display_order_all_time_deltabest", "display_order_session_deltabest",
+        "display_order_stint_deltabest", "display_order_deltalast",
     )
 
     def __init__(self, config, widget_name):
@@ -53,9 +56,11 @@ class Realtime(StatsMixin, ModernOverlay):
             ("stint_deltabest", "Stint", theme.orange),
             ("deltalast", "Last", theme.text_dim),
         )
-        self.shown = tuple(wcfg[f"show_{key}"] for key, _, _ in items)
         sample = "+88." + "8" * self.decimals
-        stats = [Stat(key, label, sample, "strong", accent) for (key, label, accent), show in zip(items, self.shown) if show]
+        stats = [Stat(key, label, sample, "strong", accent) for key, label, accent in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
+        self.keys = tuple(stat.key for stat in stats)
+        self.game_delta = wcfg["show_game_deltabest_if_available"]
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
         self.last_laptimes = [0.0] * 4
@@ -77,11 +82,13 @@ class Realtime(StatsMixin, ModernOverlay):
             if self.new_lap:
                 self.last_laptimes = [delta.lapTimeBest, delta.lapTimeSession, delta.lapTimeStint, delta.lapTimeLast]
                 self.new_lap = False
-            deltas = (delta.deltaBest, delta.deltaSession, delta.deltaStint, delta.deltaLast)
+            session = game_deltabest(delta.deltaSession) if self.game_delta else delta.deltaSession
+            deltas = (delta.deltaBest, session, delta.deltaStint, delta.deltaLast)
         theme = self.theme
+        by_key = dict(zip(("all_time_deltabest", "session_deltabest", "stint_deltabest", "deltalast"), deltas))
         values = []
-        for value, show in zip(deltas, self.shown):
-            if show:
-                text = f"{calc.sym_max(value, self.delta_range):+.{self.decimals}f}"
-                values.append(Value(text, theme.negative if value > 0 else theme.positive))
+        for key in self.keys:
+            value = by_key[key]
+            text = f"{calc.sym_max(value, self.delta_range):+.{self.decimals}f}"
+            values.append(Value(text, theme.negative if value > 0 else theme.positive))
         self.refresh(tuple(values))

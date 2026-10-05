@@ -34,14 +34,15 @@ class Realtime(DriverTable):
     """Draw widget"""
 
     COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "delta_laptime", "energy_remaining",
-        "vehicle_integrity", "incidents", "stint_laps", "time_interval",
+        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
+        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
+        "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
+        "time_interval",
     )
     options = (
         *DRIVER_OPTIONS,
-        "column_delta_laptime", "number_of_delta_laptime",
-        "column_time_interval", "decimal_places_time_interval",
+        "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
+        "column_time_interval", "decimal_places_time_interval", "display_order_time_interval",
     )
 
     def __init__(self, config, widget_name):
@@ -53,7 +54,7 @@ class Realtime(DriverTable):
 
     def extra_column(self, key: str) -> Column | None:
         if key == "time_interval":
-            sample = "+88." + "8" * self.int_decimals if self.int_decimals else "+88"
+            sample = "+888." + "8" * self.int_decimals if self.int_decimals else "+888"
             return Column(key, self.text_width("strong", sample), RIGHT)
         if key == "delta_laptime":
             return Column(key, (self.text_width("small", "8.8") + self.unit * 0.3) * self.delta_count, RIGHT)

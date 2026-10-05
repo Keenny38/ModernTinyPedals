@@ -31,6 +31,6 @@ from .restyle import Restyled, restyled_options
 class Realtime(Restyled, Classic):
     """Draw widget"""
 
-    options = restyled_options("chat")
     background_options = ("background_color_message",)
     color_tokens = {"font_color_message": "text", "font_color_new_message": "accent"}
+    options = restyled_options("chat", color_tokens, background_options)

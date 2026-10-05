@@ -46,7 +46,7 @@ def load_fuel_delta_file(
         return lastlist, used_last, laptime_last
     except FileNotFoundError:
         logger.info("MISSING: consumption delta (%s) data", extension)
-    except (IndexError, ValueError, TypeError, OSError):
+    except (IndexError, ValueError, TypeError, OSError, csv.Error):
         logger.info("MISSING: invalid consumption delta (%s) data", extension)
     return defaults
 

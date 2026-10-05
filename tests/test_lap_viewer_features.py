@@ -349,16 +349,16 @@ def test_csv_export(viewer, tmp_path):
 
 
 def test_motec_export(viewer, laps, tmp_path, monkeypatch):
-    from tinypedal.ui.quick import lap_backend
+    from tinypedal.ui.quick import lap_export
     from tinypedal.userfile.motec_ld import read_ld
 
     backend = viewer.backend
     target = tmp_path / "reference.ld"
-    monkeypatch.setattr(lap_backend.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
+    monkeypatch.setattr(lap_export.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
     backend.exportMotec("")  # reference lap
     assert target.exists() and read_ld(str(target))
     assert "Exported" in backend.status
-    monkeypatch.setattr(lap_backend.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))
+    monkeypatch.setattr(lap_export.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))
     os.makedirs(tmp_path / "all")
     backend.exportMotecMany(True)  # every lap of track, in background
     wait_loaded(viewer)

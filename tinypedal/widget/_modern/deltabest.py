@@ -20,29 +20,32 @@
 Deltabest Widget, modern design
 
 Delta to reference lap: large signed number in gain or loss color, on a pill that slides
-along a center bar (time gain fills right, loss fills left).
+along a center bar (time gain fills right, loss fills left). Pill outlined in loss color while
+game invalidated current lap (track limits).
 """
 
 from __future__ import annotations
 
 from math import isfinite
 
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter, QPen
 
 from ... import calculation as calc
+from ...api_control import api
 from ...module_info import minfo
+from .._common import game_deltabest
 from .base import CENTER, ModernOverlay
-from .draw import panel, rounded
+from .draw import panel, readable_on, rounded
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
 
     options = (
-        "font_size", "layout", "decimal_places", "deltabest_source",
-        "show_delta_bar", "delta_bar_length", "delta_bar_display_range",
-        "delta_display_range", "freeze_duration", "enable_animated_deltabest",
+        "font_size", "layout", "decimal_places", "deltabest_source", "show_game_deltabest_if_available",
+        "swap_style", "show_delta_bar", "delta_bar_length", "delta_bar_display_range",
+        "delta_display_range", "freeze_duration", "enable_animated_deltabest", "show_invalid_lap_indicator",
     )
 
     def __init__(self, config, widget_name):
@@ -57,6 +60,9 @@ class Realtime(ModernOverlay):
         self.bar_range = max(float(wcfg["delta_bar_display_range"]), 0.001)
         self.freeze_duration = min(max(wcfg["freeze_duration"], 0), 30)
         self.animated = wcfg["enable_animated_deltabest"] and wcfg["show_delta_bar"]
+        self.game_delta = wcfg["show_game_deltabest_if_available"]
+        self.swap_style = wcfg["swap_style"]
+        self.show_invalid = wcfg["show_invalid_lap_indicator"]
 
         pad = unit * 0.35
         sample = "+" + "8" * 2 + "." + "8" * self.decimals
@@ -85,7 +91,10 @@ class Realtime(ModernOverlay):
                 self.last_laptime = getattr(minfo.delta, self.laptime_source)
                 self.new_lap = False
             delta = getattr(minfo.delta, self.delta_source)
-        self.refresh(round(delta, self.decimals + 1) if isfinite(delta) else 0.0)
+            if self.game_delta:
+                delta = game_deltabest(delta)
+        invalid = self.show_invalid and api.read.lap.invalidated()
+        self.refresh((round(delta, self.decimals + 1) if isfinite(delta) else 0.0, invalid))
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
@@ -95,7 +104,7 @@ class Realtime(ModernOverlay):
 
     def paint(self, painter: QPainter):
         theme = self.theme
-        delta = self.state
+        delta, invalid = self.state
         color = theme.negative if delta > 0 else theme.positive
         bar = self.rect_bar
         fraction = calc.sym_max(delta, self.bar_range) / self.bar_range  # -1 to 1, gain < 0
@@ -109,6 +118,19 @@ class Realtime(ModernOverlay):
         if self.animated:
             left = center - fraction * bar.width() / 2 - pill.width() / 2
             pill.moveLeft(min(max(left, bar.left()), bar.right() - pill.width()))
-        rounded(painter, pill, self.radius(0.4), theme.tint(color, 46))
         text = f"{calc.sym_max(delta, self.delta_range):+.{self.decimals}f}"
-        self.draw_text(painter, pill, text, "delta", color, CENTER, elide=False)
+        if self.swap_style:  # delta color as pill fill
+            rounded(painter, pill, self.radius(0.4), color)
+            self.draw_text(painter, pill, text, "delta", readable_on(color), CENTER, elide=False)
+        else:
+            rounded(painter, pill, self.radius(0.4), theme.tint(color, 46))
+            self.draw_text(painter, pill, text, "delta", color, CENTER, elide=False)
+        if invalid:  # lap invalidated by game: loss colored outline
+            width = max(self.unit * 0.14, 2.0)
+            pen = QPen(theme.negative, width)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            radius = max(min(self.radius(0.4), pill.height() / 2) - width / 2, 0)
+            inner = pill.adjusted(width / 2, width / 2, -width / 2, -width / 2)
+            painter.drawRoundedRect(inner, radius, radius)

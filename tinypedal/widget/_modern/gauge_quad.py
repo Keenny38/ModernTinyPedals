@@ -28,6 +28,7 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QPainter
 
 from .base import ModernOverlay
+from .draw import fraction
 from .quad import QuadMixin, Section, Tile
 
 GAUGE_ALPHA = 120
@@ -38,29 +39,36 @@ class GaugeQuad(QuadMixin, ModernOverlay):
     """Four wheel gauges"""
 
     label = ""  # section label (English)
-    sample = "888"  # widest value text
+    sample = "888"  # widest value text, whole part (decimal places added)
     common_options = ("font_size", "decimal_places")
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         self.decimals = max(int(self.wcfg.get("decimal_places", 0)), 0)
         self.setup()
-        section = Section(widget_name, self.label, self.sample, min_width=GAUGE_WIDTH)
-        self.set_size(*self.build_quads([section], show_labels=bool(self.label)))
+        sample = f"{self.sample}.{'8' * self.decimals}" if self.decimals else self.sample
+        section = Section(widget_name, self.label, sample, min_width=GAUGE_WIDTH)
+        self.set_size(*self.build_quads([section], center_width=self.center_width(), show_labels=bool(self.label)))
 
     def setup(self):
         """Read options (override)"""
+
+    def center_width(self) -> float:
+        """Width of center column between left & right tiles, 0 = none (override)"""
+        return 0.0
 
     def read(self) -> tuple:
         """4 wheel tiles (override)"""
         return ()
 
-    def gauge(self, value: float, text_value: float, level: float, color: QColor, warning: bool = False) -> Tile:
-        """Tile of gauge value: text, level 0-1, gauge color"""
+    def gauge(self, value: float, text_value: float, level: float, color: QColor, warning: bool = False,
+              mark: float = -1.0) -> Tile:
+        """Tile of gauge value: text, level 0-1, gauge color, mark 0-1 (-1 = none)"""
         theme = self.theme
         text = f"{text_value:.{self.decimals}f}"
         return Tile((text,), colors=(theme.negative if warning else theme.text,),
-                    level=min(max(level, 0.0), 1.0), level_color=theme.tint(color, GAUGE_ALPHA))
+                    level=fraction(level), level_color=theme.tint(color, GAUGE_ALPHA),
+                    mark=fraction(mark) if mark >= 0 else -1.0)
 
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)

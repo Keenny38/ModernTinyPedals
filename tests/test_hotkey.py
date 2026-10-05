@@ -183,3 +183,93 @@ def test_command_lists_are_unique():
     names = [name for name, _ in command.COMMANDS_GENERAL + command.COMMANDS_PRESET
              + command.COMMANDS_MODULE + command.COMMANDS_WIDGET]
     assert len(names) == len(set(names))
+
+
+# --- Hotkey control (key polling thread)
+class StopAfter:
+    """Event replacement: wait() returns False (keep polling) a number of times, then True"""
+
+    def __init__(self, runs: int):
+        self.runs = runs
+
+    def wait(self, timeout=None) -> bool:
+        self.runs -= 1
+        return self.runs < 0
+
+
+def run_hotkeys(monkeypatch, key_states: list[set[int]], binds: dict[str, str]) -> list[str]:
+    """Poll key states (one set of pressed keys per check), returns commands run"""
+    from types import SimpleNamespace
+
+    from tinypedal import hotkey_control
+    from tinypedal.setting import cfg
+
+    for name, bind in binds.items():
+        monkeypatch.setitem(cfg.user.shortcuts, name, {"bind": bind})
+    commands = tuple((name, lambda name=name: name) for name in binds)
+    monkeypatch.setattr(hotkey_control, "COMMANDS_GENERAL", commands)
+    for group in ("COMMANDS_PRESET", "COMMANDS_MODULE", "COMMANDS_WIDGET"):
+        monkeypatch.setattr(hotkey_control, group, ())
+    states = iter(key_states)
+    pressed: set[int] = set()
+    ran: list[str] = []
+    monkeypatch.setattr(hotkey_control, "app_signal", SimpleNamespace(hotkey=SimpleNamespace(
+        emit=lambda func: ran.append(func()))))
+    monkeypatch.setattr(hotkey_control, "refresh_keystate", lambda func: None)
+    monkeypatch.setattr(hotkey_control, "get_key_state_function",
+                        lambda: lambda code: -32768 if code in pressed else 0)
+    control = hotkey_control.HotkeyControl()
+    stop_after = StopAfter(len(key_states))
+
+    def wait(timeout=None):  # next key state at each check
+        pressed.clear()
+        pressed.update(next(states, set()))
+        return stop_after.wait(timeout)
+
+    control._event = SimpleNamespace(wait=wait)
+    control._HotkeyControl__update_loop()
+    assert control._stopped
+    return ran
+
+
+def test_hotkey_runs_once_per_key_press(ui_env, monkeypatch):
+    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+
+    ctrl, key_a = KEYMAP_MODIFIER["ctrl"], KEYMAP_GENERAL["a"]
+    states = [set(), {ctrl}, {ctrl, key_a}, {ctrl, key_a}, {ctrl, key_a}, set(), {ctrl, key_a}]
+    assert run_hotkeys(monkeypatch, states, {"overlay_lock": "ctrl+a"}) == ["overlay_lock"] * 2
+
+
+def test_hotkey_not_repeated_when_longer_combo_released(ui_env, monkeypatch):
+    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+
+    ctrl, shift, key_a = KEYMAP_MODIFIER["ctrl"], KEYMAP_MODIFIER["shift"], KEYMAP_GENERAL["a"]
+    states = [{ctrl, key_a}, {ctrl, shift, key_a}, {ctrl, key_a}, {ctrl, key_a}]
+    binds = {"overlay_lock": "ctrl+a", "overlay_auto_hide": "ctrl+shift+a"}
+    assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]
+
+
+def test_hotkey_control_stops_without_commands(ui_env, monkeypatch):
+    assert run_hotkeys(monkeypatch, [set(), set()], {}) == []
+
+
+def test_hotkey_control_enable_disable(ui_env, monkeypatch, caplog):
+    from tinypedal import hotkey_control, thread_guard
+    from tinypedal.setting import cfg
+
+    control = hotkey_control.HotkeyControl()
+    monkeypatch.setitem(cfg.application, "enable_global_hotkey", False)
+    control.enable()
+    assert control._stopped  # disabled in config: no thread
+    monkeypatch.setitem(cfg.application, "enable_global_hotkey", True)
+    monkeypatch.setattr(hotkey_control, "run_supervised", lambda target, name, event: event.wait(5))
+    control.enable()
+    assert not control._stopped
+    control.reload()  # stopped & started again
+    control.disable()
+    assert control._stopped
+    # Thread stuck: disable gives up after timeout
+    monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
+    control._stopped = False
+    control.disable()
+    assert "not stopped" in caplog.text

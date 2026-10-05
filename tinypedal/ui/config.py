@@ -83,18 +83,24 @@ from ._option import (
     unit_hint,
 )
 from .display_order import DisplayOrder
+from .option_limits import limit_error
 from .widget_preview import WidgetPreview
 
 COLUMN_LABEL = 0  # grid layout column index
 COLUMN_OPTION = 1
+COLUMN_ERROR = 2  # short reason next to invalid value
+FONT_NO_CHANGE = "no change"  # font override choice keeping option as is
+# Choice lists shown as is (names, not words): others shown translated, English value saved
+UNTRANSLATED_CHOICES = (rxp.CFG_API_NAME, rxp.CFG_CHARACTER_ENCODING, rxp.CFG_LANGUAGE, rxp.CFG_FONT_WEIGHT)
 
 
 # Global options kept up to date by app itself, not shown in config dialog (still in config file)
 HIDDEN_OPTIONS = {
     "application": (
         "position_x", "position_y", "window_width", "window_height", "last_page_index", "rail_items",
-        "open_pages",
+        "open_pages", "skipped_update_version",
     ),
+    "vr_overlay": ("mirror_position_x", "mirror_position_y"),
 }
 
 
@@ -142,20 +148,96 @@ def get_font_list() -> list[str]:
     return QFontDatabase.families()
 
 
+def option_error(key: str, editor: QWidget) -> str:
+    """Short reason (English, see trm) why edited option value is invalid, "" if valid
+
+    Number is checked against option limits (range, whole number), see option_limits.
+    Editors validated with side effects (folder path) are checked when saving only.
+    """
+    invalid_reason = getattr(editor, "invalid_reason", None)
+    if not callable(invalid_reason):  # check box, choice list
+        return ""
+    reason = invalid_reason()
+    if reason or not isinstance(editor, (IntegerEdit, FloatEdit)):
+        return reason
+    return limit_error(key, float(editor.validate()))
+
+
+def reason_text(reason: str) -> str:
+    """Translated reason of invalid value (fixed text, or with numbers)"""
+    return trm(tr(reason))
+
+
+def user_setting_name(user_setting: dict) -> str:
+    """Name of loaded setting dictionary (cfg.user.setting or config), "" if another one
+
+    Loading a preset replaces cfg.user.setting with a new dictionary: config dialogs read
+    the loaded one by name when saving, never the one given when opened (see live_setting).
+    """
+    for name in ("setting", "config"):
+        if getattr(cfg.user, name, None) is user_setting:
+            return name
+    return ""
+
+
+class LiveSetting:
+    """Config dialog setting dictionary, always the loaded one, see user_setting_name"""
+
+    def __init__(self, user_setting: dict):
+        self._name = user_setting_name(user_setting)
+        self._setting = user_setting
+        # Preset the options belong to, see preset_changed
+        self.preset_filename = cfg.filename.setting
+
+    @property
+    def is_preset(self) -> bool:
+        """Options of loaded preset (replaced when another preset loads), not global config"""
+        return self._name == "setting"
+
+    def get(self) -> dict:
+        """Loaded setting dictionary"""
+        if self._name:
+            return getattr(cfg.user, self._name)
+        return self._setting
+
+    def preset_changed(self) -> bool:
+        """Another preset was loaded since dialog opened"""
+        return self.is_preset and cfg.filename.setting != self.preset_filename
+
+    def confirm_preset(self, parent) -> bool:
+        """Ask before saving options into a preset loaded since dialog opened (auto-load)"""
+        if not self.preset_changed():
+            return True
+        preset_name = cfg.filename.setting.removesuffix(".json")
+        msg_text = (
+            f"Preset <b>{preset_name}</b> was loaded since this page was opened."
+            f"<br><br>Save changed options to <b>{preset_name}</b>?"
+        )
+        confirm = QMessageBox.question(
+            parent, tr("Confirm"), trm(msg_text),
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            defaultButton=QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return False
+        self.preset_filename = cfg.filename.setting
+        return True
+
+
 @singleton_dialog(ConfigType.CONFIG)
 class FontConfig(BaseDialog):
     """Config global font setting"""
 
     def __init__(self, parent, user_setting: dict, reload_func: Callable):
         super().__init__(parent)
-        self.set_config_title("Global Font Override", cfg.filename.setting)
+        self.set_config_title(tr("Global Font Override"), cfg.filename.setting)
 
         self.reloading = reload_func
-        self.user_setting = user_setting
+        self.live_setting = LiveSetting(user_setting)
 
-        # Create options
+        # Create options ("no change" item keeps its English text as data, see selected_choice)
         self.edit_fontname = DropDownListEdit(self)
-        self.edit_fontname.addItem("no change")
+        self.edit_fontname.addItem(tr("no change"), FONT_NO_CHANGE)
         self.edit_fontname.addItems(get_font_list())
         self.edit_fontname.setFixedWidth(UIScaler.size(9))
 
@@ -164,12 +246,13 @@ class FontConfig(BaseDialog):
         self.edit_fontsize.setFixedWidth(UIScaler.size(9))
 
         self.edit_fontweight = DropDownListEdit(self)
-        self.edit_fontweight.addItem("no change")
+        self.edit_fontweight.addItem(tr("no change"), FONT_NO_CHANGE)
         self.edit_fontweight.addItems(rxp.CHOICE_COMMON[rxp.CFG_FONT_WEIGHT])
         self.edit_fontweight.setFixedWidth(UIScaler.size(9))
 
         self.edit_autooffset = DropDownListEdit(self)
-        self.edit_autooffset.addItems(("no change", "enable", "disable"))
+        for choice in (FONT_NO_CHANGE, "enable", "disable"):
+            self.edit_autooffset.addItem(tr(choice), choice)
         self.edit_autooffset.setFixedWidth(UIScaler.size(9))
 
         self.edit_fontoffset = QSpinBox(self)
@@ -208,15 +291,57 @@ class FontConfig(BaseDialog):
         layout_main.addLayout(layout_button)
         layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
         self.setLayout(layout_main)
+        self.applied_state = self.capture()  # choices last applied, see is_modified
+        # Unsaved changes marker follows choices
+        for combo in (self.edit_fontname, self.edit_fontweight, self.edit_autooffset):
+            combo.currentIndexChanged.connect(self.refresh_modified)
+        for spin in (self.edit_fontsize, self.edit_fontoffset):
+            spin.valueChanged.connect(self.refresh_modified)
 
-    def applying(self):
-        """Save & apply"""
+    @property
+    def user_setting(self) -> dict:
+        """Loaded preset setting (replaced when another preset loads)"""
+        return self.live_setting.get()
+
+    def save_action(self):
+        """Ctrl+S: Apply"""
+        return self.applying
+
+    @staticmethod
+    def selected_choice(editor: QComboBox) -> str:
+        """Selected choice, English value of translated items"""
+        data = editor.currentData()
+        return data if isinstance(data, str) else editor.currentText()
+
+    def capture(self) -> tuple:
+        """Current choices"""
+        return (
+            self.selected_choice(self.edit_fontname),
+            self.edit_fontsize.value(),
+            self.selected_choice(self.edit_fontweight),
+            self.selected_choice(self.edit_autooffset),
+            self.edit_fontoffset.value(),
+        )
+
+    def is_modified(self) -> bool:
+        """Whether choices were changed since opened or last applied"""
+        return self.capture() != self.applied_state
+
+    def is_preset_setting(self) -> bool:
+        """Edits options of loaded preset"""
+        return self.live_setting.is_preset
+
+    def applying(self) -> bool:
+        """Save & apply, False if cancelled"""
+        if not self.live_setting.confirm_preset(self):
+            return False
         self.save_setting(self.user_setting)
+        return True
 
     def saving(self):
         """Save & close"""
-        self.applying()
-        self.accept()  # close
+        if self.applying():
+            self.accept()  # close
 
     def save_setting(self, dict_user: dict[str, dict]):
         """Save setting"""
@@ -224,14 +349,14 @@ class FontConfig(BaseDialog):
             for key in setting:
                 # Font name
                 if re.search(rxp.CFG_FONT_NAME, key):
-                    font_name = self.edit_fontname.currentText()
-                    if font_name != "no change":
+                    font_name = self.selected_choice(self.edit_fontname)
+                    if font_name != FONT_NO_CHANGE:
                         setting[key] = font_name
                     continue
                 # Font weight
                 if re.search(rxp.CFG_FONT_WEIGHT, key):
-                    font_weight = self.edit_fontweight.currentText()
-                    if font_weight != "no change":
+                    font_weight = self.selected_choice(self.edit_fontweight)
+                    if font_weight != FONT_NO_CHANGE:
                         setting[key] = font_weight
                     continue
                 # Font size addend
@@ -242,7 +367,7 @@ class FontConfig(BaseDialog):
                     continue
                 # Auto font offset
                 if key == "enable_auto_font_offset":
-                    auto_offset = self.edit_autooffset.currentText()
+                    auto_offset = self.selected_choice(self.edit_autooffset)
                     if auto_offset == "disable":
                         setting[key] = False
                     elif auto_offset == "enable":
@@ -257,6 +382,8 @@ class FontConfig(BaseDialog):
         # Reset after applied
         self.edit_fontsize.setValue(0)
         self.edit_fontoffset.setValue(0)
+        self.applied_state = self.capture()
+        self.refresh_modified()
         # Wait saving finish
         cfg.save(0)
         run_after_saving(self.reloading)
@@ -374,7 +501,7 @@ class UserConfig(BaseDialog):
         self.reloading = reload_func
         self.key_name = key_name
         self.config_type = config_type
-        self.user_setting = user_setting
+        self.live_setting = LiveSetting(user_setting)
         self.default_setting = default_setting
         self.option_width = UIScaler.size(option_width)
 
@@ -388,6 +515,10 @@ class UserConfig(BaseDialog):
         self.collapsed: set[str] = set()
         self.search_words: list[str] = []
         self.show_advanced = self.option_ui is None
+        # Inline validation: invalid options (key: short reason), marks next to their editor
+        self.option_grid_rows: dict[str, int] = {}
+        self.option_errors: dict[str, str] = {}
+        self.error_marks: dict[str, QLabel] = {}
 
         # Create options
         self.layout_option = QGridLayout()
@@ -397,7 +528,7 @@ class UserConfig(BaseDialog):
         option_box.setLayout(self.layout_option)
 
         # Create scroll box
-        scroll_box = QScrollArea(self)
+        self.scroll_box = scroll_box = QScrollArea(self)
         scroll_box.setWidget(option_box)
         scroll_box.setWidgetResizable(True)
 
@@ -430,17 +561,22 @@ class UserConfig(BaseDialog):
         button_reset.clicked.connect(self.reset_setting)
         button_reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        button_apply = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply)
+        self.button_apply = button_apply = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply)
         button_apply.clicked.connect(self.applying)
 
-        button_save = QDialogButtonBox(QDialogButtonBox.StandardButton.Save)
+        self.button_save = button_save = QDialogButtonBox(QDialogButtonBox.StandardButton.Save)
         button_save.accepted.connect(self.saving)
 
         button_cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         button_cancel.rejected.connect(self.reject)
 
+        # Invalid values: Apply & Save disabled, reason shown here
+        self.label_invalid = QLabel(self)
+        self.label_invalid.setObjectName("optionInvalidStatus")
+        self.label_invalid.setHidden(True)
+
         # Undo & redo of edited (not yet applied) values
-        self.history = EditorHistory(self.option_edit, self.refresh_history_buttons, self)
+        self.history = EditorHistory(self.option_edit, self.history_changed, self)
         self.button_undo = CompactButton(tr("Undo"))
         self.button_undo.setToolTip(tr("Undo (Ctrl+Z)"))
         self.button_undo.clicked.connect(self.history.undo)
@@ -452,12 +588,14 @@ class UserConfig(BaseDialog):
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.history.redo)
         self.refresh_history_buttons()
         self.saved_state = self.history.capture()  # editor contents last saved, see is_modified
+        self.connect_option_checks()
 
         layout_button = QHBoxLayout()
         layout_button.addWidget(button_reset)
         layout_button.addWidget(self.button_undo)
         layout_button.addWidget(self.button_redo)
         layout_button.addStretch(1)
+        layout_button.addWidget(self.label_invalid)
         layout_button.addWidget(button_apply)
         layout_button.addWidget(button_save)
         layout_button.addWidget(button_cancel)
@@ -483,10 +621,111 @@ class UserConfig(BaseDialog):
         self.refresh_state()
         self.refresh_visibility()
 
+    @property
+    def user_setting(self) -> dict:
+        """Loaded setting dictionary (preset one is replaced when another preset loads)"""
+        return self.live_setting.get()
+
+    def is_preset_setting(self) -> bool:
+        """Edits options of loaded preset, not global config"""
+        return self.live_setting.is_preset
+
     def refresh_history_buttons(self):
         """Enable undo & redo buttons when history is available"""
         self.button_undo.setEnabled(bool(self.history.undo_stack) or self.history.timer.isActive())
         self.button_redo.setEnabled(bool(self.history.redo_stack))
+
+    def history_changed(self):
+        """Undo or redo state changed (edited values restored by undo or redo)"""
+        self.refresh_history_buttons()
+        self.refresh_modified()
+
+    def save_action(self):
+        """Ctrl+S: save, page kept open"""
+        return self.save_setting
+
+    # Inline validation: invalid value marked next to its editor, Apply & Save disabled
+    def connect_option_checks(self):
+        """Check edited values while typing, follow unsaved changes"""
+        for key, editor in self.option_edit.items():
+            if isinstance(editor, QCheckBox):
+                editor.toggled.connect(lambda _checked: self.option_changed())
+            elif isinstance(editor, QComboBox):
+                editor.currentTextChanged.connect(lambda _text: self.option_changed())
+            else:
+                editor.textChanged.connect(lambda _text, name=key: self.option_changed(name))
+        for key in self.option_edit:
+            self.check_option(key)
+
+    def option_changed(self, key: str = ""):
+        """Option edited: value checked (text editors), unsaved changes marker refreshed"""
+        if key:
+            self.check_option(key)
+        if not self.history.busy:  # undo & redo refresh once restored, see history_changed
+            self.refresh_modified()
+
+    def check_option(self, key: str) -> str:
+        """Check edited value, mark it if invalid, returns short reason ("" if valid)"""
+        reason = option_error(key, self.option_edit[key])
+        if reason == self.option_errors.get(key, ""):
+            return reason
+        if reason:
+            self.option_errors[key] = reason
+        else:
+            self.option_errors.pop(key, None)
+        self.mark_invalid(key, reason)
+        self.refresh_invalid_state()
+        return reason
+
+    def mark_invalid(self, key: str, reason: str):
+        """Highlight editor (see style) & show short reason next to it"""
+        editor = self.option_edit[key]
+        editor.setProperty("invalid", bool(reason))
+        editor.style().unpolish(editor)
+        editor.style().polish(editor)
+        text = reason_text(reason)
+        editor.setAccessibleDescription(text)
+        mark = self.error_marks.get(key)
+        if mark is None and reason:
+            mark = QLabel(self)
+            mark.setObjectName("optionError")
+            self.layout_option.addWidget(mark, self.option_grid_rows.get(key, 0), COLUMN_ERROR)
+            self.error_marks[key] = mark
+        if mark is not None:
+            mark.setText(f"⚠ {text}" if reason else "")
+            mark.setToolTip(f"{option_label(key)}: {text}" if reason else "")
+            mark.setHidden(not reason or editor.isHidden())
+
+    def first_invalid_key(self) -> str:
+        """First invalid option in page order, "" if none"""
+        return next((key for key in self.option_edit if key in self.option_errors), "")
+
+    def refresh_invalid_state(self):
+        """Apply & Save disabled while a value is invalid, count & first reason shown"""
+        count = len(self.option_errors)
+        self.button_apply.setEnabled(not count)
+        self.button_save.setEnabled(not count)
+        self.label_invalid.setHidden(not count)
+        if not count:
+            return
+        self.label_invalid.setText(f"⚠ {trm(f'Fix {count} invalid value(s) to save')}")
+        self.label_invalid.setToolTip("<br>".join(
+            f"{option_label(key)}: {reason_text(self.option_errors[key])}"
+            for key in self.option_edit if key in self.option_errors))
+
+    def show_invalid_option(self, key: str):
+        """Show option (search cleared, section expanded, advanced options) & focus its editor"""
+        row = next((row for row in self.rows if row.key == key), None)
+        if row is not None:
+            if self.search_words and not all(word in search_text(key) for word in self.search_words):
+                self.edit_search.clear()
+            if row.section in self.collapsed:
+                self.toggle_section(row.section)
+            if not self.show_advanced and not self.is_basic(row) and hasattr(self, "check_advanced"):
+                self.check_advanced.setChecked(True)
+        editor = self.option_edit[key]
+        self.scroll_box.ensureWidgetVisible(editor)
+        editor.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # Options tools: simple / advanced mode, color theme
     def create_option_tools(self, layout: QHBoxLayout):
@@ -565,6 +804,9 @@ class UserConfig(BaseDialog):
                 visible = row.section not in self.collapsed and (self.show_advanced or self.is_basic(row))
             row.label.setHidden(not visible)
             row.editor.setHidden(not visible)
+            mark = self.error_marks.get(row.key)
+            if mark is not None:
+                mark.setHidden(not visible or row.key not in self.option_errors)
             section_shown[row.section] = section_shown.get(row.section, False) or visible
             if row.group is not None:
                 group_shown[id(row.group)] = group_shown.get(id(row.group), False) or visible
@@ -629,14 +871,18 @@ class UserConfig(BaseDialog):
             elif editor is not None:
                 editor.textChanged.connect(self.refresh_state)
 
-    def has_display_order(self) -> bool:
-        """Check whether has display order option (modern design has fixed order)"""
+    def display_order_keys(self) -> list[str]:
+        """Display order options shown by this page (widget: options of its design)"""
+        keys = list(self.user_setting[self.key_name])
         if self.config_type == ConfigType.WIDGET:
-            from ..widget._modern import uses_modern_design
+            from ..widget._modern import design_option_keys
 
-            if uses_modern_design(cfg, self.key_name):
-                return False
-        return any("display_order" in key for key in reversed(self.user_setting[self.key_name].keys()))
+            keys = design_option_keys(cfg, self.key_name, keys)
+        return [key for key in keys if key.startswith("display_order_")]
+
+    def has_display_order(self) -> bool:
+        """Check whether has display order option (shown by widget design in use)"""
+        return bool(self.display_order_keys())
 
     def search_options(self, text: str):
         """Search for options: all words must match (any order), in displayed name or option key"""
@@ -645,9 +891,10 @@ class UserConfig(BaseDialog):
 
     def open_display_order(self):
         """Open display order dialog"""
-        # Extract column index setting
-        user_orders = {k: v for k, v in self.user_setting[self.key_name].items() if k.startswith("display_order_")}
-        default_orders = {k: v for k, v in self.default_setting[self.key_name].items() if k.startswith("display_order_")}
+        # Extract column index setting (orders shown by widget design in use)
+        keys = self.display_order_keys()
+        user_orders = {k: v for k, v in self.user_setting[self.key_name].items() if k in keys}
+        default_orders = {k: v for k, v in self.default_setting[self.key_name].items() if k in keys}
         dialog = DisplayOrder(self, user_orders=user_orders, default_orders=default_orders)
         dialog.open()
 
@@ -703,17 +950,31 @@ class UserConfig(BaseDialog):
                     editor.reset_to_default()
 
     def save_setting(self) -> bool:
-        """Save setting, False if a value is invalid (nothing saved)"""
-        user_setting = self.user_setting[self.key_name]
+        """Save setting, False if a value is invalid or saving cancelled (nothing saved)
+
+        Only options edited since opened or last saved are written, into the loaded setting:
+        options changed meanwhile elsewhere (widget moved, another preset loaded) are kept.
+        Values marked invalid (see check_option) are shown instead, others not checked while
+        typing (folder path) warn by message.
+        """
+        invalid_key = self.first_invalid_key()
+        if invalid_key:
+            self.show_invalid_option(invalid_key)
+            return False
+        state = self.history.capture()
         values = {}
         for key, editor in self.option_edit.items():
             value = editor.validate()
             if value is None:  # abort if error found
                 self.value_error_message(key)
                 return False
-            values[key] = value
-        user_setting.update(values)
-        self.saved_state = self.history.capture()
+            if state[key] != self.saved_state.get(key):
+                values[key] = value
+        if not self.live_setting.confirm_preset(self):
+            return False
+        self.user_setting[self.key_name].update(values)
+        self.saved_state = state
+        self.refresh_modified()
         # Check saving type
         if self.config_type:
             # Save global settings
@@ -729,6 +990,8 @@ class UserConfig(BaseDialog):
 
     def read_edited_values(self) -> dict | None:
         """Read edited (unsaved) values, None if any value is invalid"""
+        if self.option_errors:
+            return None
         values = dict(self.user_setting[self.key_name])
         for key, editor in self.option_edit.items():
             value = editor.validate()
@@ -784,6 +1047,7 @@ class UserConfig(BaseDialog):
             option_word_set.update(option_name.split())
             label = self._add_option_label(row_index, option_name, layout, key)
             pending.append((key, label, section, group_label))
+            self.option_grid_rows[key] = row_index
             self._add_option_editor(row_index, key, layout)
 
         self.rows = [
@@ -803,10 +1067,11 @@ class UserConfig(BaseDialog):
             return
         # Overlay theme (built-in & custom)
         if re.search(rxp.CFG_OVERLAY_THEME, key):
-            self._add_option_combolist(row_index, key, layout, overlay_theme_names())
+            self._add_option_combolist(row_index, key, layout, overlay_theme_names(), translate=True)
             return
         if re.search(rxp.CFG_WIDGET_THEME, key):
-            self._add_option_combolist(row_index, key, layout, (GLOBAL_THEME, *overlay_theme_names()))
+            self._add_option_combolist(
+                row_index, key, layout, (GLOBAL_THEME, *overlay_theme_names()), translate=True)
             return
         # Common choice list string
         if self._choice_match(rxp.CHOICE_COMMON, row_index, key, layout):
@@ -854,7 +1119,8 @@ class UserConfig(BaseDialog):
         """Choice match"""
         for ref_key, choice_list in choice_dict.items():
             if re.search(ref_key, key):
-                self._add_option_combolist(row_index, key, layout, choice_list)
+                self._add_option_combolist(
+                    row_index, key, layout, choice_list, translate=ref_key not in UNTRANSLATED_CHOICES)
                 return True
         return False
 
@@ -927,11 +1193,12 @@ class UserConfig(BaseDialog):
         layout.addWidget(editor, row_index, COLUMN_OPTION)
         self.option_edit[key] = editor
 
-    def _add_option_combolist(self, row_index: int, key: str, layout: QGridLayout, items: Sequence[str]):
-        """Combo droplist string"""
+    def _add_option_combolist(
+        self, row_index: int, key: str, layout: QGridLayout, items: Sequence[str], translate: bool = False):
+        """Combo droplist string, choices shown translated if set (English value saved)"""
         editor = DropDownListEdit(self)
         editor.setFixedWidth(self.option_width)
-        editor.addItems(items)
+        editor.add_choices(items, translate)
         # Load selected option
         editor.setCurrentText(str(self.user_setting[self.key_name][key]))
         editor.set_default(self.default_setting[self.key_name][key])
@@ -1011,7 +1278,7 @@ class UserConfig(BaseDialog):
 def set_preset_name(preset_name: str, config_type: str) -> str:
     """Set preset name"""
     if config_type == ConfigType.CONFIG:
-        preset_name += " (global)"
+        preset_name += f" ({tr('global')})"
     return preset_name
 
 

@@ -237,11 +237,15 @@ SCALED_OPTION = re.compile(
     r"|(^|_)bar_(height|width)$"
     r"|^(led|wheel)_(width|height)$"
     r"|^(icon|dot|area|vehicle|brake_input)_size$"
+    r"|^(delta_)?bar_length$|^bar_width_(unfiltered|filtered)$|^maximum_indicator_height$"  # pedal, deltabest
+    r"|^parts_(maximum_)?(width|height)$"  # damage
+    r"|^global_scale$"  # radar: pixels per meter
 )
 OVERLAY_SCALE_RANGE = (0.5, 3.0)
 # Widgets whose "bar_width" is a number of characters (already follows font size)
 CHARACTER_BAR_WIDTH = frozenset((
-    "acceleration", "fuel", "fuel_energy_saver", "pit_stop_estimate", "relative_finish_order",
+    "acceleration", "fuel", "fuel_energy_saver", "pit_stop_estimate", "relative_finish_order", "traffic",
+    "virtual_energy",
 ))
 
 

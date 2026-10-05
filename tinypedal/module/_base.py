@@ -30,14 +30,21 @@ from ..thread_guard import run_supervised
 logger = logging.getLogger(__name__)
 # Function
 round6 = partial(round, ndigits=6)
+# Sent to data generator when module stops: save data not saved yet, without reloading
+MODULE_STOP = object()
 
 
 class DataModule:
-    """Data module base"""
+    """Data module base
+
+    Attributes:
+        discard: data not saved yet is discarded when module stops (data reset), else saved.
+    """
 
     __slots__ = (
         "module_name",
         "closed",
+        "discard",
         "cfg",
         "mcfg",
         "active_interval",
@@ -48,6 +55,7 @@ class DataModule:
     def __init__(self, config: Setting, module_name: str):
         self.module_name = module_name
         self.closed = True
+        self.discard = False
 
         # Base config
         self.cfg = config
@@ -69,13 +77,27 @@ class DataModule:
         """Start update thread"""
         if self.closed:
             self.closed = False
+            self.discard = False
             self._event.clear()
             threading.Thread(target=self.__tasks, daemon=True, name=f"module:{self.module_name}").start()
             logger.info("ENABLED: %s", self.module_name.replace("_", " "))
 
-    def stop(self):
-        """Stop update thread"""
+    def stop(self, discard: bool = False):
+        """Stop update thread
+
+        Args:
+            discard: discard data not saved yet (data reset), else saved before stopping.
+        """
+        self.discard = discard
         self._event.set()
+
+    def save_on_stop(self, *generators) -> None:
+        """Save data not saved yet of data generators (run after update loop ended), unless discarded"""
+        if self.discard:
+            return
+        for generator in generators:
+            if generator is not None:
+                generator.send(MODULE_STOP)
 
     def update_data(self):
         """Update module data, rewrite in child class"""

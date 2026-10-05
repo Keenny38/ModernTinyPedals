@@ -23,9 +23,11 @@ Telemetry replay control
 from __future__ import annotations
 
 import os
+import threading
 import time
+from contextlib import suppress
 
-from PySide6.QtCore import QBasicTimer, QRect, Qt, QUrl
+from PySide6.QtCore import QBasicTimer, QObject, QRect, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -49,10 +51,10 @@ from .. import app_signal
 from ..api_control import api
 from ..const_api import API_LMU_NAME, API_RF2_NAME
 from ..i18n import tr, trm
-from ..replay import FILE_EXT, SPEEDS, list_replays, replay, replay_compatible
-from ..replay_session import api_supported, start_api_recording
+from ..replay import FILE_EXT, SPEEDS, ReplayFile, ReplayMismatch, list_replays, replay
+from ..replay_session import api_supported, section_filename, start_api_recording
 from ..setting import cfg
-from ._common import BaseDialog, UIScaler, singleton_dialog
+from ._common import BaseDialog, UIScaler, singleton_dialog, translate_filter
 
 SLIDER_SCALE = 10  # slider steps per second
 SEEK_STEP = 5.0  # seconds, arrow keys
@@ -76,6 +78,56 @@ def restart_api():
     """Restart API so it switches between game and replay"""
     api.restart()
     app_signal.refresh.emit(True)
+
+
+class SectionExport(QObject):
+    """Save replay section in background (about 3s per recorded minute), results in user interface thread
+
+    Signals:
+        progress: frames done, frames total.
+        finished: file name, number of frames, error (empty if saved).
+    """
+
+    progress = Signal(int, int)
+    finished = Signal(str, int, str)
+
+    def __init__(self, parent: QObject):
+        super().__init__(parent)
+        self._thread: threading.Thread | None = None
+
+    @property
+    def busy(self) -> bool:
+        """Whether a section is being saved"""
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, replay_file: ReplayFile, filename: str, start: float, end: float) -> bool:
+        """Start saving section, False if already saving one"""
+        if self.busy:
+            return False
+
+        def export():
+            error = ""
+            frames = 0
+            try:
+                frames = replay_file.export(filename, start, end, self._report)
+            except (OSError, ValueError) as export_error:
+                error = str(export_error)
+            with suppress(RuntimeError):  # window closed meanwhile
+                self.finished.emit(filename, frames, error)
+
+        self._thread = threading.Thread(target=export, daemon=True, name="Replay export")
+        self._thread.start()
+        return True
+
+    def _report(self, done: int, total: int):
+        with suppress(RuntimeError):  # window closed meanwhile
+            self.progress.emit(done, total)
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Wait for saving to finish, returns True if finished"""
+        if self._thread is not None:
+            self._thread.join(timeout)
+        return not self.busy
 
 
 class MarkerSlider(QSlider):
@@ -201,6 +253,10 @@ class ReplayView(BaseDialog):
         self.button_section_save = QPushButton(tr("Save Section..."), self)
         self.button_section_save.setToolTip(tr("Save part of replay between start & end to a new file"))
         self.button_section_save.clicked.connect(self.save_section)
+        self.label_section = QLabel(self)
+        self.export = SectionExport(self)
+        self.export.progress.connect(self.export_progress)
+        self.export.finished.connect(self.export_finished)
 
         box_replay = QGroupBox(tr("Replay"), self)
         layout_replay = QGridLayout(box_replay)
@@ -225,6 +281,7 @@ class ReplayView(BaseDialog):
         layout_section.addWidget(self.button_section_start)
         layout_section.addWidget(self.button_section_end)
         layout_section.addWidget(self.button_section_save)
+        layout_section.addWidget(self.label_section, stretch=1)
         layout_replay.addLayout(layout_section, 4, 0, 1, 6)
         layout_replay.addWidget(
             QLabel(tr("Space: play/pause, Left/Right: 5 s, Shift+Left/Right: one frame."), self), 5, 0, 1, 6)
@@ -285,7 +342,7 @@ class ReplayView(BaseDialog):
         has_incidents = player is not None and bool(self.slider.incidents)
         self.button_prev_incident.setEnabled(has_incidents)
         self.button_next_incident.setEnabled(has_incidents)
-        self.button_section_save.setEnabled(player is not None and None not in self.section)
+        self.button_section_save.setEnabled(player is not None and None not in self.section and not self.export.busy)
         if player is None:
             self.label_file.setText(tr("Not replaying, reading from game."))
             self.label_position.setText("")
@@ -366,7 +423,7 @@ class ReplayView(BaseDialog):
         if not self.check_lmu_api():
             return
         filename, _ = QFileDialog.getOpenFileName(
-            self, tr("Open Replay..."), cfg.path.telemetry, f"Modern Tiny Pedals Replay (*{FILE_EXT})"
+            self, tr("Open Replay..."), cfg.path.telemetry, translate_filter(f"Modern Tiny Pedals Replay (*{FILE_EXT})")
         )
         if filename:
             self.open_file(filename)
@@ -378,16 +435,17 @@ class ReplayView(BaseDialog):
         if replay.recording:
             replay.stop_recording()
         try:
-            player = replay.load(filename)
+            replay.load(filename, api.name, api.replay_layout())
+        except ReplayMismatch as error:
+            if error.reason == "source":
+                message = trm(f"Replay recorded with {error.source} API, select {error.source} API to play it.")
+            else:
+                message = tr("Replay recorded with another game data structure (older game or app version), "
+                             "it cannot be played.")
+            QMessageBox.warning(self, tr("Error"), message)
+            return
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to open replay file: {error}"))
-            return
-        if not replay_compatible(player.replay.source, api.name):
-            source = player.replay.source
-            replay.unload()
-            QMessageBox.warning(
-                self, tr("Error"),
-                trm(f"Replay recorded with {source} API, select {source} API to play it."))
             return
         restart_api()
         self.set_speed()
@@ -467,26 +525,36 @@ class ReplayView(BaseDialog):
         self.refresh()
 
     def save_section(self):
-        """Save replay section to new file"""
+        """Save replay section to new file, in background (overlays keep running)"""
         player = replay.player
         start, end = self.section
-        if player is None or start is None or end is None:
+        if player is None or start is None or end is None or self.export.busy:
             return
-        default = os.path.splitext(player.replay.filename)[0] + f"-{int(start)}-{int(end)}{FILE_EXT}"
+        default = section_filename(player.replay.filename, start, end)
         filename, _ = QFileDialog.getSaveFileName(
-            self, tr("Save Section..."), default, f"Modern Tiny Pedals Replay (*{FILE_EXT})")
+            self, tr("Save Section..."), default, translate_filter(f"Modern Tiny Pedals Replay (*{FILE_EXT})"))
         if not filename:
             return
         if os.path.abspath(filename) == os.path.abspath(player.replay.filename):
             QMessageBox.warning(self, tr("Error"), tr("Choose another file name than the open replay."))
             return
-        try:
-            frames = player.replay.export(filename, start, end)
-        except (OSError, ValueError) as error:
+        if self.export.start(player.replay, filename, start, end):
+            self.label_section.setText(tr("Saving section…"))
+            self.refresh()
+
+    def export_progress(self, done: int, total: int):
+        """Show section saving progress"""
+        self.label_section.setText(trm(f"Saving section: {done * 100 // max(total, 1)}%"))
+
+    def export_finished(self, filename: str, frames: int, error: str):
+        """Section saved or failed"""
+        if error:
+            self.label_section.setText("")
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to save replay section: {error}"))
-            return
-        self.label_record.setText(trm(f"{frames} frames: {os.path.basename(filename)}"))
-        self.refresh_list()
+        else:
+            self.label_section.setText(trm(f"{frames} frames: {os.path.basename(filename)}"))
+            self.refresh_list()
+        self.refresh()
 
     def check_lmu_api(self) -> bool:
         """Replay supports LMU, rF2 & LMU legacy shared memory APIs"""

@@ -35,9 +35,10 @@ from PySide6.QtWidgets import (
 
 from ..api_control import api
 from ..const_file import ConfigType
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
 from ..userfile.heatmap import HEATMAP_DEFAULT_TYRE, set_predefined_compound_symbol
+from ..validator import is_hex_color
 from ._common import (
     QVAL_COLOR,
     BaseEditor,
@@ -67,7 +68,7 @@ class TyreCompoundEditor(BaseEditor):
         # Set table
         self.table_compounds = QTableWidget(self)
         self.table_compounds.setColumnCount(len(HEADER_COMPOUNDS))
-        self.table_compounds.setHorizontalHeaderLabels(HEADER_COMPOUNDS)
+        self.table_compounds.setHorizontalHeaderLabels([tr(name) for name in HEADER_COMPOUNDS])
         self.table_compounds.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table_compounds.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # Symbol column
@@ -168,7 +169,7 @@ class TyreCompoundEditor(BaseEditor):
 
     def open_replace_dialog(self):
         """Open replace dialog"""
-        selector = {HEADER_COMPOUNDS[1]: 1}
+        selector = {tr(HEADER_COMPOUNDS[1]): 1}
         _dialog = TableBatchReplace(self, selector, self.table_compounds)
         _dialog.open()
 
@@ -240,8 +241,8 @@ class TyreCompoundEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_setting()
-        self.accept()  # close
+        if self.save_setting():
+            self.accept()  # close
 
     def verify_input(self, row_index: int, column_index: int):
         """Verify input value"""
@@ -253,6 +254,30 @@ class TyreCompoundEditor(BaseEditor):
                 item.setText("?")
             else:
                 item.setText(text[:1])
+
+    def verify_table(self) -> bool:
+        """Verify table before saving, warn if a compound name is listed twice or a color is invalid"""
+        compound_names = set()
+        for index in range(self.table_compounds.rowCount()):
+            compound_name = table_item(self.table_compounds, index, 0).text()
+            color = cast(ColorEdit, self.table_compounds.cellWidget(index, 2)).text()
+            if compound_name in compound_names:
+                msg_text = (
+                    f"<b>{compound_name}</b> is listed more than once.<br><br>"
+                    "Each name can only be listed once, rename or delete duplicate rows."
+                )
+            elif not is_hex_color(color):
+                msg_text = (
+                    f"Invalid color <b>{color}</b> for <b>{compound_name}</b>.<br><br>"
+                    "Use #RGB, #RRGGBB or #AARRGGBB format."
+                )
+            else:
+                compound_names.add(compound_name)
+                continue
+            self.table_compounds.setCurrentCell(index, 0)  # show invalid row
+            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+            return False
+        return True
 
     def update_compounds_temp(self):
         """Update temporary changes to compounds temp first"""
@@ -268,10 +293,13 @@ class TyreCompoundEditor(BaseEditor):
                 "heatmap": heatmap_name,
             }
 
-    def save_setting(self):
-        """Save setting"""
+    def save_setting(self) -> bool:
+        """Save setting, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_compounds_temp()
         cfg.user.compounds = copy_setting(self.compounds_temp)
         cfg.save(0, config_type=ConfigType.COMPOUNDS)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True

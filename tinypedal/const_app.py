@@ -39,11 +39,17 @@ APP_ID = "TinyPedal"  # config folder, data paths & build folder: unchanged to k
 REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
 FORK_REPO_NAME = "Keenny38/ModernTinyPedals"  # this fork (releases, updates)
 COPYRIGHT = "Copyright (C) 2022-2026 TinyPedal developers"
+# Modified version notice (GPL v3 section 5a), upstream copyright above is kept
+MODIFICATION_NOTICE = (
+    "Modern Tiny Pedals is a modified version of TinyPedal. "
+    "Modifications copyright (C) 2026 Steven Vezzu and contributors."
+)
 DESCRIPTION = "Free and Open Source telemetry overlay application for racing simulation."
 LICENSE = "Licensed under the GNU General Public License v3.0 or later."
 
 # URL
-URL_WEBSITE = f"https://github.com/{REPO_NAME}"
-URL_USER_GUIDE = f"{URL_WEBSITE}/wiki/User-Guide"
-URL_FAQ = f"{URL_WEBSITE}/wiki/Frequently-Asked-Questions"
+URL_WEBSITE = f"https://github.com/{REPO_NAME}"  # upstream TinyPedal
+URL_FORK = f"https://github.com/{FORK_REPO_NAME}"  # this modified version
+URL_USER_GUIDE = f"{URL_FORK}/wiki"  # wiki of this version (docs/wiki), not the upstream one
+URL_FAQ = f"{URL_FORK}/wiki/Troubleshooting"
 URL_RELEASE = f"https://github.com/{FORK_REPO_NAME}/releases"

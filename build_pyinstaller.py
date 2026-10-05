@@ -34,8 +34,8 @@ EXCLUDE_MODULES = [
 
 # Files that must stay next to executable (loaded with relative path)
 DATA_FILES = {
-    "": ["LICENSE.txt", "README.md"],
-    "docs": ["docs/changelog.txt", "docs/customization.md", "docs/contributors.md"],
+    "": ["LICENSE.txt", "NOTICE.md", "README.md", "CHANGELOG.md", *glob("CHANGELOG.*.md")],  # changelog translations
+    "docs": ["docs/customization.md", "docs/contributors.md"],
     "docs/licenses": glob("docs/licenses/*"),
     "fonts": [*glob("fonts/*.ttf"), *glob("fonts/OFL*.txt")],
     "plugins/example_speed": ["plugins/example_speed/setting.json", "plugins/example_speed/widget.py"],

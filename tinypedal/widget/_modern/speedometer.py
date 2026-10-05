@@ -29,7 +29,7 @@ from PySide6.QtGui import QPainter
 
 from ... import units
 from ...api_control import api
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 
@@ -40,6 +40,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "decimal_places", "off_throttle_threshold", "on_throttle_threshold",
         "speed_minimum_reset_cooldown", "speed_maximum_reset_cooldown", "show_speed", "show_speed_minimum",
         "show_speed_maximum", "show_speed_fastest",
+        *display_order_options("speedometer"),
     )
 
     def __init__(self, config, widget_name):
@@ -56,6 +57,7 @@ class Realtime(StatsMixin, ModernOverlay):
             ("speed_fastest", "Top", "value", theme.best),
         )
         stats = [Stat(key, label, sample, role, accent) for key, label, role, accent in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)

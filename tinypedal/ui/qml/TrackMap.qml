@@ -10,8 +10,8 @@ import TinyPedal
 // Mouse over a line: same point shown in charts (cursor), click: position kept (charts & map), Ctrl+click a line:
 // lap highlighted. Zooming or moving the map zooms charts on the part of lap shown (Sync zoom), and back.
 // Corner label: hover for every lap in this corner, click to zoom & select it in corner table.
-// Keys: F fit, R turn, 1-9 coloring, B/C/S/O driving points, L slips, G off track, X track limits, Z zones,
-// T trail, M ruler, Esc.
+// Keys: F fit, + / - zoom, arrows move, R turn, 1-9 coloring, B/C/S/O driving points, L slips, G off track,
+// X track limits, Z zones, T trail, M ruler, Esc.
 FocusScope {
     id: root
 
@@ -28,7 +28,7 @@ FocusScope {
         ["laps", i18n.tr("Laps")], ["gain", i18n.tr("Gain / Loss")], ["speed", i18n.tr("Speed")],
         ["pedals", i18n.tr("Pedals")], ["line", i18n.tr("Racing Line")], ["gear", i18n.tr("Gear")],
         ["elevation", i18n.tr("Elevation")], ["corners", i18n.tr("Delta per corner")],
-        ["minisectors", i18n.tr("Mini-sectors")],
+        ["minisectors", i18n.tr("Mini-sectors")], ["consistency", i18n.tr("Consistency")],
     ]
     readonly property string highlightKey: chart ? chart.highlightKey : ""
     property bool scrubbing: false  // chart cursor set by mouse over map
@@ -237,10 +237,11 @@ FocusScope {
     }
 
     Keys.onPressed: function(event) {
+        if (canvas.handleKey(event.key)) { event.accepted = true; return }  // + / - zoom, arrows move
         var digit = event.key - Qt.Key_1
         if (event.key === Qt.Key_F) canvas.reset(true)
         else if (event.key === Qt.Key_R) backend.rotateMap()
-        else if (digit >= 0 && digit < modes.length) backend.setMapMode(modes[digit][0])
+        else if (digit >= 0 && digit < Math.min(modes.length, 9)) backend.setMapMode(modes[digit][0])
         else if (event.key === Qt.Key_B) togglePoint("brake")
         else if (event.key === Qt.Key_C) togglePoint("apex")
         else if (event.key === Qt.Key_S) togglePoint("exit")
@@ -265,7 +266,7 @@ FocusScope {
         Repeater {
             model: root.modes
             MenuItem {
-                text: (index + 1) + "  " + modelData[1]
+                text: (index < 9 ? (index + 1) + "  " : "     ") + modelData[1]  // keys 1-9
                 checkable: true
                 checked: root.mode === modelData[0]
                 onTriggered: backend.setMapMode(modelData[0])
@@ -357,7 +358,7 @@ FocusScope {
                 glyph: ""  // settings
                 flat: true
                 implicitHeight: theme.em * 2
-                tip: i18n.tr("Map display") + "\n" + i18n.tr("Keys: F fit, R turn, 1-8 coloring, B C S O points, L lockups, Z zones, T trail, M ruler")
+                tip: i18n.tr("Map display") + "\n" + i18n.tr("Keys: F fit, +/- zoom, arrows move, R turn, 1-9 coloring, B C S O points, L lockups, G off track, X track limits, Z zones, T trail, M ruler")
                 checked: displayMenu.visible
                 onClicked: displayMenu.visible ? displayMenu.close() : displayMenu.popup(displayButton, 0, displayButton.height + 4)
             }
@@ -393,6 +394,7 @@ FocusScope {
             Layout.fillHeight: true
             flipY: false  // recorded positions (x, -z): y down like in-game track map, else circuit mirrored
             maxZoom: 120
+            feet: backend.distanceUnit === "ft"
             minX: root.info.minX || 0
             minY: root.info.minY || 0
             maxX: root.info.maxX || 1
@@ -892,7 +894,8 @@ FocusScope {
                     Text {
                         id: rulerText
                         anchors.centerIn: parent
-                        text: Math.hypot(parent.b[0] - parent.a[0], parent.b[1] - parent.a[1]).toFixed(1) + " m"
+                        text: (Math.hypot(parent.b[0] - parent.a[0], parent.b[1] - parent.a[1]) * backend.distanceScale).toFixed(1)
+                              .replace(".", theme.decimalPoint) + " " + backend.distanceUnit
                         color: "white"
                         font.weight: Font.Bold
                         font.features: { "tnum": 1 }
@@ -938,9 +941,9 @@ FocusScope {
                 readonly property real side: Math.min(theme.em * 9, canvas.width * 0.32, canvas.height * 0.32)
                 readonly property real spanX: Math.max((root.info.maxX || 1) - (root.info.minX || 0), 1)
                 readonly property real spanY: Math.max((root.info.maxY || 1) - (root.info.minY || 0), 1)
-                readonly property real scale: (side - 12) / Math.max(spanX, spanY)
-                readonly property real offsetX: (side - spanX * scale) / 2 - (root.info.minX || 0) * scale
-                readonly property real offsetY: (side - spanY * scale) / 2 - (root.info.minY || 0) * scale
+                readonly property real mapScale: (side - 12) / Math.max(spanX, spanY)
+                readonly property real offsetX: (side - spanX * mapScale) / 2 - (root.info.minX || 0) * mapScale
+                readonly property real offsetY: (side - spanY * mapScale) / 2 - (root.info.minY || 0) * mapScale
                 visible: root.options.minimap === true && root.hasMap && canvas.zoom > 1.6 && side > theme.em * 4
                 anchors { left: parent.left; bottom: parent.bottom; margins: theme.em * 0.5 }
                 width: side
@@ -955,14 +958,14 @@ FocusScope {
                     color: theme.dimText
                     revision: backend.revision
                     transform: Matrix4x4 {
-                        matrix: Qt.matrix4x4(minimap.scale, 0, 0, minimap.offsetX, 0, minimap.scale, 0, minimap.offsetY, 0, 0, 1, 0, 0, 0, 0, 1)
+                        matrix: Qt.matrix4x4(minimap.mapScale, 0, 0, minimap.offsetX, 0, minimap.mapScale, 0, minimap.offsetY, 0, 0, 1, 0, 0, 0, 0, 1)
                     }
                 }
                 Rectangle {  // part of circuit shown on map
-                    readonly property real x0: canvas.worldX(0) * minimap.scale + minimap.offsetX
-                    readonly property real y0: canvas.worldY(0) * minimap.scale + minimap.offsetY
-                    readonly property real x1: canvas.worldX(canvas.width) * minimap.scale + minimap.offsetX
-                    readonly property real y1: canvas.worldY(canvas.height) * minimap.scale + minimap.offsetY
+                    readonly property real x0: canvas.worldX(0) * minimap.mapScale + minimap.offsetX
+                    readonly property real y0: canvas.worldY(0) * minimap.mapScale + minimap.offsetY
+                    readonly property real x1: canvas.worldX(canvas.width) * minimap.mapScale + minimap.offsetX
+                    readonly property real y1: canvas.worldY(canvas.height) * minimap.mapScale + minimap.offsetY
                     x: Math.min(x0, x1)
                     y: Math.min(y0, y1)
                     width: Math.max(Math.abs(x1 - x0), 3)
@@ -975,7 +978,7 @@ FocusScope {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: function(mouse) {
-                        var x = (mouse.x - minimap.offsetX) / minimap.scale, y = (mouse.y - minimap.offsetY) / minimap.scale
+                        var x = (mouse.x - minimap.offsetX) / minimap.mapScale, y = (mouse.y - minimap.offsetY) / minimap.mapScale
                         var scale = canvas.baseScale * canvas.targetZoom
                         canvas.setView(canvas.targetZoom, (canvas.centerX - x) * scale, canvas.ySign * (canvas.centerY - y) * scale, true)
                         canvas.userMoved()
@@ -1171,6 +1174,44 @@ FocusScope {
                 color: theme.gold
                 font.pointSize: theme.fontPoint * 0.85
                 font.weight: Font.DemiBold
+            }
+            // Consistency: spread (standard deviation) of mini-sector times over laps of stint, session or shown laps
+            TpSegmented {
+                visible: root.mode === "consistency"
+                readonly property var scopes: ["stint", "session", "shown"]
+                options: [i18n.tr("This stint"), i18n.tr("This session"), i18n.tr("Shown laps")]
+                currentIndex: scopes.indexOf(backend.consistencyScope)
+                onActivated: function(index) { backend.setConsistencyScope(scopes[index]) }
+            }
+            Row {
+                visible: root.mode === "consistency" && backend.mapLegend.low !== undefined
+                spacing: theme.em * 0.4
+                Text { text: (backend.mapLegend.low || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Rectangle {
+                    id: spreadBar
+                    readonly property var colors: backend.mapLegend.colors || ["#22C55E", "#FACC15", "#EF4444"]
+                    width: theme.em * 7
+                    height: theme.em * 0.5
+                    radius: height / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: spreadBar.colors[0] }
+                        GradientStop { position: 0.5; color: spreadBar.colors[Math.floor(spreadBar.colors.length / 2)] }
+                        GradientStop { position: 1; color: spreadBar.colors[spreadBar.colors.length - 1] }
+                    }
+                }
+                Text { text: (backend.mapLegend.high || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+            }
+            Text {
+                visible: root.mode === "consistency"
+                text: backend.mapLegend.text || ""
+                color: theme.dimText
+                font.pointSize: theme.fontPoint * 0.85
+                HoverHandler { id: spreadHover }
+                ToolTip.visible: spreadHover.hovered
+                ToolTip.delay: 400
+                ToolTip.text: i18n.tr("Green: same time in this mini-sector lap after lap, red: time changes a lot (standard deviation)")
             }
             Text {
                 visible: root.info.official === true

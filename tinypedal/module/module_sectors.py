@@ -27,8 +27,8 @@ from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import SectorData, minfo
 from ..userfile.sector_best import load_sector_best_file, save_sector_best_file
-from ..validator import generator_init, valid_sectors
-from ._base import DataModule
+from ..validator import generator_init, is_same_session, session_token, valid_sectors
+from ._base import MODULE_STOP, DataModule
 
 
 class Realtime(DataModule):
@@ -68,6 +68,8 @@ class Realtime(DataModule):
                     reset = False
                     update_interval = self.idle_interval
 
+        self.save_on_stop(gen_record_sectors)
+
 
 @generator_init
 def record_sectors(output_session: SectorData, output_alltime: SectorData, filepath: str):
@@ -77,7 +79,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
 
     last_sector_idx = -1  # previous recorded sector index value
     combo_name = ""
-    session_id: tuple[int, ...] = ()
+    session_id: tuple[float, ...] = ()  # session token
 
     while True:
         reset = yield None
@@ -97,8 +99,8 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 )
                 delayed_save = False
 
-            # Delay reset until driving
-            if not realtime_state.active:
+            # Delay reset until driving (module stopping: data saved only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 
@@ -106,7 +108,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             output_session.reset()
             output_alltime.reset()
             combo_name = api.read.session.combo_name()
-            session_id = api.read.session.identifier()
+            session_id = session_token(api.read.session.identifier())
             (
                 output_session.sectorBestTB[:],
                 output_session.sectorBestPB[:],
@@ -120,8 +122,13 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
             )
 
         # Update previous & best sector time
-        sector_idx = api.read.lap.sector_index() 
+        sector_idx = api.read.lap.sector_index()
         if last_sector_idx != sector_idx:  # keep checking until conditions met
+
+            # Keep session token recent (saved with data), so a game pause is not taken as new session
+            new_session_id = session_token(api.read.session.identifier())
+            if is_same_session(session_id, new_session_id):
+                session_id = new_session_id
 
             laptime_valid = api.read.timing.last_laptime()
             curr_sector1 = api.read.timing.current_sector1()

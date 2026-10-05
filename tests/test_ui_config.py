@@ -60,8 +60,9 @@ def test_config_dialog_modern_design_options(ui_env):
         shown = set(dialog.option_edit)
         assert "column_time_gap" in shown and "enable_classic_layout" in shown
         assert not any("color" in key for key in shown)
-        assert "font_name" not in shown and "display_order_position" not in shown
-        assert not dialog.has_display_order()
+        assert "font_name" not in shown
+        assert "display_order_position" in shown  # modern columns follow display order once changed
+        assert dialog.has_display_order()  # button shown: modern design lists display order options
     finally:
         close_dialog(dialog)
     dialog = open_config("relative", [], classic=True)
@@ -79,9 +80,11 @@ def test_config_dialog_invalid_value(ui_env, no_message_box):
     try:
         before = cfg.user.setting["speedometer"]["font_color_speed"]
         dialog.option_edit["font_color_speed"].setText("not a color")
-        dialog.save_setting()
+        assert dialog.save_setting() is False
         assert cfg.user.setting["speedometer"]["font_color_speed"] == before
-        assert reloads == [] and no_message_box and no_message_box[0][0] == "warning"
+        # Phase 2 (package C2): shown next to the value (no message box), Save disabled
+        assert reloads == [] and not no_message_box and "font_color_speed" in dialog.option_errors
+        assert not dialog.button_save.isEnabled()
     finally:
         close_dialog(dialog)
 
@@ -480,7 +483,8 @@ def test_invalid_value_keeps_dialog_open(ui_env, monkeypatch):
         dialog.option_edit["font_size"].setText("")  # invalid
         dialog.option_edit["update_interval"].setText("77")
         dialog.saving()
-        assert errors and dialog.isVisible()  # Save & close aborted, edits kept
+        assert dialog.isVisible()  # Save & close aborted, edits kept
+        assert not errors and dialog.option_errors == {"font_size": "Number required"}  # shown inline
         assert cfg.user.setting["speedometer"]["font_size"] == font_size
         assert cfg.user.setting["speedometer"]["update_interval"] != 77  # nothing saved
     finally:

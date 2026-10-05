@@ -164,8 +164,9 @@ def test_stream_ends_when_server_stops(stream_data, monkeypatch):
 
 
 @pytest.mark.parametrize(("origin", "allowed"), [
-    (None, True), ("null", True), ("http://localhost:8080", True), ("http://127.0.0.1", True),
+    (None, True), ("http://localhost:8080", True), ("http://127.0.0.1", True),
     ("https://evil.example", False), ("http://localhost.evil.example", False),
+    ("null", False), (" NULL ", False),  # sandboxed frame of any site can send "null"
 ])
 def test_allowed_origin(origin, allowed):
     assert command_server.is_allowed_origin(origin) is allowed

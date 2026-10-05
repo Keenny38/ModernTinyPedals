@@ -20,36 +20,45 @@
 Gear Widget, modern design
 
 Large gear on a tile tinted by shift zone (shift soon, redline, over-rev or neutral at speed,
-flashing above critical RPM), speed with unit, RPM bar above safe RPM, battery & consumption
-bars, speed limiter pill.
+flashing above critical RPM), speed with unit, RPM bar above safe RPM, battery (hybrid car only)
+& consumption bars with optional readings, speed limiter pill (outlined reminder in pit lane
+while car limiter is off).
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...const_common import GEAR_SEQUENCE
+from ...i18n import tr_overlay
 from ...module_info import minfo
-from .base import CENTER, ModernOverlay
+from .base import CENTER, LEFT, RIGHT, ModernOverlay
 from .draw import bar, panel, readable_on, rounded
 
 NORMAL, SAFE, REDLINE, OVER_REV = 0, 1, 2, 3
+LIMITER_OFF, LIMITER_ON, LIMITER_REMINDER = 0, 1, 2
+READING_ALIGN = {"left": LEFT, "right": RIGHT, "1": LEFT, "2": RIGHT}  # else center
 
 
 class Realtime(ModernOverlay):
     """Draw widget"""
 
     options = (
-        "font_size", "show_speed", "show_speed_below_gear", "show_speed_limiter", "show_battery_bar",
-        "high_battery_threshold", "low_battery_threshold", "show_rpm_bar", "show_rpm_flickering_above_critical",
+        "font_size", "show_speed", "show_speed_below_gear", "show_speed_limiter", "speed_limiter_text",
+        "show_speed_limiter_reminder", "show_battery_bar",
+        "high_battery_threshold", "low_battery_threshold", "show_battery_reading", "decimal_places_battery",
+        "battery_reading_text_alignment", "show_rpm_bar", "show_rpm_flickering_above_critical",
         "rpm_multiplier_safe", "rpm_multiplier_redline", "rpm_multiplier_critical",
         "neutral_warning_speed_threshold", "neutral_warning_time_threshold",
+        "show_rpm_reading", "decimal_places_rpm", "rpm_reading_text_alignment",
         "show_consumption_bar", "show_virtual_energy_if_available", "consumption_progression_exponential_scale",
         "high_consumption_threshold", "maximum_average_consumption_samples",
+        "show_consumption_reading", "decimal_places_consumption", "consumption_reading_text_alignment",
+        "display_order_battery", "display_order_rpm", "display_order_consumption",
     )
 
     def __init__(self, config, widget_name):
@@ -90,18 +99,20 @@ class Realtime(ModernOverlay):
                 self.rect_speed = QRectF(pad, pad + gear_h + gap * 0.5, width, unit * 3.2)
             else:
                 self.rect_speed = QRectF(pad + gear_w + gap, pad, speed_w, gear_h)
-        top = max(self.rect_gear.bottom(), self.rect_speed.bottom() if show_speed else 0) + gap
-        bar_h = max(unit * 0.55, 3.0)
-        thin_h = max(unit * 0.3, 2.0)
-        self.rect_rpm = QRectF(pad, top, width, bar_h) if wcfg["show_rpm_bar"] else QRectF()
-        top += bar_h + gap * 0.6 if wcfg["show_rpm_bar"] else 0
-        self.rect_battery = QRectF(pad, top, width, thin_h) if wcfg["show_battery_bar"] else QRectF()
-        top += thin_h + gap * 0.6 if wcfg["show_battery_bar"] else 0
-        self.rect_consumption = QRectF(pad, top, width, thin_h) if wcfg["show_consumption_bar"] else QRectF()
-        top += thin_h + gap * 0.6 if wcfg["show_consumption_bar"] else 0
-        limiter_w = self.text_width("label", "LIMIT") + unit * 1.4
+        self.text_limiter = self.user_text("speed_limiter_text", tr_overlay("LIMIT"))
+        # Bar readings: decimal places & alignment, None if not shown
+        self.readings: dict[str, tuple[int, Qt.AlignmentFlag] | None] = {
+            key: (max(int(wcfg[f"decimal_places_{key}"]), 0),
+                  READING_ALIGN.get(str(wcfg[f"{key}_reading_text_alignment"]).lower(), CENTER))
+            if wcfg[f"show_{key}_reading"] else None
+            for key in ("rpm", "battery", "consumption")
+        }
+        limiter_w = min(self.text_width("label", self.text_limiter) + unit * 1.4, width)
         self.rect_limiter = QRectF(pad + width - limiter_w, pad - unit * 0.4, limiter_w, unit * 1.5)
-        self.set_size(width + pad * 2, top - (gap * 0.6 if top > self.rect_gear.bottom() + gap else gap) + pad)
+        self.content_width = width
+        self.bars_top = max(self.rect_gear.bottom(), self.rect_speed.bottom() if show_speed else 0) + gap
+        self.battery_shown = False  # battery bar of hybrid car only (electric motor available)
+        self.place_bars()
 
         self.rpm_max = -1.0
         self.rpm_safe = self.rpm_red = self.rpm_crit = 0
@@ -110,6 +121,33 @@ class Realtime(ModernOverlay):
         self.last_gear = 0
         self.shift_start = 0.0
         self.flicker = False
+
+    def place_bars(self):
+        """RPM, battery & consumption bars under gear, widget height"""
+        wcfg = self.wcfg
+        unit = self.unit
+        pad = unit * 0.9
+        gap = unit * 0.6
+        width = self.content_width
+        top = self.bars_top
+        reading_h = unit * 1.45  # bar with reading on it
+        heights = {
+            "rpm": reading_h if self.readings["rpm"] else max(unit * 0.55, 3.0),
+            "battery": reading_h if self.readings["battery"] else max(unit * 0.3, 2.0),
+            "consumption": reading_h if self.readings["consumption"] else max(unit * 0.3, 2.0),
+        }
+        shown = {
+            "rpm": wcfg["show_rpm_bar"],
+            "battery": wcfg["show_battery_bar"] and self.battery_shown,
+            "consumption": wcfg["show_consumption_bar"],
+        }
+        rects = {key: QRectF() for key in shown}
+        for key in self.display_ordered(list(shown), key=str):
+            if shown[key]:
+                rects[key] = QRectF(pad, top, width, heights[key])
+                top += heights[key] + gap * 0.6
+        self.rect_rpm, self.rect_battery, self.rect_consumption = rects["rpm"], rects["battery"], rects["consumption"]
+        self.set_size(width + pad * 2, top - (gap * 0.6 if top > self.rect_gear.bottom() + gap else gap) + pad)
 
     def post_update(self):
         self.ema_fuel_rate = 0.0
@@ -128,7 +166,7 @@ class Realtime(ModernOverlay):
 
     def paint(self, painter: QPainter):
         theme = self.theme
-        gear, speed, zone, rpm_fraction, battery, consumption, limiter = self.state
+        gear, speed, zone, rpm_fraction, battery, consumption, limiter, readings = self.state
         fills = {NORMAL: theme.surface_alt, SAFE: theme.positive, REDLINE: theme.warning, OVER_REV: theme.negative}
         fill = fills[zone]
         rounded(painter, self.rect_gear, self.radius(0.7), fill)
@@ -141,18 +179,42 @@ class Realtime(ModernOverlay):
                                 self.rect_speed.height() - self.unit * 1.6)
             self.draw_text(painter, speed_rect, speed, "speed", theme.text, CENTER, elide=False)
         rpm_colors = {NORMAL: theme.text_dim, SAFE: theme.positive, REDLINE: theme.warning, OVER_REV: theme.negative}
+        rpm_text, battery_text, consumption_text = readings
         if not self.rect_rpm.isNull():
-            bar(painter, self.rect_rpm, rpm_fraction, rpm_colors[zone], None, self.rect_rpm.height() / 2)
+            self.draw_bar(painter, self.rect_rpm, rpm_fraction, rpm_colors[zone], "rpm", rpm_text)
         if not self.rect_battery.isNull() and battery is not None:
             level, color_key = battery
-            bar(painter, self.rect_battery, level, getattr(theme, color_key), None, self.rect_battery.height() / 2)
+            self.draw_bar(painter, self.rect_battery, level, getattr(theme, color_key), "battery", battery_text)
         if not self.rect_consumption.isNull():
             level, high = consumption
-            bar(painter, self.rect_consumption, level, theme.warning if high else theme.text_dim, None,
-                self.rect_consumption.height() / 2)
-        if limiter:
+            self.draw_bar(painter, self.rect_consumption, level, theme.warning if high else theme.text_dim,
+                          "consumption", consumption_text)
+        if limiter == LIMITER_ON:
             rounded(painter, self.rect_limiter, self.rect_limiter.height() / 2, theme.negative)
-            self.draw_text(painter, self.rect_limiter, "LIMIT", "label", readable_on(theme.negative), CENTER, elide=False)
+            self.draw_text(painter, self.rect_limiter, self.text_limiter, "label", readable_on(theme.negative), CENTER)
+        elif limiter == LIMITER_REMINDER:  # in pit lane, limiter off: outlined
+            box = self.rect_limiter
+            rounded(painter, box, box.height() / 2, theme.warning)
+            inset = max(self.unit * 0.18, 1.5)
+            inner = box.adjusted(inset, inset, -inset, -inset)
+            rounded(painter, inner, inner.height() / 2, theme.surface)
+            self.draw_text(painter, box, self.text_limiter, "label", theme.warning, CENTER)
+
+    def draw_bar(self, painter: QPainter, rect: QRectF, level: float, color, key: str, text: str):
+        """Bar, reading on it if shown (fill tinted so reading stays readable)"""
+        reading = self.readings[key]
+        if reading is None:
+            bar(painter, rect, level, color, None, rect.height() / 2)
+            return
+        bar(painter, rect, level, self.theme.tint(color, 150), None, rect.height() / 2)
+        inset = self.unit * 0.6
+        self.draw_text(painter, rect.adjusted(inset, 0, -inset, 0), text, "value", self.theme.text, reading[1],
+                       elide=False)
+
+    def reading_text(self, key: str, value: float) -> str:
+        """Bar reading text, empty if not shown"""
+        reading = self.readings[key]
+        return f"{value:.{reading[0]}f}" if reading is not None else ""
 
     def zone(self, rpm: float, gear: int, speed: float, shift_time: float) -> int:
         """Shift zone of current RPM"""
@@ -192,7 +254,12 @@ class Realtime(ModernOverlay):
         rpm_offset = rpm - self.rpm_safe
         rpm_fraction = rpm_offset / self.rpm_range if self.rpm_range > 0 <= rpm_offset else 0.0
         battery = None
-        if wcfg["show_battery_bar"] and minfo.hybrid.motorState > 0:
+        battery_text = consumption_text = ""
+        hybrid = minfo.hybrid.motorState > 0  # electric motor available
+        if wcfg["show_battery_bar"] and hybrid != self.battery_shown:  # bar hidden for other cars
+            self.battery_shown = hybrid
+            self.place_bars()
+        if wcfg["show_battery_bar"] and hybrid:
             charge = minfo.hybrid.batteryCharge
             if minfo.hybrid.motorState == 3:
                 color_key = "positive"
@@ -203,6 +270,7 @@ class Realtime(ModernOverlay):
             else:
                 color_key = "accent"
             battery = (round(charge * 0.01, 3), color_key)
+            battery_text = self.reading_text("battery", charge)
         consumption = (0.0, False)
         if wcfg["show_consumption_bar"]:
             if wcfg["show_virtual_energy_if_available"] and minfo.energy.available:
@@ -213,8 +281,21 @@ class Realtime(ModernOverlay):
             self.max_fuel_rate = max(self.max_fuel_rate, self.ema_fuel_rate)
             level = rate / self.max_fuel_rate if self.max_fuel_rate else 0.0
             consumption = (round(level ** self.cons_exp, 3), level >= wcfg["high_consumption_threshold"])
-        limiter = wcfg["show_speed_limiter"] and bool(api.read.switch.speed_limiter())
+            consumption_text = self.reading_text("consumption", rate)
         self.refresh((
             GEAR_SEQUENCE(gear, "N"), f"{self.unit_speed(speed):.0f}", zone, round(min(rpm_fraction, 1.0), 3),
-            battery, consumption, limiter,
+            battery, consumption, self.limiter_state(),
+            (self.reading_text("rpm", rpm), battery_text, consumption_text),
         ))
+
+    def limiter_state(self) -> int:
+        """Speed limiter on (switched on or active), or reminder: in pit lane with car limiter off"""
+        if not self.wcfg["show_speed_limiter"]:
+            return LIMITER_OFF
+        switch = api.read.switch
+        if switch.speed_limiter() or switch.speed_limiter_active():
+            return LIMITER_ON
+        if (self.wcfg["show_speed_limiter_reminder"] and switch.speed_limiter_available()
+                and api.read.vehicle.in_pits() and api.read.vehicle.speed() > 1):
+            return LIMITER_REMINDER
+        return LIMITER_OFF

@@ -858,6 +858,12 @@ FULL = {
     "web_dashboard": "Tableau de bord web", "enable_web_dashboard": "Activer le tableau de bord web",
     "enable_lan_access": "Accès depuis le réseau local", "web_dashboard_port": "Port",
     "access_code": "Code d'accès",
+    # Phase 2 (package C2)
+    "mirror_position_x": "Position X de la fenêtre miroir",
+    "mirror_position_y": "Position Y de la fenêtre miroir",
+    "stops_left": "Arrêts restants",
+    "number_of_days_to_keep_deleted_presets": "Jours de conservation des presets supprimés",
+    "skipped_update_version": "Version de mise à jour ignorée",
 }
 # Regex overrides for numbered families: (pattern, template), groups are passed to template
 FULL_REGEX = (

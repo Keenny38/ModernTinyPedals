@@ -34,7 +34,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import ConsumptionDataSet, minfo
-from .base import DASH, ModernOverlay
+from .base import DASH, ModernOverlay, display_order_options
 from .draw import panel
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
 
@@ -46,7 +46,7 @@ class Realtime(TableMixin, ModernOverlay):
         "font_size", "lap_time_history_count", "show_empty_history", "show_laps", "show_time",
         "show_delta", "decimal_places_delta", "show_fuel", "show_fuel_sign", "decimal_places_fuel",
         "show_virtual_energy_if_available", "show_fuel_ratio", "decimal_places_fuel_ratio",
-        "show_wear", "show_wear_sign", "decimal_places_wear",
+        "show_wear", "show_wear_sign", "decimal_places_wear", *display_order_options("lap_time_history"),
     )
 
     def __init__(self, config, widget_name):
@@ -66,16 +66,18 @@ class Realtime(TableMixin, ModernOverlay):
         if wcfg["show_time"]:
             columns.append(Column("time", self.text_width("value", "8:88.888"), RIGHT, "Time"))
         if wcfg["show_delta"]:
-            columns.append(Column("delta", self.text_width("dim", f"+8.{'8' * self.dec_delta}"), RIGHT, "Delta"))
+            columns.append(Column("delta", self.text_width("dim", f"+88.{'8' * self.dec_delta}"), RIGHT, "Delta"))
         if wcfg["show_fuel"]:
             columns.append(Column("fuel", self.text_width("dim", f"88.{'8' * self.dec_fuel}{self.sign_fuel or ''}E"), RIGHT, "Used"))
         if wcfg["show_fuel_ratio"]:
             columns.append(Column("ratio", self.text_width("dim", f"8.{'8' * self.dec_ratio}"), RIGHT, "Ratio"))
         if wcfg["show_wear"]:
             columns.append(Column("wear", self.text_width("dim", f"8.{'8' * self.dec_wear}%"), RIGHT, "Wear"))
+        columns = self.display_ordered(columns, names={"ratio": "fuel_ratio"})
         self.table = self.build_table(columns, 1.45, header=True)
         self.empty_data = ConsumptionDataSet()
         self.history_rows: tuple = ()
+        self.history_version = 0  # changed with history rows: drawn in static layer
         self.last_data_version = -1
         self.last_energy_type = None
         self.resize_rows(1)
@@ -87,11 +89,13 @@ class Realtime(TableMixin, ModernOverlay):
             self.set_size(self.table.width, height)
 
     def paint_static(self, painter: QPainter):
+        """Panel, header & recent laps (they only change when a lap is completed)"""
         panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)
         self.draw_header(painter)
+        self.draw_rows(painter, self.history_rows, start=1)
 
     def paint(self, painter: QPainter):
-        self.draw_rows(painter, self.state)
+        self.draw_rows(painter, self.state[:1])  # current lap
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -107,9 +111,13 @@ class Realtime(TableMixin, ModernOverlay):
         if self.last_data_version != minfo.history.consumptionDataVersion or self.last_energy_type != energy_type:
             self.last_data_version = minfo.history.consumptionDataVersion
             self.last_energy_type = energy_type
-            self.history_rows = self.history(minfo.history.consumptionDataSet, energy_type)
-            self.resize_rows(1 + len(self.history_rows))
-        self.refresh((current, *self.history_rows))
+            history_rows = self.history(minfo.history.consumptionDataSet, energy_type)
+            if history_rows != self.history_rows:
+                self.history_rows = history_rows
+                self.history_version += 1
+                self.resize_rows(1 + len(history_rows))
+                self.redraw_static()
+        self.refresh((current, self.history_version))
 
     def history(self, dataset, energy_type: bool) -> tuple:
         """Rows of recent laps"""
@@ -127,15 +135,17 @@ class Realtime(TableMixin, ModernOverlay):
                 fuel, sign = data.lastLapUsedEnergy, "E" if self.sign_fuel else ""
             else:
                 fuel, sign = self.unit_fuel(data.lastLapUsedFuel), self.sign_fuel
+            # Oldest lap: no previous lap time (empty placeholder lap) to compare with
+            delta = data.lapTimeLast - previous.lapTimeLast if previous.lapTimeLast > 0 else None
             rows.append(self.lap_row(
-                data.lapNumber, data.lapTimeLast, data.isValidLap, data.lapTimeLast - previous.lapTimeLast,
+                data.lapNumber, data.lapTimeLast, data.isValidLap, delta,
                 fuel, sign, calc.fuel_to_energy_ratio(data.lastLapUsedFuel, data.lastLapUsedEnergy), data.tyreAvgWearLast,
             ))
         return tuple(rows)
 
-    def lap_row(self, lap: int, laptime: float, valid: bool, delta: float, fuel: float, sign: str,
+    def lap_row(self, lap: int, laptime: float, valid: bool, delta: float | None, fuel: float, sign: str,
                 ratio: float, wear: float, current: bool = False) -> Row:
-        """Cells of one lap"""
+        """Cells of one lap (delta None: no previous lap)"""
         theme = self.theme
         cells = []
         for column in self.table.columns:
@@ -151,7 +161,7 @@ class Realtime(TableMixin, ModernOverlay):
                     color = theme.text
                 cells.append(Cell(TEXT, calc.sec2laptime_full(laptime)[:8], "value", color))
             elif key == "delta":
-                if not current and (laptime <= 0 or abs(delta) > 99):
+                if delta is None or (not current and (laptime <= 0 or abs(delta) > 99)):
                     cells.append(Cell(TEXT, DASH, "dim", theme.text_faint))
                 else:
                     text = f"{calc.sym_max(delta, 99.9):+.{self.dec_delta}f}"

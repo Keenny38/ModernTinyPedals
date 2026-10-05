@@ -100,3 +100,69 @@ def test_stint_usage_from_history(field):
     assert data.estimatedStintLaps == pytest.approx(9.0)  # energy runs out first
     module_vehicles.update_stint_usage(data, 0.5, 0.0)
     assert data.estimatedStintLaps == pytest.approx(12.0)  # fuel only
+
+
+class CountedGroup:
+    """Reader group, calls of one method recorded (index of each call)"""
+
+    def __init__(self, group, *names: str):
+        self._group = group
+        self.calls: dict[str, list] = {name: [] for name in names}
+
+    def __getattr__(self, name):
+        method = getattr(self._group, name)
+        if name not in self.calls:
+            return method
+
+        def counted(index=None, *args):
+            self.calls[name].append(index)
+            return method(index, *args)
+
+        return counted
+
+
+class CountedReader:
+    """API reader, groups with counted method calls"""
+
+    def __init__(self, reader):
+        self._reader = reader
+        self.groups: dict[str, CountedGroup] = {}
+
+    def __getattr__(self, name):
+        return self.groups.get(name) or getattr(self._reader, name)
+
+
+def count_calls(monkeypatch, group_name: str, name: str) -> list:
+    """Count calls of a reader method (index of each call)"""
+    from tinypedal.api_control import api
+
+    if not isinstance(api.read, CountedReader):
+        monkeypatch.setattr(api, "read", CountedReader(api.read))
+    reader = api.read
+    group = reader.groups.setdefault(group_name, CountedGroup(getattr(reader._reader, group_name)))
+    group.calls[name] = []
+    return group.calls[name]
+
+
+def test_scoring_data_read_on_scoring_update_or_in_pits_only(field, monkeypatch):
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, True, 600.0, True)
+    distance_calls = count_calls(monkeypatch, "lap", "distance")
+    laps_calls = count_calls(monkeypatch, "lap", "completed_laps")
+    # High priority update between two scoring updates: only the car in pits (pit timer)
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, False, 600.01, True, update_scoring=False)
+    assert [index for index in distance_calls if index is not None] == [2]
+    assert [index for index in laps_calls if index is not None] == [2]
+    assert field.dataSet[2].inPit and field.dataSet[3].isYellow  # kept from last scoring update
+    # Scoring updated: every car read
+    distance_calls.clear()
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, False, 600.02, True, update_scoring=True)
+    assert sorted(index for index in distance_calls if index is not None) == [0, 1, 2, 3]
+
+
+def test_lift_and_coast_inputs_read_after_telemetry_update_only(field, monkeypatch):
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, True, 600.0, True)
+    throttle_calls = count_calls(monkeypatch, "inputs", "throttle_raw")
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, False, 600.01, True, update_scoring=False)
+    assert throttle_calls == [0]  # player (own telemetry time changed), opponents' telemetry unchanged
+    lico = field.dataSet[1].licoTimer
+    assert lico.input_time == 600.0 and lico.throttle == 0.0

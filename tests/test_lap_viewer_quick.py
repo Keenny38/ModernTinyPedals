@@ -228,10 +228,12 @@ def test_qml_page_loads_with_bundled_modules(backend, tmp_path):
     try:
         from PySide6.QtWidgets import QWidget
 
+        from tinypedal.ui.quick.replays_backend import GameReplaysBackend
         from tinypedal.ui.quick.track_map_backend import TrackMapBackend
 
         parent = QWidget()
-        for page, page_backend in (("LapViewer.qml", backend), ("TrackMapViewer.qml", TrackMapBackend(parent))):
+        for page, page_backend in (("LapViewer.qml", backend), ("TrackMapViewer.qml", TrackMapBackend(parent)),
+                                   ("GameReplays.qml", GameReplaysBackend(parent))):  # type: ignore[arg-type]
             view = create_quick_view(parent, page, {"backend": page_backend})
             assert not view.errors(), [error.toString() for error in view.errors()]
         parent.deleteLater()

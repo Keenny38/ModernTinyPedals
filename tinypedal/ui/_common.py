@@ -22,16 +22,18 @@ Common
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
 import shiboken6
-from PySide6.QtCore import QObject, QRegularExpression, Qt, QTimer
+from PySide6.QtCore import QObject, QRectF, QRegularExpression, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QDoubleValidator,
     QIntValidator,
     QKeySequence,
+    QPainter,
     QRegularExpressionValidator,
     QShortcut,
 )
@@ -61,7 +63,7 @@ from ..i18n import tr, trm
 from ..setting import cfg
 from ..userfile.json_setting import copy_setting
 from ..validator import is_string_number
-from . import UIScaler
+from . import UIScaler, draw_focus_ring
 
 # Validator
 QVAL_INTEGER = QIntValidator(-999999, 999999)
@@ -69,6 +71,9 @@ QVAL_FLOAT = QDoubleValidator(-999999.9999, 999999.9999, 6)
 QVAL_COLOR = QRegularExpressionValidator(QRegularExpression('^#[0-9a-fA-F]*'))
 QVAL_HEATMAP = QRegularExpressionValidator(QRegularExpression('[0-9a-zA-Z_]*'))
 QVAL_FILENAME = QRegularExpressionValidator(QRegularExpression('[^\\\\/:*?"<>|]*'))
+
+# Unsaved changes marker, before title of page (page title, navigation rail entry, open pages menu)
+MODIFIED_MARKER = "• "
 
 
 def run_after_saving(callback: Callable[[], object], interval: int = 10):
@@ -83,6 +88,26 @@ def run_after_saving(callback: Callable[[], object], interval: int = 10):
     if isinstance(owner, QObject) and not shiboken6.isValid(owner):
         return
     callback()
+
+
+_file_filter = re.compile(r"^(.*?)\s*(\([^()]*\))$")  # "File description (*.extension)"
+
+
+def translate_filter(file_filter: str) -> str:
+    """File dialog filters ("Text file (*.txt);;All files (*.*)") with translated descriptions"""
+    parts = []
+    for part in file_filter.split(";;"):
+        match = _file_filter.match(part)
+        parts.append(f"{tr(match.group(1))} {match.group(2)}" if match and match.group(1) else part)
+    return ";;".join(parts)
+
+
+def original_filter(file_filter: str, selected: str) -> str:
+    """Untranslated filter (see translate_filter) of filter selected in file dialog"""
+    for original, shown in zip(file_filter.split(";;"), translate_filter(file_filter).split(";;")):
+        if shown == selected:
+            return original
+    return selected
 
 
 def add_vertical_separator() -> QFrame:
@@ -105,10 +130,13 @@ def singleton_dialog(dialog_type: str, show_error: bool = True):
             parent = kwargs.get("parent", args[0] if args else None)
             if page_host(parent, dialog_class) is not None:
                 # Shown as page in app: one page per dialog, opening the same one shows its page again
-                return dialog_class(*args, **kwargs)
+                instance = dialog_class(*args, **kwargs)
+                DialogSingleton.register(dialog_type, instance)
+                return instance
             if DialogSingleton.new(dialog_type):
                 instance = dialog_class(*args, **kwargs)
                 instance.destroyed.connect(unset_dialog_state)
+                DialogSingleton.register(dialog_type, instance)
                 return instance
             return DialogSingletonError(dialog_type, show_error)
 
@@ -118,17 +146,22 @@ def singleton_dialog(dialog_type: str, show_error: bool = True):
 
 
 class DialogSingleton:
-    """Singleton dialog"""
+    """Singleton dialog
 
-    _instance_type: set[str] = set()
+    A dialog type opens one separate window at a time, while pages inside app can be many
+    (one per dialog title). Every open dialog, window or page, is registered: see dialogs().
+    """
+
+    _instance_type: set[str] = set()  # types with a separate window open
+    _registered: dict[str, list[QDialog]] = {}
 
     def __init__(self):
         raise TypeError("not for instantiate")
 
     @classmethod
     def is_opened(cls, dialog_type: str) -> bool:
-        """Is dialog open"""
-        return dialog_type in cls._instance_type
+        """Is dialog open, as separate window or as page"""
+        return dialog_type in cls._instance_type or bool(cls.dialogs(dialog_type))
 
     @classmethod
     def new(cls, dialog_type: str) -> bool:
@@ -141,7 +174,19 @@ class DialogSingleton:
     @classmethod
     def remove(cls, dialog_type: str):
         """Remove dialog type"""
-        cls._instance_type.remove(dialog_type)
+        cls._instance_type.discard(dialog_type)
+
+    @classmethod
+    def register(cls, dialog_type: str, dialog: QDialog):
+        """Register open dialog (window or page), forgotten once deleted"""
+        cls._registered.setdefault(dialog_type, []).append(dialog)
+
+    @classmethod
+    def dialogs(cls, dialog_type: str) -> list[QDialog]:
+        """Dialogs of type shown now (window or page), not closed, not a duplicate never shown"""
+        alive = [dialog for dialog in cls._registered.get(dialog_type, ()) if shiboken6.isValid(dialog)]
+        cls._registered[dialog_type] = alive
+        return [dialog for dialog in alive if not dialog.isHidden()]
 
 
 class DialogSingletonError:
@@ -151,12 +196,20 @@ class DialogSingletonError:
         self._dialog_type = dialog_type
         self._show_error = show_error
 
+    def _title(self) -> str:
+        """Translated title of open dialog, else readable dialog type"""
+        for dialog in DialogSingleton.dialogs(self._dialog_type):
+            title = dialog.windowTitle().removesuffix(f" - {APP_NAME}")
+            if title:
+                return title
+        return tr(self._dialog_type.replace("_", " ").title())
+
     def _message(self, parent=None):
         """Error for qdialog"""
         if not self._show_error:
             return
         msg_text = (
-            f"Already opened <b>{self._dialog_type.title()} dialog</b>."
+            f"Already opened <b>{self._title()} dialog</b>."
             "<br><br>Please close previous dialog first."
         )
         QMessageBox.warning(parent, tr("Error"), trm(msg_text))
@@ -180,6 +233,18 @@ class CompactButton(QPushButton):
             self.fontMetrics().boundingRect(text).width()
             + UIScaler.FONT_PIXEL_SCALED * (1 + has_menu)
         )
+
+
+class FocusRingButton(QPushButton):
+    """Push button with accent ring while focused by keyboard (style sheet buttons show none)"""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        radius = self.fontMetrics().height() * 0.4  # button border radius (0.4em)
+        draw_focus_ring(painter, self, QRectF(self.rect()), radius)
+        painter.end()
 
 
 def find_dialog_host(widget: QWidget | None):
@@ -222,15 +287,61 @@ class BaseDialog(QDialog):
 
     Opened with show() or open() from main window, dialog is shown as a page inside app
     (see TabView.show_dialog_page), unless EMBED_IN_APP is False. exec() keeps a modal window.
+
+    Unsaved changes (is_modified) are marked on page title, see refresh_modified. Ctrl+S runs
+    save_action of shown page (main window shortcut), or of dialog shown as separate window.
     """
     MARGIN = UIScaler.pixel(6)
     EMBED_IN_APP = True
     in_app_page = False  # set when shown as page
+    shown_instead: BaseDialog | None = None  # same dialog already open as page, see shown_dialog
+    modified_changed = Signal(bool)  # unsaved changes marker shown or cleared, see refresh_modified
+    _marked_modified = False
+    _save_shortcut: QShortcut | None = None
 
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+    def shown_dialog(self) -> BaseDialog:
+        """Dialog shown by show() or open(): page of same dialog if already open (this copy is
+        then deleted, so follow-up calls must go to the returned dialog)"""
+        return self.shown_instead or self
+
+    def has_unsaved_changes(self) -> bool:
+        """Changes that closing would ask to save (is_modified of editors & config pages)"""
+        is_modified = getattr(self, "is_modified", None)
+        return bool(is_modified()) if callable(is_modified) else False
+
+    def is_marked_modified(self) -> bool:
+        """Unsaved changes marker shown"""
+        return self._marked_modified
+
+    def refresh_modified(self):
+        """Show or clear unsaved changes marker (page title, rail entry, open pages menu)"""
+        modified = self.has_unsaved_changes()
+        if modified != self._marked_modified:
+            self._marked_modified = modified
+            self.modified_changed.emit(modified)
+
+    def save_action(self) -> Callable[[], object] | None:
+        """Save of Ctrl+S (keeps dialog open), None if dialog has nothing to save"""
+        return None
+
+    def save_by_shortcut(self) -> bool:
+        """Ctrl+S: run save action, False if dialog has none"""
+        action = self.save_action()
+        if action is None:
+            return False
+        action()
+        return True
+
+    def showEvent(self, event):
+        """Shown as separate window: own Ctrl+S (pages use the one of main window)"""
+        super().showEvent(event)
+        if not self.in_app_page and self._save_shortcut is None and self.save_action() is not None:
+            self._save_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self, self.save_by_shortcut)
 
     def show(self):
         host = embedded_host(self)
@@ -360,6 +471,7 @@ class BaseEditor(BaseDialog):
             self._undo_busy = False
         self._undo_state = state
         self._is_modified = True
+        self.refresh_modified()
 
     def replace_table_data(self, refresh_table: Callable[[], None]):
         """Rebuild table from replaced temp data (reset, import), recorded as one undo step
@@ -404,7 +516,7 @@ class BaseEditor(BaseDialog):
 
         if confirm == QMessageBox.StandardButton.Save:
             self.saving()
-            return self.confirm_discard()
+            return not self._is_modified  # not saved (invalid data, file error): kept open
 
         return confirm == QMessageBox.StandardButton.Discard
 
@@ -416,6 +528,7 @@ class BaseEditor(BaseDialog):
         """Set modified state"""
         if not self._is_modified:
             self._is_modified = True
+            self.refresh_modified()
         self.__record_change()
 
     def record_change(self):
@@ -426,9 +539,15 @@ class BaseEditor(BaseDialog):
         """Set unmodified state"""
         if self._is_modified:
             self._is_modified = False
+        self.refresh_modified()
 
     def saving(self):
         """Save changes"""
+
+    def save_action(self) -> Callable[[], object] | None:
+        """Ctrl+S: Apply button of editor (saves, keeps editor open), if any"""
+        applying = getattr(self, "applying", None)
+        return applying if callable(applying) else None
 
     def reject(self):
         """Reject(ESC) confirm"""
@@ -696,7 +815,8 @@ class TableBatchReplace(BaseDialog):
 
         for row_index in range(self.table_data.rowCount()):
             item = table_item(self.table_data, row_index, column_index)
-            item.setText(re.sub(pattern, replace, item.text(), flags=match_flag))
+            # Replacement is plain text, never a template ("\1", "\" are not group references)
+            item.setText(re.sub(pattern, lambda _: replace, item.text(), flags=match_flag))
 
         self.update_selector(column_index, search)
 
@@ -741,9 +861,9 @@ class FloatTableItem(QTableWidgetItem):
         return self._value
 
     def validate(self):
-        """Validate value, replace invalid value with old value if invalid"""
+        """Validate value, replace invalid value with old value if invalid (nan & infinity too)"""
         value = self.text()
-        if is_string_number(value):
+        if is_string_number(value) and math.isfinite(float(value)):
             self._value = float(value)
         else:
             self.setText(str(self._value))

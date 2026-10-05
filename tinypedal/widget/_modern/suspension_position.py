@@ -20,11 +20,12 @@
 Suspension position Widget, modern design
 
 Suspension position per wheel with gauge (compression orange, extension blue), highlighted
-when beyond maximum position range.
+when beyond maximum position range, third spring position mark (front & rear).
 """
 
 from __future__ import annotations
 
+from ...api_control import api
 from ...module_info import minfo
 from .gauge_quad import GaugeQuad
 
@@ -32,7 +33,10 @@ from .gauge_quad import GaugeQuad
 class Realtime(GaugeQuad):
     """Draw widget"""
 
-    options = (*GaugeQuad.common_options, "position_maximum_range", "show_maximum_position_range")
+    options = (
+        *GaugeQuad.common_options, "position_maximum_range", "show_maximum_position_range",
+        "show_third_spring_position_mark",
+    )
     label = "Suspension"
 
     def setup(self):
@@ -42,9 +46,13 @@ class Realtime(GaugeQuad):
         theme = self.theme
         positions = minfo.wheels.currentSuspensionPosition
         maximums = minfo.wheels.maxSuspensionPosition if self.wcfg["show_maximum_position_range"] else (0, 0, 0, 0)
+        if self.wcfg["show_third_spring_position_mark"]:
+            thirds = tuple(abs(value) / self.max_range for value in api.read.wheel.third_spring_deflection())
+        else:
+            thirds = (-1.0,) * 4
         tiles = []
-        for position, maximum in zip(positions, maximums):
+        for position, maximum, third in zip(positions, maximums, thirds):
             exceeded = 0 < maximum <= position
             color = theme.warning if position >= 0 else theme.blue
-            tiles.append(self.gauge(abs(position), position, abs(position) / self.max_range, color, exceeded))
+            tiles.append(self.gauge(abs(position), position, abs(position) / self.max_range, color, exceeded, third))
         return tuple(tiles)

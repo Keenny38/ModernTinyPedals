@@ -20,6 +20,9 @@
 Loader function
 
 Important: DO NOT call those functions in non-main thread.
+
+Safe mode (see safe_mode): overlays (widgets & VR overlay) not started at start and reload,
+a widget can still be turned on by hand; restart starts normally.
 """
 
 import logging
@@ -28,18 +31,22 @@ import signal
 import subprocess
 import sys
 
+from . import safe_mode
 from .api_control import api
 from .command_server import cmdserver
 from .const_file import FileExt
 from .hotkey_control import kctrl
+from .module.module_recorder import wait_lap_saver
 from .module_control import mctrl, wctrl
 from .overlay_control import octrl
+from .replay import replay
 from .setting import cfg
 from .update import update_checker
 from .vr_overlay import vroverlay
 from .web_dashboard import webdashboard
 
 logger = logging.getLogger(__name__)
+LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for lap files being written before restart
 
 
 def int_signal_handler(sign, frame):
@@ -63,10 +70,11 @@ def start():
     # 3 start modules
     mctrl.start()
     # 4 start widgets
-    wctrl.start()
+    if not safe_mode.state.enabled:
+        wctrl.start()
     # 5 start main window
     from .ui.app import AppWindow
-    AppWindow()
+    window = AppWindow()
     # Finalize loading after main GUI fully loaded
     logger.info("FINALIZING............")
     # 1 Enable overlay control
@@ -76,21 +84,66 @@ def start():
     # 3 Enable remote control & VR overlay
     cmdserver.enable()
     webdashboard.enable()
-    vroverlay().enable()
+    if not safe_mode.state.enabled:
+        vroverlay().enable()
     # 4 Check for updates
     if cfg.application["check_for_updates_on_startup"]:
         update_checker.check(False)
+    # 5 Start finished once window & overlays are up for a while (startup marker removed)
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(safe_mode.SETTLE_MS, finish_start)
+    if safe_mode.state.enabled:
+        QTimer.singleShot(0, lambda: show_safe_mode_notice(window))
+
+
+def finish_start():
+    """Start finished (main window & overlays up): next start is a normal one"""
+    safe_mode.clear_marker(cfg.path.config)
+    logger.info("STARTED: startup marker removed")
+
+
+def show_safe_mode_notice(window):
+    """Safe mode: shown in window title, notice offering to restart normally"""
+    import shiboken6
+    from PySide6.QtWidgets import QMessageBox
+
+    from .i18n import tr
+
+    if window is not None and not shiboken6.isValid(window):
+        window = None
+    if window is not None:
+        window.setWindowTitle(f"{window.windowTitle()} - {tr('Safe Mode')}")
+    box = QMessageBox(window if window is not None and window.isVisible() else None)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("Safe Mode"))
+    box.setText(tr("Safe mode: plugins are not loaded and overlays are not started.\n\n"
+                   "Fix the settings that stopped Modern Tiny Pedals from starting, "
+                   "then restart normally."))
+    button_restart = box.addButton(tr("Restart Normally"), QMessageBox.ButtonRole.AcceptRole)
+    box.addButton(QMessageBox.StandardButton.Close)
+    box.exec()
+    if box.clickedButton() is not button_restart:
+        return
+    restart_app = getattr(window, "restart_app", None)
+    if callable(restart_app):
+        restart_app()  # open pages may ask to save first
+    else:
+        restart()
 
 
 def close():
     """Close api, modules, widgets. Call before quit APP."""
     logger.info("CLOSING............")
-    # 1 unload modules
+    # 1 unload modules (recorder module saves last lap)
     unload_modules()
-    # 2 stop & close api
+    # 2 finish replay recording (manual recording is not stopped by recorder module)
+    replay.stop_recording()
+    # 3 stop & close api
     api.stop()
     api.close()
     logger.info("API: closed")
+    # 4 quitting or restarting before start finished is no crash
+    safe_mode.clear_marker(cfg.path.config)
 
 
 def restart():
@@ -98,8 +151,10 @@ def restart():
     logger.info("RESTARTING............")
     # 0 must close first
     close()
-    # 1 wait unfinished saving
+    # 1 wait unfinished saving (settings, recorded laps: process exits without waiting threads)
     cfg.flush()
+    if not wait_lap_saver(LAP_SAVER_TIMEOUT):
+        logger.warning("RESTARTING: lap saving not finished")
     # 2 set restart env for skipping single instance check
     os.environ["TINYPEDAL_RESTART"] = "TRUE"
     command = restart_command()
@@ -112,10 +167,11 @@ def restart():
 
 
 def restart_command() -> list[str]:
-    """Command line to relaunch APP"""
+    """Command line to relaunch APP, normal start (safe mode flag left out)"""
+    arguments = safe_mode.restart_arguments(sys.argv)
     if getattr(sys, "frozen", False) or "tinypedal.exe" in sys.executable:  # if run as exe
-        return [sys.executable, *sys.argv[1:]]
-    return [sys.executable, *sys.argv]  # if run as script
+        return [sys.executable, *arguments[1:]]
+    return [sys.executable, *arguments]  # if run as script
 
 
 def reload(reload_preset: bool = False):
@@ -158,14 +214,16 @@ def sync_screen_layout():
 
 
 def load_modules():
-    """Load modules, widgets"""
+    """Load modules, widgets (overlays kept off in safe mode)"""
     octrl.enable()  # 1 overlay control
     mctrl.start()  # 2 module
-    wctrl.start()  # 3 widget
+    if not safe_mode.state.enabled:
+        wctrl.start()  # 3 widget
     kctrl.enable()  # 4 hotkey
     cmdserver.enable()  # 5 remote control
     webdashboard.enable()  # 5 web dashboard
-    vroverlay().enable()  # 6 vr overlay
+    if not safe_mode.state.enabled:
+        vroverlay().enable()  # 6 vr overlay
 
 
 def unload_modules():

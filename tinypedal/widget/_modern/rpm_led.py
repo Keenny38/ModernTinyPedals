@@ -35,6 +35,8 @@ from .base import ModernOverlay
 from .draw import panel, rounded
 
 OFF, LOW, SAFE, REDLINE, CRITICAL, OVER_REV, LIMITER = range(7)
+GLOW_ALPHA = 60  # soft glow around lit LED
+SHINE = QColor(255, 255, 255, 45)  # highlight on top of lit LED
 
 
 class Realtime(ModernOverlay):
@@ -63,6 +65,7 @@ class Realtime(ModernOverlay):
             theme.tint(theme.surface_raised, 230), theme.positive, theme.caution, theme.negative,
             theme.accent, theme.best, theme.positive,
         )
+        self.glows = tuple(theme.tint(color, GLOW_ALPHA) for color in self.colors)
         side_w = led_w * self.max_led + gap * (self.max_led - 1)
         self.leds = [QRectF(pad + (led_w + gap) * index, pad, led_w, led_h) for index in range(self.max_led)]
         width = pad * 2 + side_w
@@ -94,14 +97,11 @@ class Realtime(ModernOverlay):
                 continue
             color = self.colors[state]
             radius = min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0)
-            glow = QColor(color)
-            glow.setAlpha(60)
             grow = min(rect.height() * 0.18, 4.0)
-            rounded(painter, rect.adjusted(-grow, -grow, grow, grow), radius + grow, glow)
+            rounded(painter, rect.adjusted(-grow, -grow, grow, grow), radius + grow, self.glows[state])
             rounded(painter, rect, radius, color)
-            shine = QColor(255, 255, 255, 45)
             rounded(painter, QRectF(rect.left() + radius * 0.3, rect.top() + rect.height() * 0.12,
-                                    rect.width() - radius * 0.6, rect.height() * 0.3), radius * 0.6, shine)
+                                    rect.width() - radius * 0.6, rect.height() * 0.3), radius * 0.6, SHINE)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""

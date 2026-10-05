@@ -2,6 +2,7 @@
 
 import ctypes
 import io
+import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -118,13 +119,20 @@ def test_replay_mmap_feeds_structure(tmp_path):
     assert shmm.data.value == 3
 
 
+def wait_until(condition, timeout: float = 10.0):
+    """Wait for recorder thread, fail instead of hanging if it stalls"""
+    end = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < end, "recorder stalled"
+        time.sleep(0.002)
+
+
 def test_record_from_source(tmp_path):
     control = ReplayControl()
     source = ctypes.create_string_buffer(b"abcd", 4)
     filename = str(tmp_path / "rec.tpreplay")
     control.start_recording(filename, lambda: source, rate=200)
-    while control.recorded_frames < 3:
-        pass
+    wait_until(lambda: control.recorded_frames >= 3)
     control.stop_recording()
     assert not control.recording
     replay = ReplayFile(filename)
@@ -155,6 +163,7 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
     restarts = []
     monkeypatch.setattr(replay_view, "restart_api", lambda: restarts.append(replay.active))
     monkeypatch.setattr(type(api), "name", property(lambda self: replay_view.API_LMU_NAME))
+    monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", len(frame)]])
     monkeypatch.setattr(replay_view.QFileDialog, "getOpenFileName", lambda *args: (filename, ""))
     dialog = replay_view.ReplayView(None)
     try:
@@ -340,16 +349,14 @@ def test_recording_skips_inactive_frames_and_writes_markers(tmp_path):
         frame=lambda: b"abcd", active=lambda: state["active"], lap=lambda: state["lap"],
         info=lambda: {"track": "Spa"})
     control.start_recording(filename, sources, rate=100)
-    while control.recorded_frames < 5:
-        time.sleep(0.005)
+    wait_until(lambda: control.recorded_frames >= 5)
     state["active"] = False
     time.sleep(1.3)  # inactive gap removed from replay time
     state["active"] = True
     state["lap"] = 2
     assert control.add_marker("incident", "9g", ago=0.0)
     frames = control.recorded_frames
-    while control.recorded_frames < frames + 5:
-        time.sleep(0.005)
+    wait_until(lambda: control.recorded_frames >= frames + 5)
     control.stop_recording()
     assert not control.add_marker("incident")  # not recording
     replay = ReplayFile(filename)
@@ -403,6 +410,7 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
         writer.finish()
     monkeypatch.setattr(replay_view, "restart_api", lambda: None)
     monkeypatch.setattr(type(api), "name", property(lambda self: replay_view.API_LMU_NAME))
+    monkeypatch.setattr(type(api), "replay_layout", lambda self: [["shmm", size]])
     monkeypatch.setattr(replay_view.cfg.path, "telemetry", str(tmp_path))
     dialog = replay_view.ReplayView(None)
     try:
@@ -425,8 +433,18 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
         dialog.set_section(1)
         assert dialog.button_section_save.isEnabled()
         target = str(tmp_path / "part.tpreplay")
-        monkeypatch.setattr(replay_view.QFileDialog, "getSaveFileName", lambda *args: (target, ""))
-        dialog.save_section()
+        suggested = []
+
+        def save_name(parent, caption, default, *args):
+            suggested.append(default)
+            return target, ""
+
+        monkeypatch.setattr(replay_view.QFileDialog, "getSaveFileName", save_name)
+        dialog.save_section()  # saved in background, overlays keep running
+        assert dialog.export.wait(10)
+        QCoreApplication.processEvents()  # finished signal from export thread
+        assert "frames" in dialog.label_section.text() and dialog.button_section_save.isEnabled()
+        assert suggested[0].endswith("markers-3-5.tpreplay")
         part = ReplayFile(target)
         assert part.duration == pytest.approx(1.9)
         part.close()
@@ -443,3 +461,267 @@ def test_unload_keeps_frames_readable_until_api_restarts(tmp_path):
     player = control.load(write_replay(tmp_path, make_frames(5)))
     control.unload()
     assert player.current_frame()  # was "seek of closed file" in API thread
+
+
+# --- Audit fixes (package A): format version, layout check, damaged files, recording safety
+def write_v1_replay(path, frames: list[bytes], header: dict | None = None, summary: bool = True) -> str:
+    """Replay in format 1 (no CRC, LMU files without layout), as written by older versions"""
+    import json
+    import zlib
+
+    from tinypedal.replay import FRAME_HEADER_V1, MAGIC_V1, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC
+
+    filename = str(path / "old.tpreplay")
+    with open(filename, "wb") as file:
+        file.write(MAGIC_V1 + json.dumps({"frame_size": len(frames[0]), "rate": 10, **(header or {})}).encode() + b"\n")
+        for index, frame in enumerate(frames):
+            payload = zlib.compress(frame)
+            file.write(FRAME_HEADER_V1.pack(index * 0.1, 1, len(payload)) + payload)  # every frame a keyframe
+        if summary:
+            offset = file.tell()
+            payload = json.dumps({"duration": (len(frames) - 1) * 0.1, "frames": len(frames)}).encode()
+            file.write(FRAME_HEADER_V1.pack(0.0, SUMMARY_FRAME, len(payload)) + payload)
+            file.write(TRAILER.pack(offset, TRAILER_MAGIC))
+    return filename
+
+
+def test_replay_header_has_format_version(tmp_path):
+    from tinypedal.replay import FORMAT_VERSION, MAGIC, read_header
+
+    filename = write_replay(tmp_path, make_frames(3))
+    with open(filename, "rb") as file:
+        assert file.read(len(MAGIC)) == MAGIC
+        file.seek(0)
+        assert read_header(file)["format"] == FORMAT_VERSION
+    assert ReplayFile(filename).format == FORMAT_VERSION
+
+
+def test_format_1_replay_still_loads(tmp_path):
+    from tinypedal.replay import read_replay_info
+
+    frames = make_frames(4)
+    filename = write_v1_replay(tmp_path, frames)
+    replay = ReplayFile(filename)
+    assert replay.format == 1 and replay.layout == [("shmm", 64)]
+    assert [replay.frame(index) for index in range(4)] == frames
+    assert read_replay_info(filename).duration == pytest.approx(0.3)
+    replay.close()
+
+
+def test_zero_filled_tail_ignored(tmp_path):
+    """Power loss leaves zeros at file end: frames end there"""
+    frames = make_frames(5)
+    for writer in (write_replay, write_v1_replay):
+        filename = writer(tmp_path, frames)
+        with open(filename, "ab") as file:
+            file.write(bytes(4096))
+        replay = ReplayFile(filename)
+        assert len(replay) == 5 and replay.damaged
+        assert replay.frame(4) == frames[4]
+        replay.close()
+
+
+def test_damaged_frame_skipped_until_keyframe(tmp_path):
+    frames = make_frames(KEYFRAME_INTERVAL + 5)
+    filename = write_replay(tmp_path, frames)
+    replay = ReplayFile(filename)
+    offset = replay._offsets[3]
+    replay.close()
+    with open(filename, "r+b") as file:  # flip a byte of delta frame 3 payload: CRC fails
+        file.seek(offset)
+        byte = file.read(1)
+        file.seek(offset)
+        file.write(bytes((byte[0] ^ 0xFF,)))
+    replay = ReplayFile(filename)
+    assert replay.frame(2) == frames[2]
+    assert replay.frame(3) == frames[2] and replay.frame(50) == frames[2]  # last good frame held
+    assert replay.frame(KEYFRAME_INTERVAL + 1) == frames[KEYFRAME_INTERVAL + 1]  # next keyframe decodes again
+    exported = [frame for _, frame in replay.iter_frames(0, KEYFRAME_INTERVAL)]
+    assert exported == [frames[0], frames[1], frames[2], frames[KEYFRAME_INTERVAL]]
+    replay.close()
+
+
+def test_summary_length_is_bounded(tmp_path):
+    """Corrupt summary length must not make a 4 GB read"""
+    from tinypedal.replay import FRAME_HEADER, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC, read_summary
+
+    data = io.BytesIO()
+    data.write(b"x" * 10)
+    data.write(FRAME_HEADER.pack(0.0, SUMMARY_FRAME, 0xFFFFFFFF, 0))
+    data.write(TRAILER.pack(10, TRAILER_MAGIC))
+    assert read_summary(data) == {}
+
+
+@pytest.mark.parametrize("frame_size", [0, -1, "64", 1 << 40])
+def test_invalid_frame_size_rejected(tmp_path, frame_size):
+    import json
+
+    filename = tmp_path / "bad.tpreplay"
+    filename.write_bytes(b"TPREPLAY2 " + json.dumps({"frame_size": frame_size}).encode() + b"\n")
+    with pytest.raises(ValueError):
+        ReplayFile(str(filename))
+
+
+def test_load_checks_api_and_structure_size(tmp_path):
+    from tinypedal.replay import ReplayMismatch
+
+    control = ReplayControl()
+    filename = write_replay(tmp_path, make_frames(3))  # old style LMU file: no layout, 64 bytes
+    assert control.load(filename, "Le Mans Ultimate", [["shmm", 64]])  # exact size accepted
+    for api_name, layout, reason in (
+        ("Le Mans Ultimate", [["shmm", 80]], "layout"),  # game structure grew: offsets would shift
+        ("Le Mans Ultimate", [["shmm", 32]], "layout"),
+        ("rFactor 2", [["scor", 64]], "source"),
+    ):
+        with pytest.raises(ReplayMismatch) as error:
+            control.load(filename, api_name, layout)
+        assert error.value.reason == reason and error.value.source == "Le Mans Ultimate"
+        assert not control.active
+
+
+def test_api_falls_back_to_game_for_incompatible_replay(tmp_path, monkeypatch):
+    """Switching API (hotkey, preset) with a replay loaded: start reads game instead of failing"""
+    from tinypedal import api_connector, app_signal
+    from tinypedal.replay import replay
+
+    errors: list[str] = []
+    app_signal.error.connect(errors.append)
+    frame = bytes(ctypes.sizeof(lmu_data.LMUObjectOut))
+    replay.load(write_replay(tmp_path, [frame, frame]))
+    try:
+        assert api_connector.SimLMU().replay_player() is replay.player  # same structure: played
+        assert api_connector.SimRF2().replay_player() is None  # LMU replay with rF2 API
+        assert not replay.active and errors and "rFactor 2" in errors[0]
+        replay.load(write_replay(tmp_path, [frame[:-8], frame[:-8]]))  # older, smaller structure
+        assert api_connector.SimLMU().replay_player() is None and not replay.active
+    finally:
+        app_signal.error.disconnect(errors.append)
+        replay.unload()
+
+
+def test_recorded_header_has_layout(tmp_path):
+    from tinypedal import api_connector
+
+    lmu, rf2 = api_connector.SimLMU(), api_connector.SimRF2()
+    assert lmu.replay_header()["layout"] == [["shmm", ctypes.sizeof(lmu_data.LMUObjectOut)]]
+    assert [name for name, _ in rf2.replay_header()["layout"]] == ["scor", "tele", "ext", "ffb", "rule"]
+    assert api_connector.SimLMULegacy().raw_data() is None  # before start: no AttributeError, no frame
+
+
+def test_auto_replay_rotation_keeps_sections(tmp_path):
+    import os
+
+    from tinypedal.replay import remove_old_replays
+    from tinypedal.replay_session import AUTO_NAME, section_filename
+
+    names = [f"replay-auto-2026-10-0{day}-12-00-00.tpreplay" for day in range(1, 5)]
+    section = "replay-auto-2026-10-01-12-00-00-12-345.tpreplay"  # saved by older versions
+    for index, name in enumerate([*names, section]):
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        os.utime(path, (1000 + index, 1000 + index))
+    removed = remove_old_replays(str(tmp_path), AUTO_NAME, 2)
+    assert sorted(removed) == names[:2]
+    assert (tmp_path / section).exists()
+    default = section_filename(str(tmp_path / names[3]), 12.4, 345.9)
+    assert os.path.basename(default) == "replay-2026-10-04-12-00-00-12-345.tpreplay"
+    assert not AUTO_NAME.fullmatch(os.path.basename(default))
+
+
+def test_recording_file_complete_after_source_error(tmp_path):
+    """Unexpected error in a source: file still gets summary & trailer"""
+    import time
+
+    from tinypedal.replay import read_replay_info
+
+    control = ReplayControl()
+    count = [0]
+
+    def frame():
+        count[0] += 1
+        if count[0] > 3:
+            raise RuntimeError("source broken")
+        return b"abcd"
+
+    filename = str(tmp_path / "broken.tpreplay")
+    control.start_recording(filename, frame, rate=100)
+    end = time.monotonic() + 5
+    while control.recording and time.monotonic() < end:
+        time.sleep(0.01)
+    control.stop_recording()
+    info = read_replay_info(filename)
+    assert info.duration >= 0  # summary written
+    assert len(ReplayFile(filename)) == 3
+
+
+def test_start_recording_only_once(tmp_path):
+    import time
+
+    control = ReplayControl()
+    assert control.start_recording(str(tmp_path / "first.tpreplay"), lambda: None, rate=100)
+    assert not control.start_recording(str(tmp_path / "second.tpreplay"), lambda: None, rate=100)
+    control.stop_recording()
+    time.sleep(0.01)
+    assert not control.recording
+
+
+def test_frame_decoded_outside_player_lock(tmp_path, monkeypatch):
+    """Position reads (user interface) never wait for frame decoding"""
+    player = ReplayPlayer(ReplayFile(write_replay(tmp_path, make_frames(5))))
+    locked = []
+    decode = player.replay.frame
+
+    def frame(index):
+        locked.append(player._lock.locked())
+        return decode(index)
+
+    monkeypatch.setattr(player.replay, "frame", frame)
+    assert player.current_frame() == player.last_frame
+    assert locked == [False]
+
+
+def lmu_frames(count: int, paused_from: int | None = None) -> list[bytes]:
+    """LMU frames, player on track, session time moving 0.1s per frame"""
+    frames = []
+    for index in range(count):
+        frame = bytearray(ctypes.sizeof(lmu_data.LMUObjectOut))
+        data = lmu_data.LMUObjectOut.from_buffer(frame)
+        data.scoring.scoringInfo.mCurrentET = 10.0 + index * 0.1
+        data.scoring.scoringInfo.mInRealtime = True
+        data.scoring.scoringInfo.mNumVehicles = 1
+        data.scoring.vehScoringInfo[0].mIsPlayer = True
+        data.telemetry.activeVehicles = 1
+        del data
+        frames.append(bytes(frame))
+    return frames
+
+
+def test_paused_replay_keeps_overlays_active(tmp_path, monkeypatch):
+    """Paused replay (frame by frame, lap viewer opening replay at lap) is not a frozen game"""
+    import time
+
+    clock = {"offset": 0.0}
+    monkeypatch.setattr(lmu_connector, "monotonic", lambda: time.monotonic() + clock["offset"])
+    player = ReplayPlayer(ReplayFile(write_replay(tmp_path, lmu_frames(30))))
+    info = lmu_connector.LMUInfo()
+    info.setReplay(player)
+    info.start()
+    try:
+        end = time.monotonic() + 5
+        while not info.isActive and time.monotonic() < end:
+            time.sleep(0.02)
+        assert info.isActive
+        player.set_paused(True)
+        clock["offset"] = 10.0  # data unchanged for 10 s
+        time.sleep(0.3)
+        assert info.isActive and not info.isPaused
+        player.set_paused(False)
+        player.loop = False
+        player.seek(player.replay.duration)  # end of replay: frozen data
+        clock["offset"] = 30.0
+        end = time.monotonic() + 5
+        while not info.isPaused and time.monotonic() < end:
+            time.sleep(0.02)
+        assert info.isPaused and not info.isActive
+    finally:
+        info.stop()

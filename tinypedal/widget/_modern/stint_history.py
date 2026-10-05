@@ -33,7 +33,7 @@ from PySide6.QtGui import QPainter
 from ... import calculation as calc
 from ... import units
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .draw import panel
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
 
@@ -46,6 +46,7 @@ class Realtime(TableMixin, ModernOverlay):
         "show_fuel", "show_fuel_sign", "decimal_places_fuel", "show_virtual_energy_if_available",
         "show_tyre", "show_wear", "show_wear_sign", "decimal_places_wear",
         "show_delta", "decimal_places_delta", "show_consistency", "show_consistency_sign", "decimal_places_consistency",
+        *display_order_options("stint_history"),
     )
 
     def __init__(self, config, widget_name):
@@ -75,6 +76,7 @@ class Realtime(TableMixin, ModernOverlay):
             columns.append(Column("delta", self.text_width("dim", f"+8.{'8' * self.dec_delta}"), RIGHT, "Delta"))
         if wcfg["show_consistency"]:
             columns.append(Column("consistency", self.text_width("dim", f"88.{'8' * self.dec_consist}%"), RIGHT, "Consist."))
+        columns = self.display_ordered(columns)
         self.table = self.build_table(columns, 1.45, header=True)
         self.history_rows: tuple = ()
         self.last_data_version = -1

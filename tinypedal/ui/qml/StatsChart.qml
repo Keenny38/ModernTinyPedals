@@ -2,32 +2,47 @@ import QtQuick
 import QtQuick.Controls.Basic
 
 // Personal best progression: best lap of each session (dots, new personal best in accent color, slow
-// sessions clipped hollow at bottom), personal best so far (steps), level limits (dashed, level color).
-// Data from backend: points x & y from 0 to 1 (y 0: fastest, at top), lap time labels & date marks.
-// Hover: date, session & lap time of nearest session.
+// sessions clipped hollow at bottom), personal best so far (steps over a soft area), level limits (dashed,
+// level color & letter), round lap time grid lines. Data from backend: points x & y from 0 to 1 (y 0: fastest,
+// at top), grid ticks, date marks. Drawn from left to right when data changes.
+// Hover: guide line, date, session & lap time of nearest session.
 Item {
     id: chart
 
     property var chartData: ({})
     readonly property var points: chartData.points || []
-    readonly property real labelWidth: theme.em * 4.4
+    readonly property real labelWidth: theme.em * 4.6
     readonly property real dateHeight: theme.em * 1.5
     readonly property real plotX: labelWidth
     readonly property real plotY: theme.em * 0.7
-    readonly property real plotWidth: Math.max(width - labelWidth - theme.em * 0.7, 1)
+    readonly property real plotWidth: Math.max(width - labelWidth - theme.em * 1.6, 1)
     readonly property real plotHeight: Math.max(height - plotY - dateHeight, 1)
     property int hovered: -1
+    property real reveal: 1  // share of chart drawn (animated when data changes)
 
     function px(value) { return plotX + value * plotWidth }
     function py(value) { return plotY + value * plotHeight }
 
-    onChartDataChanged: { hovered = -1; canvas.requestPaint() }
+    onChartDataChanged: {
+        hovered = -1
+        revealAnimation.restart()
+    }
+    onRevealChanged: canvas.requestPaint()
     onWidthChanged: canvas.requestPaint()
     onHeightChanged: canvas.requestPaint()
     onHoveredChanged: canvas.requestPaint()
-    Connections {
-        target: theme
-        function onChanged() { canvas.requestPaint() }
+    // Colors painted: canvas painted again when light / dark theme switches (theme copy has no changed signal)
+    readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border]
+    onPaintColorsChanged: canvas.requestPaint()
+
+    NumberAnimation {
+        id: revealAnimation
+        target: chart
+        property: "reveal"
+        from: 0
+        to: 1
+        duration: 520
+        easing.type: Easing.OutCubic
     }
 
     Canvas {
@@ -38,80 +53,166 @@ Item {
             ctx.reset()
             var points = chart.points
             if (points.length < 2) return
-            var dash = theme.em * 0.35
-            // Level limits: dashed lines
-            var limits = chart.chartData.limits || []
+            var x0 = chart.plotX, span = chart.plotWidth
+            var y1 = chart.plotY + chart.plotHeight
+            // Grid: round lap times
+            var ticks = chart.chartData.ticks || []
             ctx.lineWidth = 1
+            ctx.strokeStyle = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.07 : 0.09)
+            ctx.beginPath()
+            for (var t = 0; t < ticks.length; t++) {
+                var ty = Math.round(chart.py(ticks[t].y)) + 0.5
+                ctx.moveTo(x0, ty)
+                ctx.lineTo(x0 + span, ty)
+            }
+            ctx.stroke()
+            // Level limits: dashed lines
+            var dash = theme.em * 0.35
+            var limits = chart.chartData.limits || []
             for (var l = 0; l < limits.length; l++) {
                 var y = Math.round(chart.py(limits[l].y)) + 0.5
                 ctx.strokeStyle = limits[l].color
+                ctx.globalAlpha = 0.75
                 ctx.beginPath()
-                for (var x = chart.plotX; x < chart.plotX + chart.plotWidth; x += dash * 2) {
+                for (var x = x0; x < x0 + span; x += dash * 2) {
                     ctx.moveTo(x, y)
-                    ctx.lineTo(Math.min(x + dash, chart.plotX + chart.plotWidth), y)
+                    ctx.lineTo(Math.min(x + dash, x0 + span), y)
                 }
                 ctx.stroke()
             }
-            // Personal best so far: steps
-            ctx.strokeStyle = theme.accent
-            ctx.lineWidth = Math.max(2, theme.em * 0.14)
+            ctx.globalAlpha = 1
+            // Drawn part (left to right while data changes)
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(0, 0, x0 + span * chart.reveal + theme.em * 0.5, chart.height)
+            ctx.clip()
+            // Personal best so far: steps over a soft area
+            var accent = theme.accent
             ctx.beginPath()
             ctx.moveTo(chart.px(points[0].x), chart.py(points[0].pbY))
             for (var i = 1; i < points.length; i++) {
                 ctx.lineTo(chart.px(points[i].x), chart.py(points[i - 1].pbY))
                 ctx.lineTo(chart.px(points[i].x), chart.py(points[i].pbY))
             }
+            ctx.lineTo(chart.px(points[points.length - 1].x), y1)
+            ctx.lineTo(chart.px(points[0].x), y1)
+            ctx.closePath()
+            var gradient = ctx.createLinearGradient(0, chart.plotY, 0, y1)
+            gradient.addColorStop(0, Qt.rgba(accent.r, accent.g, accent.b, theme.dark ? 0.24 : 0.16))
+            gradient.addColorStop(1, Qt.rgba(accent.r, accent.g, accent.b, 0))
+            ctx.fillStyle = gradient
+            ctx.fill()
+            ctx.strokeStyle = accent
+            ctx.lineWidth = Math.max(2, theme.em * 0.14)
+            ctx.lineJoin = "round"
+            ctx.beginPath()
+            ctx.moveTo(chart.px(points[0].x), chart.py(points[0].pbY))
+            for (var s = 1; s < points.length; s++) {
+                ctx.lineTo(chart.px(points[s].x), chart.py(points[s - 1].pbY))
+                ctx.lineTo(chart.px(points[s].x), chart.py(points[s].pbY))
+            }
             ctx.stroke()
+            // Hovered session: guide line
+            if (chart.hovered >= 0 && chart.hovered < points.length) {
+                var hx = Math.round(chart.px(points[chart.hovered].x)) + 0.5
+                ctx.strokeStyle = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.35)
+                ctx.lineWidth = 1
+                ctx.beginPath()
+                ctx.moveTo(hx, chart.plotY)
+                ctx.lineTo(hx, y1)
+                ctx.stroke()
+            }
             // Session best laps
-            var muted = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.55)
+            var muted = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.5)
             for (var p = 0; p < points.length; p++) {
                 var point = points[p]
-                var radius = theme.em * (p === chart.hovered ? 0.4 : 0.26)
+                var hovered = p === chart.hovered
+                var radius = theme.em * (hovered ? 0.42 : point.newPb ? 0.3 : 0.24)
+                var cx = chart.px(point.x), cy = chart.py(point.y)
                 ctx.beginPath()
-                ctx.arc(chart.px(point.x), chart.py(point.y), radius, 0, Math.PI * 2)
+                ctx.arc(cx, cy, radius, 0, Math.PI * 2)
                 if (point.clipped) {
-                    ctx.lineWidth = 1
+                    ctx.lineWidth = 1.2
                     ctx.strokeStyle = muted
                     ctx.stroke()
+                } else if (point.newPb) {
+                    ctx.fillStyle = accent
+                    ctx.fill()
+                    ctx.lineWidth = Math.max(1.5, theme.em * 0.1)
+                    ctx.strokeStyle = theme.base
+                    ctx.stroke()
                 } else {
-                    ctx.fillStyle = point.newPb ? theme.accent : muted
+                    ctx.fillStyle = hovered ? theme.text : muted
                     ctx.fill()
                 }
             }
+            ctx.restore()
         }
     }
 
-    // Lap time labels: personal best (top) & slowest shown (bottom)
-    Text {
-        x: 0
-        width: chart.labelWidth - theme.em * 0.5
-        y: chart.plotY - height / 2
-        text: chart.chartData.top || ""
-        color: theme.dimText
-        horizontalAlignment: Text.AlignRight
-        font.pointSize: theme.fontPoint * 0.85
-        font.features: { "tnum": 1 }
+    // Lap time labels: grid lines, personal best (accent)
+    Repeater {
+        model: chart.chartData.ticks || []
+        Text {
+            required property var modelData
+            visible: Math.abs(chart.py(modelData.y) - chart.py(chart.chartData.pbY || 0)) > theme.em * 1.1
+            x: 0
+            width: chart.labelWidth - theme.em * 0.5
+            y: chart.py(modelData.y) - height / 2
+            text: modelData.text
+            color: theme.dimText
+            horizontalAlignment: Text.AlignRight
+            font.pointSize: theme.fontPoint * 0.8
+            font.features: { "tnum": 1 }
+        }
     }
     Text {
+        visible: chart.points.length >= 2
         x: 0
         width: chart.labelWidth - theme.em * 0.5
-        y: chart.plotY + chart.plotHeight - height / 2
-        text: chart.chartData.bottom || ""
-        color: theme.dimText
+        y: chart.py(chart.chartData.pbY || 0) - height / 2
+        text: chart.chartData.top || ""
+        color: theme.accent
         horizontalAlignment: Text.AlignRight
         font.pointSize: theme.fontPoint * 0.85
+        font.weight: Font.DemiBold
         font.features: { "tnum": 1 }
+    }
+    // Level of each limit line: letter at its right end
+    Repeater {
+        model: chart.chartData.limits || []
+        Rectangle {
+            required property var modelData
+            x: chart.plotX + chart.plotWidth + theme.em * 0.35
+            y: chart.py(modelData.y) - height / 2
+            width: theme.em * 1.05
+            height: width
+            radius: width / 2
+            color: modelData.color
+            ToolTip.visible: limitHover.hovered
+            ToolTip.text: modelData.name
+            ToolTip.delay: 400
+            HoverHandler { id: limitHover }
+            Text {
+                anchors.centerIn: parent
+                text: modelData.letter || ""
+                color: "white"
+                font.pointSize: theme.fontPoint * 0.62
+                font.weight: Font.Bold
+            }
+        }
     }
     // Date marks: first, middle & last session
     Repeater {
         model: chart.chartData.dates || []
         Text {
             required property var modelData
-            y: chart.plotY + chart.plotHeight + theme.em * 0.3
-            x: Math.max(chart.plotX, Math.min(chart.px(modelData.x) - width / 2, chart.width - width))
+            y: chart.plotY + chart.plotHeight + theme.em * 0.35
+            x: Math.max(chart.plotX, Math.min(chart.px(modelData.x) - width / 2, chart.plotX + chart.plotWidth - width))
             text: modelData.text
             color: theme.dimText
             font.pointSize: theme.fontPoint * 0.8
+            font.features: { "tnum": 1 }
         }
     }
 

@@ -280,6 +280,14 @@ def export_lmu_car_setup(source: dict, default: tuple) -> tuple[str, ...]:
 _rf2_setup_parts: dict = {}
 
 
+def reset_rf2_setup_parts() -> None:
+    """Drop partial setup data, called before Rest API tasks start (new session or car)
+
+    Otherwise parts left by an incomplete setup of previous car are mixed into next setup.
+    """
+    _rf2_setup_parts.clear()
+
+
 def export_rf2_car_setup(source: dict, default: tuple) -> tuple[str, ...]:
     """Export rf2 car setup"""
     _shared_data = _rf2_setup_parts

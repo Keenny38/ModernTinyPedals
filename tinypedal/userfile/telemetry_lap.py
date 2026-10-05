@@ -31,12 +31,14 @@ import gzip
 import io
 import json
 import logging
+import math
 import os
 import re
 import threading
 import time
+import zlib
 from array import array
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -58,6 +60,8 @@ SCORING_GAP = 1.0  # seconds, longer holds between scoring updates are not inter
 DISTANCE_SCALE_MIN = 0.01  # lap lengths differing less are the same (no distance scaling for delta)
 DISTANCE_SCALE_MAX = 0.10  # lap lengths differing more are not the same lap (lap cut short)
 EXACT_COLUMNS = ("time", "lap_time", "distance")  # double precision, others single (mm precision, half size)
+LAP_END_SECONDS = 1.0  # lap start & end added to lap time curve only if first / last sample this close in time
+LAP_END_METERS = 60.0  # and in distance (farther: lap cut short, not a late game update)
 EntryType = TypeVar("EntryType")
 Column = list | array  # lap column values: packed array once loaded (8 times less memory than a list)
 
@@ -217,7 +221,7 @@ def read_lap_info(path: str) -> dict:
     try:
         with open_lap_file(path) as file:
             return parse_info(file.readline())
-    except (OSError, EOFError, gzip.BadGzipFile, UnicodeDecodeError):
+    except (OSError, EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError):  # corrupt .gz: zlib.error
         return {}
 
 
@@ -245,7 +249,7 @@ def load_lap(path: str) -> LapData:
                 raise ValueError("not a TinyPedal telemetry file")
             width = len(header)
             rows = [row for row in reader if len(row) == width]
-    except (EOFError, gzip.BadGzipFile, UnicodeDecodeError, csv.Error) as error:
+    except (EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError, csv.Error) as error:
         raise ValueError(f"unreadable file: {error}") from error
     columns = dict(zip(header, parse_columns(rows, width)))
     if not columns["distance"]:
@@ -434,6 +438,81 @@ def monotonic_distance(lap: LapData, column: str = "lap_time") -> tuple[Sequence
     return [distances[index] for index in indexes if index < count], [values[index] for index in indexes if index < count]
 
 
+def official_lap_time(lap: LapData) -> float:
+    """Lap time timed by game: from lap file name, else sum of official sector times, 0 if unknown"""
+    match = _lap_time_name.search(lap.name)
+    if match:
+        return int(match.group(1)) * 60 + float(match.group(2))
+    return sum(official_sector_times(lap))
+
+
+def lap_length(lap: LapData) -> float:
+    """Track length recorded in lap info, 0 if unknown"""
+    length = lap.meta.get("track_length")
+    return float(length) if isinstance(length, (int, float)) and not isinstance(length, bool) and length > 0 else 0.0
+
+
+def lap_time_curve(lap: LapData) -> tuple[Sequence[float], Sequence[float]]:
+    """Distances & lap times (increasing distance) from line to line, empty if lap time not recorded
+
+    Game resets lap distance a bit after the line and updates it about 5 times per second (see lap_bounds &
+    smooth_distance): first sample comes up to 0.2 s after lap start, last one up to 20 m before lap end. Lap
+    start (0, 0) & lap end (track length, official lap time) are added when that close: delta at the line is the
+    lap time gap, mini-sectors add up to lap time. Samples beyond them (distance still before the line at lap
+    start, not updated yet past lap time at lap end) are left out.
+    """
+    if "lap_time" not in lap.columns or len(lap) < 2:
+        return [], []
+    distances, times = monotonic_distance(lap)
+    count = len(distances)
+    if count < 2:
+        return distances, times
+    first = 0
+    while first < count - 2 and distances[first] <= 0 and times[first] <= LAP_END_SECONDS:
+        first += 1
+    start = 0 < distances[first] <= LAP_END_METERS and 0 < times[first] <= LAP_END_SECONDS
+    if not start:
+        first = 0
+    end_distance, end_time = lap_length(lap), official_lap_time(lap)
+    last = count
+    if end_distance > 0 and end_time > 0:
+        while (last - 2 > first and times[last - 1] >= end_time
+               and 0 < end_distance - distances[last - 1] <= LAP_END_METERS):
+            last -= 1
+    end = 0 < end_distance - distances[last - 1] <= LAP_END_METERS and 0 < end_time - times[last - 1] <= LAP_END_SECONDS
+    if not end:
+        last = count
+    if not start and not end:
+        return distances, times
+    return (_padded(distances[first:last], 0.0 if start else None, end_distance if end else None),
+            _padded(times[first:last], 0.0 if start else None, end_time if end else None))
+
+
+def _padded(values: Sequence[float], first: float | None, last: float | None) -> Sequence[float]:
+    """Values with a value added before and after (None: not added), packed array kept packed"""
+    head = [first] if first is not None else []
+    tail = [last] if last is not None else []
+    if isinstance(values, array):
+        return array(values.typecode, head) + values + array(values.typecode, tail)
+    return [*head, *values, *tail]
+
+
+def same_circuit(reference: LapData, lap: LapData) -> bool:
+    """Whether lap was driven on the circuit of reference lap: same game track name & length when recorded
+
+    Track names are compared only between laps recorded by the app (game names, not MoTeC venue names).
+    An imported log measures driven distance: its length may be up to 10% off (see distance_scale).
+    """
+    recorded = "combo" in reference.meta and "combo" in lap.meta
+    names = str(reference.meta.get("track", "")), str(lap.meta.get("track", ""))
+    if recorded and all(names) and names[0] != names[1]:
+        return False
+    lengths = lap_length(reference), lap_length(lap)
+    if all(lengths):
+        return abs(lengths[0] / lengths[1] - 1) <= (DISTANCE_SCALE_MIN if recorded else DISTANCE_SCALE_MAX)
+    return True
+
+
 def distance_scale(reference: LapData, compare: LapData) -> float:
     """Factor bringing compared lap distances to reference lap length, 1 if lengths match
 
@@ -451,19 +530,20 @@ def distance_scale(reference: LapData, compare: LapData) -> float:
 
 
 def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, float]]:
-    """Time delta (compare - reference) along distance, positive = compare slower
+    """Time delta (compare - reference) along distance, positive = compare slower, empty if a lap has no lap time
 
-    Compared lap distances scaled to reference lap length if they differ (see distance_scale).
+    Compared lap distances scaled to reference lap length if they differ (see distance_scale). Both laps from
+    line to line (see lap_time_curve): delta at lap end is the lap time gap.
     """
-    ref_dist, ref_time = monotonic_distance(reference)
+    ref_dist, ref_time = lap_time_curve(reference)
     return delta_to_curve(ref_dist, ref_time, compare, distance_scale(reference, compare))
 
 
 def delta_to_curve(ref_dist: Sequence[float], ref_time: Sequence[float], compare: LapData,
                    scale: float = 1.0) -> list[tuple[float, float]]:
     """Time delta of compared lap against a lap time curve (reference distances & times, ideal lap...),
-    compared lap distances multiplied by scale (reference lap length)"""
-    cmp_dist, cmp_time = monotonic_distance(compare)
+    compared lap distances multiplied by scale (reference lap length), one point per lap_time_curve point"""
+    cmp_dist, cmp_time = lap_time_curve(compare)
     if len(ref_dist) < 2 or not cmp_dist:
         return []
     if scale != 1.0:
@@ -503,7 +583,7 @@ def sector_bounds(lap: LapData) -> list[float]:
     """
     official = official_sector_times(lap)
     if official and "lap_time" in lap.columns and len(lap) >= 2:
-        distances, times = monotonic_distance(lap)
+        distances, times = lap_time_curve(lap)
         if len(times) >= 2:
             return [interpolate(times, distances, official[0]), interpolate(times, distances, official[0] + official[1])]
     sectors = lap.columns.get("sector")
@@ -519,16 +599,16 @@ def sector_bounds(lap: LapData) -> list[float]:
 
 
 def sector_times(lap: LapData) -> list[float]:
-    """Sector 1, 2, 3 times, official times from lap info if recorded, else from samples"""
+    """Sector 1, 2, 3 times, official times from lap info if recorded, else from samples (empty without lap time)"""
     official = official_sector_times(lap)
     if official:
         return official
     bounds = sector_bounds(lap)
-    if not bounds or len(lap) < 2:
+    distances, times = lap_time_curve(lap)
+    if not bounds or len(distances) < 2:
         return []
-    distances, times = monotonic_distance(lap)
     t1, t2 = (interpolate(distances, times, bound) for bound in bounds)
-    total = lap.lap_time
+    total = official_lap_time(lap) or lap.lap_time
     result = [t1, t2 - t1, total - t2]
     return result if all(value > 0 for value in result) else []
 
@@ -590,6 +670,35 @@ def csv_number(value: float, decimal: str = ".") -> str:
     if text in ("-0", ""):
         text = "0"
     return text.replace(".", decimal) if decimal != "." else text
+
+
+def resampled_columns(grid: Sequence[float], series: Sequence[tuple[Sequence[float], Sequence[float]]],
+                      ) -> list[list[float | None]]:
+    """Each series (distances & values by increasing distance) at grid distances, None outside series"""
+    from .corner_analysis import resample_sorted
+
+    columns: list[list[float | None]] = []
+    for xs, ys in series:
+        if len(xs) < 2:
+            columns.append([None] * len(grid))
+            continue
+        low, high = bisect_left(grid, xs[0]), bisect_right(grid, xs[-1])
+        inside: list[float | None] = list(resample_sorted(xs, ys, grid[low:high]))  # one pass, no search per point
+        columns.append([None] * low + inside + [None] * (len(grid) - high))
+    return columns
+
+
+def export_series_csv(filename: str, header: list[str], start: float, end: float,
+                      series: Sequence[tuple[Sequence[float], Sequence[float]]], decimal: str = ".",
+                      step: float = 1.0) -> str:
+    """Series resampled every step (meter, or seconds on time base) from start to end & written to CSV (worker
+    process job: page thread does no resampling), returns error text ("" if written)"""
+    if step == 1.0:
+        grid = [float(meter) for meter in range(max(math.ceil(start), 0), int(end) + 1)]
+    else:
+        first = max(math.ceil(start / step - 1e-9), 0)
+        grid = [round(index * step, 6) for index in range(first, int(end / step + 1e-9) + 1)]
+    return write_lap_csv(filename, header, grid, resampled_columns(grid, series), decimal)
 
 
 def write_lap_csv(filename: str, header: list[str], grid: list[float], columns: list[list[float | None]],

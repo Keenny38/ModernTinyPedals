@@ -31,7 +31,7 @@ from PySide6.QtCore import QMimeData
 
 from .. import app_signal
 from ..const_file import FileExt
-from ..i18n import trm
+from ..i18n import tr, trm
 from ..setting import cfg
 from ..validator import is_allowed_filename
 
@@ -128,7 +128,7 @@ def handle_drop(window, paths: list[str]) -> list[str]:
             try:
                 filename = import_preset_file(path, cfg.path.settings)
             except (OSError, ValueError) as error:
-                messages.append(trm(f"Unable to import <b>{name}</b>: {error}"))
+                messages.append(trm(f"Unable to import <b>{name}</b>: {tr(str(error))}"))
                 continue
             messages.append(trm(f"Preset imported: <b>{filename[:-5]}</b>"))
             window.centralWidget().set_current_index(PAGE_INDEX["preset"])
@@ -141,12 +141,16 @@ def handle_drop(window, paths: list[str]) -> list[str]:
 
             messages.append(import_motec_log(window, path))
         elif kind == DROP_PLUGIN:
+            from ._common import BaseDialog
             from .plugin_manager import PluginManager
 
             manager = PluginManager(window)
             manager.show()
-            if hasattr(manager, "install_file"):  # not already opened
-                manager.install_file(path)
+            # Already open as page: installed from that page (new copy is deleted)
+            shown = manager.shown_dialog() if isinstance(manager, BaseDialog) else manager
+            install_file = getattr(shown, "install_file", None)
+            if callable(install_file):  # not opened as separate window already
+                install_file(path)
         else:
             messages.append(trm(f"Unsupported file: <b>{name}</b>"))
     return messages

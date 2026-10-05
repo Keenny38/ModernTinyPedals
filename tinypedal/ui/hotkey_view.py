@@ -126,7 +126,10 @@ class HotkeyList(QWidget):
 
     def set_enable_state(self, enabled: bool):
         """Set enable state"""
+        # Shown state only: toggle signal saves setting & reloads hotkeys (user click)
+        blocked = self.button_toggle.blockSignals(True)
         self.button_toggle.setChecked(enabled)
+        self.button_toggle.blockSignals(blocked)
         self.button_toggle.setText(tr("Enabled") if enabled else tr("Disabled"))
         self.button_reset.setDisabled(not enabled)
         self.listbox_hotkey.setDisabled(not enabled)
@@ -141,7 +144,7 @@ class HotkeyList(QWidget):
     def add_hotkey_category(self, name: str):
         """Add hotkey category header"""
         item = QListWidgetItem()
-        label = QLabel(trm(f"{name} Keybinding"), self.listbox_hotkey)
+        label = QLabel(trm(f"{tr(name)} Keybinding"), self.listbox_hotkey)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.listbox_hotkey.addItem(item)
         self.listbox_hotkey.setItemWidget(item, label)
@@ -222,8 +225,7 @@ class HotkeyConfigItem(QWidget):
         self.setLayout(layout_item)
 
     def open_config_dialog(self):
-        """Config dialog"""
-        kctrl.disable()  # disable before config
+        """Config dialog (hotkeys disabled while it shows, see ConfigHotkey.showEvent)"""
         self.button_config.setChecked(False)
         _dialog = ConfigHotkey(
             self._parent,
@@ -238,7 +240,7 @@ class HotkeyConfigItem(QWidget):
         if cfg.application["enable_global_hotkey"]:
             kctrl.enable()  # re-enable after config
         self.hotkey_name = cfg.user.shortcuts[self.option_name]["bind"]
-        display_name = format_hotkey_name(self.hotkey_name, "None")
+        display_name = format_hotkey_name(self.hotkey_name, tr("None"))
         self.button_config.setText(f" {display_name} " if len(display_name) < 2 else display_name)
         self.button_config.setChecked(self.hotkey_name != "")
 
@@ -302,11 +304,11 @@ class ConfigHotkey(BaseDialog):
         refresh_keystate(self.get_key_state)
 
         if PLATFORM.WINDOWS:
-            self.text_placeholder = "Press a key or key combination"
+            self.text_placeholder = tr("Press a key or key combination")
             self.update_text(format_hotkey_name(hotkey_name, self.text_placeholder, delimiter=" + "))
             self._update_timer.start(200, self)
         else:
-            self.text_placeholder = "Hotkey not supported on Linux"
+            self.text_placeholder = tr("Hotkey not supported on Linux")
             self.update_text(self.text_placeholder)
 
     def timerEvent(self, event):
@@ -381,6 +383,16 @@ class ConfigHotkey(BaseDialog):
     def reject(self):
         """Reject(ESC)"""
         self.close()
+
+    def showEvent(self, event):
+        """Global hotkeys off while capturing a key (pressed keys would run their commands)"""
+        super().showEvent(event)
+        kctrl.disable()
+
+    def hideEvent(self, event):
+        """Global hotkeys back on as soon as key capture stops showing (page left open behind)"""
+        super().hideEvent(event)
+        kctrl.enable()  # only if enabled in setting
 
     def closeEvent(self, event):
         """Close dialog"""

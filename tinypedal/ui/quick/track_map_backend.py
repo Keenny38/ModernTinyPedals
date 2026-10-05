@@ -39,6 +39,7 @@ from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
+from ..lap_viewer import distance_unit
 from ..track_map_geometry import config_grades, curve_at, curve_description, node_at
 from .lines import VertexStore, area, band, circle, colored_band, line_strip, merge_strips, segments
 
@@ -120,6 +121,16 @@ class TrackMapBackend(QObject):
     @Property(int, notify=mapChanged)
     def nodes(self) -> int:
         return len(self.raw_coords)
+
+    @Property(str, notify=mapChanged)
+    def distanceUnit(self) -> str:
+        """User distance unit symbol: m or ft"""
+        return distance_unit()[1]
+
+    @Property(float, notify=mapChanged)
+    def distanceScale(self) -> float:
+        """User distance unit per meter"""
+        return distance_unit()[0]
 
     @Property(dict, notify=mapChanged)
     def view(self) -> dict:

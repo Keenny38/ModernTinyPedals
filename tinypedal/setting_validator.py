@@ -31,7 +31,7 @@ from . import version
 from .const_common import VERSION_NA
 from .hotkey.common import validate_hotkey
 from .setting_preupdate import preupdate_global_setting, preupdate_user_setting
-from .validator import is_clock_format, is_hex_color
+from .validator import is_clock_format, is_finite_number, is_hex_color
 from .version_check import parse_version_string
 
 
@@ -209,8 +209,8 @@ class ValueValidator:
 
     @staticmethod
     def numeric(key: str, dict_user: dict) -> bool:
-        """Value - numeric"""
-        if not isinstance(dict_user[key], (float, int)) or isinstance(dict_user[key], bool):
+        """Value - numeric (finite: JSON NaN & Infinity not allowed)"""
+        if not is_finite_number(dict_user[key]):
             dict_user.pop(key)
         return True
 
@@ -306,10 +306,15 @@ class PresetValidator:
 
     @classmethod
     def _validate(cls, dict_user: dict, dict_def: dict) -> dict:
-        """Validate setting"""
+        """Validate setting, invalid section (not a dict) reset to default (rest of preset kept)"""
         # Check top-level key
         cls.validate_key_pair(dict_user, dict_def)
         # Check sub-level key
         for item in dict_user:
+            if not isinstance(dict_def[item], dict):
+                continue
+            if not isinstance(dict_user[item], dict):
+                dict_user[item] = dict_def[item].copy()
+                continue
             cls.validate_key_pair(dict_user[item], dict_def[item])
         return dict_user

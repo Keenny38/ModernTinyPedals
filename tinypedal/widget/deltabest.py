@@ -26,6 +26,7 @@ from PySide6.QtGui import QPainter, QPen
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import game_deltabest
 from ._painter import fill_rect
 
 
@@ -107,6 +108,8 @@ class Realtime(Overlay):
                 self.new_lap = False
 
             temp_best = getattr(minfo.delta, self.delta_source)
+            if self.wcfg["show_game_deltabest_if_available"]:
+                temp_best = game_deltabest(temp_best)
 
         if self.delta_best != temp_best:
             self.delta_best = temp_best

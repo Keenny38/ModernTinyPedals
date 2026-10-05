@@ -26,7 +26,6 @@ import logging
 import threading
 from collections.abc import Callable, Iterable
 from itertools import chain
-from time import sleep
 
 from . import app_signal
 from .hotkey.command import (
@@ -42,7 +41,7 @@ from .hotkey.common import (
     sort_key_codes,
 )
 from .setting import cfg
-from .thread_guard import run_supervised
+from .thread_guard import run_supervised, wait_stopped
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +80,9 @@ class HotkeyControl:
             logger.info("ENABLED: hotkey control")
 
     def disable(self):
-        """Disable hotkey control"""
+        """Disable hotkey control, wait (bounded) until stopped"""
         self._event.set()
-        while not self._stopped:
-            sleep(0.01)
+        wait_stopped(lambda: self._stopped, "hotkey control")
 
     def reload(self):
         """Reload"""
@@ -106,14 +104,18 @@ class HotkeyControl:
 
         get_key_state = get_key_state_function()
         refresh_keystate(get_key_state)
+        last_key_codes: tuple[int, ...] = ()
 
         while not _event_wait(0.2):
             # Close & disable if no commands
             if not available_commands:
                 break
-            # Run command
+            # Run command once per key press: a key of combo not held at last check (key held down
+            # or other key of a longer combo released does not repeat command)
             detected_key_codes = tuple(_key for _key in available_key_codes if get_key_state(_key))
-            if detected_key_codes in available_commands:
+            pressed = not set(detected_key_codes).issubset(last_key_codes)
+            last_key_codes = detected_key_codes
+            if pressed and detected_key_codes in available_commands:
                 hotkey_group = available_commands[detected_key_codes]
                 # Run command in main thread
                 for hotkey_name, hotkey_func in hotkey_group:

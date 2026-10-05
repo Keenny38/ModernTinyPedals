@@ -21,9 +21,10 @@ What's new: release notes of an available update
 
 Notes are the Markdown body of the GitHub release (tools/gen_release_notes.py): changelog
 section of the version (themes with bullets) first, then "## Commits" (commits by kind) and
-SHA256 checksums. Shown as a header (version, date, installed version), one card per theme,
-and technical details (commits, checksums) folded below. Also asks to install a new version
-(prompt mode).
+SHA256 checksums. The changelog part is shown in the app language when translated
+(CHANGELOG.<code>.md, see update.localize_release_notes). Shown as a header (version, date,
+installed version), one card per theme, and technical details (commits, checksums) folded
+below. Also asks to install a new version (prompt mode).
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -46,13 +48,19 @@ from PySide6.QtWidgets import (
 
 from ..const_app import VERSION
 from ..i18n import current_language, tr
-from ..update import release_url
+from ..update import RELEASE_DETAILS_HEADING, release_url
 from ..version import __version__ as app_version
 from ..version_check import parse_version_string
-from ._common import BaseDialog, UIScaler
+from ._common import BaseDialog, FocusRingButton, UIScaler
+from .notification import download_progress_text
 
-DETAILS_HEADING = "## Commits"  # technical part of notes starts here
+DETAILS_HEADING = RELEASE_DETAILS_HEADING  # technical part of notes starts here
 COMMIT_KINDS = ("Added", "Fixed", "Changed")  # see tools/gen_release_notes.py
+# Portable ZIP is no longer published: installer installed into the portable folder keeps its data
+PORTABLE_UPDATE_NOTE = (
+    "Portable copy (ZIP): download the setup ZIP from the releases page and install it into the folder of this copy, "
+    "your presets and data are kept. Next updates then install from the app."
+)
 _bold = re.compile(r"\*\*(.+?)\*\*")
 _code = re.compile(r"`([^`]+)`")
 _link = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
@@ -149,16 +157,29 @@ class NotesCard(QFrame):
 
 
 class ReleaseNotesDialog(BaseDialog):
-    """What's new of an available update, optionally asking to install it"""
+    """What's new of an available update, optionally asking to install it
+
+    Install of installed Windows app: download progress shown with Cancel (page kept open),
+    installer then runs (see UpdateInstaller). Skip This Version hides the update notice.
+    """
 
     install_requested = Signal()
+    skip_requested = Signal()
 
     def __init__(self, parent, notes: str, version: tuple[int, int, int], date: tuple[int, int, int],
-                 can_install: bool = False, prompt: bool = False, download_url: str = ""):
+                 can_install: bool = False, prompt: bool = False, download_url: str = "", portable: bool = False,
+                 installer=None, can_skip: bool = False):
+        """
+        Args:
+            installer: UpdateInstaller (download state & progress), shown while downloading.
+            can_skip: update notice of this version can be skipped.
+        """
         super().__init__(parent)
         self.prompt = prompt
         self.can_install = can_install  # installed Windows app: downloads & runs installer
         self.download_url = download_url  # else: download opened in browser (installer, or release page)
+        self.portable = portable  # portable ZIP copy: updated by hand from release page
+        self.installer = installer if can_install and not portable else None
         self.set_utility_title(tr("Update Available") if prompt else tr("Release Notes"))  # page title
         self.themes, self.details = split_notes(notes)
 
@@ -220,19 +241,45 @@ class ReleaseNotesDialog(BaseDialog):
         # Actions
         button_github = QPushButton(tr("View On GitHub"))
         button_github.clicked.connect(lambda: QDesktopServices.openUrl(release_url()))
+        self.button_skip = FocusRingButton(tr("Skip This Version"))
+        self.button_skip.setToolTip(tr("Not shown again for this version, shown again for a newer one"))
+        self.button_skip.clicked.connect(self.request_skip)
+        self.button_skip.setVisible(can_skip and newer)
         self.button_close = QPushButton(tr("Later") if prompt else tr("Close"))
         self.button_close.clicked.connect(self.close)
         self.button_install = QPushButton(tr("Install Now") if prompt else tr("Download And Install"))
         self.button_install.setObjectName("notesPrimary")
         self.button_install.clicked.connect(self.request_install)
         self.button_install.setDefault(True)
-        if not can_install:
-            self.button_install.setToolTip(tr("Opens the download in your browser, run it to install"))
+        if portable:
+            self.button_install.setText(tr("Open Releases Page"))
+            self.button_install.setToolTip(tr(PORTABLE_UPDATE_NOTE))
+        elif not can_install:
+            self.button_install.setToolTip(tr("Opens the download in your browser, extract the ZIP and run the installer"))
         layout_buttons = QHBoxLayout()
         layout_buttons.addWidget(button_github)
+        layout_buttons.addWidget(self.button_skip)
         layout_buttons.addStretch(1)
         layout_buttons.addWidget(self.button_close)
         layout_buttons.addWidget(self.button_install)
+
+        # Download progress (installed app), with cancel
+        self.download_box = QWidget(self)
+        self.progress_bar = QProgressBar(self.download_box)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setAccessibleName(tr("Download progress"))
+        self.label_progress = QLabel(self.download_box)
+        self.button_cancel = FocusRingButton(tr("Cancel Download"), self.download_box)
+        self.button_cancel.clicked.connect(self.cancel_download)
+        layout_download = QHBoxLayout(self.download_box)
+        layout_download.setContentsMargins(0, 0, 0, 0)
+        layout_download.addWidget(self.label_progress)
+        layout_download.addWidget(self.progress_bar, stretch=1)
+        layout_download.addWidget(self.button_cancel)
+        self.download_box.setHidden(True)
+        if self.installer is not None:
+            self.installer.busy_changed.connect(self.download_state)
+            self.installer.progress.connect(self.download_progress)
 
         # Header & actions stay, notes fill the rest of the window (scrolled when longer)
         layout_main = QVBoxLayout(self)
@@ -243,8 +290,15 @@ class ReleaseNotesDialog(BaseDialog):
         layout_main.addWidget(self.label_detail)
         layout_main.addSpacing(UIScaler.pixel(4))
         layout_main.addWidget(scroll, stretch=1)
+        if portable:  # installer would install another copy elsewhere, without presets & data
+            note = QLabel(tr(PORTABLE_UPDATE_NOTE))
+            note.setWordWrap(True)
+            layout_main.addWidget(note)
+        layout_main.addWidget(self.download_box)
         layout_main.addLayout(layout_buttons)
         self.resize(UIScaler.size(42), UIScaler.size(40))
+        if self.installer is not None and self.installer.busy:  # page opened while downloading
+            self.download_state(True)
 
     def showEvent(self, event):
         """Shown as page: page has its own Close button (Later kept when asking to install)"""
@@ -259,9 +313,50 @@ class ReleaseNotesDialog(BaseDialog):
         self.button_details.setText(f"{label} ({tr('commits, SHA256')})")
 
     def request_install(self):
-        """Installed Windows app: install asked (downloaded & run by caller), else download opened in browser"""
-        if self.can_install:
+        """Installed Windows app: install asked (downloaded & run by caller), else download opened in browser
+
+        Portable copy: release page opened (new ZIP), never the installer. Page stays open
+        while downloading (progress & cancel), when installer progress is known.
+        """
+        if self.can_install and not self.portable:
             self.install_requested.emit()
+            if self.installer is not None:  # also when notify button was rebuilt (language change)
+                self.installer.download(auto_install=True)
+                return
+        elif self.portable:
+            QDesktopServices.openUrl(QUrl(release_url()))
         else:
             QDesktopServices.openUrl(QUrl(self.download_url or release_url()))
         self.close()
+
+    def request_skip(self):
+        """Skip this version: update notice hidden (until a newer version), page closed"""
+        self.skip_requested.emit()
+        self.close()
+
+    def download_state(self, busy: bool):
+        """Downloading: progress & cancel shown, install & skip disabled"""
+        self.download_box.setVisible(busy)
+        self.button_install.setEnabled(not busy)
+        self.button_skip.setEnabled(not busy)
+        self.button_cancel.setEnabled(busy)
+        if busy and self.installer is not None:
+            self.download_progress(self.installer.received, self.installer.total)
+            self.button_cancel.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def download_progress(self, received: int, total: int):
+        """Percent & size downloaded (busy bar while size is unknown)"""
+        if total > 0:
+            self.progress_bar.setRange(0, 1000)
+            self.progress_bar.setValue(min(round(received * 1000 / total), 1000))
+        else:
+            self.progress_bar.setRange(0, 0)
+        text = download_progress_text(received, total) if received else ""
+        self.label_progress.setText(f"{tr('Downloading Update...')} {text}".strip())
+        self.progress_bar.setAccessibleDescription(text)
+
+    def cancel_download(self):
+        """Stop download, partial file removed"""
+        if self.installer is not None:
+            self.button_cancel.setEnabled(False)
+            self.installer.cancel()

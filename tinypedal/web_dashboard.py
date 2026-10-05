@@ -27,8 +27,14 @@ Web dashboard: show live telemetry on phone or tablet (browser), disabled by def
 Listens on 127.0.0.1 only, unless LAN access is enabled. Access code is always required,
 and repeated wrong codes from same address are blocked for a while.
 Access code is exchanged for a random session cookie, so it is not kept in page address or scripts.
+Session expires when unused for a while, and after a few days anyway.
 HTTPS (self-signed certificate, see userfile.tls_cert) can be enabled, otherwise traffic is plain HTTP,
 so only enable LAN access on a trusted network.
+
+Page in app language (built at each request), values in units of the user (speed, temperature,
+fuel), virtual energy instead of fuel for a car using it (as fuel widgets). Telemetry fields of
+before keep their units (km/h, Celsius, liters: also sent by command server stream), values shown
+are in "display".
 """
 
 from __future__ import annotations
@@ -40,12 +46,15 @@ import secrets
 import socket
 import threading
 import time
+from html import escape
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import app_signal
+from . import app_signal, units
+from .const_api import API_LMU_NAME
 from .const_file import ConfigType
+from .i18n import current_language, tr
 from .setting import cfg
 from .userfile.tls_cert import server_context
 
@@ -55,6 +64,8 @@ MAX_FAILURES = 10
 LOCKOUT_SECONDS = 60
 FAILURE_WINDOW_SECONDS = 600  # failure count is forgotten after this time
 MAX_SESSIONS = 32
+SESSION_IDLE_SECONDS = 12 * 3600  # session expires when unused (no dashboard open) for this time
+SESSION_MAX_SECONDS = 7 * 24 * 3600  # session expires after this time anyway
 MAX_FORM_SIZE = 1024
 SESSION_COOKIE = "tp_session"
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O, 1/I
@@ -99,6 +110,57 @@ def _quad(func) -> list[float]:
         return [0.0] * 4
 
 
+def unit_names() -> dict[str, str]:
+    """Units setting of user (defaults if not loaded yet)"""
+    try:
+        setting = cfg.units
+    except (AttributeError, KeyError, TypeError):
+        setting = {}
+    return {
+        "speed": str(setting.get("speed_unit", "KPH")),
+        "temperature": str(setting.get("temperature_unit", "Celsius")),
+        "fuel": str(setting.get("fuel_unit", "Liter")),
+    }
+
+
+def display_values(speed: float, tyre_temp: list[float], brake_temp: list[float], track_temp: float) -> dict:
+    """Values shown on dashboard in units of the user (speed in m/s, temperatures in Celsius),
+    virtual energy (%) instead of fuel for a car using it, as fuel widgets"""
+    from .module_info import minfo
+
+    names = unit_names()
+    to_speed = units.set_unit_speed(names["speed"])
+    to_temperature = units.set_unit_temperature(names["temperature"])
+    energy = bool(minfo.energy.available)
+    if energy:
+        to_fuel, fuel_unit, source = units.pass_value, "%", minfo.energy
+    else:
+        to_fuel = units.set_unit_fuel(names["fuel"])
+        fuel_unit, source = units.set_symbol_fuel(names["fuel"]), minfo.fuel
+    return {
+        "speed": round(to_speed(speed), 1),
+        "speed_unit": units.set_symbol_speed(names["speed"]),
+        "temperature_unit": units.set_symbol_temperature(names["temperature"]),
+        "tyre_temp": [round(to_temperature(value), 1) for value in tyre_temp],
+        "brake_temp": [round(to_temperature(value), 1) for value in brake_temp],
+        "track_temp": round(to_temperature(track_temp), 1),
+        "energy": energy,
+        "fuel": round(to_fuel(source.amountCurrent), 2),
+        "fuel_unit": fuel_unit,
+        "fuel_laps": round(source.estimatedLaps, 1),
+        "fuel_per_lap": round(to_fuel(source.estimatedConsumption), 3),
+    }
+
+
+def official_delta(read) -> float | None:
+    """Delta to best lap computed by game (LMU), None when not available"""
+    from .api_control import api
+
+    if not _safe(lambda: api.name == API_LMU_NAME, False):
+        return None
+    return round(_safe(read.timing.delta_best), 3)
+
+
 def telemetry_snapshot() -> dict:
     """Current telemetry for dashboard"""
     from .api_control import api
@@ -109,9 +171,13 @@ def telemetry_snapshot() -> dict:
         return {"active": False}
     fuel = minfo.fuel
     delta = minfo.delta
+    speed = _safe(read.vehicle.speed)
+    tyre_temp = _quad(read.tyre.surface_temperature_avg)
+    brake_temp = _quad(read.brake.temperature)
+    track_temp = round(_safe(read.session.track_temperature), 1)
     return {
         "active": bool(_safe(read.state.active, False)),
-        "speed": round(_safe(read.vehicle.speed) * 3.6, 1),
+        "speed": round(speed * 3.6, 1),
         "gear": _safe(read.engine.gear, 0),
         "rpm": round(_safe(read.engine.rpm)),
         "rpm_max": round(_safe(read.engine.rpm_max)),
@@ -127,11 +193,14 @@ def telemetry_snapshot() -> dict:
         "fuel": round(fuel.amountCurrent, 2),
         "fuel_laps": round(fuel.estimatedLaps, 1),
         "fuel_per_lap": round(fuel.estimatedConsumption, 3),
-        "tyre_temp": _quad(read.tyre.surface_temperature_avg),
-        "brake_temp": _quad(read.brake.temperature),
-        "track_temp": round(_safe(read.session.track_temperature), 1),
+        "tyre_temp": tyre_temp,
+        "brake_temp": brake_temp,
+        "track_temp": track_temp,
         "time_remaining": round(_safe(read.session.remaining)),
         "track": _safe(read.session.track_name, ""),
+        "delta_official": official_delta(read),
+        "lap_invalid": bool(_safe(read.lap.invalidated, False)),
+        "display": display_values(speed, tyre_temp, brake_temp, track_temp),
     }
 
 
@@ -141,7 +210,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "TinyPedal"
     access_code = ""
     failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
-    sessions: dict[str, float] = {}  # session token: created time
+    sessions: dict[str, list[float]] = {}  # session token: [created time, last used time]
     lock = threading.Lock()
     secure = False  # HTTPS: TLS handshake in handler thread, secure cookie
 
@@ -169,9 +238,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self.send_redirect_with_session()
                 return
             if self.has_session():
-                self.send_body(200, DASHBOARD_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                self.send_body(200, dashboard_html().encode("utf-8"), "text/html; charset=utf-8")
             else:
-                self.send_body(401, LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                self.send_body(401, login_html().encode("utf-8"), "text/html; charset=utf-8")
             return
         self.send_body(404, b"not found", "text/plain")
 
@@ -180,7 +249,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/login":
             self.send_body(404, b"not found", "text/plain")
             return
-        length = min(int(self.headers.get("Content-Length") or 0), MAX_FORM_SIZE)
+        try:  # never read more than form size (negative length reads until connection closed)
+            length = max(min(int(self.headers.get("Content-Length") or 0), MAX_FORM_SIZE), 0)
+        except ValueError:
+            self.send_body(400, b"invalid request", "text/plain")
+            return
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         if self.authorized(form.get("code", [""])[0].strip(), html=True):
             self.send_redirect_with_session()
@@ -195,17 +268,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
         morsel = cookie.get(SESSION_COOKIE)
         if morsel is None:
             return False
+        now = time.monotonic()
         with self.lock:
-            return any(hmac.compare_digest(morsel.value, token) for token in self.sessions)
+            self.purge_sessions(now)
+            for token, times in self.sessions.items():
+                if hmac.compare_digest(morsel.value, token):
+                    times[1] = now  # last used
+                    return True
+        return False
 
     def new_session(self) -> str:
-        """Create session token, oldest session is dropped if limit reached"""
+        """Create session token, least recently used session is dropped if limit reached"""
         token = secrets.token_urlsafe(32)
+        now = time.monotonic()
         with self.lock:
+            self.purge_sessions(now)
             if len(self.sessions) >= MAX_SESSIONS:
-                del self.sessions[min(self.sessions, key=self.sessions.__getitem__)]
-            self.sessions[token] = time.monotonic()
+                del self.sessions[min(self.sessions, key=lambda name: self.sessions[name][1])]
+            self.sessions[token] = [now, now]
         return token
+
+    @classmethod
+    def purge_sessions(cls, now: float):
+        """Forget expired sessions: unused for a while, or too old"""
+        expired = [
+            token for token, (created, last_used) in cls.sessions.items()
+            if now - last_used > SESSION_IDLE_SECONDS or now - created > SESSION_MAX_SECONDS
+        ]
+        for token in expired:
+            del cls.sessions[token]
 
     def authorized(self, code: str, html: bool = False) -> bool:
         """Check session cookie or access code, block address after repeated failures"""
@@ -232,7 +323,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def send_unauthorized(self, html: bool):
         if html:
-            self.send_body(401, LOGIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            self.send_body(401, login_html().encode("utf-8"), "text/html; charset=utf-8")
         else:
             self.send_body(401, b'{"error": "invalid access code"}', "application/json")
 
@@ -251,7 +342,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(303)
         self.send_header("Location", "/")
         secure = "; Secure" if self.secure else ""
-        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict{secure}")
+        self.send_header(
+            "Set-Cookie",
+            f"{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_MAX_SECONDS}; HttpOnly; SameSite=Strict{secure}",
+        )
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -370,17 +464,74 @@ class WebDashboard:
 
 webdashboard = WebDashboard()
 
-LOGIN_HTML = """<!doctype html><html><head><meta charset="utf-8">
+# Page text (English, translated in app language when page is served): "@@key@@" in page
+LOGIN_LABELS = {
+    "access_code": "Access code",
+}
+PAGE_LABELS = {
+    "title": "Modern Tiny Pedals Dashboard",
+    "connecting": "Connecting…",
+    "gear_speed": "Gear · Speed",
+    "delta": "Delta best",
+    "official": "Official delta",
+    "position": "Position",
+    "lap_current": "Current lap",
+    "invalid": "Invalid lap",
+    "lap_last": "Last lap",
+    "lap_best": "Best Lap",
+    "fuel": "Fuel · laps left",
+    "pedals": "Throttle · Brake",
+    "tyre": "Tyre",
+    "brake": "Brake",
+    "remain": "Time left",
+}
+# Text set by page script ("@@texts@@" in page, JSON)
+SCRIPT_TEXTS = {
+    "expired": "Session expired",
+    "waiting": "Waiting for session…",
+    "on_track": "On Track",
+    "lost": "Connection lost, retrying…",
+    "laps": "laps",
+    "fuel": "Fuel · laps left",
+    "energy": "Energy · laps left",
+}
+
+
+def page_language() -> str:
+    """Language of page (html lang attribute): app language"""
+    return current_language().replace("_", "-")
+
+
+def fill_page(template: str, labels: dict[str, str], texts: dict[str, str] | None = None) -> str:
+    """Page in app language: labels escaped for html, script text as JSON (never closing script)"""
+    page = template.replace("@@lang@@", escape(page_language()))
+    for key, text in labels.items():
+        page = page.replace(f"@@{key}@@", escape(tr(text)))
+    if texts is not None:
+        data = json.dumps({key: tr(text) for key, text in texts.items()}, ensure_ascii=False)
+        page = page.replace("@@texts@@", data.replace("<", "\\u003c"))
+    return page
+
+
+def login_html() -> str:
+    return fill_page(LOGIN_HTML, LOGIN_LABELS)
+
+
+def dashboard_html() -> str:
+    return fill_page(DASHBOARD_HTML, PAGE_LABELS, SCRIPT_TEXTS)
+
+
+LOGIN_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Modern Tiny Pedals</title>
 <style>body{background:#0e1116;color:#e9ecf1;font-family:system-ui,sans-serif;display:flex;
 align-items:center;justify-content:center;height:100vh;margin:0}form{display:flex;gap:8px}
 input,button{font-size:20px;padding:10px;border-radius:8px;border:1px solid #373e4c;background:#1b1f27;color:#e9ecf1}
-</style></head><body><form method="post" action="/login"><input name="code" placeholder="Access code" autofocus
+</style></head><body><form method="post" action="/login"><input name="code" placeholder="@@access_code@@" autofocus
 autocomplete="off"><button>OK</button></form></body></html>"""
 
-DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+DASHBOARD_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0e1116"><title>Modern Tiny Pedals Dashboard</title>
+<meta name="theme-color" content="#0e1116"><title>@@title@@</title>
 <style>
 :root{--bg:#0e1116;--panel:#1b1f27;--line:#2a303c;--text:#e9ecf1;--muted:#9aa3b2;
 --green:#34c759;--red:#ff4d4f;--blue:#38bdf8;--yellow:#ffd43b}
@@ -393,48 +544,63 @@ main{display:grid;gap:10px;padding:12px;grid-template-columns:repeat(auto-fit,mi
 .huge{font-size:84px;text-align:center}.bar{height:12px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:6px}
 .bar>div{height:100%;width:0}.grid4{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:22px}
 #status{padding:6px 12px;color:var(--muted);font-size:13px}.pos{color:var(--green)}.neg{color:var(--red)}
+.unit{font-size:18px;color:var(--muted)}.badge{display:none;margin-left:6px;padding:1px 6px;border-radius:6px;
+background:var(--red);color:var(--bg);font-size:12px;letter-spacing:0}
 </style></head><body>
-<div id="status">Connecting…</div>
+<div id="status">@@connecting@@</div>
 <main>
-<div class="card big"><div class="label">Gear · Speed</div>
+<div class="card big"><div class="label">@@gear_speed@@</div>
 <div class="value huge"><span id="gear">N</span> <span id="speed" style="font-size:48px">0</span>
-<span style="font-size:18px">km/h</span></div>
+<span class="unit" id="speedunit"></span></div>
 <div class="bar"><div id="rpmbar" style="background:var(--blue)"></div></div></div>
-<div class="card"><div class="label">Delta best</div><div class="value" id="delta">+0.000</div></div>
-<div class="card"><div class="label">Position</div><div class="value" id="position">-</div></div>
-<div class="card"><div class="label">Current lap</div><div class="value" id="lapcur">-:--.---</div></div>
-<div class="card"><div class="label">Last lap</div><div class="value" id="laplast">-:--.---</div></div>
-<div class="card"><div class="label">Best lap</div><div class="value" id="lapbest">-:--.---</div></div>
-<div class="card"><div class="label">Fuel · laps left</div><div class="value" id="fuel">0</div>
-<div style="font-size:18px;color:var(--muted)" id="fuellaps">0.0</div></div>
-<div class="card"><div class="label">Throttle · Brake</div>
+<div class="card"><div class="label">@@delta@@</div><div class="value" id="delta">+0.000</div></div>
+<div class="card" id="officialcard" style="display:none"><div class="label">@@official@@</div>
+<div class="value" id="official">+0.000</div></div>
+<div class="card"><div class="label">@@position@@</div><div class="value" id="position">-</div></div>
+<div class="card"><div class="label">@@lap_current@@<span class="badge" id="invalid">@@invalid@@</span></div>
+<div class="value" id="lapcur">-:--.---</div></div>
+<div class="card"><div class="label">@@lap_last@@</div><div class="value" id="laplast">-:--.---</div></div>
+<div class="card"><div class="label">@@lap_best@@</div><div class="value" id="lapbest">-:--.---</div></div>
+<div class="card"><div class="label" id="fueltitle">@@fuel@@</div>
+<div class="value"><span id="fuel">0</span> <span class="unit" id="fuelunit"></span></div>
+<div class="unit" id="fuellaps">0.0</div></div>
+<div class="card"><div class="label">@@pedals@@</div>
 <div class="bar"><div id="thr" style="background:var(--green)"></div></div>
 <div class="bar"><div id="brk" style="background:var(--red)"></div></div></div>
-<div class="card"><div class="label">Tyre °C</div><div class="grid4" id="tyres"></div></div>
-<div class="card"><div class="label">Brake °C</div><div class="grid4" id="brakes"></div></div>
-<div class="card"><div class="label">Time left</div><div class="value" id="remain">--:--</div></div>
+<div class="card"><div class="label">@@tyre@@ <span id="tyreunit"></span></div><div class="grid4" id="tyres"></div></div>
+<div class="card"><div class="label">@@brake@@ <span id="brakeunit"></span></div><div class="grid4" id="brakes"></div></div>
+<div class="card"><div class="label">@@remain@@</div><div class="value" id="remain">--:--</div></div>
 </main>
 <script>
+const T=@@texts@@;
 const $=id=>document.getElementById(id);
 const lap=t=>{if(!(t>0))return"-:--.---";const m=Math.floor(t/60);return m+":"+(t-m*60).toFixed(3).padStart(6,"0")};
 const hms=t=>{if(!(t>0))return"--:--";t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;
 return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0")};
 const quad=v=>v.map(x=>"<div>"+Math.round(x)+"</div>").join("");
+const signed=x=>(x>=0?"+":"")+x.toFixed(3);
 async function tick(){
 try{const r=await fetch("/api/telemetry",{credentials:"same-origin",cache:"no-store"});
-if(r.status===401){$("status").textContent="Session expired";return setTimeout(()=>location.replace("/"),1500)}
-if(!r.ok)throw new Error(r.status);const d=await r.json();
-$("status").textContent=d.active?(d.track||"On track"):"Waiting for session…";
-$("gear").textContent=d.gear>0?d.gear:(d.gear<0?"R":"N");$("speed").textContent=Math.round(d.speed||0);
+if(r.status===401){$("status").textContent=T.expired;return setTimeout(()=>location.replace("/"),1500)}
+if(!r.ok)throw new Error(r.status);const d=await r.json();const v=d.display||{};
+$("status").textContent=d.active?(d.track||T.on_track):T.waiting;
+$("gear").textContent=d.gear>0?d.gear:(d.gear<0?"R":"N");$("speed").textContent=Math.round(v.speed||0);
+$("speedunit").textContent=v.speed_unit||"";
 $("rpmbar").style.width=(d.rpm_max>0?Math.min(d.rpm/d.rpm_max,1)*100:0)+"%";
-const dl=d.delta_best||0;$("delta").textContent=(dl>=0?"+":"")+dl.toFixed(3);
-$("delta").className="value "+(dl>0?"neg":"pos");
+const dl=d.delta_best||0;$("delta").textContent=signed(dl);$("delta").className="value "+(dl>0?"neg":"pos");
+const off=d.delta_official;const official=typeof off==="number";
+$("officialcard").style.display=official?"":"none";
+if(official){$("official").textContent=signed(off);$("official").className="value "+(off>0?"neg":"pos")}
 $("position").textContent=d.position?d.position+"/"+d.vehicles:"-";
+$("invalid").style.display=d.lap_invalid?"inline-block":"none";
 $("lapcur").textContent=lap(d.lap_current);$("laplast").textContent=lap(d.lap_last);$("lapbest").textContent=lap(d.lap_best);
-$("fuel").textContent=(d.fuel||0).toFixed(1);$("fuellaps").textContent=(d.fuel_laps||0).toFixed(1)+" laps";
+$("fueltitle").textContent=v.energy?T.energy:T.fuel;
+$("fuel").textContent=(v.fuel||0).toFixed(1);$("fuelunit").textContent=v.fuel_unit||"";
+$("fuellaps").textContent=(v.fuel_laps||0).toFixed(1)+" "+T.laps;
 $("thr").style.width=(d.throttle*100)+"%";$("brk").style.width=(d.brake*100)+"%";
-$("tyres").innerHTML=quad(d.tyre_temp||[]);$("brakes").innerHTML=quad(d.brake_temp||[]);
+$("tyreunit").textContent=$("brakeunit").textContent=v.temperature_unit||"";
+$("tyres").innerHTML=quad(v.tyre_temp||[]);$("brakes").innerHTML=quad(v.brake_temp||[]);
 $("remain").textContent=hms(d.time_remaining);setTimeout(tick,150)}
-catch(e){$("status").textContent="Connection lost, retrying…";setTimeout(tick,2000)}}
+catch(e){$("status").textContent=T.lost;setTimeout(tick,2000)}}
 tick();
 </script></body></html>"""

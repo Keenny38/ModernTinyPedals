@@ -28,6 +28,7 @@ import logging
 
 from ..setting_validator import PresetValidator
 from ..userfile.json_setting import copy_setting
+from . import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -126,23 +127,28 @@ def _validate_file_version(user_data: dict) -> int:
 
 
 def _validate_tyre_rule(user_data: dict) -> dict:
-    """Validate tyre rule"""
+    """Validate tyre rule (value types, numbers finite)"""
     tyre_rule = user_data.get("tyre_rule")
     if not isinstance(tyre_rule, dict):
         tyre_rule = copy_setting(DEFAULT_TYRE_RULE)
     else:
         PresetValidator.validate_key_pair(tyre_rule, DEFAULT_TYRE_RULE)
+        if not isinstance(tyre_rule["maximum_tyre"], int):  # count of tyres
+            tyre_rule["maximum_tyre"] = DEFAULT_TYRE_RULE["maximum_tyre"]
     return tyre_rule
 
 
 def _validate_tyre_set(user_data: dict) -> dict:
-    """Validate tyre set (selector)"""
+    """Validate tyre set (selector): value types, numbers finite (tread, wear), invalid compound reset"""
     tyre_set = user_data.get("tyre_set")
     if not isinstance(tyre_set, dict):
         tyre_set = copy_setting(DEFAULT_TYRE_SET)
     else:
         PresetValidator.validate_key_pair(tyre_set, DEFAULT_TYRE_SET)
         for item in tyre_set:
+            if not isinstance(tyre_set[item], dict):
+                tyre_set[item] = DEFAULT_TYRE_SET[item].copy()
+                continue
             PresetValidator.validate_key_pair(tyre_set[item], DEFAULT_TYRE_SET[item])
     return tyre_set
 
@@ -226,9 +232,13 @@ def load_tyre_strategy_file(filename: str, filepath: str, extension: str = ""):
 
 
 def save_tyre_strategy_file(dict_user: dict, filename: str, filepath: str, extension: str = ""):
-    """Save tyre strategy file (*.tyres)"""
+    """Save tyre strategy file (*.tyres) atomically, as race plan widget reads it meanwhile
+
+    Raises:
+        OSError: unable to save file.
+    """
     filename_source = f"{filepath}{filename}{extension}"
-    with open(filename_source, "w", encoding="utf-8") as jsonfile:
+    with atomic_write(filename_source, raise_error=True) as jsonfile:
         json.dump(dict_user, jsonfile, indent=2)
 
 
@@ -240,10 +250,14 @@ def export_tyre_strategy_file(
     filename: str,
     extension: str = "",
 ) -> None:
-    """Export tyre strategy file as spreadsheet (*.CSV)"""
+    """Export tyre strategy file as spreadsheet (*.CSV), atomically
+
+    Raises:
+        OSError: unable to save file.
+    """
     if len(plan_data) < 1:
         return
-    with open(f"{filepath}{filename}{extension}", "w", newline="", encoding="utf-8") as csvfile:
+    with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as csvfile:
         data_writer = csv.writer(csvfile, quoting=csv.QUOTE_NONNUMERIC)
         # Write tyre rule
         data_writer.writerows(rule_data)

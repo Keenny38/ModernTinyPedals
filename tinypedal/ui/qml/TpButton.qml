@@ -18,6 +18,10 @@ AbstractButton {
     ToolTip.visible: tip !== "" && hovered
     ToolTip.text: tip
     ToolTip.delay: 600
+    // Screen readers: text, else tooltip (icon only buttons)
+    Accessible.role: Accessible.Button
+    Accessible.name: text !== "" ? text : tip
+    Accessible.description: text !== "" ? tip : ""
 
     background: Rectangle {
         radius: theme.em * 0.55

@@ -31,7 +31,6 @@ from .restyle import Restyled, restyled_options
 class Realtime(Restyled, Classic):
     """Draw widget"""
 
-    options = restyled_options("weather_forecast")
     color_tokens = {
         "background_color_estimated_time": "surface_raised",
         "font_color_estimated_time": "text_dim",
@@ -39,3 +38,4 @@ class Realtime(Restyled, Classic):
         "font_color_ambient_temperature": "text",
         "rain_chance_bar_color": "accent",
     }
+    options = restyled_options("weather_forecast", color_tokens)

@@ -94,6 +94,12 @@ class VertexStore:
             cls._watchers.setdefault(key, weakref.WeakSet()).add(item)
 
     @classmethod
+    def prune_watchers(cls, prefix: str = ""):
+        """Forget keys of prefix no longer shown by any item (items destroyed without unwatching their key)"""
+        for key in [key for key, items in cls._watchers.items() if key.startswith(prefix) and not items]:
+            del cls._watchers[key]
+
+    @classmethod
     def unwatch(cls, key: str, item: QQuickItem):
         items = cls._watchers.get(key)
         if items is not None:
@@ -105,13 +111,15 @@ class VertexStore:
     def notify(cls, key: str):
         """Items showing key drawn again"""
         items = cls._watchers.get(key)
-        if not items:
+        if items is None:
             return
         for item in list(items):
             try:
                 item.update()
             except RuntimeError:  # item deleted by Qt
                 items.discard(item)
+        if not items:  # every item showing key destroyed
+            del cls._watchers[key]
 
     @classmethod
     def get(cls, key: str) -> Vertices | None:
@@ -127,6 +135,7 @@ class VertexStore:
         for key in [key for key in cls._data if key.startswith(prefix)]:
             del cls._data[key]
             cls.notify(key)
+        cls.prune_watchers(prefix)
 
     @classmethod
     def retain(cls, prefix: str, keep: Collection[str]):
@@ -134,6 +143,7 @@ class VertexStore:
         for key in [key for key in cls._data if key.startswith(prefix) and key not in keep]:
             del cls._data[key]
             cls.notify(key)
+        cls.prune_watchers(prefix)
 
 
 class GpuShape(QQuickItem):

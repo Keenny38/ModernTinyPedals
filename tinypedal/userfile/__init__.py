@@ -27,7 +27,7 @@ import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from typing import TextIO
+from typing import IO, TextIO
 
 from ..const_app import APP_ID, PLATFORM
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 def set_user_data_path(filepath: str) -> str:
     """Set user data path, create if not exist"""
     if not os.path.exists(filepath):
-        logger.info("%s folder does not exist, attemp to create", filepath)
+        logger.info("%s folder does not exist, attempt to create", filepath)
         try:
             os.mkdir(filepath)
         except (PermissionError, FileExistsError, FileNotFoundError):
@@ -46,28 +46,44 @@ def set_user_data_path(filepath: str) -> str:
     return filepath
 
 
+def flush_to_disk(file: IO) -> None:
+    """Flush file data to disk (not only to OS cache), so a power loss never leaves it empty"""
+    file.flush()
+    os.fsync(file.fileno())
+
+
 @contextmanager
-def atomic_write(filename: str, newline: str | None = None) -> Iterator[TextIO]:
+def atomic_write(filename: str, newline: str | None = None, raise_error: bool = False) -> Iterator[TextIO]:
     """Write text file atomically, log error instead of raising
 
-    Data is written to a temporary file first, then replaces target file,
-    so existing file is never left half-written (crash, full disk, locked file).
+    Data is written to a temporary file first, flushed to disk, then replaces target file,
+    so existing file is never left half-written or empty (crash, power loss, full disk, locked file).
+
+    Args:
+        filename: target file name (with path).
+        newline: newline mode of file.
+        raise_error: raise OSError (after logging) instead of discarding data.
     """
     temp_filename = f"{filename}.tmp"
     try:
         file = open(temp_filename, "w", newline=newline, encoding="utf-8")  # noqa: SIM115, closed below
     except OSError as error:
         logger.error("USERDATA: failed saving %s: %s", filename, error)
+        if raise_error:
+            raise
         yield io.StringIO()  # discard data
         return
     try:
         with file:
             yield file
+            flush_to_disk(file)
         os.replace(temp_filename, filename)
     except OSError as error:
         logger.error("USERDATA: failed saving %s: %s", filename, error)
         with suppress(OSError):
             os.remove(temp_filename)
+        if raise_error:
+            raise
     except BaseException:  # unexpected error while writing, never leave temp file
         with suppress(OSError):
             os.remove(temp_filename)
@@ -80,6 +96,7 @@ def write_text_file(filename: str, text: str) -> bool:
     try:
         with open(temp_filename, "w", newline="", encoding="utf-8") as file:
             file.write(text)
+            flush_to_disk(file)
         os.replace(temp_filename, filename)
         return True
     except OSError as error:

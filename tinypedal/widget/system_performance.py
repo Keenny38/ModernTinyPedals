@@ -21,11 +21,32 @@ System performance Widget
 """
 
 import os
+from time import monotonic
 
 import psutil
 
 from .. import calculation as calc
 from ._base import Overlay
+
+MEMORY_READ_INTERVAL = 5.0  # seconds, app memory (unique set size) is slow to read (about 1 ms)
+
+
+class AppMemory:
+    """App memory in megabytes (unique set size), read again every few seconds only"""
+
+    __slots__ = ("process", "next_read", "used")
+
+    def __init__(self, process: psutil.Process):
+        self.process = process
+        self.next_read = 0.0
+        self.used = 0.0
+
+    def megabytes(self) -> float:
+        now = monotonic()
+        if now >= self.next_read:
+            self.next_read = now + MEMORY_READ_INTERVAL
+            self.used = self.process.memory_full_info().uss / 1024 / 1024
+        return self.used
 
 
 class Realtime(Overlay):
@@ -98,7 +119,8 @@ class Realtime(Overlay):
 
         # Last data
         self.app_info = psutil.Process(os.getpid())
-        self.cpu_count = os.cpu_count()
+        self.app_memory = AppMemory(self.app_info)
+        self.cpu_count = os.cpu_count() or 1
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -125,7 +147,7 @@ class Realtime(Overlay):
         """APP performance"""
         if target.last != data:
             target.last = data
-            memory_used = self.app_info.memory_full_info().uss / 1024 / 1024
+            memory_used = self.app_memory.megabytes()
             cpu = f"{data:>4.2f}"
             mem = f"{memory_used:>4.1f}"
             target.text = f"{prefix}{cpu:>4.4}%{mem:>5.5}MB"

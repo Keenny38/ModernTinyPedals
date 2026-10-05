@@ -38,18 +38,21 @@ class Realtime(DriverTable):
     """Draw widget"""
 
     COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "delta_laptime", "energy_remaining",
-        "vehicle_integrity", "incidents", "stint_laps", "time_interval", "time_gap",
+        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
+        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
+        "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
+        "time_interval", "time_gap",
     )
     options = (
         *DRIVER_OPTIONS,
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
         "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
         "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
-        "column_delta_laptime", "number_of_delta_laptime",
+        "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
         "column_time_interval", "show_time_interval_from_same_class", "decimal_places_time_interval",
-        "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap",
+        "time_interval_leader_text", "display_order_time_interval",
+        "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap", "time_gap_leader_text",
+        "display_order_time_gap",
     )
 
     def __init__(self, config, widget_name):
@@ -61,6 +64,8 @@ class Realtime(DriverTable):
         self.class_gap = split and wcfg["show_time_gap_from_same_class"]
         self.class_interval = split and wcfg["show_time_interval_from_same_class"]
         self.delta_count = min(max(int(wcfg["number_of_delta_laptime"]), 2), 5)
+        self.gap_leader = self.user_text("time_gap_leader_text", tr_overlay("Leader"))
+        self.int_leader = self.user_text("time_interval_leader_text", DASH)
         if wcfg["enable_single_class_exclusive_mode"]:
             max_vehicles = wcfg["maximum_vehicles_exclusive_mode"]
         elif split:
@@ -73,11 +78,11 @@ class Realtime(DriverTable):
 
     def extra_column(self, key: str) -> Column | None:
         if key == "time_gap":
-            sample = "888." + "8" * self.gap_decimals if self.gap_decimals else "888"
-            return Column(key, max(self.text_width("strong", sample), self.text_width("label", tr_overlay("Leader"))), RIGHT)
+            sample = "+888." + "8" * self.gap_decimals if self.gap_decimals else "+888"
+            return Column(key, max(self.text_width("strong", sample), self.text_width("label", self.gap_leader)), RIGHT)
         if key == "time_interval":
-            sample = "88." + "8" * self.int_decimals if self.int_decimals else "88"
-            return Column(key, self.text_width("value", sample), RIGHT)
+            sample = "888." + "8" * self.int_decimals if self.int_decimals else "888"
+            return Column(key, max(self.text_width("value", sample), self.text_width("label", self.int_leader)), RIGHT)
         if key == "delta_laptime":
             return Column(key, (self.text_width("small", "8.8") + self.unit * 0.3) * self.delta_count, RIGHT)
         return None
@@ -92,7 +97,9 @@ class Realtime(DriverTable):
             else:
                 position, gap = veh.positionOverall, veh.gapBehindNext
             if position == 1:
-                return Cell(TEXT, DASH, "value", theme.text_faint)
+                if self.int_leader == DASH:
+                    return Cell(TEXT, DASH, "value", theme.text_faint)
+                return Cell(TEXT, self.int_leader, "label", theme.accent)
             return Cell(TEXT, gap_text(gap, self.int_decimals), "value", theme.text_dim)
         if key == "delta_laptime":
             if ctx.player is None or veh.isPlayer:
@@ -111,7 +118,7 @@ class Realtime(DriverTable):
     def gap_cell(self, veh, ctx: Context) -> Cell:
         """Gap to leader (race), or to leader best lap (other sessions)"""
         theme = self.theme
-        leader_cell = Cell(TEXT, tr_overlay("Leader"), "label", theme.accent)
+        leader_cell = Cell(TEXT, self.gap_leader, "label", theme.accent)
         if ctx.in_race:
             if self.class_gap:
                 position, gap = veh.positionInClass, veh.gapBehindLeaderInClass

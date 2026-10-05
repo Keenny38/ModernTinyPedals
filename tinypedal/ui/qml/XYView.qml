@@ -5,6 +5,7 @@ import TinyPedal
 
 // XY tab: one channel against another at the same place on track (dots of each lap: grip, understeer, slip...),
 // or share of lap time spent in each value range of a channel (histogram). Zoomed chart part only when zoomed.
+// Scatter: wheel zoom at mouse, drag: move, double-click: whole plot. Lap chips: laps shown in this view.
 Item {
     id: root
 
@@ -38,6 +39,32 @@ Item {
     onVisibleChanged: if (visible && stale) update()
     function lapOpacity(lapKey) { return highlightKey === "" || lapKey === highlightKey ? 1 : 0.15 }
 
+    // Scatter zoom: part of plot shown (fractions of whole plot, y up)
+    property real zoom: 1
+    property real viewX: 0
+    property real viewY: 0
+    readonly property bool zoomed: zoom > 1.001
+    function zoomAt(factor, px, py) {
+        var span = 1 / zoom
+        var fx = viewX + px / Math.max(plot.width, 1) * span, fy = viewY + (1 - py / Math.max(plot.height, 1)) * span
+        var next = Math.max(1, Math.min(zoom * factor, 20))
+        var nextSpan = 1 / next
+        viewX = Math.max(0, Math.min(fx - px / Math.max(plot.width, 1) * nextSpan, 1 - nextSpan))
+        viewY = Math.max(0, Math.min(fy - (1 - py / Math.max(plot.height, 1)) * nextSpan, 1 - nextSpan))
+        zoom = next
+    }
+    function resetZoom() { zoom = 1; viewX = 0; viewY = 0 }
+    // Axis values of part shown: plot fraction (at) & text
+    function ticksIn(column, range, start, whole) {
+        if (!zoomed || !range) return whole || []
+        var low = range[0] + (range[1] - range[0]) * start, high = low + (range[1] - range[0]) / zoom
+        return backend.axisTicks(column, low, high).map(function(tick) {
+            return {"at": (tick.value - low) / Math.max(high - low, 1e-9), "text": tick.text}
+        })
+    }
+    readonly property var xTicks: ticksIn(xColumn, scatterData.xRange, viewX, scatterData.xTicks)
+    readonly property var yTicks: ticksIn(yColumn, scatterData.yRange, viewY, scatterData.yTicks)
+
     // Choices kept by backend (tab created again when viewer opens)
     property bool restored: false
     function save() { if (restored) backend.setXyState(mode, xColumn, yColumn, histogramColumn) }
@@ -51,8 +78,8 @@ Item {
         update()
     }
     onModeChanged: { save(); update() }
-    onXColumnChanged: { save(); refresh.restart() }
-    onYColumnChanged: { save(); refresh.restart() }
+    onXColumnChanged: { save(); resetZoom(); refresh.restart() }
+    onYColumnChanged: { save(); resetZoom(); refresh.restart() }
     onHistogramColumnChanged: { save(); refresh.restart() }
     Timer { id: refresh; interval: 120; onTriggered: root.update() }
     Connections {
@@ -145,6 +172,7 @@ Item {
             color: theme.dimText
             font.pointSize: theme.fontPoint * 0.8
         }
+        LapFilter { id: lapFilter; Layout.fillWidth: true }
 
         // Scatter plot
         Item {
@@ -176,21 +204,38 @@ Item {
                     border.width: 1
                     border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
                 }
+                MouseArea {  // wheel: zoom at mouse, drag: move, double-click: whole plot
+                    anchors.fill: parent
+                    property real pressX: 0
+                    property real pressY: 0
+                    property real startX: 0
+                    property real startY: 0
+                    cursorShape: pressed ? Qt.ClosedHandCursor : (root.zoomed ? Qt.OpenHandCursor : Qt.ArrowCursor)
+                    onPressed: function(mouse) { pressX = mouse.x; pressY = mouse.y; startX = root.viewX; startY = root.viewY }
+                    onPositionChanged: function(mouse) {
+                        if (!pressed || !root.zoomed) return
+                        var span = 1 / root.zoom
+                        root.viewX = Math.max(0, Math.min(startX - (mouse.x - pressX) / plot.width * span, 1 - span))
+                        root.viewY = Math.max(0, Math.min(startY + (mouse.y - pressY) / plot.height * span, 1 - span))
+                    }
+                    onDoubleClicked: root.resetZoom()
+                    onWheel: function(wheel) { if (wheel.angleDelta.y !== 0) root.zoomAt(Math.pow(1.0019, wheel.angleDelta.y), wheel.x, wheel.y) }
+                }
                 Repeater {  // vertical grid
-                    model: root.scatterData.xTicks || []
+                    model: root.xTicks
                     Rectangle { x: Math.round(modelData.at * plot.width); width: 1; height: plot.height; color: theme.text; opacity: 0.06 }
                 }
                 Repeater {  // horizontal grid
-                    model: root.scatterData.yTicks || []
+                    model: root.yTicks
                     Rectangle { y: Math.round((1 - modelData.at) * plot.height); width: plot.width; height: 1; color: theme.text; opacity: 0.06 }
                 }
                 Rectangle {  // zero lines
-                    readonly property real at: root.scatterData.zero ? root.scatterData.zero[0] : -1
+                    readonly property real at: root.scatterData.zero ? (root.scatterData.zero[0] - root.viewX) * root.zoom : -1
                     visible: at > 0 && at < 1
                     x: Math.round(at * plot.width); width: 1; height: plot.height; color: theme.text; opacity: 0.2
                 }
                 Rectangle {
-                    readonly property real at: root.scatterData.zero ? root.scatterData.zero[1] : -1
+                    readonly property real at: root.scatterData.zero ? (root.scatterData.zero[1] - root.viewY) * root.zoom : -1
                     visible: at > 0 && at < 1
                     y: Math.round((1 - at) * plot.height); width: plot.width; height: 1; color: theme.text; opacity: 0.2
                 }
@@ -198,15 +243,29 @@ Item {
                     model: root.scatterData.laps || []
                     GpuShape {
                         key: modelData.key
+                        visible: lapFilter.shown(modelData.lap)
                         color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
                         opacity: root.lapOpacity(modelData.lap)
                         revision: backend.revision
-                        transform: Matrix4x4 { matrix: Qt.matrix4x4(plot.width, 0, 0, 0, 0, -plot.height, 0, plot.height, 0, 0, 1, 0, 0, 0, 0, 1) }
+                        transform: Matrix4x4 {
+                            matrix: Qt.matrix4x4(plot.width * root.zoom, 0, 0, -root.viewX * root.zoom * plot.width,
+                                                 0, -plot.height * root.zoom, 0, plot.height + root.viewY * root.zoom * plot.height,
+                                                 0, 0, 1, 0, 0, 0, 0, 1)
+                        }
                     }
+                }
+                TpButton {  // zoomed: zoom factor, click for whole plot
+                    visible: root.zoomed
+                    anchors { right: parent.right; top: parent.top }
+                    text: "×" + root.zoom.toFixed(1).replace(".", theme.decimalPoint)
+                    flat: true
+                    implicitHeight: theme.em * 1.8
+                    tip: i18n.tr("Whole plot (double-click)")
+                    onClicked: root.resetZoom()
                 }
             }
             Repeater {  // y values
-                model: scatterArea.hasData ? root.scatterData.yTicks : []
+                model: scatterArea.hasData ? root.yTicks : []
                 Text {
                     x: scatterArea.padLeft - width - theme.em * 0.3
                     y: (1 - modelData.at) * plot.height - height / 2
@@ -218,7 +277,7 @@ Item {
                 }
             }
             Repeater {  // x values
-                model: scatterArea.hasData ? root.scatterData.xTicks : []
+                model: scatterArea.hasData ? root.xTicks : []
                 Text {
                     x: scatterArea.padLeft + modelData.at * plot.width - width / 2
                     y: plot.height + theme.em * 0.15
@@ -255,7 +314,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             readonly property var bins: root.histogramData.bins || []
-            readonly property var laps: root.histogramData.laps || []
+            readonly property var laps: (root.histogramData.laps || []).filter(function(lap) { return lapFilter.shown(lap.lap) })
             readonly property real peak: Math.max(root.histogramData.max || 1, 1)  // not "top": anchor line of Item
             readonly property real padBottom: theme.em * 1.6
             readonly property real padLeft: theme.em * 2.6
@@ -309,7 +368,7 @@ Item {
                                 opacity: root.highlightKey === "" ? 0.85 : 0.6
                                 ToolTip.visible: barArea.containsMouse
                                 ToolTip.text: modelData.label + " · " + histogramArea.bins[bin.binIndex] + " " + (root.histogramData.unit || "")
-                                              + " · " + value.toFixed(1) + "%"
+                                              + " · " + value.toFixed(1).replace(".", theme.decimalPoint) + "%"
                                 ToolTip.delay: 300
                                 MouseArea { id: barArea; anchors.fill: parent; hoverEnabled: true }
                             }

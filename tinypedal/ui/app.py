@@ -29,7 +29,6 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal, S
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontDatabase,
     QFontMetricsF,
     QGuiApplication,
     QIcon,
@@ -69,14 +68,25 @@ from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
 from ..userfile.layout_profile import screen_key
-from . import app_icon_file, resolve_color_theme, set_style_palette, set_style_window, system_dark_mode
-from ._common import BaseDialog, DialogSingleton, UIScaler
+from . import (
+    app_icon_file,
+    draw_focus_ring,
+    install_message_icons,
+    resolve_color_theme,
+    set_style_palette,
+    set_style_window,
+    status_color,
+    system_dark_mode,
+)
+from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler
 from .home_view import HomeView
 from .hotkey_view import HotkeyList
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .module_view import ModuleList
 from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
 from .notification import NotifyBar
+from .ordered_picker import icon_font_family
+from .overlay_view import OverlayView
 from .pace_notes_view import PaceNotesControl
 from .preset_view import PresetList
 from .spectate_view import SpectateList
@@ -92,13 +102,13 @@ RAIL_TOGGLES = (
     ("auto_hide", "Auto Hide", "\ue7b3", "H"),  # red eye
     ("vr_compatibility", "VR Compatibility", "\ue7f4", "V"),  # tv monitor
 )
-ICON_FONTS = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
 
 
-def icon_font_family() -> str:
-    """Installed icon font (Windows 10 / 11), "" if none: letters are drawn instead"""
-    families = set(QFontDatabase.families())
-    return next((family for family in ICON_FONTS if family in families), "")
+def safe_mode_enabled() -> bool:
+    """App started in safe mode: tool pages left open are not reopened (one may have crashed it)"""
+    from .. import safe_mode
+
+    return safe_mode.state.enabled
 
 
 class NavButton(QAbstractButton):
@@ -108,6 +118,7 @@ class NavButton(QAbstractButton):
         super().__init__(parent)
         self.compact = compact  # icon only, label in tooltip
         self.dot_color: QColor | None = None  # status dot drawn at top right
+        self.modified = False  # page has unsaved changes: marker before label, see set_modified
         self.setText(text)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -124,6 +135,16 @@ class NavButton(QAbstractButton):
         if self.compact:
             return QSize(round(line * 2.2), round(line * 2.2))
         return QSize(round(line * 4.4), round(line * 3.4))
+
+    def set_modified(self, modified: bool):
+        """Page of entry has unsaved changes: marker before label, noted in tooltip"""
+        if modified == self.modified:
+            return
+        self.modified = modified
+        tooltip = self.toolTip().removeprefix(MODIFIED_MARKER)
+        self.setToolTip(f"{MODIFIED_MARKER}{tooltip}" if modified else tooltip)
+        self.setAccessibleDescription(tr("Unsaved changes") if modified else "")
+        self.update()
 
     def enterEvent(self, event):
         self.update()
@@ -158,6 +179,7 @@ class NavButton(QAbstractButton):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(fill)
             painter.drawRoundedRect(area, radius, radius)
+        draw_focus_ring(painter, self, area, radius)
         color = accent if self.isChecked() else (text if self.underMouse() else muted)
         painter.setPen(color)
         icon_font = QFont(self.icon_font)
@@ -181,7 +203,8 @@ class NavButton(QAbstractButton):
         painter.setFont(label_font)
         painter.setPen(text if self.isChecked() else color)
         label_rect = QRectF(area.left(), area.top() + area.height() * 0.6, area.width(), area.height() * 0.32)
-        label = QFontMetricsF(label_font).elidedText(self.text(), Qt.TextElideMode.ElideRight, label_rect.width())
+        label_text = f"{MODIFIED_MARKER}{self.text()}" if self.modified else self.text()
+        label = QFontMetricsF(label_font).elidedText(label_text, Qt.TextElideMode.ElideRight, label_rect.width())
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
 
@@ -242,16 +265,19 @@ class DialogPage(QWidget):
     """Dialog shown as page inside app: title & close button, then dialog (scrolled if larger than page)
 
     Emits closed when dialog closes itself (close button, Save & close, Esc): page is then removed.
+    Emits modified_changed when dialog unsaved changes marker is shown or cleared.
     """
 
     closed = Signal(QWidget)
+    modified_changed = Signal()
 
-    def __init__(self, dialog: BaseDialog, parent=None):
+    def __init__(self, dialog: BaseDialog, parent=None, opener: "DialogPage | None" = None):
         super().__init__(parent)
         self.setObjectName("dialogPage")
         # Page never sets main window minimum size (open pages are kept, hidden, in page stack)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.dialog = dialog
+        self.opener = opener  # page this one was opened from (lap library of lap viewer...), kept open with it
         self._closed = False
         self._closable = True  # see set_closable
         self._own_close_buttons: list[QAbstractButton] | None = None
@@ -262,6 +288,9 @@ class DialogPage(QWidget):
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * 1.15)
         label_title.setFont(font)
+        self._label_title = label_title
+        dialog.modified_changed.connect(self.show_modified)
+        self.show_modified()
         button_close = QPushButton(tr("Close"), self)
         button_close.setToolTip(tr("Close and go back to previous page"))
         button_close.clicked.connect(dialog.close)
@@ -294,6 +323,25 @@ class DialogPage(QWidget):
         layout.setSpacing(0)
         layout.addLayout(layout_title)
         layout.addWidget(scroll, stretch=1)
+
+    def is_modified(self) -> bool:
+        """Dialog shows unsaved changes marker"""
+        return self.dialog is not None and self.dialog.is_marked_modified()
+
+    def has_unsaved_changes(self) -> bool:
+        """Closing would ask to save changes (marker shown or not)"""
+        return self.is_modified() or (self.dialog is not None and self.dialog.has_unsaved_changes())
+
+    def display_title(self) -> str:
+        """Title with unsaved changes marker (page title, open pages menu)"""
+        return f"{MODIFIED_MARKER}{self.title}" if self.is_modified() else self.title
+
+    def show_modified(self, *_):
+        """Unsaved changes marker shown or cleared"""
+        modified = self.is_modified()
+        self._label_title.setText(self.display_title())
+        self._label_title.setToolTip(tr("Unsaved changes") if modified else "")
+        self.modified_changed.emit()
 
     def set_closable(self, closable: bool):
         """Close buttons (title & dialog own) & Esc key, off for tools of navigation rail (pages like any other)"""
@@ -358,14 +406,14 @@ class TabView(QWidget):
         notify_bar.hotkey.clicked.connect(self.select_hotkey_tab)
 
         # Pages
-        home_tab = HomeView(self, parent, lambda key: self.select_page(PAGE_INDEX[key]))
-        widget_tab = ModuleList(self, wctrl)
+        icon_family = icon_font_family()
+        home_tab = HomeView(self, parent, lambda key: self.select_page(PAGE_INDEX[key]), icon_family)
+        widget_tab = OverlayView(self, wctrl)
         module_tab = ModuleList(self, mctrl)
         preset_tab = PresetList(self)
         spectate_tab = SpectateList(self)
         pacenotes_tab = PaceNotesControl(self)
         hotkey_tab = HotkeyList(self)
-        icon_family = icon_font_family()
         tools_tab = ToolsView(self, icon_family, parent)
         self.preset_tab = preset_tab
         self._pages = QStackedWidget(self)
@@ -388,6 +436,10 @@ class TabView(QWidget):
         self._page_history: list[QWidget] = []  # pages shown before, see previous_shown
         self._going_back = False
         self._restoring_pages = False  # reopening pages: window not brought to front
+        self._closing_pages = False  # closing several pages (quit, Close All) or view replaced: left pages not closed
+        self._left_pages_timer = QTimer(self)  # pages left for another one closed once page change is done
+        self._left_pages_timer.setSingleShot(True)
+        self._left_pages_timer.timeout.connect(self.close_left_pages)
         self.track_pages = False  # shown page remembered on change, once startup pages are restored
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
         self._user_resized = False  # window resized by user while grown
@@ -461,6 +513,7 @@ class TabView(QWidget):
         last_page = cfg.application["last_page_index"]
         self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0)
         self._pages.currentChanged.connect(self.page_changed)
+        self._pages.currentChanged.connect(self.schedule_close_left_pages)
 
         layout_body = QHBoxLayout()
         layout_body.setContentsMargins(0, 0, 0, 0)
@@ -478,6 +531,7 @@ class TabView(QWidget):
 
         # Connect app signal
         app_signal.updates.connect(notify_bar.updates.checking)
+        notify_bar.updates.restore()  # view rebuilt (language change): update notice kept
         app_signal.refresh.connect(notify_bar.refresh)
 
         app_signal.refresh.connect(home_tab.refresh)
@@ -546,26 +600,65 @@ class TabView(QWidget):
             if isinstance(page, DialogPage)
         ]
 
-    def activate_dialog_page(self, class_name: str, title: str = "") -> bool:
-        """Show open dialog page of class (and title if set), True if found"""
+    def find_dialog_page(self, class_name: str, title: str = "") -> DialogPage | None:
+        """Open dialog page of class (and title if set), None if not found"""
         for page in self.dialog_pages():
             dialog = page.dialog
             if dialog is not None and type(dialog).__name__ == class_name and (not title or dialog.windowTitle() == title):
+                return page
+        return None
+
+    def activate_dialog_page(self, class_name: str, title: str = "") -> bool:
+        """Show open dialog page of class (and title if set), True if found"""
+        page = self.find_dialog_page(class_name, title)
+        if page is not None:
+            self.show_page_widget(page)
+        return page is not None
+
+    def show_dialog_page(self, dialog, bring_to_front: bool = True) -> bool:
+        """Show dialog as page, same dialog already open is shown instead, True if shown in app
+
+        Not brought to front: page shown in app without showing a hidden or minimized window.
+        """
+        restoring, self._restoring_pages = self._restoring_pages, self._restoring_pages or not bring_to_front
+        try:
+            existing = self.find_dialog_page(type(dialog).__name__, dialog.windowTitle())
+            if existing is not None:
+                dialog.shown_instead = existing.dialog  # caller works on open one, see shown_dialog
+                self.show_page_widget(existing)
+                dialog.deleteLater()  # second copy of open dialog: never shown
+                return True
+            page = DialogPage(dialog, self._pages, self.page_of(dialog.parentWidget()))
+            page.closed.connect(self.close_dialog_page)
+            page.modified_changed.connect(self.refresh_open_pages)
+            page.modified_changed.connect(self.schedule_close_left_pages)
+            self._pages.addWidget(page)
+            self.show_page_widget(page)
+            self.refresh_open_pages()
+        finally:
+            self._restoring_pages = restoring
+        return True
+
+    @staticmethod
+    def page_of(widget: QWidget | None) -> DialogPage | None:
+        """Dialog page showing widget, None if widget is not on a dialog page"""
+        while widget is not None:
+            if isinstance(widget, DialogPage):
+                return widget
+            widget = widget.parentWidget()
+        return None
+
+    def show_dialog(self, dialog: QWidget) -> bool:
+        """Show page of open dialog (or its window), True if found"""
+        for page in self.dialog_pages():
+            if page.dialog is dialog:
                 self.show_page_widget(page)
                 return True
-        return False
-
-    def show_dialog_page(self, dialog) -> bool:
-        """Show dialog as page, same dialog already open is shown instead, True if shown in app"""
-        if self.activate_dialog_page(type(dialog).__name__, dialog.windowTitle()):
-            dialog.deleteLater()  # second copy of open dialog: never shown
+        if dialog.isWindow() and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
             return True
-        page = DialogPage(dialog, self._pages)
-        page.closed.connect(self.close_dialog_page)
-        self._pages.addWidget(page)
-        self.show_page_widget(page)
-        self.refresh_open_pages()
-        return True
+        return False
 
     def fit_window(self, page: "DialogPage"):
         """Grow main window to page preferred size (within screen)
@@ -637,24 +730,82 @@ class TabView(QWidget):
             if name == shown:
                 self._rail_scroll.ensureWidgetVisible(button, 0, 0)
 
+    def shown_pages(self) -> set[QWidget]:
+        """Shown page & pages it was opened from (lap viewer of its lap library...)"""
+        pages: set[QWidget] = set()
+        page: QWidget | None = self._pages.currentWidget()
+        while page is not None and page not in pages:
+            pages.add(page)
+            page = page.opener if isinstance(page, DialogPage) else None
+        return pages
+
+    def schedule_close_left_pages(self, *_):
+        self._left_pages_timer.start(0)
+
+    def close_left_pages(self):
+        """Pages left for another one are closed, kept open: shown page (and pages it was opened
+        from), pages with unsaved changes (closing would ask to save) & tools of navigation rail"""
+        if self._restoring_pages or self._closing_pages:
+            return
+        if QApplication.activeModalWidget() is not None:  # message box (may be closing pages)
+            self._left_pages_timer.start(250)
+            return
+        pages = self.dialog_pages()
+        kept = self.shown_pages()
+        for page in pages:
+            if self.is_rail_page(page) or page.has_unsaved_changes():
+                opener: DialogPage | None = page
+                while opener is not None and opener not in kept:
+                    kept.add(opener)
+                    opener = opener.opener
+        closed = False
+        for page in reversed(pages):  # pages opened from a page closed first
+            if page not in kept and page.dialog is not None and self._pages.indexOf(page) >= 0:
+                if page.dialog.close():
+                    page.notify_closed()  # hidden page: no hide event, page removed at once
+                    closed = True
+        if closed:
+            self.page_changed(self._pages.currentIndex())  # open pages remembered for next startup
+        self.refresh_open_pages()
+
     def refresh_open_pages(self):
-        """Close button on pages, open pages button with count of pages outside rail"""
+        """Close button on pages, open pages button (shown while pages outside rail are kept
+        open behind shown page, ex. with unsaved changes), unsaved changes marker on rail entries
+        & open pages button"""
+        modified_tools = set()
         for page in self.dialog_pages():
             page.set_closable(not self.is_rail_page(page))
+            if page.is_modified():
+                modified_tools.add(type(page.dialog).__name__)
+        for name, button in self.rail_tool_buttons().items():
+            button.set_modified(name in modified_tools)
         pages = self.other_pages()
+        modified = sum(page.is_modified() for page in pages)
         accent = self.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
-        self._button_pages.setVisible(bool(pages))
-        self._button_pages.dot_color = accent if pages else None
-        self._button_pages.setToolTip(trm(f"Open pages: {len(pages)}"))
+        shown = self.shown_pages()
+        behind = any(page not in shown for page in pages)
+        self._button_pages.setVisible(behind)
+        self._button_pages.dot_color = (QColor(status_color("warning")) if modified else accent) if behind else None
+        tooltip = trm(f"Open pages: {len(pages)}")
+        if modified:
+            tooltip = f"{tooltip}\n{MODIFIED_MARKER}{trm(f'Unsaved changes: {modified}')}"
+        self._button_pages.setToolTip(tooltip)
         self._button_pages.update()
         self.sync_rail_selection()
+
+    def save_current_page(self) -> bool:
+        """Ctrl+S: save shown page (editor, config page...), False if it has nothing to save"""
+        current = self._pages.currentWidget()
+        if isinstance(current, DialogPage) and current.dialog is not None:
+            return current.dialog.save_by_shortcut()
+        return False
 
     def show_pages_menu(self):
         """Menu of open pages (outside rail): show one, or close all"""
         menu = QMenu(self)
         current = self._pages.currentWidget()
         for page in self.other_pages():
-            action = menu.addAction(page.title)
+            action = menu.addAction(page.display_title())
             action.setCheckable(True)
             action.setChecked(page is current)
             action.triggered.connect(lambda _=False, target=page: self.show_page_widget(target))
@@ -679,6 +830,7 @@ class TabView(QWidget):
         other pages (config, unsaved edits) taken out as they are, and shown page if taken out
         """
         tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+        self._closing_pages = True  # view replaced: its pages are not left for another one
         current = self._pages.currentWidget()
         paths: list[str] = []
         kept: list[DialogPage] = []
@@ -693,6 +845,8 @@ class TabView(QWidget):
                 paths.append(f"*{path}" if page is current else path)
                 continue
             page.closed.disconnect(self.close_dialog_page)
+            page.modified_changed.disconnect(self.refresh_open_pages)
+            page.modified_changed.disconnect(self.schedule_close_left_pages)
             self._pages.removeWidget(page)
             page.setParent(None)
             kept.append(page)
@@ -703,13 +857,22 @@ class TabView(QWidget):
     def adopt_pages(self, pages: list[DialogPage]):
         """Pages taken out of previous view, see detach_pages"""
         for page in pages:
+            if not any(page.opener is other for other in pages):  # tool page reopened as new page
+                page.opener = None
             page.closed.connect(self.close_dialog_page)
+            page.modified_changed.connect(self.refresh_open_pages)
+            page.modified_changed.connect(self.schedule_close_left_pages)
             self._pages.addWidget(page)
         self.refresh_open_pages()
 
     def restore_pages(self, paths: list[str]):
-        """Reopen tool pages (unknown tools skipped), shown page shown again, else current page kept"""
+        """Reopen tool pages (unknown tools skipped), shown page shown again, else current page kept
+
+        Pages left for another one are closed (see close_left_pages): only shown page & tools
+        of navigation rail are reopened.
+        """
         known = {path for _, entries in TOOL_SECTIONS for _, _, path in entries}
+        rail_tools = self.rail_tool_buttons()
         index = self._pages.currentIndex()
         shown = None
         self._restoring_pages = True
@@ -718,6 +881,8 @@ class TabView(QWidget):
                 path = entry.strip().removeprefix("*")
                 path = RENAMED_TOOLS.get(path, path)  # merged tools: new tool
                 if path not in known:
+                    continue
+                if not entry.strip().startswith("*") and path.rsplit(".", 1)[-1] not in rail_tools:
                     continue
                 try:
                     open_tool(path, self._dialog_parent)
@@ -732,14 +897,20 @@ class TabView(QWidget):
             self.show_page_widget(shown, bring_to_front=False)
         elif isinstance(self._pages.currentWidget(), DialogPage):
             self.set_current_index(index if index < len(NAV_PAGES) else self._return_index)
+        self.schedule_close_left_pages()
 
     def close_all_pages(self, pages: list[DialogPage] | None = None) -> bool:
         """Close every (or given) dialog page (each may ask to save), True if all closed"""
-        for page in reversed(self.dialog_pages() if pages is None else pages):
-            if page.dialog is not None and not page.dialog.close():
-                self.show_page_widget(page)
-                return False
-        return True
+        self._closing_pages = True
+        try:
+            for page in reversed(self.dialog_pages() if pages is None else pages):
+                if page.dialog is not None and not page.dialog.close():
+                    self.show_page_widget(page)
+                    return False
+            return True
+        finally:
+            self._closing_pages = False
+            self.schedule_close_left_pages()
 
     def show_page_widget(self, page: QWidget, bring_to_front: bool = True):
         """Show dialog page, main window brought to front"""
@@ -771,6 +942,10 @@ class TabView(QWidget):
         was_current = self._pages.currentWidget() is page
         self._pages.removeWidget(page)
         page.deleteLater()
+        for other in self.dialog_pages():
+            if other.opener is page:
+                other.opener = None
+        self._page_history = [shown for shown in self._page_history if shown is not page]
         self._grown_for.discard(page)
         if not self._grown_for:  # no open page needs grown window anymore
             self.restore_window_size()
@@ -840,8 +1015,8 @@ class TabView(QWidget):
         else:
             api_state = api.read.state.version()
         running = bool(api_state) and api_state not in ("not running", "0.0")
-        dot_color = QColor("#3DDC84") if running else QColor("#808080")
-        tooltip = f"{api.alias} \u00b7 {api_state}"
+        dot_color = QColor(status_color("success" if running else "inactive"))
+        tooltip = f"{api.alias} \u00b7 {tr(api_state)}"
         if self._button_api.dot_color != dot_color or self._button_api.toolTip() != tooltip:
             self._button_api.dot_color = dot_color
             self._button_api.setToolTip(tooltip)
@@ -948,7 +1123,7 @@ class StatusButtonBar(QStatusBar):
         self.button_api.setProperty("running", running)
         self.button_api.style().unpolish(self.button_api)
         self.button_api.style().polish(self.button_api)
-        self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {text_api_status}")
+        self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {tr(text_api_status)}")
 
         dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
         # Moon & sun glyphs without a color emoji form, so they stay monochrome like the text
@@ -1013,6 +1188,8 @@ class AppWindow(QMainWindow):
         self.last_style = None
         self.last_icon_dark = None
         self.last_language = cfg.application["language"]
+        self._pages_closed = False  # pages closed for quit or restart, see close_pages_for_quit
+        install_message_icons()  # message box icons drawn in window color theme
 
         # Status bar
         self.setStatusBar(StatusButtonBar(self))
@@ -1030,6 +1207,8 @@ class AppWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+K"), self, self.open_command_palette)
         # Previous page, like a browser
         QShortcut(QKeySequence("Alt+Left"), self, self.go_back)
+        # Save shown page (editors, config pages)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self, self.save_current_page)
 
         # Import preset, preset package or plugin by drag & drop
         self.setAcceptDrops(True)
@@ -1054,13 +1233,28 @@ class AppWindow(QMainWindow):
         if cfg.application["show_setup_wizard_at_startup"]:
             QTimer.singleShot(600, self.open_setup_wizard)
 
+    @staticmethod
+    def config_dialogs(preset_only: bool = False) -> list:
+        """Open config dialogs (pages or windows), only those editing loaded preset options if set"""
+        dialogs = DialogSingleton.dialogs(ConfigType.CONFIG)
+        if preset_only:
+            dialogs = [dialog for dialog in dialogs if getattr(dialog, "is_preset_setting", lambda: False)()]
+        return dialogs
+
+    def modified_config_dialogs(self, preset_only: bool = False) -> list:
+        """Open config dialogs with unsaved changes"""
+        return [
+            dialog for dialog in self.config_dialogs(preset_only)
+            if getattr(dialog, "is_modified", lambda: False)()
+        ]
+
     def check_screen_setup(self):
         """Reload overlay with positions of new screen setup"""
         key = screen_key()
         if key == self._screen_key:
             return
-        if DialogSingleton.is_opened(ConfigType.CONFIG):
-            return  # retried once config dialog is closed
+        if self.modified_config_dialogs():
+            return  # retried once config changes are saved or cancelled
         self._screen_key = key
         if cfg.application["enable_layout_per_screen_setup"]:
             logger.info("LAYOUT: screen setup changed to %s", key)
@@ -1162,6 +1356,9 @@ class AppWindow(QMainWindow):
             tray_icon.setContextMenu(OverlayMenu(tr("Overlay"), self, True))
             if old_menu is not None:
                 old_menu.deleteLater()
+        # Running overlays rebuilt with labels of new language (sized to fit them)
+        for name in tuple(wctrl.active_modules):
+            wctrl.reload(name)
         app_signal.refresh.emit(True)
         logger.info("GUI: language changed to %s", self.last_language)
 
@@ -1196,15 +1393,15 @@ class AppWindow(QMainWindow):
         # Config tray icon
         tray_icon.setIcon(self.windowIcon())
         tray_icon.setToolTip(self.windowTitle())
-        tray_icon.activated.connect(self.tray_doubleclick)
+        tray_icon.activated.connect(self.tray_activated)
         # Add tray menu
         tray_menu = OverlayMenu(tr("Overlay"), self, True)
         tray_icon.setContextMenu(tray_menu)
         tray_icon.show()
 
-    def tray_doubleclick(self, active_reason: QSystemTrayIcon.ActivationReason):
-        """Tray doubleclick"""
-        if active_reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+    def tray_activated(self, active_reason: QSystemTrayIcon.ActivationReason):
+        """Tray click or double click: show window (right click opens tray menu)"""
+        if active_reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.show_app()
 
     def set_window_state(self):
@@ -1294,6 +1491,11 @@ class AppWindow(QMainWindow):
         if isinstance(view, TabView):
             view.go_back()
 
+    def save_current_page(self) -> bool:
+        """Save shown page (Ctrl+S), False if it has nothing to save"""
+        view = self.centralWidget()
+        return isinstance(view, TabView) and view.save_current_page()
+
     def mousePressEvent(self, event):
         """Mouse back button: previous page (clicks not used by widget under mouse come here)"""
         if event.button() == Qt.MouseButton.BackButton:
@@ -1327,12 +1529,6 @@ class AppWindow(QMainWindow):
             cfg.save(config_type=ConfigType.CONFIG)
         self.save_open_pages(delay=66)
 
-    def stop_tracking_pages(self):
-        """Before pages close for quit or restart: state saved at that moment is kept"""
-        view = self.centralWidget()
-        if isinstance(view, TabView):
-            view.track_pages = False
-
     def restore_open_pages(self):
         """Reopen tool pages left open at last quit, then follow page changes"""
         if not shiboken6.isValid(self):  # closed before event loop ran
@@ -1341,25 +1537,50 @@ class AppWindow(QMainWindow):
         if not isinstance(view, TabView):
             return
         paths = [path for path in cfg.application["open_pages"].split(",") if path.strip()]
-        if cfg.application["remember_open_pages"] and paths:
+        if cfg.application["remember_open_pages"] and paths and not safe_mode_enabled():
             view.restore_pages(paths)
         view.track_pages = True
 
-    def restart_app(self):
-        """Restart app, tool pages left open reopened"""
-        self.save_open_pages()
-        self.stop_tracking_pages()
-        loader.restart()
+    def close_pages_for_quit(self) -> bool:
+        """Before quit or restart: tool pages left open remembered (reopened at next startup),
+        then every page closed, each may ask to save changes
 
-    def quit_app(self):
-        """Quit manager, open pages with unsaved changes are asked first (cancel keeps app open)"""
+        Returns:
+            False if cancelled (unsaved changes kept): pages kept open, app must not quit.
+        """
+        view = self.centralWidget()
+        if not isinstance(view, TabView) or self._pages_closed:
+            return True
+        self.save_open_pages()
+        view.track_pages = False  # pages closing now: saved state kept
+        if not view.close_all_pages():
+            view.track_pages = True
+            return False
+        self._pages_closed = True
+        return True
+
+    def cancel_quit(self):
+        """Quit or restart failed after pages were closed (installer not started): app goes on"""
+        self._pages_closed = False
         view = self.centralWidget()
         if isinstance(view, TabView):
-            self.save_open_pages()
-            view.track_pages = False  # pages closing now: saved state kept
-            if not view.close_all_pages():
-                view.track_pages = True
-                return
+            view.track_pages = True
+
+    def restart_app(self) -> bool:
+        """Restart app, tool pages left open reopened, False if cancelled (unsaved changes)"""
+        if not self.close_pages_for_quit():
+            return False
+        loader.restart()
+        return True
+
+    def quit_app(self) -> bool:
+        """Quit manager, open pages with unsaved changes are asked first
+
+        Returns:
+            False if cancelled: app kept open.
+        """
+        if not self.close_pages_for_quit():
+            return False
         loader.close()  # must close this first
         self.save_window_state()
         self.__break_signal()
@@ -1367,24 +1588,44 @@ class AppWindow(QMainWindow):
         if tray_icon is not None:  # tray is optional (not supported on some desktops)
             tray_icon.hide()  # workaround tray icon not removed after exited
         QApplication.quit()
+        return True
 
     def closeEvent(self, event):
-        """Minimize to tray"""
+        """Minimize to tray, else quit: window kept (with tray icon & pages) if quit is cancelled"""
         if cfg.application["minimize_to_tray"]:
             event.ignore()
             self.hide()
-        else:
-            self.quit_app()
+        elif not self.quit_app():
+            event.ignore()
 
     @Slot(bool)  # type: ignore[operator]
     def reload_preset(self, check_singleton: bool):
-        """Reload current preset"""
-        # Cancel loading while any config dialog opened
-        if check_singleton and DialogSingleton.is_opened(ConfigType.CONFIG):
-            msg_text = "Cannot load preset while Config dialog is opened."
+        """Reload current preset
+
+        Open config pages of preset options (they show options of preset loaded before) are
+        closed first. Loading asked by user is cancelled while one has unsaved changes (shown
+        instead), auto-loading goes on (saving those changes then asks first).
+
+        Args:
+            check_singleton: loading asked by user (list, hotkey, menu), False for auto-loading.
+        """
+        dialogs = self.config_dialogs(preset_only=True)
+        modified = self.modified_config_dialogs(preset_only=True)
+        if check_singleton and modified:
+            view = self.centralWidget()
+            if isinstance(view, TabView):
+                view.show_dialog(modified[0])
+            title = modified[0].windowTitle().removesuffix(f" - {APP_NAME}")
+            msg_text = (
+                f"Cannot load preset while <b>{title}</b> has unsaved changes."
+                "<br><br>Save or cancel its changes first."
+            )
             QMessageBox.warning(self, tr("Error"), trm(msg_text))
             cfg.set_next_to_load("")
             return
+        for dialog in dialogs:
+            if dialog not in modified:
+                dialog.close()
         loader.reload(reload_preset=True)
         app_signal.refresh.emit(True)
 

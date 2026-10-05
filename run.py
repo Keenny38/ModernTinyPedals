@@ -57,11 +57,27 @@ def get_cli_argument() -> argparse.Namespace:
             " 1 - single instance (default);"
         ),
     )
+    parse.add_argument(
+        "--safe-mode",
+        action="store_true",
+        help=(
+            "start in safe mode: plugins not loaded, overlays not started"
+            " (restart from the app to start normally)"
+        ),
+    )
     # Deprecated, PySide6 is always used (kept for existing launcher configs)
     parse.add_argument(
         "-p",
         "--pyside",
         type=int,
+        help=argparse.SUPPRESS,
+    )
+    # Release build check (CI): run self test, write report to optional file & exit
+    parse.add_argument(
+        "--self-test",
+        nargs="?",
+        const="",
+        metavar="REPORT_FILE",
         help=argparse.SUPPRESS,
     )
     return parse.parse_args()
@@ -77,6 +93,11 @@ if __name__ == "__main__":
 
     # Load command line arguments
     cli_args = get_cli_argument()
+
+    if cli_args.self_test is not None:
+        from tinypedal.self_test import run_self_test
+
+        sys.exit(run_self_test(cli_args.self_test))
 
     # Start
     from tinypedal.main import start_app

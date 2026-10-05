@@ -25,7 +25,9 @@ TpPage {
         canvas.setView(Math.max(canvas.zoom, 4), (canvas.centerX - current.x) * scale,
                        canvas.ySign * (canvas.centerY - current.y) * scale, animated)
     }
-    function number(value, decimals) { return value === undefined ? "—" : Number(value).toFixed(decimals) }
+    // Numbers with decimal separator of app language, distances in user unit (m or ft)
+    function number(value, decimals) { return value === undefined ? "—" : Number(value).toFixed(decimals).replace(".", theme.decimalPoint) }
+    function distance(meters, decimals) { return meters === undefined ? "—" : number(meters * backend.distanceScale, decimals) + " " + backend.distanceUnit }
 
     onFollowChanged: if (follow) centerOnPosition(true); else canvas.reset(true)
     Connections {
@@ -47,6 +49,11 @@ TpPage {
         }
     }
     focus: true
+    // + / - zoom, up & down move map, Shift+left / right move map (left / right alone: position)
+    Keys.onPressed: function(event) {
+        var sideways = event.key === Qt.Key_Left || event.key === Qt.Key_Right
+        if ((!sideways || (event.modifiers & Qt.ShiftModifier)) && canvas.handleKey(event.key)) event.accepted = true
+    }
     Keys.onLeftPressed: step(-1)
     Keys.onRightPressed: step(1)
     Keys.onSpacePressed: playing = !playing
@@ -79,7 +86,7 @@ TpPage {
             }
             Repeater {
                 model: page.loaded && page.overlays.show_map_info
-                       ? [backend.length.toFixed(0) + " m", backend.nodes + " " + i18n.tr("nodes")] : []
+                       ? [page.distance(backend.length, 0), backend.nodes + " " + i18n.tr("nodes")] : []
                 Rectangle {
                     implicitHeight: theme.em * 1.8
                     implicitWidth: chipText.implicitWidth + theme.em * 1.1
@@ -137,6 +144,7 @@ TpPage {
                     anchors.margins: 1
                     flipY: false  // track map file: y down
                     maxZoom: 200
+                    feet: backend.distanceUnit === "ft"
                     minX: page.view.minX || 0
                     minY: page.view.minY || 0
                     maxX: page.view.maxX || 1
@@ -306,7 +314,7 @@ TpPage {
                             opacity: page.current.sector === index + 1 ? 1 : 0.6
                             Rectangle { width: theme.em * 0.7; height: theme.em * 0.3; radius: height / 2; color: page.view.sectorColors[index]; anchors.verticalCenter: parent.verticalCenter }
                             Text {
-                                text: "S" + (index + 1) + "  " + modelData.toFixed(0) + " m"
+                                text: "S" + (index + 1) + "  " + page.distance(modelData, 0)
                                 color: theme.text
                                 font.pointSize: theme.fontPoint * 0.85
                                 font.weight: page.current.sector === index + 1 ? Font.DemiBold : Font.Normal
@@ -329,7 +337,7 @@ TpPage {
                 InfoCard {
                     visible: page.overlays.show_position_info
                     title: i18n.tr("Position")
-                    value: page.number(page.current.distance, 1) + " m"
+                    value: page.distance(page.current.distance, 1)
                     lines: [
                         (page.current.corner ? page.current.corner + " · " : "")
                             + i18n.tr("Node") + " " + (page.current.node || "—") + " · S" + (page.current.sector || "—"),
@@ -343,8 +351,8 @@ TpPage {
                     value: page.current.radiusDesc || "—"
                     accentColor: page.current.direction > 0 ? "#38BDF8" : page.current.direction < 0 ? "#F472B6" : theme.text
                     lines: [
-                        i18n.tr("Radius") + " " + page.number(page.current.radius, 1) + " m",
-                        i18n.tr("Length") + " " + page.number(page.current.curveLength, 1) + " m (" + (page.current.lengthDesc || "") + ")",
+                        i18n.tr("Radius") + " " + page.distance(page.current.radius, 1),
+                        i18n.tr("Length") + " " + page.distance(page.current.curveLength, 1) + " (" + (page.current.lengthDesc || "") + ")",
                         i18n.tr("Angle") + " " + page.number(page.current.angle, 1) + "°",
                     ]
                 }
@@ -356,7 +364,7 @@ TpPage {
                     lines: [
                         page.current.slopeDesc || "",
                         i18n.tr("Angle") + " " + page.number(page.current.slopeAngle, 2) + "°",
-                        i18n.tr("Delta") + " " + page.number(page.current.slopeDelta, 2) + " m",
+                        i18n.tr("Delta") + " " + page.distance(page.current.slopeDelta, 2),
                     ]
                 }
                 Card {
@@ -429,8 +437,8 @@ TpPage {
                         revision: backend.revision
                         transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
                     }
-                    Text { x: 4; y: 2; text: page.number(profile.maxZ, 1) + " m"; color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
-                    Text { x: 4; anchors.bottom: parent.bottom; text: page.number(profile.minZ, 1) + " m"; color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
+                    Text { x: 4; y: 2; text: page.distance(profile.maxZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
+                    Text { x: 4; anchors.bottom: parent.bottom; text: page.distance(profile.minZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
                     Rectangle {  // position
                         x: backend.position * profile.sx
                         width: 2
@@ -464,7 +472,7 @@ TpPage {
                     }
                     TpButton { glyph: ""; flat: true; onClicked: page.step(1) }  // chevron right
                     Text {
-                        text: backend.position.toFixed(0) + " / " + backend.length.toFixed(0) + " m"
+                        text: page.number(backend.position * backend.distanceScale, 0) + " / " + page.distance(backend.length, 0)
                         color: theme.text
                         font.features: { "tnum": 1 }
                         Layout.preferredWidth: theme.em * 7

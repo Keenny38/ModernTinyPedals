@@ -39,7 +39,8 @@ class Realtime(QuadMixin, ModernOverlay):
 
     options = (
         "font_size", "show_inner_center_outer", "show_degree_sign", "leading_zero",
-        "enable_heatmap_auto_matching", "heatmap_name", "show_tyre_compound",
+        "enable_heatmap_auto_matching", "heatmap_name", "enable_heatmap_from_optimal_temperature",
+        "show_tyre_compound",
     )
     reader = "surface"
 
@@ -50,7 +51,11 @@ class Realtime(QuadMixin, ModernOverlay):
         self.sign = "°" if wcfg["show_degree_sign"] else ""
         self.leading_zero = min(max(int(wcfg.get("leading_zero", 2)), 1), 3)
         self.ico = wcfg.get("show_inner_center_outer", False)
-        self.compounds = TyreCompounds(wcfg.get("enable_heatmap_auto_matching", True), wcfg.get("heatmap_name", "tyre_default"))
+        self.compounds = TyreCompounds(
+            wcfg.get("enable_heatmap_auto_matching", True), wcfg.get("heatmap_name", "tyre_default"),
+            wcfg.get("enable_heatmap_from_optimal_temperature", False),
+        )
+        self.add_font("tiny", 0.5, "bold", caps=True)  # left & right compound badges
         self.show_compound = wcfg.get("show_tyre_compound", True)
         sample = f"888{self.sign}"
         section = Section(self.widget_name, "", sample, 3 if self.ico else 1)

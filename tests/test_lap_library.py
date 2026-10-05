@@ -140,6 +140,9 @@ def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
     library.import_logs()
+    assert not library.button_import.isEnabled()  # import running in background
+    library.check_imports(wait=True)
+    assert library.button_import.isEnabled()
     names = [item.text(library.COL_NAME) for item in library.top_items()]
     assert names == ["Monza run", "Spa race"] and warnings  # broken log reported
     monza = library.top_items()[0]
@@ -172,11 +175,13 @@ def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):
     window = QWidget()
     try:
         messages = file_drop.handle_drop(window, [str(log)])
-        assert "Shared lap" in messages[0] and "3 laps" in messages[0]
+        assert "Shared lap" in messages[0] and "Importing" in messages[0]  # read in background by viewer page
+        from tests.test_lap_viewer import wait_loaded
         from tinypedal.ui._common import BaseDialog
 
         viewer = next(dialog for dialog in window.findChildren(BaseDialog) if type(dialog).__name__ == "LapViewer")
-        assert len(viewer.backend.external) == 3  # shown in lap viewer
+        wait_loaded(viewer)
+        assert len(viewer.backend.external) == 3 and "3 laps" in viewer.backend.status  # shown in lap viewer
         assert list_imported(cfg.path.telemetry)[0][0] == "Shared lap"
         assert "Unable to import" in file_drop.handle_drop(window, [str(tmp_path / "missing.ld")])[0]
         viewer.close()

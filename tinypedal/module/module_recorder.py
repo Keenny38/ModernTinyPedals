@@ -36,8 +36,10 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable
+from array import array
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from contextlib import suppress
 from typing import NamedTuple
 
@@ -126,30 +128,49 @@ class Realtime(DataModule):
             if mcfg["enable_auto_replay_recording"] else None
         )
 
-        while not _event_wait(update_interval):
-            active = realtime_state.active
+        try:
+            while not _event_wait(update_interval):
+                active = realtime_state.active
+                if auto_replay is not None:
+                    auto_replay.update(bool(active), time.monotonic())
+                if replay.active and not record_during_replay:
+                    active = False  # replayed laps are already recorded
+                if active and record_laps:
+                    if not reset:
+                        reset = True
+                        update_interval = self.active_interval
+                    if vehicle_resets != realtime_state.resets:
+                        vehicle_resets = realtime_state.resets
+                    gen_recorder.send(vehicle_resets)
+                else:
+                    if reset:
+                        reset = False
+                        update_interval = self.idle_interval
+                        gen_recorder.send(None)  # discard incomplete lap
+        finally:
+            # Module stopped (reload, quit): save completed lap still waiting for validation
+            if reset:
+                with suppress(StopIteration):  # recorder ended by error, already logged
+                    gen_recorder.send(None)
+            if not wait_lap_saver(LAP_SAVER_TIMEOUT):
+                logger.warning("RECORDER: lap saving not finished")
             if auto_replay is not None:
-                auto_replay.update(bool(active), time.monotonic())
-            if replay.active and not record_during_replay:
-                active = False  # replayed laps are already recorded
-            if active and record_laps:
-                if not reset:
-                    reset = True
-                    update_interval = self.active_interval
-                if vehicle_resets != realtime_state.resets:
-                    vehicle_resets = realtime_state.resets
-                gen_recorder.send(vehicle_resets)
-            else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
-                    gen_recorder.send(None)  # discard incomplete lap
-
-        if auto_replay is not None:
-            auto_replay.stop()
+                auto_replay.stop()
 
 
 LAP_SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Lap saver")
+LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for laps being saved when module stops
+
+
+def wait_lap_saver(timeout: float | None = None) -> bool:
+    """Wait for laps queued for saving, returns True if all saved within timeout"""
+    try:
+        LAP_SAVER.submit(lambda: None).result(timeout)  # single worker: runs after every lap queued before
+    except FuturesTimeout:
+        return False
+    except RuntimeError:  # saver shut down (interpreter exit)
+        return True
+    return True
 
 
 def save_lap_background(pending: PendingLap, options: SaveOptions, valid: bool):
@@ -251,7 +272,72 @@ def read_sample(lap_start: float) -> tuple:
     )
 
 
-def lap_info(kind: str, rows: list) -> dict:
+def new_column(value) -> array | list:
+    """Sample column for first value: typed array for float & int, plain list otherwise"""
+    value_type = type(value)
+    try:
+        if value_type is float:
+            return array("d", (value,))
+        if value_type is int:
+            return array("q", (value,))
+    except OverflowError:
+        pass
+    return [value]
+
+
+class LapSamples:
+    """Telemetry samples of a lap, stored by column in typed arrays
+
+    Rows of float objects take about 4 times more memory (about 30 MB for a Le Mans lap).
+    Rows read back (iteration, index) hold the same values & types as appended, so CSV output is
+    unchanged: a column turns into a plain list if a value of another type shows up
+    (int 0 from invalid value check in a float column).
+    """
+
+    __slots__ = ("_columns",)
+
+    def __init__(self):
+        self._columns: list[array | list] = []
+
+    def append(self, row: Sequence) -> None:
+        """Add sample row (same length for every row)"""
+        columns = self._columns
+        if not columns:
+            self._columns = [new_column(value) for value in row]
+            return
+        if len(row) != len(columns):
+            raise ValueError(f"sample size {len(row)} != {len(columns)}")
+        for index, value in enumerate(row):
+            column = columns[index]
+            if isinstance(column, array):
+                if type(value) is (float if column.typecode == "d" else int):
+                    try:
+                        column.append(value)
+                        continue
+                    except OverflowError:
+                        pass
+                column = columns[index] = column.tolist()  # keep value types exact
+            column.append(value)
+
+    def column(self, index: int) -> Sequence:
+        """Values of column"""
+        if not self._columns:
+            return ()
+        return self._columns[index]
+
+    def __len__(self) -> int:
+        return len(self._columns[0]) if self._columns else 0
+
+    def __getitem__(self, index: int) -> tuple:
+        if not self._columns:
+            raise IndexError("no sample")
+        return tuple(column[index] for column in self._columns)
+
+    def __iter__(self) -> Iterator[tuple]:
+        return zip(*self._columns)
+
+
+def lap_info(kind: str, rows: Sequence | LapSamples) -> dict:
     """Lap info (track, vehicle, session, weather), saved as first line of lap file"""
     read = api.read
     info: dict = {"kind": kind, "app_version": VERSION}
@@ -267,6 +353,8 @@ def lap_info(kind: str, rows: list) -> dict:
             "track_temperature": round(read.session.track_temperature(), 1),
             "ambient_temperature": round(read.session.ambient_temperature(), 1),
             "wetness": round(read.session.wetness_average(), 3),
+            # Tyre compound names (per axle or wheel, as game gives): lap viewer groups stints & laps by compound
+            "compound": [str(name) for name in read.tyre.compound_name()],
             # Real time when session clock was 0: same value for every lap of a session (lap viewer groups)
             "session_start": round(lap_timestamp() - read.timing.elapsed()),
         })
@@ -339,7 +427,7 @@ def record_telemetry(
     last_elapsed = float("-inf")
     lap_complete_start = False  # whether recording started from start line
     started_in_pits = False
-    rows: list[tuple] = []
+    rows = LapSamples()
     pending: PendingLap | None = None  # completed lap waiting for validation
     options = SaveOptions(filepath, max_saved_laps, save_invalid, keep_best, compress)
 
@@ -356,7 +444,7 @@ def record_telemetry(
             last_lap_start = None
             last_elapsed = float("-inf")
             lap_complete_start = False
-            rows = []
+            rows = LapSamples()
             if reset is None:
                 continue
 
@@ -382,7 +470,7 @@ def record_telemetry(
             started_in_pits = in_pits
         elif lap_start > last_lap_start:  # crossed start line
             track_length = api.read.lap.track_length()
-            distances = [row[2] for row in rows]
+            distances = list(rows.column(2))
             first, last = lap_bounds(distances)  # without samples of previous lap distance
             max_distance = max(distances[first:last], default=0.0)
             kind = OUT_LAP_KIND if started_in_pits else IN_LAP_KIND if in_pits else LAP_KIND
@@ -399,7 +487,7 @@ def record_telemetry(
                     info=lap_info(kind, rows),
                     timestamp=timestamp(),
                 )
-            rows = []
+            rows = LapSamples()
             lap_complete_start = True
             started_in_pits = in_pits
             last_lap_start = lap_start
@@ -442,7 +530,7 @@ class PendingLap(NamedTuple):
     lap_number: int
     lap_time: float
     finish_time: float
-    rows: list
+    rows: Sequence | LapSamples
     info: dict
     timestamp: float
 
@@ -468,7 +556,7 @@ def lap_filename(lap_number: int, lap_time: float, valid: bool = True, timestamp
     return f"{date} lap{lap_number:03d} {int(minutes)}m{seconds:06.3f}s{suffix}{ext}"
 
 
-def lap_text(rows: list, info: dict | None = None) -> str:
+def lap_text(rows: Sequence | LapSamples, info: dict | None = None) -> str:
     """Lap file content"""
     buffer = io.StringIO()
     if info:
@@ -494,13 +582,32 @@ def write_gzip_file(filename: str, text: str) -> bool:
         return False
 
 
+WINDOWS_RESERVED_NAMES = frozenset((
+    "CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
+))
+
+
+def lap_folder_name(combo_name: str) -> str:
+    """Folder name of track & class laps, valid on every system ("unknown" if empty)
+
+    Windows silently drops trailing spaces & dots of a folder name, then files cannot be
+    written in it ("Track - " when class is empty).
+    """
+    name = combo_name.strip().rstrip(". ")
+    if name.endswith(" -"):  # empty class name
+        name = name[:-2].rstrip(". ")
+    if name.split(".")[0].upper() in WINDOWS_RESERVED_NAMES:
+        name = f"{name}_"
+    return name or "unknown"
+
+
 def save_lap(
-    filepath: str, combo_name: str, lap_number: int, lap_time: float, rows: list,
+    filepath: str, combo_name: str, lap_number: int, lap_time: float, rows: Sequence | LapSamples,
     max_saved_laps: int, valid: bool = True, info: dict | None = None, keep_best: int = 0,
     compress: bool = False, timestamp: float | None = None,
 ) -> bool:
     """Save lap telemetry to CSV, remove oldest files of same track over limit"""
-    folder = os.path.join(filepath, combo_name or "unknown")
+    folder = os.path.join(filepath, lap_folder_name(combo_name))
     try:
         os.makedirs(folder, exist_ok=True)
     except OSError as error:
@@ -526,23 +633,42 @@ def cache_lap(filepath: str, path: str):
         logger.debug("RECORDER: lap %s not cached: %s", path, error)
 
 
+def modified_time(path: str) -> float:
+    """File modified time, 0 if unavailable (removed meanwhile)"""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 def remove_old_laps(folder: str, max_saved_laps: int, keep_best: int = 0):
-    """Remove oldest recorded laps over limit (per track & class folder), fastest valid laps & kept laps are kept"""
+    """Remove oldest recorded laps over limit (per track & class folder), fastest valid laps & kept laps are kept
+
+    A lap that cannot be removed (open in lap viewer) is skipped, next oldest one is removed instead.
+    """
     try:
         laps = lap_files(folder)
         if len(laps) <= max_saved_laps:
             return
         kept = kept_laps(folder)  # kept by user in lap viewer
-        protected = {lap.path for lap in best_laps(laps, keep_best)} | {lap.path for lap in laps if lap.filename in kept}
-        laps.sort(key=lambda lap: os.path.getmtime(lap.path))
-        excess = len(laps) - max_saved_laps
-        for lap in laps:
-            if excess <= 0:
-                break
-            if lap.path in protected:
-                continue
-            os.remove(lap.path)
-            remove_cached_lap(os.path.dirname(folder), lap.path)
-            excess -= 1
     except OSError as error:
         logger.error("RECORDER: unable to remove old laps: %s", error)
+        return
+    protected = {lap.path for lap in best_laps(laps, keep_best)} | {lap.path for lap in laps if lap.filename in kept}
+    laps.sort(key=lambda lap: modified_time(lap.path))
+    excess = len(laps) - max_saved_laps
+    for lap in laps:
+        if excess <= 0:
+            break
+        if lap.path in protected:
+            continue
+        try:
+            os.remove(lap.path)
+        except FileNotFoundError:  # removed meanwhile
+            excess -= 1
+            continue
+        except OSError as error:
+            logger.error("RECORDER: unable to remove old lap: %s", error)
+            continue
+        remove_cached_lap(os.path.dirname(folder), lap.path)
+        excess -= 1

@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Track selector: selected track, popup with search field (part of name) & tracks with last driven date,
-// All Tracks first. Up / Down move in list, Enter selects, Escape closes.
+// Track selector shown as page title: selected track, popup with search field (part of name) & tracks with
+// last driven date, All Tracks first. Up / Down move in list, Enter selects, Escape closes; openSearch() opens it.
 AbstractButton {
     id: picker
 
@@ -22,34 +22,49 @@ AbstractButton {
         popup.close()
         if (entry) backend.selectTrack(entry.key)
     }
+    function openSearch() {
+        if (!popup.visible) popup.open()
+    }
 
-    implicitHeight: Math.round(theme.em * 2.3)
+    implicitHeight: Math.round(theme.em * 2.6)
+    implicitWidth: contentItem.implicitWidth
     hoverEnabled: true
     focusPolicy: Qt.NoFocus
     onClicked: popup.visible ? popup.close() : popup.open()
+    Accessible.name: i18n.tr("Track") + ": " + backend.currentLabel
 
     background: Rectangle {
-        radius: theme.em * 0.55
-        color: picker.hovered ? theme.hover : theme.raised
-        border.width: 1
-        border.color: popup.visible ? theme.accent : theme.border
+        radius: theme.em * 0.6
+        color: picker.down || popup.visible ? theme.hover
+             : picker.hovered ? Qt.rgba(theme.hover.r, theme.hover.g, theme.hover.b, 0.7) : "transparent"
+        border.width: popup.visible ? 1 : 0
+        border.color: theme.accent
         Behavior on color { ColorAnimation { duration: 120 } }
     }
     contentItem: RowLayout {
         spacing: theme.em * 0.5
-        Icon { glyph: ""; color: theme.accent; Layout.leftMargin: theme.em * 0.6 }  // map pin
+        Icon {  // globe (All Tracks), map pin
+            glyph: backend.allTracks ? "" : ""
+            color: theme.accent
+            size: theme.em * 1.25
+            Layout.leftMargin: theme.em * 0.5
+        }
         Text {
             text: backend.currentLabel
             color: theme.text
+            font.pointSize: theme.fontPoint * 1.4
             font.weight: Font.DemiBold
             elide: Text.ElideRight
             Layout.fillWidth: true
+            Layout.maximumWidth: implicitWidth
         }
         Icon {
             glyph: ""  // chevron down
-            size: theme.em * 0.75
-            color: theme.dimText
-            Layout.rightMargin: theme.em * 0.6
+            size: theme.em * 0.8
+            color: picker.hovered || popup.visible ? theme.text : theme.dimText
+            rotation: popup.visible ? 180 : 0
+            Layout.rightMargin: theme.em * 0.5
+            Behavior on rotation { NumberAnimation { duration: 160 } }
         }
     }
 

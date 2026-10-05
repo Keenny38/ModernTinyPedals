@@ -30,26 +30,33 @@ import psutil
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
-from .base import ModernOverlay
+from ..system_performance import AppMemory
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
 
-    options = ("font_size", "layout", "average_samples", "show_system_performance", "show_tinypedal_performance")
+    options = (
+        "font_size", "layout", "average_samples", "show_system_performance", "show_tinypedal_performance",
+        *display_order_options("system_performance"),
+    )
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
         self.ema = calc.ema_filter(wcfg["average_samples"])
         self.app_info = psutil.Process(os.getpid())
+        self.app_memory = AppMemory(self.app_info)
         self.cpu_count = os.cpu_count() or 1
         stats = []
         if wcfg["show_system_performance"]:
-            stats.append(Stat("system", "System", "88.88%", sub_sample="88.8GB"))
+            stats.append(Stat("system", "System", "888.88%", sub_sample="888.8GB"))
         if wcfg["show_tinypedal_performance"]:
-            stats.append(Stat("app", "App", "88.88%", sub_sample="888.8MB"))
+            stats.append(Stat("app", "App", "888.88%", sub_sample="8888.8MB"))
+        stats = self.display_ordered(stats, names={"app": "tinypedal"})
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0, show_sub=True)
         self.set_size(width, height)
@@ -70,6 +77,6 @@ class Realtime(StatsMixin, ModernOverlay):
                 memory = f"{psutil.virtual_memory().used / 1024 ** 3:.1f}GB"
             else:
                 self.cpu[key] = self.ema(self.cpu[key], self.app_info.cpu_percent() / self.cpu_count)
-                memory = f"{self.app_info.memory_full_info().uss / 1024 ** 2:.1f}MB"
-            values.append(Value(f"{self.cpu[key]:.2f}%", bar=min(self.cpu[key] / 100, 1.0), sub=memory))
+                memory = f"{self.app_memory.megabytes():.1f}MB"
+            values.append(Value(f"{self.cpu[key]:.2f}%", bar=fraction(self.cpu[key] / 100), sub=memory))
         self.refresh(tuple(values))

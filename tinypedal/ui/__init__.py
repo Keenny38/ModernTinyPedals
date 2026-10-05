@@ -23,14 +23,174 @@ Application UI, style
 import re
 import sys
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetrics, QGuiApplication, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
+from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle, QWidget
 
 from ..const_app import PLATFORM
 from ..const_file import ImageFile
 
 WINDOWS_THEME_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+# Status colors (no QPalette role for them), per window color theme.
+# Text colors keep at least 4.5:1 contrast on window & base background of their theme,
+# badge colors are backgrounds under badge_text.
+STATUS_COLORS = {
+    "Dark": {
+        "success": "#3DDC84",
+        "success_border": "#2E7D52",
+        "inactive": "#808080",
+        "danger": "#FF7B72",
+        "warning": "#E3B341",
+        "info": "#58A6FF",
+        "badge_success": "#238636",
+        "badge_danger": "#C93C37",
+        "badge_warning": "#8A5D00",
+        "badge_neutral": "#5E6670",
+        "badge_text": "#FFFFFF",
+    },
+    "Light": {
+        "success": "#16702F",
+        "success_border": "#16702F",
+        "inactive": "#6E7781",
+        "danger": "#B42318",
+        "warning": "#8A5A00",
+        "info": "#0B5CBF",
+        "badge_success": "#1A7F37",
+        "badge_danger": "#CF222E",
+        "badge_warning": "#8A5A00",
+        "badge_neutral": "#5E6670",
+        "badge_text": "#FFFFFF",
+    },
+}
+
+
+def palette_theme(palette: QPalette | None = None) -> str:
+    """Window color theme of palette (app palette if not set): "Dark" or "Light" """
+    if palette is None:
+        palette = QApplication.palette()
+    window = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Window)
+    return "Dark" if window.lightness() < 128 else "Light"
+
+
+def status_color(name: str, palette: QPalette | None = None) -> str:
+    """Status color (see STATUS_COLORS) matching window color theme in use"""
+    return STATUS_COLORS[palette_theme(palette)][name]
+
+
+def has_keyboard_focus(widget: QWidget) -> bool:
+    """Widget has focus reached by keyboard (Tab, shortcut), not by mouse click"""
+    window = widget.window()
+    return widget.hasFocus() and window is not None and window.testAttribute(
+        Qt.WidgetAttribute.WA_KeyboardFocusChange)
+
+
+def draw_focus_ring(painter: QPainter, widget: QWidget, area: QRectF, radius: float):
+    """Accent outline around custom drawn button reached by keyboard"""
+    if not has_keyboard_focus(widget):
+        return
+    pen = QPen(widget.palette().color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight))
+    pen.setWidthF(max(UIScaler.pixel(2), 2))
+    painter.save()
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(area.adjusted(1, 1, -1, -1), radius, radius)
+    painter.restore()
+
+
+# Message box icons drawn in window color theme (native ones clash with app theme)
+MESSAGE_ICON_KINDS = {
+    QStyle.StandardPixmap.SP_MessageBoxInformation: "information",
+    QStyle.StandardPixmap.SP_MessageBoxWarning: "warning",
+    QStyle.StandardPixmap.SP_MessageBoxCritical: "critical",
+    QStyle.StandardPixmap.SP_MessageBoxQuestion: "question",
+}
+MESSAGE_ICON_SIZE = 128  # pixels, scaled down by message box
+
+
+def message_icon_color(kind: str, palette: QPalette | None = None) -> QColor:
+    """Fill color of message box icon"""
+    if kind == "warning":
+        return QColor(status_color("badge_warning", palette))
+    if kind == "critical":
+        return QColor(status_color("badge_danger", palette))
+    if palette is None:
+        palette = QApplication.palette()
+    return palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
+
+
+def message_icon(kind: str, palette: QPalette | None = None) -> QIcon:
+    """Message box icon: filled circle (triangle for warning) with glyph, in window color theme"""
+    size = MESSAGE_ICON_SIZE
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(message_icon_color(kind, palette))
+    margin = size * 0.06
+    if kind == "warning":
+        top, bottom = size * 0.1, size * 0.9
+        painter.drawPolygon(QPolygonF((
+            QPointF(size / 2, top), QPointF(size - margin, bottom), QPointF(margin, bottom))))
+        glyph_area = QRectF(0, size * 0.32, size, size * 0.56)
+    else:
+        painter.drawEllipse(QRectF(margin, margin, size - margin * 2, size - margin * 2))
+        glyph_area = QRectF(0, 0, size, size)
+    glyph_color = QColor(status_color("badge_text", palette))
+    if kind == "critical":  # cross
+        pen = QPen(glyph_color)
+        pen.setWidthF(size * 0.1)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        low, high = size * 0.34, size * 0.66
+        painter.drawLine(QPointF(low, low), QPointF(high, high))
+        painter.drawLine(QPointF(high, low), QPointF(low, high))
+    else:
+        font = QFont(QApplication.font())
+        font.setBold(True)
+        font.setPixelSize(round(glyph_area.height() * (0.75 if kind == "warning" else 0.6)))
+        painter.setFont(font)
+        painter.setPen(glyph_color)
+        glyph = {"information": "i", "question": "?"}.get(kind, "!")
+        painter.drawText(glyph_area, Qt.AlignmentFlag.AlignCenter, glyph)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class MessageIconStyle(QProxyStyle):
+    """App style with message box icons drawn in window color theme"""
+
+    def standardIcon(self, standard_icon, option=None, widget=None):
+        kind = MESSAGE_ICON_KINDS.get(standard_icon)
+        if kind is not None:
+            return message_icon(kind)
+        return super().standardIcon(standard_icon, option, widget)
+
+
+_message_icon_style: list[MessageIconStyle] = []  # installed style, reference kept
+
+
+def install_message_icons() -> bool:
+    """Wrap app style (Fusion) to draw message box icons, once, True if installed now"""
+    app = QApplication.instance()
+    if not isinstance(app, QApplication) or _message_icon_style:
+        return False
+    style = MessageIconStyle(app.style().name())
+    _message_icon_style.append(style)
+    QApplication.setStyle(style)
+    return True
 
 
 class UIScaler:
@@ -194,6 +354,10 @@ def set_style_window(base_font_pt: int) -> str:
     color_disabled_window_text = palette.windowText().color().name()
     color_disabled_highlighted_text = palette.highlightedText().color().name()
     color_disabled_highlight = palette.highlight().color().name()
+
+    color_success = status_color("success", palette)
+    color_success_border = status_color("success_border", palette)
+    color_danger = status_color("danger", palette)
 
     # Strip off indentation & comment
     return re.sub(r"\s{4,}|\/\*.*\/", "", f"""
@@ -475,16 +639,84 @@ def set_style_window(base_font_pt: int) -> str:
             border: 1px solid {color_active_midlight};
             border-radius: {border_radius_card}px;
         }}
+        #homeCard[clickable="true"]:hover {{
+            border-color: {color_active_highlight};
+        }}
+        #homeCard[clickable="true"]:focus {{
+            border: 2px solid {color_active_highlight};
+        }}
+        #homeCardTitle, #homeDetail, #homeSubtitle {{
+            color: {color_disabled_window_text};
+        }}
+        #homeGlyph {{
+            color: {color_active_highlight};
+        }}
         #homeValue {{
             font-size: {font_pt_app_name}pt;
         }}
         #homeHeader {{
             font-size: {font_pt_app_name}pt;
         }}
-        #previewPopup {{
-            background: {color_active_window};
-            border: 1px solid {color_active_mid};
+        #homeHero {{
+            background: {color_active_base};
+            border: 1px solid {color_active_midlight};
+            border-left: 3px solid {color_active_highlight};
             border-radius: {border_radius_card}px;
+        }}
+        #homeChip {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-radius: 0.6em;
+            padding: 0.1em 0.6em;
+            font-weight: bold;
+        }}
+        #homeSectionTitle {{
+            font-size: {font_pt_item_button}pt;
+            font-weight: bold;
+        }}
+        #pickerCard {{
+            background: {color_active_base};
+            border: 1px solid {color_active_midlight};
+            border-radius: {border_radius_card}px;
+        }}
+        #pickerTitle {{
+            font-size: {font_pt_item_button}pt;
+            font-weight: bold;
+        }}
+        #pickerList {{
+            background: transparent;
+            border: none;
+            outline: none;
+        }}
+        #pickerEmpty, #pickerHelp {{
+            color: {color_disabled_window_text};
+        }}
+        #pickerEmpty {{
+            padding: 1.5em 0.5em;
+        }}
+        #editorPrimary {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-color: {color_active_highlight};
+            font-weight: bold;
+        }}
+        #homeLink {{
+            border: 1px solid transparent;
+            background: transparent;
+            color: {color_active_highlight};
+            padding: 0.1em 0.4em;
+        }}
+        #homeLink:hover {{
+            text-decoration: underline;
+        }}
+        #homeLink:focus {{
+            border-color: {color_active_highlight};
+        }}
+        #homePrimary {{
+            color: {color_active_highlighted_text};
+            background: {color_active_highlight};
+            border-color: {color_active_highlight};
+            font-weight: bold;
         }}
         #toast {{
             color: {color_active_window_text};
@@ -516,8 +748,8 @@ def set_style_window(base_font_pt: int) -> str:
             background: transparent;
         }}
         AppWindow QStatusBar > #pillApi[running="true"] {{
-            color: #3DDC84;
-            border-color: #2E7D52;
+            color: {color_success};
+            border-color: {color_success_border};
         }}
         AppWindow QStatusBar > QPushButton::menu-indicator {{
             image: none;
@@ -598,6 +830,16 @@ def set_style_window(base_font_pt: int) -> str:
         ModuleList > QListView::item:hover {{
             background: {color_active_midlight};
         }}
+        ModuleList > QListView:focus {{
+            border-color: {color_active_highlight};
+        }}
+        ModuleList > QListView::item:focus {{
+            background: {color_active_midlight};
+            border: 1px solid {color_active_highlight};
+        }}
+        ModuleList #filterChip:focus {{
+            border-color: {color_active_highlight};
+        }}
         ModuleControlItem #buttonConfig {{
             font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif;
             font-size: {font_pt_item_name}pt;
@@ -614,7 +856,8 @@ def set_style_window(base_font_pt: int) -> str:
 
         /* Preset list (tab) */
         PresetList > QListView,
-        RestoreBackup > QListView {{
+        RestoreBackup > QListView,
+        PresetTrash > QListView {{
             font-size: {font_pt_item_name}pt;
             outline: none;
             border: 1px solid {color_active_mid};
@@ -623,15 +866,20 @@ def set_style_window(base_font_pt: int) -> str:
             padding: 0.2em;
         }}
         PresetList > QListView::item,
-        RestoreBackup > QListView::item {{
+        RestoreBackup > QListView::item,
+        PresetTrash > QListView::item {{
             border: none;
             min-height: 1.25em;
             padding: 0.25em 0.25em 0.25em 0;
         }}
         PresetList > QListView::item:selected,
-        RestoreBackup > QListView::item:selected {{
+        RestoreBackup > QListView::item:selected,
+        PresetTrash > QListView::item:selected {{
             selection-color: {color_active_highlighted_text};
             background: {color_active_highlight};
+        }}
+        PresetTrash > QListView:focus {{
+            border: 2px solid {color_active_highlight};
         }}
         PresetTagItem QLabel {{
             font-size: {font_pt_item_button}pt;
@@ -769,67 +1017,23 @@ def set_style_window(base_font_pt: int) -> str:
             border: none;
         }}
 
-        /* Race calculator (fuel & tyres): cards, key figure tiles, results */
-        RaceCalculator #fuelCard,
-        RaceCalculator #fuelTile,
+        /* Driver stats viewer: cards & key figure tiles */
         DriverStatsViewer #fuelCard,
         DriverStatsViewer #fuelTile {{
             background: {color_active_base};
             border: 1px solid {color_active_midlight};
             border-radius: {border_radius_card}px;
         }}
-        RaceCalculator #fuelCardTitle,
         DriverStatsViewer #fuelCardTitle {{
             font-size: {font_pt_item_button}pt;
             font-weight: bold;
         }}
-        RaceCalculator #fuelTileValue,
         DriverStatsViewer #fuelTileValue {{
             font-size: {font_pt_app_name}pt;
             font-weight: bold;
         }}
-        RaceCalculator #fuelValue {{
-            font-weight: bold;
-        }}
-        RaceCalculator #fuelSource {{
-            font-size: {font_pt_item_button}pt;
-        }}
-        RaceCalculator QLabel[warning="true"] {{
-            color: #FF4400;
-        }}
-        RaceCalculator QAbstractSpinBox {{
-            border: 1px solid {color_active_mid};
-            border-radius: {border_radius_input}px;
-            padding: 0.15em 0.35em;
-            background: {color_active_window};
-        }}
-        RaceCalculator QAbstractSpinBox:focus {{
-            border-color: {color_active_highlight};
-        }}
-        RaceCalculator QAbstractSpinBox:disabled {{
-            color: {color_disabled_window_text};
-        }}
-        RaceCalculator #fuelSegment {{
-            border-radius: 0;
-            padding: 0.25em 0.6em;
-        }}
-        RaceCalculator #fuelSegment:first {{
-            border-top-left-radius: {border_radius_input}px;
-            border-bottom-left-radius: {border_radius_input}px;
-        }}
-        RaceCalculator #fuelSegment:last {{
-            border-top-right-radius: {border_radius_input}px;
-            border-bottom-right-radius: {border_radius_input}px;
-        }}
-        RaceCalculator PitStopPreview {{
-            font-size: {font_pt_text_browser}pt;
-        }}
-        RaceCalculator QTableWidget {{
-            background: {color_active_base};
-            alternate-background-color: {color_active_window};
-        }}
 
-        /* Driver stats viewer: table & level marks (cards & tiles shared with race calculator) */
+        /* Driver stats viewer: table & level marks */
         DriverStatsViewer QTableWidget {{
             background: {color_active_base};
             alternate-background-color: {color_active_window};
@@ -891,6 +1095,11 @@ def set_style_window(base_font_pt: int) -> str:
             border-color: {color_active_highlight};
             font-weight: bold;
         }}
+        ReleaseNotesDialog #notesPrimary:disabled {{
+            color: {color_disabled_window_text};
+            background: {color_active_window};
+            border-color: {color_active_mid};
+        }}
 
         /* About dialog */
         About QLabel {{
@@ -920,6 +1129,17 @@ def set_style_window(base_font_pt: int) -> str:
             color: {color_active_window_text};
             background: {color_disabled_highlight};
             padding: 0.2em 0;
+        }}
+        UserConfig QLineEdit[invalid="true"] {{
+            border-color: {color_danger};
+        }}
+        UserConfig QLineEdit[invalid="true"]:focus {{
+            border: 2px solid {color_danger};
+        }}
+        UserConfig #optionError,
+        UserConfig #optionInvalidStatus {{
+            color: {color_danger};
+            font-weight: bold;
         }}
 
         /* Display order dialog */

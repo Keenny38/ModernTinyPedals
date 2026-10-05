@@ -22,12 +22,11 @@ Overlay Control
 
 import logging
 import threading
-from time import sleep
 
 from . import app_signal, overlay_signal, realtime_state
 from .api_control import api
 from .setting import cfg
-from .thread_guard import run_supervised
+from .thread_guard import run_supervised, wait_stopped
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +89,9 @@ class OverlayControl:
             logger.info("ENABLED: overlay control")
 
     def disable(self):
-        """Disable overlay control"""
+        """Disable overlay control, wait (bounded) until stopped"""
         self._event.set()
-        while not self._stopped:
-            sleep(0.01)
+        wait_stopped(lambda: self._stopped, "overlay control")
 
     def __updating(self):
         """Run update loop, always mark stopped (disable() waits for it)"""

@@ -412,18 +412,117 @@ def test_consumption_target_to_stop():
     assert target_to_stop(setup, 30.0, 9) == pytest.approx((30 - 3) / 9)
 
 
+def session_id(now: float, laps: int = 0, start: float = 0.0, stamp: int = 360004) -> tuple[int, int, int]:
+    """Session identifier as the game gives it: stamp, whole elapsed seconds (changes every second), laps"""
+    return stamp, int(now - start), laps
+
+
 def test_stop_counter():
     from tinypedal.race_live import StopCounter
 
     counter = StopCounter()
-    session = (1, 1, 1)
-    assert counter.update(session, False, 50, 40, 0, 90, 0, now=0) == 0
+    assert counter.update(session_id(0), False, 50, 40, 0, 90, 0, now=0) == 0
     # Drive-through counted by the game: not a stop
-    counter.update(session, True, 16, 40, 0, 90, 1, now=1)
-    assert counter.update(session, False, 50, 40, 0, 90, 1, now=2) == 0
+    counter.update(session_id(1), True, 16, 40, 0, 90, 1, now=1)
+    assert counter.update(session_id(2), False, 50, 40, 0, 90, 1, now=2) == 0
     # Real stop, game counts at exit
-    counter.update(session, True, 0.1, 30, 0, 90, 1, now=10)
-    counter.update(session, True, 0.1, 60, 0, 100, 1, now=30)
-    assert counter.update(session, False, 50, 60, 0, 100, 2, now=40) == 1
-    # Stop not seen (page hidden): game count trusted
-    assert counter.update(session, False, 50, 60, 0, 100, 3, now=500) == 2
+    counter.update(session_id(10, 5), True, 0.1, 30, 0, 90, 1, now=10)
+    counter.update(session_id(30, 5), True, 0.1, 60, 0, 100, 1, now=30)
+    assert counter.update(session_id(40, 5), False, 50, 60, 0, 100, 2, now=40, laps=5.05, clock=38.0) == 1
+    assert (counter.last_stop_lap, counter.last_stop_clock) == (5, 38.0)
+    # Stop not seen (page hidden): game count trusted, its lap unknown
+    assert counter.update(session_id(500, 9), False, 50, 60, 0, 100, 3, now=500) == 2
+    assert counter.last_stop_lap == -1
+
+
+def test_stop_counter_serviced_stop_not_counted_by_game():
+    from tinypedal.race_live import StopCounter
+
+    counter = StopCounter()
+    counter.update(session_id(100), False, 50, 40, 0, 90, 0, now=100)
+    for now in range(101, 120):  # standing in pit box, refuelled: game never counts it
+        counter.update(session_id(now), True, 0.0, 40 + now - 100, 0, 90, 0, now=now)
+    assert counter.update(session_id(121), False, 50, 60, 0, 90, 0, now=121, laps=7.98, clock=121) == 1
+    assert counter.last_stop_lap == 8
+
+
+def test_stop_counter_new_session():
+    from tinypedal.race_live import StopCounter
+
+    counter = StopCounter()
+    counter.update(session_id(600, 10), False, 50, 40, 0, 90, 2, now=600)
+    assert counter.update(session_id(601, 10), False, 50, 40, 0, 90, 2, now=601) == 2  # game count kept
+    # Restart (same length & type): elapsed time back to start
+    assert counter.update(session_id(610, 0, start=609), False, 50, 40, 0, 90, 0, now=610) == 0
+    # Restart not seen until later (page hidden): elapsed time & laps already above last ones
+    counter = StopCounter()
+    counter.update(session_id(600, 10), False, 50, 40, 0, 90, 2, now=600)
+    assert counter.update(session_id(2000, 12, start=1300), False, 50, 40, 0, 90, 1, now=2000) == 1
+
+
+def test_rival_tracker_keeps_stop_on_driver_swap(monkeypatch):
+    from types import SimpleNamespace
+
+    from tinypedal import race_live
+
+    cars = {"driver": ["A1", "B1"], "stops": [0, 0], "laps": [10, 10], "elapsed": 600}
+    read = SimpleNamespace(
+        session=SimpleNamespace(identifier=lambda: (360004, cars["elapsed"], 10)),
+        vehicle=SimpleNamespace(
+            player_index=lambda: 0, total_vehicles=lambda: 2, same_class=lambda index: True,
+            slot_id=lambda index: 100 + index, driver_name=lambda index: cars["driver"][index],
+            number_pitstops=lambda index: cars["stops"][index], place=lambda index: index + 1,
+            in_pits=lambda index: False),
+        lap=SimpleNamespace(completed_laps=lambda index: cars["laps"][index]),
+    )
+    monkeypatch.setattr(race_live.api, "read", read)
+    tracker = race_live.RivalTracker()
+    tracker.update(now=600)
+    # Car 2 stops with driver swap, while id of session changes every second
+    cars.update(driver=["A1", "B2"], stops=[0, 1], laps=[12, 12], elapsed=700)
+    rivals = tracker.update(now=700)
+    assert (rivals[1].driver, rivals[1].stops, rivals[1].last_stop_lap) == ("B2", 1, 12)
+    cars.update(laps=[13, 13], elapsed=790)
+    assert tracker.update(now=790)[1].last_stop_lap == 12  # kept: same session
+
+
+def test_rest_of_race_counts_stint_from_real_stop():
+    from tinypedal.fuel_strategy import RaceState, remaining_input
+
+    # 60 min stint limit: plan stops at lap 36, car pits at lap 20
+    setup = StrategyInput(laptime=100, race_laps=100, tank_capacity=200, fuel_per_lap=2.0, max_stint_minutes=60)
+    base = plan(setup)
+    assert base.stops[0].lap == 36
+    state = RaceState(30, 0.0, 3000, 0, 100.0, 0, 0, 1, last_stop_lap=20, last_stop_clock=2050)
+    rest = remaining_input(setup, base, state)
+    assert rest.stint_seconds_done == pytest.approx(950)  # since leaving the pits, not since lap 36
+    assert plan(rest).stops[0].lap <= 20 + 37  # 60 min from real stop
+    # Stop lap only (no clock): laps since real stop
+    rest = remaining_input(setup, base, state._replace(last_stop_clock=-1.0))
+    assert rest.stint_seconds_done == pytest.approx(10 * 100)
+    # Stop not seen: planned stop used
+    rest = remaining_input(setup, base, state._replace(last_stop_lap=-1, last_stop_clock=-1.0))
+    assert rest.stint_seconds_done == 0
+
+
+def test_leader_extra_lap_not_added_again_after_timer():
+    from tinypedal.fuel_strategy import RaceState, remaining_input
+
+    setup = StrategyInput(laptime=100, race_minutes=60, tank_capacity=100, fuel_per_lap=3.0, extra_laps=1)
+    base = plan(setup)
+    # Timer ended during lap in progress: one more lap after it
+    state = RaceState(35, 0.5, 3620, -20, 10.0, 0, 0, 0)
+    assert remaining_input(setup, base, state).extra_laps == 1
+    # Timer ended before lap in progress (extra lap under way): last lap
+    state = RaceState(36, 0.5, 3700, -100, 10.0, 0, 0, 0)
+    rest = remaining_input(setup, base, state)
+    assert rest.extra_laps == 0 and plan(rest).race_laps == 1
+
+
+def test_start_fuel_above_tank_capacity():
+    strategy = plan(StrategyInput(laptime=90, race_laps=40, tank_capacity=45, fuel_per_lap=3.0, fuel_start=53))
+    assert all(stop.fuel >= 0 for stop in strategy.stops)
+    assert strategy.stops[0].lap == 15  # full tank, not more
+    early = plan(StrategyInput(laptime=90, race_laps=40, tank_capacity=45, fuel_per_lap=3.0, fuel_start=53,
+                               sc_lap=2, sc_laps=2, sc_pit=True))
+    assert early.stops[0].lap == 2 and early.stops[0].fuel >= 0  # stop under safety car, never "-8.0 L"

@@ -26,9 +26,8 @@ import logging
 
 from ..process.garage import export_rf2_car_setup
 from ..process.weather import FORECAST_DEFAULT, forecast_rf2
-from ..validator import valid_value_type
 from .lmu_restapi import RestAPIData as RestAPIData
-from .restapi_connector import ResOutput, RestAPITask
+from .restapi_connector import ResOutput, RestAPITask, valid_json_value
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +41,10 @@ def rf2_restapi_tasks() -> tuple[RestAPITask, ...]:
         ResOutput("forecastRace", FORECAST_DEFAULT, forecast_rf2, ("RACE",)),
     )
     res_timescale = (
-        ResOutput("timeScale", 1, valid_value_type, ("currentValue",)),
+        ResOutput("timeScale", 1, valid_json_value, ("currentValue",)),
     )
     res_privatequalify = (
-        ResOutput("privateQualifying", 0, valid_value_type, ("currentValue",)),
+        ResOutput("privateQualifying", 0, valid_json_value, ("currentValue",)),
     )
     res_garagesetup = (
         ResOutput("lastCarSetup", (), export_rf2_car_setup),

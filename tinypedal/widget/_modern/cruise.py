@@ -31,7 +31,7 @@ from ... import units
 from ...api_control import api
 from ...const_common import COMPASS_BEARINGS
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 
@@ -41,6 +41,7 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "show_compass", "show_elevation", "show_odometer", "odometer_maximum_digits",
         "show_distance_into_lap",
+        *display_order_options("cruise"),
     )
 
     def __init__(self, config, widget_name):
@@ -54,13 +55,15 @@ class Realtime(StatsMixin, ModernOverlay):
         digits = min(max(int(wcfg["odometer_maximum_digits"]), 1), 12)
         self.odm_decimals = 0 if self.symbol_odm == "m" else 1
         self.odm_range = int(digits * "9")
+        odometer = "8" * digits + (f".{'8' * self.odm_decimals}" if self.odm_decimals else "")
         items = (
             ("compass", "Heading", "888° NW"),
             ("elevation", "Elevation", f"8888{self.symbol_dist}"),
-            ("odometer", "Odometer", "8" * digits + self.symbol_odm),
+            ("odometer", "Odometer", odometer + self.symbol_odm),
             ("distance_into_lap", "Lap dist.", f"88888{self.symbol_dist}"),
         )
         stats = [Stat(key, label, sample) for key, label, sample in items if wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)

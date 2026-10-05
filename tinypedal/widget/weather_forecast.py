@@ -34,6 +34,7 @@ from ..const_common import (
     TEXT_NA,
 )
 from ..const_file import ImageFile
+from ..i18n import tr_overlay
 from ..process.weather import WeatherNode
 from ..userfile.custom_image import split_pixmap_image
 from ._base import Overlay
@@ -84,7 +85,7 @@ class Realtime(Overlay):
                 bg_color=self.wcfg["background_color_estimated_time"],
                 count=self.total_slot,
             )
-            self.bars_time[0].text = "now"
+            self.bars_time[0].text = tr_overlay("now")
             self.set_grid_layout_table_row(
                 layout=layout,
                 targets=self.bars_time,

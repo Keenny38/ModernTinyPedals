@@ -28,8 +28,10 @@ from __future__ import annotations
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
+from ...i18n import tr_overlay
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .quad import QuadMixin, Section, Tile
 
 SECTIONS = (
@@ -52,17 +54,16 @@ class Realtime(QuadMixin, ModernOverlay):
     options = (
         "font_size", "layout", "show_thickness", "warning_threshold_remaining", "warning_threshold_wear",
         "warning_threshold_laps", "warning_threshold_minutes", *(f"show_{key}" for key, _, _ in SECTIONS),
+        *display_order_options("brake_wear"),
     )
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         wcfg = self.wcfg
         self.threshold_remaining = min(max(wcfg["warning_threshold_remaining"], 0), 100) * 0.01
-        self.keys = tuple(key for key, _, _ in SECTIONS if wcfg[f"show_{key}"])
-        sections = [
-            Section(key, label, "88.8", min_width=3.2 if gauge else 0.0)
-            for key, label, gauge in SECTIONS if key in self.keys
-        ]
+        self.keys = tuple(self.display_ordered([key for key, _, _ in SECTIONS if wcfg[f"show_{key}"]], key=str))
+        items = {key: (label, gauge) for key, label, gauge in SECTIONS}
+        sections = [Section(key, items[key][0], "88.8", min_width=3.2 if items[key][1] else 0.0) for key in self.keys]
         self.set_size(*self.build_quads(sections, horizontal=wcfg["layout"] != 0))
 
     def paint_static(self, painter: QPainter):
@@ -83,7 +84,7 @@ class Realtime(QuadMixin, ModernOverlay):
             failed = current <= 0
             failure = wheels.failureBrakeThickness[index]
             max_thickness = wheels.maxBrakeThickness[index] - failure
-            current -= failure
+            current = max(current - failure, 0.0)  # worn past failure thickness: no lifespan left
             live = wheels.currentlapBrakeWear[index]
             wear = wheels.estimatedBrakeWear[index]
             valid_wear = wheels.estimatedValidBrakeWear[index]
@@ -99,8 +100,9 @@ class Realtime(QuadMixin, ModernOverlay):
                     warn = remaining_percent <= self.threshold_remaining * 100
                     color = theme.negative if warn or failed else theme.positive
                     values[key].append(Tile(
-                        ("FAIL" if failed else number(current),), colors=(theme.negative if warn or failed else theme.text,),
-                        level=min(max(remaining_percent / 100, 0.0), 1.0), level_color=theme.tint(color, 110)))
+                        (tr_overlay("FAIL") if failed else number(current),),
+                        colors=(theme.negative if warn or failed else theme.text,),
+                        level=fraction(remaining_percent / 100), level_color=theme.tint(color, 110)))
                 elif key == "wear_difference":
                     values[key].append(self.plain(wear, wear_percent > wcfg["warning_threshold_wear"]))
                 elif key == "live_wear_difference":

@@ -133,7 +133,7 @@ class OverlayMenu(QMenu):
         self.addSeparator()
 
         # Reset submenu
-        menu_reset_data = ResetDataMenu("Reset Data", parent)
+        menu_reset_data = ResetDataMenu(tr("Reset Data"), parent)
         self.addMenu(menu_reset_data)
         self.addSeparator()
 
@@ -227,7 +227,7 @@ class ResetDataMenu(QMenu):
             filepath=cfg.path.energy_delta,
             filename=api.read.session.combo_name(),
         ):
-            mctrl.reload("module_fuel")
+            mctrl.reload("module_fuel", discard=True)  # stopping module must not save the deleted data back
 
     def reset_fueldelta(self):
         """Reset fuel delta data"""
@@ -237,7 +237,7 @@ class ResetDataMenu(QMenu):
             filepath=cfg.path.fuel_delta,
             filename=api.read.session.combo_name(),
         ):
-            mctrl.reload("module_fuel")
+            mctrl.reload("module_fuel", discard=True)  # stopping module must not save the deleted data back
 
     def reset_consumption(self):
         """Reset consumption history data"""
@@ -247,7 +247,7 @@ class ResetDataMenu(QMenu):
             filepath=cfg.path.fuel_delta,
             filename=api.read.session.combo_name(),
         ):
-            mctrl.reload("module_stint")
+            mctrl.reload("module_stint", discard=True)  # stopping module must not save the deleted data back
 
     def reset_sectorbest(self):
         """Reset sector best data"""
@@ -257,7 +257,7 @@ class ResetDataMenu(QMenu):
             filepath=cfg.path.sector_best,
             filename=api.read.session.combo_name(),
         ):
-            mctrl.reload("module_sectors")
+            mctrl.reload("module_sectors", discard=True)  # stopping module must not save the deleted data back
 
     def reset_trackmap(self):
         """Reset trackmap data"""
@@ -271,23 +271,26 @@ class ResetDataMenu(QMenu):
 
     def __confirmation(self, data_type: str, extension: str, filepath: str, filename: str) -> bool:
         """Message confirmation, returns true if file deleted"""
+        # Data name in current language (English one title-cased in title, capitalized in message)
+        data_name = tr(data_type)
+        translated = data_name != data_type
         # Check if file exist
         filename_full = f"{filepath}{filename}.{extension}"
         if not os.path.exists(filename_full):
             QMessageBox.warning(
                 self._parent,
                 tr("Error"),
-                trm(f"No {data_type} data found.<br><br>You can only reset data from active session."),
+                trm(f"No {data_name} data found.<br><br>You can only reset data from active session."),
             )
             return False
         # Confirm reset
         msg_text = (
-            f"Reset <b>{data_type}</b> data for<br>"
+            f"Reset <b>{data_name}</b> data for<br>"
             f"<b>{filename}</b> ?<br><br>"
             "This cannot be undone!"
         )
         delete_msg = QMessageBox.question(
-            self._parent, trm(f"Reset {data_type.title()}"), trm(msg_text),
+            self._parent, trm(f"Reset {data_name if translated else data_name.title()}"), trm(msg_text),
             buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             defaultButton=QMessageBox.StandardButton.No,
         )
@@ -295,7 +298,8 @@ class ResetDataMenu(QMenu):
             return False
         # Delete file
         os.remove(filename_full)
-        show_toast(self._parent, trm(f"{data_type.capitalize()} data has been reset for<br><b>{filename}</b>"))
+        show_toast(self._parent, trm(
+            f"{data_name if translated else data_name.capitalize()} data has been reset for<br><b>{filename}</b>"))
         return True
 
 
@@ -531,12 +535,15 @@ class APIMenu(QMenu):
     def __init__(self, title, parent):
         super().__init__(title, parent)
         self._parent = parent
+        self.actions_api: QActionGroup | None = None
         self.reset_menu()
         self.aboutToShow.connect(self.refresh_menu)
 
     def reset_menu(self):
         """Reset menu"""
         self.clear()
+        if self.actions_api is not None:  # group is not deleted with menu actions
+            self.actions_api.deleteLater()
 
         self.actions_api = self.__api_selector()
         self.addSeparator()
@@ -563,7 +570,8 @@ class APIMenu(QMenu):
     def refresh_menu(self):
         """Refresh menu"""
         selected_api_name = cfg.api_name
-        for action in self.actions_api.actions():
+        actions = self.actions_api.actions() if self.actions_api is not None else []
+        for action in actions:
             if selected_api_name == action.text():
                 action.setChecked(True)
                 break

@@ -19,10 +19,13 @@
 """
 Ride height Widget, modern design
 
-Ride height per wheel with gauge, warning below bottoming height.
+Ride height per wheel with gauge, warning below bottoming height, front & rear ride height
+(aero reference, from game) between left & right tiles.
 """
 
 from __future__ import annotations
+
+from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from .gauge_quad import GaugeQuad
@@ -35,13 +38,35 @@ class Realtime(GaugeQuad):
 
     options = (
         *GaugeQuad.common_options, "ride_height_maximum_range",
-        *(f"bottoming_height_{corner}" for corner in CORNERS),
+        *(f"bottoming_height_{corner}" for corner in CORNERS), "show_axle_ride_height",
     )
     label = "Ride height"
 
     def setup(self):
         self.max_range = max(int(self.wcfg["ride_height_maximum_range"]), 10)
         self.bottoming = tuple(self.wcfg[f"bottoming_height_{corner}"] for corner in CORNERS)
+        self.show_axle = self.wcfg["show_axle_ride_height"]
+
+    def center_width(self) -> float:
+        """Front & rear ride height (aero reference) between left & right tiles"""
+        if not self.wcfg["show_axle_ride_height"]:
+            return 0.0
+        sample = f"888.{'8' * self.decimals}" if self.decimals else "888"
+        return self.text_width("small", sample) + self.unit * 0.3
+
+    def paint(self, painter: QPainter):
+        tiles, axles = self.state
+        self.draw_quads(painter, (tiles,))
+        if axles:
+            self.draw_center_texts(painter, self.quad_slots[0], axles)
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        axles: tuple[str, ...] = ()
+        if self.show_axle:
+            vehicle = api.read.vehicle
+            axles = tuple(f"{value:.{self.decimals}f}" for value in (vehicle.ride_height_front(), vehicle.ride_height_rear()))
+        self.refresh((self.read(), axles))
 
     def read(self) -> tuple:
         theme = self.theme

@@ -156,13 +156,16 @@ def save_geometry(folder: str, track: str, geometry: TrackGeometry):
 # Game REST API
 def rest_get(host: str, port: int, resource: str, timeout: float = REQUEST_TIMEOUT):
     """Json from game REST API, None if game not running or no answer"""
-    from ..async_request import get_response, resolve_hostname, set_header_get
+    from ..async_request import forget_hostname, get_response, resolve_hostname, set_header_get
 
     try:
         address = resolve_hostname(host, port, timeout)
         raw = asyncio.run(get_response(set_header_get(resource, address), address, port, timeout))
         return json.loads(raw) if raw else None
-    except (OSError, ValueError, RuntimeError, asyncio.TimeoutError):
+    except (TimeoutError, OSError):  # connection error: host resolved again next time
+        forget_hostname(host, port)
+        return None
+    except (ValueError, RuntimeError):
         return None
 
 

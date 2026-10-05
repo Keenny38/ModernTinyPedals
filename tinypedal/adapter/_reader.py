@@ -26,6 +26,16 @@ from abc import ABC, abstractmethod
 
 from ..process.weather import WeatherNode
 
+# Game index of sector 1, 2, 3 (game sector index 0 = sector 3)
+SECTOR_ORDER = (1, 2, 0)
+
+
+def signed_char(value: bytes | int) -> int:
+    """Signed value of ctypes char (bytes) or byte field, shared by readers"""
+    if isinstance(value, bytes):
+        value = value[0] if value else 0
+    return value - 256 if value > 127 else value
+
 
 class State(ABC):
     """State"""
@@ -52,6 +62,14 @@ class State(ABC):
     def version(self) -> str:
         """Identify API version"""
 
+    @abstractmethod
+    def session_events(self) -> tuple[bool, bool, bool, bool]:
+        """Game event flags: session started, session ended, entered realtime (driving), exited realtime
+
+        Set while game signals the event (LMU shared memory generic events), all False for rF2.
+        For information only, not used to detect session or active state (meaning not verified).
+        """
+
 
 class Brake(ABC):
     """Brake"""
@@ -76,7 +94,10 @@ class Brake(ABC):
 
     @abstractmethod
     def wear(self, index: int | None = None) -> tuple[float, ...]:
-        """Brake remaining thickness (meters)"""
+        """Brake remaining thickness (meters)
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
 
 
 class ElectricMotor(ABC):
@@ -111,6 +132,13 @@ class ElectricMotor(ABC):
     @abstractmethod
     def regeneration_level(self, index: int | None = None) -> float:
         """Regeneration level (kW)"""
+
+    @abstractmethod
+    def state_of_charge(self, index: int | None = None) -> float:
+        """Battery state of charge as shown by game (percent, 0-100)
+
+        LMU: game state of charge, rF2: battery charge fraction x 100.
+        """
 
 
 class Engine(ABC):
@@ -181,6 +209,10 @@ class Engine(ABC):
     @abstractmethod
     def expected_energy_consumption(self) -> float:
         """Virtual energy consumption per lap estimated by game (percent), 0 if unknown"""
+
+    @abstractmethod
+    def overheating(self, index: int | None = None) -> bool:
+        """Whether game shows engine overheating warning"""
 
 
 class Inputs(ABC):
@@ -293,6 +325,14 @@ class Lap(ABC):
     @abstractmethod
     def pit_entry_distance(self) -> float:
         """Lap distance of pit lane entry (meters), -1 if unknown"""
+
+    @abstractmethod
+    def pit_box_distance(self, index: int | None = None) -> float:
+        """Lap distance of vehicle pit box (meters), -1 if unknown"""
+
+    @abstractmethod
+    def invalidated(self, index: int | None = None) -> bool:
+        """Whether game invalidated current lap (track limits), False if unavailable (rF2)"""
 
 
 class Session(ABC):
@@ -442,6 +482,40 @@ class Session(ABC):
     def cut_points(self, index: int | None = None) -> float:
         """Current track limits cut points per penalty"""
 
+    @abstractmethod
+    def time_remaining(self) -> float:
+        """Session time remaining counted by game (seconds), minimum limit to 0
+
+        LMU: game session countdown, rF2: end time minus elapsed time (same as remaining()).
+        """
+
+    @abstractmethod
+    def yellow_flag_state(self) -> int:
+        """Full course yellow state
+
+        -1 invalid, 0 none, 1 pending, 2 pits closed, 3 pit lead lap, 4 pits open,
+        5 last lap, 6 resume, 7 race halt.
+        """
+
+    @abstractmethod
+    def sector_yellow_flags(self) -> tuple[bool, bool, bool]:
+        """Local yellow flag in sector 1, sector 2, sector 3
+
+        Game sector flag order assumed same as vehicle sector (game index 0 = sector 3).
+        """
+
+    @abstractmethod
+    def wind_velocity(self) -> tuple[float, float, float]:
+        """Wind velocity x, y, z (m/s), in game world coordinates (y = up)"""
+
+    @abstractmethod
+    def dark_cloud(self) -> float:
+        """Cloud darkness (fraction), range 0.0 - 1.0"""
+
+    @abstractmethod
+    def fixed_setup(self) -> bool:
+        """Whether session uses fixed car setup, False if unavailable (rF2)"""
+
 
 class Switch(ABC):
     """Switch"""
@@ -511,6 +585,14 @@ class Switch(ABC):
     @abstractmethod
     def auto_clutch(self) -> bool:
         """Auto clutch"""
+
+    @abstractmethod
+    def speed_limiter_available(self, index: int | None = None) -> bool:
+        """Whether vehicle has a pit speed limiter"""
+
+    @abstractmethod
+    def speed_limiter_active(self, index: int | None = None) -> bool:
+        """Whether pit speed limiter is active (rF2: speed limiter switched on)"""
 
 
 class Timing(ABC):
@@ -582,6 +664,26 @@ class Timing(ABC):
     def behind_next(self, index: int | None = None) -> float:
         """Time behind next place (seconds)"""
 
+    @abstractmethod
+    def delta_best(self, index: int | None = None) -> float:
+        """Delta to best lap computed by game (seconds, negative = faster), 0 if unavailable (rF2)"""
+
+    @abstractmethod
+    def gap_car_ahead(self, index: int | None = None) -> float:
+        """Time gap to car ahead on track, any class (seconds) from game, 0 if unavailable (rF2)"""
+
+    @abstractmethod
+    def gap_car_behind(self, index: int | None = None) -> float:
+        """Time gap to car behind on track, any class (seconds) from game, 0 if unavailable (rF2)"""
+
+    @abstractmethod
+    def gap_place_ahead(self, index: int | None = None) -> float:
+        """Time gap to car one place ahead (seconds) from game (rF2: time behind next place)"""
+
+    @abstractmethod
+    def gap_place_behind(self, index: int | None = None) -> float:
+        """Time gap to car one place behind (seconds) from game (rF2: its time behind next place), 0 if none"""
+
 
 class Tyre(ABC):
     """Tyre (front left, front right, rear left, rear right)"""
@@ -606,7 +708,11 @@ class Tyre(ABC):
 
     @abstractmethod
     def surface_temperature_ico(self, index: int | None = None) -> tuple[float, ...]:
-        """Tyre surface temperature set (Celsius) inner,center,outer"""
+        """Tyre surface temperature set (Celsius) left,center,right of each tyre (12 values)
+
+        Game order is left/center/right seen from car, not inner/center/outer:
+        inner edge is right side of left tyres, left side of right tyres.
+        """
 
     @abstractmethod
     def inner_temperature_avg(self, index: int | None = None) -> tuple[float, ...]:
@@ -614,7 +720,10 @@ class Tyre(ABC):
 
     @abstractmethod
     def inner_temperature_ico(self, index: int | None = None) -> tuple[float, ...]:
-        """Tyre inner temperature set (Celsius) inner,center,outer"""
+        """Tyre inner layer temperature set (Celsius) left,center,right of each tyre (12 values)
+
+        Game order is left/center/right seen from car, not inner/center/outer.
+        """
 
     @abstractmethod
     def pressure(self, index: int | None = None) -> tuple[float, ...]:
@@ -643,6 +752,14 @@ class Tyre(ABC):
     @abstractmethod
     def slip_angle(self, index: int | None = None) -> tuple[float, ...]:
         """Tyre slip angle (radians)"""
+
+    @abstractmethod
+    def flat(self, index: int | None = None) -> tuple[bool, ...]:
+        """Tyre flat state from game (puncture), see also puncture() from wear"""
+
+    @abstractmethod
+    def optimal_temperature(self, index: int | None = None) -> tuple[float, ...]:
+        """Tyre optimal temperature from game (Celsius), 0 if unavailable (rF2)"""
 
 
 class Vehicle(ABC):
@@ -812,7 +929,10 @@ class Vehicle(ABC):
 
     @abstractmethod
     def aero_damage(self, index: int | None = None) -> float:
-        """Aerodynamic damage (fraction), 0.0 no damage, 1.0 totaled"""
+        """Aerodynamic damage (fraction), 0.0 no damage, 1.0 totaled
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
 
     @abstractmethod
     def integrity(self, index: int | None = None) -> float:
@@ -845,6 +965,33 @@ class Vehicle(ABC):
     @abstractmethod
     def setup_modified(self) -> bool:
         """Car setup changed in garage since loaded or saved"""
+
+    @abstractmethod
+    def under_yellow(self, index: int | None = None) -> bool:
+        """Whether vehicle took full course caution flag at start/finish line"""
+
+    @abstractmethod
+    def ride_height_front(self, index: int | None = None) -> float:
+        """Front ride height (convert meters to millimeters)"""
+
+    @abstractmethod
+    def ride_height_rear(self, index: int | None = None) -> float:
+        """Rear ride height (convert meters to millimeters)"""
+
+    @abstractmethod
+    def drag(self, index: int | None = None) -> float:
+        """Aerodynamic drag (Newtons)"""
+
+    @abstractmethod
+    def scheduled_pitstops(self, index: int | None = None) -> int:
+        """Number of scheduled pit stops"""
+
+    @abstractmethod
+    def player_has_vehicle(self) -> bool:
+        """Whether local player has a vehicle in session (False while only watching)
+
+        LMU: telemetry player vehicle flag, rF2: any scoring vehicle marked as player.
+        """
 
 
 class Wheel(ABC):
@@ -890,7 +1037,10 @@ class Wheel(ABC):
 
     @abstractmethod
     def suspension_damage(self, index: int | None = None) -> tuple[float, ...]:
-        """Suspension damage (fraction), 0.0 no damage, 1.0 totaled"""
+        """Suspension damage (fraction), 0.0 no damage, 1.0 totaled
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
 
     @abstractmethod
     def position_vertical(self, index: int | None = None) -> tuple[float, ...]:

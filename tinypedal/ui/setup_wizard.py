@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import NamedTuple
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -42,7 +43,7 @@ from .. import app_signal, loader
 from ..api_control import api
 from ..const_file import ConfigType, FileExt
 from ..formatter import strip_filename_extension
-from ..i18n import LANGUAGES, tr
+from ..i18n import LANGUAGES, set_language, tr
 from ..i18n.options import module_label
 from ..module_control import wctrl
 from ..setting import cfg
@@ -58,6 +59,7 @@ STARTER_WIDGETS = (
     "tyre_temperature", "brake_temperature", "flag", "session", "weather", "radar",
 )
 DEFAULT_STARTER = ("relative", "deltabest", "fuel", "pedal", "gear", "flag")
+WINDOW_THEMES = ("Dark", "Light", "System")
 
 
 class SetupChoices(NamedTuple):
@@ -109,6 +111,8 @@ def apply_preset_choices(choices: SetupChoices) -> list[str]:
 def run_setup(choices: SetupChoices):
     """Apply all choices and reload"""
     preset = apply_global_choices(choices)
+    # Overlays created below with labels of chosen language (window rebuilt after, see retranslate)
+    set_language(choices.language)
     if preset:
         cfg.set_next_to_load(preset)
         loader.reload(reload_preset=True)
@@ -129,8 +133,9 @@ class LanguagePage(QWizardPage):
         self.language.addItems(tuple(LANGUAGES))
         self.language.setCurrentText(cfg.application["language"])
         self.window_theme = QComboBox(self)
-        self.window_theme.addItems(("Dark", "Light", "System"))
-        self.window_theme.setCurrentText(cfg.application["window_color_theme"])
+        for theme in WINDOW_THEMES:
+            self.window_theme.addItem(tr(theme), theme)
+        self.window_theme.setCurrentIndex(max(self.window_theme.findData(cfg.application["window_color_theme"]), 0))
         layout = QGridLayout()
         layout.addWidget(QLabel(tr("Language")), 0, 0)
         layout.addWidget(self.language, 0, 1)
@@ -171,8 +176,9 @@ class StylePage(QWizardPage):
         self.setSubTitle(tr("Colors of the in-game widgets."))
         style = cfg.user.config["overlay_style"]
         self.overlay_theme = QComboBox(self)
-        self.overlay_theme.addItems(overlay_theme_names())
-        self.overlay_theme.setCurrentText(style["overlay_theme"])
+        for name in overlay_theme_names():  # shown translated, name kept as data
+            self.overlay_theme.addItem(tr(name), name)
+        self.overlay_theme.setCurrentIndex(max(self.overlay_theme.findData(style["overlay_theme"]), 0))
         self.modern_font = QCheckBox(tr("Modern font (JetBrains Mono)"), self)
         self.modern_font.setChecked(style["enable_modern_font"])
         layout = QGridLayout()
@@ -201,7 +207,8 @@ class PresetPage(QWizardPage):
         self.new_name = QLineEdit(self)
         self.new_name.setPlaceholderText(tr("Enter a new preset name"))
         self.new_name.setValidator(QVAL_FILENAME)
-        self.new_name.setText("my overlay")
+        self.new_name.setText(tr("my overlay"))
+        self.new_name.textChanged.connect(lambda _: self.completeChanged.emit())  # name checked while typing
         self.preset.currentIndexChanged.connect(self.update_name_state)
 
         layout = QGridLayout()
@@ -241,6 +248,7 @@ class SetupWizard(QWizard):
 
     def __init__(self, parent):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)  # not kept once finished
         self.setWindowTitle(tr("Setup Wizard"))
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
@@ -258,8 +266,8 @@ class SetupWizard(QWizard):
         return SetupChoices(
             language=self.page_language.language.currentText(),
             api_name=self.page_game.api_name(),
-            window_theme=self.page_language.window_theme.currentText(),
-            overlay_theme=self.page_style.overlay_theme.currentText(),
+            window_theme=self.page_language.window_theme.currentData() or WINDOW_THEMES[0],
+            overlay_theme=self.page_style.overlay_theme.currentData() or self.page_style.overlay_theme.currentText(),
             modern_font=self.page_style.modern_font.isChecked(),
             preset=self.page_preset.preset.currentData() or "",
             new_preset=self.page_preset.new_preset_name(),

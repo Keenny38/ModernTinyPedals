@@ -28,10 +28,12 @@ import logging
 import os
 import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from time import localtime, monotonic, sleep, strftime, time
 
 from ..const_file import FileExt
 from ..setting_validator import PresetValidator
+from . import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +133,12 @@ def load_style_json_file(
 def save_json_file(
     dict_user: dict, filename: str, filepath: str, extension: str = "", compact_json: bool = False
 ) -> None:
-    """Save json file"""
+    """Save json file atomically (temporary file replaces target), error logged
+
+    Existing file is never left half-written or empty (crash, power loss, full disk).
+    """
     filename_source = f"{filepath}{filename}{extension}"
-    with open(filename_source, "w", encoding="utf-8") as jsonfile:
+    with atomic_write(filename_source) as jsonfile:
         if compact_json:
             json.dump(dict_user, jsonfile, separators=(",", ":"))
         else:
@@ -174,6 +179,7 @@ def create_backup_file(
     """Create backup file before saving"""
     filename_source = f"{filepath}{filename}"
     filename_backup = f"{filepath}{filename}{extension}"
+    backup_existed = os.path.exists(filename_backup)
     try:
         if not copy_and_verify_file(filename_source, filename_backup):
             raise FileNotFoundError
@@ -186,6 +192,10 @@ def create_backup_file(
         logger.error("USERDATA: no permission to access %s", filename_source)
     except (AttributeError, TypeError, ValueError, OSError):
         logger.error("USERDATA: unable to create backup %s", filename_source)
+    # Never leave incomplete backup behind
+    if not backup_existed:
+        with suppress(OSError):
+            os.remove(filename_backup)
     return False
 
 
@@ -266,13 +276,17 @@ def save_and_verify_json_file(
     # Start saving attempts
     attempts = max_attempts
     timer_start = monotonic()
-    while attempts > 0:
-        save_json_file(dict_user, filename, filepath, compact_json=compact_json)
-        if verify_json_file(dict_user, filename, filepath):
-            break
-        attempts -= 1
-        logger.error("USERDATA: %s failed saving, %s attempt(s) left", filename, attempts)
-        sleep(0.05)
+    try:
+        while attempts > 0:
+            save_json_file(dict_user, filename, filepath, compact_json=compact_json)
+            if verify_json_file(dict_user, filename, filepath):
+                break
+            attempts -= 1
+            logger.error("USERDATA: %s failed saving, %s attempt(s) left", filename, attempts)
+            sleep(0.05)
+    except (TypeError, ValueError) as error:  # data not serializable, file untouched (atomic write)
+        logger.error("USERDATA: %s failed saving, invalid data: %s", filename, error)
+        attempts = 0
     timer_end = round((monotonic() - timer_start) * 1000)
     # Clean up
     if attempts > 0:
@@ -318,18 +332,25 @@ def create_versioned_backup(
     if max_count <= 0 or not os.path.exists(source):
         return False
     prefix = f"{filename}{FileExt.BACKUP}-auto-"
+    backup = f"{filepath}{filename}{set_backup_timestamp(f'{FileExt.BACKUP}-auto')}"
+    copied = False
     try:
         existing = sorted(name for name in os.listdir(filepath) if name.startswith(prefix))
+        # Backup modified time is its creation time (preset time not copied), for interval
         if existing and time() - os.path.getmtime(f"{filepath}{existing[-1]}") < min_interval:
             return False
-        shutil.copy2(source, f"{filepath}{filename}{set_backup_timestamp(f'{FileExt.BACKUP}-auto')}")
+        shutil.copyfile(source, backup)
+        copied = True
         existing = sorted(name for name in os.listdir(filepath) if name.startswith(prefix))
         for old_backup in existing[:-max_count]:
             os.remove(f"{filepath}{old_backup}")
         return True
     except OSError as error:
         logger.error("USERDATA: unable to create automatic backup of %s: %s", filename, error)
-        return False
+        if not copied:  # never leave incomplete backup behind
+            with suppress(OSError):
+                os.remove(backup)
+        return copied
 
 
 def rename_preset_backups(filepath: str, old_filename: str, new_filename: str) -> int:
@@ -352,8 +373,10 @@ def rename_preset_backups(filepath: str, old_filename: str, new_filename: str) -
         return 0
     for backup in backups:
         new_backup = f"{new_filename}{backup[len(old_filename):]}"
+        # Case only rename (Windows): new name "exists" as the same file, rename anyway
+        same_file = os.path.normcase(new_backup) == os.path.normcase(backup)
         try:
-            if not os.path.exists(f"{filepath}{new_backup}"):
+            if same_file or not os.path.exists(f"{filepath}{new_backup}"):
                 os.rename(f"{filepath}{backup}", f"{filepath}{new_backup}")
                 count += 1
         except OSError as error:

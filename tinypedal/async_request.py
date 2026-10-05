@@ -24,24 +24,77 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from asyncio import StreamReader, create_task, open_connection, wait_for
 from collections.abc import Awaitable
 from contextlib import asynccontextmanager, suppress
 from functools import partial
-from time import perf_counter
+from time import monotonic, perf_counter
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
+RESOLVED_HOLD = 300.0  # seconds a resolved local address is reused (re-resolved after failure)
+UNRESOLVED_HOLD = 5.0  # seconds before probing again when nothing answered (game not running)
+_resolved_hosts: dict[tuple[str, int], tuple[str, float]] = {}  # (host, port): (address, expiry time)
+_resolved_lock = threading.Lock()
+
+
+def is_local_host(host: str) -> bool:
+    """Whether host is a loopback name, resolved by probing"""
+    return host == "localhost" or host.startswith("127.")
+
+
+def _cached_hostname(host: str, port: int) -> str | None:
+    """Cached address of host, None if not cached or expired"""
+    with _resolved_lock:
+        cached = _resolved_hosts.get((host, port))
+    if cached is not None and monotonic() < cached[1]:
+        return cached[0]
+    return None
+
+
+def _store_hostname(host: str, port: int, resolved: str) -> str:
+    """Cache probing result, returns address to use (host itself if unresolved)"""
+    hold = RESOLVED_HOLD if resolved else UNRESOLVED_HOLD
+    address = resolved or host
+    with _resolved_lock:
+        _resolved_hosts[(host, port)] = (address, monotonic() + hold)
+    return address
+
+
+def forget_hostname(host: str, port: int) -> None:
+    """Drop cached address of host (connection failed), next request probes again"""
+    with _resolved_lock:
+        _resolved_hosts.pop((host, port), None)
+
+
+def clear_resolved_hosts() -> None:
+    """Drop every cached address"""
+    with _resolved_lock:
+        _resolved_hosts.clear()
+
 
 def resolve_hostname(host: str, port: int, timeout: float = 3) -> str:
-    """Resolve hostname"""
-    if host == "localhost" or host.startswith("127."):
-        host_resolved = asyncio.run(
-            localhost_resolve({host, "localhost", "127.0.0.1"}, port, timeout)
-        )
-        if host_resolved:
-            return host_resolved
-    return host
+    """Resolve hostname, cached (probing opens connections, see localhost_resolve)"""
+    if not is_local_host(host):
+        return host
+    cached = _cached_hostname(host, port)
+    if cached is not None:
+        return cached
+    resolved = asyncio.run(localhost_resolve({host, "localhost", "127.0.0.1"}, port, timeout))
+    return _store_hostname(host, port, resolved)
+
+
+async def resolve_hostname_async(host: str, port: int, timeout: float = 3) -> str:
+    """Resolve hostname in running event loop (cancellable), cached"""
+    if not is_local_host(host):
+        return host
+    cached = _cached_hostname(host, port)
+    if cached is not None:
+        return cached
+    resolved = await localhost_resolve({host, "localhost", "127.0.0.1"}, port, timeout)
+    return _store_hostname(host, port, resolved)
 
 
 def set_header_get(uri: str = "/", host: str = "localhost", *headers: str) -> bytes:
@@ -51,30 +104,64 @@ def set_header_get(uri: str = "/", host: str = "localhost", *headers: str) -> by
     return f"GET {uri} HTTP/1.1\r\nHost: {host}{extra_headers}\r\n\r\n".encode()
 
 
-async def parse_response(reader: StreamReader) -> bytes:
-    """Parse response"""
-    # Get headers
+class HttpResponse(NamedTuple):
+    """HTTP response
+
+    Attributes:
+        status: status code, 0 if invalid status line.
+        body: body bytes (status 200 only, empty otherwise).
+        keep_alive: whether connection can be reused for next request.
+    """
+
+    status: int
+    body: bytes
+    keep_alive: bool
+
+
+def parse_status_line(line: bytes) -> tuple[bytes, int]:
+    """HTTP version & status code from status line ("HTTP/1.1 200 OK"), status 0 if invalid"""
+    parts = line.split(None, 2)
+    if len(parts) < 2 or not parts[0].startswith(b"HTTP/"):
+        return b"", 0
+    try:
+        return parts[0], int(parts[1])
+    except ValueError:
+        return parts[0], 0
+
+
+async def read_response(reader: StreamReader) -> HttpResponse:
+    """Read complete response (status line, headers, body)"""
     header_bytes = await reader.readuntil(b"\r\n\r\n")
-    if b"200" not in header_bytes:  # check http status code
-        return b""
-    # Get non-chunked data
-    if b"chunked" not in header_bytes:
-        # Get body length
-        body_length = 0
-        pos_beg = header_bytes.find(b"Content-Length")
-        if pos_beg >= 0:
-            try:
-                pos_beg += 15  # offset
-                pos_end = header_bytes.find(b"\r\n", pos_beg)
-                body_length = int(header_bytes[pos_beg:pos_end])
-            except (AttributeError, TypeError, IndexError, ValueError):
-                body_length = 0
-        if body_length <= 0:
-            return b""
-        # Note: read(n) returns only data already received (can be less than n),
-        # readexactly(n) waits for complete body
-        return await reader.readexactly(body_length)
-    # Get chunked data: "size(hex)\r\n" + data + "\r\n", ends with zero size chunk
+    lines = header_bytes[:-4].split(b"\r\n")
+    version, status = parse_status_line(lines[0])
+    headers = {}
+    for line in lines[1:]:
+        name, separator, value = line.partition(b":")
+        if separator:
+            headers[name.strip().lower()] = value.strip()
+    connection = headers.get(b"connection", b"").lower()
+    keep_alive = (version == b"HTTP/1.1" and connection != b"close") or connection == b"keep-alive"
+    if b"chunked" in headers.get(b"transfer-encoding", b"").lower():
+        body = await read_chunked(reader)
+    else:
+        try:
+            body_length = int(headers.get(b"content-length", b"-1"))
+        except ValueError:
+            body_length = -1
+        if body_length < 0:  # body until connection closes: not read, connection not reusable
+            body = b""
+            keep_alive = False
+        elif body_length:
+            # Note: read(n) returns only data already received (can be less than n),
+            # readexactly(n) waits for complete body
+            body = await reader.readexactly(body_length)
+        else:
+            body = b""
+    return HttpResponse(status, body if status == 200 else b"", keep_alive)
+
+
+async def read_chunked(reader: StreamReader) -> bytes:
+    """Read chunked body: "size(hex)\r\n" + data + "\r\n", ends with zero size chunk & optional trailers"""
     temp_bytes = bytearray()
     while True:
         size_line = await reader.readuntil(b"\r\n")
@@ -83,7 +170,71 @@ async def parse_response(reader: StreamReader) -> bytes:
             break
         temp_bytes.extend(await reader.readexactly(chunk_size))
         await reader.readexactly(2)  # CRLF after chunk data
+    while await reader.readuntil(b"\r\n") != b"\r\n":  # trailers, until empty line
+        pass
     return bytes(temp_bytes)
+
+
+async def parse_response(reader: StreamReader) -> bytes:
+    """Parse response, returns body of status 200 response, empty otherwise"""
+    return (await read_response(reader)).body
+
+
+class HttpConnection:
+    """HTTP connection to one host, kept open between requests (keep-alive)
+
+    Reconnects once if server closed the kept connection meanwhile. Falls back to one connection
+    per request if a kept connection is not answered (server not keeping connections properly).
+    """
+
+    __slots__ = (
+        "host",
+        "port",
+        "timeout",
+        "_stream",
+        "_reuse",
+    )
+
+    def __init__(self, host: str, port: int, timeout: float):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self._stream: tuple[StreamReader, asyncio.StreamWriter] | None = None
+        self._reuse = True
+
+    async def get(self, request: bytes) -> bytes:
+        """Body of GET request response (empty if status is not 200)
+
+        Raises:
+            OSError, EOFError, asyncio.TimeoutError, ValueError: connection error or invalid response.
+        """
+        reused = self._stream is not None
+        try:
+            return await self._get(request)
+        except (TimeoutError, OSError, EOFError, ValueError) as error:
+            self.close()
+            if not reused:
+                raise
+            if isinstance(error, asyncio.TimeoutError):
+                self._reuse = False  # kept connection not answered: new connection per request
+            return await self._get(request)
+
+    async def _get(self, request: bytes) -> bytes:
+        if self._stream is None:
+            self._stream = await wait_for(open_connection(self.host, self.port), self.timeout)
+        reader, writer = self._stream
+        writer.write(request)
+        await writer.drain()
+        response = await wait_for(read_response(reader), self.timeout)
+        if not (self._reuse and response.keep_alive):
+            self.close()
+        return response.body
+
+    def close(self) -> None:
+        """Close connection (opened again by next request)"""
+        if self._stream is not None:
+            self._stream[1].close()
+            self._stream = None
 
 
 @asynccontextmanager
@@ -124,7 +275,7 @@ async def get_response(request: bytes, host: str, port: int, time_out: float, ss
         func_get = https_get if ssl else http_get
         async with func_get(request, host, port, time_out) as raw_bytes:
             return raw_bytes
-    except (OSError, EOFError, asyncio.TimeoutError, ValueError):  # connection, ssl, incomplete data
+    except (TimeoutError, OSError, EOFError, ValueError):  # connection, ssl, incomplete data
         return b""
 
 
@@ -137,7 +288,7 @@ async def latency_test(request: bytes, host: str, port: int, time_out: float, ss
     start = perf_counter()
     try:
         _, writer = await wait_for(open_connection(host, port, ssl=ssl), time_out)
-    except asyncio.TimeoutError as error:
+    except TimeoutError as error:
         raise OSError(f"{host}:{port} timed out") from error
     try:
         writer.write(request)
@@ -179,10 +330,9 @@ async def localhost_resolve(hostnames: set[str], port: int, timeout: float = 3) 
     cancel_func = partial(cancel_tasks, task_group=task_group, result=result)
     for task in task_group:
         task.add_done_callback(cancel_func)
-    # Start task
-    for task in task_group:
-        with suppress(asyncio.CancelledError, OSError, EOFError, asyncio.TimeoutError, ValueError):
-            await task
+    # Wait every probe. Done callbacks remove failed probes from task group meanwhile,
+    # so wait on a copy: a slower probe that answers must not be skipped.
+    await asyncio.gather(*tuple(task_group), return_exceptions=True)
     # Get fastest host name
     if result:
         host, latency = result[0]

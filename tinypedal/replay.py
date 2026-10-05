@@ -23,8 +23,9 @@ Records raw shared memory frames (LMU, or rF2 & LMU legacy) to a file, and plays
 through the regular API, so every widget & module can run without the game.
 
 File format (.tpreplay):
-    header line: b"TPREPLAY1 " + json (frame size, rate, created, source API, zone layout, info) + b"\\n"
-    frames: struct FRAME_HEADER (elapsed seconds, frame type, payload size) + payload
+    header line: b"TPREPLAY2 " + json + b"\\n", json: format version, frame size, rate, created,
+        source API, zone layout ([name, structure size], ...), info.
+    frames: struct FRAME_HEADER (elapsed seconds, frame type, payload size, payload CRC32) + payload
     frame type 0 or 1 (keyframe): zlib of frame XOR previous frame, or of full frame (keyframe).
     frame type 2: zlib of json Rest API data snapshot (weather forecast, damage...), written when changed.
     frame type 3: json marker {"kind": "lap" or "incident"..., "text": str}.
@@ -32,6 +33,9 @@ File format (.tpreplay):
         followed by trailer struct TRAILER (summary frame offset, b"TPIX").
 A frame is every shared memory zone back to back, as listed in header "layout" ([name, size], ...).
 Frames are read from file on demand, only their position is kept in memory.
+
+Format 1 (b"TPREPLAY1 ", still read): frame header without CRC, LMU files without layout
+(single "shmm" zone of frame size).
 """
 
 from __future__ import annotations
@@ -39,13 +43,16 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
+import math
 import os
+import re
 import struct
 import threading
 import time
 import zlib
+from array import array
 from bisect import bisect_right
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import suppress
 from typing import Any, BinaryIO, NamedTuple
 
@@ -53,9 +60,12 @@ from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
 
 logger = logging.getLogger(__name__)
 
-MAGIC = b"TPREPLAY1 "
+FORMAT_VERSION = 2
+MAGIC = b"TPREPLAY2 "
+MAGIC_V1 = b"TPREPLAY1 "
 FILE_EXT = ".tpreplay"
-FRAME_HEADER = struct.Struct("<dBI")
+FRAME_HEADER = struct.Struct("<dBII")  # elapsed, frame type, payload size, payload CRC32
+FRAME_HEADER_V1 = struct.Struct("<dBI")  # format 1: no CRC
 TRAILER = struct.Struct("<Q4s")
 TRAILER_MAGIC = b"TPIX"
 KEYFRAME_INTERVAL = 100  # frames between full frames, bounds seeking cost
@@ -66,6 +76,9 @@ REST_INTERVAL = 1.0  # seconds between Rest API data checks
 DEFAULT_RATE = 30  # recorded frames per second
 MAX_GAP = 1.0  # seconds, longer gaps between recorded frames (inactive, paused) are removed
 SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
+MAX_FRAME_SIZE = 64 * 1024 * 1024  # bound of header frame size (largest shared memory is a few MB)
+MAX_EXTRA_SIZE = 16 * 1024 * 1024  # bound of Rest API snapshot, marker & summary payload
+EXPORT_PROGRESS_STEP = 100  # frames between export progress calls
 
 
 # Replay source API names that share shared memory structures
@@ -80,6 +93,37 @@ def replay_compatible(source: str, api_name: str) -> bool:
     if source == api_name:
         return True
     return any(source in family and api_name in family for family in REPLAY_FAMILIES)
+
+
+class ReplayMismatch(ValueError):
+    """Replay recorded with an API or shared memory structure that current API cannot play
+
+    Attributes:
+        source: API name replay was recorded with.
+        reason: "source" (other API), or "layout" (other structure size: older game or app version).
+    """
+
+    def __init__(self, message: str, source: str, reason: str):
+        super().__init__(message)
+        self.source = source
+        self.reason = reason
+
+
+def replay_mismatch(replay_file: ReplayFile, api_name: str, layout: Sequence[Sequence]) -> ReplayMismatch | None:
+    """Why replay cannot be played with API of zone layout, None if it can
+
+    Zone names & structure sizes must match exactly: a smaller frame cannot fill the structure,
+    a larger one would be read with shifted offsets. Older files without layout are a single
+    LMU zone of frame size, so only exact size match is accepted for them too.
+    """
+    if not replay_compatible(replay_file.source, api_name):
+        return ReplayMismatch(
+            f"recorded with {replay_file.source} API, not {api_name}", replay_file.source, "source")
+    expected = [(str(name), int(size)) for name, size in layout]
+    if replay_file.layout != expected:
+        return ReplayMismatch(
+            f"recorded data structure {replay_file.layout} differs from {expected}", replay_file.source, "layout")
+    return None
 
 
 def no_update() -> None:
@@ -126,9 +170,13 @@ class Marker(NamedTuple):
 
 
 class ReplayWriter:
-    """Write frames to replay file"""
+    """Write frames to replay file (current format)"""
 
     def __init__(self, file: BinaryIO, frame_size: int, rate: int, header_extra: dict | None = None):
+        """
+        Args:
+            header_extra: source API name, zone layout ([name, size], ...), info...
+        """
         self._file = file
         self._frame_size = frame_size
         self._last = b""
@@ -136,6 +184,7 @@ class ReplayWriter:
         self._count = 0
         self._elapsed = 0.0
         header = {"frame_size": frame_size, "rate": rate, "created": time.time(), **(header_extra or {})}
+        header["format"] = FORMAT_VERSION  # current format, also when header copied from older file
         file.write(MAGIC + json.dumps(header).encode("utf-8") + b"\n")
 
     @property
@@ -175,39 +224,61 @@ class ReplayWriter:
         self._file.write(TRAILER.pack(offset, TRAILER_MAGIC))
 
     def _write(self, elapsed: float, frame_type: int, payload: bytes) -> None:
-        self._file.write(FRAME_HEADER.pack(elapsed, frame_type, len(payload)))
+        self._file.write(FRAME_HEADER.pack(elapsed, frame_type, len(payload), zlib.crc32(payload)))
         self._file.write(payload)
 
 
 def read_header(file: BinaryIO) -> dict:
-    """Read replay header line, raise ValueError if not a replay file"""
-    line = file.readline()
-    if not line.startswith(MAGIC):
+    """Read replay header line, raise ValueError if not a replay file
+
+    Header "format" is set from file magic (1 or 2).
+    """
+    line = file.readline(1024 * 1024)
+    if line.startswith(MAGIC):
+        version = FORMAT_VERSION
+    elif line.startswith(MAGIC_V1):
+        version = 1
+    else:
         raise ValueError("not a TinyPedal replay file")
     try:
         header = json.loads(line[len(MAGIC):])
     except ValueError as error:
         raise ValueError("invalid replay header") from error
-    if not isinstance(header, dict) or "frame_size" not in header:
+    if not isinstance(header, dict):
         raise ValueError("invalid replay header")
+    frame_size = header.get("frame_size")
+    if not isinstance(frame_size, int) or isinstance(frame_size, bool) or not 0 < frame_size <= MAX_FRAME_SIZE:
+        raise ValueError("invalid replay header")
+    header["format"] = version
     return header
 
 
-def read_summary(file: BinaryIO) -> dict:
+def frame_header_of(header: dict) -> struct.Struct:
+    """Frame header structure of replay format"""
+    return FRAME_HEADER_V1 if header.get("format", 1) < 2 else FRAME_HEADER
+
+
+def read_summary(file: BinaryIO, frame_header: struct.Struct = FRAME_HEADER) -> dict:
     """Summary of complete recording from file trailer, empty if missing (interrupted recording)"""
     try:
         size = file.seek(0, os.SEEK_END)
-        if size < TRAILER.size + FRAME_HEADER.size:
+        if size < TRAILER.size + frame_header.size:
             return {}
         file.seek(size - TRAILER.size)
         offset, magic = TRAILER.unpack(file.read(TRAILER.size))
-        if magic != TRAILER_MAGIC or offset >= size:
+        end = size - TRAILER.size  # summary frame ends at trailer
+        if magic != TRAILER_MAGIC or offset + frame_header.size > end:
             return {}
         file.seek(offset)
-        _, frame_type, length = FRAME_HEADER.unpack(file.read(FRAME_HEADER.size))
-        if frame_type != SUMMARY_FRAME:
+        fields = frame_header.unpack(file.read(frame_header.size))
+        frame_type, length = fields[1], fields[2]
+        # Bound length: a corrupt trailer must not make a huge read
+        if frame_type != SUMMARY_FRAME or length > min(MAX_EXTRA_SIZE, end - offset - frame_header.size):
             return {}
-        summary = json.loads(file.read(length))
+        payload = file.read(length)
+        if len(fields) > 3 and zlib.crc32(payload) != fields[3]:
+            return {}
+        summary = json.loads(payload)
     except (OSError, ValueError, struct.error):
         return {}
     return summary if isinstance(summary, dict) else {}
@@ -228,7 +299,7 @@ def read_replay_info(filename: str) -> ReplayInfo:
     """Read replay header & summary only (fast), raise OSError or ValueError on invalid file"""
     with open(filename, "rb") as file:
         header = read_header(file)
-        summary = read_summary(file)
+        summary = read_summary(file, frame_header_of(header))
         size = file.seek(0, os.SEEK_END)
     info = header.get("info")
     return ReplayInfo(
@@ -257,25 +328,41 @@ def list_replays(folder: str) -> list[ReplayInfo]:
     return replays
 
 
-def remove_old_replays(folder: str, prefix: str, keep: int) -> list[str]:
-    """Remove oldest replay files starting with prefix over limit, return removed file names"""
-    removed = []
+def remove_old_replays(folder: str, prefix: str | re.Pattern, keep: int) -> list[str]:
+    """Remove oldest replay files over limit, return removed file names
+
+    Args:
+        prefix: file name prefix, or pattern matching whole file name (other files never removed).
+    """
+    if isinstance(prefix, str):
+        def matched(name: str) -> bool:
+            return name.startswith(prefix) and name.endswith(FILE_EXT)
+    else:
+        def matched(name: str) -> bool:
+            return prefix.fullmatch(name) is not None
+    removed: list[str] = []
     try:
-        files = [
-            os.path.join(folder, name) for name in os.listdir(folder)
-            if name.startswith(prefix) and name.endswith(FILE_EXT)
-        ]
+        files = [os.path.join(folder, name) for name in os.listdir(folder) if matched(name)]
         files.sort(key=os.path.getmtime)
-        for old_file in files[:-max(keep, 1)]:
-            os.remove(old_file)
-            removed.append(os.path.basename(old_file))
     except OSError as error:
         logger.error("replay: unable to remove old replays: %s", error)
+        return removed
+    for old_file in files[:-max(keep, 1)]:
+        try:
+            os.remove(old_file)
+            removed.append(os.path.basename(old_file))
+        except OSError as error:  # open elsewhere: removed next time
+            logger.error("replay: unable to remove old replay: %s", error)
     return removed
 
 
 class ReplayFile:
-    """Read replay file, frames are read from file on demand"""
+    """Read replay file, frames are read from file on demand
+
+    Damaged files are read up to the damage: a zero-filled tail (power loss) or invalid frame
+    header ends the file, a frame failing CRC or decompression is skipped (replay holds last good
+    frame until next keyframe).
+    """
 
     def __init__(self, filename: str):
         self.filename = filename
@@ -285,55 +372,88 @@ class ReplayFile:
         except Exception:
             self._file.close()
             raise
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # file reading
+        self._frame_lock = threading.Lock()  # decoding state (current frame)
         self._index = -1
-        self._frame = b""
+        self._frame = bytes(self.frame_size)  # zero frame until first good frame decoded
+        self._broken = True  # previous frame unavailable: wait for keyframe
+        self._corrupt: set[int] = set()
 
     def _scan(self):
         file = self._file
         header = read_header(file)
         self.header = header
+        self.format = int(header.get("format", 1))
         self.frame_size = int(header["frame_size"])
         self.rate = int(header.get("rate", DEFAULT_RATE))
         self.created = float(header.get("created", 0.0))
         self.source = str(header.get("source", API_LMU_NAME))  # API name, older files are LMU
         info = header.get("info")
         self.info: dict = info if isinstance(info, dict) else {}
-        self.layout: list[tuple[str, int]] = [
-            (str(name), int(size)) for name, size in header.get("layout", [["shmm", self.frame_size]])]
+        try:
+            self.layout: list[tuple[str, int]] = [
+                (str(name), int(size)) for name, size in header.get("layout", [["shmm", self.frame_size]])]
+        except (TypeError, ValueError) as error:
+            raise ValueError("invalid zone layout") from error
         if sum(size for _, size in self.layout) != self.frame_size:
             raise ValueError("invalid zone layout")
         self.times: list[float] = []
         self.keyframes: list[bool] = []
         self._offsets: list[int] = []
         self._sizes: list[int] = []
+        self._crcs = array("I")  # payload CRC of each frame (format 2)
         self.rest_times: list[float] = []
         self.rest_data: list[dict] = []
         self.markers: list[Marker] = []
         self.summary: dict = {}
+        self.damaged = False  # file ends with damaged data (power loss, disk error)
+        frame_header = frame_header_of(header)
+        has_crc = frame_header is FRAME_HEADER
+        max_frame = self.frame_size + self.frame_size // 100 + 1024  # zlib worst case (incompressible)
         file_size = os.fstat(file.fileno()).st_size
         position = file.tell()
+        last_time = float("-inf")
         while True:
-            head = file.read(FRAME_HEADER.size)
-            if len(head) < FRAME_HEADER.size:
+            head = file.read(frame_header.size)
+            if len(head) < frame_header.size:
                 break  # end of file, or truncated frame from interrupted recording
-            elapsed, frame_type, size = FRAME_HEADER.unpack(head)
-            position += FRAME_HEADER.size
-            if position + size > file_size:
-                break
+            fields = frame_header.unpack(head)
+            elapsed, frame_type, size = fields[0], fields[1], fields[2]
+            # Zero-filled tail has zero size, garbage has unknown type, goes back in time or above size bound
             if frame_type <= 1:
+                valid = 0 < size <= max_frame and math.isfinite(elapsed) and elapsed >= last_time - 0.001
+            else:
+                valid = frame_type <= SUMMARY_FRAME and size <= MAX_EXTRA_SIZE and math.isfinite(elapsed)
+            if not valid:
+                self._damaged_at(position)
+                break
+            position += frame_header.size
+            if position + size > file_size:
+                break  # truncated frame from interrupted recording
+            if frame_type <= 1:
+                last_time = elapsed
                 self.times.append(elapsed)
                 self.keyframes.append(bool(frame_type))
                 self._offsets.append(position)
                 self._sizes.append(size)
+                if has_crc:
+                    self._crcs.append(fields[3])
                 file.seek(size, os.SEEK_CUR)
             else:
                 payload = file.read(size)
-                self._read_extra(elapsed, frame_type, payload)
+                if has_crc and zlib.crc32(payload) != fields[3]:
+                    logger.warning("replay: %s: damaged data frame skipped", os.path.basename(self.filename))
+                else:
+                    self._read_extra(elapsed, frame_type, payload)
             position += size
         if not self._offsets or not self.keyframes[0]:
             raise ValueError("replay file contains no frame")
         self.markers.sort(key=lambda marker: marker.time)
+
+    def _damaged_at(self, position: int):
+        self.damaged = True
+        logger.warning(
+            "replay: %s: damaged data at byte %s, later frames ignored", os.path.basename(self.filename), position)
 
     def _read_extra(self, elapsed: float, frame_type: int, payload: bytes):
         try:
@@ -397,39 +517,77 @@ class ReplayFile:
             self._file.seek(self._offsets[index])
             return self._file.read(self._sizes[index])
 
-    def _decode(self, index: int, previous: bytes) -> bytes:
-        raw = zlib.decompress(self._payload(index))
+    def _decode(self, index: int, previous: bytes) -> bytes | None:
+        """Decoded frame, None if damaged (CRC, decompression or size)"""
+        payload = self._payload(index)
+        raw = b""
+        if not self._crcs or zlib.crc32(payload) == self._crcs[index]:
+            with suppress(zlib.error):
+                raw = zlib.decompress(payload)
+        if len(raw) != self.frame_size:
+            if index not in self._corrupt:
+                self._corrupt.add(index)
+                logger.warning(
+                    "replay: %s: damaged frame %s skipped, until next keyframe", os.path.basename(self.filename), index)
+            return None
         return raw if self.keyframes[index] else xor_bytes(raw, previous)
 
     def frame(self, index: int) -> bytes:
-        """Get decoded frame, sequential access is fast, seeking starts from nearest keyframe"""
-        index = min(max(index, 0), len(self) - 1)
-        if index == self._index:
+        """Get decoded frame, sequential access is fast, seeking starts from nearest keyframe
+
+        Thread safe. A damaged frame is skipped: last good frame is kept until next keyframe.
+        """
+        with self._frame_lock:
+            index = min(max(index, 0), len(self) - 1)
+            if index == self._index:
+                return self._frame
+            if index < self._index or index - self._index > KEYFRAME_INTERVAL:
+                start = index
+                while not self.keyframes[start]:
+                    start -= 1
+                self._index = start - 1
+                self._broken = True
+            while self._index < index:
+                self._index += 1
+                if self._broken and not self.keyframes[self._index]:
+                    continue  # no previous frame to apply difference to
+                frame = self._decode(self._index, self._frame)
+                if frame is None:
+                    self._broken = True
+                else:
+                    self._frame = frame
+                    self._broken = False
             return self._frame
-        if index < self._index or index - self._index > KEYFRAME_INTERVAL:
-            start = index
-            while not self.keyframes[start]:
-                start -= 1
-            self._index = start
-            self._frame = self._decode(start, b"")
-        while self._index < index:
-            self._index += 1
-            self._frame = self._decode(self._index, self._frame)
-        return self._frame
 
     def iter_frames(self, first: int, last: int) -> Iterator[tuple[float, bytes]]:
-        """Decoded frames (time, frame) of index range, independent of playback position"""
+        """Decoded frames (time, frame) of index range, independent of playback position
+
+        Damaged frames (and following ones until next keyframe) are skipped.
+        """
         start = first
         while not self.keyframes[start]:
             start -= 1
         frame = b""
+        broken = True
         for index in range(start, last + 1):
-            frame = self._decode(index, frame)
+            if broken and not self.keyframes[index]:
+                continue
+            decoded = self._decode(index, frame)
+            if decoded is None:
+                broken = True
+                continue
+            frame, broken = decoded, False
             if index >= first:
                 yield self.times[index], frame
 
-    def export(self, filename: str, start: float, end: float) -> int:
-        """Save part of replay (start to end seconds) to new file, return number of frames"""
+    def export(
+        self, filename: str, start: float, end: float, progress: Callable[[int, int], None] | None = None,
+    ) -> int:
+        """Save part of replay (start to end seconds) to new file, return number of frames
+
+        Args:
+            progress: called with (frames done, frames total) every EXPORT_PROGRESS_STEP frames (any thread).
+        """
         first, last = self.index_at(start), self.index_at(end)
         if last < first:
             first, last = last, first
@@ -438,11 +596,13 @@ class ReplayFile:
         header = {key: value for key, value in self.header.items() if key not in ("frame_size", "rate", "created")}
         header["created"] = self.created + origin
         header["trimmed_from"] = os.path.basename(self.filename)
+        header["layout"] = [list(zone) for zone in self.layout]  # format 1 LMU files had no layout
         rest = [(t, data) for t, data in zip(self.rest_times, self.rest_data) if origin < t <= end_time]
         initial_rest = self.rest_at(origin)
         if initial_rest >= 0:
             rest.insert(0, (origin, self.rest_data[initial_rest]))
         markers = [marker for marker in self.markers if origin <= marker.time <= end_time]
+        total = last - first + 1
         with open(filename, "wb") as file:
             writer = ReplayWriter(file, self.frame_size, self.rate, header)
             for frame_time, frame in self.iter_frames(first, last):
@@ -452,6 +612,8 @@ class ReplayFile:
                 while markers and markers[0].time <= frame_time:
                     marker = markers.pop(0)
                     writer.write_marker(marker.time - origin, marker.kind, marker.text)
+                if progress is not None and writer.frames % EXPORT_PROGRESS_STEP == 0:
+                    progress(writer.frames, total)
             writer.finish()
         return writer.frames
 
@@ -515,10 +677,15 @@ class ReplayPlayer:
             self.speed = speed
 
     def current_frame(self) -> bytes:
-        """Frame at current replay time"""
+        """Frame at current replay time
+
+        Decoded outside player lock: decoding after backward seek takes up to KEYFRAME_INTERVAL
+        frames, position reads (user interface) must not wait for it.
+        """
         with self._lock:
-            self.last_frame = self.replay.frame(self.replay.index_at(self._current()))
-            return self.last_frame
+            index = self.replay.index_at(self._current())
+        self.last_frame = self.replay.frame(index)
+        return self.last_frame
 
     def current_rest(self) -> int:
         """Index of Rest API snapshot at current replay time, -1 if none"""
@@ -556,6 +723,11 @@ class ReplayMMap:
         self._rest_index = -1
         self.update: Callable[[], None] = no_update
         self.data: Any = data_struct.from_buffer(self._buffer)
+
+    @property
+    def paused(self) -> bool:
+        """Whether replay is paused (data held on purpose, not a frozen game)"""
+        return self._player.paused
 
     def create(self, *_args) -> None:
         """Start feeding frames"""
@@ -602,6 +774,7 @@ class ReplayControl:
         self.player: ReplayPlayer | None = None
         self._rec_thread: threading.Thread | None = None
         self._rec_event = threading.Event()
+        self._rec_lock = threading.Lock()  # recording started & stopped from GUI and recorder module
         self._markers: list[tuple[str, str, float]] = []
         self._markers_lock = threading.Lock()
         self.recording_file = ""
@@ -614,10 +787,25 @@ class ReplayControl:
         """Is replaying"""
         return self.player is not None
 
-    def load(self, filename: str) -> ReplayPlayer:
-        """Load replay file, raise OSError or ValueError on invalid file"""
+    def load(self, filename: str, api_name: str = "", layout: Sequence[Sequence] | None = None) -> ReplayPlayer:
+        """Load replay file, raise OSError or ValueError on invalid file
+
+        Args:
+            api_name: API to play replay with, checked with layout if given.
+            layout: shared memory zones of API ([name, size], ...).
+
+        Raises:
+            ReplayMismatch: replay cannot be played with API.
+        """
         self.unload()
-        self.player = ReplayPlayer(ReplayFile(filename))
+        replay_file = ReplayFile(filename)
+        if api_name and layout is not None:
+            mismatch = replay_mismatch(replay_file, api_name, layout)
+            if mismatch is not None:
+                replay_file.close()
+                logger.warning("replay: %s not loaded: %s", filename, mismatch)
+                raise mismatch
+        self.player = ReplayPlayer(replay_file)
         logger.info("replay: loaded %s (%s frames)", filename, len(self.player.replay))
         return self.player
 
@@ -650,37 +838,44 @@ class ReplayControl:
         rate: int = DEFAULT_RATE,
         rest_source: Callable[[], dict | None] | None = None,
         header_extra: dict | None = None,
-    ) -> None:
-        """Record frames from source until stopped
+    ) -> bool:
+        """Record frames from source until stopped, returns False if already recording
 
         Args:
             source: frame source (see RecordingSources.frame), or every recording source.
             rest_source: returns Rest API data snapshot, or None.
             header_extra: source API name & zone layout.
         """
-        if self.recording:
-            return
-        sources = source if isinstance(source, RecordingSources) else RecordingSources(source, rest_source)
-        self._rec_event.clear()
-        with self._markers_lock:
-            self._markers.clear()
-        self.recording_file = filename
-        self.recorded_frames = 0
-        self.recording_elapsed = 0.0
-        self._rec_thread = threading.Thread(
-            target=self.__recording, args=(filename, sources, rate, header_extra),
-            daemon=True, name="Replay recorder",
-        )
-        self._rec_thread.start()
+        with self._rec_lock:
+            if self.recording:
+                return False
+            sources = source if isinstance(source, RecordingSources) else RecordingSources(source, rest_source)
+            # Own stop event for each recording, a previous recorder still closing its file never resumes
+            self._rec_event = threading.Event()
+            with self._markers_lock:
+                self._markers.clear()
+            self.recording_file = filename
+            self.recorded_frames = 0
+            self.recording_elapsed = 0.0
+            self._rec_thread = threading.Thread(
+                target=self.__recording, args=(filename, sources, rate, header_extra, self._rec_event),
+                daemon=True, name="Replay recorder",
+            )
+            self._rec_thread.start()
+            return True
 
     def stop_recording(self) -> None:
         """Stop recording and wait for file to close"""
-        self._rec_event.set()
-        if self._rec_thread is not None:
-            self._rec_thread.join(5)
-            self._rec_thread = None
+        with self._rec_lock:
+            self._rec_event.set()
+            if self._rec_thread is not None:
+                self._rec_thread.join(5)
+                self._rec_thread = None
 
-    def __recording(self, filename: str, sources: RecordingSources, rate: int, header_extra: dict | None) -> None:
+    def __recording(
+        self, filename: str, sources: RecordingSources, rate: int, header_extra: dict | None,
+        stop_event: threading.Event,
+    ) -> None:
         interval = 1 / max(rate, 1)
         last_time = 0.0
         last_rest = -REST_INTERVAL
@@ -689,43 +884,46 @@ class ReplayControl:
         writer = None
         try:
             with open(filename, "wb") as file:
-                while not self._rec_event.wait(interval):
-                    if sources.active is not None and not sources.active():
-                        continue
-                    data = sources.frame()
-                    if data is None:
-                        continue
-                    frame = bytes(data)
-                    now = time.monotonic()
-                    if writer is None:
-                        extra = dict(header_extra or {})
-                        if sources.info is not None:
-                            extra["info"] = sources.info()
-                        writer = ReplayWriter(file, len(frame), rate, extra)
-                    else:
-                        step = now - last_time
-                        elapsed += step if step < MAX_GAP else interval  # remove skipped time
-                    last_time = now
-                    writer.write(elapsed, frame)
-                    self.recorded_frames = writer.frames
-                    self.recording_elapsed = elapsed
-                    if sources.lap is not None:
-                        lap = sources.lap()
-                        if lap != last_lap:
-                            writer.write_marker(elapsed, "lap", str(lap))
-                            last_lap = lap
-                    with self._markers_lock:
-                        markers, self._markers = self._markers, []
-                    for kind, text, ago in markers:
-                        writer.write_marker(max(elapsed - ago, 0.0), kind, text)
-                    if sources.rest is not None and elapsed - last_rest >= REST_INTERVAL:
-                        last_rest = elapsed
-                        rest = sources.rest()
-                        if rest is not None:
-                            writer.write_rest(elapsed, rest)
-                if writer is not None:
-                    writer.finish()
-        except (OSError, ValueError):
+                try:
+                    while not stop_event.wait(interval):
+                        if sources.active is not None and not sources.active():
+                            continue
+                        data = sources.frame()
+                        if data is None:
+                            continue
+                        frame = bytes(data)
+                        now = time.monotonic()
+                        if writer is None:
+                            extra = dict(header_extra or {})
+                            if sources.info is not None:
+                                extra["info"] = sources.info()
+                            writer = ReplayWriter(file, len(frame), rate, extra)
+                        else:
+                            step = now - last_time
+                            elapsed += step if step < MAX_GAP else interval  # remove skipped time
+                        last_time = now
+                        writer.write(elapsed, frame)
+                        self.recorded_frames = writer.frames
+                        self.recording_elapsed = elapsed
+                        if sources.lap is not None:
+                            lap = sources.lap()
+                            if lap != last_lap:
+                                writer.write_marker(elapsed, "lap", str(lap))
+                                last_lap = lap
+                        with self._markers_lock:
+                            markers, self._markers = self._markers, []
+                        for kind, text, ago in markers:
+                            writer.write_marker(max(elapsed - ago, 0.0), kind, text)
+                        if sources.rest is not None and elapsed - last_rest >= REST_INTERVAL:
+                            last_rest = elapsed
+                            rest = sources.rest()
+                            if rest is not None:
+                                writer.write_rest(elapsed, rest)
+                finally:
+                    if writer is not None:  # summary & trailer even after error: file stays complete
+                        with suppress(OSError, ValueError):
+                            writer.finish()
+        except Exception:  # never leave recorder thread with unexpected error unlogged
             logger.exception("replay: recording failed, %s", filename)
         logger.info("replay: recorded %s frames to %s", self.recorded_frames, filename)
         if writer is None:  # nothing recorded (game never active)

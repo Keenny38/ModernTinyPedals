@@ -29,7 +29,6 @@ import bisect
 import math
 from array import array
 from collections.abc import Sequence
-from itertools import pairwise
 
 from PySide6.QtGui import QColor
 
@@ -66,6 +65,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
     limits_from_offsets,
     map_line,
     map_line_indexes,
+    mini_sector_times,
     off_track_events,
     placement,
     track_events,
@@ -75,7 +75,8 @@ from ...userfile.telemetry_lap import LapData, compute_delta, distance_scale, in
 from ..lap_viewer import GAIN_FULL_SCALE, GAIN_WINDOW, gain_color
 from .lines import TRIANGLE_STRIP, Vertices, band, band_part, colored_band, merge_strips, range_indexes
 
-MAP_MODES = ("laps", "gain", "speed", "pedals", "line", "gear", "elevation", "corners", "minisectors")
+MAP_MODES = ("laps", "gain", "speed", "pedals", "line", "gear", "elevation", "corners", "minisectors", "consistency")
+CONSISTENCY_COLORS = (QColor("#22C55E"), QColor("#FACC15"), QColor("#EF4444"))  # steady to scattered times
 SPEED_COLORS = (QColor("#3B82F6"), QColor("#22C55E"), QColor("#FACC15"), QColor("#EF4444"))  # slow to fast
 ELEVATION_COLORS = (QColor("#1E40AF"), QColor("#0D9488"), QColor("#84CC16"), QColor("#EAB308"), QColor("#B45309"))
 GEAR_COLORS = tuple(QColor(color) for color in (  # gear 1 to 8 (reverse & neutral grey)
@@ -407,13 +408,21 @@ def mini_sector_bounds(length: float) -> list[float]:
     return [length * index / count for index in range(count + 1)]
 
 
-def mini_sector_times(bounds: Sequence[float], distances: Sequence[float], times: Sequence[float]) -> list[float]:
-    """Time taken in each mini-sector (lap distances & lap times, same distance scale as bounds)"""
-    if len(distances) < 2:
-        return []
-    distances, times = list(distances), list(times)  # copied once, not for each bound
-    at = [interpolate(distances, times, bound) for bound in bounds]
-    return [second - first for first, second in pairwise(at)]
+def spread_colors(line: MapLine, bounds: Sequence[float], spreads: Sequence[float]) -> list[QColor]:
+    """Line colored by spread of each mini-sector (green steady to red scattered, between lowest & highest
+    spread), grey where unknown (-1)"""
+    known = [spread for spread in spreads if spread >= 0]
+    low, high = min(known, default=0.0), max(known, default=0.0)
+    neutral = QColor("#9CA3AF")
+    colors = []
+    for distance in line.distances:
+        sector = min(max(bisect.bisect_right(bounds, distance) - 1, 0), len(spreads) - 1) if spreads else -1
+        spread = spreads[sector] if sector >= 0 else -1.0
+        if spread < 0:
+            colors.append(neutral)
+        else:
+            colors.append(blend(CONSISTENCY_COLORS, (spread - low) / (high - low) if high > low else 0.0))
+    return colors
 
 
 def mini_sector_winners(times_by_lap: Sequence[Sequence[float]]) -> list[int]:
@@ -615,11 +624,12 @@ class LineGrid:
         return found
 
 
-def distance_ticks(line: MapLine) -> list[tuple[float, float, float]]:
-    """Distance marks along line: x, y, distance (every 500 m, every km on long laps)"""
+def distance_ticks(line: MapLine, step: float = 0.0) -> list[tuple[float, float, float]]:
+    """Distance marks along line: x, y, distance (every step meters, default every 500 m, every km on long laps)"""
     if len(line.distances) < 2:
         return []
-    step = 1000.0 if line.distances[-1] > 8000 else 500.0
+    if step <= 0:
+        step = 1000.0 if line.distances[-1] > 8000 else 500.0
     ticks = []
     distance = step
     while distance < line.distances[-1] - step * 0.3:

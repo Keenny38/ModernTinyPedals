@@ -1,432 +1,612 @@
 # Changelog
 
-Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
-La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
+All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
+The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
-## 0.19.0 (2026-10-05)
+## 0.20.0 (2026-10-05)
 
-La plus grosse mise à jour depuis le début : tous les overlays changent de look, la page des statistiques pilote est refaite, le calculateur de course sait gérer une voiture de sécurité, la pluie et plusieurs pilotes, et l'app lit beaucoup plus de données de Le Mans Ultimate (chat, contacts, rejeux, relais de l'équipe).
+A full audit of the app: more than 150 fixes, 7 new overlays, the modern design now on par with the classic one, new Le Mans Ultimate data in the overlays, redesigned Race calculator, Driver stats, Overlays and Game Replays pages, many more tools in the telemetry viewer, and release notes in the app language. More than 2,300 tests now cover 91% of the code.
 
-### Nouveau design des overlays
+### New overlays
 
-- **Tous les overlays sauf le Black box** ont un nouveau design : un panneau arrondi par overlay, police **Barlow** (incluse avec l'app), libellés courts au-dessus des valeurs, traduits dans la langue de l'app.
-- **Valeurs colorées selon leur sens** : gain en vert, perte en rouge, alerte en orange, meilleur temps en violet.
-- **Classements** (relative, standings, rivals) en lignes : badge de position, pastille de classe avec la position dans la classe, couleur de classe sur le bord de la ligne, tour le plus rapide de la classe en violet. Colonnes au choix (`column_*`), et pour rivals l'écart de temps au tour et l'intervalle.
-- **Carburant et énergie** avec une jauge, le repère du plein et les valeurs clés en tuiles (tours, minutes, conso par tour, économie, arrêts).
-- **Pneus et freins** en tuiles aux couleurs de la heatmap, **LED** en pastilles lumineuses, nouvelles jauges pour le rapport, les pédales et les dégâts.
-- **Options simplifiées** : la fenêtre de configuration et la recherche d'options (`Ctrl+F`) ne montrent que les options que le design utilise.
-- **L'ancien look reste disponible** : pour tous les overlays (désactiver `enable_modern_style` dans `Style d'overlay`) ou pour un seul (`enable_classic_layout`).
-- Police du design réglable (`modern_design_font_name`), couleurs du thème d'overlay comme avant.
+All of them are disabled by default; enable them in the `Overlays` tab.
 
-![Nouveau design : classements](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
+- **Delta graph**: the delta all along the lap (loss in red, gain in green) with the previous lap in the background. Reference of your choice: best lap, session, stint or last lap.
+- **Gap trend**: gap to the car ahead and behind over the last laps, with what you gain or lose per lap. All classes or within your class.
+- **Pit lane helper**: speed against the limit, pit limiter (warning if it is not on), distance to the pit box and planned services. Shown only when approaching and in the pit lane.
+- **Stint timer**: stint time and laps, countdown to the maximum stint length, each driver's driving time against their fair share or the required minimum.
+- **Spotter**: bars on the edges of the screen when a car is alongside you, brighter when it is very close.
+- **Race notifications**: positions gained or lost (overall and in class), penalty, fastest lap in class, blue flag, full course yellow, lap invalidated. Each type can be turned off separately.
+- **Tyre temp trend**: temperature of each tyre over the last seconds or per lap, with the ideal temperature given by LMU.
 
-![Nouveau design : carburant et énergie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-carburant.png)
+![New overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
 
-![Nouveau design : voiture et pneus](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-voiture.png)
+![Pit lane helper](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-aide-voie-des-stands.png)
 
-![Nouveau design : chronos](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-chrono.png)
+### Modern design: everything the classic one did
 
-### Nouvelle icône et interface
+- **Standings**: average lap, speed trap, lift & coast and brand logo columns, tyre compounds wheel by wheel when they differ, custom texts (pit, garage, leader), class position in the class color.
+- **Race plan**: live recalculation, check of the game's pit menu (`80>60L` in red if it differs from the plan), target fuel consumption per lap, and optionally what limits the stints and the consumption estimation method.
+- **Row order**: the `display_order_*` options apply to the modern design as soon as you change one, and the `Display Order` button is back.
+- Adjustable colors for the redesigned overlays (radar, map, flags…), center spring mark (suspension), pedal mark (brake pressure), RPM, battery and fuel consumption on the gear overlay, 100% pedal indicator, custom session names, inverted delta style, damage shown as integrity.
 
-- Nouvelle icône **or et noir**, et sa version **or et blanc** pour le thème sombre.
-- L'icône de la fenêtre, de la barre des tâches et de la zone de notification suit le **mode clair / sombre de Windows**, comme le logo de la fenêtre `À propos` et les raccourcis créés par l'installeur.
-- L'onglet `Widget` de la fenêtre principale s'appelle maintenant **`Overlays`**.
+![Standings: new columns](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-classements-nouvelles-colonnes.png)
 
-### Visionneuse de télémétrie
+### Le Mans Ultimate: new data in the overlays
 
-#### Tracé officiel et limites de piste (LMU)
+- **Official game delta** in delta best (option), **invalidated lap** flagged on the timing overlays.
+- **Puncture** read from the game (instead of being estimated from wear), **engine overheating**.
+- **Automatic tyre heatmap** centered on the ideal temperature given by the game (option).
+- **Sector yellow flags** and full course yellow (FCY) phases, **wind** in the weather, front and rear **ride height**, **pit limiter reminder** in the pit lane.
 
-- La visionneuse récupère le **tracé officiel** du circuit et la **voie des stands** auprès du jeu, puis les garde : ils restent disponibles sans le jeu.
-- **Bords de piste** du jeu sur la carte, avec la **marge au bord** à chaque point clé (extérieur au freinage, intérieur à la corde, extérieur en sortie) et un nouveau **point extérieur** ■ après chaque corde.
-- **Hors-piste** (2 roues ou plus dans l'herbe, la terre ou le gravier) et **limites de piste dépassées** (4 roues dehors) marqués sur la carte et comptés par tour (hors-pistes : tours enregistrés avec cette version). Pour les tours enregistrés avant cette version, les bords sont déduits des trajectoires.
-- Deux nouvelles colorations de la carte : **mini-secteurs** (la trajectoire de référence colorée par le tour le plus rapide de chaque mini-secteur, avec le **tour idéal des tours affichés**) et **écart par virage**.
+![Race plan, weather and gear](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-overlays-nouvelles-tuiles.png)
 
-![Carte : tracé officiel, bords de piste, mini-secteurs et mini-carte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
+### Telemetry viewer
 
-#### Nouveaux onglets Session et XY
+#### Charts
 
-- **Session** : tous les tours de la session (tours affichés dans leur couleur, meilleur en or, tours invalides creux), carburant et usure des pneus de chaque tour, hors-pistes et limites de piste. Un clic sur un tour l'affiche ou le masque.
-- **Rythme en long run** : moyenne des tours propres en écartant les tours lents (trafic, erreurs), et **tendance** du temps au tour au fil de la session (usure, carburant, évolution de la piste), aussi par % d'usure des pneus.
-- **XY** : un canal contre un autre au même endroit de la piste, en **nuage de points** (vitesse / G latéral, direction / G latéral, accélérateur / glissement…), ou en **histogramme** (part du tour passée dans chaque plage de valeurs). Limité à la partie zoomée des courbes quand on zoome.
+- **Values fitted to the visible part**, panel by panel (right-click a panel).
+- **Your own math channels**: a formula built from recorded channels (`+ - * /`, `abs`, `min`, `max`, derivative `d()`), with understeer angle, brake release rate and throttle application rate ready to use.
+- **Align laps on braking**: the charts are shifted so that each lap's braking for a corner starts at the same spot.
+- CSV export on a time base.
 
-![Onglet Session : rythme en long run et tendance](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-session.png)
+#### Map and views
 
-![Onglet XY : vitesse / G latéral](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-xy.png)
+- Keyboard zoom (`+` / `-`, arrows), zoom and lap filter in the G circle and the XY view.
+- **Consistency per mini-sector**: each mini-sector colored by the spread of its times over the stint, the session or the shown laps.
 
-#### Où le temps est perdu
+#### Compare
 
-- En haut de l'onglet Virages, les virages qui coûtent le plus, avec la **cause en clair** : « Freine 6 m plus tôt », « Vitesse minimale inférieure de 7 km/h », « Roue libre 0,7 s de plus », « Plein gaz 8 m plus tard »…
-- Option **delta par rapport au tour idéal** (tour propre le plus rapide de chaque mini-secteur) au lieu du tour de référence.
-- **Écart des points de freinage** d'un tour à l'autre, pour juger de la régularité.
+- **Import a teammate's laps** from another folder (same track and same class), marked as foreign.
+- **Best lap in similar conditions** (track temperature, tyre compound, wet track) as reference.
+- **Setup differences** between two laps, and a **corner report** as HTML or PDF.
 
-![Onglet Virages : où le temps est perdu](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-coaching.png)
+#### Fixes
 
-#### Nouveaux canaux enregistrés
+- Exact delta and ideal lap: the ends of the lap were cut off (up to 0.19 s off on the delta, 0.4 s on the ideal lap).
+- A damaged lap file no longer makes loading restart in a loop, laps from another track are flagged and left out of the ideal lap, the A/B markers follow the distance / time switch.
+- The app's distance unit is respected, decimal comma in French, MoTeC import runs in the background.
+- **Smooth lap playback**: the cursor moves on every frame (it used to stall one frame in four and jump the next), and the charts slide to the next part of the lap instead of jumping.
 
-- Températures **intérieur / milieu / extérieur** de chaque pneu (et leur écart), **charge** des pneus, **angle de dérive**, **carrossage**.
-- **Répartition de freinage**, niveaux **TC** et **ABS**, **cartographie moteur**, températures **eau** et **huile**, position sur la piste et distance au centre.
-- Le **nom du setup** chargé dans le jeu est gardé avec chaque tour (LMU), affiché et cherchable.
+### Race calculator
 
-#### Liste des tours
+#### Redesigned page
 
-- **Recherche** : véhicule, session, setup, note.
-- **Corbeille** : les tours supprimés vont à la corbeille et se restaurent avec `Ctrl+Z`. Menus de session : afficher, masquer, garder ou mettre à la corbeille tous les tours d'une session ; mêmes actions pour les tours cochés, et export MoTeC des tours cochés.
-- **Utiliser comme delta meilleur tour** : un tour enregistré devient le delta meilleur tour utilisé en piste (l'ancien est gardé en copie de sauvegarde).
+- **New modern page** (Qt Quick, like the `Overlays` page): race setup, key figures and the **strategy timeline always in view** above the `Fuel`, `Tyres` and `Team` tabs. The timeline now shows the **fuel in the tank** over the race, safety car and rain laps, and its stints slide into place when the plan changes.
+- **Input sections that fold** (they stay folded, their main values shown in the title), switch of the `Safety Car` and `Rain` scenarios in their title, consumption history beside the plan or below it on a narrow window.
+- **Faster to type**: `Up` / `Down` (or the mouse wheel in the selected field) step a value, `Shift` by ten steps, `Esc` cancels what you typed, lap time typed in one field (`1:59.950` or seconds).
+- **Tyre plan**: drag a tyre from the stock onto a wheel or click a wheel to pick one, tread at the start and end of each stint as a colored bar, compound colors, `Delete` takes a tyre off. Stock and rules actions in compact menus.
+- **Consumption history**: `Ctrl` / `Shift` selection, `Ctrl+A`, double click adds a lap, `Delete` deletes the selected laps.
+- **Lighter**: the page is built when first shown, the `Tyres` and `Team` tabs when first opened, and only the parts of the results that change are redrawn. The plan picture (`Save Image...`, `Copy Picture`) is drawn at the same size whatever the window size.
 
-#### Carte, courbes et lecture
+![Race calculator: strategy, fuel in the tank and pit stop plan](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator.png)
 
-- **Règle** (`M`) pour mesurer une distance sur la carte, **zones de pédales**, **traînée du curseur**, **repères de distance**, couleurs pour daltoniens.
-- **Export de l'image de la carte** (fichier ou presse-papiers), **passage A ↔ B** en CSV ou en image.
-- **Zoom de la carte synchronisé** avec les courbes (ou indépendant), **zoom précédent / suivant**, **mini-carte** sur la grande carte, **garder une position** d'un clic.
-- Lecture : **boucle sur le passage A-B**, reculer / avancer de 2 s (maintenir pour un retour ou une avance rapide).
-- **Aide clavier et souris** (bouton `?`) et raccourcis de la carte : `F` recadrer, `R` tourner, `1`-`8` coloration, `L` blocages, `Z` zones, `T` traînée.
+![Race calculator: tyre plan and stock](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-race-calculator-tyres.png)
 
-#### Performances de la visionneuse
+#### Strategy
 
-- Chaque tour enregistré a une **copie binaire** : la visionneuse l'ouvre sans relire le CSV, le chargement est bien plus rapide.
-- Les calculs lourds (limites de piste, valeurs de session) tournent dans un **processus séparé** : courbes et carte restent fluides pendant le calcul.
-- Les exports se font en arrière-plan ; fermer la visionneuse ou quitter l'app attend qu'ils soient terminés.
+- **Stints limited by tyre life**: laps per set of tyres, tyre changes placed in the plan.
+- **Driver of each stint** recorded at pit stops, shown in "Plan against Race".
+- Fuel unit (L / gal) on the plan, **copy the plan as an image** for Discord.
+- Share codes keep the fuel unit: a plan in gallons is no longer read as liters.
+- Fixed: the pit stop counter went back to zero every second during a race, and the current stint was counted from the planned stop instead of the actual stop.
 
-### Calculateur de course
+### Driver stats
 
-- **Course en direct** : pendant une course, le plan de la fin de course est recalculé à chaque tour et à chaque arrêt à partir de la voiture (tours et temps faits, carburant, énergie, pneus, arrêts faits).
-- **Scénario voiture de sécurité** (ou drapeau jaune intégral) : à partir d'un tour, pour quelques tours, avec la conso, le temps au tour et l'usure sous voiture de sécurité, et l'option de s'arrêter sous voiture de sécurité. Comparé au plan sans voiture de sécurité.
-- **Scénario pluie** : période de pluie avec conso et temps au tour adaptés, et arrêts pour pneus pluie puis slicks.
-- **Plusieurs pilotes** : relais par pilote, écart de rythme, temps de conduite minimum et maximum de chacun, carte `Temps de conduite` avec les limites non respectées en rouge.
-- **Comparaison des stratégies** : le plan actuel contre 1 ou 2 arrêts de moins (économie de carburant) et 1 arrêt de plus, avec le **coût de l'économie** sur le temps au tour, le temps aux stands et l'écart à l'arrivée. L'objectif d'économie dit si l'arrêt en moins est **rentable**.
-- **Plan d'arrêts** : **fenêtre d'arrêt** (premier et dernier tour possibles sans changer le nombre d'arrêts), **heure de la journée** de chaque arrêt avec l'heure de départ, export en **texte, pour Discord, en CSV ou en image**.
-- **Relais équilibrés** (pas de court relais d'appoint à la fin), **le leader finit d'abord (+1 tour)** en course au temps, marge de sécurité en **tours, en carburant ou en %**, conso des **tours d'entrée et de sortie** des stands.
-- **Estimer depuis l'historique** : durée d'arrêt, effet du carburant et évolution de la piste tirés de l'historique de consommation.
-- **Code de partage** : tout le plan sur une ligne de texte à coller dans un chat, et **plan enregistré par voiture et circuit**, rouvert automatiquement. **Annuler / rétablir** (`Ctrl+Z` / `Ctrl+Y`) sur toutes les saisies.
-- **Plan contre course** (relais roulés comparés au plan) et **rivaux de la catégorie** (tours, arrêts, prochain arrêt attendu).
-- **Onglet Équipe (LMU)** : relais de chaque pilote de la voiture lus dans le jeu, coéquipiers compris, avec carburant, énergie et usure par tour à reporter dans le calculateur. **Pneus autorisés** repris de la session du jeu.
+#### Redesigned page
 
-![Calculateur de course : voiture de sécurité, 2 pilotes, comparaison des stratégies](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-race-calculator.png)
+- **Track name as the page title** with what matters at a glance: number of vehicles and sessions, last driven date, a `Live` badge on the track of the running game session, and a back button to `All Tracks` (`Alt+←`).
+- **Key figures with icons**: the level shown with its letter, valid laps with a share bar, values fading in when they change.
+- **Level scale** of the selected vehicle: the six levels from `Offline` to `Alien`, where your personal best, qualifying and race bests stand, the gap to the reference and the time to find for the next level. The level list marks your bests with badges.
+- **Wider progression chart** under the table, next to the sessions list: round lap time grid, personal best line over a shaded area, level letters at the end of the limit lines, drawn from left to right when you pick another vehicle. Sessions show their type (practice, qualifying, race) and the podium in color.
+- **All Tracks**: a **daily activity calendar** of the last 12 months (driving time per day, days driven, longest streak) and the **recent sessions** of every track: click one to open its track and vehicle.
+- **Table**: levels as colored badges, personal best in bold, missing values dimmed, selected row marked, rows sliding to their place when sorted. `Delete` removes the selected vehicle (or track), `Backspace` goes back to `All Tracks`, `F5` reloads, `/` searches a track.
+- Clearer empty states, `Delete all stats of this track` and `Restore Backup` moved to the `⋯` menu, icons only for the menus when the window is narrow.
 
-### Statistiques pilote
+![Driver stats: level scale, progression and sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-driver-stats.png)
 
-- La page est **refaite en Qt Quick**, comme la visionneuse de télémétrie.
-- **Tous les circuits** : ta carrière sur une page, le meilleur tour de chaque catégorie sur chaque circuit coloré par son niveau, et le compte de tes niveaux (Alien, Compétitif, Bon…).
-- **Progression** : le meilleur tour de chaque session et ton record au fil du temps, avec les paliers de niveau, filtrable par essais, qualif ou course. Liste des **sessions** avec le résultat de chaque course.
-- **Nouvelles colonnes** : meilleur tour **théorique** (somme des meilleurs secteurs) et **potentiel**, départs, abandons, position moyenne, taux de victoires et de podiums, vitesse moyenne, conso aux 100 km, dernière sortie. Colonnes à afficher au choix, largeurs réglables.
-- **Niveau suivant** : le temps à trouver pour passer au niveau supérieur.
-- **Recherche de circuit**, tri par dernière sortie, export CSV, couleurs pour daltoniens.
-- **Annuler / rétablir** les suppressions et réinitialisations, **sauvegarde automatique** avant chaque modification (les 10 dernières, restaurables).
-- Bouton **`Télémétrie`** : ouvre les tours enregistrés du véhicule dans la visionneuse, avec ton record comme référence.
+![Driver stats, all tracks: activity calendar and recent sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-driver-stats-career.png)
 
-![Statistiques pilote : niveau, progression et sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-driver-stats.png)
+#### Faster
 
-![Statistiques pilote : tous les circuits](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-career.png)
+- Sorting no longer rebuilds the table (about 25 times faster), and the stats saved at each lap while you drive refresh the page 4 to 5 times faster: the session history is read again only when it changes.
 
-### Le Mans Ultimate : nouvelles données du jeu
+#### Stints, export and friends
 
-- Nouveau widget **Chat** : les messages du chat du jeu en overlay, pratique en VR. Retour à la ligne, disparition au bout de quelques secondes, nouveaux messages surlignés, heure optionnelle.
-- Nouvelle page **Rejeux du jeu** (`Outils`) : les rejeux enregistrés par le jeu, ouverture dans le jeu, commandes de lecture, et la liste des **contacts** de la session avec **saut au moment du contact**, caméra sur la voiture.
-- **Black box** : le journal inscrit chaque **contact** avec le nom de l'autre pilote, ou le mur.
-- Widget **Plan de course** : **distance jusqu'à l'entrée des stands**, plan recalculé à chaque tour en course, **vérification du menu des stands** (le plein réglé dans le jeu contre le plan) et **conso cible** pour atteindre le prochain arrêt.
-- **Estimation de conso du jeu** : tant qu'aucun tour de la voiture n'est enregistré sur ce circuit, les overlays carburant et énergie et le calculateur partent de la conso par tour estimée par le jeu.
+- **Pace and degradation per tyre compound** over recorded stints, **consistency index** per session and per track.
+- **Export** of the session history as CSV or JSON, and **comparison with a friend's stats** (exported JSON file).
 
-![Widget Chat](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-chat.png)
+### Fuel and energy
 
-### Corrections
-
-- Un virage qui traverse la ligne de départ n'est plus compté deux fois, et un coup de frein bref avant le vrai freinage n'est plus pris pour le point de freinage.
-- Changer d'unités met aussi à jour les bulles de la liste des tours.
-- Un export de la visionneuse qui échoue est signalé au lieu d'échouer sans rien dire.
-- Statistiques pilote : une modification ne perd plus les statistiques enregistrées entre-temps par l'app, et un temps réinitialisé disparaît aussi de la progression.
-
-## 0.18.0 (2026-10-04)
-
-### Visionneuse de télémétrie : analyse
-
-- **Légende interactive** au-dessus des courbes : survol pour surligner un tour (courbes, carte, cercle G), clic pour le garder surligné, double-clic pour en faire la référence, `×` pour le masquer, clic droit pour le menu.
-- **Couleurs stables** : chaque tour garde sa couleur tant qu'il est affiché, même quand on en coche ou décoche d'autres, ou qu'on change de référence.
-- **Écart à la référence** dans les bulles du curseur (`237 +4`, `9 % −3 %`). Quand une voie est trop petite pour sa bulle, les valeurs s'affichent sous son nom.
-- **Repères A et B** (clic droit ou touches `A` / `B`) et nouvel onglet **Plage** : temps de chaque tour entre les repères, écart à la référence, et min / max / moyenne de chaque voie affichée.
-- **Canaux calculés** : glissement de chaque roue (blocage au freinage, patinage à l'accélération), vitesse de braquage, carburant consommé, écart de température des pneus.
-- **Panneaux combinés** : les 4 roues dans une seule voie (températures, pressions, usure, freins, suspension…) et `Accélérateur et frein` superposés.
-- **Menu `Canaux`** : recherche, presets (Pédales, Pneus, Freins, Suspension), canaux non enregistrés grisés (et un message dans la voie plutôt qu'un graphe vide), **lissage** des voies bruitées, **fenêtre** du gain/perte de temps (20 à 150 m), **bande min / max** des tours affichés pour voir la régularité.
-- **Voies** : hauteur réglable en glissant leur bord (double-clic pour revenir), zoom vertical avec `Ctrl` + molette, défilement quand il y a beaucoup de voies.
-- **Lecture du tour** (bouton ▶ ou `Espace`, de 0,25× à 4×) : le curseur suit le tour de référence en temps réel.
-- **Clavier** : `←` `→` déplacent le curseur (`Maj` : la vue), `[` `]` virage précédent / suivant, `A` `B` repères, `Échap` les efface, `R` met le tour surligné en référence.
-- **Clic droit sur les courbes** : repères, zoom sur le secteur ou entre les repères, copier les valeurs ou l'image, ouvrir le replay à cet endroit.
-- **Clic sur `S1`, `S2`, `S3`** dans les courbes, ou sur un temps de secteur dans la liste : zoom sur le secteur.
-
-![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-telemetry-viewer.png)
-
-### Onglet Virages
-
-- **Tour comparé au choix** quand plusieurs tours sont affichés, et **tri par temps perdu** pour voir d'abord où gagner du temps.
-- Pour chaque virage : **vitesses d'entrée et de sortie**, **rapport** à la vitesse mini, **pression de freinage** maximale et **tour le plus rapide** dans ce virage.
-- **Tour idéal** : le meilleur passage de chaque virage et de chaque ligne droite parmi les tours affichés, avec l'écart au tour de référence.
-- La sensibilité de détection s'affiche dans ton unité de vitesse, et les virages sont recalculés au relâchement du curseur (3 fois plus vite qu'avant).
-
-![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-corners.png)
-
-### Carte de trajectoire
-
-- **Points de pilotage** de chaque tour dans chaque virage : ◆ freinage, ● point de corde (vitesse mini), ▲ sortie (retour à plein gaz, pointe dans le sens de la course). Au survol : virage, vitesse et distance, avec l'écart au tour de référence. Un clic zoome les courbes sur le virage. Option pour afficher la vitesse à côté de chaque point.
-- **7 colorations** : par tour, gain/perte, vitesse, pédales, **trajectoire** (le tour comparé à l'intérieur ou à l'extérieur de la référence), **rapport** et **altitude**.
-- **Suivi des voitures** pendant la lecture (ou avec les flèches du clavier) : la carte zoome sur les voitures et les garde au centre, et dézoome si elles s'écartent.
-- **Curseur** : une flèche par tour, orientée dans le sens de la course, avec l'écart à la référence (en secondes, ou en mètres sur l'axe en temps). Passer la souris sur la piste place le curseur des courbes au même endroit.
-- **Temps des secteurs** sur la piste avec l'écart du tour comparé, **flèches de sens**, **blocages des roues avant** et **patinage arrière**.
-- **Grande carte** par-dessus les courbes (bouton ⤢), **orientation auto** pour remplir la carte et rotation par quart de tour.
-- Étiquettes de virages qui ne se chevauchent plus (les plus gros écarts d'abord).
-
-![Carte : points de freinage, de corde et de sortie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-track-map.png)
-
-![Carte : coloration trajectoire](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-racing-line.png)
-
-### Liste des tours et outils
-
-- **Sélection** : `Maj` + clic coche tous les tours entre deux, menu de sélection rapide (meilleur tour vs dernier, 3 ou 5 meilleurs, tout décocher).
-- **Écart au meilleur tour** sur chaque tour, et conditions en bulle (températures piste et air, humidité, carburant consommé).
-- Un tour illisible est signalé dans la liste au lieu de disparaître sans rien dire.
-- **Mode `Direct`** : un nouveau tour enregistré apparaît tout seul et se compare au meilleur tour.
-- **Ouvrir le replay** à l'endroit du curseur quand un replay couvre ce tour.
-- **Export en image** (PNG) ou copie dans le presse-papiers, pour partager sur Discord.
-- La mise en page est mémorisée : largeur des colonnes, onglet de droite, hauteur des voies.
-
-### Cercle G
-
-- Le freinage est maintenant en bas et un virage à droite à droite (c'était inversé), avec les repères Gauche / Droite / Accélération / Freinage.
-- **Enveloppe d'adhérence** de chaque tour, et une échelle qui ignore les pics (vibreurs, contacts).
-
-### Corrections
-
-- **Les pages Qt Quick sont enfin en français** : la visionneuse de télémétrie et le Track Map Viewer restaient en anglais.
-- La carte de trajectoire n'est plus **en miroir** : elle a le même sens que la carte en jeu.
-- Le zoom des courbes est gardé quand on coche un tour.
-- Zoom à la molette fluide sur pavé tactile (courbes et carte).
-- En axe en temps, la carte et le cercle G montrent où est chaque tour à ce temps (au lieu de tous au même endroit).
-- Un tour importé de MoTeC dont la distance diffère un peu est recalé pour le delta.
-- Les réglages de la visionneuse ne peuvent plus être perdus si l'app s'arrête pendant leur écriture.
-- Couleurs lisibles en thème clair (meilleur tour, meilleurs secteurs, avertissements, gain/perte).
-
-### Performances
-
-- Les tours se chargent toujours en arrière-plan, avec la progression, et la lecture des fichiers est plus rapide.
-- Cocher un tour ne recalcule que ce tour, et l'export MoTeC de tout un circuit se fait en arrière-plan.
-- Le curseur demande un seul calcul par mouvement de souris pour les courbes, la carte et le cercle G.
-
-## 0.17.0 (2026-10-04)
-
-### Visionneuse de télémétrie refaite
-
-La visionneuse est entièrement refaite en Qt Quick : courbes, carte et cercle G sont dessinés par la carte graphique.
-
-- **Fluide** : zoom et déplacement animés, à la fréquence de l'écran. Avant, chaque cran de molette demandait environ 160 ms de dessin.
-- **Navigation** : mini-courbe du tour entier sous les graphes pour voir et déplacer la partie zoomée, bouton `Reset`, `Maj` + glisser pour zoomer une zone, glisser le nom d'une voie pour la déplacer.
-- **Liste des tours** : sessions repliables, couleur de chaque tour, badge `RÉF`, drapeau (ou double-clic) pour choisir la référence, `Tours propres` pour masquer les tours invalides, de sortie et de rentrée.
-- **Clic droit sur un tour** : référence, export MoTeC, garder, note, supprimer.
-- **Barre d'outils** : légende des tours, `Imported Laps...`, menu `Export` (MoTeC : tour de référence, tours affichés ou tous les tours du circuit ; CSV pour Excel).
-- **Onglet Virages** : barre de temps gagné/perdu par virage et, sous chaque virage, point de freinage, plein gaz, freinage dégressif, roue libre et chevauchement des pédales.
-- **Mémoire** : les tours chargés sont libérés après 3 minutes en arrière-plan, puis rechargés avec le même zoom.
-
-![Visionneuse de télémétrie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-telemetry-viewer.png)
-
-### Carte de trajectoire
-
-- **4 colorations** : par tour, gain/perte de temps face au tour de référence, vitesse (du plus lent au plus rapide, avec l'échelle) ou pédales (gaz, frein, les deux, roue libre).
-- **Suivre le zoom** : la carte zoome toute seule sur la partie du tour zoomée dans les courbes.
-- **Points de freinage** de chaque tour.
-- **Circuit soigné** : route avec bordure, ligne de départ en damier, limites de secteurs, échelle et boutons de zoom.
-- **Virages cliquables** avec le temps gagné ou perdu par le tour comparé : un clic zoome les courbes sur le virage.
-
-### Vrais numéros de virages
-
-Les virages portent leur numéro officiel (`T1`, `T10a`…, `V1` en français) sur les courbes, la carte et l'onglet Virages, au lieu d'un numéro dans l'ordre du tour.
-
-- **Circuits** : Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (tracé F1), Monza, Bahreïn, Portimão, Lusail, Road Atlanta, Laguna Seca et Long Beach. Au Mans, sans numérotation officielle, les virages sont nommés (Dunlop, Tertre Rouge, Mulsanne, Indianapolis, Arnage, Virages Porsche, Chicanes Ford).
-- **Placés sur le vrai tracé** : chaque virage est calé sur l'apex du virage correspondant de ton tour (ou de la carte du circuit). La carte montre tous les virages, même ceux passés à fond, et un virage détecté qui en couvre plusieurs s'appelle `T2-4`.
-- Les autres circuits et tracés gardent la numérotation dans l'ordre du tour.
-
-![Onglet Virages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-corners.png)
-
-### Track Map Viewer refait
-
-- **Carte dessinée par la carte graphique** : route à sa vraie largeur, ligne colorée par secteur (longueur de S1, S2 et S3), ligne de départ, limites de secteurs, virages officiels (un clic y amène la position).
-- **À la position** : section de courbe, cercle osculateur, cercles de distance et repère central ; infos de position (virage, nœud, secteur, XYZ), de courbe (« Droite 3 », rayon, longueur, angle) et de pente.
-- **Profil d'altitude** de tout le tour, cliquable, avec la position.
-- **Navigation** : clic sur la carte, curseur, flèches du clavier, bouton `Play` pour parcourir le circuit, `Suivre la position` pour garder la position au centre.
-- Menu `Afficher` pour chaque élément ; couleurs, largeurs et seuils de courbe de la configuration existante conservés.
-
-![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-track-map-viewer.png)
-
-### Et aussi
-
-- L'app ne s'alourdit que de 20 Mo pour Qt Quick : seuls les modules utilisés sont embarqués (sans ça, plus de 300 Mo).
-
-## 0.16.0 (2026-10-04)
-
-### Calculateur de course (nouveau)
-
-Le calculateur de carburant et la stratégie pneus ne font plus qu'un outil, **Calculateur de course** (entrée « Course » de la barre de navigation). Les anciennes entrées de la barre et les pages ouvertes s'y redirigent toutes seules.
-
-- **Une page, deux onglets** : réglages de course et chiffres clés en haut, communs, puis onglets **Carburant** et **Pneus**. Tout est en français, s'adapte aux petites fenêtres et se recalcule dès qu'une valeur est validée (Entrée ou en quittant le champ).
-- **Plan d'arrêts tour par tour** : à chaque arrêt, tour, carburant et énergie à remettre (plein tant que d'autres relais suivent, juste ce qu'il faut au dernier), pneus, pilote et durée de l'arrêt. Bouton `Copier` pour le partager en texte.
-- **Frise de stratégie** : un bloc par relais, tours d'arrêt au-dessus (en orange quand on change de pneus), lisible même en course de 24 h.
-- **Chiffres clés** : carburant et énergie de la course, arrêts (et ce qui les impose : carburant, énergie ou durée des relais), relais le plus long, plein moyen par arrêt (ou carburant à charger quand il n'y a pas d'arrêt), pneus utilisés sur le maximum autorisé.
-- **Course au temps juste** : carburant et énergie partagent les mêmes arrêts, et le nombre de tours dépend vraiment du temps perdu aux stands (ravitaillement, pneus, changement de pilote).
-- **Marge de sécurité** en tours, gardée à chaque arrêt et à l'arrivée.
-- **Arrêts au stand réalistes** : débit de ravitaillement carburant et énergie (un complément coûte moins qu'un plein), pneus changés pendant le ravitaillement ou après, temps de changement de pilote.
-- **Règlement** : arrêts obligatoires, durée maximale d'un relais, pilotes qui se relaient.
-- **Rythme** : effet du carburant sur le temps au tour et évolution de la piste au fil des heures.
-- **Objectif d'économie** : consommation à tenir pour gagner un arrêt, ou pour faire un nombre de tours par relais.
-- **Voitures à énergie seule** planifiées sur l'énergie.
-- **Remplissage intelligent** depuis le direct ou un fichier : moyenne des 5 derniers tours valides au rythme course (tours de stand écartés). En direct, la longueur de la course est reprise de la session, l'historique se met à jour tout seul, et l'option `Suivre le direct` met aussi à jour les saisies.
-- **Historique de consommation** : tri par colonne, filtre `Tours valides seulement`, sélection par tours entiers (tours invalides ignorés), bouton `Colonnes`, et suppression de tours ou de tout l'historique (`Supprimer la sélection`, `Tout supprimer`).
-- **Plan pneus relié à la stratégie** : une ligne par relais, temps de changement de pneus ajouté à l'arrêt, usure = usure par tour x tours du relais, ajustée selon la gomme (`Gomme mesurée`).
-- **`Proposer les changements`** : pneus neufs roue par roue au relais où la gomme passerait sous le minimum (2 pneus quand un seul essieu en a besoin), dans la limite des pneus autorisés ; s'il en manque, les meilleurs pneus usés sont remontés et les relais concernés signalés.
-- **Plan pneus gardé d'une session à l'autre**, avec annuler / rétablir (`Ctrl+Z` / `Ctrl+Y`) ; en tapant une valeur, les lignes ne sont plus perdues.
-- **Fichier plan de course** (`.race-plan`) : réglages, saisies et plan pneus dans un seul fichier, à garder ou partager avec l'équipe. Toutes les saisies sont aussi retrouvées à la réouverture, et `Remettre à zéro` les efface.
-
-### Widget Plan de course (nouveau)
-
-- **Le prochain arrêt en jeu** : tour de l'arrêt et tours restants (mis en évidence à l'approche), carburant et énergie à remettre, pneus à changer, arrêts restants. Le plan est refait à partir des saisies du calculateur, même fermé.
-
-### Black box
-
-- **Plus aucun chevauchement** : pneus, disques et suspensions qui braquent et bougent avec la suspension ne passent plus sur les LEDs RPM, les pastilles TC/BB/MAP ni les températures de freins. La place est réservée au braquage maximum, l'arrière braquant moins, et le débattement dessiné est plafonné.
-
-### Statistiques pilote
-
-- **Page modernisée** : chiffres clés du circuit (meilleur tour et sa voiture, niveau, distance, temps de conduite, tours valides, courses), tableau lisible, carte de référence de la voiture sélectionnée.
-- **Comparaison aux temps de la communauté** (feuille LMU d'[ohne_speed](https://www.youtube.com/@ohne_speed)) : chaque record est placé sur une échelle de niveaux, d'**Alien** à **Hors rythme**, avec son écart en % au temps de référence de la catégorie et la voiture la plus rapide. Les noms de circuits LMU et leurs variantes sont reconnus automatiquement. La feuille est téléchargée une fois par jour et gardée hors ligne ; menu `Référence` pour l'actualiser, changer de feuille ou désactiver la comparaison.
-
-### Mises à jour
-
-- **Page « Nouveautés » modernisée** : version et date de publication en en-tête, une carte par thème, détails techniques (commits, empreintes SHA256) repliés, texte adapté à la taille de la fenêtre.
-- **Bouton `Télécharger et installer` toujours disponible** (téléchargement dans le navigateur quand l'installation automatique n'est pas possible). La demande d'installation d'une nouvelle version utilise la même page.
-- **Messages de mise à jour traduits** (« Nouvelle version : v… », « Aucune mise à jour disponible »).
+- **Green-flag consumption** (option): median of the last green-flag laps, leaving out laps under FCY or safety car, pit laps and invalidated laps.
+- The extra lap when the leader crosses the line before the time runs out now counts in the laps left.
+- Fixed: "+664 laps" on the formation lap and the first lap.
 
 ### Interface
 
-- **Retour sur la dernière page au redémarrage**, même après un plantage ou un arrêt de Windows : la page affichée est enregistrée dès qu'elle change, plus seulement en quittant par le menu.
-- **Palette de commandes** : chercher « carburant », « stratégie pneus » ou « fuel calculator » trouve le Calculateur de course.
+- **New home page**: version and **`Release Notes`** button for the installed version (readable offline), available update highlighted, game status with the current session (track, session, position, lap), overlay lock in one click, last session driven, game setup reminder as long as the game is not running, **customizable quick access** (tools, pages and actions of your choice, in the order you want, with `Customize...` or right-click). Clickable cards and a 1 to 3 column layout depending on the width.
+- **Redesigned `Overlays` page**: each overlay is a card with a **preview drawn with your settings** (redrawn when you save its options), its category and its switch, or a compact list (preview in a tooltip); the view is remembered. Search ignores accents and case and accepts several words, category chips show how many overlays match, `All` / `Active` / `Inactive` filter, animated list. `Enable Shown` / `Disable Shown` switch only the filtered overlays. An overlay that is on but could not start shows an `Error` badge, with a link to the log. Right-click menu, keyboard (type to search, `/`, arrows, `Space`, `Enter`). Faster: the page is built when first shown and previews are drawn in the background, only while the page is visible.
+
+![Overlays page: cards with preview, search and category chips](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-overlays-page.png)
+
+- **Customize the navigation bar, quick access and display order**: new layout with the shown entries on the left (numbered, with their `Ctrl+1` to `Ctrl+9` shortcut for the bar) and the available entries on the right, sorted by type and with search. Drag and drop, move up / move down / remove buttons on each row, `Alt+↑` / `Alt+↓` and `Delete` on the keyboard, undo / redo, changes flagged until they are saved, `Ctrl+S` to save.
+- **Unsaved changes** flagged with a dot on the page, the navigation bar and the list of open pages. **`Ctrl+S`** saves the page shown.
+- **Pages no longer pile up**: a page you leave (settings, tool not in the navigation bar) closes by itself. Only those with unsaved changes stay open behind, listed by the `Open Pages` button. Navigation bar tools are still kept as you left them.
+- **Values checked as you type** in the settings: an invalid box is outlined in red with the reason, no more error message on save.
+- **Preset trash**: a deleted preset can be restored (`Undo` button for a few seconds, or `Trash` page).
+- **Updates**: `Skip This Version`, download progress with `Cancel Download`. If the app is hidden in the notification area, a message appears there instead of opening the window over the game. The portable ZIP version opens the release page instead of installing a separate copy.
+- **Keyboard**: focus outline on the navigation bar and the tools, overlay list usable with the keyboard, a single click on the notification area icon.
+- Better contrast in light theme, message icons matching the theme, last remaining English texts translated into French.
+- **Safe mode**: if the app crashed at launch, it offers to start without plugins or overlays (also with `--safe-mode`).
+
+### Connections
+
+- **Web dashboard** translated into French, in your units, with virtual energy for Hypercar and LMGT3, the official delta and the invalidated lap.
+- **Game data status** in the performance monitor: age of the shared memory and status of each piece of data read through the LMU REST API.
+
+### Game replays (Le Mans Ultimate)
+
+- **Redesigned page** (`Tools` > `Game Replays`): game status at a glance (not running, in the menus, in a session, replay open), replays grouped by day with search, `All` / `Practice` / `Qualify` / `Race` filter, sort by date, size or track, replay folder in one click.
+- **Replay files**: `Add` (or drop `.Vcr` files on the page) copies replays into the game replay folder, with a progress bar, a free disk space check and `Stop Copy`; `Export` copies them to a folder of your choice; `Rename`; `Delete` moves them to the Windows recycle bin, after confirmation. Several replays can be selected (`Ctrl` / `Shift` click, `Ctrl+A`). **Protect** replays with the star: they are never deleted. Folder clean up: delete replays older than a number of days, keep only the latest ones, delete the temporary files the game leaves behind. The replay folder is asked to the game, so it is known even without any replay.
+- **Game camera & HUD**: the camera menu of the game (Cockpit, Swingman, Nose Camera, Bonnet Camera, the 7 onboard cameras, trackside `Cycle All` and groups 1 to 4) with the camera shown checked, previous / next angle, camera on the previous / next car, name of the camera shown; show or hide the whole game UI for clean pictures (top bar, standings, replay bar and HUD, as a middle click in the game does) or the HUD parts one by one (chat, car HUD, timing, MFD, track map). Works in a live session too.
+- **Playback**: round buttons (`Space` play / pause), slow motion, rewind and fast forward, and every other speed of the game in a menu. Replay time read from the replay itself, with its speed (`1x`, `4x`...); `LIVE` and the session time in a live session. Lap of the car followed by the camera with previous / next lap, lap starts marked on the timeline.
+- **Replay this moment** in a live session: an incident opens the replay of the session at that moment, `Back to Live` returns to the session.
+- **Drivers**: standings of the session or replay (position and class position, number, driver and car, laps, best lap in purple when fastest of its class, last lap, gap as the game shows it (best lap behind the leader in practice and qualifying), pit stops, virtual energy of your team's cars, garage / in pits / finished / retired, incidents), class chips, your car highlighted, the car followed by the camera marked (cars sharing a driver name told apart); double-click a driver to put the camera on their car, right-click: `Go to Lap...`.
+- **Track map**: the track and pit lane of the session or replay with every car (class color, number), gliding between updates; click a car to put the camera on it.
+- **Incidents** instead of raw contacts: both sides of a contact merged into one incident, car number and class, your car highlighted, `Cars` / `Walls` filter, `My car`, driver chips with their incident count, copy or export to CSV. The incidents and standings of the session you just left stay shown. **Timeline** over the whole session: click an incident to jump to it, click anywhere else to move the replay there, mouse wheel to zoom.
+- Settings kept (seconds before, sort, filters, tab, protected replays), replays list updated when a session ends, `Today` / `Yesterday` updated at midnight, screen reader names on buttons.
+- Lighter on the game: asked only while the page is shown, on one connection per update and one background thread, less often when the game is not running, standings only when needed.
+
+![Game Replays page: replays by day, playback, camera, track map with the cars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.20.0-game-replays.png)
+
+### Releases and documentation
+
+- **Release notes in the app language**: the `Release Notes` page shows the changelog in French when the app is in French (available update and installed version alike), in English otherwise.
+- **Simpler releases**: two files only, `ModernTinyPedals-<version>-setup.zip` (the Windows installer) and `ModernTinyPedals-<version>-source.zip`. Updating from the app downloads the ZIP, checks its SHA-256 hash and runs the installer inside. The portable ZIP is no longer published: to turn a portable copy into an installed one, install the setup into its folder (presets and data are kept).
+- **Wiki**: a full guide (installation, game setup, overlays, telemetry viewer, race calculator, connections, troubleshooting, development) on the [project wiki](https://github.com/Keenny38/ModernTinyPedals/wiki).
+- README, changelog and GitHub release notes in English, contributing guide rewritten for Modern Tiny Pedals.
+
+### Reliability and security
+
+- The app starts even if the game's shared memory has an unexpected size (old rF2 plugin, another tool).
+- Replays: pausing no longer hides the overlays, replays from an older game version are cleanly rejected, damaged files are read up to their healthy part, export runs in the background.
+- Presets and settings are written safely (no more empty file after a power cut), module data saved on shutdown, the lap being recorded is kept if you quit just after the line.
+- Closing the window then choosing `Cancel` no longer leaves the app without a window, and changes on a settings page are no longer lost when switching presets.
+- Plugins installed from a ZIP are checked (paths, executed code), web dashboard and remote control hardened.
+- Overlay fixes: deltabest_extended, modern heatmaps, sizes at ×2 scale, truncated texts, °F, engine and pedal maximums, and many more (see [the audit history](docs/AUDIT.md)).
+- The Windows version is now launched in test mode before each release.
+- **Verifiable downloads**: each release file has a signed provenance attestation (proof that GitHub built it from the repository code, to check with `gh attestation verify`, see [SECURITY.md](SECURITY.md)), and a published release can no longer be modified. Security vulnerabilities are reported privately, as explained in the same file.
+
+## 0.19.1 (2026-10-05)
+
+Fix for the Windows version of 0.19.0.
+
+- **The app did not start** in the Windows version (installer and ZIP): a Python module (`multiprocessing`, used at launch and by the telemetry viewer's background computations) was missing from the executable.
+
+## 0.19.0 (2026-10-05)
+
+The biggest update since the beginning: every overlay gets a new look, the driver stats page is rebuilt, the race calculator handles a safety car, rain and multiple drivers, and the app reads much more Le Mans Ultimate data (chat, contacts, replays, team stints).
+
+### New overlay design
+
+- **Every overlay except the Black box** has a new design: one rounded panel per overlay, **Barlow** font (included with the app), short labels above the values, translated into the app language.
+- **Values colored by meaning**: gain in green, loss in red, warning in orange, best time in purple.
+- **Standings** (relative, standings, rivals) as rows: position badge, class pill with the position in class, class color on the edge of the row, fastest lap of the class in purple. Columns of your choice (`column_*`), and for rivals the lap time gap and the interval.
+- **Fuel and energy** with a gauge, the full-tank mark and the key values in tiles (laps, minutes, consumption per lap, saving, pit stops).
+- **Tyres and brakes** in tiles with heatmap colors, **LEDs** as glowing dots, new gauges for gear, pedals and damage.
+- **Simplified options**: the config window and the option search (`Ctrl+F`) only show the options the design uses.
+- **The classic look is still available**: for all overlays (disable `enable_modern_style` in `Overlay Style`) or for a single one (`enable_classic_layout`).
+- Adjustable design font (`modern_design_font_name`), overlay theme colors as before.
+
+![New design: standings](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
+
+![New design: fuel and energy](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-carburant.png)
+
+![New design: car and tyres](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-voiture.png)
+
+![New design: timing](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-chrono.png)
+
+### New icon and interface
+
+- New **gold and black** icon, and its **gold and white** version for the dark theme.
+- The window, taskbar and notification area icon follows **Windows light / dark mode**, as do the logo of the `About` window and the shortcuts created by the installer.
+- The `Widget` tab of the main window is now called **`Overlays`**.
+
+### Telemetry viewer
+
+#### Official layout and track limits (LMU)
+
+- The viewer fetches the track's **official layout** and **pit lane** from the game, then keeps them: they remain available without the game.
+- Game **track edges** on the map, with the **margin to the edge** at each key point (outside at braking, inside at the apex, outside at the exit) and a new **outside point** ■ after each apex.
+- **Off-tracks** (2 or more wheels on grass, dirt or gravel) and **track limits exceeded** (4 wheels out) marked on the map and counted per lap (off-tracks: laps recorded with this version). For laps recorded before this version, the edges are inferred from the driving lines.
+- Two new map colorings: **mini-sectors** (the reference line colored by the fastest lap in each mini-sector, with the **ideal lap of the shown laps**) and **delta per corner**.
+
+![Map: official layout, track edges, mini-sectors and mini-map](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
+
+#### New Session and XY tabs
+
+- **Session**: every lap of the session (shown laps in their color, best in gold, invalid laps hollow), fuel and tyre wear of each lap, off-tracks and track limits. Clicking a lap shows or hides it.
+- **Long-run pace**: average of clean laps leaving out slow laps (traffic, mistakes), and lap time **trend** over the session (wear, fuel, track evolution), also per % of tyre wear.
+- **XY**: one channel against another at the same spot on track, as a **scatter plot** (speed / lateral G, steering / lateral G, throttle / slip…) or as a **histogram** (share of the lap spent in each value range). Limited to the zoomed part of the charts when zoomed in.
+
+![Session tab: long-run pace and trend](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-session.png)
+
+![XY tab: speed / lateral G](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-xy.png)
+
+#### Where time is lost
+
+- At the top of the Corners tab, the corners that cost the most, with the **cause in plain words**: "Brakes 6 m earlier", "Minimum speed 7 km/h lower", "Coasting 0.7 s longer", "Full throttle 8 m later"…
+- Option for the **delta to the ideal lap** (fastest clean lap in each mini-sector) instead of the reference lap.
+- **Spread of braking points** from one lap to the next, to judge consistency.
+
+![Corners tab: where time is lost](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-coaching.png)
+
+#### New recorded channels
+
+- **Inner / middle / outer** temperatures of each tyre (and their spread), tyre **load**, **slip angle**, **camber**.
+- **Brake bias**, **TC** and **ABS** levels, **engine map**, **water** and **oil** temperatures, track position and distance from the center line.
+- The name of the **setup** loaded in the game is kept with each lap (LMU), shown and searchable.
+
+#### Lap list
+
+- **Search**: vehicle, session, setup, note.
+- **Trash**: deleted laps go to the trash and can be restored with `Ctrl+Z`. Session menus: show, hide, keep or move to the trash all laps of a session; the same actions for checked laps, and MoTeC export of checked laps.
+- **Use as Delta Best**: a recorded lap becomes the delta best used on track (the previous one is kept as a backup copy).
+
+#### Map, charts and playback
+
+- **Ruler** (`M`) to measure a distance on the map, **pedal zones**, **cursor trail**, **distance markers**, colorblind-friendly colors.
+- **Map image export** (file or clipboard), **A ↔ B section** as CSV or image.
+- **Map zoom synced** with the charts (or independent), **previous / next zoom**, **mini-map** on the large map, **pin a position** in one click.
+- Playback: **A-B section loop**, step back / forward 2 s (hold to rewind or fast-forward).
+- **Keyboard and mouse help** (`?` button) and map shortcuts: `F` fit, `R` rotate, `1`-`8` coloring, `L` lock-ups, `Z` zones, `T` trail.
+
+#### Viewer performance
+
+- Each recorded lap has a **binary copy**: the viewer opens it without re-reading the CSV, so loading is much faster.
+- Heavy computations (track limits, session values) run in a **separate process**: charts and map stay smooth during the computation.
+- Exports run in the background; closing the viewer or quitting the app waits for them to finish.
+
+### Race calculator
+
+- **Live race**: during a race, the plan for the rest of the race is recalculated every lap and every pit stop from the car (laps and time done, fuel, energy, tyres, stops made).
+- **Safety car scenario** (or full course yellow): from a given lap, for a few laps, with consumption, lap time and wear under safety car, and the option to pit under safety car. Compared with the plan without a safety car.
+- **Rain scenario**: rain period with adjusted consumption and lap time, and pit stops for wet tyres then slicks.
+- **Multiple drivers**: stints per driver, pace difference, minimum and maximum driving time for each, `Driving Time` card with unmet limits in red.
+- **Strategy comparison**: the current plan against 1 or 2 fewer stops (fuel saving) and 1 more stop, with the **cost of saving** in lap time, pit time and gap at the finish. The saving target tells you whether the stop saved is **worth it**.
+- **Pit stop plan**: **pit window** (first and last possible lap without changing the number of stops), **time of day** of each stop based on the start time, export as **text, for Discord, as CSV or as an image**.
+- **Balanced stints** (no short top-up stint at the end), **leader finishes first (+1 lap)** in timed races, safety margin in **laps, fuel or %**, consumption of the pit **in and out laps**.
+- **Estimate from history**: pit stop duration, fuel effect and track evolution taken from the consumption history.
+- **Share code**: the whole plan on one line of text to paste in a chat, and **plan saved per car and track**, reopened automatically. **Undo / redo** (`Ctrl+Z` / `Ctrl+Y`) on all inputs.
+- **Plan against race** (stints driven compared with the plan) and **class rivals** (laps, stops, next expected stop).
+- **Team tab (LMU)**: stints of each driver of the car read from the game, teammates included, with fuel, energy and wear per lap to carry over into the calculator. **Allowed tyres** taken from the game session.
+
+![Race calculator: safety car, 2 drivers, strategy comparison](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-race-calculator.png)
+
+### Driver stats
+
+- The page is **rebuilt in Qt Quick**, like the telemetry viewer.
+- **All tracks**: your career on one page, the best lap of each class on each track colored by its level, and the count of your levels (Alien, Competitive, Good…).
+- **Progression**: the best lap of each session and your record over time, with the level thresholds, filterable by practice, qualifying or race. List of **sessions** with the result of each race.
+- **New columns**: **theoretical** best lap (sum of best sectors) and **potential**, starts, retirements, average position, win and podium rates, average speed, consumption per 100 km, last driven. Columns to show of your choice, adjustable widths.
+- **Next level**: the time to find to move up to the next level.
+- **Track search**, sort by last driven, CSV export, colorblind-friendly colors.
+- **Undo / redo** deletions and resets, **automatic backup** before each change (the last 10, restorable).
+- **`Telemetry`** button: opens the vehicle's recorded laps in the viewer, with your record as reference.
+
+![Driver stats: level, progression and sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-driver-stats.png)
+
+![Driver stats: all tracks](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-career.png)
+
+### Le Mans Ultimate: new game data
+
+- New **Chat** widget: the game's chat messages as an overlay, handy in VR. Line wrapping, fading out after a few seconds, new messages highlighted, optional time.
+- New **Game Replays** page (`Tools`): replays recorded by the game, opening in the game, playback controls, and the list of the session's **contacts** with **jump to the moment of contact**, camera on the car.
+- **Black box**: the log records each **contact** with the name of the other driver, or the wall.
+- **Race plan** widget: **distance to the pit entry**, plan recalculated every lap during the race, **pit menu check** (fuel set in the game against the plan) and **target consumption** to reach the next stop.
+- **Game consumption estimate**: as long as no lap of the car is recorded on this track, the fuel and energy overlays and the calculator start from the per-lap consumption estimated by the game.
+
+![Chat widget](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-chat.png)
+
+### Fixes
+
+- A corner that crosses the start line is no longer counted twice, and a brief brake tap before the real braking is no longer taken as the braking point.
+- Changing units also updates the tooltips of the lap list.
+- A failed viewer export is reported instead of failing silently.
+- Driver stats: a change no longer loses the stats saved by the app in the meantime, and a reset time also disappears from the progression.
+
+## 0.18.0 (2026-10-04)
+
+### Telemetry viewer: analysis
+
+- **Interactive legend** above the charts: hover to highlight a lap (charts, map, G circle), click to keep it highlighted, double-click to make it the reference, `×` to hide it, right-click for the menu.
+- **Stable colors**: each lap keeps its color as long as it is shown, even when other laps are checked or unchecked, or the reference changes.
+- **Gap to the reference** in the cursor tooltips (`237 +4`, `9 % −3 %`). When a lane is too small for its tooltip, the values are shown under its name.
+- **A and B markers** (right-click or `A` / `B` keys) and a new **Range** tab: time of each lap between the markers, gap to the reference, and min / max / average of each shown lane.
+- **Calculated channels**: slip of each wheel (lock-up under braking, wheelspin under acceleration), steering rate, fuel used, tyre temperature spread.
+- **Combined panels**: all 4 wheels in a single lane (temperatures, pressures, wear, brakes, suspension…) and `Throttle & Brake` overlaid.
+- **`Channels` menu**: search, presets (Pedals, Tyres, Brakes, Suspension), channels not recorded grayed out (and a message in the lane rather than an empty chart), **smoothing** of noisy lanes, time gain/loss **window** (20 to 150 m), **min / max band** of the shown laps to see consistency.
+- **Lanes**: height adjustable by dragging their edge (double-click to reset), vertical zoom with `Ctrl` + wheel, scrolling when there are many lanes.
+- **Lap playback** (▶ button or `Space`, from 0.25× to 4×): the cursor follows the reference lap in real time.
+- **Keyboard**: `←` `→` move the cursor (`Shift`: the view), `[` `]` previous / next corner, `A` `B` markers, `Esc` clears them, `R` makes the highlighted lap the reference.
+- **Right-click on the charts**: markers, zoom to the sector or between the markers, copy the values or the image, open the replay at this point.
+- **Click on `S1`, `S2`, `S3`** in the charts, or on a sector time in the list: zoom to the sector.
+
+![Telemetry viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-telemetry-viewer.png)
+
+### Corners tab
+
+- **Compared lap of your choice** when several laps are shown, and **sort by time lost** to see first where to gain time.
+- For each corner: **entry and exit speeds**, **gear** at minimum speed, maximum **brake pressure** and the **fastest lap** through that corner.
+- **Ideal lap**: the best pass through each corner and each straight among the shown laps, with the gap to the reference lap.
+- The detection sensitivity is shown in your speed unit, and corners are recalculated when the slider is released (3 times faster than before).
+
+![Corners tab](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-corners.png)
+
+### Track map
+
+- **Driving points** of each lap in each corner: ◆ braking, ● apex (minimum speed), ▲ exit (back to full throttle, pointing in the direction of travel). On hover: corner, speed and distance, with the gap to the reference lap. A click zooms the charts to the corner. Option to show the speed next to each point.
+- **7 colorings**: by lap, gain/loss, speed, pedals, **racing line** (the compared lap inside or outside the reference), **gear** and **elevation**.
+- **Car tracking** during playback (or with the keyboard arrows): the map zooms in on the cars and keeps them centered, and zooms out if they move apart.
+- **Cursor**: one arrow per lap, pointing in the direction of travel, with the gap to the reference (in seconds, or in meters on the time axis). Hovering over the track puts the chart cursor at the same spot.
+- **Sector times** on the track with the gap of the compared lap, **direction arrows**, **front wheel lock-ups** and **rear wheelspin**.
+- **Large map** over the charts (⤢ button), **auto orientation** to fill the map and rotation by quarter turns.
+- Corner labels no longer overlap (biggest gaps first).
+
+![Map: braking, apex and exit points](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-track-map.png)
+
+![Map: racing line coloring](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.18.0-racing-line.png)
+
+### Lap list and tools
+
+- **Selection**: `Shift` + click checks all laps in between, quick selection menu (best lap vs last, best 3 or 5, uncheck all).
+- **Gap to the best lap** on each lap, and conditions in a tooltip (track and air temperatures, humidity, fuel used).
+- An unreadable lap is flagged in the list instead of silently disappearing.
+- **`Live` mode**: a newly recorded lap shows up on its own and is compared with the best lap.
+- **Open the replay** at the cursor position when a replay covers that lap.
+- **Image export** (PNG) or copy to the clipboard, to share on Discord.
+- The layout is remembered: column widths, right-hand tab, lane heights.
+
+### G circle
+
+- Braking is now at the bottom and a right-hand corner on the right (it was the other way around), with Left / Right / Acceleration / Braking labels.
+- **Grip envelope** of each lap, and a scale that ignores spikes (curbs, contacts).
+
+### Fixes
+
+- **Qt Quick pages are finally in French**: the telemetry viewer and the Track Map Viewer stayed in English.
+- The track map is no longer **mirrored**: it has the same orientation as the in-game map.
+- The chart zoom is kept when a lap is checked.
+- Smooth wheel zoom on touchpads (charts and map).
+- On the time axis, the map and the G circle show where each lap is at that time (instead of all at the same spot).
+- A lap imported from MoTeC with a slightly different distance is realigned for the delta.
+- Viewer settings can no longer be lost if the app stops while writing them.
+- Readable colors in light theme (best lap, best sectors, warnings, gain/loss).
+
+### Performance
+
+- Laps are now always loaded in the background, with progress, and reading files is faster.
+- Checking a lap only recalculates that lap, and the MoTeC export of a whole track runs in the background.
+- The cursor requests a single computation per mouse move for the charts, the map and the G circle.
+
+## 0.17.0 (2026-10-04)
+
+### Telemetry viewer rebuilt
+
+The viewer is fully rebuilt in Qt Quick: charts, map and G circle are drawn by the graphics card.
+
+- **Smooth**: animated zoom and pan, at the screen refresh rate. Before, each mouse wheel notch took about 160 ms to draw.
+- **Navigation**: mini-chart of the whole lap under the charts to see and move the zoomed part, `Reset` button, `Shift` + drag to zoom into an area, drag a lane's name to move it.
+- **Lap list**: collapsible sessions, color of each lap, `REF` badge, flag (or double-click) to pick the reference, `Clean only` to hide invalid laps, out laps and in laps.
+- **Right-click on a lap**: reference, MoTeC export, keep, note, delete.
+- **Toolbar**: lap legend, `Imported Laps...`, `Export` menu (MoTeC: reference lap, shown laps or all laps of the track; CSV for Excel).
+- **Corners tab**: time gained/lost bar per corner and, under each corner, braking point, full throttle, trail braking, coasting and pedal overlap.
+- **Memory**: loaded laps are released after 3 minutes in the background, then reloaded with the same zoom.
+
+![Telemetry viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-telemetry-viewer.png)
+
+### Track map
+
+- **4 colorings**: by lap, time gain/loss against the reference lap, speed (slowest to fastest, with the scale) or pedals (throttle, brake, both, coasting).
+- **Follow zoom**: the map zooms in by itself on the part of the lap zoomed in the charts.
+- **Braking points** of each lap.
+- **Polished track drawing**: road with border, checkered start line, sector limits, scale and zoom buttons.
+- **Clickable corners** with the time gained or lost by the compared lap: a click zooms the charts to the corner.
+
+### Real corner numbers
+
+Corners carry their official number (`T1`, `T10a`…, `V1` in French) on the charts, the map and the Corners tab, instead of a number in lap order.
+
+- **Tracks**: Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (F1 layout), Monza, Bahrain, Portimão, Lusail, Road Atlanta, Laguna Seca and Long Beach. At Le Mans, which has no official numbering, the corners are named (Dunlop, Tertre Rouge, Mulsanne, Indianapolis, Arnage, Porsche Curves, Ford Chicanes).
+- **Placed on the real layout**: each corner is aligned on the apex of the matching corner of your lap (or of the track map). The map shows every corner, even those taken flat out, and a detected corner that covers several is called `T2-4`.
+- Other tracks and layouts keep the numbering in lap order.
+
+![Corners tab](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-corners.png)
+
+### Track Map Viewer rebuilt
+
+- **Map drawn by the graphics card**: road at its real width, line colored by sector (length of S1, S2 and S3), start line, sector limits, official corners (a click moves the position there).
+- **At the position**: curve section, osculating circle, distance circles and center mark; position info (corner, node, sector, XYZ), curve info ("Right 3", radius, length, angle) and slope info.
+- **Elevation profile** of the whole lap, clickable, with the position.
+- **Navigation**: click on the map, slider, keyboard arrows, `Play` button to run through the track, `Follow position` to keep the position centered.
+- `Show` menu for each element; colors, widths and curve thresholds from the existing configuration kept.
+
+![Track Map Viewer](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.17.0-track-map-viewer.png)
+
+### Also
+
+- Qt Quick adds only 20 MB to the app: only the modules in use are bundled (otherwise more than 300 MB).
+
+## 0.16.0 (2026-10-04)
+
+### Race calculator (new)
+
+The fuel calculator and the tyre strategy are now a single tool, the **Race calculator** ("Race" entry of the navigation bar). The former bar entries and open pages redirect to it automatically.
+
+- **One page, two tabs**: race settings and key figures at the top, shared, then **Fuel** and **Tyres** tabs. Everything is in French, fits small windows and is recalculated as soon as a value is confirmed (Enter or leaving the field).
+- **Lap-by-lap pit stop plan**: for each stop, the lap, fuel and energy to add (full while more stints follow, just what is needed at the last one), tyres, driver and stop duration. `Copy` button to share it as text.
+- **Strategy timeline**: one block per stint, pit laps above (in orange when tyres are changed), readable even for a 24-hour race.
+- **Key figures**: race fuel and energy, pit stops (and what forces them: fuel, energy or stint length), longest stint, average refuel per stop (or fuel to load when there is no stop), tyres used out of the maximum allowed.
+- **Timed races done right**: fuel and energy share the same stops, and the lap count really depends on the time lost in the pits (refueling, tyres, driver change).
+- **Safety margin** in laps, kept at each stop and at the finish.
+- **Realistic pit stops**: fuel and energy refueling rate (a top-up costs less than a full refuel), tyres changed during or after refueling, driver change time.
+- **Rules**: mandatory stops, maximum stint length, drivers taking turns.
+- **Pace**: fuel effect on lap time and track evolution over the hours.
+- **Saving target**: consumption to hold to save a stop, or to do a given number of laps per stint.
+- **Energy-only cars** planned on energy.
+- **Smart fill** from live data or a file: average of the last 5 valid laps at race pace (pit laps left out). In live mode, the race length is taken from the session, the history updates on its own, and the `Follow Live` option also updates the inputs.
+- **Consumption history**: sort by column, `Valid Laps Only` filter, selection by whole laps (invalid laps ignored), `Columns` button, and deletion of laps or of the whole history (`Delete Selected`, `Delete All`).
+- **Tyre plan linked to the strategy**: one row per stint, tyre change time added to the stop, wear = wear per lap x stint laps, adjusted by compound (`Measured Compound`).
+- **`Propose Changes`**: new tyres wheel by wheel at the stint where the tread would drop below the minimum (2 tyres when only one axle needs it), within the allowed tyres; if some are missing, the best used tyres are fitted again and the affected stints are flagged.
+- **Tyre plan kept from one session to the next**, with undo / redo (`Ctrl+Z` / `Ctrl+Y`); rows are no longer lost while typing a value.
+- **Race plan file** (`.race-plan`): settings, inputs and tyre plan in a single file, to keep or share with the team. All inputs are also restored on reopening, and `Reset to Zero` clears them.
+
+### Race plan widget (new)
+
+- **The next pit stop in game**: stop lap and laps left (highlighted when approaching), fuel and energy to add, tyres to change, stops left. The plan is rebuilt from the calculator inputs, even when the calculator is closed.
+
+### Black box
+
+- **No more overlap**: tyres, discs and suspensions that steer and move with the suspension no longer cover the RPM LEDs, the TC/BB/MAP pills or the brake temperatures. Room is reserved for full steering lock, the rear steering less, and the suspension travel drawn is capped.
+
+### Driver stats
+
+- **Modernized page**: key figures of the track (best lap and its car, level, distance, driving time, valid laps, races), readable table, reference card of the selected car.
+- **Comparison with community times** (LMU sheet by [ohne_speed](https://www.youtube.com/@ohne_speed)): each record is placed on a scale of levels, from **Alien** to **Offline**, with its % gap to the class reference time and the fastest car. LMU track names and their variants are recognized automatically. The sheet is downloaded once a day and kept offline; `Reference` menu to refresh it, switch sheets or disable the comparison.
+
+### Updates
+
+- **Modernized "Release Notes" page**: version and release date in the header, one card per topic, technical details (commits, SHA256 hashes) collapsed, text fitted to the window size.
+- **`Download And Install` button always available** (download in the browser when automatic installation is not possible). The prompt to install a new version uses the same page.
+- **Translated update messages** ("New Updates: v…", "No Updates Available").
+
+### Interface
+
+- **Back to the last page on restart**, even after a crash or a Windows shutdown: the page shown is saved as soon as it changes, not only when quitting from the menu.
+- **Command palette**: searching "fuel", "tyre strategy" or "fuel calculator" finds the Race calculator.
 
 ## 0.15.0 (2026-10-04)
 
-### Visionneuse de télémétrie (Telemetry)
+### Telemetry viewer (Telemetry)
 
-- **Unités de tes réglages** : vitesse (km/h, mph), températures (°C, °F), pressions (kPa, psi, bar) et carburant (litres, gallons). Pédales et volant en pourcentage.
-- **Axes gradués** : distance sous les courbes, valeurs haute et basse de chaque courbe.
-- **Valeurs au curseur dans chaque courbe**, une étiquette colorée par tour, et la ligne du haut colorée comme les tours.
-- **Virages numérotés (T1, T2…)** sur les courbes et sur la carte.
-- **Clic sur la carte** pour placer le curseur à cet endroit dans les courbes.
-- **Rapport engagé dessiné en marches d'escalier.**
-- **Courbe « Gain/Perte de temps »** : où le temps se perd ou se gagne face au tour de référence, en secondes par 100 m.
-- **Axe en temps** (au lieu de la distance), la partie zoomée du tour est conservée.
-- **Analyse de pilotage par virage** (onglet Virages) : freinage dégressif, roue libre et chevauchement gaz / frein des deux tours.
-- **Noms de tours clairs partout** : « Tour 12 · 1:11.525 · Course 03/10 » dans la légende.
-- **Liste des tours** : étoile sur le meilleur tour de chaque session, option pour masquer les tours invalides, de sortie et de rentrée, tours ajoutés regroupés par log.
-- **Garder un tour** (jamais supprimé par l'enregistreur), **note par tour** et **suppression** depuis le clic droit.
-- **Tours cochés et tour de référence mémorisés** par circuit.
-- **Export CSV pour Excel** des courbes affichées (virgule décimale et point-virgule si Windows est en français).
-- **Plus fluide** : à partir de 3 tours à lire, chargement en arrière-plan sans figer la fenêtre, et « Actualiser » ne relit que les tours modifiés.
+- **Units from your settings**: speed (km/h, mph), temperatures (°C, °F), pressures (kPa, psi, bar) and fuel (liters, gallons). Pedals and steering in percent.
+- **Graduated axes**: distance under the charts, top and bottom values of each chart.
+- **Cursor values in each chart**, one colored label per lap, and the top line colored like the laps.
+- **Numbered corners (T1, T2…)** on the charts and on the map.
+- **Click on the map** to put the cursor at that spot in the charts.
+- **Gear drawn as stair steps.**
+- **"Time Gain/Loss" chart**: where time is lost or gained against the reference lap, in seconds per 100 m.
+- **Time axis** (instead of distance), the zoomed part of the lap is kept.
+- **Per-corner driving analysis** (Corners tab): trail braking, coasting and throttle / brake overlap of both laps.
+- **Clear lap names everywhere**: "Lap 12 · 1:11.525 · Race 03/10" in the legend.
+- **Lap list**: star on the best lap of each session, option to hide invalid laps, out laps and in laps, added laps grouped by log.
+- **Keep a lap** (never deleted by the recorder), **per-lap note** and **deletion** from the right-click menu.
+- **Checked laps and reference lap remembered** per track.
+- **CSV export for Excel** of the shown charts (decimal comma and semicolon if Windows is in French).
+- **Smoother**: from 3 laps to read, loading in the background without freezing the window, and "Refresh" only re-reads modified laps.
 
 ## 0.14.0 (2026-10-04)
 
-### Tout dans la fenêtre de l'app
+### Everything in the app window
 
-- **Outils, éditeurs et réglages s'ouvrent comme des pages** dans la fenêtre principale, plus dans des fenêtres séparées. Les petites saisies (nom de preset, raccourci clavier, code de partage, nom de thème) aussi.
-- **Barre de navigation personnalisable** (clic droit > `Personnaliser la barre de navigation...`) : pages et outils au choix, dans l'ordre voulu, avec `Ctrl+1` à `Ctrl+9` pour les 9 premières entrées. Par défaut : Pace Notes retiré, Telemetry, Driver Stats Viewer, Fuel Calculator et Tyre Strategy Planner ajoutés.
-- **Les outils de la barre sont des pages comme Widget ou Module** : entrée surlignée quand on y est, pas de bouton Fermer, on les retrouve tels qu'on les a laissés. Échap ne les ferme plus.
-- **Bouton « Pages ouvertes »** en bas de la barre (visible seulement s'il y en a) pour retrouver ou fermer les autres pages (réglages, outils hors barre).
-- **Les icônes de la barre gardent leur taille** : si la fenêtre est petite, la barre défile (molette ou fine barre de défilement), avec un dégradé et une flèche quand des entrées sont cachées.
-- **Retour à la page précédente** avec `Alt+←` ou le bouton souris arrière. Fermer une page ramène à celle d'avant.
-- **Pages rouvertes au démarrage** : les outils laissés ouverts reviennent au lancement suivant, après un redémarrage ou un changement de langue (option `Fenêtre > Rouvrir les pages au démarrage`). Elles se rouvrent une fois la fenêtre affichée, sans ralentir le démarrage.
-- **La fenêtre s'agrandit pour une page large** (dans la limite de l'écran), garde cette taille pendant la navigation et la reprend quand la page est fermée.
-- **Les réglages ne se perdent plus** : fermer une page de réglages modifiée demande d'enregistrer, d'abandonner ou d'annuler, et un enregistrement n'est accepté que si toutes les valeurs sont valides. Les options internes de l'application (position et taille de fenêtre, barre...) ne sont plus affichées.
-- **Changement de langue sans perte** : les pages de réglages et les pages avec des modifications non enregistrées sont gardées telles quelles.
-- **Pastilles de couleur par catégorie** dans la liste des widgets, et statuts dans le gestionnaire de plugins.
+- **Tools, editors and settings open as pages** in the main window, no longer in separate windows. The small inputs too (preset name, keyboard shortcut, share code, theme name).
+- **Customizable navigation bar** (right-click > `Customize Navigation Bar...`): pages and tools of your choice, in the order you want, with `Ctrl+1` to `Ctrl+9` for the first 9 entries. By default: Pace Notes removed, Telemetry, Driver Stats Viewer, Fuel Calculator and Tyre Strategy Planner added.
+- **Bar tools are pages like Widget or Module**: entry highlighted when you are on it, no Close button, you find them as you left them. Esc no longer closes them.
+- **"Open Pages" button** at the bottom of the bar (shown only when there are some) to get back to or close the other pages (settings, tools not in the bar).
+- **Bar icons keep their size**: if the window is small, the bar scrolls (mouse wheel or thin scroll bar), with a fade and an arrow when entries are hidden.
+- **Back to the previous page** with `Alt+←` or the mouse back button. Closing a page goes back to the one before.
+- **Pages reopened at startup**: tools left open come back at the next launch, after a restart or a language change (option `Window > Reopen Pages at Startup`). They reopen once the window is shown, without slowing down startup.
+- **The window grows for a wide page** (within the screen limits), keeps that size while navigating and goes back to its previous size when the page is closed.
+- **Settings are no longer lost**: closing a modified settings page asks whether to save, discard or cancel, and a save is only accepted when all values are valid. The app's internal options (window position and size, bar...) are no longer shown.
+- **Language change without loss**: settings pages and pages with unsaved changes are kept as they are.
+- **Color dots per category** in the widget list, and statuses in the plugin manager.
 
-### Telemetry (visionneuse de tours)
+### Telemetry (lap viewer)
 
-- **Tours regroupés par session** : une ligne repliable par session (type, date et heure de début, meilleur tour, nombre de tours, voiture), la plus récente en haut. Tours dans l'ordre (« Tour 1, Tour 2... »), tours invalides, de sortie et de rentrée grisés. Les tours enregistrés à partir de cette version gardent l'heure de début de session.
-- **Comparaison virage par virage** (onglet Virages) : temps perdu ou gagné, vitesse mini, point de freinage et point de plein gaz pour chaque virage, plus une ligne pour les lignes droites et le total. Clic sur un virage pour zoomer dessus, sensibilité de détection réglable.
-- **Trajectoire colorée selon le temps gagné ou perdu** face au tour de référence (rouge où l'on perd, vert où l'on gagne), avec légende.
-- **Import de logs MoTeC `.ld`** (celui de LMU par exemple) pour se comparer au tour d'un autre pilote : temps au tour calculé au passage de la ligne, canaux principaux importés.
-- **Bibliothèque des tours importés** : importer, rechercher (circuit, voiture, pilote, date, temps), afficher, renommer, supprimer. Un `.ld` déposé sur l'app est importé directement et affiché.
-- **Limites de secteurs** placées aux temps de secteur officiels du jeu.
-- **Moins de mémoire** : après 3 minutes en arrière-plan, les tours chargés sont libérés, puis rechargés avec le même zoom au retour.
+- **Laps grouped by session**: one collapsible row per session (type, start date and time, best lap, number of laps, car), newest at the top. Laps in order ("Lap 1, Lap 2..."), invalid laps, out laps and in laps grayed out. Laps recorded from this version on keep the session start time.
+- **Corner-by-corner comparison** (Corners tab): time lost or gained, minimum speed, braking point and full throttle point for each corner, plus a row for the straights and the total. Click a corner to zoom in on it, adjustable detection sensitivity.
+- **Racing line colored by time gained or lost** against the reference lap (red where you lose, green where you gain), with a legend.
+- **Import of MoTeC `.ld` logs** (LMU's, for example) to compare yourself with another driver's lap: lap time computed at the line crossing, main channels imported.
+- **Library of imported laps**: import, search (track, car, driver, date, time), show, rename, delete. An `.ld` file dropped on the app is imported directly and shown.
+- **Sector limits** placed at the game's official sector times.
+- **Less memory**: after 3 minutes in the background, loaded laps are released, then reloaded with the same zoom when you come back.
 
 ### Overlay
 
-- **Black box** : pressions cibles des pneus en psi ou bar.
-- **Standings et Relative plus rapides à dessiner** (mise en cache du texte et des fonds de cellules).
-- **Cellules transparentes** : plus d'effet de relief sur les cellules au fond entièrement transparent.
+- **Black box**: target tyre pressures in psi or bar.
+- **Standings and Relative faster to draw** (caching of text and cell backgrounds).
+- **Transparent cells**: no more relief effect on cells with a fully transparent background.
 
-### Corrections
+### Fixes
 
-- La lecture des pace notes ne s'arrête plus quand la page est cachée.
-- La migration des anciens presets ne plante plus quand une option manque.
-- Une carte SVG qui n'a pas été créée par l'app est signalée comme invalide au lieu de provoquer une erreur.
-- L'éditeur ne revient plus à d'anciennes données après une réinitialisation.
-- Le pilote suivant en mode spectateur revient bien au leader après le dernier.
-- Une fenêtre d'aperçu de widget déjà supprimée ne provoque plus d'erreur.
-- Textes traduits qui manquaient : verrouillage de preset, raccourcis activés/désactivés, choix de preset, historique du Fuel Calculator.
-- Les pages cachées mettent leurs rafraîchissements en pause.
+- Pace notes playback no longer stops when the page is hidden.
+- Migrating old presets no longer crashes when an option is missing.
+- An SVG map that was not created by the app is reported as invalid instead of causing an error.
+- The editor no longer goes back to old data after a reset.
+- Next driver in spectator mode now correctly goes back to the leader after the last one.
+- An already deleted widget preview window no longer causes an error.
+- Missing translated texts: preset lock, shortcuts enabled/disabled, preset choice, Fuel Calculator history.
+- Hidden pages pause their refreshes.
 
-### Qualité
+### Quality
 
-- **1200 tests automatisés**, 85 % du code couvert (seuil minimum relevé à 81 %, identique sous Linux et Windows).
-- Nouveaux tests pour la migration des réglages, les modules Relative et Wheels, le widget Track Map, les pages Presets et Raccourcis, le Fuel Calculator, les connecteurs REST API et rF2, le démarrage de l'app.
-- Signature de la release avec Azure Artifact Signing quand elle est configurée.
-- Le changelog de chaque version s'affiche en tête des notes de release et dans `Voir les nouveautés` de l'app.
+- **1,200 automated tests**, 85% of the code covered (minimum threshold raised to 81%, the same on Linux and Windows).
+- New tests for settings migration, the Relative and Wheels modules, the Track Map widget, the Preset and Hotkey pages, the Fuel Calculator, the REST API and rF2 connectors, and app startup.
+- Release signing with Azure Artifact Signing when it is configured.
+- The changelog of each version is shown at the top of the release notes and in the app's `What's New`.
 
 ## 0.13.0 (2026-10-03)
 
-- **Black box** : ABS, TC, répartition de freinage et carte moteur en pastilles entre les roues droites.
-- Notes de release avec images avant / après des changements d'overlay.
-- Correction de la vérification de types avec mypy 2.4.
+- **Black box**: ABS, TC, brake bias and engine map as pills between the right-hand wheels.
+- Release notes with before / after images of overlay changes.
+- Fixed type checking with mypy 2.4.
 
 ## 0.12.2 (2026-10-01)
 
-- Correction : les outils (Telemetry, éditeurs, replay) ne s'ouvraient pas dans la version installée.
-- Image d'aperçu du README avec tous les widgets sur des données de course réalistes.
+- Fixed: the tools (Telemetry, editors, replay) did not open in the installed version.
+- README preview image with all widgets on realistic race data.
 
 ## 0.12.1 (2026-10-01)
 
-- Telemetry : améliorations de l'enregistreur de tours, de la visionneuse, du replay et du flux de données.
+- Telemetry: improvements to the lap recorder, the viewer, the replay and the data feed.
 
 ## 0.12.0 (2026-10-01)
 
-- Fenêtre miroir VR pour les jeux OpenXR, via les overlays de capture de fenêtre (OpenKneeboard...).
-- Code de partage de preset : copier un preset en texte, l'importer avec un aperçu.
-- Carte de trajectoire dans la visionneuse de tours, comparant les deux tours au curseur et la partie zoomée.
-- Replay de télémétrie pour rFactor 2 et LMU, données REST API enregistrées dans les replays.
-- Packs de langue JSON et générateur de modèle pour ajouter une langue sans code.
-- Mode d'édition visuel : contour, nom et poignée de redimensionnement des widgets déverrouillés.
-- Échelle globale de l'overlay, annuler / rétablir dans les réglages.
-- Page d'accueil (jeu, preset, widgets, overlay et version d'un coup d'œil), palette de commandes (`Ctrl+K`) et filtre par catégorie.
-- Notifications (toasts), import de presets, paquets et plugins par glisser-déposer.
-- Widgets affichés selon la session et le contexte des stands, avec fondu.
-- Positions des widgets mémorisées par configuration d'écrans.
-- Export et import des thèmes d'overlay, aperçu des widgets au survol de la liste.
-- Thème clair / sombre du système suivi, fenêtre maximisable.
-- Widgets cachés plus mis à jour, rafraîchissement plus lent par défaut pour les widgets qui changent peu.
+- VR mirror window for OpenXR games, through window capture overlays (OpenKneeboard...).
+- Preset share code: copy a preset as text, import it with a preview.
+- Track map in the lap viewer, comparing both laps at the cursor and the zoomed part.
+- Telemetry replay for rFactor 2 and LMU, REST API data recorded in replays.
+- JSON language packs and a template generator to add a language without code.
+- Visual edit mode: outline, name and resize handle of unlocked widgets.
+- Global overlay scale, undo / redo in settings.
+- Home page (game, preset, widgets, overlay and version at a glance), command palette (`Ctrl+K`) and category filter.
+- Notifications (toasts), import of presets, packages and plugins by drag and drop.
+- Widgets shown depending on the session and pit context, with fading.
+- Widget positions remembered per screen setup.
+- Export and import of overlay themes, widget preview on hover in the list.
+- System light / dark theme followed, maximizable window.
+- Hidden widgets no longer updated, slower default refresh for widgets that change little.
 
 ## 0.11.0 (2026-10-01)
 
-- Page Outils et actions rapides dans la barre de navigation, assistant de configuration affiché une seule fois.
+- Tools page and quick actions in the navigation bar, setup wizard shown only once.
 
 ## 0.10.2 (2026-10-01)
 
-- Proposition d'installer les mises à jour dès qu'elles sont détectées.
+- Offer to install updates as soon as they are detected.
 
 ## 0.10.1 (2026-10-01)
 
-- Style visuel de la Black box appliqué à tous les overlays, listes de widgets triées par ordre alphabétique.
+- Black box visual style applied to all overlays, widget lists sorted alphabetically.
 
 ## 0.10.0 (2026-10-01)
 
-Première version de Modern Tiny Pedals, basée sur TinyPedal 2.50.0.
+First version of Modern Tiny Pedals, based on TinyPedal 2.50.0.
 
-- Installateur Windows et installation des mises à jour depuis l'app.
-- Éditeur de disposition pour placer les widgets sur une capture du jeu.
-- Black box : phares et état moteur, source du delta et des pédales, répartition de freinage, réglages, analyse du freinage, enregistreur d'incidents, suspensions en direct et angles de roue réels.
-- Mises à jour et changelog via GitHub Releases.
-- Corrections : sonde de l'hôte local, plantage REST API, valeurs de télémétrie non finies, réglages texte / booléens refusés, accès à des widgets supprimés.
+- Windows installer and installation of updates from the app.
+- Layout editor to place widgets on a screenshot of the game.
+- Black box: headlights and engine state, delta and pedal source, brake bias, settings, braking analysis, incident recorder, live suspension and real wheel angles.
+- Updates and changelog through GitHub Releases.
+- Fixes: local host probe, REST API crash, non-finite telemetry values, rejected text / boolean settings, access to deleted widgets.
 
-Changelog de TinyPedal jusqu'à la version 2.50.0 : [docs/changelog.txt](docs/changelog.txt).
+TinyPedal changelog up to version 2.50.0: [docs/changelog.txt](docs/changelog.txt).

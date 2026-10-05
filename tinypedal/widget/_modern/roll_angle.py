@@ -28,7 +28,7 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...api_control import api
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 
@@ -39,6 +39,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_degree_and_percentage_sign", "wheel_track_front", "wheel_track_rear",
         "roll_angle_smoothing_samples", "roll_angle_ratio_smoothing_samples", "decimal_places",
         "show_roll_angle_difference", "show_roll_angle_ratio",
+        *display_order_options("roll_angle"),
     )
 
     def __init__(self, config, widget_name):
@@ -57,6 +58,10 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("difference", "Diff", sample))
         if wcfg["show_roll_angle_ratio"]:
             stats.append(Stat("ratio", "Ratio", "88.8" + self.percent))
+        stats = self.display_ordered(stats, names={
+            "front": "roll_angle_front", "rear": "roll_angle_rear", "difference": "roll_angle_difference",
+            "ratio": "roll_angle_ratio",
+        })
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)

@@ -170,6 +170,27 @@ def triangle(painter: QPainter, rect: QRectF, up: bool, color: QColor) -> None:
     painter.restore()
 
 
+def arrow(painter: QPainter, rect: QRectF, angle: float, color: QColor) -> None:
+    """Arrow centered in rect, pointing up at angle 0, turned clockwise by angle (degrees)"""
+    side = min(rect.width(), rect.height())
+    if not side > 0 or not isfinite(angle):
+        return
+    half = side / 2
+    head = side * 0.42
+    shaft = side * 0.09
+    points = (
+        QPointF(0, -half), QPointF(head, -half + head), QPointF(shaft, -half + head),
+        QPointF(shaft, half), QPointF(-shaft, half), QPointF(-shaft, -half + head), QPointF(-head, -half + head),
+    )
+    painter.save()
+    painter.translate(rect.center())
+    painter.rotate(angle)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawPolygon(QPolygonF(points))
+    painter.restore()
+
+
 def bar(painter: QPainter, rect: QRectF, fraction: float, color: QColor, track: QColor | None,
         radius: float, vertical: bool = False) -> None:
     """Progress bar: track, then filled part (left to right, or bottom to top)"""
@@ -223,7 +244,29 @@ def ring(painter: QPainter, rect: QRectF, fraction: float, color: QColor, track:
     painter.restore()
 
 
+_DARK_TEXT = QColor(14, 17, 22)
+_LIGHT_TEXT = QColor(244, 246, 249)
+_readable: dict[int, QColor] = {}
+
+
 def readable_on(color: QColor) -> QColor:
-    """Dark or light text color readable on a colored background"""
-    luminance = 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
-    return QColor(14, 17, 22) if luminance > 0.55 else QColor(244, 246, 249)
+    """Dark or light text color readable on a colored background (shared color, never modified)
+
+    Rows, badges & tiles ask for it on every paint: answer cached per background color.
+    """
+    key = color.rgba()
+    text = _readable.get(key)
+    if text is None:
+        luminance = 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
+        text = _DARK_TEXT if luminance > 0.55 else _LIGHT_TEXT
+        if len(_readable) > 1024:
+            _readable.clear()
+        _readable[key] = text
+    return text
+
+
+def fraction(value: float) -> float:
+    """Bar or gauge fill: 0 to 1, rounded to 0.1% (sub-pixel changes do not repaint widget)"""
+    if not value > 0:  # also nan
+        return 0.0
+    return round(min(value, 1.0), 3)

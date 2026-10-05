@@ -20,9 +20,18 @@
 API connector
 """
 
+from __future__ import annotations
+
+import ctypes
+import logging
+import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+
+from pyLMUSharedMemory import lmu_data
+
+from . import app_signal
 
 # Import APIs
 from .adapter import (
@@ -36,8 +45,32 @@ from .adapter import (
     rf2_restapi,
 )
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
-from .replay import replay, rest_snapshot
+from .process.garage import reset_rf2_setup_parts
+from .replay import ReplayPlayer, replay, replay_mismatch, rest_snapshot
 from .validator import bytes_to_str
+
+if TYPE_CHECKING:
+    from .adapter.restapi_connector import EndpointStatus
+
+logger = logging.getLogger(__name__)
+
+
+class ConnectorHealth(NamedTuple):
+    """Game data connection state, for performance monitor
+
+    Attributes:
+        data_age: seconds since shared memory data last changed, -1 if never.
+        paused: shared memory data stopped updating.
+        replaying: frames from replay file instead of game.
+        error: why shared memory could not be opened, empty if opened.
+        rest: Rest API status of each resource.
+    """
+
+    data_age: float
+    paused: bool
+    replaying: bool
+    error: str
+    rest: tuple[EndpointStatus, ...]
 
 
 class Connector(ABC):
@@ -71,15 +104,42 @@ class Connector(ABC):
         """Rest API data snapshot for replay recording, None if unsupported"""
         return None
 
+    def replay_layout(self) -> list[list]:
+        """Shared memory zones of replay frame: [name, structure size], ..., empty if unsupported"""
+        return []
+
     def replay_header(self) -> dict:
         """Replay file header: source API & shared memory zone layout"""
-        return {"source": self.NAME}
+        return {"source": self.NAME, "layout": self.replay_layout()}
+
+    def replay_player(self) -> ReplayPlayer | None:
+        """Loaded replay player if API can play it, None to read game
+
+        A replay this API cannot read (other API, other structure size) is unloaded,
+        so switching API (hotkey, preset) falls back to game data instead of failing to start.
+        """
+        player = replay.player
+        if player is None:
+            return None
+        mismatch = replay_mismatch(player.replay, self.NAME, self.replay_layout())
+        if mismatch is None:
+            return player
+        logger.warning(
+            "replay: %s not played with %s API: %s", os.path.basename(player.replay.filename), self.NAME, mismatch)
+        replay.unload()
+        app_signal.error.emit(f"Replay not compatible with {self.NAME} API, reading game data.")
+        return None
+
+    def health(self) -> ConnectorHealth:
+        """Game data connection state"""
+        return ConnectorHealth(-1.0, False, False, "", ())
 
     def close(self):
         """Dereference all instances"""
         name: str
-        for name in self.__slots__:
-            setattr(self, name, None)
+        for cls in type(self).__mro__:  # slots of every class, subclass may add none
+            for name in getattr(cls, "__slots__", ()):
+                setattr(self, name, None)
 
 
 class SimLMU(Connector):
@@ -103,9 +163,10 @@ class SimLMU(Connector):
         self._restapi = restapi_connector.RestAPIConnector(lmu_restapi.lmu_restapi_tasks(), self._restapi_dataset)
 
     def start(self):
-        self._replaying = replay.active
+        player = self.replay_player()
+        self._replaying = player is not None
         # Recorded frames & Rest API data instead of game
-        self._shmmapi.setReplay(replay.player, self._restapi_dataset)
+        self._shmmapi.setReplay(player, self._restapi_dataset)
         self._shmmapi.start()  # 1 load first
         if not self._replaying:
             self._restapi.start()  # 2
@@ -124,6 +185,15 @@ class SimLMU(Connector):
         if self._replaying:
             return None
         return rest_snapshot(self._restapi_dataset)
+
+    def replay_layout(self) -> list[list]:
+        return [["shmm", ctypes.sizeof(lmu_data.LMUObjectOut)]]
+
+    def health(self) -> ConnectorHealth:
+        shmm = self._shmmapi
+        return ConnectorHealth(
+            shmm.dataAge, shmm.isPaused, self._replaying, shmm.openError,
+            () if self._replaying else self._restapi.status())
 
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi
@@ -171,12 +241,19 @@ class SimRF2(Connector):
         self._shmmapi = rf2_connector.RF2Info()
         self._replaying = False
         self._restapi_dataset = rf2_restapi.RestAPIData()
-        self._restapi = restapi_connector.RestAPIConnector(rf2_restapi.rf2_restapi_tasks(), self._restapi_dataset)
+        self._restapi = restapi_connector.RestAPIConnector(
+            self.restapi_tasks(), self._restapi_dataset, on_start=reset_rf2_setup_parts)
+
+    @staticmethod
+    def restapi_tasks() -> tuple:
+        """Rest API task set"""
+        return rf2_restapi.rf2_restapi_tasks()
 
     def start(self):
-        self._replaying = replay.active
+        player = self.replay_player()
+        self._replaying = player is not None
         # Recorded frames & Rest API data instead of game
-        self._shmmapi.setReplay(replay.player, self._restapi_dataset)
+        self._shmmapi.setReplay(player, self._restapi_dataset)
         self._shmmapi.start()  # 1 load first
         if not self._replaying:
             self._restapi.start()  # 2
@@ -196,8 +273,14 @@ class SimRF2(Connector):
             return None
         return rest_snapshot(self._restapi_dataset)
 
-    def replay_header(self) -> dict:
-        return {"source": self.NAME, "layout": rf2_connector.replay_layout()}
+    def replay_layout(self) -> list[list]:
+        return rf2_connector.replay_layout()
+
+    def health(self) -> ConnectorHealth:
+        shmm = self._shmmapi
+        return ConnectorHealth(
+            shmm.dataAge, shmm.isPaused, self._replaying, shmm.openError,
+            () if self._replaying else self._restapi.status())
 
     def reader(self) -> APIDataReader:
         shmm = self._shmmapi
@@ -232,17 +315,11 @@ class SimRF2(Connector):
 class SimLMULegacy(SimRF2):
     """Le Mans Ultimate (legacy) - RF2 Sharedmemory Map Plugin API"""
 
-    __slots__ = (
-        # Primary API
-        "_shmmapi",
-        # Secondary API
-        "_restapi",
-        "_restapi_dataset",
-    )
+    __slots__ = ()  # same instances as rF2, LMU Rest API tasks
     NAME = API_LMULEGACY_NAME
     LEGACY = True
 
-    def __init__(self):
-        self._shmmapi = rf2_connector.RF2Info()
-        self._restapi_dataset = lmu_restapi.RestAPIData()
-        self._restapi = restapi_connector.RestAPIConnector(lmu_restapi.lmu_restapi_tasks(), self._restapi_dataset)
+    @staticmethod
+    def restapi_tasks() -> tuple:
+        """Rest API task set"""
+        return lmu_restapi.lmu_restapi_tasks()

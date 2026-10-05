@@ -23,23 +23,195 @@ Notification
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from contextlib import suppress
+from time import monotonic
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import QLocale, QObject, Qt, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
-from ..i18n import tr, trm
+from ..const_app import APP_NAME
+from ..i18n import current_language, tr, trm
 from ..setting import cfg
-from ..update import can_auto_update, download_installer, release_url, run_installer, update_checker
+from ..update import (
+    DownloadCancelled,
+    can_auto_update,
+    download_installer,
+    is_portable_copy,
+    release_url,
+    run_installer,
+    skip_version,
+    update_checker,
+)
+from ._common import find_dialog_host
 
 logger = logging.getLogger(__name__)
+
+DOWNLOAD_CANCELLED = "cancelled"  # error message of cancelled download, see UpdateInstaller
+
+
+def main_window() -> QWidget | None:
+    """Main application window (has quit_app), None if not created"""
+    for widget in QApplication.topLevelWidgets():
+        if callable(getattr(widget, "quit_app", None)):
+            return widget
+    return None
+
+
+def install_update(window: QWidget | None, path: str) -> bool:
+    """Run downloaded installer then quit, False if cancelled or installer not started
+
+    Open pages are closed first (each may ask to save changes): cancelling keeps app as is,
+    installer is only started once app can quit.
+    """
+    close_pages = getattr(window, "close_pages_for_quit", None)
+    if callable(close_pages) and not close_pages():
+        return False
+    try:
+        run_installer(path)
+    except (OSError, ValueError) as error:
+        logger.error("UPDATES: unable to run installer: %s", error)
+        cancel_quit = getattr(window, "cancel_quit", None)
+        if callable(cancel_quit):
+            cancel_quit()
+        if isinstance(error, ValueError):  # broken signature: installer never kept
+            with suppress(OSError):
+                os.remove(path)
+            msg_text = tr("Installer signature is not valid, update was not installed.")
+        else:
+            msg_text = trm(f"Unable to install update: {error}")
+        QMessageBox.warning(window, tr("Error"), msg_text)
+        return False
+    quit_app = getattr(window, "quit_app", None)
+    if callable(quit_app):
+        quit_app()
+    return True
+
+
+def format_megabytes(size: int) -> str:
+    """Size in MB, one decimal, in current language"""
+    return QLocale(current_language()).toString(size / 1_000_000, "f", 1)
+
+
+def download_progress_text(received: int, total: int) -> str:
+    """Downloaded part: percent & size, or size only if total is unknown"""
+    if total > 0:
+        percent = min(round(received * 100 / total), 100)
+        return trm(f"{percent}% ({format_megabytes(received)} / {format_megabytes(total)} MB)")
+    return trm(f"{format_megabytes(received)} MB")
+
+
+class UpdateInstaller(QObject):
+    """Download & install of update: one download at a time, whatever button or page asked it
+
+    Notify buttons are rebuilt on language change and what's new pages can be reopened,
+    so download state (busy, progress) is kept here, not in them.
+    """
+
+    busy_changed = Signal(bool)
+    progress = Signal(int, int)  # received, total bytes (0 if unknown), from download thread
+    downloaded = Signal(str, str)  # installer path, error message (from download thread)
+    PROGRESS_INTERVAL = 0.1  # seconds between progress signals
+
+    def __init__(self):
+        super().__init__()
+        self.busy = False
+        self.received = 0
+        self.total = 0
+        self._auto_install = False
+        self._cancel = threading.Event()
+        self.downloaded.connect(self.install_downloaded)
+        self.progress.connect(self.store_progress)
+
+    def download(self, auto_install: bool = False) -> bool:
+        """Download installer in background thread, False if none or already downloading"""
+        asset = update_checker.installer
+        if asset is None or self.busy:
+            return False
+        self.busy = True
+        self.received = self.total = 0
+        self._auto_install = auto_install
+        self._cancel = cancel = threading.Event()
+        self.busy_changed.emit(True)
+        last_report = [0.0]
+
+        def report(received: int, total: int):
+            now = monotonic()
+            if now - last_report[0] >= self.PROGRESS_INTERVAL or received >= total > 0:
+                last_report[0] = now
+                self.progress.emit(received, total)
+
+        def download():
+            try:
+                path, message = download_installer(asset, progress=report, cancelled=cancel), ""
+            except DownloadCancelled:
+                logger.info("UPDATES: download cancelled")
+                path, message = "", DOWNLOAD_CANCELLED
+            except Exception as error:  # OSError, ValueError, or unexpected: never left busy
+                logger.error("UPDATES: download failed: %s", error)
+                path, message = "", str(error)
+            self.downloaded.emit(path, message)
+
+        threading.Thread(target=download, daemon=True, name="Update download").start()
+        return True
+
+    def cancel(self) -> bool:
+        """Stop download (partial file removed), False if not downloading"""
+        if not self.busy:
+            return False
+        self._cancel.set()
+        return True
+
+    @Slot(int, int)  # type: ignore[operator]
+    def store_progress(self, received: int, total: int):
+        """Progress kept for buttons & pages shown later"""
+        self.received, self.total = received, total
+
+    def progress_text(self) -> str:
+        """Downloaded part of current download"""
+        return download_progress_text(self.received, self.total)
+
+    @Slot(str, str)  # type: ignore[operator]
+    def install_downloaded(self, path: str, error: str):
+        """Run installer and quit, installer restarts TinyPedal when done"""
+        self.busy = False
+        self.busy_changed.emit(False)
+        auto_install, self._auto_install = self._auto_install, False
+        window = main_window()
+        if error == DOWNLOAD_CANCELLED:
+            return
+        if not path:
+            QMessageBox.warning(window, tr("Error"), trm(f"Unable to download update: {error}"))
+            return
+        if not auto_install:
+            confirm = QMessageBox.question(
+                window, tr("Download And Install"),
+                tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+        install_update(window, path)
+
+
+_update_installer: UpdateInstaller | None = None
+
+
+def update_installer() -> UpdateInstaller:
+    """Update download & install (created once, after QApplication)"""
+    global _update_installer
+    if _update_installer is None:
+        _update_installer = UpdateInstaller()
+    return _update_installer
 
 
 class NotifyBar(QWidget):
@@ -132,9 +304,13 @@ class NotifyBar(QWidget):
 
 
 class UpdatesNotifyButton(QPushButton):
-    """Updates notify button"""
+    """Updates notify button
 
-    downloaded = Signal(str, str)  # installer path, error message
+    Prompted version & dismissed message are shared by buttons (rebuilt on language change).
+    """
+
+    prompted_version = ""  # update already proposed, see prompt_update
+    dismissed_message = ""  # update message hidden by user, see dismiss
 
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
@@ -143,26 +319,51 @@ class UpdatesNotifyButton(QPushButton):
         self.install_update = version_menu.addAction(tr("Download And Install"))
         self.install_update.triggered.connect(self.download_update)
         self.install_update.setVisible(False)
-        self.downloaded.connect(self.install_downloaded)
         self._auto_install = False
-        self._prompted_version = ""
+        installer = update_installer()
+        installer.busy_changed.connect(self.download_state)
+        installer.progress.connect(self.download_progress)
+
+        self.cancel_download = version_menu.addAction(tr("Cancel Download"))
+        self.cancel_download.triggered.connect(lambda: update_installer().cancel())
+        self.cancel_download.setVisible(False)
 
         self.view_notes = version_menu.addAction(tr("What's New"))
-        self.view_notes.triggered.connect(self.show_release_notes)
+        self.view_notes.triggered.connect(lambda: self.show_release_notes())
         self.view_notes.setVisible(False)
 
         view_update = version_menu.addAction(tr("View Updates On GitHub"))
         view_update.triggered.connect(self.open_release)
         version_menu.addSeparator()
 
+        self.skip_update = version_menu.addAction(tr("Skip This Version"))
+        self.skip_update.setToolTip(tr("Not shown again for this version, shown again for a newer one"))
+        self.skip_update.triggered.connect(self.skip)
+        self.skip_update.setVisible(False)
+
         dismiss_msg = version_menu.addAction(tr("Dismiss"))
-        dismiss_msg.triggered.connect(self.hide)
+        dismiss_msg.triggered.connect(self.dismiss)
 
         self.setMenu(version_menu)
 
     def open_release(self):
         """Open release link"""
         QDesktopServices.openUrl(release_url())
+
+    def dismiss(self):
+        """Hide message, kept hidden when button is rebuilt (language change)"""
+        UpdatesNotifyButton.dismissed_message = update_checker.message()
+        self.hide()
+
+    def skip(self):
+        """Skip version of available update: notice not shown again (a newer version is), saved"""
+        skip_version(update_checker.latest_version())
+        UpdatesNotifyButton.dismissed_message = update_checker.message()
+        self.hide()
+
+    def can_install(self) -> bool:
+        """Update available & app can download and run its installer"""
+        return can_auto_update() and update_checker.is_updates() and update_checker.installer is not None
 
     @Slot(bool)  # type: ignore[operator]
     def checking(self, checking: bool):
@@ -172,38 +373,98 @@ class UpdatesNotifyButton(QPushButton):
             self.setText(tr("Checking For Updates..."))
             self.setVisible(update_checker.is_manual())
         else:
-            # Hide message if no unpdates and not manual checking
+            # Hide message if no updates (or version skipped) and not manual checking
+            skipped = update_checker.is_skipped()
             self.setText(trm(update_checker.message()))
-            self.setVisible(update_checker.is_manual() or update_checker.is_updates())
-            self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.release_notes))
-            self.install_update.setVisible(
-                can_auto_update() and update_checker.is_updates() and update_checker.installer is not None
-            )
-            if self.install_update.isVisible():
+            self.setVisible(update_checker.is_manual() or (update_checker.is_updates() and not skipped))
+            self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.notes(current_language())))
+            self.skip_update.setVisible(update_checker.is_updates())
+            self.install_update.setVisible(self.can_install())
+            if self.install_update.isVisible() and not skipped:
                 self.prompt_update()
+            self.download_state(update_installer().busy)
+
+    def restore(self):
+        """Show result of last check again (button rebuilt on language change), unless dismissed"""
+        if update_checker.is_checking():
+            self.checking(True)
+        elif (update_checker.is_updates() and not update_checker.is_skipped()
+                and update_checker.message() != self.dismissed_message):
+            self.checking(False)
+
+    @Slot(bool)  # type: ignore[operator]
+    def download_state(self, busy: bool):
+        """Downloading update: shown on button (with progress), install entry disabled, cancel shown"""
+        self.install_update.setEnabled(not busy)
+        self.cancel_download.setVisible(busy)
+        if busy:
+            installer = update_installer()
+            self.download_progress(installer.received, installer.total)
+        elif update_checker.is_updates():
+            self.setText(trm(update_checker.message()))
+
+    @Slot(int, int)  # type: ignore[operator]
+    def download_progress(self, received: int, total: int):
+        """Downloaded part shown on button"""
+        if not update_installer().busy:
+            return
+        text = tr("Downloading Update...")
+        if received:
+            text = f"{text} {download_progress_text(received, total)}"
+        self.setText(text)
 
     def prompt_update(self):
-        """Ask once per version to install available update (what's new shown), install downloads it"""
+        """Ask once per version to install available update (what's new shown), install downloads it
+
+        Window hidden (tray) or minimized, game likely running: never popped up, what's new page
+        waits inside app and a tray message tells about the update.
+        """
         version_text = update_checker.message()
-        if self._prompted_version == version_text:
+        if self.prompted_version == version_text:
             return
-        self._prompted_version = version_text
-        self.show_release_notes(prompt=True)
+        UpdatesNotifyButton.prompted_version = version_text
+        window = self.window()
+        if window.isVisible() and not window.isMinimized():
+            self.show_release_notes(prompt=True)
+            return
+        self.show_release_notes(prompt=True, bring_to_front=False)
+        tray_icon = window.findChild(QSystemTrayIcon)
+        if tray_icon is not None and tray_icon.isVisible():
+            show_app = getattr(window, "show_app", None)
+            if callable(show_app):
+                tray_icon.messageClicked.connect(show_app, Qt.ConnectionType.UniqueConnection)
+            version = ".".join(str(number) for number in update_checker.latest_version())
+            tray_icon.showMessage(
+                APP_NAME, trm(f"Update available: v{version}. Open {APP_NAME} to see what's new and install it."),
+                QSystemTrayIcon.MessageIcon.Information, 15000)
 
     def release_notes_dialog(self, prompt: bool = False):
         """What's new page of available update, install button when it can install"""
         from .release_notes import ReleaseNotesDialog
 
+        portable = is_portable_copy()
+        installer = update_checker.installer
         dialog = ReleaseNotesDialog(
-            self, update_checker.release_notes, update_checker.latest_version(), update_checker.latest_date(),
-            can_install=can_auto_update() and update_checker.is_updates() and update_checker.installer is not None,
-            prompt=prompt, download_url=update_checker.installer.url if update_checker.installer else "")
+            self, update_checker.notes(current_language()), update_checker.latest_version(), update_checker.latest_date(),
+            can_install=self.can_install(), prompt=prompt,
+            download_url=installer.url if installer is not None and not portable else "", portable=portable,
+            installer=update_installer(), can_skip=update_checker.is_updates())
         dialog.install_requested.connect(self.install_from_notes)
+        dialog.skip_requested.connect(self.skip)
         return dialog
 
-    def show_release_notes(self, prompt: bool = False):
-        """Show release notes (changelog) of available update"""
-        self.release_notes_dialog(prompt).open()
+    def show_release_notes(self, prompt: bool = False, bring_to_front: bool = True):
+        """Show release notes (changelog) of available update
+
+        Not brought to front: shown as page of hidden window, seen once window is opened.
+        """
+        dialog = self.release_notes_dialog(prompt)
+        if bring_to_front:
+            dialog.open()
+            return
+        host = find_dialog_host(self)
+        if host is None or not host.show_dialog_page(dialog, bring_to_front=False):
+            dialog.deleteLater()  # no page to wait in: tray message only
 
     def install_from_notes(self):
         """Install asked from what's new page: installs once downloaded, no second question"""
@@ -211,40 +472,6 @@ class UpdatesNotifyButton(QPushButton):
         self.download_update()
 
     def download_update(self):
-        """Download installer in background thread"""
-        asset = update_checker.installer
-        if asset is None:
-            return
-        self.install_update.setEnabled(False)
-        self.setText(tr("Downloading Update..."))
-
-        def download():
-            try:
-                self.downloaded.emit(download_installer(asset), "")
-            except (OSError, ValueError) as error:
-                logger.error("UPDATES: download failed: %s", error)
-                self.downloaded.emit("", str(error))
-
-        threading.Thread(target=download, daemon=True, name="Update download").start()
-
-    @Slot(str, str)  # type: ignore[operator]
-    def install_downloaded(self, path: str, error: str):
-        """Run installer and quit, installer restarts TinyPedal when done"""
-        self.install_update.setEnabled(True)
-        self.setText(trm(update_checker.message()))
+        """Download installer in background thread (once, while not already downloading)"""
         auto_install, self._auto_install = self._auto_install, False
-        if not path:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to download update: {error}"))
-            return
-        if not auto_install:
-            confirm = QMessageBox.question(
-                self, tr("Download And Install"),
-                tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
-            )
-            if confirm != QMessageBox.StandardButton.Yes:
-                return
-        run_installer(path)
-        window = self.window()
-        quit_app = getattr(window, "quit_app", None)
-        if callable(quit_app):
-            quit_app()
+        update_installer().download(auto_install)

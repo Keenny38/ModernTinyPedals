@@ -28,6 +28,7 @@ name & vehicle class to sheet track & class.
 from __future__ import annotations
 
 import csv
+import http.client
 import io
 import logging
 import os
@@ -199,8 +200,16 @@ def parse_time(text: str) -> float:
 
 
 def parse_lap_references(text: str) -> LapReferenceTable:
-    """References from sheet CSV text (rows that are not reference rows skipped)"""
+    """References from sheet CSV text (rows that are not reference rows skipped, rows after a CSV error too)"""
     table = LapReferenceTable()
+    try:
+        _parse_rows(text, table)
+    except csv.Error as error:  # NUL byte, unclosed quote at end of a cut off file: rows read so far kept
+        logger.warning("LAP REFERENCE: sheet CSV error: %s", error)
+    return table
+
+
+def _parse_rows(text: str, table: LapReferenceTable):
     for row in csv.reader(io.StringIO(text)):
         if not table.updated:
             for cell in row:
@@ -220,7 +229,6 @@ def parse_lap_references(text: str) -> LapReferenceTable:
         )
         if reference.reference > 0:
             table.entries[(reference.track, reference.vehicle_class)] = reference
-    return table
 
 
 def normalize(text: str) -> str:
@@ -274,8 +282,11 @@ def fetch_sheet(url: str, timeout: float = 15) -> str:
     target = csv_url(url)
     if not target.startswith("https://docs.google.com/"):
         raise ValueError("not a Google Sheets url")
-    with urllib.request.urlopen(target, timeout=timeout) as response:
-        data = response.read(MAX_SIZE + 1)
+    try:
+        with urllib.request.urlopen(target, timeout=timeout) as response:
+            data = response.read(MAX_SIZE + 1)
+    except http.client.HTTPException as error:  # cut off response (IncompleteRead), bad status line
+        raise OSError(f"download failed: {type(error).__name__}") from error
     if len(data) > MAX_SIZE:
         raise ValueError("sheet too large")
     text = data.decode("utf-8-sig", "replace")
@@ -290,7 +301,7 @@ def load_cache(filepath: str) -> tuple[str, float]:
     try:
         with open(path, encoding="utf-8") as file:
             return file.read(MAX_SIZE), os.path.getmtime(path)
-    except OSError:
+    except (OSError, UnicodeDecodeError):  # damaged cache: downloaded again
         return "", 0.0
 
 

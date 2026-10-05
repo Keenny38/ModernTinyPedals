@@ -82,6 +82,9 @@ class LoopbackServer:
 def test_resolve_hostname_sends_valid_request():
     """Probes must send a complete GET request (bytes), not a bare path string:
     asyncio's writer rejects str, which used to crash the whole RestAPI thread"""
+    from tinypedal.async_request import clear_resolved_hosts
+
+    clear_resolved_hosts()
     server = LoopbackServer()
     try:
         resolved = resolve_hostname("localhost", server.port, timeout=2)
@@ -139,3 +142,105 @@ def test_failed_probe_does_not_cancel_others():
         return result
 
     assert asyncio.run(scenario()) == [("localhost", 0.05)]
+
+
+# --- Audit fixes (package A)
+def test_status_read_from_status_line():
+    """"200" elsewhere in headers is not a success status"""
+    from tinypedal.async_request import parse_status_line
+
+    assert run_parse(b"HTTP/1.1 404 Not Found\r\nX-Request-Id: 200\r\nContent-Length: 2\r\n\r\n{}") == b""
+    assert run_parse(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}") == b"{}"  # header name case ignored
+    assert parse_status_line(b"HTTP/1.0 503 Busy") == (b"HTTP/1.0", 503)
+    assert parse_status_line(b"garbage") == (b"", 0)
+
+
+def test_failed_first_probe_keeps_slower_answer(monkeypatch):
+    """First probe refused before a slower one answers: resolving must not return nothing"""
+    from tinypedal import async_request
+
+    async def probe(request, host, port, timeout, ssl=False):
+        if host == "127.0.0.1":
+            raise OSError("refused")
+        await asyncio.sleep(0.05)
+        return host, 0.05
+
+    monkeypatch.setattr(async_request, "latency_test", probe)
+    for _ in range(5):  # probe order of set varies
+        assert asyncio.run(async_request.localhost_resolve({"127.0.0.1", "localhost"}, 1)) == "localhost"
+
+
+def test_resolved_host_cached_until_forgotten():
+    from tinypedal.async_request import clear_resolved_hosts, forget_hostname
+
+    clear_resolved_hosts()
+    server = LoopbackServer()
+    try:
+        first = resolve_hostname("localhost", server.port, timeout=2)
+        probes = len(server.requests)
+        assert probes and resolve_hostname("localhost", server.port, timeout=2) == first
+        assert len(server.requests) == probes  # no new probing connection
+        forget_hostname("localhost", server.port)  # connection failed: resolved again
+        resolve_hostname("localhost", server.port, timeout=2)
+        assert len(server.requests) > probes
+    finally:
+        server.close()
+        clear_resolved_hosts()
+
+
+def make_http_server(protocol: str, connections: list):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = protocol
+
+        def setup(self):
+            super().setup()
+            connections.append(self.client_address)
+
+        def do_GET(self):  # http.server API name
+            body = b'{"ok": 1}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_http_connection_kept_open():
+    """Rest API polling reuses its connection (HTTP/1.1), reconnects when server closes it (HTTP/1.0)"""
+    from tinypedal.async_request import HttpConnection
+
+    for protocol, expected in (("HTTP/1.1", 1), ("HTTP/1.0", 3)):
+        connections: list = []
+        server = make_http_server(protocol, connections)
+        try:
+            async def requests(port):
+                connection = HttpConnection("127.0.0.1", port, 2)
+                bodies = [await connection.get(set_header_get("/rest/x", "127.0.0.1")) for _ in range(3)]
+                connection.close()
+                return bodies
+
+            assert asyncio.run(requests(server.server_address[1])) == [b'{"ok": 1}'] * 3
+            assert len(connections) == expected
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
+def test_chunked_trailer_consumed():
+    """Kept connection: data after chunked body (trailers) must not remain for next response"""
+    async def main():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\nX-T: 1\r\n\r\nNEXT")
+        reader.feed_eof()
+        body = await parse_response(reader)
+        return body, await reader.read()
+
+    assert asyncio.run(main()) == (b"ok", b"NEXT")

@@ -29,7 +29,8 @@ from PySide6.QtGui import QPainter
 
 from ...api_control import api
 from ..brake_bias import brake_migration
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .stats import Stat, StatsMixin, Value
 
 
@@ -40,6 +41,7 @@ class Realtime(StatsMixin, ModernOverlay):
         "font_size", "layout", "show_brake_bias", "decimal_places_brake_bias", "show_front_and_rear",
         "show_percentage_sign", "show_baseline_bias_delta", "decimal_places_baseline_bias_delta",
         "show_brake_migration", "decimal_places_brake_migration", "electric_braking_allocation",
+        *display_order_options("brake_bias"),
     )
 
     def __init__(self, config, widget_name):
@@ -58,6 +60,9 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("delta", "Change", "+8.88"))
         if wcfg["show_brake_migration"]:
             stats.append(Stat("migration", "Migration", "88.8F"))
+        stats = self.display_ordered(stats, names={
+            "bias": "brake_bias", "delta": "baseline_bias_delta", "migration": "brake_migration",
+        })
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
@@ -85,7 +90,7 @@ class Realtime(StatsMixin, ModernOverlay):
                     text = f"{front:.{self.dec_bias}f}:{100 - front:.{self.dec_bias}f}"
                 else:
                     text = f"{front:.{self.dec_bias}f}{self.sign}"
-                values.append(Value(text, bar=min(max(bias, 0.0), 1.0), bar_color=theme.orange))
+                values.append(Value(text, bar=fraction(bias), bar_color=theme.orange))
             elif key == "delta":
                 if not self.baseline or ((api.read.vehicle.in_pits() or api.read.session.pre_race())
                                          and api.read.vehicle.speed() < 0.1):

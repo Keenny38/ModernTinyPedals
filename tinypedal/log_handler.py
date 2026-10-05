@@ -22,9 +22,75 @@ Log handler setup
 
 import logging
 import sys
+import threading
+from collections import deque
+from collections.abc import Iterator
 from logging.handlers import RotatingFileHandler
 
 ERROR_LOG_FILE = "tinypedal-errors.log"
+LOG_STREAM_MAX_CHARS = 2 * 1024 * 1024  # log kept in memory (log dialog, bug report)
+
+
+class BoundedLogStream:
+    """In-memory log text (StringIO-like), only the latest text kept (max_chars at most)
+
+    Oldest lines are dropped once size limit reached, so log never grows for whole app lifetime.
+    Use getvalue() to read log text, tell() changes whenever text is written.
+    """
+
+    def __init__(self, max_chars: int = LOG_STREAM_MAX_CHARS):
+        self.max_chars = max(int(max_chars), 1)
+        self._chunks: deque[str] = deque()
+        self._size = 0  # characters kept
+        self._written = 0  # characters ever written
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        """Add text, drop oldest text over size limit"""
+        if not text:
+            return 0
+        with self._lock:
+            self._chunks.append(text)
+            self._size += len(text)
+            self._written += len(text)
+            while self._size > self.max_chars and len(self._chunks) > 1:
+                self._size -= len(self._chunks.popleft())
+            if self._size > self.max_chars:  # single text over limit: keep its end
+                last = self._chunks[0][-self.max_chars:]
+                self._chunks[0] = last
+                self._size = len(last)
+        return len(text)
+
+    def flush(self) -> None:
+        """Nothing to flush (stream handler API)"""
+
+    def getvalue(self) -> str:
+        """Log text kept"""
+        with self._lock:
+            return "".join(self._chunks)
+
+    def tell(self) -> int:
+        """Characters ever written (changes on new log text)"""
+        return self._written
+
+    def clear(self) -> None:
+        """Remove all log text"""
+        with self._lock:
+            self._chunks.clear()
+            self._size = 0
+
+    def truncate(self, size: int | None = 0) -> int:
+        """Remove all log text (StringIO compatible for size 0)"""
+        self.clear()
+        return 0
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """No position to set (StringIO compatible), returns tell()"""
+        return self._written
+
+    def __iter__(self) -> Iterator[str]:
+        """Lines of log text kept"""
+        return iter(self.getvalue().splitlines(keepends=True))
 
 
 def new_stream_handler(_logger: logging.Logger, stream) -> logging.StreamHandler:

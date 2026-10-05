@@ -181,3 +181,21 @@ def test_player_leading_a_timed_race_has_no_offset(field, monkeypatch):
     update_finish_time(field, max_finish_time_diff=10.0)
 
     assert field.finishLapOffset == 0.0
+
+
+def test_timed_race_without_valid_lap_pace_has_no_offset(field, monkeypatch):
+    """Formation lap & first lap: no leader lap yet (pace MAX_SECONDS), no "+664 laps" offset"""
+    from tinypedal.const_common import MAX_SECONDS
+    from tinypedal.module_info import minfo
+
+    set_reader(monkeypatch, "session", "finish_type", 0)
+    set_reader(monkeypatch, "session", "remaining", 3600.0)
+    set_reader(monkeypatch, "lap", "progress", 0.3)
+    monkeypatch.setattr(minfo.delta, "lapTimePace", 100.0)
+    field.dataSet[0].lapTimeHistory.average = MAX_SECONDS
+    update_finish_time(field, max_finish_time_diff=10.0)
+    assert field.finishLapOffset == 0.0
+    field.dataSet[0].lapTimeHistory.average = 100.0
+    monkeypatch.setattr(minfo.delta, "lapTimePace", MAX_SECONDS)  # no valid player lap yet
+    update_finish_time(field, max_finish_time_diff=10.0)
+    assert field.finishLapOffset == 0.0

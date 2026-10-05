@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Callable, Iterable
 from typing import NamedTuple
@@ -80,20 +81,24 @@ def parse_record(data) -> SessionRecord | None:
         value = data.get(name, default)
         if name in TEXT_FIELDS:
             value = value if isinstance(value, str) else default
-        elif isinstance(value, bool) or not isinstance(value, (int, float)):
-            value = default
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            value = default  # Infinity & NaN (accepted by json) too
         values[name] = type(default)(value)
     time_value = data.get("time")
-    if isinstance(time_value, bool) or not isinstance(time_value, (int, float)) or time_value <= 0:
+    if (isinstance(time_value, bool) or not isinstance(time_value, (int, float)) or not math.isfinite(time_value)
+            or time_value <= 0):
         return None
     return SessionRecord(time=float(time_value), track=track, vehicle=vehicle, **values)
 
 
 def read_records(filepath: str) -> list[SessionRecord]:
-    """Session records of file, oldest first (invalid lines skipped, empty if no file)"""
+    """Session records of file, oldest first (invalid lines skipped, empty if no file)
+
+    Bytes that are not UTF-8 replaced (line skipped if broken): a damaged file never stops the viewer.
+    """
     records = []
     try:
-        with open(history_path(filepath), encoding="utf-8") as file:
+        with open(history_path(filepath), encoding="utf-8", errors="replace") as file:
             for line in file:
                 try:
                     record = parse_record(json.loads(line))
@@ -130,11 +135,16 @@ def record_line(record: SessionRecord) -> str:
 
 
 def append_record(filepath: str, record: SessionRecord) -> None:
-    """Add record at end of history file"""
+    """Add record at end of history file, on a line of its own (last line cut short by a crash stays apart)"""
     with STATS_LOCK:
         try:
-            with open(history_path(filepath), "a", encoding="utf-8") as file:
-                file.write(record_line(record))
+            with open(history_path(filepath), "ab+") as file:
+                file.seek(0, os.SEEK_END)
+                separator = b""
+                if file.tell() > 0:
+                    file.seek(-1, os.SEEK_END)
+                    separator = b"" if file.read(1) == b"\n" else b"\n"
+                file.write(separator + record_line(record).encode("utf-8"))
         except OSError as error:
             logger.error("USERDATA: unable to save %s: %s", HISTORY_FILE, error)
 

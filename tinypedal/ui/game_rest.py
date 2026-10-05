@@ -26,6 +26,9 @@ pages ask the game themselves, also from the monitor or the menus.
 from __future__ import annotations
 
 import http.client
+import json
+import logging
+import queue
 import threading
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -33,12 +36,14 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from ..async_request import resolve_hostname
+from ..async_request import forget_hostname, resolve_hostname
 from ..const_api import API_LMU_CONFIG
 from ..setting import cfg
 from ..userfile import track_geometry
 
 COMMAND_TIMEOUT = 3.0
+
+logger = logging.getLogger(__name__)
 
 
 def game_address() -> tuple[str, int] | None:
@@ -57,8 +62,9 @@ def request_game(resource: str) -> Any:
     return track_geometry.rest_get(*address, resource)
 
 
-def game_command(method: str, resource: str) -> bool:
-    """Command to LMU Rest API ("PUT" with empty json, or "GET" of a resource that acts), True if accepted"""
+def game_command(method: str, resource: str, body: str | None = None) -> bool:
+    """Command to LMU Rest API, True if accepted: "PUT" (empty json if no body), "POST" with json body,
+    or "GET" of a resource that acts"""
     address = game_address()
     if address is None:
         return False
@@ -67,46 +73,140 @@ def game_command(method: str, resource: str) -> bool:
     try:
         connection = http.client.HTTPConnection(resolve_hostname(host, port, COMMAND_TIMEOUT), port,
                                                 timeout=COMMAND_TIMEOUT)
-        body = "{}" if method == "PUT" else None
+        if body is None and method == "PUT":
+            body = "{}"
         connection.request(method, resource, body=body, headers={"Content-Type": "application/json"})
         response = connection.getresponse()
         response.read()
         return response.status < 300
-    except (OSError, http.client.HTTPException, ValueError):
+    except OSError:  # connection error: host resolved again next time
+        forget_hostname(host, port)
+        return False
+    except (http.client.HTTPException, ValueError):
         return False
     finally:
         if connection is not None:
             connection.close()
 
 
+class GameConnection:
+    """Connection to LMU Rest API kept open for several requests in a row (one background job)
+
+    get: json answer, None if no answer (game not running) or not json. Game answers some resources
+    with an error status & json body outside sessions (watch focus: 400 & -1): body kept.
+    send: command, True if accepted (see game_command).
+    answered: game answered at least once (running), even with an error status.
+    Once the game did not answer, the following requests of the job answer None at once.
+    """
+
+    def __init__(self, timeout: float = COMMAND_TIMEOUT):
+        self.address = game_address()
+        self.timeout = timeout
+        self.connection: http.client.HTTPConnection | None = None
+        self.failed = self.address is None
+        self.answered = False
+
+    def __enter__(self) -> GameConnection:
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self):
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+    def request(self, method: str, resource: str, body: str | None = None) -> tuple[int, bytes]:
+        """Status & body of answer, (0, b"") if no answer"""
+        if self.failed or self.address is None:
+            return 0, b""
+        host, port = self.address
+        for attempt in range(2):  # connection closed by game since last request: once more on a new one
+            try:
+                if self.connection is None:
+                    self.connection = http.client.HTTPConnection(
+                        resolve_hostname(host, port, self.timeout), port, timeout=self.timeout)
+                self.connection.request(method, resource, body=body, headers={
+                    "Content-Type": "application/json", "Accept": "application/json"})
+                response = self.connection.getresponse()
+                data = response.read()
+                if response.will_close:
+                    self.close()
+                self.answered = True
+                return response.status, data
+            except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError):
+                self.close()
+                if attempt:
+                    break
+            except OSError:  # not running: host resolved again next time
+                forget_hostname(host, port)
+                break
+            except (http.client.HTTPException, ValueError):
+                break
+        self.close()
+        self.failed = True
+        return 0, b""
+
+    def get(self, resource: str) -> Any:
+        status, data = self.request("GET", resource)
+        if not status or not data:
+            return None
+        try:
+            return json.loads(data)
+        except ValueError:
+            return None
+
+    def send(self, method: str, resource: str, body: str | None = None) -> bool:
+        if body is None and method == "PUT":
+            body = "{}"
+        return 200 <= self.request(method, resource, body)[0] < 300
+
+
+def _serve(jobs: queue.SimpleQueue, received: Any, failed: Any):
+    """Jobs of a game request done one after another on the same thread (until None)"""
+    while (job := jobs.get()) is not None:
+        try:
+            result = job()
+        except Exception:  # request ended, next one can start
+            logger.exception("GAME REST: request failed")
+            with suppress(RuntimeError):
+                failed.emit()
+            continue
+        with suppress(RuntimeError):  # page closed meanwhile
+            received.emit(result)
+
+
 class GameRequest(QObject):
     """Game asked in background, result handed to callback in UI thread, one request at a time
 
     Default work: json answers (None if no answer) of resources, as a list.
+    Requests are done on a thread of their own, kept for next requests (pages ask every few seconds).
     """
 
     received = Signal(object)
+    failed = Signal()
 
     def __init__(self, parent: QObject, resources: Sequence[str], callback: Callable[[Any], None]):
         super().__init__(parent)
         self.resources = tuple(resources)
         self.busy = False
         self._callback = callback
+        self._jobs: queue.SimpleQueue | None = None
         self.received.connect(self._done)
+        self.failed.connect(self._failed)
 
     def start(self, work: Callable[[], Any] | None = None) -> bool:
         """Ask game (resources, or work done in background), False if still waiting for last answer"""
         if self.busy:
             return False
         self.busy = True
-        job = work if work is not None else self.answers
-
-        def requesting():
-            result = job()
-            with suppress(RuntimeError):  # page closed meanwhile
-                self.received.emit(result)
-
-        threading.Thread(target=requesting, daemon=True, name="Game request").start()
+        if self._jobs is None:
+            jobs = self._jobs = queue.SimpleQueue()
+            threading.Thread(target=_serve, args=(jobs, self.received, self.failed), daemon=True,
+                             name="Game request").start()
+            self.destroyed.connect(lambda *_: jobs.put(None))  # thread ends with request
+        self._jobs.put(work if work is not None else self.answers)
         return True
 
     def answers(self) -> list:
@@ -116,3 +216,6 @@ class GameRequest(QObject):
     def _done(self, result: Any):
         self.busy = False
         self._callback(result)
+
+    def _failed(self):
+        self.busy = False

@@ -24,9 +24,10 @@ import json
 import os
 import re
 import zipfile
-from contextlib import suppress
 
-from PySide6.QtCore import QPoint, Qt, Slot
+import shiboken6
+from PySide6.QtCore import QPoint, Qt, QTimer, Slot
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -50,14 +51,23 @@ from ..i18n.options import module_label
 from ..module_control import mctrl, wctrl
 from ..setting import cfg
 from ..userfile.json_setting import create_backup_file, set_backup_timestamp
-from ..userfile.layout_profile import profile_filename
 from ..userfile.preset_package import export_preset_package, import_preset_package
 from ..userfile.preset_share import SHARE_PREFIX, decode_preset, encode_preset, save_preset_data, summarize_preset
-from ..validator import is_allowed_filename
-from ._common import TextInputDialog, UIScaler
+from ..userfile.preset_trash import TrashEntry, purge_trash
+from ..validator import is_allowed_filename, load_json_strict
+from ._common import FocusRingButton, TextInputDialog, UIScaler, translate_filter
 from .file_drop import unique_preset_name
 from .preset_compare import PresetCompare
-from .preset_management import CreatePreset, PresetTransfer, RestoreBackup
+from .preset_management import (
+    CreatePreset,
+    PresetTransfer,
+    PresetTrash,
+    RestoreBackup,
+    restore_trashed_preset,
+    trash_keep_days,
+    trash_preset,
+    update_preset_references,
+)
 from .toast import show_toast
 
 
@@ -78,6 +88,10 @@ class PresetList(QWidget):
 
         button_restore = QPushButton(tr("Restore"))
         button_restore.clicked.connect(self.open_restore_backup)
+
+        button_trash = FocusRingButton(tr("Trash"))
+        button_trash.setToolTip(tr("Deleted presets: restore or delete permanently"))
+        button_trash.clicked.connect(self.open_preset_trash)
 
         button_create = QPushButton(tr("New"))
         button_create.clicked.connect(self.open_create_preset)
@@ -105,6 +119,7 @@ class PresetList(QWidget):
         layout_button.addWidget(button_refresh)
         layout_button.addWidget(button_transfer)
         layout_button.addWidget(button_restore)
+        layout_button.addWidget(button_trash)
         layout_button.addStretch(1)
         layout_button.addSpacing(20)
         layout_button.addWidget(button_import)
@@ -119,6 +134,14 @@ class PresetList(QWidget):
         margin = UIScaler.pixel(6)
         layout_main.setContentsMargins(margin, margin, margin, margin)
         self.setLayout(layout_main)
+
+        # Undo last delete (Ctrl+Z while preset list has focus, or undo button of toast)
+        self.last_trashed: TrashEntry | None = None
+        self.shortcut_undo = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self, self.undo_delete)
+        self.shortcut_undo.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.shortcut_undo.setEnabled(False)
+        # Presets deleted long ago removed from trash, once app is running
+        QTimer.singleShot(3000, self, lambda: purge_trash(cfg.path.settings, trash_keep_days()))
 
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
@@ -136,7 +159,7 @@ class PresetList(QWidget):
             self.listbox_preset.setItemWidget(item, label_item)
 
         loaded_preset = cfg.filename.setting
-        locked_tag = " (locked)" if loaded_preset in cfg.user.filelock else ""
+        locked_tag = f" ({tr('locked')})" if loaded_preset in cfg.user.filelock else ""
         self.label_loaded.setText(trm(f"Loaded: <b>{loaded_preset[:-5]}{locked_tag}</b>"))
         self.checkbox_autoload.setChecked(cfg.application["enable_auto_load_preset"])
 
@@ -148,7 +171,7 @@ class PresetList(QWidget):
 
     def open_create_preset(self):
         """Create new preset"""
-        _dialog = CreatePreset(self, title="Create new default preset")
+        _dialog = CreatePreset(self, title=tr("Create new default preset"))
         _dialog.open()
 
     def open_preset_transfer(self):
@@ -167,7 +190,7 @@ class PresetList(QWidget):
         zip_filename, _ = QFileDialog.getSaveFileName(
             self,
             dir=os.path.join(os.path.expanduser("~"), f"{preset_filename[:-5]}.zip"),
-            filter="Modern Tiny Pedals preset package (*.zip)",
+            filter=translate_filter("Modern Tiny Pedals preset package (*.zip)"),
         )
         if not zip_filename:
             return
@@ -182,7 +205,7 @@ class PresetList(QWidget):
     def import_package(self):
         """Import preset package"""
         zip_filename, _ = QFileDialog.getOpenFileName(
-            self, dir=os.path.expanduser("~"), filter="Modern Tiny Pedals preset package (*.zip)"
+            self, dir=os.path.expanduser("~"), filter=translate_filter("Modern Tiny Pedals preset package (*.zip)"),
         )
         if zip_filename:
             self.import_package_file(zip_filename)
@@ -207,7 +230,7 @@ class PresetList(QWidget):
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to import package:<br>{error}"))
             return
         self.refresh()
-        lines = [f"Presets: <b>{', '.join(name[:-5] for name in result.presets) or 'none'}</b>"]
+        lines = [f"Presets: <b>{', '.join(name[:-5] for name in result.presets) or tr('none')}</b>"]
         if result.styles:
             lines.append(f"Style presets: {', '.join(result.styles)} (reload preset to apply)")
         if result.notes:
@@ -241,7 +264,8 @@ class PresetList(QWidget):
             return False
         try:
             preset = decode_preset(code)
-        except ValueError as error:
+            load_json_strict(json.dumps(preset))  # NaN & Infinity are not valid option values
+        except (ValueError, RecursionError) as error:  # RecursionError: data nested too deep
             QMessageBox.warning(self, tr("Error"), trm(f"Invalid share code:<br>{error}"))
             return False
         summary = summarize_preset(preset, wctrl.names, mctrl.names)
@@ -251,7 +275,7 @@ class PresetList(QWidget):
             self, tr("Import Share Code"),
             trm(f"<b>{len(summary.widgets)}</b> widgets: {widgets}<br><br>"
                 f"<b>{len(summary.modules)}</b> modules: {modules}<br><br>New preset name:"),
-            lambda name: self.save_shared_preset(preset, name), text="Shared preset",
+            lambda name: self.save_shared_preset(preset, name), text=tr("Shared preset"),
         ).open()
         return True
 
@@ -272,6 +296,11 @@ class PresetList(QWidget):
     def open_restore_backup(self):
         """Restore backup"""
         _dialog = RestoreBackup(self)
+        _dialog.open()
+
+    def open_preset_trash(self):
+        """Deleted presets"""
+        _dialog = PresetTrash(self)
         _dialog.open()
 
     @staticmethod
@@ -379,7 +408,7 @@ class PresetList(QWidget):
         elif action == "Duplicate":
             _dialog = CreatePreset(
                 self,
-                title="Duplicate Preset",
+                title=tr("Duplicate Preset"),
                 mode="duplicate",
                 source_filename=selected_filename
             )
@@ -388,30 +417,64 @@ class PresetList(QWidget):
         elif action == "Rename":
             _dialog = CreatePreset(
                 self,
-                title="Rename Preset",
+                title=tr("Rename Preset"),
                 mode="rename",
                 source_filename=selected_filename
             )
             _dialog.open()
-        # Delete preset
+        # Delete preset: moved to trash, undo shown
         elif action == "Delete":
-            msg_text = (
-                f"Delete <b>{selected_filename}</b> preset permanently?<br><br>"
-                "This cannot be undone!"
-            )
-            if self.confirm_operation(title=tr("Delete Preset"), message=msg_text):
-                full_path = f"{cfg.path.settings}{selected_filename}"
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-                with suppress(OSError):  # layout profiles of screen setups, if any
-                    os.remove(profile_filename(cfg.path.settings, selected_filename))
+            # Same file name check as file system (case-insensitive on Windows)
+            if os.path.normcase(selected_filename) == os.path.normcase(cfg.filename.setting):
+                QMessageBox.warning(
+                    self, tr("Delete Preset"), tr("The loaded preset cannot be deleted, load another preset first."))
+                return
+            self.delete_preset(selected_filename)
         # Refresh
         app_signal.refresh.emit(True)
+
+    def delete_preset(self, preset_filename: str) -> bool:
+        """Move preset file & layout profiles to trash, clear primary preset references (shortcuts,
+        tracks, classes), undo shown for a few seconds (also Ctrl+Z, or from trash later)"""
+        if not os.path.exists(f"{cfg.path.settings}{preset_filename}"):  # already gone
+            update_preset_references(preset_filename[:-len(FileExt.JSON)], "")
+            return True
+        try:
+            entry = trash_preset(preset_filename)
+        except OSError as error:  # locked file (cloud sync, antivirus), permission
+            QMessageBox.warning(self, tr("Delete Preset"), trm(f"Unable to delete preset:<br>{error}"))
+            return False
+        self.last_trashed = entry
+        self.shortcut_undo.setEnabled(True)
+        show_toast(
+            self, trm(f"Preset <b>{entry.name}</b> moved to trash"),
+            action_text=tr("Undo (Ctrl+Z)"), action=lambda: self.undo_delete(entry))
+        return True
+
+    def undo_delete(self, entry: TrashEntry | None = None) -> bool:
+        """Restore preset deleted last (or entry), with its primary preset references"""
+        entry = entry or self.last_trashed
+        if entry is None or not shiboken6.isValid(self):
+            return False
+        if entry is self.last_trashed:
+            self.last_trashed = None
+            self.shortcut_undo.setEnabled(False)
+        if not os.path.isdir(entry.folder):  # restored or removed from trash meanwhile
+            return False
+        try:
+            filename = restore_trashed_preset(entry)
+        except OSError as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to restore preset:<br>{error}"))
+            return False
+        self.refresh()
+        app_signal.refresh.emit(True)
+        show_toast(self, trm(f"Preset restored: <b>{filename[:-len(FileExt.JSON)]}</b>"))
+        return True
 
     def confirm_operation(self, title: str = "Confirm", message: str = "") -> bool:
         """Confirm operation"""
         confirm = QMessageBox.question(
-            self, title, trm(message),
+            self, tr(title), trm(message),
             buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             defaultButton=QMessageBox.StandardButton.No,
         )

@@ -27,7 +27,7 @@ from .. import calculation as calc
 from ..api_control import api
 from ..const_common import FLOAT_INF, WHEELS_ZERO
 from ._base import Overlay
-from ._common import warning_flash
+from ._common import tyre_punctured, warning_flash
 from ._painter import fill_rect
 
 
@@ -155,7 +155,7 @@ class Realtime(Overlay):
             update_later = True
 
         # Damage tyre
-        temp_damage_tyre = api.read.tyre.puncture()
+        temp_damage_tyre = tyre_punctured()
         if self.damage_tyre != temp_damage_tyre:
             self.damage_tyre = temp_damage_tyre
             update_later = True

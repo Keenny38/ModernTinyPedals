@@ -35,6 +35,7 @@ from .base import ModernOverlay
 from .draw import panel, rounded
 
 OFF, LOW, CRITICAL, LOCK, ABS, SLIP, TC = range(7)
+GLOW_ALPHA = 60  # soft glow around lit LED
 
 
 class Realtime(ModernOverlay):
@@ -86,6 +87,7 @@ class Realtime(ModernOverlay):
             theme.tint(theme.surface_raised, 230), theme.best, QColor(theme.best).lighter(135),
             theme.negative, theme.blue, theme.caution, theme.warning,
         )
+        self.glows = tuple(theme.tint(color, GLOW_ALPHA) for color in self.colors)
         self.critical = wcfg["lift_and_coast_multiplier_critical"]
 
     def paint_static(self, painter: QPainter):
@@ -101,10 +103,8 @@ class Realtime(ModernOverlay):
                 continue
             color = self.colors[state]
             radius = min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0)
-            glow = QColor(color)
-            glow.setAlpha(60)
             grow = min(min(rect.width(), rect.height()) * 0.15, 4.0)
-            rounded(painter, rect.adjusted(-grow, -grow, grow, grow), radius + grow, glow)
+            rounded(painter, rect.adjusted(-grow, -grow, grow, grow), radius + grow, self.glows[state])
             rounded(painter, rect, radius, color)
 
     def timerEvent(self, event):

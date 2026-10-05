@@ -46,8 +46,9 @@ class Realtime(ModernOverlay):
 
     options = (
         "font_size", "enable_horizontal_style", "bar_length", "bar_width_unfiltered", "bar_width_filtered",
-        "show_readings", "show_throttle", "show_throttle_filtered", "show_brake", "show_brake_filtered",
-        "show_brake_pressure", "show_clutch", "show_clutch_filtered", "show_ffb_meter",
+        "maximum_indicator_height", "show_readings", "show_throttle", "show_throttle_filtered", "show_brake",
+        "show_brake_filtered", "show_brake_pressure", "show_clutch", "show_clutch_filtered", "show_ffb_meter",
+        "display_order_throttle", "display_order_brake", "display_order_clutch", "display_order_ffb",
     )
 
     def __init__(self, config, widget_name):
@@ -58,20 +59,25 @@ class Realtime(ModernOverlay):
             "ffb": wcfg["show_ffb_meter"], "clutch": wcfg["show_clutch"],
             "brake": wcfg["show_brake"], "throttle": wcfg["show_throttle"],
         }
-        self.keys = tuple(key for key, _, _ in PEDALS if shown[key])
+        self.keys = tuple(self.display_ordered([key for key, _, _ in PEDALS if shown[key]], key=str))
         self.colors = {key: getattr(self.theme, color) for key, _, color in PEDALS}
+        self.gradients: dict[int, QLinearGradient] = {}
         self.labels = {key: label for key, label, _ in PEDALS}
         self.horizontal = wcfg["enable_horizontal_style"]
         self.show_readings = wcfg["show_readings"]
-        self.max_brake_pressure = 1.0
+        self.post_update()
         length = max(float(wcfg["bar_length"]), 10.0)
         thickness = max(float(wcfg["bar_width_unfiltered"]) + float(wcfg["bar_width_filtered"]), 4.0)
         pad = unit * 0.35
         gap = unit * 0.45
         label = unit * 1.0
         reading = unit * 1.0 if self.show_readings else 0.0
+        # 100% indicator: lights up at full pedal travel, beyond end of track
+        max_h = max(float(wcfg["maximum_indicator_height"]), 0.0)
+        max_gap = unit * 0.15 if max_h else 0.0
         count = len(self.keys)
         self.rects: dict[str, tuple[QRectF, QRectF, QRectF]] = {}  # track, label, reading
+        self.max_rects: dict[str, QRectF] = {}
         if self.horizontal:
             label_w = self.text_width("label", "FFB") + unit * 0.3
             reading_w = self.text_width("small", "100") + unit * 0.3 if self.show_readings else 0.0
@@ -80,21 +86,30 @@ class Realtime(ModernOverlay):
                 top = pad + index * (row + gap)
                 label_rect = QRectF(pad, top, label_w, row)
                 track = QRectF(label_rect.right() + unit * 0.2, top + (row - thickness) / 2, length, thickness)
-                reading_rect = QRectF(track.right() + unit * 0.2, top, reading_w, row)
+                if max_h:
+                    self.max_rects[key] = QRectF(track.right() + max_gap, track.top(), max_h, thickness)
+                reading_rect = QRectF(track.right() + max_gap + max_h + unit * 0.2, top, reading_w, row)
                 self.rects[key] = (track, label_rect, reading_rect)
-            width = pad * 2 + label_w + unit * 0.2 + length + (unit * 0.2 + reading_w if reading_w else 0)
+            width = (pad * 2 + label_w + unit * 0.2 + length + max_gap + max_h
+                     + (unit * 0.2 + reading_w if reading_w else 0))
             height = pad * 2 + count * row + max(count - 1, 0) * gap
         else:
             column = max(thickness, self.text_width("label", "FFB") + unit * 0.2)
             for index, key in enumerate(self.keys):
                 left = pad + index * (column + gap)
                 reading_rect = QRectF(left, pad, column, reading)
-                track = QRectF(left + (column - thickness) / 2, pad + reading, thickness, length)
+                track = QRectF(left + (column - thickness) / 2, pad + reading + max_h + max_gap, thickness, length)
+                if max_h:
+                    self.max_rects[key] = QRectF(track.left(), pad + reading, thickness, max_h)
                 label_rect = QRectF(left, track.bottom() + unit * 0.15, column, label)
                 self.rects[key] = (track, label_rect, reading_rect)
             width = pad * 2 + count * column + max(count - 1, 0) * gap
-            height = pad * 2 + reading + length + unit * 0.15 + label
+            height = pad * 2 + reading + max_h + max_gap + length + unit * 0.15 + label
         self.set_size(width, height)
+
+    def post_update(self):
+        """Peak brake pressure found again for next car (filtered brake as share of peak)"""
+        self.max_brake_pressure = 0.01
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
@@ -103,6 +118,9 @@ class Realtime(ModernOverlay):
             track, label, _ = self.rects[key]
             rounded(painter, track, min(track.width(), track.height()) / 2, theme.surface_raised)
             self.draw_text(painter, label, self.labels[key], "label", theme.text_muted, CENTER, elide=False)
+            if key in self.max_rects:
+                cap = self.max_rects[key]
+                rounded(painter, cap, min(cap.width(), cap.height()) / 2, theme.surface_raised)
 
     def paint(self, painter: QPainter):
         theme = self.theme
@@ -113,23 +131,37 @@ class Realtime(ModernOverlay):
                 color = theme.warning
             self.draw_fill(painter, track, min(max(filtered, 0.0), 1.0), color)
             self.draw_tick(painter, track, min(max(raw, 0.0), 1.0))
+            if raw >= 1 and key in self.max_rects:  # full pedal travel (ffb: clipping)
+                cap = self.max_rects[key]
+                rounded(painter, cap, min(cap.width(), cap.height()) / 2, color)
             if self.show_readings:
                 self.draw_text(painter, reading, f"{filtered * 100:.0f}", "small", theme.text_dim, CENTER, elide=False)
+
+    def gradient(self, color: QColor) -> QLinearGradient:
+        """Fill gradient of color: color stops set once, ends moved to filled part when drawn"""
+        gradient = self.gradients.get(color.rgba())
+        if gradient is None:
+            gradient = QLinearGradient()
+            gradient.setColorAt(0.0, color.darker(125))
+            gradient.setColorAt(1.0, color.lighter(115))
+            self.gradients[color.rgba()] = gradient
+        return gradient
 
     def draw_fill(self, painter: QPainter, track: QRectF, value: float, color: QColor):
         """Filled part of capsule, brighter toward input end"""
         if value <= 0:
             return
         radius = min(track.width(), track.height()) / 2
+        gradient = self.gradient(color)
         if self.horizontal:
             fill = QRectF(track.left(), track.top(), track.width() * value, track.height())
-            gradient = QLinearGradient(fill.left(), 0, fill.right(), 0)
+            gradient.setStart(fill.left(), 0)
+            gradient.setFinalStop(fill.right(), 0)
         else:
             height = track.height() * value
             fill = QRectF(track.left(), track.bottom() - height, track.width(), height)
-            gradient = QLinearGradient(0, fill.bottom(), 0, fill.top())
-        gradient.setColorAt(0.0, color.darker(125))
-        gradient.setColorAt(1.0, color.lighter(115))
+            gradient.setStart(0, fill.bottom())
+            gradient.setFinalStop(0, fill.top())
         rounded(painter, fill, min(radius, min(fill.width(), fill.height()) / 2), QBrush(gradient))
 
     def draw_tick(self, painter: QPainter, track: QRectF, value: float):

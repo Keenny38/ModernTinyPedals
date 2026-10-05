@@ -10,8 +10,14 @@ Used by the "Build and Release" workflow; the app shows the same notes in its
 update notification, without the Visuals section. Write clear commit titles, and
 describe notable releases in CHANGELOG.md (optional).
 
+CHANGELOG.md is in English (GitHub release notes). Its translations (CHANGELOG.fr.md) have
+the same sections: the app shows the section of its language in place of the English one,
+read from the release tag (see tinypedal/update.py).
+
 Usage (from project root):
     python tools/gen_release_notes.py v2.51.0      notes of v2.51.0 (commits up to HEAD if tag is new)
+    python tools/gen_release_notes.py --check-changelog 2.51.0      exit code 1 if no changelog section
+    python tools/gen_release_notes.py --check-changelog 2.51.0 --changelog CHANGELOG.fr.md
 """
 
 from __future__ import annotations
@@ -50,8 +56,9 @@ def git(*args: str) -> str:
 
 
 def release_tags() -> list[tuple[str, str]]:
-    """Release tags (name, date), newest first"""
-    output = git("tag", "--list", "v*", "--sort=-creatordate", "--format=%(refname:short)\t%(creatordate:short)")
+    """Release tags (name, date) reachable from HEAD, highest version first"""
+    output = git("tag", "--list", "v*", "--merged", "HEAD", "--sort=-v:refname",
+                 "--format=%(refname:short)\t%(creatordate:short)")
     tags = []
     for line in output.splitlines():
         name, _, date = line.partition("\t")
@@ -174,6 +181,11 @@ def changelog_section(version: str, filename: str = CHANGELOG) -> str:
     return "\n".join(body).strip("\n") + "\n" if any(line.strip() for line in body) else ""
 
 
+def pin_image_urls(text: str, sha: str) -> str:
+    """Changelog images point to master branch: pin them to release commit, so old notes keep their images"""
+    return text.replace(f"{RAW_URL}/master/", f"{RAW_URL}/{sha}/") if sha else text
+
+
 def release_notes(tag: str) -> str:
     """Notes of one release: commits since previous tag (tag may not exist yet: use HEAD)"""
     tags = [name for name, _ in release_tags()]
@@ -186,7 +198,7 @@ def release_notes(tag: str) -> str:
         end = "HEAD"
     revision_range = f"{previous}..{end}" if previous else end
     notes = format_notes(commits(revision_range))
-    summary = changelog_section(tag.removeprefix("v"))
+    summary = pin_image_urls(changelog_section(tag.removeprefix("v")), git("rev-parse", end).strip())
     if summary:  # written changelog first, then commits
         notes = f"{summary}\n## Commits\n\n{notes}"
     images = format_visuals(unshown_visuals(visuals(revision_range), summary))
@@ -195,9 +207,18 @@ def release_notes(tag: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("tag", help="release tag, for example v2.51.0")
+    parser.add_argument("tag", nargs="?", help="release tag, for example v2.51.0")
+    parser.add_argument("--check-changelog", metavar="VERSION",
+                        help="exit code 1 if changelog has no section for VERSION (for example 2.51.0)")
+    parser.add_argument("--changelog", default=CHANGELOG, metavar="FILE",
+                        help=f"changelog checked by --check-changelog (default {CHANGELOG})")
+    args = parser.parse_args()
+    if args.check_changelog:
+        return 0 if changelog_section(args.check_changelog.removeprefix("v"), args.changelog) else 1
+    if not args.tag:
+        parser.error("tag is required")
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # notes are UTF-8 (console codepage on Windows)
-    sys.stdout.write(release_notes(parser.parse_args().tag))
+    sys.stdout.write(release_notes(args.tag))
     return 0
 
 

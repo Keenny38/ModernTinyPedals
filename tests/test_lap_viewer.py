@@ -297,7 +297,7 @@ def test_trace_data_many_laps(ui_env, tmp_path):
 
 def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, monkeypatch):
     from tinypedal.setting import cfg
-    from tinypedal.ui.quick import lap_backend
+    from tinypedal.ui.quick import lap_export
 
     folder = cfg.path.telemetry.rstrip("/")
     info = {"sectors": [30.0, 30.0, 30.0]}
@@ -306,7 +306,7 @@ def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, mo
     other = tmp_path / "other"
     module_recorder.save_lap(f"{other}/", "Other - GT3", 1, 60.0, rows, 10, info={"sectors": [20.0, 20.0, 20.0]})
     other_file = next((other / "Other - GT3").glob("*.csv"))
-    monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
+    monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
     backend = open_viewer().backend
     backend.addFiles()
     wait_loaded(backend)

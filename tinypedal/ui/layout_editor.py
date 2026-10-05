@@ -33,13 +33,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..formatter import format_module_name
 from ..i18n import tr, trm
+from ..i18n.options import module_label
 from ..module_control import wctrl
 from ..setting import cfg
 from ..widget._base import store_screen_layout
 from ..widget._layout_guide import COLOR_GUIDE, alignment_lines
-from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog, translate_filter
 
 SNAP_DISTANCE = 8  # screen pixel
 COLOR_BOX = QColor(255, 255, 255, 50)
@@ -207,7 +207,7 @@ class LayoutCanvas(QWidget):
             painter.setPen(QPen(COLOR_GUIDE if selected else COLOR_BOX_EDGE, 2 if selected else 1))
             painter.drawRect(box)
             painter.drawText(box.adjusted(3, 1, -3, -1), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-                             format_module_name(name))
+                             module_label(name))
         # Alignment guides
         painter.setPen(QPen(COLOR_GUIDE, 1, Qt.PenStyle.DashLine))
         lines_x, lines_y = self._guides
@@ -286,14 +286,14 @@ class LayoutEditor(BaseDialog):
             self.label_info.setText(trm(f"{len(self.canvas.boxes)} widgets"))
             return
         rect = self.canvas.boxes[name]
-        self.label_info.setText(f"{format_module_name(name)}: x {rect.x()}, y {rect.y()}  ({rect.width()} x {rect.height()})")
+        self.label_info.setText(f"{module_label(name)}: x {rect.x()}, y {rect.y()}  ({rect.width()} x {rect.height()})")
 
     def toggle_snap(self, checked: bool):
         self.canvas.snap = checked
 
     def load_screenshot(self):
         filename, _ = QFileDialog.getOpenFileName(
-            self, tr("Load Screenshot..."), "", "Images (*.png *.jpg *.jpeg *.bmp)"
+            self, tr("Load Screenshot..."), "", translate_filter("Images (*.png *.jpg *.jpeg *.bmp)")
         )
         if filename:
             pixmap = QPixmap(filename)
@@ -304,14 +304,18 @@ class LayoutEditor(BaseDialog):
                 self.canvas.update()
 
     def capture_screen(self):
-        """Capture primary screen, without this dialog"""
+        """Capture primary screen, without this dialog (or main window when shown as page)"""
         screen = QGuiApplication.primaryScreen()
         if screen is None:
             return
-        self.hide()
+        # Hiding a page closes it (unapplied moves lost): main window is hidden instead
+        window = self.window() if self.in_app_page else self
+        window.hide()
         QGuiApplication.processEvents()
         pixmap = screen.grabWindow(0)
-        self.show()
+        window.show()
+        window.raise_()
+        window.activateWindow()
         if not pixmap.isNull():
             self.canvas.screen_rect = screen.geometry()
             self.canvas.background = pixmap

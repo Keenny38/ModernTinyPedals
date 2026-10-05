@@ -33,14 +33,22 @@ from ..calculation import (
     oriyaw,
     slip_angle,
 )
-from ..const_common import MAX_SECONDS
+from ..const_common import MAX_SECONDS, WHEELS_NA
 from ..formatter import strip_invalid_char
 from ..process.weather import WeatherNode
 from ..validator import bytes_to_str as tostr
 from ..validator import infnan_to_zero as rmnan
 from . import _reader
+from ._reader import SECTOR_ORDER, signed_char
 from .lmu_connector import LMU_COMPOUND_TYPE, LMUInfo
 from .lmu_restapi import RestAPIData
+
+
+def celsius(temperature: float) -> float:
+    """Temperature in Celsius of game value documented as Celsius, a Kelvin value (above 200) is converted"""
+    if temperature > 200:
+        return temperature - 273.15
+    return temperature
 
 
 class DataAdapter:
@@ -94,6 +102,20 @@ class State(_reader.State, DataAdapter):
             return "unknown"
         return f"{version[0]}.{version[1:]}"
 
+    def session_events(self) -> tuple[bool, bool, bool, bool]:
+        """Game event flags: session started, session ended, entered realtime (driving), exited realtime
+
+        Set while game signals the event (LMU shared memory generic events), all False for rF2.
+        For information only, not used to detect session or active state (meaning not verified).
+        """
+        events = self.shmm.lmuGeneric.events
+        return (
+            bool(events.SME_START_SESSION),
+            bool(events.SME_END_SESSION),
+            bool(events.SME_ENTER_REALTIME),
+            bool(events.SME_EXIT_REALTIME),
+        )
+
 
 class Brake(_reader.Brake, DataAdapter):
     """Brake"""
@@ -133,8 +155,13 @@ class Brake(_reader.Brake, DataAdapter):
         )
 
     def wear(self, index: int | None = None) -> tuple[float, ...]:
-        """Brake remaining thickness (meters)"""
-        return self.rest.brakeWear
+        """Brake remaining thickness (meters)
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
+        if index is None or index == self.shmm.playerIndex:
+            return self.rest.brakeWear
+        return WHEELS_NA
 
 
 class ElectricMotor(_reader.ElectricMotor, DataAdapter):
@@ -178,6 +205,13 @@ class ElectricMotor(_reader.ElectricMotor, DataAdapter):
     def regeneration_level(self, index: int | None = None) -> float:
         """Regeneration level (kW)"""
         return rmnan(self.shmm.lmuTeleVeh(index).mRegen)
+
+    def state_of_charge(self, index: int | None = None) -> float:
+        """Battery state of charge as shown by game (percent, 0-100)
+
+        LMU: game state of charge, rF2: battery charge fraction x 100.
+        """
+        return rmnan(self.shmm.lmuTeleVeh(index).mStateOfCharge)
 
 
 class Engine(_reader.Engine, DataAdapter):
@@ -248,6 +282,10 @@ class Engine(_reader.Engine, DataAdapter):
     def expected_energy_consumption(self) -> float:
         """Virtual energy consumption per lap estimated by game (percent), 0 if unknown"""
         return self.rest.expectedEnergyConsumption * 100
+
+    def overheating(self, index: int | None = None) -> bool:
+        """Whether game shows engine overheating warning"""
+        return bool(self.shmm.lmuTeleVeh(index).mOverheating)
 
 
 class Inputs(_reader.Inputs, DataAdapter):
@@ -377,6 +415,15 @@ class Lap(_reader.Lap, DataAdapter):
     def pit_entry_distance(self) -> float:
         """Lap distance of pit lane entry (meters), -1 if unknown"""
         return self.rest.pitEntryDistance
+
+    def pit_box_distance(self, index: int | None = None) -> float:
+        """Lap distance of vehicle pit box (meters), -1 if unknown"""
+        distance = rmnan(self.shmm.lmuScorVeh(index).mPitLapDist)
+        return distance if distance > 0 else -1.0
+
+    def invalidated(self, index: int | None = None) -> bool:
+        """Whether game invalidated current lap (track limits), False if unavailable (rF2)"""
+        return bool(self.shmm.lmuTeleVeh(index).mLapInvalidated)
 
 
 class Session(_reader.Session, DataAdapter):
@@ -606,6 +653,49 @@ class Session(_reader.Session, DataAdapter):
             return self.shmm.lmuTeleVeh(index).mTrackLimitsSteps / points
         return 0.0
 
+    def time_remaining(self) -> float:
+        """Session time remaining counted by game (seconds), minimum limit to 0
+
+        LMU: game session countdown, rF2: end time minus elapsed time (same as remaining()).
+        """
+        seconds = rmnan(self.shmm.lmuScorInfo.mSessionTimeRemaining)
+        if seconds < 0:
+            seconds = 0.0
+        return seconds
+
+    def yellow_flag_state(self) -> int:
+        """Full course yellow state
+
+        -1 invalid, 0 none, 1 pending, 2 pits closed, 3 pit lead lap, 4 pits open,
+        5 last lap, 6 resume, 7 race halt.
+        """
+        return signed_char(self.shmm.lmuScorInfo.mYellowFlagState)
+
+    def sector_yellow_flags(self) -> tuple[bool, bool, bool]:
+        """Local yellow flag in sector 1, sector 2, sector 3
+
+        Game sector flag order assumed same as vehicle sector (game index 0 = sector 3).
+        """
+        sec_flag = self.shmm.lmuScorInfo.mSectorFlag
+        return (
+            sec_flag[SECTOR_ORDER[0]] == 1,
+            sec_flag[SECTOR_ORDER[1]] == 1,
+            sec_flag[SECTOR_ORDER[2]] == 1,
+        )
+
+    def wind_velocity(self) -> tuple[float, float, float]:
+        """Wind velocity x, y, z (m/s), in game world coordinates (y = up)"""
+        wind = self.shmm.lmuScorInfo.mWind
+        return rmnan(wind.x), rmnan(wind.y), rmnan(wind.z)
+
+    def dark_cloud(self) -> float:
+        """Cloud darkness (fraction), range 0.0 - 1.0"""
+        return rmnan(self.shmm.lmuScorInfo.mDarkCloud)
+
+    def fixed_setup(self) -> bool:
+        """Whether session uses fixed car setup, False if unavailable (rF2)"""
+        return bool(self.shmm.lmuScorInfo.mIsFixedSetup)
+
 
 class Switch(_reader.Switch, DataAdapter):
     """Switch"""
@@ -708,6 +798,14 @@ class Switch(_reader.Switch, DataAdapter):
         """Auto clutch"""
         return False
 
+    def speed_limiter_available(self, index: int | None = None) -> bool:
+        """Whether vehicle has a pit speed limiter"""
+        return bool(self.shmm.lmuTeleVeh(index).mSpeedLimiterAvailable)
+
+    def speed_limiter_active(self, index: int | None = None) -> bool:
+        """Whether pit speed limiter is active (rF2: speed limiter switched on)"""
+        return bool(self.shmm.lmuTeleVeh(index).mSpeedLimiterActive)
+
 
 class Timing(_reader.Timing, DataAdapter):
     """Timing"""
@@ -796,6 +894,26 @@ class Timing(_reader.Timing, DataAdapter):
         """Time behind next place (seconds)"""
         return rmnan(self.shmm.lmuScorVeh(index).mTimeBehindNext)
 
+    def delta_best(self, index: int | None = None) -> float:
+        """Delta to best lap computed by game (seconds, negative = faster), 0 if unavailable (rF2)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mDeltaBest)
+
+    def gap_car_ahead(self, index: int | None = None) -> float:
+        """Time gap to car ahead on track, any class (seconds) from game, 0 if unavailable (rF2)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mTimeGapCarAhead)
+
+    def gap_car_behind(self, index: int | None = None) -> float:
+        """Time gap to car behind on track, any class (seconds) from game, 0 if unavailable (rF2)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mTimeGapCarBehind)
+
+    def gap_place_ahead(self, index: int | None = None) -> float:
+        """Time gap to car one place ahead (seconds) from game (rF2: time behind next place)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mTimeGapPlaceAhead)
+
+    def gap_place_behind(self, index: int | None = None) -> float:
+        """Time gap to car one place behind (seconds) from game (rF2: its time behind next place), 0 if none"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mTimeGapPlaceBehind)
+
 
 class Tyre(_reader.Tyre, DataAdapter):
     """Tyre (front left, front right, rear left, rear right)"""
@@ -841,7 +959,11 @@ class Tyre(_reader.Tyre, DataAdapter):
         )
 
     def surface_temperature_ico(self, index: int | None = None) -> tuple[float, ...]:
-        """Tyre surface temperature set (Celsius) inner,center,outer"""
+        """Tyre surface temperature set (Celsius) left,center,right of each tyre (12 values)
+
+        Game order is left/center/right seen from car, not inner/center/outer:
+        inner edge is right side of left tyres, left side of right tyres.
+        """
         wheel_data = self.shmm.lmuTeleVeh(index).mWheels
         return (
             rmnan(wheel_data[0].mTemperature[0]) - 273.15,
@@ -869,7 +991,10 @@ class Tyre(_reader.Tyre, DataAdapter):
         )
 
     def inner_temperature_ico(self, index: int | None = None) -> tuple[float, ...]:
-        """Tyre inner temperature set (Celsius) inner,center,outer"""
+        """Tyre inner layer temperature set (Celsius) left,center,right of each tyre (12 values)
+
+        Game order is left/center/right seen from car, not inner/center/outer.
+        """
         wheel_data = self.shmm.lmuTeleVeh(index).mWheels
         return (
             rmnan(wheel_data[0].mTireInnerLayerTemperature[0]) - 273.15,
@@ -954,6 +1079,26 @@ class Tyre(_reader.Tyre, DataAdapter):
             rmnan(slip_angle(wheel_data[1].mLateralGroundVel, wheel_data[1].mLongitudinalGroundVel)),
             rmnan(slip_angle(wheel_data[2].mLateralGroundVel, wheel_data[2].mLongitudinalGroundVel)),
             rmnan(slip_angle(wheel_data[3].mLateralGroundVel, wheel_data[3].mLongitudinalGroundVel)),
+        )
+
+    def flat(self, index: int | None = None) -> tuple[bool, ...]:
+        """Tyre flat state from game (puncture), see also puncture() from wear"""
+        wheel_data = self.shmm.lmuTeleVeh(index).mWheels
+        return (
+            bool(wheel_data[0].mFlat),
+            bool(wheel_data[1].mFlat),
+            bool(wheel_data[2].mFlat),
+            bool(wheel_data[3].mFlat),
+        )
+
+    def optimal_temperature(self, index: int | None = None) -> tuple[float, ...]:
+        """Tyre optimal temperature from game (Celsius), 0 if unavailable (rF2)"""
+        wheel_data = self.shmm.lmuTeleVeh(index).mWheels
+        return (
+            celsius(rmnan(wheel_data[0].mOptimalTemp)),
+            celsius(rmnan(wheel_data[1].mOptimalTemp)),
+            celsius(rmnan(wheel_data[2].mOptimalTemp)),
+            celsius(rmnan(wheel_data[3].mOptimalTemp)),
         )
 
 
@@ -1140,8 +1285,13 @@ class Vehicle(_reader.Vehicle, DataAdapter):
         return dmg[1], dmg[0], dmg[7], dmg[2], dmg[6], dmg[3], dmg_rear, dmg[5]  # LMU order
 
     def aero_damage(self, index: int | None = None) -> float:
-        """Aerodynamic damage (fraction), 0.0 no damage, 1.0 totaled"""
-        return self.rest.aeroDamage
+        """Aerodynamic damage (fraction), 0.0 no damage, 1.0 totaled
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
+        if index is None or index == self.shmm.playerIndex:
+            return self.rest.aeroDamage
+        return -1.0
 
     def integrity(self, index: int | None = None) -> float:
         """Vehicle integrity"""
@@ -1182,6 +1332,33 @@ class Vehicle(_reader.Vehicle, DataAdapter):
     def setup_modified(self) -> bool:
         """Car setup changed in garage since loaded or saved"""
         return self.rest.setupModified
+
+    def under_yellow(self, index: int | None = None) -> bool:
+        """Whether vehicle took full course caution flag at start/finish line"""
+        return bool(self.shmm.lmuScorVeh(index).mUnderYellow)
+
+    def ride_height_front(self, index: int | None = None) -> float:
+        """Front ride height (convert meters to millimeters)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mFrontRideHeight) * 1000
+
+    def ride_height_rear(self, index: int | None = None) -> float:
+        """Rear ride height (convert meters to millimeters)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mRearRideHeight) * 1000
+
+    def drag(self, index: int | None = None) -> float:
+        """Aerodynamic drag (Newtons)"""
+        return rmnan(self.shmm.lmuTeleVeh(index).mDrag)
+
+    def scheduled_pitstops(self, index: int | None = None) -> int:
+        """Number of scheduled pit stops"""
+        return self.shmm.lmuTeleVeh(index).mScheduledStops
+
+    def player_has_vehicle(self) -> bool:
+        """Whether local player has a vehicle in session (False while only watching)
+
+        LMU: telemetry player vehicle flag, rF2: any scoring vehicle marked as player.
+        """
+        return bool(self.shmm.rawData.telemetry.playerHasVehicle)
 
 
 class Wheel(_reader.Wheel, DataAdapter):
@@ -1277,8 +1454,13 @@ class Wheel(_reader.Wheel, DataAdapter):
         )
 
     def suspension_damage(self, index: int | None = None) -> tuple[float, ...]:
-        """Suspension damage (fraction), 0.0 no damage, 1.0 totaled"""
-        return self.rest.suspensionDamage
+        """Suspension damage (fraction), 0.0 no damage, 1.0 totaled
+
+        Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
+        """
+        if index is None or index == self.shmm.playerIndex:
+            return self.rest.suspensionDamage
+        return WHEELS_NA
 
     def position_vertical(self, index: int | None = None) -> tuple[float, ...]:
         """Vertical wheel position (convert meters to millimeters) related to vehicle"""

@@ -72,6 +72,6 @@ def absolute_refilling(dataset: list[dict], default: float) -> float:
                 if "gal" in raw_value.lower():  # convert to liter
                     abs_refill *= 3.7854118
                 break
-    except (AttributeError, TypeError, IndexError, ValueError):
+    except (AttributeError, TypeError, IndexError, KeyError, ValueError):  # entry without settings
         abs_refill = default
     return abs_refill

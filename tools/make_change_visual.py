@@ -6,7 +6,7 @@ Each widget is rendered twice on the same simulated race data as the README prev
 last commit) and with the working tree. Both renders are placed side by side, base on
 the left. Commit the image with the change: release notes (tools/gen_release_notes.py)
 show every image added under docs/changes in their Visuals section, captioned by --title
-(stored in the image).
+(stored in the image). Write the title in English, like the release notes.
 
 Run from project root, before committing the overlay change:
     python tools/make_change_visual.py black_box
@@ -54,14 +54,18 @@ preview.cfg.default.set_default()
 for slot in preview.cfg.user.__slots__:
     setattr(preview.cfg.user, slot, preview.copy_setting(getattr(preview.cfg.default, slot)))
 for name, options in overrides.items():
-    preview.cfg.user.setting[name].update(options)
+    if name in preview.cfg.user.setting:  # widget new in after tree: not in older revision
+        preview.cfg.user.setting[name].update(options)
 sim, data = preview.lmu_api()
 preview.api._api, preview.api.read = sim, sim.reader()
 preview.set_telemetry(sim, data)
 preview.set_vehicles()
 preview.set_modules()
 for name in names:
-    module = import_module(f"tinypedal.widget.{name}")
+    try:
+        module = import_module(f"tinypedal.widget.{name}")
+    except ModuleNotFoundError:  # new widget: no before render, shown as "(new)"
+        continue
     try:  # modern design (older revisions have none)
         from tinypedal.widget._modern import create_widget
     except ImportError:
@@ -108,7 +112,7 @@ def render_tree(tree: str, names: list[str], overrides: dict, output: str):
 def compose(names: list[str], before_dir: str, after_dir: str, title: str, output: str):
     """Before / after pairs, one row per widget"""
     from PySide6.QtCore import QRectF, Qt
-    from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+    from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
     from PySide6.QtWidgets import QApplication
 
     from tinypedal.main import load_bundled_fonts
@@ -122,27 +126,29 @@ def compose(names: list[str], before_dir: str, after_dir: str, title: str, outpu
         after = QPixmap(os.path.join(after_dir, f"{name}.png"))
         rows.append((before, after))
     column = max(max(before.width(), after.width()) for before, after in rows)
-    width = MARGIN * 2 + column * 2 + GAP
+    title_font = QFont("JetBrains Mono", 14, QFont.Weight.Bold)
+    title_width = QFontMetrics(title_font).horizontalAdvance(title)
+    width = max(MARGIN * 2 + column * 2 + GAP, MARGIN * 2 + title_width)  # title never cut
     height = MARGIN * 2 + LABEL_HEIGHT * 2 + sum(
         max(before.height(), after.height()) + LABEL_HEIGHT for before, after in rows)
     image = QPixmap(width, height)
     image.fill(BACKGROUND)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setFont(QFont("JetBrains Mono", 14, QFont.Weight.Bold))
+    painter.setFont(title_font)
     painter.setPen(QColor(255, 255, 255, 220))
     painter.drawText(QRectF(MARGIN, MARGIN, width - MARGIN * 2, LABEL_HEIGHT),
                      Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title)
     top = MARGIN + LABEL_HEIGHT * 2
     painter.setFont(QFont("JetBrains Mono", 12))
     for name, (before, after) in zip(names, rows):
-        for index, (label, pixmap) in enumerate((("Avant", before), ("Après", after))):
+        for index, (label, pixmap) in enumerate((("Before", before), ("After", after))):
             left = MARGIN + index * (column + GAP)
             painter.setPen(QColor(255, 255, 255, 150))
             painter.drawText(QRectF(left, top - LABEL_HEIGHT, column, LABEL_HEIGHT),
                              Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{label} · {name}")
             if pixmap.isNull():
-                painter.drawText(QRectF(left, top, column, LABEL_HEIGHT), Qt.AlignmentFlag.AlignLeft, "(nouveau)")
+                painter.drawText(QRectF(left, top, column, LABEL_HEIGHT), Qt.AlignmentFlag.AlignLeft, "(new)")
             else:
                 painter.drawPixmap(int(left), int(top), pixmap)
         top += max(before.height(), after.height()) + LABEL_HEIGHT

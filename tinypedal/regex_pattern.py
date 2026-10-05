@@ -103,6 +103,7 @@ CFG_STRING = (
     "^process_id$|"
     "^open_pages$|"
     "^rail_items$|"
+    "^home_quick_access$|"
     "^version$|"
     # Partial match
     "by_class|"

@@ -1,179 +1,200 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/icon_dark.png">
-    <img src="images/icon.png" alt="Logo Modern Tiny Pedals" width="112">
+    <img src="images/icon.png" alt="Modern Tiny Pedals logo" width="112">
   </picture>
 </p>
 
 <h1 align="center">Modern Tiny Pedals</h1>
 
 <p align="center">
-  <b>Overlay de télémétrie et outils d'analyse pour Le Mans Ultimate et rFactor 2</b><br>
-  79 overlays au design moderne, visionneuse de télémétrie, stratégie de course et statistiques pilote.<br>
-  Libre, gratuit et en français.
+  <b>Telemetry overlays and analysis tools for Le Mans Ultimate and rFactor 2</b><br>
+  86 overlays with a modern design, a telemetry viewer, race strategy and driver stats.<br>
+  Free and open source, in English and French.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><img src="https://img.shields.io/github/v/release/Keenny38/ModernTinyPedals?label=version&color=c9a227" alt="Dernière version"></a>
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases"><img src="https://img.shields.io/github/downloads/Keenny38/ModernTinyPedals/total?label=t%C3%A9l%C3%A9chargements" alt="Téléchargements"></a>
-  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/licence-GPL%20v3-blue" alt="Licence GPL v3"></a>
-  <img src="https://img.shields.io/badge/plateformes-Windows%20%7C%20Linux-555" alt="Windows et Linux">
+  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><img src="https://img.shields.io/github/v/release/Keenny38/ModernTinyPedals?label=version&color=c9a227" alt="Latest version"></a>
+  <a href="https://github.com/Keenny38/ModernTinyPedals/releases"><img src="https://img.shields.io/github/downloads/Keenny38/ModernTinyPedals/total?label=downloads" alt="Downloads"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-GPL%20v3-blue" alt="GPL v3 license"></a>
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-555" alt="Windows and Linux">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><b>Télécharger</b></a> ·
-  <a href="#démarrage-rapide">Démarrage rapide</a> ·
-  <a href="#fonctionnalités">Fonctionnalités</a> ·
-  <a href="docs/customization.md">Guide des réglages</a> ·
+  <a href="https://github.com/Keenny38/ModernTinyPedals/releases/latest"><b>Download</b></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="https://github.com/Keenny38/ModernTinyPedals/wiki">Wiki</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="docs/ROADMAP.md">Feuille de route</a>
+  <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
 
-![Les 79 overlays au nouveau design sur une course simulée à Road Atlanta](images/readme_preview.png)
+![The 86 overlays with the new design on a simulated race at Road Atlanta](images/readme_preview.png)
 
-Modern Tiny Pedals est une version modernisée de [TinyPedal](https://github.com/TinyPedal/TinyPedal) : la même base solide, avec un nouveau design, une interface repensée, de nouveaux outils et beaucoup de travail sur la fiabilité.
+Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same solid base, with a new design, a redesigned interface, new tools and a lot of work on reliability.
 
 > [!NOTE]
-> **Nouveau dans la 0.19.0** : nouveau design pour tous les overlays (sauf le Black box), nouvelle icône, statistiques pilote refaites (carrière, progression, sessions), calculateur de course avec voiture de sécurité, pluie et plusieurs pilotes, tracé officiel et limites de piste dans la visionneuse de télémétrie, et de nouvelles données de Le Mans Ultimate : chat en overlay, rejeux et contacts, relais de l'équipe. Tout le détail, avec des captures, dans le [changelog](CHANGELOG.md).
+> **New in 0.20.0**: a full audit of the app with more than 150 fixes, 7 new overlays (delta graph, gap trend, pit lane helper, stint timer, spotter, race notifications, tyre temperature trend), the modern design on par with the classic one, official delta, punctures, sector flags and wind from Le Mans Ultimate, math channels and corner report in the telemetry viewer, redesigned pages for the race calculator (stints limited by tyre life), driver stats (level scale, activity calendar, recent sessions), overlays (cards with live previews) and game replays (camera, standings, track map, incident timeline), preset trash, safe mode, release notes in the app language and a [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki). All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
-## Démarrage rapide
+## Quick start
 
-1. **Télécharge** `ModernTinyPedals-<version>-windows-setup.exe` sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) et lance-le. Pas besoin de droits administrateur : l'app s'installe dans ton profil (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
-2. **Prépare le jeu** : mode d'affichage `Sans bordure` ou `Fenêtré` (le plein écran exclusif cache l'overlay), puis le réglage de ton jeu ci-dessous.
-3. **Au premier lancement**, l'assistant te demande la langue, le jeu, le thème et les overlays de départ.
-4. **Lance une session** : l'overlay apparaît dès que la voiture est en piste et se cache sinon.
+1. **Download** `ModernTinyPedals-<version>-setup.zip` from the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page, extract it and run the installer. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
+2. **Prepare the game**: `Borderless` or `Windowed` display mode (exclusive fullscreen hides the overlay), then the setting of your game below.
+3. **On first launch**, the setup wizard asks for the language, the game, the theme and the overlays to start with.
+4. **Start a session**: the overlay shows up as soon as the car is on track and hides otherwise.
 
-Ensuite :
+Then:
 
-- **Déplacer les overlays** : déverrouille l'overlay (menu de l'icône dans la zone de notification > `Verrouiller l'overlay`) puis fais-les glisser, ou utilise `Outils > Éditeur de disposition` sur une capture du jeu.
-- **Régler un overlay** : onglet `Overlays` de la fenêtre principale, ou `Ctrl+F` pour chercher une option par son nom.
-- **Mises à jour** : l'app te prévient d'une nouvelle version, affiche ses nouveautés et peut la télécharger et l'installer (`Télécharger et installer`).
+- **Move the overlays**: unlock the overlay (notification area icon menu > `Lock Overlay`) and drag them, or use `Tools > Layout Editor` on a screenshot of the game.
+- **Configure an overlay**: `Overlays` tab of the main window, or `Ctrl+F` to search for an option by name.
+- **Updates**: the app tells you about a new version, shows its release notes in your language and can download and install it (`Download And Install`).
 
-Une version ZIP portable existe aussi. Ne l'extrais pas dans `Program Files` ni dans le dossier du jeu : l'app enregistre ses réglages à côté de l'exécutable.
+Each release has two files: the Windows installer (`-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) for details and for verifying your download.
 
-### Réglage du jeu
+### Game setup
 
-| Jeu | Windows | Linux |
+| Game | Windows | Linux |
 |---|---|---|
-| **Le Mans Ultimate** | Rien à installer. Active `Paramètres > Gameplay > Activer les plugins`. | Nécessite un plugin tiers, voir [cette discussion](https://github.com/TinyPedal/TinyPedal/issues/9). |
-| **rFactor 2** | Plugin [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download). | [Version Wine du plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build). |
+| **Le Mans Ultimate** | Nothing to install. Enable `Settings > Gameplay > Enable Plugins`. | Needs a third-party plugin, see [this discussion](https://github.com/TinyPedal/TinyPedal/issues/9). |
+| **rFactor 2** | [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download) plugin. | [Wine version of the plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build). |
 
-Pour rFactor 2 : copie `rFactor2SharedMemoryMapPlugin64.dll` dans `rFactor 2\Bin64\Plugins` (crée le dossier s'il manque), active-le dans `Paramètres > Gameplay > Plugins`, puis redémarre le jeu. Si le plugin n'apparaît pas, installe le runtime `Visual C++ 2013` fourni dans `Support\Runtimes` du jeu.
+For rFactor 2: copy `rFactor2SharedMemoryMapPlugin64.dll` into `rFactor 2\Bin64\Plugins` (create the folder if it is missing), enable it in `Settings > Gameplay > Plugins`, then restart the game. If the plugin does not show up, install the `Visual C++ 2013` runtime found in the game's `Support\Runtimes` folder.
 
-Avec Le Mans Ultimate, l'app lit aussi l'API REST locale du jeu (rien à configurer) : chat, contacts, rejeux, relais de l'équipe, estimation de conso, tracé officiel des circuits.
+With Le Mans Ultimate, the app also reads the game's local REST API (nothing to set up): chat, contacts, replays, team stints, fuel consumption estimate, official track layouts.
 
 ---
 
-## Fonctionnalités
+## Features
 
-### Overlays au design moderne
+### Overlays with a modern design
 
-79 overlays configurables : pneus, freins, carburant et énergie, delta, chronos, classements, radar, carte, météo, moteur, suspensions, chat…
+86 configurable overlays: tyres, brakes, fuel and energy, delta, timing, standings, radar, map, weather, engine, suspension, chat…
 
-- **Un panneau arrondi par overlay**, police Barlow, libellés courts traduits au-dessus des valeurs.
-- **Valeurs colorées selon leur sens** : gain, perte, alerte, meilleur temps.
-- **Classements** en lignes avec badge de position, pastille de classe et position dans la classe, colonnes au choix.
-- **Carburant et énergie** avec jauge et repères, **pneus et freins** en tuiles aux couleurs de la heatmap, **LED** en pastilles lumineuses.
-- **Options simplifiées** : la configuration n'affiche que ce que le design utilise. L'ancien look reste disponible, pour tous les overlays ou un seul.
-- **Thèmes** (sombre, contraste élevé, adapté au daltonisme, classique), éditeur de thèmes, thème par overlay, export et import.
-- **Affichage selon la session** (essais, qualif, course) et le passage aux stands, avec fondu.
+- **One rounded panel per overlay**, Barlow font, short translated labels above the values.
+- **Values colored by meaning**: gain, loss, warning, best time.
+- **Standings** as rows with position badge, class pill and position in class, columns of your choice.
+- **Fuel and energy** with gauge and marks, **tyres and brakes** as tiles in the heatmap colors, **LEDs** as glowing dots.
+- **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay or just one.
+- **Themes** (dark, high contrast, color-blind friendly, classic), theme editor, per-overlay theme, export and import.
+- **Visibility by session** (practice, qualifying, race) and pit lane, with fade.
+- **Race aids**: delta graph over the lap, gap trend ahead and behind, pit lane helper (speed limit, pit limiter, distance to the box), stint timer and driving time per driver, spotter on the screen edges, race notifications, tyre temperature trend.
 
-![Nouveau design des classements, avant et après](docs/changes/2026-10-05-design-classements.png)
+![New standings design, before and after](docs/changes/2026-10-05-design-classements.png)
 
-**Black box** : pneus, freins, suspensions, dégâts, jauges carburant et énergie, journal des incidents (contacts avec le nom de l'autre pilote, pénalités, limites de piste) et pastilles ABS, TC, répartition de freinage et cartographie moteur, sans aucun chevauchement même quand les roues braquent.
+**Black box**: tyres, brakes, suspension, damage, fuel and energy gauges, incident log (contacts with the other driver's name, penalties, track limits) and ABS, TC, brake bias and engine map chips, with no overlap even when the wheels turn.
 
-### Visionneuse de télémétrie
+### Telemetry viewer
 
-Chaque tour est enregistré et s'analyse dans une visionneuse dessinée par la carte graphique : zoom fluide, tours regroupés par session, plusieurs tours superposés.
+Every lap is recorded and analyzed in a GPU-drawn viewer: smooth zoom, laps grouped by session, several laps overlaid.
 
-![Visionneuse de télémétrie : écart à la référence, repères A et B, statistiques de plage](docs/changelog/0.18.0-telemetry-viewer.png)
+![Telemetry viewer: gap to reference, A and B markers, range statistics](docs/changelog/0.18.0-telemetry-viewer.png)
 
-- **Courbes** : écart à la référence au curseur, repères A/B et statistiques de plage, canaux calculés (glissement des roues, vitesse de braquage, carburant consommé), panneaux 4 roues, bande min/max, lissage, lecture animée du tour, mode Direct.
-- **Carte de trajectoire** : tracé officiel et bords de piste du jeu (LMU), points de freinage, de corde, de sortie et point extérieur de chaque tour, hors-pistes et limites de piste, 9 colorations (par tour, gain/perte, vitesse, pédales, trajectoire, rapport, altitude, écart par virage, mini-secteurs), règle, mini-carte.
-- **Virages** : temps, vitesses d'entrée, mini et de sortie, rapport, pression de freinage, tour idéal, et **où le temps est perdu** avec la cause en clair (« Freine 6 m plus tôt »).
-- **Session** : rythme en long run et tendance du temps au tour, carburant et usure de chaque tour. **XY** : nuage de points ou histogramme de n'importe quels canaux.
-- **Outils** : recherche, corbeille avec annulation, tour utilisé comme delta meilleur tour, ouverture du replay au curseur, export **MoTeC `.ld`**, CSV et image, import d'un journal MoTeC pour se comparer au tour d'un autre pilote.
+- **Charts**: gap to reference at the cursor, A/B markers and range statistics, computed channels (wheel slip, steering speed, fuel used), 4-wheel panels, min/max band, smoothing, animated lap playback, Live mode.
+- **Track map**: official layout and track edges from the game (LMU), braking, apex, exit and outside points of each lap, off-tracks and track limits, 9 colorings (by lap, gain/loss, speed, pedals, racing line, gear, altitude, gap per corner, mini-sectors), ruler, mini-map.
+- **Corners**: time, entry, minimum and exit speeds, gear, brake pressure, ideal lap, and **where the time is lost** with the reason in plain words ("Brakes 6 m earlier").
+- **Session**: long run pace and lap time trend, fuel and wear of each lap. **XY**: scatter plot or histogram of any channels.
+- **Tools**: search, trash with undo, lap used as delta best, open the replay at the cursor, **MoTeC `.ld`**, CSV and image export, MoTeC log import to compare with another driver's lap.
+- **In-depth analysis**: values fitted to the visible part, math channels from a formula, laps aligned on braking, consistency per mini-sector, teammate laps, best lap in similar conditions, setup differences, corner report as HTML or PDF.
 
-| Tracé officiel, bords de piste et mini-secteurs | Où le temps est perdu |
+| Official layout, track edges and mini-sectors | Where the time is lost |
 |---|---|
-| ![Carte de trajectoire](docs/changelog/0.19.0-track-map.png) | ![Onglet Virages](docs/changelog/0.19.0-coaching.png) |
-| **Session : long run et tendance** | **XY : vitesse / G latéral** |
-| ![Onglet Session](docs/changelog/0.19.0-session.png) | ![Onglet XY](docs/changelog/0.19.0-xy.png) |
+| ![Track map](docs/changelog/0.19.0-track-map.png) | ![Corners tab](docs/changelog/0.19.0-coaching.png) |
+| **Session: long run and trend** | **XY: speed / lateral G** |
+| ![Session tab](docs/changelog/0.19.0-session.png) | ![XY tab](docs/changelog/0.19.0-xy.png) |
 
-La **visionneuse de carte de piste** montre aussi chaque circuit par secteurs avec les vrais numéros de virages, la courbe et la pente à chaque point, le profil d'altitude et un parcours animé.
+The **track map viewer** also shows each track by sectors with the real corner numbers, the curvature and slope at each point, the altitude profile and an animated run.
 
-### Calculateur de course
+### Race calculator
 
-Carburant, énergie et pneus dans une seule page, pour préparer une course et la suivre en direct.
+Fuel, energy and tyres on one page, to prepare a race and follow it live.
 
-- **Plan d'arrêts** tour par tour : plein ou juste ce qu'il faut, pneus, pilote, durée de l'arrêt, fenêtre d'arrêt, heure de chaque arrêt.
-- **Scénarios** voiture de sécurité et pluie, comparés au plan normal. **Comparaison des stratégies** avec un arrêt de moins (économie) ou de plus, et le coût de l'économie.
-- **Plusieurs pilotes** avec temps de conduite minimum et maximum, relais équilibrés, arrêts obligatoires, relais max, effet du carburant.
-- **Course en direct** : le plan de la fin de course est recalculé à chaque tour à partir de la voiture.
-- **Onglet Équipe (LMU)** : relais de chaque pilote de la voiture lus dans le jeu, coéquipiers compris.
-- **Partage** : code de partage d'une ligne, export pour Discord, CSV ou image, plan enregistré par voiture et circuit.
-- Le widget **Plan de course** affiche en piste le prochain arrêt du plan, la distance jusqu'à l'entrée des stands et la conso cible.
+- **Modern page**: key figures and the strategy timeline (with the fuel in the tank) always in view, input sections that fold, tyres dragged from the stock onto the wheels of the tyre plan, values stepped with the arrow keys, and only what changes is redrawn.
+- **Pit stop plan** lap by lap: full tank or just what is needed, tyres, driver, stop duration, pit window, time of each stop. Stints limited by tyre life if you want.
+- **Safety car and rain scenarios**, compared with the normal plan. **Strategy comparison** with one stop less (fuel saving) or more, and the cost of saving.
+- **Several drivers** with minimum and maximum driving time, balanced stints, mandatory stops, maximum stint, fuel effect.
+- **Live race**: the plan for the rest of the race is recalculated every lap from the car, with the driver of each stint.
+- **Team tab (LMU)**: stints of each driver of the car read from the game, teammates included.
+- **Sharing**: one-line share code, export for Discord, CSV or image, plan saved per car and track.
+- The **Race plan** overlay shows the next stop of the plan on track, the distance to the pit entry and the target consumption.
 
-<p align="center"><img src="docs/changelog/0.19.0-race-calculator.png" alt="Calculateur de course : voiture de sécurité, 2 pilotes, comparaison des stratégies" width="820"></p>
+<p align="center"><img src="docs/changelog/0.20.0-race-calculator.png" alt="Race calculator: safety car, 2 drivers, strategy and pit stop plan" width="820"></p>
 
-### Statistiques pilote
+### Driver stats
 
-Tes chiffres par circuit et par voiture, comparés aux temps de la communauté LMU (feuille d'[ohne_speed](https://www.youtube.com/@ohne_speed)), avec un niveau d'Alien à Hors rythme.
+Your numbers per track and per car, compared with the LMU community times (sheet by [ohne_speed](https://www.youtube.com/@ohne_speed)), with a level from Alien to Offline.
 
-- **Tous les circuits** : ta carrière sur une page, avec le niveau de chaque meilleur tour.
-- **Progression** de ton record session après session, et liste des **sessions** avec les résultats de course.
-- Meilleur tour **théorique** et potentiel, temps à trouver pour le **niveau suivant**, départs, victoires, podiums, abandons, conso aux 100 km.
-- Bouton **Télémétrie** pour ouvrir les tours enregistrés du véhicule dans la visionneuse.
+- **Level scale** of each vehicle: where your personal best, qualifying and race bests stand, and the time to find for the **next level**.
+- **Progress** of your session best, session after session, next to the list of **sessions** with race results.
+- **All tracks**: your career on one page, with the level of each best lap, a **daily activity calendar** and your **recent sessions**.
+- **Theoretical** best lap and potential, starts, wins, podiums, retirements, consumption per 100 km.
+- **Telemetry** button to open the vehicle's recorded laps in the viewer.
+- **Pace and degradation per tyre compound**, consistency index, CSV / JSON export and **comparison with a friend**.
 
-| Circuit : niveau, progression, sessions | Tous les circuits |
+| Track: level scale, progress, sessions | All tracks: activity, recent sessions |
 |---|---|
-| ![Statistiques pilote](docs/changelog/0.19.0-driver-stats.png) | ![Carrière](docs/changelog/0.19.0-career.png) |
+| ![Driver stats](docs/changelog/0.20.0-driver-stats.png) | ![Career](docs/changelog/0.20.0-driver-stats-career.png) |
 
-### Le Mans Ultimate : les données du jeu
+### Le Mans Ultimate: game data
 
-<img src="docs/changelog/0.19.0-chat.png" alt="Widget Chat" width="383" align="right">
+<img src="docs/changelog/0.19.0-chat.png" alt="Chat overlay" width="383" align="right">
 
-- **Chat** du jeu en overlay, pratique en VR.
-- **Rejeux du jeu** : ouverture dans le jeu, commandes de lecture, saut au moment de chaque contact.
-- **Contacts** inscrits dans le journal du Black box, avec le nom de l'autre pilote.
-- **Conso estimée par le jeu** tant qu'aucun tour n'est enregistré sur le circuit.
-- **Nom du setup** gardé avec chaque tour enregistré.
-- **Pneus autorisés** et **relais de l'équipe** repris dans le calculateur de course.
+- In-game **chat** as an overlay, handy in VR.
+- **Game replays**: replays by day with search and filters, add / export / rename / protect / delete replays and clean the folder up, open in the game, playback, camera and HUD controls, drivers standings, track map with the cars, incident timeline with a jump to each incident (also from a live session).
+- **Contacts** written to the Black box log, with the other driver's name.
+- **Fuel consumption estimated by the game** until a lap is recorded on the track.
+- **Setup name** kept with each recorded lap.
+- **Allowed tyres** and **team stints** used by the race calculator.
+- **In the overlays**: official delta, invalidated lap, puncture, ideal tyre temperature, sector yellow flags and full course yellow, wind, ride height, pit limiter, engine overheating.
 
 <br clear="right">
 
 ### Interface
 
-- Interface Qt 6 en **français ou en anglais** (changement à chaud), noms et bulles d'aide des options traduits.
-- **Tout s'ouvre dans la fenêtre de l'app** : outils, éditeurs et réglages sont des pages, avec retour à la page précédente (`Alt+←` ou bouton souris arrière). Les pages ouvertes se rouvrent au démarrage suivant, même après un plantage.
-- **Barre de navigation personnalisable**, recherche globale d'option (`Ctrl+F`), aperçu en direct des overlays, annuler / rétablir dans les éditeurs.
-- **Éditeur de disposition** avec guides d'alignement et magnétisme, échelle globale, positions mémorisées par configuration d'écran.
-- **Code de partage de preset** : copier un preset en texte, l'importer avec un aperçu.
-- **Rejeu de télémétrie** : enregistre une session et rejoue-la dans tous les overlays, sans lancer le jeu.
-- Icône or et noir, ou or et blanc, selon le mode clair ou sombre de Windows.
+- Qt 6 interface in **English or French** (switch without restarting), translated option names and tooltips, **release notes in the app language**.
+- **Home page**: game and current session status, overlay lock, last session, customizable quick access (tools, pages, actions) and **release notes of the installed version**.
+- **Overlays page**: every overlay as a card with a preview drawn with your settings (or a compact list), search ignoring accents, category chips with counts, enable / disable the filtered overlays, start errors flagged.
+- **Everything opens inside the app window**: tools, editors and settings are pages, with back navigation (`Alt+←` or the mouse back button). A page you leave closes by itself (unless it has unsaved changes), so pages never pile up. Navigation bar tools stay as you left them and come back on next start, even after a crash.
+- **Customizable navigation bar**, global option search (`Ctrl+F`), live overlay preview, undo / redo in editors.
+- **Layout editor** with alignment guides and snapping, global scale, positions remembered per screen setup.
+- **Preset share code**: copy a preset as text, import it with a preview. **Preset trash** with undo.
+- **Unsaved changes** flagged on each page, `Ctrl+S` to save, values checked as you type.
+- **Telemetry replay**: record a session and replay it in every overlay, without the game.
+- Gold and black or gold and white icon, following the Windows light or dark mode.
 
-### Connexions
+### Connections
 
-- **Contrôle à distance** pour Stream Deck, Companion ou SimHub, et flux de télémétrie en direct par WebSocket.
-- **Tableau de bord web** pour téléphone ou tablette, avec code d'accès et HTTPS en option.
-- **VR** : overlay SteamVR expérimental, et fenêtre miroir pour les jeux OpenXR (à afficher dans le casque avec OpenKneeboard, OVR Toolkit, XSOverlay ou Desktop+).
+- **Remote control** for Stream Deck, Companion or SimHub, and live telemetry stream over WebSocket.
+- **Web dashboard** for phone or tablet, in your units and language, with access code and optional HTTPS.
+- **VR**: experimental SteamVR overlay, and a mirror window for OpenXR games (to show in the headset with OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+).
 
-### Fiabilité
+### Reliability
 
-- Installeur Windows et **mises à jour vérifiées** (SHA-256) depuis l'app.
-- Sauvegardes automatiques des presets et des statistiques, écriture de fichiers atomique, redémarrage automatique des threads plantés.
-- Plugins d'overlays avec gestionnaire, rapport de bug en un clic, moniteur de performance.
-- **Plus de 1500 tests automatisés** (83 % du code couvert), vérification de types et lint en intégration continue.
-
-Chaque option est détaillée dans le [guide des réglages](docs/customization.md), et les nouveautés de chaque version dans le [changelog](CHANGELOG.md).
+- Windows installer and **updates from the app**, with a check of the downloaded file (SHA-256, and signature when the installer is signed).
+- Automatic backups of presets and stats, atomic file writes, automatic restart of crashed threads.
+- Overlay plugins with a manager, one-click bug report, performance monitor with the game data status.
+- **Safe mode** offered after a crash at launch (no plugins nor overlays).
+- **More than 2,300 automated tests** (91% of the code covered), type checking and lint in continuous integration, the executable is started in test mode before each release.
 
 ---
 
-## Lancer depuis le code source
+## Documentation
 
-Nécessite [Python](https://www.python.org/) 3.10 ou plus récent.
+The [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki) is the user and developer guide:
+
+| Use | Develop |
+|---|---|
+| [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) · [Game setup](https://github.com/Keenny38/ModernTinyPedals/wiki/Game-Setup) · [Getting started](https://github.com/Keenny38/ModernTinyPedals/wiki/Getting-Started) | [Development](https://github.com/Keenny38/ModernTinyPedals/wiki/Development): run from source, checks, architecture, Windows build, release process |
+| [Overlays](https://github.com/Keenny38/ModernTinyPedals/wiki/Overlays) · [Presets and settings](https://github.com/Keenny38/ModernTinyPedals/wiki/Presets-and-Settings) | [Contributing guide](CONTRIBUTING.md) |
+| [Telemetry viewer](https://github.com/Keenny38/ModernTinyPedals/wiki/Telemetry-Viewer) · [Race calculator](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Calculator) · [Driver stats](https://github.com/Keenny38/ModernTinyPedals/wiki/Driver-Stats) | [Roadmap](docs/ROADMAP.md) |
+| [Connections](https://github.com/Keenny38/ModernTinyPedals/wiki/Connections) · [Updates and security](https://github.com/Keenny38/ModernTinyPedals/wiki/Updates-and-Security) · [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting) | [Security policy](SECURITY.md) |
+
+Every option is described in the [settings reference](docs/customization.md) (also bundled with the app), and what changed in each version in the [changelog](CHANGELOG.md) ([en français](CHANGELOG.fr.md)). The wiki is generated from [docs/wiki](docs/wiki): edit it there.
+
+## Run from source
+
+Requires [Python](https://www.python.org/) 3.11 or newer.
 
 ```bash
 git clone https://github.com/Keenny38/ModernTinyPedals.git
@@ -183,7 +204,7 @@ git clone https://github.com/Keenny38/ModernTinyPedals.git
 cd ModernTinyPedals
 ```
 
-Crée un environnement virtuel, active-le, puis installe les dépendances (PySide6, psutil, cryptography) :
+Create a virtual environment, activate it, then install the dependencies (PySide6, psutil, cryptography):
 
 ```bash
 py -3.12 -m venv .venv
@@ -201,145 +222,18 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Les bibliothèques de mémoire partagée (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) sont incluses dans le dépôt : pas de sous-module à récupérer. Pour des versions exactes testées, utilise `requirements-lock.txt`.
+The shared memory libraries (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) are included in the repository: no submodule to fetch. For exact tested versions, use `requirements-lock.txt`.
 
-### Développement
+On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `TinyPedal` command in `/usr/local/`. Settings are in `$HOME/.config/TinyPedal/` and data in `$HOME/.local/share/TinyPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
 
-```bash
-pip install -r requirements-dev.txt
-```
+> The display name is "Modern Tiny Pedals", but the internal name stays `TinyPedal` (configuration folder `%APPDATA%\TinyPedal`, `tinypedal.exe`, `X-TinyPedal` remote control header), to keep existing settings and tool compatibility.
 
-Contrôles lancés en intégration continue (et avant chaque commit avec `pre-commit install`) :
+## Contributing
 
-```bash
-ruff check .
-```
+Report a problem or suggest an idea in the [issues](https://github.com/Keenny38/ModernTinyPedals/issues). The contribution rules (development setup, checks, project rules) are in [CONTRIBUTING.md](CONTRIBUTING.md), and what is left to do in the [roadmap](docs/ROADMAP.md). A security vulnerability is reported privately, not in an issue: see [SECURITY.md](SECURITY.md).
 
-```bash
-mypy tinypedal
-```
+## License and credits
 
-```bash
-pytest --cov=tinypedal
-```
+Modern Tiny Pedals is derived from [TinyPedal](https://github.com/TinyPedal/TinyPedal), Copyright (C) 2022-2026 TinyPedal developers. See [docs/contributors.md](docs/contributors.md) for the list of developers and contributors.
 
-Le benchmark des widgets se lance à part avec `pytest -m benchmark`. La CI échoue si la couverture totale des tests passe sous le seuil `fail_under` de `pyproject.toml` (81 %).
-
-L'intégration continue installe toujours les dernières versions de `ruff` et `mypy`. Si un contrôle échoue en CI alors qu'il passe chez toi, mets-les à jour :
-
-```bash
-pip install -U ruff mypy
-```
-
-Après avoir ajouté des options ou modifié la documentation, régénère les libellés et les bulles d'aide :
-
-```bash
-python tools/gen_fr_options.py
-```
-
-```bash
-python tools/gen_option_help.py
-```
-
-Le second script signale les bulles d'aide qui n'ont pas encore de traduction française (`tinypedal/i18n/data/fr_option_help.json`).
-
-**Design des overlays** : chaque overlay (sauf le Black box) a sa version moderne dans `tinypedal/widget/_modern/<nom>.py`, enregistrée dans `tinypedal/template/widget/modern.py` avec les options qu'elle lit (les seules affichées dans la configuration). Les composants communs (tuiles de valeurs, tableaux, jauges, roues, restylage des overlays graphiques) sont dans le même dossier. Les libellés des overlays passent par `tr_overlay` (`tinypedal/i18n/fr_overlay.py`), pas par `tr` : ils doivent rester courts. La police Barlow est dans `fonts`.
-
-**Pages Qt Quick** : la visionneuse de télémétrie, le Track Map Viewer et les statistiques pilote sont en QML dans `tinypedal/ui/qml`, avec leur état dans `tinypedal/ui/quick` (Python pur, testable sans affichage). Courbes et cartes sont envoyées une seule fois à la carte graphique (`GpuShape`), le zoom ne fait que changer une matrice. Un nouveau module QML importé par une page doit être ajouté à `tinypedal/ui/quick/qml_modules.py` : l'exe n'embarque que ceux-là (un test charge les pages avec ces seuls modules). Les textes QML passent par `i18n.tr("...")` et `i18n.trm("...")` (un test vérifie chaque page en français). Les numéros officiels des virages sont dans `tinypedal/userfile/track_corners.py`, le tracé officiel des circuits LMU dans `tinypedal/userfile/track_geometry.py`.
-
-**Calculs lourds de la visionneuse** (limites de piste, valeurs de session) : ils tournent dans un processus séparé (`tinypedal/userfile/lap_geometry.py`, sans import de Qt GUI). `multiprocessing.freeze_support()` doit rester en tête du bloc principal de `run.py`, et un script qui ouvre la visionneuse doit avoir un `if __name__ == "__main__":`.
-
-**API REST de Le Mans Ultimate** : les données du jeu (chat, contacts, rejeux, relais de l'équipe, estimation de conso) sont lues dans `tinypedal/process/game_info.py` et `tinypedal/process/team_usage.py`.
-
-### Releases, mises à jour et changelog
-
-Tout passe par les [Releases GitHub](https://github.com/Keenny38/ModernTinyPedals/releases), sans rien faire à la main : chaque push sur `master` publie une nouvelle version dès que les contrôles (`Checks`) passent.
-
-- **Version** (`MAJEUR.MINEUR.CORRECTIF`, à partir de `0.10.0`) : calculée depuis les commits depuis la dernière release. Un titre qui commence par `Add` (nouveauté) monte la version mineure (`0.10.3` → `0.11.0`), tout le reste monte le correctif (`0.10.0` → `0.10.1`). Une version majeure se choisit à la main : lance `Build and Release` depuis l'onglet Actions avec `bump: major`.
-- **Contenu** : le code source en ZIP, l'app compilée en ZIP, l'installeur Windows et son `.sha256`.
-- **Changelog** : [`CHANGELOG.md`](CHANGELOG.md) décrit en français les nouveautés de chaque version (section `## X.Y.Z (date)`). Les notes de la release commencent par la section de sa version, puis listent ses commits en **Added**, **Fixed** et **Changed** : écris donc des titres de commit clairs, et ajoute la section de la prochaine version dans le changelog avant de pousser (après `git fetch --tags`, pour partir de la vraie dernière version).
-- **Visuels** : quand un commit change l'apparence d'un overlay, ajoute-lui une image avant/après dans `docs/changes`. Les notes de la release l'affichent dans une section **Visuals**, sauf si la section du changelog l'insère déjà (pas dans l'app, qui n'affiche pas les images).
-- **Captures du changelog** : les captures d'une nouveauté (pages de l'app) vont dans `docs/changelog` et sont insérées dans `CHANGELOG.md` par leur adresse `raw.githubusercontent.com` (visibles sur GitHub et dans les notes de release ; la page `Nouveautés` de l'app ignore ces lignes). Les titres `##` à `####` d'une section deviennent les cartes de la page `Nouveautés`.
-- **Dans l'app** : la version installée voit la nouvelle release au démarrage, affiche ses notes dans la page `Nouveautés` (une carte par thème, commits et SHA256 repliés) et propose `Télécharger et installer` (dans le navigateur quand l'app ne peut pas s'installer seule, depuis le code source par exemple).
-
-Pour prévisualiser en local la prochaine version et ses notes :
-
-```bash
-python tools/next_version.py
-```
-
-```bash
-python tools/gen_release_notes.py v0.10.0
-```
-
-La version de l'app est indépendante de celle du format des réglages (`SETTING_VERSION` dans `tinypedal/version.py`, restée sur la numérotation TinyPedal 2.x), pour que les presets existants continuent de se charger sans migration inutile.
-
-L'image d'aperçu de ce README est générée à partir des vrais overlays, sur une course simulée :
-
-```bash
-python tools/make_readme_preview.py
-```
-
-Pour l'image avant/après d'un overlay modifié (dernier commit à gauche, code en cours à droite), avant de commiter :
-
-```bash
-python tools/make_change_visual.py black_box --title "Black box : cartographie moteur"
-```
-
-`--set black_box.show_motor_map=true` montre une option désactivée par défaut, `--base` choisit la révision « avant ».
-
-### Compiler pour Windows
-
-```bash
-pip install pyinstaller
-```
-
-```bash
-python build_pyinstaller.py
-```
-
-L'exécutable est créé dans `dist\TinyPedal`. Le hook `tools/pyinstaller_hooks/hook-PySide6.QtQml.py` n'embarque que les modules QML utilisés (environ 2 Mo au lieu de 300 Mo avec WebEngine et 3D). Pour l'installeur, installe [Inno Setup 6](https://jrsoftware.org/isinfo.php) puis (en remplaçant la version) :
-
-```bash
-iscc /DAppVersion=0.10.0 installer\tinypedal.iss
-```
-
-L'installeur choisit l'icône des raccourcis selon le mode clair ou sombre de Windows (`images/icon.ico` ou `images/icon_dark.ico`). Les icônes se régénèrent depuis `images/src/icon.webp` et `images/src/icon_dark.webp` avec `images/export_icon.sh` (ImageMagick 7).
-
-Le workflow `Build and Release` signe l'exécutable et l'installeur si un certificat `.pfx` ou un compte Azure Artifact Signing est configuré dans les secrets et variables du dépôt (détail dans `.github/workflows/build-release.yml`), sinon il les publie sans signature.
-
-> Le nom affiché est « Modern Tiny Pedals », mais le nom interne reste `TinyPedal` (dossier de configuration `%APPDATA%\TinyPedal`, `tinypedal.exe`, en-tête `X-TinyPedal` du contrôle à distance), pour garder les réglages existants et la compatibilité des outils.
-
----
-
-## Linux
-
-Lance l'app depuis le code source comme ci-dessus (pas d'exécutable). Paquets nécessaires : `PySide6`, `psutil`, `cryptography` et `pyxdg`, par exemple `python3-pyside6`, `python3-psutil`, `python3-cryptography`, `python3-pyxdg` selon ta distribution. Certaines distributions découpent PySide6 : installe alors `python3-pyside6.qtgui`, `python3-pyside6.qtwidgets` et `python3-pyside6.qtmultimedia`.
-
-```bash
-./run.py
-```
-
-Les réglages sont dans `$HOME/.config/TinyPedal/` et les données dans `$HOME/.local/share/TinyPedal/`.
-
-Pour installer un lanceur et la commande `TinyPedal` dans `/usr/local/` :
-
-```bash
-sudo ./install.sh
-```
-
-Des arguments de lancement permanents se mettent dans `~/.config/TinyPedal/launcher.conf`, par exemple `TINYPEDAL_RUN_ARGS="--log-level 2"`.
-
-Problèmes connus :
-- Sous KDE, les overlays n'apparaissent pas au-dessus du jeu : active `Activer contourner le gestionnaire de fenêtres` dans `Config > Compatibilité`.
-- La transparence ne marche pas sans compositing : active la composition de fenêtres de ton environnement de bureau.
-
-## Contribuer
-
-Signale un problème ou propose une idée dans les [issues](https://github.com/Keenny38/ModernTinyPedals/issues). Les règles de contribution sont dans [CONTRIBUTING.md](CONTRIBUTING.md), et ce qui reste à faire dans la [feuille de route](docs/ROADMAP.md).
-
-## Licence et crédits
-
-Modern Tiny Pedals est dérivé de [TinyPedal](https://github.com/TinyPedal/TinyPedal), Copyright (C) 2022-2026 TinyPedal developers. Voir [docs/contributors.md](docs/contributors.md) pour la liste des développeurs et contributeurs.
-
-Logiciel libre sous licence [GNU GPL v3](LICENSE.txt) ou toute version ultérieure, distribué SANS AUCUNE GARANTIE. L'icône et les images du dossier `images` sont sous licence [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). La police [Barlow](https://github.com/jpt/barlow) est sous licence SIL Open Font License 1.1 (`fonts/OFL-Barlow.txt`). Les licences des logiciels tiers sont dans [docs/licenses](docs/licenses/THIRDPARTYNOTICES.txt).
+Free software under the [GNU GPL v3](LICENSE.txt) or any later version, distributed WITHOUT ANY WARRANTY. The icon and the images of the `images` folder are under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The [Barlow](https://github.com/jpt/barlow) font is under the SIL Open Font License 1.1 (`fonts/OFL-Barlow.txt`). Third-party software licenses are in [docs/licenses](docs/licenses/THIRDPARTYNOTICES.txt).

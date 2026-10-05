@@ -29,6 +29,7 @@ from ..userfile.delta_best import load_delta_best_file, save_delta_best_file
 from ..validator import (
     generator_init,
     is_same_session,
+    session_token,
     valid_delta_raw,
     vehicle_position_sync,
 )
@@ -155,7 +156,8 @@ def calc_delta_time(
     """Calculate delta time data"""
     last_reset = None  # reset check
 
-    last_session_id = ("",-1,-1,-1)
+    last_combo_name = ""
+    last_session_id: tuple[float, ...] = ()  # session token
     delta_array_session: tuple[tuple[float, float], ...] = DELTA_DEFAULT
     delta_array_stint: tuple[tuple[float, float], ...] = DELTA_DEFAULT
     laptime_session_best = MAX_SECONDS
@@ -180,13 +182,14 @@ def calc_delta_time(
             is_pit_lap = 0  # whether pit in or pit out lap
 
             combo_name = api.read.session.combo_name()
-            session_id = api.read.session.identifier()
+            session_id = session_token(api.read.session.identifier())
 
-            # Reset delta session best if not same session
-            if not is_same_session(combo_name, session_id, last_session_id):
+            # Reset delta session best if not same session, car, track combo
+            if combo_name != last_combo_name or not is_same_session(last_session_id, session_id):
                 delta_array_session = DELTA_DEFAULT
                 laptime_session_best = MAX_SECONDS
-                last_session_id = (combo_name, *session_id)
+            last_combo_name = combo_name
+            last_session_id = session_id
 
             delta_array_best, laptime_best = load_delta_best_file(
                 filepath=filepath,
@@ -239,6 +242,10 @@ def calc_delta_time(
             pos_last = pos_recorded = pos_curr
             recording = laptime_curr < 1
             is_pit_lap = 0
+            # Keep session token recent, so a game pause is not taken as new session
+            session_id = session_token(api.read.session.identifier())
+            if is_same_session(last_session_id, session_id):
+                last_session_id = session_id
         last_lap_stime = lap_stime  # reset
 
         # 1 sec position distance check after new lap begins

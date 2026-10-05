@@ -1,0 +1,39 @@
+# Weekly update pull requests (each one goes through Checks before it can be merged)
+# Cooldown: a new version is proposed only after some days, time for a compromised release to be found
+# and pulled (security updates are not delayed)
+version: 2
+updates:
+  # Workflow actions (pinned by commit SHA, updated with their version comment)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Pinned versions of release builds (requirements-lock.txt, requirements-build.txt)
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "PySide6*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "shiboken6"
+        update-types: ["version-update:semver-major"]
+
+  # Hooks of .pre-commit-config.yaml (ruff, pre-commit-hooks)
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7

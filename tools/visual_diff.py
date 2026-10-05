@@ -1,13 +1,14 @@
 """Compare widget renders of two folders (base & changed), for visual regression check in CI
 
 Usage:
-    python tools/visual_diff.py BASE_DIR NEW_DIR [DIFF_DIR]
+    python tools/visual_diff.py [--allow-changes] BASE_DIR NEW_DIR [DIFF_DIR]
 
 Images with same name are compared pixel by pixel. A pixel is changed if any channel differs
 by more than CHANNEL_TOLERANCE (antialiasing noise is ignored). An image is reported if more than
 CHANGED_RATIO of its pixels changed, or if its size changed. Diff images (changed pixels in red
 over a faded copy of new render) are written to DIFF_DIR. A markdown summary is printed, and
-appended to $GITHUB_STEP_SUMMARY if set. Exit code 1 if any image changed.
+appended to $GITHUB_STEP_SUMMARY if set. Exit code 1 if any image changed, unless --allow-changes
+(intended change: before / after image added in docs/changes, or "[visual]" in a commit message).
 """
 
 from __future__ import annotations
@@ -94,21 +95,26 @@ def summary(differences: list[Difference], added: list[str], removed: list[str])
 
 
 def main():
-    if len(sys.argv) < 3:
+    args = sys.argv[1:]
+    allow_changes = "--allow-changes" in args
+    args = [arg for arg in args if arg != "--allow-changes"]
+    if len(args) < 2:
         print(__doc__)
         sys.exit(2)
     from PySide6.QtGui import QGuiApplication
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QGuiApplication(sys.argv[:1])  # noqa: F841  # needed by QImage color conversion
-    differences, added, removed = compare_folders(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "")
+    differences, added, removed = compare_folders(args[0], args[1], args[2] if len(args) > 2 else "")
     report = summary(differences, added, removed)
+    if differences and allow_changes:
+        report += "\nIntended visual change (before / after image in docs/changes or [visual] commit): not failing.\n"
     print(report)
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:
         with open(step_summary, "a", encoding="utf-8") as file:
             file.write(report)
-    sys.exit(1 if differences else 0)
+    sys.exit(1 if differences and not allow_changes else 0)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,6 @@ import bisect
 import logging
 import math
 import os
-import pickle
 import time
 from array import array
 from collections.abc import Sequence
@@ -37,8 +36,17 @@ from contextlib import suppress
 from itertools import pairwise
 from typing import NamedTuple
 
-from .lap_cache import load_cached_lap
-from .telemetry_lap import LapData, lap_files, official_sector_times, sector_bounds
+from .lap_cache import load_cached_lap, read_arrays_file, write_arrays_file
+from .telemetry_lap import (
+    DISTANCE_SCALE_MAX,
+    DISTANCE_SCALE_MIN,
+    LapData,
+    interpolate,
+    lap_files,
+    lap_time_curve,
+    official_sector_times,
+    sector_bounds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +386,7 @@ def _smooth(values: list[float], points: int) -> list[float]:
 
 
 # Track limits job: placement of each clean lap around base line (saved per lap), edges from all of them
-LIMITS_PARTS_VERSION = 1  # per lap track limits data format: saved parts computed again if changed
+LIMITS_PARTS_VERSION = 2  # per lap track limits data format: saved parts computed again if changed
 YIELD_EVERY = 0.004  # seconds of work between short pauses in threads (page thread gets the interpreter lock)
 
 
@@ -415,13 +423,16 @@ def limits_part(folder: str, parts_folder: str, path: str, base: MapLine,
     except OSError:
         return None
     stamp = (stat.st_size, stat.st_mtime_ns)
-    with suppress(OSError, ValueError, EOFError, pickle.UnpicklingError, KeyError, TypeError):
-        with open(target, "rb") as file:
-            saved = pickle.load(file)
-        if (saved["version"] == LIMITS_PARTS_VERSION and saved["base"] == base_key
-                and tuple(saved["stamp"]) == stamp):
+    saved_part = read_arrays_file(target)  # plain data (older pickled parts ignored & computed again)
+    if saved_part is not None:
+        values, saved = saved_part
+        sectors = values.get("sectors")
+        if (values.get("version") == LIMITS_PARTS_VERSION and values.get("base") == base_key
+                and values.get("stamp") == list(stamp) and isinstance(sectors, list)
+                and all(isinstance(value, (int, float)) for value in sectors)
+                and all(name in saved for name in ("sides", "indexes", "laterals", "edges"))):
             return (LapOffsets(saved["sides"].tolist(), saved["indexes"].tolist(),
-                               saved["laterals"].tolist(), saved["edges"].tolist()), list(saved["sectors"]))
+                               saved["laterals"].tolist(), saved["edges"].tolist()), [float(value) for value in sectors])
     try:
         lap = load_cached_lap(folder, path)
     except (OSError, ValueError):
@@ -440,19 +451,14 @@ def limits_part(folder: str, parts_folder: str, path: str, base: MapLine,
         else:
             offsets = LapOffsets(sides, nearest, [], [])
     if base_key != "lap":  # placement around a lap line changes with best lap: not saved
-        temp = f"{target}.{os.getpid()}.tmp"
         try:
             os.makedirs(parts_folder, exist_ok=True)
-            with open(temp, "wb") as file:
-                pickle.dump({"version": LIMITS_PARTS_VERSION, "base": base_key, "stamp": stamp,
-                             "sides": array("f", offsets.sides), "indexes": array("i", offsets.indexes),
-                             "laterals": array("f", offsets.laterals), "edges": array("f", offsets.edges),
-                             "sectors": sectors}, file, protocol=pickle.HIGHEST_PROTOCOL)
-            os.replace(temp, target)
-        except OSError as error:
+            write_arrays_file(target, {"version": LIMITS_PARTS_VERSION, "base": base_key, "stamp": list(stamp),
+                                       "sectors": sectors},
+                              {"sides": array("f", offsets.sides), "indexes": array("i", offsets.indexes),
+                               "laterals": array("f", offsets.laterals), "edges": array("f", offsets.edges)})
+        except (OSError, OverflowError, ValueError) as error:
             logger.debug("LAP GEOMETRY: unable to save track limits part %s: %s", target, error)
-            with suppress(OSError):
-                os.remove(temp)
     return offsets, sectors
 
 
@@ -475,32 +481,47 @@ def prune_limits_parts(parts_folder: str, track_folder: str) -> int:
 
 def track_limits_job(folder: str, parts_folder: str, track_folder: str, paths: list[str],
                      official: MapLine | None, base_key: str) -> dict:
-    """Track limits of track from clean laps (paths, best lap first): limits, source & sector bounds
+    """Track limits of track from clean laps (paths, best lap first): limits, source & sector bounds, file names
+    of unreadable laps if any ("unreadable": result not to be kept, see check_limits_job)
 
-    Placement around official center path (game) if known, else around best lap line. Saved placements
+    Placement around official center path (game) if known, else around best readable lap line. Saved placements
     of laps no longer recorded are removed.
     """
     result: dict = {}
+    unreadable: list[str] = []
     prune_limits_parts(parts_folder, track_folder)
     base = official
+    base_path = ""
     if base is None:  # no official circuit: placement around best lap line
-        try:
-            base = map_line(load_cached_lap(folder, paths[0]))
-        except (OSError, ValueError):
-            base = None
+        for lap_path in paths:
+            try:
+                base = map_line(load_cached_lap(folder, lap_path))
+            except (OSError, ValueError) as error:
+                logger.warning("LAP GEOMETRY: unable to read %s: %s", lap_path, error)
+                unreadable.append(os.path.basename(lap_path))
+                continue
+            if base is not None:
+                base_path = lap_path
+                break
         if base is None:
+            if unreadable:
+                result["unreadable"] = unreadable
             return result
     parts = []
     bounds = []
     for lap_path in paths:
         part = limits_part(folder, parts_folder, lap_path, base, base_key)
         if part is None:
+            if os.path.exists(lap_path) and os.path.basename(lap_path) not in unreadable:
+                unreadable.append(os.path.basename(lap_path))
             continue
         offsets, sectors = part
         if sectors:
             bounds.append(sectors)
-        if official is not None or lap_path != paths[0]:  # base lap itself not counted twice
+        if official is not None or lap_path != base_path:  # base lap itself not counted twice
             parts.append(offsets)
+    if unreadable:
+        result["unreadable"] = unreadable
     result["sectors"] = median_bounds(bounds)
     estimated = limits_from_offsets(base, parts, base_included=official is None)
     game = [part for part in parts if part.edges and any(part.edges)]
@@ -508,6 +529,50 @@ def track_limits_job(folder: str, parts_folder: str, track_folder: str, paths: l
     result["source"] = "game" if limits is not None else "estimated"
     result["limits"] = limits if limits is not None else estimated
     return result
+
+
+def mini_sector_times(bounds: Sequence[float], distances: Sequence[float], times: Sequence[float]) -> list[float]:
+    """Time taken in each mini-sector (lap distances & lap times, same distance scale as bounds)"""
+    if len(distances) < 2:
+        return []
+    distances, times = list(distances), list(times)  # copied once, not for each bound
+    at = [interpolate(distances, times, bound) for bound in bounds]
+    return [second - first for first, second in pairwise(at)]
+
+
+def mini_sector_spread(times_by_lap: Sequence[Sequence[float]], minimum: int = 3) -> list[float]:
+    """Standard deviation of each mini-sector time over laps (consistency), -1 where under minimum laps have a time"""
+    count = max((len(times) for times in times_by_lap), default=0)
+    spreads = []
+    for index in range(count):
+        values = [times[index] for times in times_by_lap if index < len(times) and times[index] > 0]
+        if len(values) < minimum:
+            spreads.append(-1.0)
+            continue
+        mean = sum(values) / len(values)
+        spreads.append(math.sqrt(sum((value - mean) ** 2 for value in values) / (len(values) - 1)))
+    return spreads
+
+
+def mini_sector_job(folder: str, paths: list[str], bounds: list[float], reference_length: float,
+                    ) -> dict[str, list[float]]:
+    """Time of each lap in each mini-sector (bounds: reference lap distances, lap distances scaled to reference
+    lap length like distance_scale): lap path: times, laps without lap time or unreadable left out"""
+    found = {}
+    for path in paths:
+        try:
+            lap = load_cached_lap(folder, path)
+        except (OSError, ValueError):
+            continue
+        distances, times = lap_time_curve(lap)
+        length = max(lap.distance) if len(lap) else 0.0
+        if len(distances) < 2 or length <= 0:
+            continue
+        ratio = reference_length / length if reference_length > 0 else 1.0
+        if DISTANCE_SCALE_MIN < abs(ratio - 1) < DISTANCE_SCALE_MAX:
+            distances = [distance * ratio for distance in distances]
+        found[path] = mini_sector_times(bounds, distances, times)
+    return found
 
 
 def session_values(folder: str, todo: list[tuple[str, float]]) -> dict[str, tuple[float, dict]]:

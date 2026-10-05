@@ -29,8 +29,7 @@ from ..process.game_info import parse_chat, parse_contacts, parse_distance, pars
 from ..process.garage import export_lmu_car_setup
 from ..process.vehicle import absolute_refilling, export_wheels, steerlock_to_number
 from ..process.weather import FORECAST_DEFAULT, WeatherNode, forecast_rf2
-from ..validator import valid_value_type
-from .restapi_connector import ResOutput, RestAPITask
+from .restapi_connector import ResOutput, RestAPITask, valid_json_value
 
 logger = logging.getLogger(__name__)
 
@@ -103,23 +102,23 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
         ResOutput("forecastRace", FORECAST_DEFAULT, forecast_rf2, ("RACE",)),
     )
     res_currentstint = (
-        ResOutput("aeroDamage", -1.0, valid_value_type, ("wearables", "body", "aero")),
+        ResOutput("aeroDamage", -1.0, valid_json_value, ("wearables", "body", "aero")),
         ResOutput("brakeWear", WHEELS_NA, export_wheels, ("wearables", "brakes")),
         ResOutput("suspensionDamage", WHEELS_NA, export_wheels, ("wearables", "suspension")),
         ResOutput("absoluteRefill", 0.0, absolute_refilling, ("pitMenu", "pitMenu")),
-        ResOutput("maxVirtualEnergy", 0.0, valid_value_type, ("fuelInfo", "maxVirtualEnergy")),
+        ResOutput("maxVirtualEnergy", 0.0, valid_json_value, ("fuelInfo", "maxVirtualEnergy")),
     )
     res_garagesetup = (
         ResOutput("steeringWheelRange", 0.0, steerlock_to_number, ("VM_STEER_LOCK", "stringValue")),
         ResOutput("lastCarSetup", (), export_lmu_car_setup),
     )
     res_sessionsinfo = (
-        ResOutput("timeScale", 1, valid_value_type, ("SESSSET_race_timescale", "currentValue")),
-        ResOutput("privateQualifying", 0, valid_value_type, ("SESSSET_private_qual", "currentValue")),
+        ResOutput("timeScale", 1, valid_json_value, ("SESSSET_race_timescale", "currentValue")),
+        ResOutput("privateQualifying", 0, valid_json_value, ("SESSSET_private_qual", "currentValue")),
     )
     res_expectedusage = (
-        ResOutput("expectedFuelConsumption", 0.0, valid_value_type, ("expectedUsage", "fuelConsumption")),
-        ResOutput("expectedEnergyConsumption", 0.0, valid_value_type, ("expectedUsage", "virtualEnergyFractionPerLap")),
+        ResOutput("expectedFuelConsumption", 0.0, valid_json_value, ("expectedUsage", "fuelConsumption")),
+        ResOutput("expectedEnergyConsumption", 0.0, valid_json_value, ("expectedUsage", "virtualEnergyFractionPerLap")),
     )
     res_chat = (
         ResOutput("chatMessages", (), parse_chat),
@@ -132,22 +131,22 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
     )
     res_setupsummary = (
         ResOutput("setupName", "", parse_setup_name, ("activeSetup",)),
-        ResOutput("setupModified", False, valid_value_type, ("unsavedChanges",)),
+        ResOutput("setupModified", False, valid_json_value, ("unsavedChanges",)),
     )
     res_pitstoptime = (
-        ResOutput("pitStopTime", 0.0, valid_value_type, ("total",)),
-        ResOutput("repairTime", 0.0, valid_value_type, ("damage",)),
+        ResOutput("pitStopTime", 0.0, valid_json_value, ("total",)),
+        ResOutput("repairTime", 0.0, valid_json_value, ("damage",)),
     )
-    # Define task set
+    # Define task set (repeated tasks: minimum interval, maximum interval while data unchanged)
     return (
         RestAPITask("/rest/sessions/weather", res_weatherforecast, "enable_weather_info", False, 0.1),
         RestAPITask("/rest/sessions", res_sessionsinfo, "enable_session_info", False, 0.1),
         RestAPITask("/rest/garage/getPlayerGarageData", res_garagesetup, "enable_garage_setup_info", False, 0.1),
         RestAPITask("/rest/garage/summary", res_setupsummary, "enable_garage_setup_info", False, 0.1),
-        RestAPITask("/rest/garage/UIScreen/RepairAndRefuel", res_currentstint, "enable_vehicle_info", True, 0.2),
-        RestAPITask("/rest/strategy/pitstop-estimate", res_pitstoptime, "enable_vehicle_info", True, 1.0),
+        RestAPITask("/rest/garage/UIScreen/RepairAndRefuel", res_currentstint, "enable_vehicle_info", True, 0.2, 1.0),
+        RestAPITask("/rest/strategy/pitstop-estimate", res_pitstoptime, "enable_vehicle_info", True, 1.0, 2.0),
         RestAPITask("/rest/garage/UIScreen/TireManagement", res_expectedusage, "enable_vehicle_info", True, 1.0),
-        RestAPITask("/rest/chat/", res_chat, "enable_race_info", True, 0.5),
-        RestAPITask("/rest/watch/getIncidentsList/1", res_contacts, "enable_race_info", True, 1.0),
+        RestAPITask("/rest/chat/", res_chat, "enable_race_info", True, 0.5, 1.0),
+        RestAPITask("/rest/watch/getIncidentsList/1", res_contacts, "enable_race_info", True, 1.0, 1.0),
         RestAPITask("/rest/sessions/GetGameState", res_gamestate, "enable_race_info", True, 1.0),
     )

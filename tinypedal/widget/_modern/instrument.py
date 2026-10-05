@@ -31,8 +31,8 @@ from .restyle import Restyled, restyled_options
 class Realtime(Restyled, Classic):
     """Draw widget"""
 
-    options = restyled_options("instrument")
     background_options = (
         "background_color_headlights", "background_color_ignition", "background_color_clutch",
         "background_color_wheel_lock", "background_color_wheel_slip",
     )
+    options = restyled_options("instrument", background_options=background_options)

@@ -17,7 +17,8 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Imported laps library: import, search, add to lap viewer, rename & delete laps imported from MoTeC logs
+Imported laps library: import, search, add to lap viewer, rename & delete laps imported from MoTeC logs & other
+drivers' folders (foreign laps)
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import os
 import time
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -43,8 +44,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr, trm
-from ..userfile.lap_library import delete_laps, group_name_error, import_folder, list_imported, rename_group
-from ..userfile.motec_import import import_ld_file
+from ..userfile.lap_library import (
+    delete_laps,
+    group_name_error,
+    import_folder,
+    is_foreign,
+    list_imported,
+    rename_group,
+)
+from ..userfile.motec_ld import import_ld_job
 from ..userfile.telemetry_lap import read_lap_info
 from ._common import BaseDialog, TextInputDialog, UIScaler
 
@@ -89,12 +97,17 @@ class LapLibrary(BaseDialog):
         self.edit_filter.setPlaceholderText(tr("Search track, vehicle, driver or log..."))
         self.edit_filter.setClearButtonEnabled(True)
         self.edit_filter.textChanged.connect(self.apply_filter)
-        button_import = QPushButton(tr("Import MoTeC..."))
-        button_import.setToolTip(tr("Import complete laps of MoTeC logs (.ld), also by dropping them on the app"))
-        button_import.clicked.connect(self.import_logs)
+        self.button_import = QPushButton(tr("Import MoTeC..."))
+        self.button_import.setToolTip(tr("Import complete laps of MoTeC logs (.ld), also by dropping them on the app"))
+        self.button_import.clicked.connect(self.import_logs)
         layout_top = QHBoxLayout()
         layout_top.addWidget(self.edit_filter, stretch=1)
-        layout_top.addWidget(button_import)
+        layout_top.addWidget(self.button_import)
+        # Imports run in lap viewer worker process (a long log takes seconds to read): (log name, job)
+        self._imports: list = []
+        self._import_timer = QTimer(self)
+        self._import_timer.setInterval(100)
+        self._import_timer.timeout.connect(self.check_imports)
 
         self.tree = QTreeWidget(self)
         self.tree.setHeaderLabels([tr("Name"), tr("Time"), tr("Track"), tr("Vehicle"), tr("Driver"), tr("Imported")])
@@ -164,6 +177,8 @@ class LapLibrary(BaseDialog):
                     item.setText(column, str(info.get(key, "")))
             for column, key in ((self.COL_TRACK, "track"), (self.COL_VEHICLE, "vehicle"), (self.COL_DRIVER, "driver")):
                 group.setText(column, str(first_info.get(key, "")))
+            if not first_info.get("driver") and is_foreign(laps[0].path):  # laps of another driver's folder
+                group.setText(self.COL_DRIVER, tr("foreign laps"))
             group.setText(self.COL_DATE, format_date(newest))
             group.setExpanded(name in expanded or len(groups) == 1)
         for column in range(self.tree.columnCount()):
@@ -197,23 +212,47 @@ class LapLibrary(BaseDialog):
                 group.setExpanded(True)
 
     def import_logs(self):
-        """Import MoTeC logs into library, new logs shown expanded"""
+        """Import MoTeC logs into library in background, new logs shown expanded once done"""
+        if self._imports:
+            return
         filenames, _ = QFileDialog.getOpenFileNames(self, tr("Import MoTeC..."), "", "MoTeC i2 (*.ld)")
         if not filenames:
             return
+        from .quick.lap_backend import start_job
+
+        folder = import_folder(self.filepath)
+        self._imports = [(os.path.basename(filename), start_job("motec import", import_ld_job, filename, folder))
+                         for filename in filenames]
+        self.button_import.setEnabled(False)
+        self.button_import.setText(tr("Importing..."))
+        self._import_timer.start()
+
+    def check_imports(self, wait: bool = False):
+        """Show imported logs once every import is done (wait: block until done, for tests)"""
+        if wait:
+            for _, job in self._imports:
+                job.join()
+        if not self._imports or any(job.is_alive() for _, job in self._imports):
+            return
+        from .quick.lap_backend import JobHandle
+
+        self._import_timer.stop()
         groups: set[str] = set()
         problems: list[str] = []
-        for filename in filenames:
-            name = os.path.basename(filename)
-            try:
-                paths = import_ld_file(filename, import_folder(self.filepath))
-            except (OSError, ValueError) as error:
-                logger.error("LAP LIBRARY: unable to import %s: %s", filename, error)
+        for name, job in self._imports:
+            result = job.result()
+            if result is None or result is JobHandle.BROKEN:
+                paths, error = [], tr("Unexpected error")
+            else:
+                paths, error = result
+            if error:
                 problems.append(trm(f"Unable to import <b>{name}</b>: {error}"))
-                continue
-            if not paths:
+            elif not paths:
                 problems.append(trm(f"No complete lap in: {name}"))
             groups.update(os.path.basename(os.path.dirname(path)) for path in paths)
+        self._imports = []
+        self.button_import.setEnabled(True)
+        self.button_import.setText(tr("Import MoTeC..."))
         self.edit_filter.clear()
         self.refresh(groups)
         if problems:

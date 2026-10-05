@@ -44,7 +44,7 @@ def fill_module_output(monkeypatch, value):
 
 
 @pytest.mark.parametrize("mode", list(EXTREME_VALUES))
-def test_widgets_survive_extreme_values(ui_env, monkeypatch, mode):
+def test_widgets_survive_extreme_values(ui_env, bundled_fonts, monkeypatch, mode):
     fill_module_output(monkeypatch, EXTREME_VALUES[mode])
     failures = []
     for name in WIDGET_DISPLAY_ORDER:

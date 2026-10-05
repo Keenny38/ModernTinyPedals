@@ -23,7 +23,7 @@ Tyre carcass temperature Widget
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
-from ..const_common import TEXT_NA, TEXT_PLACEHOLDER, WHEELS_ZERO
+from ..const_common import TEXT_NA, TEXT_PLACEHOLDER
 from ..userfile.heatmap import (
     HEATMAP_DEFAULT_TYRE,
     load_heatmap_color,
@@ -67,6 +67,8 @@ class Realtime(Overlay):
 
         # Config units
         self.unit_temp = units.set_unit_temperature(self.cfg.units["temperature_unit"])
+        # Temperature difference (rate of change): scale only, no offset
+        self.temp_scale = 1.8 if self.cfg.units["temperature_unit"] == "Fahrenheit" else 1.0
 
         # Heatmap style list: 0 - fl, 1 - fr, 2 - rl, 3 - rr
         self.heatmap_styles = 4 * [
@@ -162,7 +164,7 @@ class Realtime(Overlay):
         # Last data
         self.last_in_pits = -1
         self.last_compounds: tuple[str, ...] = ("", "", "", "")
-        self.last_rtemp = list(WHEELS_ZERO)
+        self.last_rtemp: list[float] | None = None
         self.last_lap_etime = 0.0
 
     def timerEvent(self, event):
@@ -200,6 +202,10 @@ class Realtime(Overlay):
                 interval = self.rate_interval / (lap_etime - self.last_lap_etime)
                 self.last_lap_etime = lap_etime
 
+                if self.last_rtemp is None:  # first reading: no rate yet (from 0 would be a fake spike)
+                    self.last_rtemp = list(ctemp)
+                    return
+
                 for tyre_idx, bar_rdiff in enumerate(self.bars_rdiff):
                     rdiff = self.calc_ema_rdiff(
                         bar_rdiff.last,
@@ -224,7 +230,7 @@ class Realtime(Overlay):
         """Rate of change"""
         if target.last != data:
             target.last = data
-            temp = self.unit_temp(abs(data))
+            temp = abs(data) * self.temp_scale
             if temp > 9.94:
                 text = f"{temp:.0f}"
             else:

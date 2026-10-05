@@ -33,7 +33,10 @@ race lasts the laps that fit in race time with these lap & stop times: race leng
 settled together. A safety car period slows laps and consumption, a stop under safety car loses
 less time.
 
-Tyres are changed at a stop when the next stint would wear them below the minimum tread.
+Tyres are changed at a stop when the next stint would wear them below the minimum tread. Tyre
+life can also cut stints (laps per set of tyres, and tread down to the minimum tread when stints
+are cut by tyre life): tyres are changed at a stop when they cannot last the next stint, and a
+stint never lasts longer than its tyres, together with fuel, energy & driver limits.
 
 A plan can also cover the rest of a race under way (live race state, see remaining_input): laps,
 race clock, fuel, energy & tread of now, stops & driving time done. Plans are cached (same input,
@@ -79,6 +82,9 @@ class StrategyInput:
     fresh_tread: float = FRESH_TREAD  # tread of tyres fitted at a stop
     wear_per_lap: float = 0.0
     minimum_tread: float = 0.0  # change tyres before going below
+    tyre_set_laps: int = 0  # tyre life: most laps on a set of tyres (laps at race pace wear), 0 = none
+    tyre_life_stints: bool = False  # stints cut so tread never goes below minimum tread (wear per lap)
+    tyre_laps_done: float = 0.0  # laps already driven on tyres of start (laps per set)
     stop_extra_seconds: tuple[float, ...] = ()  # tyre change time of each stop (tyre plan)
     tyre_change_seconds: float = 0.0  # proposed tyre change (4 tyres) without tyre plan
     refuel_rate: float = 0.0  # fuel unit per second, 0 = refuelling inside pit time
@@ -152,7 +158,8 @@ class Strategy:
     energy_needed: float = 0.0
     fuel_load: float = 0.0  # fuel to load at start (start fuel, or exact amount without stop)
     energy_load: float = 0.0
-    limit: str = "fuel"  # what ends stints: "fuel", "energy", "stint" (driver limit) or "stops" (mandatory)
+    limit: str = "fuel"  # what ends stints: "fuel", "energy", "stint" (driver limit), "tyres" (tyre life)
+    # or "stops" (mandatory)
     feasible: bool = True
     problem: str = ""  # not feasible: "tank" (full tank below one lap), "start" (start amount), "stops"
     tyre_changes: list[int] = field(default_factory=list)  # tyres changed per stop (tyre plan), empty: proposed
@@ -263,6 +270,15 @@ def reserves(setup: StrategyInput, usage: dict[str, float]) -> dict[str, float]:
     return reserve
 
 
+def start_amounts(setup: StrategyInput) -> dict[str, float]:
+    """Fuel & energy in tank at start (full if not given), at most a full tank"""
+    fuel = setup.fuel_start if setup.fuel_start > 0 else setup.tank_capacity
+    if setup.tank_capacity > 0:
+        fuel = min(fuel, setup.tank_capacity)
+    energy = setup.energy_start if setup.energy_start > 0 else 100.0
+    return {"fuel": fuel, "energy": min(energy, 100.0)}
+
+
 def stint_laps(amounts: dict[str, float], usage: dict[str, float], reserve: dict[str, float]) -> int:
     """Whole laps until any resource cannot cover one more lap plus its reserve"""
     laps = None
@@ -278,6 +294,28 @@ def full_tank_laps(setup: StrategyInput) -> int:
     """Laps a full refill covers (resource running out first), safety margin kept"""
     usage = consumption(setup)
     return stint_laps({"fuel": setup.tank_capacity, "energy": 100.0}, usage, reserves(setup, usage))
+
+
+def tyre_cut(setup: StrategyInput) -> bool:
+    """Stints cut by tyre life: laps per set, or tread down to minimum tread (wear known)"""
+    return setup.tyre_set_laps > 0 or (setup.tyre_life_stints and setup.wear_per_lap > 0)
+
+
+def tyre_life(setup: StrategyInput, tread: float, laps_done: float = 0.0) -> float:
+    """Laps (at race pace wear) a set of tyres still lasts: tread down to minimum tread (stints
+    cut by tyre life, wear known) & laps per set, inf = no limit"""
+    life = inf
+    if setup.tyre_life_stints and setup.wear_per_lap > 0:
+        life = max(tread - setup.minimum_tread, 0.0) / setup.wear_per_lap
+    if setup.tyre_set_laps > 0:
+        life = min(life, max(setup.tyre_set_laps - laps_done, 0.0))
+    return life
+
+
+def tyre_stint_limit(setup: StrategyInput) -> int:
+    """Stint length limit in laps from life of new tyres at race pace (0 = none), one lap at least"""
+    life = tyre_life(setup, setup.fresh_tread)
+    return max(floor(life + EPSILON), 1) if life < inf else 0
 
 
 def stop_time(setup: StrategyInput, index: int, fuel: float, energy: float, tyres: bool,
@@ -383,6 +421,17 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
         """Tyre wear of laps after `after` until `until`, in laps at race pace"""
         return until - after - overlap_units(after, until, True) if periods else float(until - after)
 
+    def tyre_laps(lap: int, life: float) -> int:
+        """Whole laps after `lap` tyres with `life` left (laps at race pace wear) last"""
+        if life == inf:
+            return end - lap
+        if not periods:
+            return floor(life + EPSILON)
+        count = 0
+        while lap + count < end and wear_units(lap, lap + count + 1) <= life + EPSILON:
+            count += 1
+        return count
+
     def stint_units(lap: int, stint: int, after_stop: bool) -> float:
         """Consumption of a stint, out lap (after a stop) & in lap (stop at its end) included"""
         total = units(lap, lap + stint)
@@ -393,10 +442,7 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
                 total -= usage_factor(lap + stint) * (pit_factor if after_stop and stint == 1 else 1) * (1 - pit_factor)
         return total
 
-    amounts = {
-        "fuel": setup.fuel_start if setup.fuel_start > 0 else setup.tank_capacity,
-        "energy": setup.energy_start if setup.energy_start > 0 else 100.0,
-    }
+    amounts = start_amounts(setup)
     race_units = units(first, end) if race_laps > 0 else 0.0
     needed = {name: race_units * usage.get(name, 0.0) + reserve[name] for name in capacity}
     strategy = Strategy(
@@ -413,12 +459,17 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
     cap_laps = stint_limit(setup)
     if cap_laps and cap_laps < min(full.values()):
         strategy.limit = "stint"
+    tyre_cap = tyre_stint_limit(setup)
+    if tyre_cap and tyre_cap < min(full.values()) and (not cap_laps or tyre_cap < cap_laps):
+        strategy.limit = "tyres"
+    cut_by_tyres = tyre_cut(setup)
     drivers = max(setup.drivers, 1)
     max_total = [minutes * 60 for minutes in setup.driver_max_minutes[:drivers]]
     min_total = [minutes * 60 for minutes in setup.driver_min_minutes[:drivers]]
     no_stop = all(needed[name] <= capacity[name] + EPSILON for name in usage)
+    tyres_short = cut_by_tyres and tyre_life(setup, setup.tread_start, setup.tyre_laps_done) < wear_units(first, end) - EPSILON
     constrained = (stints > 1 or setup.max_stint_minutes > 0 or any(max_total) or any(min_total)
-                   or bool(forced))
+                   or bool(forced) or tyres_short)
     if no_stop and setup.fuel_start <= 0 and setup.energy_start <= 0 and not constrained:
         amounts = {name: min(needed[name], capacity[name]) for name in amounts}  # exact load
     strategy.fuel_load = amounts["fuel"] if "fuel" in usage else 0.0
@@ -503,8 +554,9 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
         return count
 
     def stint_length(lap: int, clock: float, driver: int, stint_count: int, after_stop: bool,
-                     stint_done: float = 0.0) -> int:
-        """Laps of the stint starting after `lap`"""
+                     stint_done: float = 0.0, tyres_left: float = inf) -> int:
+        """Laps of the stint starting after `lap`, tyres_left: life of tyres (laps at race pace
+        wear, one lap at least)"""
         laps_left = end - lap
         laps = laps_fitting(lap, laps_left, after_stop)
         stints_left = stints - stint_count
@@ -514,6 +566,8 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
             if lap < stop_lap <= lap + laps:
                 laps = stop_lap - lap
                 break
+        if tyres_left < inf:
+            laps = min(laps, max(tyre_laps(lap, tyres_left), 1))
         allowed = time_allowed(driver, stint_done, lap, clock)
         if allowed == inf or laps <= 1:
             return laps
@@ -552,13 +606,15 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
 
     clock = 0.0  # race clock from plan start, runs after formation laps
     tread = setup.tread_start
+    set_laps = setup.tyre_laps_done  # laps on tyres of now (laps at race pace wear)
     driver = min(max(setup.driver_start, 1), drivers)
     turn_stints = setup.driver_stints_done
     stint_done = setup.stint_seconds_done
     lap = first
     while lap < end:
         after_stop = bool(strategy.stops)
-        stint = stint_length(lap, clock, driver, len(strategy.stints), after_stop, stint_done)
+        stint = stint_length(lap, clock, driver, len(strategy.stints), after_stop, stint_done,
+                             tyre_life(setup, tread, set_laps) if cut_by_tyres else inf)
         stint_done = 0.0
         if stint <= 0:
             strategy.feasible = False
@@ -598,7 +654,9 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
         strategy.stint_seconds.append(seconds)
         strategy.stint_drivers.append(driver)
         driven[driver - 1] += seconds
-        tread -= setup.wear_per_lap * wear_units(lap - stint, lap)
+        worn = wear_units(lap - stint, lap)
+        tread -= setup.wear_per_lap * worn
+        set_laps += worn
         if lap >= end:
             break
         if len(strategy.stops) >= MAX_STOPS:
@@ -620,14 +678,19 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
         change = new_driver != driver
         if change:
             turn_stints = 0
-        # Tyres: wear over the stint actually driven next, new ones for wet & back to slicks
+        # Tyres: wear over the stint actually driven next, new ones for wet & back to slicks, and
+        # when tyre life cuts stints: tyres of now not lasting the next stint (then cut by new ones)
         reason = forced.get(lap, "")
         tyres = reason in ("rain", "dry")
-        if setup.wear_per_lap > 0 and not tyres:
+        if not tyres and (setup.wear_per_lap > 0 or cut_by_tyres):
             next_stint = stint_length(lap, clock, new_driver, len(strategy.stints), True)
-            tyres = tread - setup.wear_per_lap * wear_units(lap, lap + next_stint) < setup.minimum_tread
+            if setup.wear_per_lap > 0:
+                tyres = tread - setup.wear_per_lap * wear_units(lap, lap + next_stint) < setup.minimum_tread
+            if cut_by_tyres and not tyres:
+                tyres = tyre_laps(lap, tyre_life(setup, tread, set_laps)) < next_stint
         if tyres:
             tread = setup.fresh_tread
+            set_laps = 0.0
         under_safety_car = sc is not None and sc.first <= lap <= sc.last
         seconds_stop, refuel, tyre = stop_time(
             setup, len(strategy.stops), added["fuel"], added["energy"], tyres, change, under_safety_car,
@@ -670,7 +733,7 @@ def estimated_stops(setup: StrategyInput, stints: int = 0) -> int:
     if not usage or laps <= 0:
         return 0
     reserve = reserves(setup, usage)
-    start = {"fuel": setup.fuel_start or setup.tank_capacity, "energy": setup.energy_start or 100.0}
+    start = start_amounts(setup)
     capacity = {"fuel": setup.tank_capacity, "energy": 100.0}
     stops = max(stints - 1, setup.minimum_stops, 0)
     for _ in range(3):  # stops shorten the race: count again with their pit time
@@ -681,9 +744,9 @@ def estimated_stops(setup: StrategyInput, stints: int = 0) -> int:
             if usable <= per_lap:
                 return 0
             count = max(count, ceil((laps * per_lap + reserve[name] - start[name]) / usable - EPSILON))
-        cap = stint_limit(setup)
-        if cap:
-            count = max(count, ceil(laps / cap - EPSILON) - 1)
+        for cap in (stint_limit(setup), tyre_stint_limit(setup)):
+            if cap:
+                count = max(count, ceil(laps / cap - EPSILON) - 1)
         if count == stops:
             break
         stops = max(count, 0)
@@ -797,6 +860,9 @@ def pit_windows(setup: StrategyInput, strategy: Strategy) -> list[tuple[int, int
     stint_cap = setup.max_stint_minutes * 60
     if stint_cap > 0:  # heaviest car (full tank) is the slowest: fewest laps in the stint time
         full = min(full, stint_time_laps(setup, setup.tank_capacity, stint_cap))
+    tyre_cap = tyre_stint_limit(setup)  # new tyres at race pace
+    if tyre_cap:
+        full = min(full, tyre_cap)
     formation = whole_laps(setup.formation_laps) if not setup.lap_offset else 0
     partial = formation - setup.formation_laps if formation else 0.0  # fuel of formation lap not used
     start = {"fuel": strategy.fuel_load, "energy": strategy.energy_load}
@@ -805,6 +871,8 @@ def pit_windows(setup: StrategyInput, strategy: Strategy) -> list[tuple[int, int
     if stint_cap > 0:
         first_stint = min(first_stint, stint_time_laps(
             setup, strategy.fuel_load or setup.tank_capacity, stint_cap - setup.stint_seconds_done))
+    if tyre_cut(setup):  # tyres of start
+        first_stint = min(first_stint, max(floor(tyre_life(setup, setup.tread_start, setup.tyre_laps_done) + EPSILON), 1))
     count = len(strategy.stops)
     end = strategy.last_lap
     lowest = strategy.first_lap + formation + 1  # no stop during formation laps
@@ -950,20 +1018,25 @@ class RaceState(NamedTuple):
     laps_done: int  # race laps completed (formation laps not included)
     lap_progress: float  # fraction of lap in progress driven
     elapsed: float  # race clock (seconds from green flag)
-    seconds_left: float  # time race: race time left
+    seconds_left: float  # time race: race time left, negative: time since timer ended
     fuel: float
     energy: float  # %
     tread: float  # % (average of 4 tyres), 0 = unknown
     stops_done: int
+    last_stop_lap: int = -1  # race laps done at last stop, -1 = unknown (plan used)
+    last_stop_clock: float = -1.0  # race clock leaving the pits after last stop, -1 = unknown
+    stint_drivers: tuple[str, ...] = ()  # driver name of each stint, stint in progress last, "" unknown
 
 
 def remaining_input(setup: StrategyInput, base: Strategy, state: RaceState) -> StrategyInput:
     """Input of the rest of a race under way, from start of lap in progress
 
     Laps, stops & driving time of the drivers done are taken from the race state and the plan
-    made before the race (base): driver in the car, its stints & stint time.
+    made before the race (base): driver in the car, its stints & stint time. Stint in progress
+    is counted from the last stop made (lap & race clock) when known, else from the planned one.
     """
-    done = whole_laps(setup.formation_laps) + max(state.laps_done, 0)
+    formation = whole_laps(setup.formation_laps)
+    done = formation + max(state.laps_done, 0)
     progress = min(max(state.lap_progress, 0.0), 0.99)
     fuel = state.fuel + progress * setup.fuel_per_lap
     energy = state.energy + progress * setup.energy_per_lap
@@ -976,14 +1049,29 @@ def remaining_input(setup: StrategyInput, base: Strategy, state: RaceState) -> S
         turn += 1
     drivers = max(setup.drivers, 1)
     seconds_done = [0.0] * drivers
-    stint_start = base.stops[stint_index - 1].lap if 0 < stint_index <= len(base.stops) else base.first_lap
+    lap_clock = max(state.elapsed - progress * setup.laptime, 0.0)  # race clock at start of lap in progress
     for index, seconds in enumerate(base.stint_seconds[:stint_index]):
         seconds_done[min(base.driver_of(index), drivers) - 1] += seconds
-    in_stint = max(done - stint_start, 0) * setup.laptime
+    if state.stops_done > 0 and state.last_stop_clock >= 0:  # time since leaving the pits
+        in_stint = max(lap_clock - state.last_stop_clock, 0.0)
+    else:
+        if state.stops_done > 0 and state.last_stop_lap >= 0:
+            stint_start = formation + state.last_stop_lap
+        elif 0 < stint_index <= len(base.stops):
+            stint_start = base.stops[stint_index - 1].lap
+        else:
+            stint_start = base.first_lap
+        in_stint = max(done - stint_start, 0) * setup.laptime
     seconds_done[min(driver, drivers) - 1] += in_stint
+    # Laps on tyres of now (laps per set): since last stop done changing tyres in the plan, else start
+    tyre_stops = [stop.lap for stop in base.stops[:max(state.stops_done, 0)] if stop.tyres]
+    tyre_laps_done = max(done - tyre_stops[-1], 0) if tyre_stops else setup.tyre_laps_done + done
+    extra_laps = setup.extra_laps
     if setup.race_minutes > 0:
         seconds_left = max(state.seconds_left, 0.0) + progress * setup.laptime
         race_minutes, race_laps = seconds_left / 60, 0
+        if extra_laps and -state.seconds_left > progress * setup.laptime:
+            extra_laps -= 1  # timer ended before lap in progress: extra lap under way
     else:
         race_minutes, race_laps = 0.0, max(setup.race_laps - max(state.laps_done, 0), 0)
     return replace(
@@ -994,10 +1082,12 @@ def remaining_input(setup: StrategyInput, base: Strategy, state: RaceState) -> S
         fuel_start=min(max(fuel, 1e-6), setup.tank_capacity) if setup.tank_capacity > 0 else 0.0,
         energy_start=min(max(energy, 1e-6), 100.0),
         tread_start=state.tread if state.tread > 0 else setup.tread_start,
+        tyre_laps_done=float(tyre_laps_done),
         minimum_stops=max(setup.minimum_stops - state.stops_done, 0),
         stop_extra_seconds=setup.stop_extra_seconds[state.stops_done:],
+        extra_laps=extra_laps,
         lap_offset=done,
-        clock_offset=max(state.elapsed - progress * setup.laptime, 0.0),
+        clock_offset=lap_clock,
         stops_done=state.stops_done,
         driver_start=driver,
         driver_stints_done=turn,
@@ -1184,6 +1274,8 @@ def strategy_input_from_values(values: dict, stop_extra_seconds: tuple[float, ..
         tread_start=number("input_tread_start") or FRESH_TREAD,
         wear_per_lap=number("input_wear_per_lap"),
         minimum_tread=number("input_minimum_tread"),
+        tyre_set_laps=max(int(number("input_tyre_set_laps")), 0),
+        tyre_life_stints=values.get("enable_tyre_life_stints") is True,
         stop_extra_seconds=stop_extra_seconds,
         tyre_change_seconds=tyre_change_seconds,
         refuel_rate=number("input_refuel_rate"),

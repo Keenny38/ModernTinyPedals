@@ -4,7 +4,8 @@ import TinyPedal
 
 // Stacked channel charts along lap distance (or lap time), lines drawn by GPU
 // Wheel: zoom (eased every frame: smooth), drag: move, click: keep position, double-click: reset,
-// drag a channel name: reorder, drag a channel lower edge: resize, right-click: menu.
+// panel menu: values fitted to visible part, drag a channel name: reorder, drag a channel lower edge: resize,
+// right-click: menu.
 // Keyboard: +/- zoom, left/right one recorded frame (Ctrl: farther, Shift: move view, while playing: 2 s),
 // Alt+left/right previous / next zoom, Home or 0 reset, [ ] previous / next corner, A / B markers,
 // Esc clear markers (then kept position), R reference = highlighted lap, Space play, L loop A-B, , . speed,
@@ -38,8 +39,12 @@ FocusScope {
     property string hoverKey: ""  // lap highlighted while hovering its legend chip
     property string pinnedKey: ""  // lap highlighted by clicking its legend chip
     readonly property string highlightKey: hoverKey || pinnedKey
-    property real markerA: NaN
-    property real markerB: NaN
+    // Markers A & B kept as reference lap distances (like kept position): same place on track when time axis
+    // is toggled or reference lap changes, axis positions follow (chartChanged)
+    property real markerDistanceA: NaN
+    property real markerDistanceB: NaN
+    readonly property real markerA: { backend.timeAxis; return axisAt(markerDistanceA) }
+    readonly property real markerB: { backend.timeAxis; return axisAt(markerDistanceB) }
     readonly property bool hasRange: !isNaN(markerA) && !isNaN(markerB) && markerA !== markerB
     property bool playing: false
     property real playSpeed: 1
@@ -54,7 +59,6 @@ FocusScope {
     property bool browsingHistory: false
     // Time of each shown lap between markers A & B (passage), fastest flagged
     readonly property var passage: hasRange && backend.legend.length > 0 ? backend.passageTimes(markerA, markerB) : []
-    property double playClock: 0
     readonly property real minPanelHeight: theme.em * 3.2
     readonly property real totalWeight: {
         var sum = 0
@@ -82,6 +86,30 @@ FocusScope {
     signal pictureRequested(bool copy)
     signal rangeSet()
     signal helpRequested()
+    signal setupRequested(string lapKey)
+
+    // Value axis of panels fitted to visible part of lap: column: axis (low, high, ticks, lowText, highText).
+    // Panels without one show their whole value range
+    property var yViews: ({})
+    function axisOf(info) {
+        var view = info ? yViews[info.column] : undefined
+        return view && view.low !== undefined ? view : info
+    }
+    function updateAutoscale() {
+        var views = {}
+        for (var i = 0; i < panels.length; i++) {
+            var column = panels[i].column
+            if (panels[i].autoscale) views[column] = backend.autoscaleAxis(column, targetStart, targetEnd)
+        }
+        yViews = views
+    }
+    Timer { id: autoscaleTimer; interval: 40; onTriggered: chart.updateAutoscale() }
+    function setAutoscale(index, enabled) {
+        var info = panels[index]
+        if (!info) return
+        backend.setPanelAutoscale(info.column, enabled)
+        autoscaleTimer.restart()
+    }
 
     // Reduced copy of a series drawn when each of its buckets is at most a pixel wide (same look, fewer vertices).
     // Level worked out once for the chart: series keys change only when the level does (not every zoom frame)
@@ -131,6 +159,7 @@ FocusScope {
         backend.setChartView(targetStart, targetEnd)
         followTarget()
         if (!browsingHistory) historyTimer.restart()
+        autoscaleTimer.restart()
     }
     function resetView(animated) { setView(0, maxX, animated) }
     function zoom(factor, center, animated) {
@@ -213,13 +242,14 @@ FocusScope {
         var span = maxX * 0.03
         setView(x - span, x + span, true)
     }
+    function axisAt(distance) { return isNaN(distance) ? NaN : backend.xAtDistance(distance) }
     function setMarker(which, x) {
         if (isNaN(x)) return
-        if (which === "A") markerA = x
-        else markerB = x
+        if (which === "A") markerDistanceA = backend.distanceAt(x)
+        else markerDistanceB = backend.distanceAt(x)
         if (hasRange) rangeSet()
     }
-    function clearMarkers() { markerA = NaN; markerB = NaN }
+    function clearMarkers() { markerDistanceA = NaN; markerDistanceB = NaN }
     // Play lap, or only part between markers A & B (looped), from cursor if inside played part
     function togglePlay() {
         if (playing) { playing = false; return }
@@ -231,7 +261,6 @@ FocusScope {
         }
         var start = hasCursor ? backend.referenceTimeAt(cursorX) : backend.referenceTimeAt(targetStart)
         playTime = start >= playFrom && start < playTo - 0.05 ? start : playFrom
-        playClock = Date.now()
         playing = true
     }
     function xOf(value) { return (value - viewStart) / Math.max(viewEnd - viewStart, 1e-9) * plotArea.width }
@@ -265,6 +294,13 @@ FocusScope {
         for (var i = 0; i < values.length; i++) if (values[i].text !== "") count++
         return count
     }
+    // Line of a series value in its panel bubble: values shown before it (empty ones hidden)
+    function valueRow(panelIndex, seriesIndex) {
+        var values = cursorValues[panelIndex] || []
+        var row = 0
+        for (var i = 0; i < seriesIndex && i < values.length; i++) if (values[i] && values[i].text !== "") row++
+        return row
+    }
     // Cursor values bubble fits in panel, else values shown under channel name
     function bubbleFits(panelIndex) {
         return panelHeight(panelIndex) > valueCount(panelIndex) * theme.em * 1.3 + theme.em * 0.4
@@ -285,8 +321,10 @@ FocusScope {
             if (raw <= multiples[i] * magnitude) return multiples[i] * magnitude
         return 10 * magnitude
     }
+    readonly property real distanceScale: backend.distanceScale  // user distance unit (m or ft) per meter
+    readonly property string distanceUnit: backend.distanceUnit
     function axisText(value) {
-        if (!backend.timeAxis) return value.toFixed(0) + " m"
+        if (!backend.timeAxis) return Math.round(value * distanceScale) + " " + distanceUnit
         if (value < 60) return value.toFixed(0) + "s"
         var minutes = Math.floor(value / 60)
         var seconds = Math.round(value - minutes * 60)
@@ -305,6 +343,7 @@ FocusScope {
         backend.setChartView(targetStart, targetEnd)
         followTarget()
         if (!browsingHistory) historyTimer.restart()
+        autoscaleTimer.restart()
     }
     onMarkerAChanged: markersMoved()
     onMarkerBChanged: markersMoved()
@@ -323,14 +362,15 @@ FocusScope {
             playTo = backend.referenceLapTime
         }
     }
-    // Zoom history: view kept once it stays the same for a moment
+    // Zoom history: view kept once it stays the same for a moment, as reference lap distances (same part of lap
+    // shown again after time axis is toggled)
     Timer {
         id: historyTimer
         interval: 700
         onTriggered: {
-            var view = [chart.targetStart, chart.targetEnd]
+            var view = [backend.distanceAt(chart.targetStart), backend.distanceAt(chart.targetEnd)]
             var last = chart.viewHistory[chart.historyIndex]
-            if (last && Math.abs(last[0] - view[0]) < 1e-6 && Math.abs(last[1] - view[1]) < 1e-6) return
+            if (last && Math.abs(last[0] - view[0]) < 1e-3 && Math.abs(last[1] - view[1]) < 1e-3) return
             var kept = chart.viewHistory.slice(0, chart.historyIndex + 1)
             kept.push(view)
             if (kept.length > 40) kept.shift()
@@ -344,7 +384,7 @@ FocusScope {
         if (index < 0 || index >= viewHistory.length) return
         historyIndex = index
         browsingHistory = true
-        setView(viewHistory[index][0], viewHistory[index][1], true)
+        setView(backend.xAtDistance(viewHistory[index][0]), backend.xAtDistance(viewHistory[index][1]), true)
         browsingHistory = false
     }
     function changeSpeed(direction) {
@@ -365,7 +405,10 @@ FocusScope {
         if (x < targetStart || x > targetEnd) setView(x - span / 2, x + span / 2, false)
         setCursor(x, "key")
     }
-    onPanelsChanged: if (hasCursor) setCursor(cursorX, cursorSource)
+    onPanelsChanged: {
+        if (hasCursor) setCursor(cursorX, cursorSource)
+        autoscaleTimer.restart()  // laps or channels changed: fitted ranges again
+    }
 
     Connections {
         target: backend
@@ -379,15 +422,12 @@ FocusScope {
         }
     }
 
-    // Playback: cursor moves along reference lap at real time (x speed)
-    Timer {
-        interval: 16
-        repeat: true
+    // Playback: cursor moves along reference lap at real time (x speed), once per drawn frame (same clock as
+    // other animations: no frame drawn without cursor move, no double step), view slides on when cursor nears its end
+    FrameAnimation {
         running: chart.playing
         onTriggered: {
-            var now = Date.now()
-            chart.playTime += (now - chart.playClock) / 1000 * chart.playSpeed
-            chart.playClock = now
+            chart.playTime += Math.min(frameTime, 0.1) * chart.playSpeed
             if (chart.playTime >= chart.playTo) {
                 if (chart.hasRange && chart.playLoop) {  // passage A-B again
                     chart.playTime = chart.playFrom
@@ -400,7 +440,7 @@ FocusScope {
             var span = chart.targetEnd - chart.targetStart
             var margin = chart.hasRange ? 0 : span * 0.1  // passage A-B kept in view as zoomed
             if (chart.zoomed && (x > chart.targetEnd - margin || x < chart.targetStart))
-                chart.setView(x - span * 0.3, x + span * 0.7, false)
+                chart.setView(x - span * 0.3, x + span * 0.7, true)
             chart.setCursor(x, "play")
         }
     }
@@ -469,7 +509,7 @@ FocusScope {
                 opacity: chart.highlightKey === "" || chart.highlightKey === model.key ? 1 : 0.55
                 ToolTip.visible: chipArea.containsMouse
                 ToolTip.text: model.full + (model.tip ? "\n" + model.tip : "")
-                              + (model.clean ? "" : "\n" + i18n.tr("Not counted in ideal lap & mini-sectors (invalid, out or in lap)"))
+                              + (model.excluded ? "\n" + model.excluded : "")
                               + "\n" + i18n.tr("Click: highlight · double-click: set as reference · right-click: menu")
                 ToolTip.delay: 600
                 MouseArea {
@@ -498,9 +538,9 @@ FocusScope {
                     Rectangle { width: theme.em * 0.55; height: width; radius: width / 2; color: model.color; anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         text: model.label
-                        color: model.clean ? theme.text : theme.dimText
+                        color: model.excluded ? theme.dimText : theme.text
                         font.pointSize: theme.fontPoint * 0.9
-                        font.italic: !model.clean
+                        font.italic: model.excluded !== ""
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
@@ -509,6 +549,14 @@ FocusScope {
                         color: model.color
                         font.pointSize: theme.fontPoint * 0.75
                         font.weight: Font.Bold
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {  // shifted to align braking points
+                        visible: model.offset !== "" && !backend.timeAxis
+                        text: model.offset
+                        color: theme.dimText
+                        font.pointSize: theme.fontPoint * 0.75
+                        font.features: { "tnum": 1 }
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
@@ -553,6 +601,37 @@ FocusScope {
         }
         MouseArea { id: idealArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
     }
+    // Laps aligned on braking point of a corner: corner, click to put laps back at their place
+    Rectangle {
+        parent: legendRow
+        visible: backend.alignment.label !== undefined
+        height: theme.em * 1.8
+        width: alignText.implicitWidth + theme.em * 0.9
+        radius: height / 2
+        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, alignArea.containsMouse ? 0.24 : 0.14)
+        border.width: 1.5
+        border.color: theme.accent
+        ToolTip.visible: alignArea.containsMouse
+        ToolTip.text: (backend.timeAxis ? i18n.tr("Laps are aligned on distance axis only") + "\n" : "")
+                      + i18n.tr("Laps shifted along distance so their braking starts line up with reference lap") + "\n"
+                      + i18n.tr("Click: laps back at their place")
+        ToolTip.delay: 500
+        Text {
+            id: alignText
+            anchors.centerIn: parent
+            text: "↔ " + i18n.tr("Aligned on braking") + " " + (backend.alignment.label || "") + "  ×"
+            color: theme.accent
+            font.pointSize: theme.fontPoint * 0.9
+            font.weight: Font.DemiBold
+        }
+        MouseArea {
+            id: alignArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: backend.alignBraking(-1)
+        }
+    }
     TpMenu {
         id: chipMenu
         property string lapKey: ""
@@ -573,6 +652,11 @@ FocusScope {
             text: i18n.tr("Open Replay Here")
             enabled: chart.hasCursor
             onTriggered: backend.openReplay(chart.cursorX, chipMenu.lapKey)
+        }
+        Action {
+            text: i18n.tr("Setup Differences with Reference...")
+            enabled: !chipMenu.reference
+            onTriggered: chart.setupRequested(chipMenu.lapKey)
         }
         MenuSeparator {}
         Action { text: i18n.tr("Hide Lap"); enabled: !chipMenu.reference; onTriggered: backend.setLapChecked(chipMenu.lapKey, false) }
@@ -717,7 +801,7 @@ FocusScope {
             Behavior on opacity { NumberAnimation { duration: 200 } }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "×" + (chart.maxX / Math.max(chart.targetEnd - chart.targetStart, 1e-9)).toFixed(1)
+                text: "×" + (chart.maxX / Math.max(chart.targetEnd - chart.targetStart, 1e-9)).toFixed(1).replace(".", theme.decimalPoint)
                 color: theme.dimText
             }
             TpButton {
@@ -873,28 +957,30 @@ FocusScope {
                     height: chart.panelHeight(index)
                     opacity: index === chart.movingFrom ? 0.5 : 1
                     readonly property bool roomy: height > theme.em * 3.4 && modelData.available
-                    readonly property real lowValue: modelData.low
-                    readonly property real highValue: modelData.high
+                    readonly property var axis: chart.axisOf(modelData)  // fitted values, else whole range
+                    readonly property bool valuesFitted: chart.yViews[modelData.column] !== undefined
+                    readonly property real lowValue: axis.low
+                    readonly property real highValue: axis.high
                     // Value range of panel, next to panel top & bottom edges (not over lines)
                     Text {
                         anchors { right: parent.right; top: parent.top }
                         visible: labelItem.roomy
-                        text: modelData.highText
-                        color: theme.dimText
+                        text: labelItem.axis.highText
+                        color: labelItem.valuesFitted ? theme.accent : theme.dimText
                         font.pointSize: theme.fontPoint * 0.72
                         font.features: { "tnum": 1 }
                     }
                     Text {
                         anchors { right: parent.right; bottom: parent.bottom }
                         visible: labelItem.roomy
-                        text: modelData.lowText
-                        color: theme.dimText
+                        text: labelItem.axis.lowText
+                        color: labelItem.valuesFitted ? theme.accent : theme.dimText
                         font.pointSize: theme.fontPoint * 0.72
                         font.features: { "tnum": 1 }
                     }
                     // Values between range limits, next to their grid line (tall panels only)
                     Repeater {
-                        model: labelItem.height > theme.em * 6 && modelData.available ? modelData.ticks : []
+                        model: labelItem.height > theme.em * 6 && modelData.available ? labelItem.axis.ticks : []
                         Text {
                             readonly property real pad: Math.min(theme.em * 0.4, labelItem.height * 0.1)
                             readonly property real level: labelItem.height - pad - (modelData.value - labelItem.lowValue)
@@ -931,6 +1017,15 @@ FocusScope {
                             text: modelData.unit
                             color: theme.dimText
                             font.pointSize: theme.fontPoint * 0.8
+                        }
+                        // Values fitted to visible part
+                        Text {
+                            anchors.right: parent.right
+                            visible: labelItem.valuesFitted && labelItem.height > theme.em * 2.6
+                            text: i18n.tr("fitted")
+                            color: theme.accent
+                            font.pointSize: theme.fontPoint * 0.7
+                            font.weight: Font.DemiBold
                         }
                         // Sub-channels of combined panel
                         Flow {
@@ -1109,7 +1204,8 @@ FocusScope {
                 Item {
                     id: panel
                     readonly property var info: model
-                    readonly property var range: [info.low, info.high]
+                    readonly property var axis: chart.axisOf(info)  // fitted values, else whole range
+                    readonly property var range: [axis.low, axis.high]
                     readonly property real sx: width / Math.max(chart.viewEnd - chart.viewStart, 1e-9)
                     readonly property real pad: Math.min(theme.em * 0.4, height * 0.1)  // lines at range limits stay visible
                     readonly property real sy: (height - pad * 2) / Math.max(range[1] - range[0], 1e-9)
@@ -1129,7 +1225,7 @@ FocusScope {
                     }
                     // Value grid (same values as labels beside panel)
                     Repeater {
-                        model: panel.height > theme.em * 6 && panel.info.available ? panel.info.ticks : []
+                        model: panel.height > theme.em * 6 && panel.info.available ? panel.axis.ticks : []
                         Rectangle {
                             y: Math.round(panel.ty - modelData.value * panel.sy)
                             width: panel.width
@@ -1238,19 +1334,36 @@ FocusScope {
                     color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.88)
                     border.width: 1
                     border.color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.12)
-                    Column {
+                    // Rows placed by bindings, not Column / Row: positioners lay out after values change, while
+                    // frame is drawn, which asks for a second frame each cursor move (playback stutters)
+                    Item {
                         id: valueColumn
                         anchors.centerIn: parent
+                        readonly property real rowHeight: valueMetrics.height
+                        width: {
+                            var widest = 0
+                            for (var i = 0; i < valueRows.count; i++) {
+                                var row = valueRows.itemAt(i)
+                                if (row && row.visible) widest = Math.max(widest, row.width)
+                            }
+                            return widest
+                        }
+                        height: chart.valueCount(bubble.panelIndex) * rowHeight
+                        FontMetrics { id: valueMetrics; font.pointSize: theme.fontPoint * 0.85; font.weight: Font.DemiBold }
                         // One item per drawn series (kept while cursor moves), empty ones hidden
                         Repeater {
+                            id: valueRows
                             model: modelData.series.length
-                            Row {
+                            Item {
                                 readonly property var entry: chart.cursorEntry(bubble.panelIndex, index)
                                 visible: entry !== null && entry.text !== ""
-                                spacing: theme.em * 0.4
+                                y: chart.valueRow(bubble.panelIndex, index) * valueColumn.rowHeight
+                                width: valueText.implicitWidth + (diffText.text !== "" ? diffText.x - valueText.implicitWidth + diffText.implicitWidth : 0)
+                                height: valueColumn.rowHeight
                                 opacity: chart.panels[bubble.panelIndex] && chart.panels[bubble.panelIndex].series[index]
                                          ? chart.lapOpacity(chart.panels[bubble.panelIndex].series[index].lap) : 1
                                 Text {
+                                    id: valueText
                                     text: parent.entry ? parent.entry.text : ""
                                     color: parent.entry ? parent.entry.color : theme.text
                                     font.pointSize: theme.fontPoint * 0.85
@@ -1258,12 +1371,14 @@ FocusScope {
                                     font.features: { "tnum": 1 }
                                 }
                                 Text {
+                                    id: diffText
+                                    x: valueText.implicitWidth + theme.em * 0.4
                                     visible: text !== ""
                                     text: parent.entry ? parent.entry.diff : ""
                                     color: theme.dimText
                                     font.pointSize: theme.fontPoint * 0.75
                                     font.features: { "tnum": 1 }
-                                    anchors.baseline: parent.children[0].baseline
+                                    anchors.baseline: valueText.baseline
                                 }
                             }
                         }
@@ -1350,6 +1465,22 @@ FocusScope {
         Action { text: i18n.tr("Next Zoom") + "  (Alt+→)"; enabled: chart.historyIndex < chart.viewHistory.length - 1; onTriggered: chart.stepHistory(1) }
         Action { text: i18n.tr("Reset Channel Heights"); onTriggered: backend.resetPanelWeights() }
         Action { text: i18n.tr("Sync zoom with map"); checkable: true; checked: backend.mapFollow; onTriggered: backend.setMapFollow(checked) }
+        MenuSeparator {}
+        // Values of panel right-clicked
+        Action {
+            text: i18n.tr("Fit Values to Visible Part")
+            checkable: true
+            enabled: chart.panels[chartMenu.panelIndex] !== undefined
+            checked: chart.panels[chartMenu.panelIndex] !== undefined && chart.panels[chartMenu.panelIndex].autoscale === true
+            onTriggered: chart.setAutoscale(chartMenu.panelIndex, checked)
+        }
+        MenuSeparator {}
+        Action {
+            text: i18n.tr("Align Laps on Braking Point Here")
+            enabled: chart.hasCursor && backend.cornerRanges.length > 0 && backend.legend.length > 1 && !backend.timeAxis
+            onTriggered: backend.alignBrakingAt(chart.cursorX)
+        }
+        Action { text: i18n.tr("Stop Aligning Laps"); enabled: backend.alignment.label !== undefined; onTriggered: backend.alignBraking(-1) }
         MenuSeparator {}
         Action { text: i18n.tr("Copy Values"); enabled: chart.hasCursor; onTriggered: backend.copyValues(chart.cursorX) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: chart.pictureRequested(true) }

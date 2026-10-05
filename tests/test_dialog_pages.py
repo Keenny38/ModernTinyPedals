@@ -32,6 +32,12 @@ def window(ui_env, monkeypatch):
     QCoreApplication.processEvents()
 
 
+def settle():
+    """Run pending events, also timers started meanwhile (pages left for another one closed...)"""
+    for _ in range(3):
+        QApplication.processEvents()
+
+
 def rail_keys(main) -> list[str]:
     from tinypedal.ui.app import NavButton
 
@@ -74,16 +80,12 @@ def test_customize_rail(window):
     pages = view.dialog_pages()
     assert len(pages) == 1 and isinstance(pages[0].dialog, RailEditor)  # shown inside app
     editor = pages[0].dialog
-    entries = editor.list_entries
-    for row in range(entries.count()):
-        item = entries.item(row)
-        keep = item.data(Qt.ItemDataRole.UserRole) in ("home", "pacenotes", "race_calculator")
-        item.setCheckState(Qt.CheckState.Checked if keep else Qt.CheckState.Unchecked)
-    row = next(row for row in range(entries.count()) if entries.item(row).data(Qt.ItemDataRole.UserRole) == "pacenotes")
-    entries.setCurrentRow(row)
-    editor.move_current(-row)  # to top
+    editor.fill(["home", "pacenotes", "race_calculator"])
+    editor.list_entries.setCurrentRow(1)  # pace notes
+    editor.move_current(-1)  # to top
     editor.move_current(-1)  # already first: no change
-    editor.saving()
+    assert editor.checked_items() == ["pacenotes", "home", "race_calculator"] and editor.is_modified()
+    editor.button_save.click()
     assert cfg.application["rail_items"] == "pacenotes,home,race_calculator"
     assert len(rail_keys(window)) == 3 and rail_keys(window)[2] == "railTool:race_calculator.RaceCalculator"
     assert not view.dialog_pages()  # editor page closed
@@ -95,13 +97,11 @@ def test_rail_editor_reset_and_nothing_checked(window):
     from tinypedal.ui.nav_rail import RailEditor, default_rail_items
 
     editor = RailEditor(None)
-    for row in range(editor.list_entries.count()):
-        editor.list_entries.item(row).setCheckState(Qt.CheckState.Unchecked)
-    assert editor.checked_items() == []
-    editor.fill(default_rail_items())
+    editor.fill([])
+    assert editor.checked_items() == [] and not editor.picker.label_empty.isHidden()
+    editor.reset()
     assert editor.checked_items() == default_rail_items()
-    for row in range(editor.list_entries.count()):
-        editor.list_entries.item(row).setCheckState(Qt.CheckState.Unchecked)
+    editor.fill([])
     editor.saving()  # empty rail not allowed: default rail
     assert cfg.application["rail_items"] == ",".join(default_rail_items())
 
@@ -220,6 +220,60 @@ def test_open_pages_indicator(window, monkeypatch):
     assert view._button_pages.isHidden()
 
 
+def test_left_pages_closed(window):
+    """Page left for another one is closed (no pages piling up behind), rail tools are kept"""
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("race_calculator.RaceCalculator", window)
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    open_tool("brake_editor.BrakeEditor", window)
+    settle()
+    assert [page.title for page in view.dialog_pages()] == ["Race Calculator", "Brake Editor"]
+    assert view._button_pages.isHidden()  # nothing behind shown page
+    view.set_current_index(1)
+    settle()
+    assert [page.title for page in view.dialog_pages()] == ["Race Calculator"]
+    assert view.go_back() and view._pages.currentWidget().title == "Race Calculator"  # closed pages skipped
+
+
+def test_left_page_with_unsaved_changes_kept(window):
+    from PySide6.QtGui import QColor
+
+    from tinypedal.ui.app import status_color
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("brake_editor.BrakeEditor", window)
+    editor = view.dialog_pages()[0].dialog
+    editor.set_modified()
+    view.set_current_index(1)
+    settle()
+    assert [page.dialog for page in view.dialog_pages()] == [editor]  # kept, closing would ask to save
+    assert not view._button_pages.isHidden() and view._button_pages.dot_color == QColor(status_color("warning"))
+    editor.set_unmodified()  # saved meanwhile: closed as any page left
+    settle()
+    assert not view.dialog_pages() and view._button_pages.isHidden()
+
+
+def test_page_opened_from_page_keeps_it_open(window):
+    """Input page opened from a page (new theme name): page it was opened from kept behind it"""
+    from tinypedal.ui._common import TextInputDialog
+    from tinypedal.ui.tools_view import open_tool
+
+    view = window.centralWidget()
+    open_tool("theme_editor.ThemeEditor", window)
+    editor = view.dialog_pages()[0].dialog
+    editor.new_theme()
+    settle()
+    pages = view.dialog_pages()
+    assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog) and pages[1].opener is pages[0]
+    assert view._button_pages.isHidden()  # editor is not left behind, input is shown over it
+    view.set_current_index(1)  # both left
+    settle()
+    assert not view.dialog_pages()
+
+
 def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
@@ -327,9 +381,13 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
     assert view.open_page_paths() == ["*race_calculator.RaceCalculator", "brake_editor.BrakeEditor"]
     window.save_open_pages()
     assert cfg.application["open_pages"] == "*race_calculator.RaceCalculator,brake_editor.BrakeEditor"
+    settle()  # pages left for another one closed, remembered at once
+    assert view.open_page_paths() == ["*race_calculator.RaceCalculator"]
+    assert cfg.application["open_pages"] == "*race_calculator.RaceCalculator"
 
-    # Next startup: same pages, shown page shown again, window not brought to front
-    cfg.application["open_pages"] += ",unknown.Tool"
+    # Next startup: shown page (shown again) & rail tools reopened, window not brought to front
+    cfg.application["open_pages"] = (
+        "race_calculator.RaceCalculator,*brake_editor.BrakeEditor,heatmap_editor.HeatmapEditor,unknown.Tool")
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     other = app_module.AppWindow()
     try:
@@ -337,7 +395,7 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
         assert not other_view.dialog_pages()  # reopened once window is shown
         QApplication.processEvents()
         assert [page.title for page in other_view.dialog_pages()] == ["Race Calculator", "Brake Editor"]
-        assert other_view._pages.currentWidget() is other_view.dialog_pages()[0]
+        assert other_view._pages.currentWidget() is other_view.dialog_pages()[1]
         assert not other.isVisible()
     finally:
         for page in other.centralWidget().dialog_pages():
@@ -350,8 +408,10 @@ def test_open_pages_current_app_page_kept(window):
 
     view = window.centralWidget()
     view.set_current_index(PAGE_INDEX["preset"])
-    view.restore_pages(["track_map_viewer.TrackMapViewer"])  # no page was shown at quit
-    assert len(view.dialog_pages()) == 1 and view.current_index() == PAGE_INDEX["preset"]
+    # No page was shown at quit: rail tool reopened, other tool left for another page not reopened
+    view.restore_pages(["race_calculator.RaceCalculator", "track_map_viewer.TrackMapViewer"])
+    assert [page.title for page in view.dialog_pages()] == ["Race Calculator"]
+    assert view.current_index() == PAGE_INDEX["preset"]
 
 
 def test_open_pages_not_remembered_when_disabled(window, monkeypatch):

@@ -51,6 +51,7 @@ class Realtime(QuadMixin, ModernOverlay):
         self.text_width_chars = 3 + (pres_unit != "kPa")
         self.hot_temp = max(wcfg["hot_pressure_temperature_threshold"], 0)
         self.compounds = TyreCompounds(False)
+        self.add_font("tiny", 0.5, "bold", caps=True)  # left & right compound badges
         self.show_compound = wcfg["show_tyre_compound"]
         self.show_deviation = wcfg["show_pressure_deviation"]
         self.averages = [0.0] * 4

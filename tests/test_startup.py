@@ -123,6 +123,26 @@ def test_close_stops_api_after_modules(controls):
     assert controls.index("mctrl.close") < controls.index("api.stop") < controls.index("api.close")
 
 
+def test_close_finishes_replay_recording(controls, monkeypatch):
+    """Manual replay recording gets its trailer on quit (recorder module only stops automatic ones)"""
+    monkeypatch.setattr(loader.replay, "stop_recording", lambda: controls.append("replay.stop_recording"))
+    loader.close()
+    assert controls.index("mctrl.close") < controls.index("replay.stop_recording") < controls.index("api.stop")
+
+
+def test_restart_waits_for_lap_saving(controls, monkeypatch):
+    """Restart exits the process at once: laps still being written must be finished first"""
+    monkeypatch.setattr(loader.replay, "stop_recording", lambda: None)
+    monkeypatch.setattr(loader, "wait_lap_saver", lambda timeout: controls.append("wait_lap_saver") or True)
+    monkeypatch.setattr(loader.subprocess, "Popen", lambda *args, **kwargs: controls.append("launch"))
+    monkeypatch.setattr(loader.os, "_exit", lambda code: controls.append("exit"))
+    monkeypatch.setattr(loader.os, "execv", lambda *args: controls.append("exit"))
+    monkeypatch.setattr(loader.logging, "shutdown", lambda: None)
+    monkeypatch.setenv("TINYPEDAL_RESTART", "")
+    loader.restart()
+    assert controls.index("api.close") < controls.index("wait_lap_saver") < controls.index("exit")
+
+
 def test_screen_layout_sync_optional(controls, monkeypatch):
     from tinypedal.userfile import layout_profile
 

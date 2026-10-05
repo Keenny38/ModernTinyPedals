@@ -28,21 +28,46 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import urllib.request
+import zipfile
+from collections.abc import Callable
+from contextlib import suppress
 from typing import NamedTuple
 
 from . import app_signal, version
 from .async_request import get_response, set_header_get
 from .const_app import APP_NAME, FORK_REPO_NAME
 from .const_common import DATE_NA, VERSION_NA
+from .const_file import ConfigType
+from .i18n import current_language
 from .setting import cfg
 from .version_check import is_new_version, parse_version_string
 
 logger = logging.getLogger(__name__)
+
+
+def version_number(version_tuple: tuple[int, int, int]) -> int:
+    """Version as one number (major * 1000000 + minor * 1000 + patch), stored in config"""
+    major, minor, patch = version_tuple
+    return major * 1_000_000 + minor * 1000 + patch
+
+
+def skipped_version() -> int:
+    """Update version skipped by user (see version_number), 0 if none"""
+    value = cfg.application.get("skipped_update_version", 0)
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+
+def skip_version(version_tuple: tuple[int, int, int]):
+    """Update notice of version not shown again (a newer version is), saved in config"""
+    cfg.application["skipped_update_version"] = version_number(version_tuple)
+    cfg.save(config_type=ConfigType.CONFIG)
+    logger.info("UPDATES: version %s skipped", ".".join(map(str, version_tuple)))
 
 
 RENAMED_REPOS = {"keenny38/overlays": FORK_REPO_NAME}
@@ -81,32 +106,52 @@ def request_latest_release(repo: str):
 
 
 class InstallerAsset(NamedTuple):
-    """Windows installer attached to a release"""
+    """Windows installer attached to a release: setup ZIP (installer inside) or installer itself"""
 
     name: str
     url: str
-    sha256_url: str
+    sha256: str  # expected hash of downloaded file
 
 
-INSTALLER_SUFFIX = "-windows-setup.exe"
+# Release files: "<name>-<version>-setup.zip" (installer "<name>-<version>-windows-setup.exe" inside)
+# and "<name>-<version>-source.zip". Releases before 0.20.0 attached the installer itself.
+INSTALLER_SUFFIXES = ("-setup.zip", "-windows-setup.exe")
 DOWNLOAD_HOSTS = ("https://github.com/", "https://objects.githubusercontent.com/")
 
 
+def release_hash(release: dict, name: str) -> str:
+    """SHA-256 of release file: asset digest given by GitHub, else the SHA256 list of release notes"""
+    for asset in release.get("assets", ()):
+        if not isinstance(asset, dict):
+            continue
+        digest = str(asset.get("digest") or "")
+        if asset.get("name") == name and digest.lower().startswith("sha256:"):
+            with suppress(ValueError):
+                return parse_sha256(digest[7:])
+    # Release notes lines "- `<hash>  <file>`" (tools/gen_release_notes.py & release workflow)
+    match = re.search(rf"\b([0-9a-fA-F]{{64}})\s+\*?{re.escape(name)}\b", str(release.get("body") or ""))
+    return match.group(1).lower() if match else ""
+
+
 def parse_installer(data: bytes) -> InstallerAsset | None:
-    """Find Windows installer & its sha256 file in github Rest API release response"""
+    """Find Windows installer & its hash in github Rest API release response, None if no verifiable installer"""
     try:
         release = json.loads(data[data.index(b"{"):].decode("utf-8"))
         assets = {str(asset["name"]): str(asset["browser_download_url"]) for asset in release["assets"]}
     except (AttributeError, TypeError, IndexError, KeyError, ValueError):
         return None
-    for name, url in assets.items():
-        sha256_url = assets.get(f"{name}.sha256", "")
-        if name.endswith(INSTALLER_SUFFIX) and sha256_url and url.startswith(DOWNLOAD_HOSTS):
-            return InstallerAsset(name, url, sha256_url)
+    for suffix in INSTALLER_SUFFIXES:  # setup ZIP first
+        for name, url in assets.items():
+            if not name.endswith(suffix) or not url.startswith(DOWNLOAD_HOSTS):
+                continue
+            sha256 = release_hash(release, name)
+            if sha256:
+                return InstallerAsset(name, url, sha256)
     return None
 
 
 RELEASE_VISUALS_HEADING = "### Visuals"  # see tools/gen_release_notes.py
+RELEASE_DETAILS_HEADING = "## Commits"  # technical part of release notes (commits by kind, checksums)
 
 
 def parse_release_notes(data: bytes) -> str:
@@ -122,37 +167,313 @@ def parse_release_notes(data: bytes) -> str:
     return body.split(RELEASE_VISUALS_HEADING, 1)[0].strip()
 
 
-def can_auto_update() -> bool:
-    """Installer update only applies to installed Windows executable"""
+def parse_release_tag(data: bytes) -> str:
+    """Tag name of release in github Rest API response, empty if invalid"""
+    try:
+        release = json.loads(data[data.index(b"{"):].decode("utf-8"))
+        tag = str(release["tag_name"])
+    except (AttributeError, TypeError, IndexError, KeyError, ValueError):
+        return ""
+    return tag if re.fullmatch(r"[\w.+-]+", tag) else ""
+
+
+# Changelog: CHANGELOG.md in English (also the GitHub release notes), translations in
+# CHANGELOG.<language code>.md (CHANGELOG.fr.md), with the same "## X.Y.Z (date)" sections
+CHANGELOG_FILE = "CHANGELOG.md"
+MAX_CHANGELOG_SIZE = 4 * 1024 * 1024
+
+
+def changelog_sections(text: str) -> list[tuple[str, str]]:
+    """Changelog sections (version, body) in file order, text before first "## " heading left out"""
+    sections: list[tuple[str, list[str]]] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            sections.append((line[3:].split(" ")[0], []))
+        elif sections:
+            sections[-1][1].append(line)
+    return [(name, "\n".join(body).strip()) for name, body in sections]
+
+
+def changelog_section(text: str, version: str) -> str:
+    """Body of version section in changelog, empty if none"""
+    return next((body for name, body in changelog_sections(text) if name == version), "")
+
+
+def localized_changelog_name(language: str, filename: str = CHANGELOG_FILE) -> str:
+    """Changelog file of language (CHANGELOG.fr.md), English changelog for English or invalid code"""
+    if language == "en" or not re.fullmatch(r"[a-z]{2,3}(_[A-Za-z]{2,4})?", language):
+        return filename
+    root, ext = os.path.splitext(filename)
+    return f"{root}.{language}{ext}"
+
+
+def localize_release_notes(notes: str, summary: str) -> str:
+    """Release notes with changelog part replaced by translated changelog section
+
+    Technical details (commits, checksums) are kept as they are. Notes without written
+    changelog (commits only) get the translated section first.
+    """
+    summary = summary.strip()
+    if not summary:
+        return notes
+    _, heading, details = notes.partition(RELEASE_DETAILS_HEADING)
+    if heading:
+        return f"{summary}\n\n{heading}{details}"
+    if notes.lstrip().startswith("### "):  # commits by kind only
+        return f"{summary}\n\n{RELEASE_DETAILS_HEADING}\n\n{notes.strip()}"
+    return summary
+
+
+def fetch_localized_summary(repo: str, tag: str, language: str, timeout: float = 5) -> str:
+    """Translated changelog section of release (CHANGELOG.<language>.md at release tag), empty if none"""
+    filename = localized_changelog_name(language)
+    if filename == CHANGELOG_FILE or not tag or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        return ""
+    url = f"https://raw.githubusercontent.com/{repo}/{tag}/{filename}"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            text = response.read(MAX_CHANGELOG_SIZE).decode("utf-8", "replace")
+    except (OSError, ValueError) as error:  # not translated (404), offline
+        logger.info("UPDATES: no %s release notes: %s", language, error)
+        return ""
+    version = tag.lstrip("v").split("-")[0]
+    return changelog_section(text, version)
+
+
+UNINSTALLER_NAME = "unins000.exe"  # left next to app executable by installer (Inno Setup)
+
+
+def is_frozen_windows() -> bool:
+    """Windows executable (installed or portable), not run from source"""
     return sys.platform == "win32" and bool(getattr(sys, "frozen", False))
 
 
+def is_installed_copy() -> bool:
+    """Executable installed by installer (uninstaller next to it), not a portable ZIP copy"""
+    return os.path.isfile(os.path.join(os.path.dirname(sys.executable), UNINSTALLER_NAME))
+
+
+def can_auto_update() -> bool:
+    """Installer update only applies to Windows executable installed by installer
+
+    Portable ZIP copy (published until 0.19) keeps presets & data in its own folder: installer
+    would install another copy elsewhere, starting with default presets and no data.
+    """
+    return is_frozen_windows() and is_installed_copy()
+
+
+def is_portable_copy() -> bool:
+    """Windows executable from portable ZIP: installer run by hand, into the folder of this copy"""
+    return is_frozen_windows() and not is_installed_copy()
+
+
 def parse_sha256(text: str) -> str:
-    """Hash from sha256sum output ("<hash>  <name>")"""
-    value = text.strip().split(" ")[0].lower()
+    """Hash from sha256sum output ("<hash>  <name>", any whitespace)"""
+    parts = text.split()
+    value = parts[0].lower() if parts else ""
     if not re.fullmatch(r"[0-9a-f]{64}", value):
         raise ValueError("invalid sha256 file")
     return value
 
 
-def download_installer(asset: InstallerAsset, folder: str = "", timeout: float = 30) -> str:
-    """Download installer, verify sha256, return file path (raise OSError or ValueError)"""
-    with urllib.request.urlopen(asset.sha256_url, timeout=timeout) as response:
-        expected = parse_sha256(response.read(1024).decode("utf-8", "replace"))
-    path = os.path.join(folder or tempfile.gettempdir(), os.path.basename(asset.name))
+class DownloadCancelled(Exception):
+    """Download cancelled by user"""
+
+
+def content_length(response) -> int:
+    """Size announced by download response, 0 if unknown"""
+    headers = getattr(response, "headers", None)
+    try:
+        return max(int(headers.get("Content-Length", 0)), 0) if headers is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def download_installer(
+    asset: InstallerAsset,
+    folder: str = "",
+    timeout: float = 30,
+    progress: Callable[[int, int], object] | None = None,
+    cancelled: threading.Event | None = None,
+) -> str:
+    """Download installer, verify sha256, return installer path (raise OSError or ValueError)
+
+    Data is downloaded to a ".part" file first, removed if download fails, hash mismatches
+    or download is cancelled. Setup ZIP: installer is extracted next to it, ZIP removed.
+
+    Args:
+        progress: called with received & total bytes (0 if unknown) after each chunk, from download thread.
+        cancelled: download stopped (raise DownloadCancelled) once set.
+    """
+    expected = parse_sha256(asset.sha256)
+    folder = folder or tempfile.gettempdir()
+    path = os.path.join(folder, os.path.basename(asset.name))
+    part_path = f"{path}.part"
     digest = hashlib.sha256()
-    with urllib.request.urlopen(asset.url, timeout=timeout) as response, open(path, "wb") as file:
-        while chunk := response.read(1 << 16):
-            digest.update(chunk)
-            file.write(chunk)
-    if digest.hexdigest() != expected:
-        os.remove(path)
-        raise ValueError("downloaded installer does not match its sha256 hash")
+    try:
+        with urllib.request.urlopen(asset.url, timeout=timeout) as response, open(part_path, "wb") as file:
+            total = content_length(response)
+            received = 0
+            while chunk := response.read(1 << 16):
+                if cancelled is not None and cancelled.is_set():
+                    raise DownloadCancelled("download cancelled")
+                digest.update(chunk)
+                file.write(chunk)
+                received += len(chunk)
+                if progress is not None:
+                    progress(received, total)
+            if cancelled is not None and cancelled.is_set():
+                raise DownloadCancelled("download cancelled")
+        if digest.hexdigest() != expected:
+            raise ValueError("downloaded installer does not match its sha256 hash")
+        os.replace(part_path, path)
+    except BaseException:  # partial or invalid download never left behind
+        with suppress(OSError):
+            os.remove(part_path)
+        raise
+    if not path.lower().endswith(".zip"):
+        return path
+    try:
+        return extract_installer(path, folder)
+    finally:
+        with suppress(OSError):
+            os.remove(path)
+
+
+MAX_INSTALLER_SIZE = 1 << 30  # extracted installer size limit
+
+
+def extract_installer(zip_path: str, folder: str) -> str:
+    """Extract the installer (only executable) of setup ZIP to folder, return its path (raise OSError or ValueError)"""
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            members = [info for info in archive.infolist()
+                       if not info.is_dir() and info.filename.lower().endswith(".exe")]
+            if len(members) != 1:
+                raise ValueError("setup archive does not contain one installer")
+            info = members[0]
+            if info.file_size > MAX_INSTALLER_SIZE:
+                raise ValueError("installer in setup archive is too large")
+            # File name only: never a path from the archive
+            path = os.path.join(folder, os.path.basename(info.filename.replace("\\", "/")))
+            part_path = f"{path}.part"
+            try:
+                with archive.open(info) as source, open(part_path, "wb") as target:
+                    shutil.copyfileobj(source, target, 1 << 16)
+                os.replace(part_path, path)
+            except BaseException:
+                with suppress(OSError):
+                    os.remove(part_path)
+                raise
+    except zipfile.BadZipFile as error:  # also CRC mismatch while reading
+        raise ValueError(f"invalid setup archive: {error}") from error
     return path
 
 
+# Authenticode (WinVerifyTrust) result
+SIGNATURE_VALID = "valid"
+SIGNATURE_UNSIGNED = "unsigned"
+SIGNATURE_INVALID = "invalid"
+SIGNATURE_UNKNOWN = "unknown"  # not checked (not Windows, check unavailable)
+
+
+def installer_signature(path: str) -> str:
+    """Authenticode signature state of file: valid, unsigned, invalid, or unknown"""
+    if sys.platform != "win32":
+        return SIGNATURE_UNKNOWN
+    try:
+        return _win_verify_trust(path)
+    except (AttributeError, OSError, ValueError) as error:
+        logger.error("UPDATES: unable to check installer signature: %s", error)
+        return SIGNATURE_UNKNOWN
+
+
+def _win_verify_trust(path: str) -> str:
+    """Check embedded Authenticode signature with WinVerifyTrust (no UI, no network)"""
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", wintypes.BYTE * 8),
+        ]
+
+    class WintrustFileInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbStruct", wintypes.DWORD),
+            ("pcwszFilePath", wintypes.LPCWSTR),
+            ("hFile", wintypes.HANDLE),
+            ("pgKnownSubject", ctypes.c_void_p),
+        ]
+
+    class WintrustData(ctypes.Structure):
+        _fields_ = [
+            ("cbStruct", wintypes.DWORD),
+            ("pPolicyCallbackData", ctypes.c_void_p),
+            ("pSIPClientData", ctypes.c_void_p),
+            ("dwUIChoice", wintypes.DWORD),
+            ("fdwRevocationChecks", wintypes.DWORD),
+            ("dwUnionChoice", wintypes.DWORD),
+            ("pFile", ctypes.POINTER(WintrustFileInfo)),
+            ("dwStateAction", wintypes.DWORD),
+            ("hWVTStateData", wintypes.HANDLE),
+            ("pwszURLReference", wintypes.LPCWSTR),
+            ("dwProvFlags", wintypes.DWORD),
+            ("dwUIContext", wintypes.DWORD),
+            ("pSignatureSettings", ctypes.c_void_p),
+        ]
+
+    # WINTRUST_ACTION_GENERIC_VERIFY_V2 {00AAC56B-CD44-11d0-8CC2-00C04FC295EE}
+    action = GUID(0x00AAC56B, 0xCD44, 0x11D0, (wintypes.BYTE * 8)(0x8C, 0xC2, 0x00, 0xC0, 0x4F, 0xC2, 0x95, 0xEE))
+    file_info = WintrustFileInfo(ctypes.sizeof(WintrustFileInfo), os.path.abspath(path), None, None)
+    data = WintrustData()
+    data.cbStruct = ctypes.sizeof(WintrustData)
+    data.dwUIChoice = 2  # WTD_UI_NONE
+    data.fdwRevocationChecks = 0  # WTD_REVOKE_NONE
+    data.dwUnionChoice = 1  # WTD_CHOICE_FILE
+    data.pFile = ctypes.pointer(file_info)
+    data.dwStateAction = 1  # WTD_STATEACTION_VERIFY
+    data.dwProvFlags = 0x1000  # WTD_CACHE_ONLY_URL_RETRIEVAL
+    verify = ctypes.WinDLL("wintrust", use_last_error=True).WinVerifyTrust
+    verify.argtypes = (wintypes.HWND, ctypes.POINTER(GUID), ctypes.c_void_p)
+    verify.restype = wintypes.LONG
+    result = verify(None, ctypes.byref(action), ctypes.byref(data)) & 0xFFFFFFFF
+    last_error = ctypes.get_last_error() & 0xFFFFFFFF
+    data.dwStateAction = 2  # WTD_STATEACTION_CLOSE, free verify state
+    verify(None, ctypes.byref(action), ctypes.byref(data))
+    if result == 0:
+        return SIGNATURE_VALID
+    # No signature, unknown subject form or provider: unsigned, unless "no signature" comes
+    # from another error (file not readable, broken signature), see WinVerifyTrust documentation
+    no_signature = (0x800B0100, 0x800B0003, 0x800B0001)
+    if result in no_signature and (result != 0x800B0100 or last_error in no_signature):
+        return SIGNATURE_UNSIGNED
+    logger.error("UPDATES: installer signature check failed: 0x%08X", result)
+    return SIGNATURE_INVALID
+
+
+def verify_installer(path: str) -> None:
+    """Refuse installer with a broken signature (raise ValueError), unsigned one is logged"""
+    signature = installer_signature(path)
+    if signature == SIGNATURE_INVALID:
+        raise ValueError("installer signature is not valid")
+    if signature == SIGNATURE_UNSIGNED:
+        logger.warning("UPDATES: installer is not signed, sha256 hash verified only")
+    else:
+        logger.info("UPDATES: installer signature: %s", signature)
+
+
 def run_installer(path: str) -> None:
-    """Start installer silently, it closes TinyPedal and starts it again when done"""
+    """Start installer silently, it closes TinyPedal and starts it again when done
+
+    Raises:
+        ValueError: installer signature is not valid.
+        OSError: installer can not be started.
+    """
+    verify_installer(path)
     subprocess.Popen([path, "/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS"], close_fds=True)
 
 
@@ -185,6 +506,7 @@ class UpdateChecker:
         "_disabled",
         "installer",
         "release_notes",
+        "localized_notes",
     )
 
     def __init__(self):
@@ -195,7 +517,8 @@ class UpdateChecker:
         self._last_checked_date = DATE_NA
         self._disabled = False
         self.installer: InstallerAsset | None = None
-        self.release_notes = ""
+        self.release_notes = ""  # English (GitHub release notes)
+        self.localized_notes: dict[str, str] = {}  # language code: translated notes
 
     def is_manual(self) -> bool:
         """Is manual checking"""
@@ -204,6 +527,17 @@ class UpdateChecker:
     def is_updates(self) -> bool:
         """Is updates available"""
         return self._update_available
+
+    def is_skipped(self) -> bool:
+        """Update available but version skipped by user: not shown, unless checked by hand"""
+        return (
+            self._update_available and not self._manual_checking
+            and version_number(self._last_checked_version) == skipped_version()
+        )
+
+    def notes(self, language: str) -> str:
+        """Release notes of latest release in language, English if not translated"""
+        return self.localized_notes.get(language) or self.release_notes
 
     def latest_version(self) -> tuple[int, int, int]:
         """Version of latest release (last check)"""
@@ -229,20 +563,34 @@ class UpdateChecker:
             app_signal.updates.emit(True)
             threading.Thread(target=self.__checking, args=(repo,), daemon=True).start()
 
+    def is_checking(self) -> bool:
+        """Is checking (background thread running)"""
+        return self._is_checking
+
     def __checking(self, repo: str):
         """Fetch version info from github Rest API"""
-        raw_bytes = asyncio.run(request_latest_release(repo))
-        checked_version, checked_date = parse_release(raw_bytes)
-        self.installer = parse_installer(raw_bytes)
-        self.release_notes = parse_release_notes(raw_bytes)
-        current_version = parse_version_string(version.__version__)
-        self._update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
-        # Save info
-        self._last_checked_version = checked_version
-        self._last_checked_date = checked_date
-        # Send update signal
-        app_signal.updates.emit(False)
-        self._is_checking = False
+        try:
+            raw_bytes = asyncio.run(request_latest_release(repo))
+            checked_version, checked_date = parse_release(raw_bytes)
+            self.installer = parse_installer(raw_bytes)
+            self.release_notes = parse_release_notes(raw_bytes)
+            current_version = parse_version_string(version.__version__)
+            self._update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
+            self.localized_notes = {}
+            language = current_language()
+            if self._update_available and language != "en":  # notes shown in app language
+                summary = fetch_localized_summary(repo, parse_release_tag(raw_bytes), language)
+                if summary:
+                    self.localized_notes[language] = localize_release_notes(self.release_notes, summary)
+            # Save info
+            self._last_checked_version = checked_version
+            self._last_checked_date = checked_date
+        except Exception:  # unexpected error: never stuck checking (no check would run again)
+            logger.exception("UPDATES: error while checking for updates")
+        finally:
+            self._is_checking = False
+            # Send update signal
+            app_signal.updates.emit(False)
         # Output log
         logger.info("UPDATES: %s", self.message())
 

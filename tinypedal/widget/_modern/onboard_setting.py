@@ -28,7 +28,7 @@ from __future__ import annotations
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
-from .base import DASH, ModernOverlay
+from .base import DASH, ModernOverlay, display_order_options
 from .stats import Stat, StatsMixin, Value
 
 ITEMS = (
@@ -46,7 +46,7 @@ ITEMS = (
 class Realtime(StatsMixin, ModernOverlay):
     """Draw widget"""
 
-    options = ("font_size", "layout", *(f"show_{key}" for key, _ in ITEMS))
+    options = ("font_size", "layout", *(f"show_{key}" for key, _ in ITEMS), *display_order_options("onboard_setting"))
 
     def design_unit(self) -> float:
         return float(self.wcfg["font_size"]) * 0.62  # font size 25 by default
@@ -55,6 +55,7 @@ class Realtime(StatsMixin, ModernOverlay):
         super().__init__(config, widget_name)
         self.add_font("strong", 1.45, "bold")
         stats = [Stat(key, label, "88", "strong") for key, label in ITEMS if self.wcfg[f"show_{key}"]]
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats, vertical=self.wcfg["layout"] == 0)
         self.set_size(width, height)

@@ -40,6 +40,7 @@ GLOBAL_DEFAULT = {
         "enable_global_hotkey": False,
         "show_option_group_title": True,
         "show_confirmation_for_batch_toggle": True,
+        "show_overlay_previews": True,  # Overlays page: cards with preview, compact list if off
         "check_for_updates_on_startup": True,
         "update_repository": "Keenny38/ModernTinyPedals",
         'snap_distance': 10,
@@ -50,6 +51,10 @@ GLOBAL_DEFAULT = {
         "maximum_loading_attempts": 5,
         "maximum_saving_attempts": 10,
         "number_of_automatic_backups": 10,
+        # Phase 2 (package C2): deleted presets kept in trash, update version not proposed again
+        # (major * 1000000 + minor * 1000 + patch, 0 if none), see update.version_number
+        "number_of_days_to_keep_deleted_presets": 30,
+        "skipped_update_version": 0,
         "position_x": 0,
         "position_y": 0,
         "window_width": 0,
@@ -63,6 +68,9 @@ GLOBAL_DEFAULT = {
             "home,widget,module,preset,spectate,hotkey,tools,"
             "lap_viewer,driver_stats_viewer,race_calculator"
         ),
+        # Home page quick access buttons in order: tool dialog module names, page keys & actions,
+        # see ui.home_view.quick_access_entries
+        "home_quick_access": "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,command_palette",
         "enable_layout_per_screen_setup": True,
         # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
         "open_pages": "",
@@ -84,6 +92,9 @@ GLOBAL_DEFAULT = {
         "horizontal_offset_meters": 0.0,
         "enable_vr_mirror_window": False,
         "mirror_background_color": "#000000",
+        # Audit fixes (package C): mirror window position, kept by app (not on any screen: not set)
+        "mirror_position_x": -99999,
+        "mirror_position_y": -99999,
     },
     "remote_control": {
         "enable_remote_control": False,
@@ -207,6 +218,8 @@ GLOBAL_DEFAULT = {
         "enable_auto_load_combo_plan": True,
         "enable_plan_inputs": False,
         "export_path": "",
+        "collapsed_sections": "",
+        "race_tab": 0,
     },
     "driver_stats_viewer": {
         "enable_lap_reference": True,

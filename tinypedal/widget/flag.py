@@ -27,6 +27,10 @@ from ..const_common import MAX_SECONDS
 from ..module_info import minfo
 from ._base import Overlay
 
+# Full course yellow state (game) -> text after prefix: 1 pending, 2 pits closed, 3 pits open
+# for lead lap cars, 4 pits open, 5 last lap, 6 resume, 7 race halt (red flag)
+FCY_PHASES = {1: "", 2: "", 3: " LDR", 4: " PIT", 5: " END", 6: " GO", 7: " RED"}
+
 
 class Realtime(Overlay):
     """Draw widget"""
@@ -235,6 +239,36 @@ class Realtime(Overlay):
                 column=self.wcfg["display_order_scheduled_repairs"],
             )
 
+        # Sector yellow flags
+        if self.wcfg["show_sector_yellow_flags"]:
+            self.bar_sector_yellow = self.set_rawtext(
+                text="SEC 123",
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_sector_yellow_flags"],
+                bg_color=self.wcfg["background_color_sector_yellow_flags"],
+            )
+            self.set_primary_orient(
+                target=self.bar_sector_yellow,
+                column=self.wcfg["display_order_sector_yellow_flags"],
+            )
+
+        # Full course yellow
+        if self.wcfg["show_full_course_yellow"]:
+            self.bar_fcy = self.set_rawtext(
+                text="FCY",
+                width=bar_width,
+                fixed_height=font_m.height,
+                offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color_full_course_yellow"],
+                bg_color=self.wcfg["background_color_full_course_yellow"],
+            )
+            self.set_primary_orient(
+                target=self.bar_fcy,
+                column=self.wcfg["display_order_full_course_yellow"],
+            )
+
         # Last data
         self.pit_timer = PitTimer(self.wcfg["pit_time_highlight_duration"])
         self.green_timer = GreenFlagTimer(self.wcfg["green_flag_duration"])
@@ -274,7 +308,7 @@ class Realtime(Overlay):
 
         # Pit limiter
         if self.wcfg["show_speed_limiter"]:
-            limiter_state: float = api.read.switch.speed_limiter()
+            limiter_state: float = api.read.switch.speed_limiter() or api.read.switch.speed_limiter_active()
             show_speed = self.wcfg["show_current_speed_while_limiter_on"]
             if limiter_state and show_speed:
                 limiter_state = api.read.vehicle.speed() + 0.0000001
@@ -314,6 +348,18 @@ class Realtime(Overlay):
         if self.wcfg["show_scheduled_repairs"]:
             repair_time = api.read.vehicle.repair_time()
             self.update_repair_time(self.bar_repairs, repair_time)
+
+        # Sector yellow flags
+        if self.wcfg["show_sector_yellow_flags"]:
+            if not self.wcfg["show_yellow_flag_for_race_only"] or in_race:
+                sectors = api.read.session.sector_yellow_flags()
+            else:
+                sectors = (False, False, False)
+            self.update_sector_yellow(self.bar_sector_yellow, tuple(sectors))
+
+        # Full course yellow
+        if self.wcfg["show_full_course_yellow"]:
+            self.update_fcy(self.bar_fcy, api.read.session.yellow_flag_state())
 
     # GUI update methods
     def update_pit_timer(self, target, data):
@@ -525,6 +571,38 @@ class Realtime(Overlay):
                 else:
                     text_repair = duration
                 target.text = text_repair
+                target.update()
+                hidden = False
+            else:
+                hidden = True
+
+            if target.state != hidden:
+                target.state = hidden
+                target.setHidden(hidden)
+
+    def update_sector_yellow(self, target, data):
+        """Sector yellow flags: sector numbers under local yellow"""
+        if target.last != data:
+            target.last = data
+            if any(data):
+                sectors = "".join(f"{index}" if flag else "-" for index, flag in enumerate(data, start=1))
+                target.text = f"{self.wcfg['sector_yellow_flags_text']}{sectors}"
+                target.update()
+                hidden = False
+            else:
+                hidden = True
+
+            if target.state != hidden:
+                target.state = hidden
+                target.setHidden(hidden)
+
+    def update_fcy(self, target, data):
+        """Full course yellow phase"""
+        if target.last != data:
+            target.last = data
+            phase = FCY_PHASES.get(data)
+            if phase is not None:
+                target.text = f"{self.wcfg['full_course_yellow_text']}{phase}"
                 target.update()
                 hidden = False
             else:

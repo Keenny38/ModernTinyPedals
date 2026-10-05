@@ -139,6 +139,43 @@ def test_session_limit(dashboard):
     assert get("/api/telemetry", opener=opener_first)[0] == 401  # oldest session dropped
 
 
+@pytest.mark.parametrize("length", ["-1", "abc"])
+def test_login_body_size_bounded(dashboard, length):
+    """Negative or invalid length never makes server read until connection closed (before login)"""
+    client = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+    try:
+        client.putrequest("POST", "/login")
+        client.putheader("Content-Length", length)
+        client.endheaders()
+        client.send(b"code=WRONG")
+        status = client.getresponse().status  # answered without waiting for more data
+    finally:
+        client.close()
+    assert status in (400, 401)
+    DashboardHandler.failures.clear()
+
+
+def test_session_expires_when_unused(dashboard):
+    from tinypedal.web_dashboard import SESSION_IDLE_SECONDS, SESSION_MAX_SECONDS
+
+    opener = browser()
+    get("/?code=TESTCODE", opener=opener)
+    assert get("/api/telemetry", opener=opener)[0] == 200
+    now = time.monotonic()
+    for times in DashboardHandler.sessions.values():
+        times[:] = [now - 3600, now - 60]  # used a minute ago: kept, last use updated
+    assert get("/api/telemetry", opener=opener)[0] == 200
+    assert next(iter(DashboardHandler.sessions.values()))[1] > now - 1
+    for times in DashboardHandler.sessions.values():
+        times[:] = [now - 3600, now - SESSION_IDLE_SECONDS - 1]  # unused for too long
+    assert get("/api/telemetry", opener=opener)[0] == 401
+    assert not DashboardHandler.sessions
+    get("/?code=TESTCODE", opener=opener)
+    for times in DashboardHandler.sessions.values():
+        times[:] = [now - SESSION_MAX_SECONDS - 1, now]  # in use, but too old
+    assert get("/api/telemetry", opener=opener)[0] == 401
+
+
 def test_access_code_generated(ui_env):
     cfg.user.config["web_dashboard"]["access_code"] = ""
     code = WebDashboard.access_code()

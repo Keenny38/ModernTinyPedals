@@ -20,20 +20,28 @@
 Weather Widget, modern design
 
 Track & air temperature, rain, surface wetness (or rubber coverage while dry), each with
-trend arrow (rising, falling, steady).
+trend arrow (rising, falling, steady), wind speed with arrow of where wind blows relative to
+car (up: tailwind, down: headwind).
 """
 
 from __future__ import annotations
 
+from math import atan2, hypot
+
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainter
 
+from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...i18n import tr_overlay
 from ...module_info import minfo
 from ..weather import TrendTimer, laps_to_rubber, rubber_to_laps
 from .base import ModernOverlay
+from .draw import arrow
 from .stats import Stat, StatsMixin, Value
+
+WIND_CALM = 0.3  # m/s, no direction shown below
 
 TREND_SIGN = ("●", "▲", "▼")  # steady, rising, falling
 
@@ -46,7 +54,8 @@ class Realtime(StatsMixin, ModernOverlay):
         "show_rubber_coverage_while_dry", "rubber_median_laps", "rubber_time_scale_practice",
         "rubber_time_scale_qualifying", "rubber_time_scale_race", "starting_rubber_practice",
         "starting_rubber_qualifying", "starting_rubber_race", "show_trend", "temperature_trend_interval",
-        "raininess_trend_interval", "wetness_trend_interval",
+        "raininess_trend_interval", "wetness_trend_interval", "show_wind",
+        "display_order_temperature", "display_order_rain", "display_order_wetness",
     )
 
     def __init__(self, config, widget_name):
@@ -60,13 +69,23 @@ class Realtime(StatsMixin, ModernOverlay):
         self.rubber_start = tuple(wcfg[f"starting_rubber_{name}"] for name in ("practice", "practice", "qualifying", "race", "race"))
         self.show_trend = wcfg["show_trend"]
         stats = []
-        sample_temp = f"88.{'8' * self.decimals} / 88.{'8' * self.decimals}{self.symbol_temp} ▲"
+        trend = " ▲" if self.show_trend else ""
+        # Whole degrees: 2 digits in Celsius (or minus sign), 3 in Fahrenheit (38°C = 100°F)
+        degrees = "888" if self.symbol_temp == "°F" else "-88"
+        number = f"{degrees}.{'8' * self.decimals}" if self.decimals else degrees
         if wcfg["show_temperature"]:
-            stats.append(Stat("temperature", "Track / Air", sample_temp))
+            stats.append(Stat("temperature", "Track / Air", f"{number} / {number}{self.symbol_temp}{trend}"))
         if wcfg["show_rain"]:
-            stats.append(Stat("rain", "Rain", "100% ▲"))
+            stats.append(Stat("rain", "Rain", f"100%{trend}"))
         if wcfg["show_wetness"]:
-            stats.append(Stat("wetness", "Surface", "Rubber 100% ▲"))
+            sample = self.widest("value", (f"{tr_overlay(label)} 100%{trend}" for label in ("Wet", "Rubber")))
+            stats.append(Stat("wetness", "Surface", sample))
+        self.unit_speed = units.set_unit_speed(self.cfg.units["speed_unit"])
+        self.symbol_speed = units.set_symbol_speed(self.cfg.units["speed_unit"])
+        self.arrow_size = self.metrics["value"].capHeight() * 1.25
+        if wcfg["show_wind"]:  # value drawn with arrow before it (see paint), "88 " holds arrow place
+            stats.append(Stat("wind", "Wind", f"88 888 {self.symbol_speed}"))
+        stats = self.display_ordered(stats)
         self.keys = tuple(stat.key for stat in stats)
         width, height = self.build_stats(stats)
         self.set_size(width, height)
@@ -80,7 +99,24 @@ class Realtime(StatsMixin, ModernOverlay):
         self.paint_stats_static(painter)
 
     def paint(self, painter: QPainter):
-        self.draw_stats(painter, self.state)
+        values, wind = self.state
+        self.draw_stats(painter, values)
+        if wind is not None:
+            self.draw_wind(painter, *wind)
+
+    def draw_wind(self, painter: QPainter, text: str, angle: float | None):
+        """Wind speed, arrow before it (no arrow while calm)"""
+        slot = self.slots[self.keys.index("wind")]
+        rect = slot.value
+        size = self.arrow_size
+        gap = size * 0.35
+        width = self.text_width("value", text) + (size + gap if angle is not None else 0)
+        left = rect.center().x() - width / 2
+        if angle is not None:
+            arrow(painter, QRectF(left, rect.center().y() - size / 2, size, size), angle, self.theme.accent)
+            left += size + gap
+        self.draw_text(painter, QRectF(left, rect.top(), rect.right() - left, rect.height()), text, "value",
+                       self.theme.text, elide=False)
 
     def trend(self, key: str, value: float, elapsed: float) -> str:
         """Trend sign suffix"""
@@ -114,4 +150,20 @@ class Realtime(StatsMixin, ModernOverlay):
                         laps += minfo.vehicles.totalCompletedLaps * self.rubber_scale[session_type]
                     text, color = f"{tr_overlay('Rubber')} {laps_to_rubber(laps, self.rubber_median):.0%}", None
                 values.append(Value(text + self.trend(key, wet_min + wet_max + wet_avg, elapsed), color))
-        self.refresh(tuple(values))
+            elif key == "wind":
+                values.append(Value())  # drawn with arrow
+        wind = self.wind() if "wind" in self.keys else None
+        self.refresh((tuple(values), wind))
+
+    def wind(self) -> tuple[str, float | None]:
+        """Wind speed text in speed unit, arrow angle of where wind blows relative to car
+        (degrees clockwise from car front), None while calm"""
+        wind_x, _, wind_z = api.read.session.wind_velocity()
+        speed = hypot(wind_x, wind_z)
+        text = f"{self.unit_speed(speed):.0f} {self.symbol_speed}"
+        if speed < WIND_CALM:
+            return text, None
+        # Same view as radar: world plane rotated to car heading (x right, y behind)
+        yaw = api.read.vehicle.orientation_yaw_radians()
+        right, behind = calc.rotate_coordinate(yaw - 3.14159265, wind_x, -wind_z)
+        return text, round(calc.degrees(atan2(right, -behind)) / 5) * 5.0  # 5 degree steps

@@ -57,6 +57,7 @@ from ..template.widget.black_box_ui import (
 )
 from ..userfile import set_relative_path, set_user_data_path
 from ..validator import image_exists, is_clock_format, is_hex_color, is_string_number
+from ._common import translate_filter
 
 # Numeric options are stored in a fixed base unit (kPa, Celsius, meters per second, liters),
 # never in whatever unit the overlay displays, so that changing the display unit cannot
@@ -145,6 +146,18 @@ class BaseLineEdit(QLineEdit):
             if action == option_reset:
                 self.reset_to_default()
 
+    def validate(self) -> Any:
+        """Validate & export value, returns None if invalid"""
+        return self.text()
+
+    def invalid_reason(self) -> str:
+        """Short reason why text is invalid (English, translated by caller), "" if valid
+
+        Checked while typing (see UserConfig), so editors validated with side effects
+        (folder created) return "" and are checked when saving only.
+        """
+        return "" if self.validate() is not None else "Invalid value"
+
 
 class BaseCheckBox(QCheckBox):
     """Option QCheckBox with default value & reset method"""
@@ -180,11 +193,34 @@ class BaseCheckBox(QCheckBox):
 
 
 class BaseComboBox(QComboBox):
-    """Option QComboBox with default value & reset method"""
+    """Option QComboBox with default value & reset method
+
+    Choices added by add_choices show translated text, English value kept as item data
+    (saved value, see value), and setCurrentText selects by value first.
+    """
 
     def __init__(self, parent):
         super().__init__(parent)
         self._default = None
+
+    def add_choices(self, items, translate: bool = True):
+        """Add choices, shown translated (value kept as item data)"""
+        for item in items:
+            text = str(item)
+            self.addItem(tr(text) if translate else text, text)
+
+    def value(self) -> str:
+        """Value of selected choice (English), text if added without value"""
+        data = self.currentData()
+        return data if isinstance(data, str) else self.currentText()
+
+    def setCurrentText(self, text: str):
+        """Select choice by value (English), else by shown text"""
+        index = self.findData(text)
+        if index >= 0:
+            self.setCurrentIndex(index)
+        else:
+            super().setCurrentText(text)
 
     def set_default(self, default: Any):
         """Set default value (once) & create reset-context-menu"""
@@ -239,6 +275,9 @@ class ClockFormatEdit(BaseLineEdit):
             return None
         return value
 
+    def invalid_reason(self) -> str:
+        return "" if self.validate() is not None else "Invalid clock format"
+
 
 class IntegerEdit(BaseLineEdit):
     """Integer number option edit"""
@@ -252,6 +291,13 @@ class IntegerEdit(BaseLineEdit):
             return int(value)
         except ValueError:  # decimal typed in an integer option, report as invalid
             return None
+
+    def invalid_reason(self) -> str:
+        if self.validate() is not None:
+            return ""
+        if is_string_number(self.text()):
+            return "Whole number required"
+        return "Number required"
 
 
 class FloatEdit(BaseLineEdit):
@@ -267,13 +313,16 @@ class FloatEdit(BaseLineEdit):
             return int(value)
         return value
 
+    def invalid_reason(self) -> str:
+        return "" if self.validate() is not None else "Number required"
+
 
 class DropDownListEdit(BaseComboBox):
     """Drop down list option edit"""
 
     def validate(self):
         """Validate & export value, returns None if invalid"""
-        return self.currentText()
+        return self.value()
 
 
 class ColorEdit(BaseLineEdit):
@@ -300,6 +349,9 @@ class ColorEdit(BaseLineEdit):
         if not is_hex_color(value):
             return None
         return value
+
+    def invalid_reason(self) -> str:
+        return "" if self.validate() is not None else "Color as #RRGGBB or #AARRGGBB"
 
     def open_dialog_color(self):
         """Open color dialog"""
@@ -438,13 +490,22 @@ class FilePathEdit(BaseLineEdit):
             self.open_dialog_path()
 
     def validate(self):
-        """Validate & export value, returns None if invalid"""
+        """Validate & export value, returns None if invalid (empty, or drive root)"""
+        if not self.text().strip():  # would point data folder to drive root
+            return None
         # Try convert to relative path again, in case user manually sets path
         value = set_relative_path(self.text())
+        full_path = os.path.abspath(value)
+        if os.path.dirname(full_path) == full_path:  # drive or file system root
+            return None
         if not set_user_data_path(value):
             return None
         self.setText(value)  # update reformatted path
         return value
+
+    def invalid_reason(self) -> str:
+        """Checked when saving only: validating creates the folder"""
+        return ""
 
     def open_dialog_path(self):
         """Open file path dialog"""
@@ -476,9 +537,12 @@ class ImagePathEdit(BaseLineEdit):
             return None
         return value
 
+    def invalid_reason(self) -> str:
+        return "" if self.validate() is not None else "File not found"
+
     def open_dialog_image(self):
         """Open image file path dialog"""
-        path_selected = QFileDialog.getOpenFileName(self, dir=self.init_value, filter=FileFilter.PNG)[0]
+        path_selected = QFileDialog.getOpenFileName(self, dir=self.init_value, filter=translate_filter(FileFilter.PNG))[0]
         if image_exists(path_selected):
             self.setText(path_selected)
             self.init_value = path_selected

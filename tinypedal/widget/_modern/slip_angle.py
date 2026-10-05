@@ -36,7 +36,7 @@ class Realtime(GaugeQuad):
         "minimum_oversteer_slip_angle_difference", "minimum_understeer_slip_angle_difference",
     )
     label = "Slip angle"
-    sample = "88.8"
+    sample = "88"
 
     def setup(self):
         self.max_range = max(int(self.wcfg["slip_angle_maximum_range"]), 1)

@@ -48,8 +48,8 @@ def is_new_version(
     # New version
     if checked_version > current_version:
         return True
-    # Pre-release version
-    if checked_version == current_version and version_tag:
+    # Pre-release version (local build made after that release, tag "+...", is not older)
+    if checked_version == current_version and version_tag and not version_tag.startswith("+"):
         return True
     # Same version
     return False
@@ -58,6 +58,8 @@ def is_new_version(
 def tinypedal() -> str:
     from . import version
 
+    if version.DEVELOPMENT.startswith("+"):  # local build after release: 0.19.1+3.g8a0f9f3
+        return f"{version.__version__}{version.DEVELOPMENT}"
     ver_number = (version.__version__, version.DEVELOPMENT)
     return "-".join(ver for ver in ver_number if ver != "")
 

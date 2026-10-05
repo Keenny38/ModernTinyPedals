@@ -140,21 +140,23 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
     from PySide6.QtCore import QCoreApplication, QEvent
 
     from tinypedal.ui import lap_viewer
-    from tinypedal.ui.quick import lap_backend
+    from tinypedal.ui.quick import lap_export
 
     filename = str(tmp_path / "pro lap.ld")
     write_logger_ld(filename, logger_channels())
-    monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([filename], ""))
+    monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([filename], ""))
     viewer = lap_viewer.LapViewer(None)
     backend = viewer.backend
     try:
-        backend.addFiles()
-        imported = [entry for entry in backend.external if entry.info.get("source") == "MoTeC"]
-        assert len(imported) == 3
-        assert backend.reference_key in {entry.file.path for entry in imported}  # fastest imported lap
         from tests.test_lap_viewer import wait_loaded
 
-        wait_loaded(viewer)  # 3 laps read in background
+        backend.addFiles()
+        assert backend.loading and viewer.is_loading()  # log read by worker process: page stays responsive
+        wait_loaded(viewer)  # log imported, then 3 laps read in background
+        imported = [entry for entry in backend.external if entry.info.get("source") == "MoTeC"]
+        assert len(imported) == 3 and "3 laps" in backend.status
+        assert backend.reference_key in {entry.file.path for entry in imported}  # fastest imported lap
+        wait_loaded(viewer)
         header = backend.lap_model.rows[0]
         assert header["title"] == "pro lap" and "added" in header["info"]  # added log on top
         assert backend.lap_rows()[0]["title"].startswith("Lap")
@@ -162,7 +164,7 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
         assert backend.data.reference is not None
         bad = tmp_path / "bad.ld"
         bad.write_bytes(b"x" * 10)
-        monkeypatch.setattr(lap_backend.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([str(bad)], ""))
+        monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args, **kwargs: ([str(bad)], ""))
         backend.addFiles()
         assert "MoTeC" in backend.status
     finally:

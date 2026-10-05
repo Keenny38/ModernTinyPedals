@@ -25,18 +25,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import threading
-from collections.abc import Callable
-from itertools import chain
+from collections.abc import Callable, Coroutine
+from contextlib import suppress
+from time import monotonic
 from typing import Any, NamedTuple
 
 from .. import realtime_state
-from ..async_request import http_get, resolve_hostname, set_header_get
+from ..async_request import HttpConnection, forget_hostname, resolve_hostname_async, set_header_get
 from ..const_common import TYPE_JSON
 from ..thread_guard import run_supervised
 
 logger = logging.getLogger(__name__)
 json_decoder = json.JSONDecoder()
+
+MAX_UPDATE_INTERVAL = 5.0  # default maximum update interval while repeated resource data is unchanged
+MISSING_RETRY_MAX = 10.0  # maximum delay between requests of resource without data (game answers null)
+STOP_TIMEOUT = 3.0  # seconds to wait for update thread to stop
 
 
 class HttpSetup(NamedTuple):
@@ -66,6 +72,7 @@ class RestAPITask(NamedTuple):
         condition: enable condition check.
         repeated: is repeated or one time task.
         interval: minimum update interval.
+        max_interval: maximum update interval while data unchanged (repeated task).
     """
 
     path: str
@@ -73,6 +80,7 @@ class RestAPITask(NamedTuple):
     condition: str
     repeated: bool
     interval: float
+    max_interval: float = MAX_UPDATE_INTERVAL
 
 
 class ResOutput(NamedTuple):
@@ -110,6 +118,60 @@ class ResOutput(NamedTuple):
         return True
 
 
+class EndpointStatus(NamedTuple):
+    """Rest API resource status, for performance monitor
+
+    Attributes:
+        path: resource url path.
+        state: "idle" (not on track), "disabled" (option off), "waiting" (first request),
+            "active" (data received), "missing" (no data yet, requested again), "dead" (stopped after error).
+        error: last error ("timeout", "connection failed", "no answer", "invalid JSON", "no data",
+            "parser error", "unexpected error"), empty if none.
+        updated: monotonic time of last answer, 0 if never.
+    """
+
+    path: str
+    state: str
+    error: str = ""
+    updated: float = 0.0
+
+
+class RestError(Exception):
+    """Resource unavailable, message is short reason (see EndpointStatus.error)"""
+
+
+def valid_json_value(value: Any, default: Any) -> Any:
+    """Validate JSON value against default value type, return default if invalid
+
+    JSON has a single number type: int is accepted for float default (35 for 35.0),
+    integral float for int default. Bool is never accepted as number.
+    """
+    if isinstance(default, bool) or not isinstance(default, (int, float)):
+        return value if isinstance(value, type(default)) else default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    if isinstance(default, float):
+        try:
+            value = float(value)
+        except OverflowError:
+            return default
+        return value if math.isfinite(value) else default
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else default
+    return value
+
+
+def retry_delay(attempt: int, retry: int, delay: float) -> float:
+    """Delay before requesting again resource without data
+
+    Configured number of retries at configured delay, then growing delay up to MISSING_RETRY_MAX,
+    as game answers null for a while around session changes.
+    """
+    if attempt <= retry:
+        return delay
+    return min(max(delay, 1.0) * 2 ** min(attempt - retry, 8), MISSING_RETRY_MAX)
+
+
 class RestAPIConnector:
     """Rest API connector"""
 
@@ -122,11 +184,24 @@ class RestAPIConnector:
         "_update_thread",
         "_active_interval",
         "_event",
+        "_on_start",
+        "_active_tasks",
+        "_status",
+        "_status_lock",
+        "_warned",
+        "_data_received",
     )
 
-    def __init__(self, taskset: tuple, dataset: object):
+    def __init__(self, taskset: tuple, dataset: object, on_start: Callable[[], None] | None = None):
+        """
+        Args:
+            taskset: Rest API tasks.
+            dataset: output data set.
+            on_start: called before tasks start (player on track), to clear state kept between requests.
+        """
         self._taskset = taskset
         self._dataset = dataset
+        self._on_start = on_start
 
         self._cfg: dict = {}
         self._task_cancel = False
@@ -134,6 +209,11 @@ class RestAPIConnector:
         self._update_thread: threading.Thread | None = None
         self._active_interval = 0.2
         self._event = threading.Event()
+        self._active_tasks: dict[str, tuple[ResOutput, ...]] = {}
+        self._status = {task.path: EndpointStatus(task.path, "idle") for task in taskset}
+        self._status_lock = threading.Lock()
+        self._warned: set[tuple[str, str]] = set()
+        self._data_received = False
 
     def __del__(self):
         if logger is not None:  # module globals are cleared at interpreter exit
@@ -147,32 +227,68 @@ class RestAPIConnector:
     def start(self):
         """Start update thread"""
         if not self._updating and self._cfg["enable_restapi_access"]:
+            previous = self._update_thread
+            if previous is not None and previous.is_alive():  # still stopping, see stop()
+                previous.join(STOP_TIMEOUT)
             self._updating = True
-            self._event.clear()
-            self._update_thread = threading.Thread(target=self.__update, daemon=True, name="RestAPI")
+            # Own stop event for each thread, so a previous thread still stopping never resumes
+            self._event = threading.Event()
+            self._update_thread = threading.Thread(
+                target=self.__update, args=(self._event,), daemon=True, name="RestAPI")
             self._update_thread.start()
             logger.info("RestAPI: UPDATING: thread started")
 
     def stop(self):
-        """Stop update thread"""
+        """Stop update thread, wait a bounded time (requests are cancelled within 0.1s)"""
         if self._updating:
             self._event.set()
             if self._update_thread is not None:
-                self._update_thread.join()
+                self._update_thread.join(STOP_TIMEOUT)
+                if self._update_thread.is_alive():
+                    logger.warning("RestAPI: UPDATING: thread still stopping in background")
             self._updating = False
             logger.info("RestAPI: UPDATING: thread stopped")
 
-    def __update(self) -> None:
-        """Run update loop, restart after unexpected error"""
-        run_supervised(self.__update_loop, "RestAPI update", self._event)
+    def status(self) -> tuple[EndpointStatus, ...]:
+        """Status of every resource (any thread)"""
+        with self._status_lock:
+            return tuple(self._status.values())
 
-    def __update_loop(self) -> None:
+    def _set_status(self, path: str, state: str, error: str | None = None, updated: bool = False):
+        """Set resource status, keep last error & update time unless given"""
+        with self._status_lock:
+            old = self._status.get(path, EndpointStatus(path, state))
+            self._status[path] = EndpointStatus(
+                path,
+                state,
+                old.error if error is None else error,
+                monotonic() if updated else old.updated,
+            )
+
+    def _reset_status(self, state: str):
+        """Set every resource status"""
+        with self._status_lock:
+            for path, old in self._status.items():
+                self._status[path] = old._replace(state=state)
+
+    def _warn_once(self, key: tuple[str, str], message: str, *args, exc_info: bool = False):
+        """Log warning once per connector (key: resource path, cause)"""
+        if key not in self._warned:
+            self._warned.add(key)
+            logger.warning(message, *args, exc_info=exc_info)
+
+    def __update(self, event: threading.Event) -> None:
+        """Run update loop, restart after unexpected error"""
+        if not run_supervised(lambda: self.__update_loop(event), "RestAPI update", event) and not event.is_set():
+            # Stopped after repeated errors: no stale value left behind
+            reset_to_default(self._dataset, self._active_tasks)
+            self._reset_status("dead")
+
+    def __update_loop(self, event: threading.Event) -> None:
         """Update Rest API data"""
-        _event_wait = self._event.wait
+        _event_wait = event.wait
         reset = False
         update_interval = 0.5
-
-        active_task_sim: dict[str, Any] = {}
 
         while not _event_wait(update_interval):
             if realtime_state.active:
@@ -182,7 +298,7 @@ class RestAPIConnector:
                     reset = True
                     update_interval = self._active_interval
                     self._task_cancel = False
-                    self.run_tasks(active_task_sim)
+                    self.run_tasks(event)
 
             else:
                 if reset:
@@ -190,53 +306,73 @@ class RestAPIConnector:
                     update_interval = 0.5
 
         # Reset to default on close
-        reset_to_default(self._dataset, active_task_sim)
+        reset_to_default(self._dataset, self._active_tasks)
+        self._reset_status("idle")
 
-    def run_tasks(self, active_task_sim: dict):
-        """Run tasks"""
+    def run_tasks(self, event: threading.Event):
+        """Run tasks, blocks until leaving track or stopped"""
         logger.info("RestAPI: CONNECTING")
-        # Load http connection setting
-        sim_http = HttpSetup(
-            host=resolve_hostname(self._cfg["url_host"], self._cfg["url_port"]),
-            port=self._cfg["url_port"],
-            timeout=min(max(self._cfg["connection_timeout"], 0.5), 10),
-            retry=min(max(int(self._cfg["connection_retry"]), 0), 10),
-            retry_delay=min(max(self._cfg["connection_retry_delay"], 0), 60),
-        )
-        # Run all tasks while on track, this blocks until tasks cancelled
-        logger.info("RestAPI: all tasks started")
-        asyncio.run(self.task_init(self.sort_taskset(sim_http, active_task_sim, self._taskset)))
+        if self._on_start is not None:
+            self._on_start()
+        self._data_received = False
+        asyncio.run(self.task_init(event))
         logger.info("RestAPI: all tasks stopped")
+        if not self._data_received:  # nothing answered: resolve host again next time
+            forget_hostname(self._cfg["url_host"], self._cfg["url_port"])
         # Reset when finished
-        reset_to_default(self._dataset, active_task_sim)
+        reset_to_default(self._dataset, self._active_tasks)
+        self._reset_status("idle")
 
     def sort_taskset(self, http: HttpSetup, active_task: dict, taskset: tuple[RestAPITask, ...]):
         """Sort task set into dictionary, key - uri_path, value - output_set"""
         for task in taskset:
             if self._cfg.get(task.condition, True):
                 active_task[task.path] = task.outputs
+                self._set_status(task.path, "waiting", "")
                 update_interval = max(task.interval, self._active_interval)
-                yield asyncio.create_task(
-                    self.fetch(http, task.path, task.outputs, task.repeated, update_interval)
-                )
+                yield asyncio.create_task(self.fetch(http, task, update_interval))
+            else:
+                self._set_status(task.path, "disabled", "")
 
-    async def task_init(self, *task_generator):
-        """Run repeatedly updating task"""
-        task_group = tuple(chain(*task_generator))
+    async def task_init(self, event: threading.Event):
+        """Resolve host, then run tasks until leaving track or stopped"""
+        cfg = self._cfg
+        # Resolving probes connections for up to 3s: cancelled at once on stop
+        host = await self.until_stopped(event, resolve_hostname_async(cfg["url_host"], cfg["url_port"]))
+        if host is None:
+            return
+        sim_http = HttpSetup(
+            host=host,
+            port=cfg["url_port"],
+            timeout=min(max(cfg["connection_timeout"], 0.5), 10),
+            retry=min(max(int(cfg["connection_retry"]), 0), 10),
+            retry_delay=min(max(cfg["connection_retry_delay"], 0), 60),
+        )
+        task_group = tuple(self.sort_taskset(sim_http, self._active_tasks, self._taskset))
+        logger.info("RestAPI: all tasks started")
         # Task control
-        await asyncio.create_task(self.task_control(task_group))
-        # Start task
+        await asyncio.create_task(self.task_control(event, task_group))
+        # Collect tasks (unexpected errors are logged by each task)
         for task in task_group:
-            try:
+            with suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:  # log unexpected error, never hide it
-                logger.debug("RestAPI: task error", exc_info=True)
 
-    async def task_control(self, task_group: tuple[asyncio.Task, ...]):
+    async def until_stopped(self, event: threading.Event, coroutine: Coroutine) -> Any:
+        """Result of coroutine, None if cancelled because stopped or leaving track"""
+        task = asyncio.ensure_future(coroutine)
+        while not task.done():
+            if event.is_set() or not realtime_state.active:
+                task.cancel()
+                break
+            await asyncio.wait((task,), timeout=0.1)
+        try:
+            return await task
+        except asyncio.CancelledError:
+            return None
+
+    async def task_control(self, event: threading.Event, task_group: tuple[asyncio.Task, ...]):
         """Control task running state"""
-        _event_is_set = self._event.is_set
+        _event_is_set = event.is_set
         while not _event_is_set() and realtime_state.active:
             await asyncio.sleep(0.1)  # check every 100ms
         # Set cancel state to exit loop in case failed to cancel
@@ -245,60 +381,110 @@ class RestAPIConnector:
         for task in task_group:
             task.cancel()
 
-    async def fetch(
-        self, http: HttpSetup, uri_path: str, output_set: tuple[ResOutput, ...],
-        repeat: bool = False, min_interval: float = 0.01):
-        """Fetch data and verify"""
-        data_available = await self.update_once(http, uri_path, output_set)
-        if not data_available:
-            logger.info("RestAPI: MISSING: %s", uri_path)
-        elif not repeat:
-            logger.info("RestAPI: ACTIVE: %s (one time)", uri_path)
-        else:
+    async def fetch(self, http: HttpSetup, task: RestAPITask, min_interval: float = 0.01):
+        """Fetch data until available, then keep updating if repeated task"""
+        uri_path = task.path
+        connection = HttpConnection(http.host, http.port, http.timeout)
+        request = set_header_get(uri_path, http.host)
+        try:
+            if not await self.update_until_available(connection, request, http, uri_path, task.outputs):
+                return
+            if not task.repeated:
+                logger.info("RestAPI: ACTIVE: %s (one time)", uri_path)
+                return
             logger.info("RestAPI: ACTIVE: %s (%sms)", uri_path, int(min_interval * 1000))
-            await self.update_repeat(http, uri_path, output_set, min_interval)
+            await self.update_repeat(
+                connection, request, uri_path, task.outputs, min_interval, max(task.max_interval, min_interval))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # never hide unexpected error, other tasks keep running
+            self._set_status(uri_path, "dead", "unexpected error")
+            self._warn_once((uri_path, "task"), "RestAPI: task stopped after error: %s", uri_path, exc_info=True)
+        finally:
+            connection.close()
+
+    async def update_until_available(
+        self, connection: HttpConnection, request: bytes, http: HttpSetup, uri_path: str,
+        output_set: tuple[ResOutput, ...]) -> bool:
+        """Request resource until data available (game answers null around session changes)"""
+        attempt = 0
+        while not self._task_cancel:
+            if await self.update_once(connection, request, uri_path, output_set):
+                return True
+            if attempt == 0:
+                logger.info("RestAPI: MISSING: %s, requesting again", uri_path)
+            attempt += 1
+            await asyncio.sleep(retry_delay(attempt, http.retry, http.retry_delay))
+        return False
 
     async def update_once(
-        self, http: HttpSetup, uri_path: str, output_set: tuple[ResOutput, ...]) -> bool:
-        """Update once and verify"""
-        request_header = set_header_get(uri_path, http.host)
-        data_available = False
-        total_retry = retry = http.retry
-        while not self._task_cancel and retry >= 0:
-            resource_output = await get_resource(request_header, http)
-            # Verify & retry
-            if not isinstance(resource_output, TYPE_JSON):
-                logger.info("RestAPI: %s: %s (%s/%s retries left)",
-                    resource_output, uri_path, retry, total_retry)
-                retry -= 1
-                if retry < 0:
-                    data_available = False
-                    break
-                await asyncio.sleep(http.retry_delay)
-                continue
-            # Output
-            for res in output_set:
-                if res.update(self._dataset, resource_output):
-                    data_available = True
-            break
-        return data_available
+        self, connection: HttpConnection, request: bytes, uri_path: str, output_set: tuple[ResOutput, ...]) -> bool:
+        """Update once, returns True if data available"""
+        try:
+            resource_output = await get_resource(request, connection)
+        except RestError as error:
+            self._set_status(uri_path, "missing", str(error))
+            return False
+        self._data_received = True
+        if self.apply_outputs(uri_path, output_set, resource_output):
+            self._set_status(uri_path, "active", updated=True)
+            return True
+        self._set_status(uri_path, "missing", "no data", updated=True)
+        return False
 
     async def update_repeat(
-        self, http: HttpSetup, uri_path: str, output_set: tuple[ResOutput, ...], min_interval: float):
+        self, connection: HttpConnection, request: bytes, uri_path: str, output_set: tuple[ResOutput, ...],
+        min_interval: float, max_interval: float = MAX_UPDATE_INTERVAL):
         """Update repeat"""
-        request_header = set_header_get(uri_path, http.host)
         interval = min_interval
         last_hash = new_hash = -1
         while not self._task_cancel:  # use task control to cancel & exit loop
-            new_hash = await output_resource(self._dataset, request_header, http, output_set, last_hash)
+            new_hash = await self.output_resource(connection, request, uri_path, output_set, last_hash)
             if last_hash != new_hash:
                 last_hash = new_hash
                 interval = min_interval
-            elif interval < 5:  # increase update interval while no new data
+            elif interval < max_interval:  # increase update interval while no new data
                 interval += interval / 2
-                if interval > 5:
-                    interval = 5
+                if interval > max_interval:
+                    interval = max_interval
             await asyncio.sleep(interval)
+
+    async def output_resource(
+        self, connection: HttpConnection, request: bytes, uri_path: str, output_set: tuple[ResOutput, ...],
+        last_hash: int) -> int:
+        """Get resource from REST API and output data, skip unnecessary checking"""
+        try:
+            raw_bytes = await connection.get(request)
+        except (TimeoutError, OSError, EOFError, ValueError) as error:
+            self._set_status(uri_path, "active", request_error(error))
+            return last_hash
+        new_hash = hash(raw_bytes)
+        if last_hash != new_hash:
+            try:
+                resource_output = json_decoder.decode(raw_bytes.decode())
+            except ValueError:
+                self._set_status(uri_path, "active", "invalid JSON" if raw_bytes else "no answer")
+                return last_hash
+            self.apply_outputs(uri_path, output_set, resource_output)
+        self._set_status(uri_path, "active", updated=True)
+        return new_hash
+
+    def apply_outputs(self, uri_path: str, output_set: tuple[ResOutput, ...], resource_output: Any) -> bool:
+        """Parse resource into data set, returns True if any data available
+
+        An entry the parser cannot read is set to default, other entries & next updates go on.
+        """
+        data_available = False
+        for res in output_set:
+            try:
+                if res.update(self._dataset, resource_output):
+                    data_available = True
+            except Exception:  # unexpected game data must not stop updates
+                res.reset(self._dataset)
+                self._set_status(uri_path, "active", "parser error")
+                self._warn_once(
+                    (uri_path, res.name), "RestAPI: unable to parse %s from %s", res.name, uri_path, exc_info=True)
+        return data_available
 
 
 def reset_to_default(dataset: object, active_task: dict[str, tuple[ResOutput, ...]]):
@@ -311,27 +497,31 @@ def reset_to_default(dataset: object, active_task: dict[str, tuple[ResOutput, ..
         active_task.clear()
 
 
-async def get_resource(request: bytes, http: HttpSetup) -> Any | str:
-    """Get resource from REST API"""
-    try:
-        async with http_get(request, http.host, http.port, http.timeout) as raw_bytes:
-            return json_decoder.decode(raw_bytes.decode())
-    except (AttributeError, TypeError, IndexError, KeyError, ValueError,
-            OSError, EOFError, asyncio.TimeoutError):
-        return "INVALID"
+def request_error(error: BaseException) -> str:
+    """Short reason of failed request"""
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+        return "timeout"
+    if isinstance(error, ValueError):
+        return "invalid answer"
+    return "connection failed"
 
 
-async def output_resource(
-    dataset: object, request: bytes, http: HttpSetup, output_set: tuple[ResOutput, ...], last_hash: int) -> int:
-    """Get resource from REST API and output data, skip unnecessary checking"""
+async def get_resource(request: bytes, connection: HttpConnection) -> Any:
+    """Get JSON resource (dict or list) from REST API
+
+    Raises:
+        RestError: unavailable (connection, error status, invalid JSON, null).
+    """
     try:
-        async with http_get(request, http.host, http.port, http.timeout) as raw_bytes:
-            new_hash = hash(raw_bytes)
-            if last_hash != new_hash:
-                resource_output = json_decoder.decode(raw_bytes.decode())
-                for res in output_set:
-                    res.update(dataset, resource_output)
-            return new_hash
-    except (AttributeError, TypeError, IndexError, KeyError, ValueError,
-            OSError, EOFError, asyncio.TimeoutError):
-        return last_hash
+        raw_bytes = await connection.get(request)
+    except (TimeoutError, OSError, EOFError, ValueError) as error:
+        raise RestError(request_error(error)) from error
+    if not raw_bytes:
+        raise RestError("no answer")  # error status or empty body
+    try:
+        resource_output = json_decoder.decode(raw_bytes.decode())
+    except ValueError as error:
+        raise RestError("invalid JSON") from error
+    if not isinstance(resource_output, TYPE_JSON):
+        raise RestError("no data")  # null outside session
+    return resource_output

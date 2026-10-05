@@ -19,35 +19,22 @@ then
     echo
 fi
 
-# Check submodule
-if [ ! -f ".gitmodules" ];
-then
-    echo "Error: File '.gitmodules' not found, please redownload source code."
-    exit 1
-fi
-
-SUBMODULE_FILE=$(awk -F= '/^\spath/{print $2}' '.gitmodules')
+# Check bundled shared memory libraries (part of source code, no git submodule)
+SUBMODULE_FILE="pyLMUSharedMemory pyRfactor2SharedMemory"
 SUBMODULE_MISSING="false"
-
-if [ -z "${SUBMODULE_FILE}" ];
-then
-    echo "Error: Invalid '.gitmodules' file, please redownload source code."
-    exit 1
-fi
 
 for LINE in ${SUBMODULE_FILE};
 do
     if [ ! -f "${LINE}/__init__.py" ];
     then
         SUBMODULE_MISSING="true"
-        echo "Error: Submodule '${LINE}' not found"
+        echo "Error: Folder '${LINE}' not found"
     fi
 done
 
 if [ "${SUBMODULE_MISSING}" == "true" ];
 then
-    echo "Error: Missing one or more submodules."
-    echo "Please, use a Linux source release file or 'git clone --recurse-submodules'."
+    echo "Error: Missing one or more source folders, please redownload source code."
     exit 1
 fi
 
@@ -76,12 +63,15 @@ then
     fi
 fi
 
-rm "${APPLICATIONS_PATH}/TinyPedal-overlay.desktop" "${BIN_PATH}/TinyPedal"
+rm -f "${APPLICATIONS_PATH}/TinyPedal-overlay.desktop" "${BIN_PATH}/TinyPedal"
 
 # Write new file
 BASE_FILE='
     run.py
     README.md
+    CHANGELOG.md
+    CHANGELOG.fr.md
+    NOTICE.md
     LICENSE.txt
 '
 IMAGE_FILE='

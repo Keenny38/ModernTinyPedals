@@ -22,6 +22,7 @@ Validator function
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -37,6 +38,8 @@ from .const_file import FileExt
 from .regex_pattern import CFG_INVALID_FILENAME, rex_hex_color
 
 logger = logging.getLogger(__name__)
+
+SESSION_START_TOLERANCE = 2.0  # seconds, session start time from whole elapsed seconds
 
 
 # Decorator
@@ -74,8 +77,38 @@ def is_allowed_filename(filename: str) -> bool:
 
 
 def invalid_save_name(name: str) -> bool:
-    """Is invalid save name"""
-    return name == "" or name[:3] == " - " or name[-3:] == " - "
+    """Is invalid save name (empty, or track or class name missing in combo name)"""
+    return name == "" or name[:3] == " - " or name[-3:] == " - " or name[-2:] == " -"
+
+
+def is_finite_number(value: Any) -> bool:
+    """Is finite number (int or float, not bool, nan or inf)"""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+
+def _reject_json_constant(name: str) -> Any:
+    """JSON NaN, Infinity, -Infinity are not allowed"""
+    raise ValueError(f"invalid JSON number: {name}")
+
+
+def _finite_json_float(text: str) -> float:
+    """JSON float, out of range number (1e999) is not allowed"""
+    value = float(text)
+    if not isfinite(value):
+        raise ValueError(f"invalid JSON number: {text}")
+    return value
+
+
+def load_json_strict(data: str | bytes | bytearray) -> Any:
+    """Parse untrusted JSON text (share code, imported file), raise ValueError if invalid
+
+    Unlike json.loads, NaN, Infinity & out of range numbers are rejected, and too deeply nested
+    data raises ValueError (not RecursionError).
+    """
+    try:
+        return json.loads(data, parse_constant=_reject_json_constant, parse_float=_finite_json_float)
+    except RecursionError as error:
+        raise ValueError("JSON data nested too deeply") from error
 
 
 def is_string_number(value: str) -> bool:
@@ -94,15 +127,34 @@ def valid_sectors(sector_time: list | Any, max_time: float = MAX_SECONDS) -> boo
     return 0 < sector_time < max_time
 
 
-def is_same_session(
-    combo_name: str, session_id: tuple[int, int, int],
-    last_session_id: tuple[str, int, int, int]) -> bool:
-    """Check if same session, car, track combo"""
+def session_token(session_id: tuple[int, ...], now: float | None = None) -> tuple[float, ...]:
+    """Session token: session id (stamp, elapsed seconds, total laps) & time read
+
+    Args:
+        session_id: session identifier from API.
+        now: time read (seconds), default wall clock (tokens saved to file).
+    """
+    return (*session_id[:3], time.time() if now is None else now)
+
+
+def is_same_session(last_token: tuple | None, token: tuple) -> bool:
+    """Check if session token belongs to session of last token (read before)
+
+    Same session: same stamp (session length & type), elapsed time & laps not gone back, and
+    session running (elapsed time) since before last token was read. A new session of same
+    length & type has started after it, so going out later in a restarted session is not taken
+    as the same session. Both tokens must be read on the same clock. Game paused (single player)
+    longer than the elapsed time of last token counts as new session.
+    """
+    if not last_token or len(last_token) != 4 or len(token) != 4:
+        return False
+    stamp, elapsed, laps, read_time = token
+    last_stamp, last_elapsed, last_laps, last_read_time = last_token
     return (
-        combo_name == last_session_id[0] and
-        last_session_id[1] == session_id[0] and  # session time stamp
-        last_session_id[2] <= session_id[1] and  # session elapsed time
-        last_session_id[3] <= session_id[2]  # total completed laps
+        stamp == last_stamp
+        and last_elapsed <= elapsed
+        and last_laps <= laps
+        and read_time - elapsed < last_read_time + SESSION_START_TOLERANCE
     )
 
 
@@ -145,6 +197,9 @@ def valid_delta_set(data: tuple) -> tuple:
     # Delta list must have at least 10 lines of samples
     if len(data) < 10:
         raise ValueError
+    # Numbers only (no text, nan or inf)
+    if not all(is_finite_number(value) for row in data for value in row):
+        raise ValueError
     return data
 
 
@@ -165,7 +220,11 @@ def valid_delta_raw(dataset: list[Any], final: float, column: int) -> bool:
 
 # Value type validate
 def valid_value_type(value: Any, default: Any) -> Any:
-    """Validate if value is same type as default, return default value if False"""
+    """Validate if value is same type as default (int accepted as float), return default value if False"""
+    if isinstance(default, float):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return default
     if isinstance(value, type(default)):
         return value
     return default

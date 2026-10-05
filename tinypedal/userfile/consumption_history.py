@@ -28,7 +28,7 @@ from collections.abc import Sequence
 
 from ..const_file import FileExt
 from ..module_info import ConsumptionDataSet
-from ..validator import dict_value_type, invalid_save_name
+from ..validator import dict_value_type, invalid_save_name, is_finite_number
 from . import atomic_write
 
 logger = logging.getLogger(__name__)
@@ -46,24 +46,30 @@ def load_consumption_history_file(
                 ConsumptionDataSet(**dict_value_type(data, default_data))
                 for data in data_reader
             )
-            if not dataset:
-                raise ValueError
+        # Numbers only (no nan or inf), invalid line left out
+        dataset = tuple(data for data in dataset if all(map(is_finite_number, data)))
+        if not dataset:
+            raise ValueError
         return dataset
     except FileNotFoundError:
         logger.info("MISSING: consumption history (%s) data", extension)
-    except (IndexError, KeyError, ValueError, TypeError, OSError):
+    except (IndexError, KeyError, ValueError, TypeError, OSError, csv.Error):
         logger.info("MISSING: invalid consumption history (%s) data", extension)
     return (ConsumptionDataSet(),)
 
 
 def save_consumption_history_file(
     dataset: Sequence, filepath: str, filename: str, extension: str = FileExt.CONSUMPTION
-) -> None:
-    """Save fuel/energy consumption history file (*.consumption)"""
+) -> bool:
+    """Save fuel/energy consumption history file (*.consumption), returns True if written (error logged)"""
     if len(dataset) < 2 or invalid_save_name(filename):
-        return
-    with atomic_write(f"{filepath}{filename}{extension}", newline="") as csvfile:
-        data_writer = csv.writer(csvfile, quoting=csv.QUOTE_NONNUMERIC)
-        data_writer.writerow(ConsumptionDataSet._fields)  # write field name as column header
-        data_writer.writerows(dataset)
-        logger.info("USERDATA: %s%s saved", filename, extension)
+        return False
+    try:
+        with atomic_write(f"{filepath}{filename}{extension}", newline="", raise_error=True) as csvfile:
+            data_writer = csv.writer(csvfile, quoting=csv.QUOTE_NONNUMERIC)
+            data_writer.writerow(ConsumptionDataSet._fields)  # write field name as column header
+            data_writer.writerows(dataset)
+    except OSError:  # logged by atomic_write
+        return False
+    logger.info("USERDATA: %s%s saved", filename, extension)
+    return True

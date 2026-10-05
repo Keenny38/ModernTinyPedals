@@ -4,7 +4,7 @@ import QtQuick
 // (zoom in log scale, point under mouse kept under mouse: wheel steps blend into one smooth move).
 // Content items use canvas.matrix (GpuShape transform) or screenX/screenY (labels, markers).
 // Wheel: zoom at cursor, drag: move, double-click: whole map, click: clicked(world x, y),
-// mouse over map: hovered(world x, y), then hoverEnded() when mouse leaves.
+// mouse over map: hovered(world x, y), then hoverEnded() when mouse leaves. Keys (handleKey): + / - zoom, arrows move.
 Item {
     id: canvas
     clip: true
@@ -26,6 +26,7 @@ Item {
     property var anchor: null  // zoom at mouse: {px, py, x, y} world point kept at screen point while easing
     property bool zoomFollows: false  // view moved by a follower (followed vehicles): wheel only sets zoom wanted
     property bool showControls: true
+    property bool feet: false  // scale bar in feet & miles (user distance unit), else meters & km
     property bool interactive: true
     property int clickModifiers: 0  // keyboard modifiers of last click
     default property alias content: layer.data
@@ -125,6 +126,19 @@ Item {
                      {px: px, py: py, x: x, y: y})
     }
     function reset(animated) { setView(1, 0, 0, animated) }
+    // Keyboard: + / - zoom at view center, arrows move zoomed view by a sixth of it. Returns true if key was used
+    function handleKey(key) {
+        if (!hasBounds) return false
+        if (key === Qt.Key_Plus || key === Qt.Key_Equal) { zoomAt(1.5, width / 2, height / 2); return true }
+        if (key === Qt.Key_Minus || key === Qt.Key_Underscore) { zoomAt(1 / 1.5, width / 2, height / 2); return true }
+        var move = Math.min(width, height) / 6
+        var dx = key === Qt.Key_Left ? move : key === Qt.Key_Right ? -move : 0
+        var dy = key === Qt.Key_Up ? move : key === Qt.Key_Down ? -move : 0
+        if ((dx === 0 && dy === 0) || targetZoom <= 1.001) return false  // whole map shown: nothing to move
+        setView(targetZoom, targetPanX + dx, targetPanY + dy, true)
+        userMoved()
+        return true
+    }
     // Center view on world point at zoom, at once (followed vehicle)
     function centerOn(x, y, nextZoom) {
         var next = Math.max(1, Math.min(nextZoom, maxZoom))
@@ -191,18 +205,22 @@ Item {
         anchors.fill: parent
     }
 
-    // Scale bar: round length about a sixth of view width
+    // Scale bar: round length about a sixth of view width, in user distance unit (meters & km, feet & miles)
     Item {
         id: scaleBar
         visible: canvas.showControls && canvas.hasBounds
-        readonly property real meters: {
-            var raw = canvas.width / 6 * canvas.metersPerPixel
+        readonly property real unitMeters: canvas.feet ? 0.3048 : 1  // meters of one foot or meter
+        readonly property real value: {  // bar length in feet or meters, miles from half a mile
+            var raw = canvas.width / 6 * canvas.metersPerPixel / unitMeters
+            var unit = canvas.feet && raw >= 2640 ? 5280 : 1
+            raw = raw / unit
             var magnitude = Math.pow(10, Math.floor(Math.log(Math.max(raw, 1e-6)) / Math.LN10))
             var steps = [1, 2, 5, 10]
             for (var i = 0; i < steps.length; i++)
-                if (raw <= steps[i] * magnitude) return steps[i] * magnitude
-            return 10 * magnitude
+                if (raw <= steps[i] * magnitude) return steps[i] * magnitude * unit
+            return 10 * magnitude * unit
         }
+        readonly property real meters: value * unitMeters
         anchors { right: parent.right; bottom: parent.bottom; margins: theme.em * 0.6 }
         width: meters * canvas.mapScale
         height: theme.em * 1.4
@@ -213,7 +231,8 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 4
-            text: scaleBar.meters >= 1000 ? (scaleBar.meters / 1000) + " km" : scaleBar.meters + " m"
+            text: (canvas.feet ? (scaleBar.value >= 2640 ? (scaleBar.value / 5280) + " mi" : scaleBar.value + " ft")
+                   : (scaleBar.value >= 1000 ? (scaleBar.value / 1000) + " km" : scaleBar.value + " m")).replace(".", theme.decimalPoint)
             color: theme.dimText
             font.pointSize: theme.fontPoint * 0.8
         }

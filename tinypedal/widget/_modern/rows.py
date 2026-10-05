@@ -27,13 +27,18 @@ from functools import lru_cache
 from PySide6.QtGui import QColor
 
 from ... import calculation as calc
+from ... import units
 from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...formatter import random_color_class, shorten_driver_name
+from ...i18n import tr_overlay as tr
 from ...userfile.heatmap import select_compound_color, select_compound_symbol
 from .base import DASH
 from .draw import readable_on
 from .table import BADGE, COMPOUND, PILL, TEXT, Cell
 from .theme import Theme
+
+PIT_STATUS = ("FIN", "PIT", "GAR", "SLOW")  # pit status pill texts (English, translated)
+PIT_STATUS_OPTIONS = ("finish_status_text", "pit_status_text", "garage_status_text", "yellow_flag_status_text")
 
 
 @lru_cache(maxsize=256)
@@ -59,26 +64,39 @@ def laptime_text(laptime: float, valid: bool = True) -> str:
     return TEXT_NOLAPTIME
 
 
-def compound_cell(names: tuple[str, ...]) -> Cell:
-    """Tyre compounds: one square per distinct compound, front first"""
-    compounds = []
-    for name in names:
-        item = (select_compound_symbol(name), _qcolor(select_compound_color(name)))
-        if item not in compounds:
-            compounds.append(item)
-    return Cell(COMPOUND, extra=tuple(compounds[:2]))
+def _compound(name: str) -> tuple[str, QColor]:
+    """Compound symbol & color (compound presets may be edited: not cached)"""
+    return select_compound_symbol(name), _qcolor(select_compound_color(name))
 
 
-def pit_cell(theme: Theme, in_pit: int, is_yellow: bool, is_finished: bool) -> Cell:
-    """Pit lane, garage, stopped on track (yellow), finished"""
+def compound_cell(names: tuple[str, ...], per_wheel: bool = True) -> Cell:
+    """Tyre compounds (front left, front right, rear left, rear right): one square if same on
+    every wheel, front & rear, or every wheel (per_wheel) when left & right of an axle differ"""
+    items = tuple(map(_compound, names))
+    if not items:
+        return Cell(COMPOUND, extra=())
+    if per_wheel and len(items) >= 4 and (items[0] != items[1] or items[2] != items[3]):
+        return Cell(COMPOUND, extra=items[:4])
+    front, rear = items[0], items[2] if len(items) >= 3 else items[-1]
+    return Cell(COMPOUND, extra=(front,) if front == rear else (front, rear))
+
+
+def pit_cell(theme: Theme, in_pit: int, is_yellow: bool, is_finished: bool,
+             texts: tuple[str, ...] | None = None) -> Cell:
+    """Pit lane, garage, stopped on track (yellow), finished
+
+    Args:
+        texts: finish, pit, garage, slow texts (default: translated design labels).
+    """
+    finish, pit, garage, slow = texts or tuple(map(tr, PIT_STATUS))
     if is_finished:
-        return Cell(PILL, "FIN", color=readable_on(theme.text), fill=theme.text)
+        return Cell(PILL, finish, color=readable_on(theme.text), fill=theme.text)
     if in_pit == 1:
-        return Cell(PILL, "PIT", color=readable_on(theme.accent), fill=theme.accent)
+        return Cell(PILL, pit, color=readable_on(theme.accent), fill=theme.accent)
     if in_pit == 2:
-        return Cell(PILL, "GAR", color=theme.text, fill=theme.surface_strong)
+        return Cell(PILL, garage, color=theme.text, fill=theme.surface_strong)
     if is_yellow:
-        return Cell(PILL, "SLOW", color=readable_on(theme.caution), fill=theme.caution)
+        return Cell(PILL, slow, color=readable_on(theme.caution), fill=theme.caution)
     return Cell(PILL)
 
 
@@ -90,6 +108,11 @@ class RowStyle:
         self.wcfg = wcfg
         self.theme: Theme = widget.theme
         self.on_accent = readable_on(self.theme.accent)
+        # Custom status texts of classic options (FIN, PIT, GAR, SLOW labels while at default)
+        self.pit_texts = tuple(
+            widget.user_text(key, tr(label)) for key, label in zip(PIT_STATUS_OPTIONS, PIT_STATUS)
+        )
+        self.unit_speed = units.set_unit_speed(widget.cfg.units["speed_unit"])
 
     def class_width(self) -> float:
         """Class pill width: alias part & position part"""
@@ -126,7 +149,7 @@ class RowStyle:
         """Pit stops done, pit request, penalty"""
         theme = self.theme
         if count < 0:
-            return Cell(BADGE, "PEN", "label", readable_on(theme.best), theme.best)
+            return Cell(BADGE, tr("PEN"), "label", readable_on(theme.best), theme.best)
         if requested and self.wcfg.get("show_pit_request", True):
             return Cell(BADGE, f"{count}", "small", readable_on(theme.positive), theme.positive)
         if count == 0:
@@ -173,3 +196,21 @@ class RowStyle:
         text_done = f"{done:.0f}" if done > 0 else DASH
         text_est = f"{estimated // 1:.0f}" if estimated > 0 else DASH
         return Cell(TEXT, f"{text_done}/{text_est}", "dim", theme.text_dim)
+
+    def speed_trap_cell(self, speed: float) -> Cell:
+        """Speed trap (fastest speed at speed trap line) in speed unit"""
+        theme = self.theme
+        if not speed > 0:
+            return Cell(TEXT, DASH, "dim", theme.text_faint)
+        return Cell(TEXT, f"{self.unit_speed(speed):.1f}", "dim", theme.text_dim)
+
+    def lift_and_coast_cell(self, elapsed: float, idling: float) -> Cell:
+        """Lift and coast time of current braking zone (reset after idling)"""
+        theme = self.theme
+        wcfg = self.wcfg
+        if idling > wcfg.get("lift_and_coast_reset_threshold", 60) or not elapsed > 0:
+            return Cell(TEXT, DASH, "dim", theme.text_faint)
+        elapsed = min(elapsed, 99)
+        text = f"{elapsed:.1f}s" if elapsed < 9.94 else f"{elapsed:.0f}s"
+        high = elapsed > wcfg.get("lift_and_coast_highlight_threshold", 1)
+        return Cell(TEXT, text, "dim", theme.warning if high else theme.text_dim)

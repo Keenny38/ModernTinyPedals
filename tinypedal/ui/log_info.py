@@ -26,14 +26,15 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
+    QMessageBox,
     QTextBrowser,
     QVBoxLayout,
 )
 
 from ..const_file import FileFilter
-from ..i18n import tr
+from ..i18n import tr, trm
 from ..main import log_stream
-from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog
+from ._common import BaseDialog, CompactButton, UIScaler, singleton_dialog, translate_filter
 from .toast import show_toast
 
 
@@ -48,7 +49,7 @@ class LogInfo(BaseDialog):
         self._update_timer = QBasicTimer()
         # Timer is not unregistered if widget is deleted by parent while Python object lives on
         self.destroyed.connect(self._update_timer.stop)
-        self.last_position = -1
+        self.last_text = ""  # log shown, see timerEvent
 
         # Text view
         self.log_view = QTextBrowser(self)
@@ -97,9 +98,7 @@ class LogInfo(BaseDialog):
         """Refresh log"""
         if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
             return
-        position = log_stream.tell()
-        if self.last_position != position:
-            self.last_position = position
+        if self.last_text != log_stream.getvalue():
             self.refresh_log()
 
     def toggle_auto_refresh(self, checked: bool):
@@ -113,7 +112,8 @@ class LogInfo(BaseDialog):
 
     def refresh_log(self):
         """Refresh log"""
-        self.log_view.setText(log_stream.getvalue())
+        self.last_text = log_stream.getvalue()
+        self.log_view.setPlainText(self.last_text)
         self.log_view.moveCursor(QTextCursor.MoveOperation.End)
 
     def clear_log(self):
@@ -134,12 +134,13 @@ class LogInfo(BaseDialog):
         filename_full = QFileDialog.getSaveFileName(
             self,
             dir="log",
-            filter=";;".join((FileFilter.TXT, FileFilter.LOG, FileFilter.ALL)),
+            filter=translate_filter(";;".join((FileFilter.TXT, FileFilter.LOG, FileFilter.ALL))),
         )[0]
         if not filename_full:
             return
-        with open(filename_full, "w", newline="", encoding="utf-8") as log_file:
-            log_stream.seek(0)
-            log_file.writelines(log_stream)
-        # Set back to end
-        log_stream.seek(2)
+        # Copy of log text: log stream itself is never moved (new lines keep being appended)
+        try:
+            with open(filename_full, "w", newline="", encoding="utf-8") as log_file:
+                log_file.write(log_stream.getvalue())
+        except OSError as error:
+            QMessageBox.warning(self, tr("Error"), trm(f"Unable to save log: {error}"))

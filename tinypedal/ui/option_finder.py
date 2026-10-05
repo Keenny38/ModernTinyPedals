@@ -35,6 +35,7 @@ from ..module_control import mctrl, wctrl
 from ..setting import cfg
 from ..widget._modern import design_option_keys
 from ._common import BaseDialog, UIScaler, singleton_dialog
+from .config import HIDDEN_OPTIONS
 
 MAX_RESULTS = 200
 # Global config sections edited from other places (API menu, tool dialogs)
@@ -72,6 +73,8 @@ def build_index() -> list[OptionEntry]:
             keys = list(options)
             if section_type == ConfigType.WIDGET:  # options shown by current design only
                 keys = design_option_keys(cfg, section, keys)
+            elif section_type == ConfigType.CONFIG:  # kept up to date by app, not shown in config dialog
+                keys = [key for key in keys if key not in HIDDEN_OPTIONS.get(section, ())]
             for key in keys:
                 entries.append(OptionEntry(section, key, section_type, f"{section_text} {search_text(key)}"))
     return entries
@@ -102,9 +105,13 @@ def open_option(parent, entry: OptionEntry):
         default_setting=default_setting,
         reload_func=reload_function(entry),
     )
-    dialog.edit_search.setText(entry.key)
     dialog.open()
-    return dialog
+    # Same config already open as page: that page is shown & filtered (new copy is deleted)
+    shown = dialog.shown_dialog() if isinstance(dialog, BaseDialog) else dialog
+    search = getattr(shown, "edit_search", None)
+    if search is not None:
+        search.setText(entry.key)
+    return shown
 
 
 def reload_function(entry: OptionEntry):

@@ -442,3 +442,39 @@ Suite (01/10/2026) :
 - Unités vérifiées en rejouant un enregistrement LMU réel : usure des pneus en fraction restante, rotation des roues négative en marche avant (valeur absolue utilisée), hauteur de caisse et débattement en mm, freins en °C. La distance du tour est négative dans la voie des stands avant la ligne, sans effet sur le découpage des tours.
 - MoTeC : un vrai fichier `.ld` place l'unité dans le champ documenté comme « nom court ». L'unité est maintenant écrite dans les deux champs.
 - Visionneuse : échelle du delta robuste aux tours aberrants, légende des tours sur les courbes. Rendu avec les vraies polices : boutons tronqués, libellés coupés à gauche, colonne Temps tronquée et rapport affiché « 2.00 » corrigés.
+
+---
+
+## I. Audit complet (05/10/2026)
+
+Méthode : ruff (règles du projet et règles étendues), mypy, suite de tests (1 573 tests, 83 % de couverture au départ), lancement de l'app sur un profil vierge, relecture de chaque zone par un agent (données du jeu, calculs et réglages, overlays, interface, visionneuses Qt Quick, build et documentation), puis rendu des 79 overlays dans les deux designs avec des données extrêmes (0 à 128 voitures, NaN, unités impériales, combinaisons d'options au hasard). Chaque correction a son test de non-régression ; après corrections : 1 957 tests, 90 % de couverture.
+
+### Bugs corrigés (prioritaires)
+- 🔴 Stratégie en course : la clé de session contenait le temps écoulé, le compteur d'arrêts et le suivi des rivaux repartaient à zéro chaque seconde (`race_live.py`). Règle « même session » centralisée (`validator.session_token` / `is_same_session`).
+- 🔴 L'app ne démarrait plus si la mémoire partagée du jeu existait déjà avec une taille plus petite (ancien plugin rF2, autre outil) : erreur interceptée, état « non connecté » et message.
+- 🔴 Plugins : installation depuis un ZIP pouvant écrire hors du dossier (nom `D:xxx.py`), et `.pyc` livré exécuté à la place du code relu. Chemins vérifiés, code exécuté depuis les octets vérifiés.
+- 🔴 Fermer la fenêtre puis « Annuler » détruisait quand même la fenêtre (app sans interface) ; modifications d'une page de config perdues au changement de preset.
+- 🔴 Race plan moderne : arrêt suivant affiché au lieu de l'arrêt en cours au stand.
+- 🔴 Visionneuse : delta et tour idéal faussés (jusqu'à 0,19 s / 0,4 s) par les extrémités du tour coupées ; fichier `.csv.gz` corrompu rechargé en boucle.
+- 🔴 `install.sh` exigeait un `.gitmodules` disparu ; mise à jour automatique lancée depuis la version ZIP portable.
+
+### Autres corrections
+- Rejeux : pause masquant les overlays, structure de données vérifiée (format 2 avec CRC par image, fichiers endommagés lus jusqu'à la partie saine), rotation qui supprimait les extraits sauvegardés, export en arrière-plan, tour en attente sauvegardé à la fermeture.
+- Données LMU : tâches REST relancées après une réponse vide, entier JSON accepté pour un décimal, connexions réutilisées, adresse du jeu en cache, état des connecteurs dans le moniteur de performance (onglet « Données du jeu »).
+- Calculs : « +664 tours » au tour 1, relais compté depuis l'arrêt prévu, notes de pilotage près de la ligne, bilan batterie après un arrêt, carburant négatif, format 599,6 s → « 00:09:00 ».
+- Fichiers : presets et `config.json` écrits de façon atomique avec `fsync`, CSV abîmés, sauvegardes horodatées, données des modules enregistrées à leur arrêt.
+- Interface : redémarrage sans demande, fenêtre ouverte par-dessus le jeu pour une mise à jour, journal corrompu après « Enregistrer », éditeurs (doublons, couleurs invalides, erreurs d'écriture), unité dans les codes de partage, contraste du thème clair, navigation au clavier, signature de l'installeur vérifiée.
+- Overlays : deltabest_extended qui plantait, heatmaps modernes jamais rafraîchies, tailles à l'échelle ×2, textes tronqués (test qui échoue si un texte dépasse), maxima du moteur et des pédales, °F, libellés traduits, performances (LRU, caches, historique des tours).
+- Sécurité : tableau de bord web (longueur négative, expiration des sessions), flux WebSocket refusant l'origine `null`, caches de la visionneuse sans `pickle`, JSON non fini refusé.
+- Build et CI : test de démarrage de l'exe avant publication (`--self-test`), versions figées, droits et secrets limités, actions épinglées, délais maximum, comparaison visuelle sur tout le push, hash du setup.exe, version réelle quand l'app tourne depuis les sources, licences tierces complétées, `NOTICE.md`, `CONTRIBUTING.md` du fork.
+
+### Ajouts et améliorations (suite de l'audit)
+- 7 nouveaux overlays : graphique de delta, tendance des écarts, aide en voie des stands, minuteur de relais, spotter, alertes de course, tendance des températures pneus.
+- Design moderne au niveau de l'ancien : race plan (recalcul en direct, menu des stands, conso cible), colonnes des classements, gommes par roue, textes personnalisés, ordre des lignes, couleurs des overlays redessinés.
+- Nouvelles données LMU dans l'API de lecture et les overlays : delta officiel, tour invalidé, écarts, crevaison, température idéale des pneus, limiteur, état de charge, position du box, drapeaux jaunes par secteur, vent, hauteurs de caisse, surchauffe, événements de session.
+- Stratégie : conso médiane hors neutralisation (option), tour du leader dans les tours restants, pilote de chaque relais, relais limités par les pneus, badge d'unité et copie de l'image du plan.
+- Visionneuse : valeurs ajustées à la partie visible par panneau, canaux calculés (formule vérifiée, jamais `eval`), alignement sur un freinage, CSV sur base de temps, zoom clavier, régularité par mini-secteur, tours d'un coéquipier, meilleur tour en conditions proches, différences de setup, rapport HTML / PDF. Statistiques : dégradation par gomme, régularité, export, comparaison avec un ami.
+- Interface : marqueur de modifications et `Ctrl+S`, validation pendant la saisie, corbeille des presets, `Ignorer cette version` et progression du téléchargement, démarrage sans échec (`--safe-mode`).
+- Tableau de bord web traduit, unités de l'utilisateur, énergie virtuelle. Python 3.10 abandonné (fin de vie), 3.11 minimum. Couverture minimale relevée à 88 %.
+
+Après l'ensemble : 2 188 tests, 91 % de couverture. Ce qui reste à vérifier en jeu est listé dans la [feuille de route](ROADMAP.md).

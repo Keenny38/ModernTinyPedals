@@ -242,3 +242,66 @@ def test_rename_preset_backups(folder):
         "other.json.bak",
     ])
     assert rename_preset_backups(f"{folder}missing/", "a", "b") == 0
+
+
+# Audit fixes: atomic saving, backups
+def test_save_never_leaves_truncated_file(folder, monkeypatch):
+    """Write failing half-way (full disk, power loss): previous file kept as is"""
+    write(folder, "config.json", json.dumps({"old": True}))
+
+    def fail_half_way(data, file, **kwargs):
+        file.write('{"new": ')
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(json_setting.json, "dump", fail_half_way)
+    json_setting.save_json_file({"new": True}, "config.json", folder)
+    assert read_json(folder, "config.json") == {"old": True}
+    assert sorted(os.listdir(folder)) == ["config.json"]  # no temporary file left
+
+
+def test_save_invalid_data_leaves_no_backup(folder):
+    write(folder, "data.json", json.dumps({"old": True}))
+    save_and_verify_json_file({"bad": object()}, "data.json", folder, max_attempts=3)
+    assert read_json(folder, "data.json") == {"old": True}
+    assert sorted(os.listdir(folder)) == ["data.json"]  # backup & temporary file removed
+
+
+def test_failed_backup_copy_removed(folder, monkeypatch):
+    write(folder, "data.json", json.dumps({"old": True}))
+    monkeypatch.setattr(json_setting.filecmp, "cmp", lambda *args, **kwargs: False)  # copy differs
+    assert not create_backup_file("data.json", folder, f"{FileExt.BACKUP}-1")
+    assert sorted(os.listdir(folder)) == ["data.json"]
+    write(folder, f"data.json{FileExt.BACKUP}", "{}")  # backup made before: kept
+    assert not create_backup_file("data.json", folder)
+    assert os.path.exists(f"{folder}data.json{FileExt.BACKUP}")
+
+
+def test_versioned_backup_interval_from_backup_time(folder):
+    """Backup gets its own time (not preset modified time), so interval counts from backup"""
+    write(folder, "data.json", "{}")
+    os.utime(f"{folder}data.json", (time.time() - 7200, time.time() - 7200))  # preset saved 2 hours ago
+    assert create_versioned_backup("data.json", folder, max_count=5, min_interval=600)
+    assert not create_versioned_backup("data.json", folder, max_count=5, min_interval=600)
+    assert len(backups(folder, "data.json")) == 1
+
+
+def test_versioned_backup_failed_copy_removed(folder, monkeypatch):
+    write(folder, "data.json", "{}")
+
+    def fail_copy(source, target):
+        with open(target, "w", encoding="utf-8") as file:
+            file.write("{")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(json_setting.shutil, "copyfile", fail_copy)
+    assert not create_versioned_backup("data.json", folder, max_count=5, min_interval=0)
+    assert sorted(os.listdir(folder)) == ["data.json"]
+
+
+def test_backups_follow_case_only_rename(folder, monkeypatch):
+    """Windows: "race.json" renamed "Race.json", backup name exists as same file but is renamed too"""
+    write(folder, f"race.json{FileExt.BACKUP}-1", "{}")
+    monkeypatch.setattr(json_setting.os.path, "exists", lambda path: True)  # case insensitive file system
+    monkeypatch.setattr(json_setting.os.path, "normcase", str.lower)
+    assert rename_preset_backups(folder, "race.json", "Race.json") == 1
+    assert os.listdir(folder) == [f"Race.json{FileExt.BACKUP}-1"]

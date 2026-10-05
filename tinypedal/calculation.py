@@ -412,14 +412,23 @@ def sec2hourminute(seconds: float) -> str:
     return f"{seconds // 3600:02.0f}:{seconds // 60 % 60:02.0f}"
 
 
+def round_seconds(seconds: float) -> int:
+    """Seconds rounded to whole seconds, 0 if invalid (inf or nan)"""
+    return round(seconds) if isfinite(seconds) else 0
+
+
 def sec2sessiontime(seconds: float) -> str:
-    """Session time (hour:min:sec)"""
-    return f"{seconds // 3600:02.0f}:{seconds // 60 % 60:02.0f}:{round(seconds) % 60:02.0f}"
+    """Session time (hour:min:sec), rounded to whole seconds"""
+    minutes, sec = divmod(round_seconds(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{sec:02d}"
 
 
 def sec2countdown(seconds: float) -> str:
-    """Countdown time (hour:min:sec)"""
-    return f"{seconds // 3600:01.0f}:{seconds // 60 % 60:02.0f}:{round(seconds) % 60:02.0f}"
+    """Countdown time (hour:min:sec), rounded to whole seconds"""
+    minutes, sec = divmod(round_seconds(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:01d}:{minutes:02d}:{sec:02d}"
 
 
 def sec2laptime(seconds: float) -> str:
@@ -763,7 +772,9 @@ def end_stint_pit_counts(fuel_needed: float, capacity_total: float) -> float:
 
 
 def end_lap_pit_counts(fuel_needed: float, capacity_empty: float, capacity_total: float) -> float:
-    """Estimate end-lap pit stop counts"""
+    """Estimate end-lap pit stop counts, 0 if no fuel needed"""
+    if fuel_needed <= 0:
+        return 0.0
     if capacity_empty < 0:
         capacity_empty = 0
     # Amount fuel can be added without exceeding capacity
@@ -795,9 +806,9 @@ def fuel_to_energy_ratio(fuel: float, energy: float) -> float:
 
 # Wear
 def wear_lifespan_in_laps(remaining: float, wear_last_lap: float) -> float:
-    """Wear lifespan in laps = remaining / last lap wear"""
+    """Wear lifespan in laps = remaining / last lap wear (remaining below 0 counted as 0)"""
     if wear_last_lap > 0:
-        est_laps = remaining / wear_last_lap
+        est_laps = max(remaining, 0) / wear_last_lap
     else:
         est_laps = 999
     if est_laps > 999:
@@ -806,11 +817,11 @@ def wear_lifespan_in_laps(remaining: float, wear_last_lap: float) -> float:
 
 
 def wear_lifespan_in_mins(remaining: float, wear_last_lap: float, laptime: float) -> float:
-    """Wear lifespan in minutes = remaining / last lap wear * laptime / 60"""
+    """Wear lifespan in minutes = remaining / last lap wear * laptime / 60 (remaining below 0 counted as 0)"""
     if laptime <= 0:
         return 999
     if wear_last_lap > 0:
-        est_mins = remaining / wear_last_lap * laptime / 60
+        est_mins = max(remaining, 0) / wear_last_lap * laptime / 60
     else:
         est_mins = 999
     if est_mins > 999:

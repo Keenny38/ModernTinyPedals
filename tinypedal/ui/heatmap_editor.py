@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..const_file import ConfigType
 from ..i18n import tr, trm
 from ..setting import cfg, copy_setting
+from ..validator import is_hex_color
 from ._common import (
     QVAL_COLOR,
     QVAL_HEATMAP,
@@ -75,7 +76,7 @@ class HeatmapEditor(BaseEditor):
         # Heatmap list box
         self.table_heatmap = QTableWidget(self)
         self.table_heatmap.setColumnCount(len(HEADER_HEATMAP))
-        self.table_heatmap.setHorizontalHeaderLabels(HEADER_HEATMAP)
+        self.table_heatmap.setHorizontalHeaderLabels([tr(name) for name in HEADER_HEATMAP])
         self.table_heatmap.verticalHeader().setVisible(False)
         self.table_heatmap.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table_heatmap.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -181,8 +182,8 @@ class HeatmapEditor(BaseEditor):
         color_edit = ColorEdit(self, key)
         color_edit.setMaxLength(9)
         color_edit.setValidator(QVAL_COLOR)
+        color_edit.setText(key)  # load selected option, not a change
         color_edit.textChanged.connect(self.set_modified)
-        color_edit.setText(key)  # load selected option
         return color_edit
 
     def add_temperature_entry(self, row_index: int, temperature: float, color: str):
@@ -193,12 +194,16 @@ class HeatmapEditor(BaseEditor):
 
     def open_create_dialog(self):
         """Create heatmap preset"""
-        _dialog = CreateHeatmapPreset(self, "Create Heatmap Preset")
+        if not self.verify_table():  # selected preset is applied before switching to new one
+            return
+        _dialog = CreateHeatmapPreset(self, tr("Create Heatmap Preset"))
         _dialog.open()
 
     def open_copy_dialog(self):
         """Copy heatmap preset"""
-        _dialog = CreateHeatmapPreset(self, "Duplicate Heatmap Preset", "duplicate")
+        if not self.verify_table():
+            return
+        _dialog = CreateHeatmapPreset(self, tr("Duplicate Heatmap Preset"), "duplicate")
         _dialog.open()
 
     def open_offset_dialog(self):
@@ -275,16 +280,27 @@ class HeatmapEditor(BaseEditor):
 
     def sort_temperature(self):
         """Sort temperature"""
+        if self.sort_rows():
+            self.set_modified()
+
+    def sort_rows(self) -> bool:
+        """Sort rows by temperature, editor not marked modified, True if sorted"""
         if self.table_heatmap.rowCount() > 1:
             self._verify_enabled = False  # cells are empty while moving
             self.table_heatmap.sortItems(0)
             self._verify_enabled = True
-            self.set_modified()
+            return True
+        return False
 
     def select_heatmap(self):
         """Select heatmap list"""
         # Sort & apply previous preset first
         if self.selected_heatmap_dict:
+            if not self.verify_table():  # stay on previous preset until table is fixed
+                self.heatmap_list.blockSignals(True)
+                self.heatmap_list.setCurrentText(self.selected_heatmap_key)
+                self.heatmap_list.blockSignals(False)
+                return
             self.update_heatmap_temp()
         # Get newly selected preset name
         self.selected_heatmap_key = self.heatmap_list.currentText()
@@ -333,12 +349,39 @@ class HeatmapEditor(BaseEditor):
 
     def saving(self):
         """Save & close"""
-        self.save_heatmap()
-        self.accept()  # close
+        if self.save_heatmap():
+            self.accept()  # close
+
+    def verify_table(self) -> bool:
+        """Verify table before applying it to selected heatmap, warn if invalid
+
+        Temperatures are heatmap keys: a duplicated temperature would silently drop a row.
+        """
+        temperatures = set()
+        for index in range(self.table_heatmap.rowCount()):
+            temperature = f"{table_item(self.table_heatmap, index, 0, FloatTableItem).value():.1f}"
+            color_string = cast(ColorEdit, self.table_heatmap.cellWidget(index, 1)).text()
+            if temperature in temperatures:
+                msg_text = (
+                    f"Temperature <b>{temperature}</b> is listed more than once.<br><br>"
+                    "Each temperature can only be listed once, change or remove duplicate rows."
+                )
+            elif not is_hex_color(color_string):
+                msg_text = (
+                    f"Invalid color <b>{color_string}</b> for <b>{temperature} °C</b>.<br><br>"
+                    "Use #RGB, #RRGGBB or #AARRGGBB format."
+                )
+            else:
+                temperatures.add(temperature)
+                continue
+            self.table_heatmap.setCurrentCell(index, 0)  # show invalid row
+            QMessageBox.warning(self, tr("Error"), trm(msg_text))
+            return False
+        return True
 
     def update_heatmap_temp(self):
         """Update temporary changes to selected heatmap first"""
-        self.sort_temperature()
+        self.sort_rows()
         self.selected_heatmap_dict.clear()
         for index in range(self.table_heatmap.rowCount()):
             temperature = f"{table_item(self.table_heatmap, index, 0, FloatTableItem).value():.1f}"
@@ -347,13 +390,16 @@ class HeatmapEditor(BaseEditor):
         # Apply changes to heatmap preset dictionary
         self.heatmap_temp[self.selected_heatmap_key] = self.selected_heatmap_dict
 
-    def save_heatmap(self):
-        """Save heatmap"""
+    def save_heatmap(self) -> bool:
+        """Save heatmap, False if table is invalid (not saved)"""
+        if not self.verify_table():
+            return False
         self.update_heatmap_temp()
         cfg.user.heatmap = copy_setting(self.heatmap_temp)
         cfg.save(0, config_type=ConfigType.HEATMAP)
         self.set_unmodified()
         run_after_saving(self.reloading)
+        return True
 
 
 class CreateHeatmapPreset(BaseDialog):
@@ -393,7 +439,7 @@ class CreateHeatmapPreset(BaseDialog):
         entered_name = self.preset_entry.text()
         if not entered_name:
             QMessageBox.warning(self, tr("Error"), tr("Invalid preset name."))
-        elif entered_name in cfg.user.heatmap:
+        elif entered_name in self._parent.heatmap_temp:  # includes presets not saved yet
             QMessageBox.warning(self, tr("Error"), tr("Preset already exists."))
         else:
             self.__saving(entered_name)
@@ -402,11 +448,13 @@ class CreateHeatmapPreset(BaseDialog):
         """Saving new preset"""
         # Duplicate preset
         if self.edit_mode == "duplicate":
+            self._parent.update_heatmap_temp()  # include table changes not applied yet
             self._parent.heatmap_temp[entered_name] = self._parent.selected_heatmap_dict.copy()
         # Create new preset
         else:
             self._parent.heatmap_temp[entered_name] = {"-273.0": "#4444FF"}
         self._parent.heatmap_list.addItem(entered_name)
         self._parent.heatmap_list.setCurrentText(entered_name)
+        self._parent.set_modified()
         # Close window
         self.accept()

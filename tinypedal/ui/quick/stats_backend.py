@@ -26,7 +26,11 @@ lap times (userfile.lap_reference), personal best progression & sessions list (u
 
 Edits (delete track, remove vehicle, reset lap time, restore backup) are applied to stats file read again
 under STATS_LOCK (stats module saves meanwhile kept), after an automatic backup; undo merges stats
-recorded since. Stats & history files saved by stats module are reloaded at once (page shown).
+recorded since. Stats & history files saved by stats module are reloaded at once (page shown), history
+only when its file changed (stats file is saved every lap while driving).
+
+All Tracks also shows driving activity of each day (last weeks) & recent sessions. Table rows of the same
+track are moved & changed in place (sort, reload): delegates, scroll & animations kept.
 """
 
 from __future__ import annotations
@@ -34,17 +38,20 @@ from __future__ import annotations
 import copy
 import csv
 import logging
+import math
 import os
 import re
 import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from datetime import date, timedelta
 from statistics import median_low
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import (
     Property,
+    QDate,
     QDateTime,
     QFileSystemWatcher,
     QLocale,
@@ -97,8 +104,18 @@ from ...userfile.driver_stats import (
 from ...userfile.lap_reference import LEVEL_COLORS, LEVELS, LapReference, LapReferenceTable
 from ...userfile.sector_best import load_theoretical_best
 from .. import UIScaler
+from ..lap_viewer import number_text, signed
 from ..track_map_viewer import TrackMapViewer
 from .models import DictListModel
+from .stint_analysis import (
+    compare_friend,
+    history_document,
+    load_friend,
+    read_laps,
+    stint_report,
+    write_history_csv,
+    write_history_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +163,14 @@ COLORBLIND_LEVEL_COLORS = ("#CC79A7", "#0072B2", "#009E73", "#F0E442", "#E69F00"
 SESSION_NAMES = ("Test day", "Practice", "Qualifying", "Warmup", "Race")
 SESSION_FILTERS = ("All", "Practice", "Qualifying", "Race")
 FINISH_TEXTS = {2: "DNF", 3: "DQ"}  # race result codes, same in every language
+MAX_STINTS = 12  # stints & sessions listed with their consistency, newest first
+ACTIVITY_WEEKS = 53  # weeks of daily driving activity (All Tracks), page shows the last ones that fit
+ACTIVITY_STEPS = (1800, 3600, 7200)  # driving time (seconds) of activity levels 1 to 4 (above last)
+RECENT_SESSIONS = 8  # latest sessions of every track (All Tracks)
+HISTORY_COLUMNS = (  # session history CSV export
+    "Date", "Track", "Vehicle", "Class", "Session", "Best Lap (s)", "Valid Laps", "Invalid Laps", "Distance (m)",
+    "Driving Time (s)", "Position", "Finish",
+)
 
 
 # Formatting
@@ -181,8 +206,29 @@ def format_date(timestamp: float) -> str:
     """Short date in language format (24/10/2025 in French), "-" if none"""
     if timestamp <= 0:
         return "-"
-    date = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
-    return date_locale().toString(date, QLocale.FormatType.ShortFormat)
+    day = QDateTime.fromSecsSinceEpoch(int(timestamp)).date()
+    return date_locale().toString(day, QLocale.FormatType.ShortFormat)
+
+
+def format_day(day: date) -> str:
+    """Short date of a calendar day in language format"""
+    return date_locale().toString(QDate(day.year, day.month, day.day), QLocale.FormatType.ShortFormat)
+
+
+def session_kind(session: int) -> int:
+    """Session filter (SESSION_FILTERS index) a session belongs to: 1 practice, 2 qualifying, 3 race, 0 unknown"""
+    return next((group for group in range(1, len(SESSION_GROUPS)) if session in SESSION_GROUPS[group]), 0)
+
+
+def session_name(session: int) -> str:
+    return tr(SESSION_NAMES[session]) if 0 <= session < len(SESSION_NAMES) else ""
+
+
+def race_result(record: SessionRecord) -> str:
+    """Finish position (P3), DNF or DQ, empty if no result"""
+    if record.finish == 1 and record.position > 0:
+        return f"P{record.position}"
+    return FINISH_TEXTS.get(record.finish, "")
 
 
 def parse_display_value(key: str, value: float) -> str | float:
@@ -293,6 +339,18 @@ def format_derived(key: str, value: float | None) -> str:
     return f"{value:.1f}"
 
 
+def chart_ticks(low: float, high: float, wanted: int = 4) -> list[float]:
+    """Round lap times between low & high for chart grid lines (0.1 s to 10 s steps, about wanted lines)"""
+    span = high - low
+    if span <= 0:
+        return []
+    step = next((step for step in (0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 5.0, 10.0) if span / step <= wanted),
+                10.0 * math.ceil(span / wanted / 10.0))
+    first = math.ceil(low / step - 1e-9) * step
+    count = int((high - first) / step + 1e-9) + 1
+    return [round(first + step * index, 3) for index in range(count) if low < first + step * index < high]
+
+
 def valid_laptime(value) -> float:
     """Lap time in seconds, 0 if none"""
     return value if isinstance(value, (int, float)) and 0 < value < MAX_SECONDS else 0.0
@@ -355,6 +413,7 @@ class Cell(NamedTuple):
     bold: bool = False
     tip: str = ""
     badge: str = ""  # level letter
+    pill: bool = False  # shown as a pill of its color (level)
 
 
 class StatsEdit(NamedTuple):
@@ -374,12 +433,18 @@ class DriverStatsBackend(QObject):
     """Driver stats viewer page state & actions"""
 
     tracksChanged = Signal()
-    statsChanged = Signal()
+    statsChanged = Signal()  # rows, key figures, levels, activity (track or stats changed)
+    sortChanged = Signal()  # sort column or order: rows moved, nothing else built again
+    columnsChanged = Signal()  # columns shown, their widths
     selectionChanged = Signal()
+    rowIndexChanged = Signal()  # place of selected row (selection changed or rows sorted)
     referenceChanged = Signal()
     editsChanged = Signal()
     optionsChanged = Signal()
+    lapsChanged = Signal()  # stints & consistency of selected vehicle (recorded laps read)
+    friendChanged = Signal()  # friend's stats compared (loaded, removed, own stats changed)
     reference_loaded = Signal(str, str)  # sheet CSV text (empty if failed), error
+    laps_loaded = Signal(str, object)  # recorded laps folder & vehicle, stints report
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -404,6 +469,7 @@ class DriverStatsBackend(QObject):
         self._edits_undo: list[StatsEdit] = []
         self._edits_redo: list[StatsEdit] = []
         self._file_times = (0.0, 0.0)
+        self._history_stamp: tuple[int, int] = (-1, -1)  # history file read: modified time (ns), size
         # Table
         self.table_header_key: list[str] = list(VEHICLE_COLUMNS)
         self._labels: dict[str, str] = {}
@@ -412,14 +478,29 @@ class DriverStatsBackend(QObject):
         self._sort = {"vehicles": ("pb", False), "tracks": ("track", False)}
         self._selected = {"vehicles": "", "tracks": ""}
         self.row_model = DictListModel(("key", "cells"), self)
+        self._published_track: str | None = None  # track of rows in model (rows of another one: model reset)
         # Selected vehicle
         self._tiles: list[dict] = []
+        self._track_info: dict = {}
         self._reference: dict = {}
         self._progression: dict = {}
         self._sessions: list[dict] = []
         self._session_filter = 0
+        self._has_laps = False
         self._tracks: list[dict] = []
+        # All Tracks: daily activity (computed once per history & day), latest sessions
+        self._activity: dict = {}
+        self._activity_key: tuple = ()
+        self._recent: list[dict] = []
         self.reference_loaded.connect(self.reference_downloaded)
+        # Stints & consistency of selected vehicle from recorded laps (read in background), friend's stats
+        self._stints: dict = {}
+        self._laps_key = ""  # recorded laps folder & vehicle shown in stints
+        self._lap_infos: dict[str, tuple[float, dict]] = {}  # lap path: file time, lap info (read once)
+        self.laps_loaded.connect(self.stints_loaded)
+        self._friend: dict | None = None
+        self._friend_view: dict = {"visible": False}
+        self.load_friend(str(self.viewer_config().get("friend_file", "")), quiet=True)
 
         # Stats & history files saved by stats module: reloaded
         self.watcher = QFileSystemWatcher(self)
@@ -429,11 +510,24 @@ class DriverStatsBackend(QObject):
         self.watch_timer.setSingleShot(True)
         self.watch_timer.setInterval(WATCH_DELAY)
         self.watch_timer.timeout.connect(self.reload_if_changed)
+        # Level colors depend on light or dark theme: table, tiles & charts colored again when theme changes
+        self._backups: list[dict] | None = None  # automatic backups (listed again once one is made)
+        self._palette_connected = False
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.paletteChanged.connect(self.palette_changed)
+            self._palette_connected = True
 
         self.load_reference()
         self.reload_stats()
         self.watch_files()
         self.download_reference()
+
+    @Slot()
+    def palette_changed(self, *_args):
+        """Light / dark theme switched: level colors (darker on light theme) computed again"""
+        if self._loaded:
+            self.refresh_table()
 
     # Setting
     def viewer_config(self) -> dict:
@@ -481,12 +575,17 @@ class DriverStatsBackend(QObject):
         self.referenceChanged.emit()
 
         def download():
+            text, error = "", "download failed"
             try:
                 text, error = lap_reference.fetch_sheet(url), ""
             except (OSError, ValueError) as exc:
                 text, error = "", str(exc)
-            with suppress(RuntimeError):  # page closed meanwhile
-                self.reference_loaded.emit(text, error)
+            except Exception as exc:  # cut off response (IncompleteRead), bad CSV...: never left downloading
+                logger.exception("STATS: lap time reference download failed")
+                text, error = "", str(exc) or type(exc).__name__
+            finally:
+                with suppress(RuntimeError):  # page closed meanwhile
+                    self.reference_loaded.emit(text, error)
 
         threading.Thread(target=download, daemon=True, name="Lap reference download").start()
 
@@ -574,6 +673,15 @@ class DriverStatsBackend(QObject):
                 times.append(0.0)
         return times[0], times[1]
 
+    @staticmethod
+    def history_stamp() -> tuple[int, int]:
+        """History file modified time (ns) & size, (0, 0) if none: file read again once changed"""
+        try:
+            stat = os.stat(history_path(cfg.path.config))
+        except OSError:
+            return 0, 0
+        return stat.st_mtime_ns, stat.st_size
+
     def watch_files(self):
         """Watch config folder & stats files (replaced file dropped by watcher: added again)"""
         paths = [os.path.normpath(path) for path in (
@@ -606,11 +714,15 @@ class DriverStatsBackend(QObject):
         self._visible = False
 
     def release(self):
-        """Page closed: stop watching files"""
+        """Page closed: stop watching files & theme"""
         self.watch_timer.stop()
         paths = self.watcher.files() + self.watcher.directories()
         if paths:
             self.watcher.removePaths(paths)
+        if self._palette_connected:
+            self._palette_connected = False
+            with suppress(RuntimeError, TypeError):
+                QApplication.instance().paletteChanged.disconnect(self.palette_changed)  # type: ignore[union-attr]
 
     @Slot()
     def reload(self):
@@ -624,16 +736,20 @@ class DriverStatsBackend(QObject):
         """
         with STATS_LOCK:
             stats_user = load_stats_json_file(filepath=cfg.path.config)
-            self.history = load_history(cfg.path.config)
+            stamp = self.history_stamp()
+            if stamp != self._history_stamp:  # stats saved every lap, history at end of each stint only
+                self.history = load_history(cfg.path.config)
+                self._history_stamp = self.history_stamp()  # file rewritten if over limit
+                self.history_index = index_history(self.history)
+                self.classes = vehicle_classes(self.history)
+                self.vehicle_last_driven = last_driven(self.history)
+                self.track_last_driven = track_last_driven(self.history)
         self._file_times = self.file_times()
         if stats_user is None:  # invalid file: stats shown kept
             self.refresh_table()
             return
         self.stats_temp = validate_stats_file(stats_user)
-        self.history_index = index_history(self.history)
-        self.classes = vehicle_classes(self.history)
-        self.vehicle_last_driven = last_driven(self.history)
-        self.track_last_driven = track_last_driven(self.history)
+        self._laps_key = ""  # stints read again (laps recorded with new stats)
         if select is not None:
             wanted = select
         elif self._loaded:
@@ -733,13 +849,20 @@ class DriverStatsBackend(QObject):
         self._table = self.sorted_rows(rows)
         self.publish_table()
         self.refresh_tiles()
+        self._track_info = self.track_info()
+        if not self.selected_stats_key:
+            self._activity = self.activity_data()
+            self._recent = self.recent_sessions()
         selected = self._selected[self.mode]
         keys = [key for key, _ in self._table]
         if selected not in keys:
             self._selected[self.mode] = keys[0] if keys else ""
+        self.columnsChanged.emit()
+        self.sortChanged.emit()
         self.statsChanged.emit()
         self.editsChanged.emit()
         self.update_selection()
+        self.refresh_friend()  # rows of selected track
 
     def set_header(self, keys: list[str], labels: list[str]):
         self.table_header_key = keys
@@ -761,7 +884,7 @@ class DriverStatsBackend(QObject):
         cells["gap"] = Cell(f"{percent:.2f} %" if percent else "-", percent or None, round(percent, 3) if percent else None)
         level = reference.level(best) if reference else -1
         cells["level"] = Cell(level_text(level), level if level >= 0 else None, level_text(level) if level >= 0 else None,
-                              self.level_color(level), level >= 0)
+                              self.level_color(level), level >= 0, pill=level >= 0)
         cells["theory"] = Cell(str(parse_display_value("theory", theory)), theory or None, round(theory, 3) if theory else None)
         potential = best - theory if best and theory and best >= theory - 0.0005 else None
         cells["potential"] = Cell(f"{max(potential, 0.0):.3f}" if potential is not None else "-",
@@ -778,7 +901,7 @@ class DriverStatsBackend(QObject):
             if DriverStats.is_lap_time(key):
                 laptime = valid_laptime(value)
                 cells[key] = Cell(str(parse_display_value(key, laptime or MAX_SECONDS)), laptime or None,
-                                  round(laptime, 3) if laptime else None)
+                                  round(laptime, 3) if laptime else None, bold=key == "pb" and laptime > 0)
             else:
                 cells[key] = Cell(str(parse_display_value(key, value)), value, value)
         return cells
@@ -870,14 +993,15 @@ class DriverStatsBackend(QObject):
                                              and not key.startswith("class:"))
         self._sort[self.mode] = (key, descending)
         self._table = self.sorted_rows(self._table)
-        self.publish_table()
-        self.statsChanged.emit()
+        self.publish_rows()  # rows moved: columns & widths unchanged
+        self.sortChanged.emit()
+        self.rowIndexChanged.emit()  # same row, other place: reference & charts kept
 
-    @Property(str, notify=statsChanged)
+    @Property(str, notify=sortChanged)
     def sortKey(self) -> str:
         return self._sort[self.mode][0]
 
-    @Property(bool, notify=statsChanged)
+    @Property(bool, notify=sortChanged)
     def sortDescending(self) -> bool:
         return self._sort[self.mode][1]
 
@@ -899,49 +1023,71 @@ class DriverStatsBackend(QObject):
         return [key for key in self.table_header_key if key in FIXED_COLUMNS or key not in hidden]
 
     def publish_table(self):
-        """Visible columns (widths from contents, measured once) & rows to page"""
+        """Visible columns (widths from contents) & rows to page"""
+        self.publish_columns()
+        self.publish_rows()
+
+    def publish_columns(self):
+        """Visible columns: widths from contents (each text measured once), or set by user"""
         keys = self.visible_keys()
         font = QFont(QApplication.font())
         metrics = QFontMetricsF(font)
         font.setBold(True)
         bold = QFontMetricsF(font)
+        measured: dict[tuple[str, bool], float] = {}  # many cells share a text ("-", dates...)
+
+        def text_width(text: str, is_bold: bool) -> float:
+            width = measured.get((text, is_bold))
+            if width is None:
+                width = measured[(text, is_bold)] = (bold if is_bold else metrics).horizontalAdvance(text)
+            return width
+
         em = float(UIScaler.FONT_PIXEL_SCALED)  # theme.em of page
         user_widths = self.column_widths()
         columns = []
         for key in keys:
             label = self._labels.get(key, key)
-            width = bold.horizontalAdvance(label) * 1.05 + em * 2.0  # margins & sort arrow (StatsTable.qml)
+            width = text_width(label, True) * 1.05 + em * 2.0  # margins & sort arrow (StatsTable.qml)
             for _, cells in self._table:
                 cell = cells.get(key)
                 if cell is not None:
-                    text_width = (bold if cell.bold else metrics).horizontalAdvance(cell.text)
-                    width = max(width, text_width * 1.05 + em * (3.3 if cell.badge else 1.6))  # badge, margins
+                    margins = 3.3 if cell.badge else 2.4 if cell.pill else 1.6  # badge, pill & cell margins
+                    width = max(width, text_width(cell.text, cell.bold) * 1.05 + em * margins)
             if key in user_widths:
                 width = max(user_widths[key] * em, em * 2)
             tip = HEADER_TOOLTIPS.get(key, "")
             columns.append({"key": key, "label": label, "tip": tr(tip) if tip else "",
                             "width": round(width), "align": "left" if key in FIXED_COLUMNS else "center"})
         self._columns = columns
-        self.row_model.reset([
-            {"key": row_key, "cells": [self.cell_data(cells.get(key)) for key in keys]}
-            for row_key, cells in self._table
-        ])
+
+    def publish_rows(self):
+        """Rows to page: rows of another track rebuilt, else moved & changed in place (scroll & delegates kept)"""
+        keys = self.visible_keys()
+        rows = [{"key": row_key, "cells": [self.cell_data(cells.get(key)) for key in keys]}
+                for row_key, cells in self._table]
+        if self._published_track != self.selected_stats_key:
+            self._published_track = self.selected_stats_key
+            self.row_model.reset(rows)
+        else:
+            self.row_model.sync(rows)
 
     @staticmethod
     def cell_data(cell: Cell | None) -> dict:
+        """Cell of page: text, look, tooltip; unknown value dimmed"""
         if cell is None:
-            return {"text": "", "color": "", "bold": False, "tip": "", "badge": ""}
-        return {"text": cell.text, "color": cell.color, "bold": cell.bold, "tip": cell.tip, "badge": cell.badge}
+            return {"text": "", "color": "", "bold": False, "tip": "", "badge": "", "pill": False, "dim": False}
+        return {"text": cell.text, "color": cell.color, "bold": cell.bold, "tip": cell.tip, "badge": cell.badge,
+                "pill": cell.pill, "dim": cell.value is None and not cell.color}
 
     @Property(QObject, constant=True)
     def rows(self) -> QObject:
         return self.row_model
 
-    @Property(list, notify=statsChanged)
+    @Property(list, notify=columnsChanged)
     def columns(self) -> list[dict]:
         return self._columns
 
-    @Property(list, notify=statsChanged)
+    @Property(list, notify=columnsChanged)
     def columnMenu(self) -> list[dict]:
         """Columns of vehicle table that can be hidden (shared ones in All Tracks too)"""
         hidden = self.hidden_columns()
@@ -957,7 +1103,7 @@ class DriverStatsBackend(QObject):
             hidden.add(key)
         self.save_viewer_config(hidden_columns=",".join(key for key in VEHICLE_COLUMNS if key in hidden))
         self.publish_table()
-        self.statsChanged.emit()
+        self.columnsChanged.emit()
 
     @Slot(str, float)
     def setColumnWidth(self, key: str, width: float):
@@ -966,14 +1112,14 @@ class DriverStatsBackend(QObject):
         widths = self.column_widths()
         widths[key] = round(max(width, em * 2) / em, 2)
         self.save_viewer_config(column_widths=",".join(f"{name}:{value:g}" for name, value in widths.items()))
-        self.publish_table()
-        self.statsChanged.emit()
+        self.publish_columns()  # rows unchanged
+        self.columnsChanged.emit()
 
     @Slot()
     def resetColumnWidths(self):
         self.save_viewer_config(column_widths="")
-        self.publish_table()
-        self.statsChanged.emit()
+        self.publish_columns()
+        self.columnsChanged.emit()
 
     @Property(bool, notify=statsChanged)
     def hasRows(self) -> bool:
@@ -1028,16 +1174,21 @@ class DriverStatsBackend(QObject):
         races_detail = f"{plural(total('wins'), 'win', 'wins')} · {plural(total('podiums'), 'podium', 'podiums')}"
         tiles += [
             self.tile(tr("Distance"), f"{parse_display_value('meters', meters)} {tr(format_header_key('meters')).lower()}"
-                      if data else "-"),
-            self.tile(tr("Driving Time"), format_duration(total("seconds")) if data else "-"),
-            self.tile(tr("Valid Laps"), f"{valid:.0f}" if data else "-", laps_detail),
-            self.tile(tr("Races"), f"{total('races'):.0f}" if data else "-", races_detail if data else ""),
+                      if data else "-", glyph=""),  # car
+            self.tile(tr("Driving Time"), format_duration(total("seconds")) if data else "-", glyph=""),  # clock
+            self.tile(tr("Valid Laps"), f"{valid:.0f}" if data else "-", laps_detail, glyph="",  # check
+                      ratio=valid / laps if laps else -1.0),
+            self.tile(tr("Races"), f"{total('races'):.0f}" if data else "-", races_detail if data else "",
+                      glyph=""),  # flag
         ]
         self._tiles = tiles
 
     @staticmethod
-    def tile(title: str, value: str, detail: str = "", color: str = "", tip: str = "") -> dict:
-        return {"title": title, "value": value, "detail": detail, "color": color, "tip": tip}
+    def tile(title: str, value: str, detail: str = "", color: str = "", tip: str = "", glyph: str = "",
+             letter: str = "", ratio: float = -1.0) -> dict:
+        """Key figure: icon, title, value (color: level), detail line, level letter, ratio bar (-1: none)"""
+        return {"title": title, "value": value, "detail": detail, "color": color, "tip": tip, "glyph": glyph,
+                "letter": letter, "ratio": ratio}
 
     def track_tiles(self) -> list[dict]:
         """Best lap of track & its level"""
@@ -1047,7 +1198,8 @@ class DriverStatsBackend(QObject):
         tip_best = tr("Best personal best of the track, any vehicle")
         tip_level = tr("Level of best lap on community lap times")
         if not bests:
-            return [self.tile(tr("Best Lap"), "-", tip=tip_best), self.tile(tr("Level"), "-", tip=tip_level)]
+            return [self.tile(tr("Best Lap"), "-", tip=tip_best, glyph=""),  # stopwatch
+                    self.tile(tr("Level"), "-", tip=tip_level, glyph="")]  # star
         best, vehicle = min(bests)
         reference = self.reference_of(vehicle)
         level = reference.level(best) if reference else -1
@@ -1055,8 +1207,9 @@ class DriverStatsBackend(QObject):
             detail = f"{reference.percent(best):.2f} %"
         else:
             detail = tr("No reference for this track or class") if self.references.entries else ""
-        return [self.tile(tr("Best Lap"), calc.sec2laptime_full(best), vehicle, tip=tip_best),
-                self.tile(tr("Level"), level_text(level), detail, self.level_color(level), tip_level)]
+        return [self.tile(tr("Best Lap"), calc.sec2laptime_full(best), vehicle, tip=tip_best, glyph=""),
+                self.tile(tr("Level"), level_text(level), detail, self.level_color(level), tip_level, glyph="",
+                          letter=level_letter(level))]
 
     def career_tiles(self) -> list[dict]:
         """Tracks driven & most driven one, median level of best laps"""
@@ -1069,10 +1222,142 @@ class DriverStatsBackend(QObject):
         level = median_low(levels) if levels else -1
         level_detail = f"{tr('Median of')} {plural(len(levels), 'best lap', 'best laps')}" if levels else ""
         return [
-            self.tile(tr("Tracks"), str(len(tracks)) if tracks else "-", detail, tip=f"{tr('Tracks with stats')}\n{detail}"),
+            self.tile(tr("Tracks"), str(len(tracks)) if tracks else "-", detail, tip=f"{tr('Tracks with stats')}\n{detail}",
+                      glyph=""),  # map pin
             self.tile(tr("Level"), level_text(level), level_detail, self.level_color(level),
-                      tr("Median level of your best laps, all tracks & classes")),
+                      tr("Median level of your best laps, all tracks & classes"), glyph="",
+                      letter=level_letter(level)),
         ]
+
+    # Header line: vehicles, sessions & last driven date of track (All Tracks: tracks, sessions, first date)
+    def track_info(self) -> dict:
+        track = self.selected_stats_key
+        if track:
+            records = [record for record in self.history if record.track == track]
+            parts = [plural(len(self.selected_stats_dict), "vehicle", "vehicles")]
+            driven = self.track_last_driven.get(track, 0.0)
+        else:
+            records = [record for record in self.history if record.track in self.stats_temp]
+            count = len([key for key in self.stats_temp if key])
+            parts = [plural(count, "track", "tracks")] if count else []  # no stats: empty page says it
+            driven = 0.0
+        if records:
+            parts.append(plural(len(records), "session", "sessions"))
+            if track:
+                parts.append(f"{tr('last driven')} {format_date(driven)}")
+            else:
+                parts.append(f"{tr('since')} {format_date(records[0].time)}")
+        current = api.read.session.track_name() if api.read is not None else ""
+        return {"subtitle": " · ".join(parts), "live": bool(track) and track == current}
+
+    @Property(dict, notify=statsChanged)
+    def trackInfo(self) -> dict:
+        """Line under track name (subtitle), live: track of game session"""
+        return self._track_info
+
+    # Daily driving activity of last weeks, recent sessions (All Tracks)
+    def activity_data(self) -> dict:
+        """Driving time of each day of last ACTIVITY_WEEKS weeks (Monday first), month & day names, summary
+
+        Days: level (0 none, 1-4 driving time, -1 future), tooltip. Computed again only when history or day changes.
+        """
+        today = date.today()
+        key = (self._history_stamp, today, current_language())
+        if key == self._activity_key and self._activity:
+            return self._activity
+        start = today - timedelta(days=today.weekday() + (ACTIVITY_WEEKS - 1) * 7)
+        seconds: dict[date, float] = {}
+        sessions: dict[date, int] = {}
+        for record in reversed(self.history):  # oldest first: older records skipped at once
+            day = date.fromtimestamp(record.time)
+            if day < start:
+                break
+            seconds[day] = seconds.get(day, 0.0) + record.seconds
+            sessions[day] = sessions.get(day, 0) + 1
+        days = []
+        streak = longest = 0
+        for number in range(ACTIVITY_WEEKS * 7):
+            day = start + timedelta(days=number)
+            if day > today:
+                days.append({"level": -1, "tip": ""})
+                continue
+            count = sessions.get(day, 0)
+            driven = seconds.get(day, 0.0)
+            streak = streak + 1 if count else 0
+            longest = max(longest, streak)
+            level = 0 if not count else 1 + sum(driven >= step for step in ACTIVITY_STEPS)
+            detail = (f"{plural(count, 'session', 'sessions')} · {format_duration(driven)}" if count
+                      else tr("No driving"))
+            days.append({"level": level, "tip": f"{format_day(day)}\n{detail}"})
+        locale = date_locale()
+        months = []
+        for week in range(ACTIVITY_WEEKS):
+            first = start + timedelta(days=week * 7)
+            if week == 0 or first.month != (first - timedelta(days=7)).month:
+                months.append({"week": week, "text": locale.monthName(first.month, QLocale.FormatType.ShortFormat)})
+        driven_days = len(seconds)
+        if driven_days:
+            summary = " · ".join((
+                plural(driven_days, "day driven", "days driven"),
+                format_duration(sum(seconds.values())),
+                f"{tr('longest streak')} {plural(longest, 'day', 'days')}",
+            ))
+        else:
+            summary = tr("No session recorded yet: history starts with your next session.")
+        self._activity_key = key
+        return {"weeks": ACTIVITY_WEEKS, "days": days, "months": months, "summary": summary,
+                "dayNames": [locale.dayName(number, QLocale.FormatType.ShortFormat) for number in (1, 3, 5)]}
+
+    @Property(dict, notify=statsChanged)
+    def activity(self) -> dict:
+        """Daily driving activity (All Tracks): weeks, days (level, tip), months (week, text), summary"""
+        return self._activity
+
+    def recent_sessions(self) -> list[dict]:
+        """Latest sessions of tracks with stats, newest first"""
+        rows = []
+        for record in reversed(self.history):
+            vehicles = self.stats_temp.get(record.track)
+            if not isinstance(vehicles, dict) or record.vehicle not in vehicles:
+                continue  # removed since
+            data = vehicles[record.vehicle]
+            best = valid_laptime(data.get("pb", 0)) if isinstance(data, dict) else 0.0
+            laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
+            rows.append({
+                "track": record.track, "vehicle": record.vehicle, "date": format_date(record.time),
+                "session": session_name(record.session), "kind": session_kind(record.session),
+                "best": calc.sec2laptime_full(laptime) if laptime else "-",
+                "pb": bool(best and laptime and abs(laptime - best) < 0.0005), "result": race_result(record),
+                "podium": record.position if record.finish == 1 and 0 < record.position <= 3 else 0,
+            })
+            if len(rows) >= RECENT_SESSIONS:
+                break
+        return rows
+
+    @Property(list, notify=statsChanged)
+    def recent(self) -> list[dict]:
+        """Latest sessions (All Tracks): track, vehicle, date, session, kind, best lap, pb, result"""
+        return self._recent
+
+    @Slot(str, str)
+    def openSession(self, track: str, vehicle: str):
+        """Recent session clicked: its track shown, its vehicle selected"""
+        if track not in self.stats_temp:
+            return
+        self.selectTrack(track)
+        self.selectRow(vehicle)
+
+    @Slot()
+    def showAllTracks(self):
+        self.selectTrack(ALL_TRACKS)
+
+    @Slot()
+    def deleteSelected(self):
+        """Delete key: remove selected vehicle (All Tracks: delete selected track), after confirmation"""
+        if self.selected_stats_key:
+            self.removeVehicle()
+        elif self._selected["tracks"]:
+            self.deleteTrack(self._selected["tracks"])
 
     @Property(list, notify=statsChanged)
     def tiles(self) -> list[dict]:
@@ -1110,7 +1395,7 @@ class DriverStatsBackend(QObject):
         keys = self.row_keys()
         return keys.index(self._selected[self.mode]) if self._selected[self.mode] in keys else -1
 
-    @Property(int, notify=selectionChanged)
+    @Property(int, notify=rowIndexChanged)
     def selectedIndex(self) -> int:
         return self.selected_index()
 
@@ -1134,7 +1419,195 @@ class DriverStatsBackend(QObject):
     def update_selection(self):
         self._reference = self.reference_data()
         self._progression, self._sessions = self.history_data()
+        self._has_laps = bool(self.lap_folder())
         self.selectionChanged.emit()
+        self.rowIndexChanged.emit()
+        self.update_stints()
+
+    # Stints & consistency of selected vehicle: recorded laps of its track & class folder
+    def update_stints(self, background: bool = True):
+        """Recorded laps of selected vehicle read (in a thread if background): stint pace & degradation by tyre
+        compound, consistency of each session & of the track"""
+        vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
+        folder = self.lap_folder(vehicle) if vehicle else ""
+        key = f"{folder}|{vehicle}"
+        if not vehicle:
+            self._laps_key, self._stints = key, {}
+            self.lapsChanged.emit()
+            return
+        if not folder:
+            self._laps_key = key
+            self._stints = {"visible": True, "busy": False,
+                            "note": tr("No recorded lap for this vehicle class: enable the Recorder module, then drive a few laps.")}
+            self.lapsChanged.emit()
+            return
+        if key == self._laps_key and self._stints.get("visible"):
+            return  # same laps shown (reloaded when stats change: see refresh)
+        self._laps_key = key
+        self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps...")}
+        self.lapsChanged.emit()
+        path = os.path.join(cfg.path.telemetry, folder)
+        cache = self._lap_infos
+
+        def reading():
+            try:
+                report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), cache))
+            except Exception:  # unreadable folder: nothing shown, page goes on
+                logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
+                report = None
+            with suppress(RuntimeError):  # page closed meanwhile
+                self.laps_loaded.emit(key, report)
+
+        if background:
+            threading.Thread(target=reading, daemon=True, name="Driver stats laps").start()
+        else:
+            reading()
+
+    def stints_loaded(self, key: str, report):
+        """Recorded laps read: stints & consistency shown if still selected"""
+        if key != self._laps_key:
+            return
+        self._stints = self.stints_data(report) if isinstance(report, dict) else {
+            "visible": True, "busy": False, "note": tr("Unable to read recorded laps.")}
+        self.lapsChanged.emit()
+
+    def stints_data(self, report: dict) -> dict:
+        """Stints, compounds & consistency as shown: lap times, degradation per lap, coefficient of variation"""
+
+        def slope_text(slope: float | None) -> str:
+            return f"{signed(slope, 3)} s/{tr('lap')}" if slope is not None else "—"
+
+        def slope_color(slope: float | None) -> str:
+            return "" if slope is None or abs(slope) < 0.02 else "loss" if slope > 0 else "gain"
+
+        def compound(name: str) -> str:
+            return name or tr("Compound not recorded")
+
+        def session(name: str) -> str:
+            return tr(name) if name else tr("Session")
+
+        compounds = [{"compound": compound(row["compound"]), "stints": row["stints"], "laps": row["laps"],
+                      "pace": calc.sec2laptime_full(row["pace"]), "slope": slope_text(row["slope"]),
+                      "slopeColor": slope_color(row["slope"])} for row in report["compounds"]]
+        stints = [{"date": format_date(row["start"]), "session": session(row["session"]),
+                   "compound": compound(row["compound"]), "laps": f"{row['clean']}/{row['laps']}",
+                   "pace": calc.sec2laptime_full(row["pace"]), "slope": slope_text(row["slope"]),
+                   "slopeColor": slope_color(row["slope"])}
+                  for row in sorted(report["stints"], key=lambda row: -row["start"])[:MAX_STINTS]]
+        sessions = [{"date": format_date(row["start"]), "session": session(row["session"]), "laps": row["clean"],
+                     "index": f"{number_text(row['index'], 2)} %", "pace": calc.sec2laptime_full(row["pace"])}
+                    for row in sorted(report["sessions"], key=lambda row: -row["start"])[:MAX_STINTS]]
+        index = report["index"]
+        return {
+            "visible": True, "busy": False, "compounds": compounds, "stints": stints, "sessions": sessions,
+            "index": f"{number_text(index, 2)} %" if index is not None else "",
+            "indexInfo": f"{tr('Median of')} {plural(len(report['sessions']), 'session', 'sessions')}"
+            if index is not None else "",
+            "note": "" if stints or sessions else tr("3 clean laps or more needed in a session."),
+        }
+
+    @Property(dict, notify=lapsChanged)
+    def stints(self) -> dict:
+        """Stints & consistency of selected vehicle: visible, busy, note, index, compounds, stints, sessions"""
+        return self._stints
+
+    # Session history export (CSV, or JSON a friend can compare with)
+    def history_records(self) -> list[SessionRecord]:
+        """Session records of selected track, every track for All Tracks"""
+        return [record for record in self.history if not self.selected_stats_key or record.track == self.selected_stats_key]
+
+    @Slot(str)
+    def exportHistory(self, kind: str):
+        """Session history of selected track (every track for All Tracks) to CSV or JSON (friend's comparison)"""
+        if not self.history_records():
+            self.warning(tr("No session recorded yet: history starts with your next session."))
+            return
+        name = strip_invalid_char(self.selected_stats_key or tr("All Tracks"))
+        folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        extension = "json" if kind == "json" else "csv"
+        default = os.path.join(folder or os.path.expanduser("~"), f"{name} - {tr('Session History')}.{extension}")
+        filename, _ = QFileDialog.getSaveFileName(self._window, tr("Export Session History..."), default,
+                                                  "JSON (*.json)" if extension == "json" else "CSV (*.csv)")
+        if filename:
+            self.write_history(filename, extension)
+
+    def write_history(self, filename: str, kind: str, decimal_point: str = "") -> bool:
+        """Write session history of selected track (every track for All Tracks), CSV in system number format"""
+        records = self.history_records()
+        try:
+            if kind == "json":
+                tracks = {self.selected_stats_key} if self.selected_stats_key else set(self.stats_temp)
+                stats = {track: self.stats_temp[track] for track in tracks if track in self.stats_temp}
+                write_history_json(filename, history_document(records, stats, self.classes))
+            else:
+                decimal = decimal_point or QLocale.system().decimalPoint() or "."
+                header = [tr(name) for name in HISTORY_COLUMNS]
+                write_history_csv(filename, records, header, [tr(name) for name in SESSION_NAMES], decimal)
+        except OSError as error:
+            logger.error("DRIVER STATS: unable to export %s: %s", filename, error)
+            self.warning(trm(f"Unable to export: {error}"))
+            return False
+        return True
+
+    # Friend's stats: exported session history of another driver, personal bests compared track by track
+    def load_friend(self, filename: str, quiet: bool = False) -> bool:
+        if not filename:
+            return False
+        try:
+            self._friend = load_friend(filename)
+        except ValueError as error:
+            if not quiet:
+                self.warning(trm(f"Unable to read friend's stats: {error}"))
+            return False
+        return True
+
+    @Slot()
+    def importFriend(self):
+        """Compare with a friend's exported session history (JSON)"""
+        folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        filename, _ = QFileDialog.getOpenFileName(self._window, tr("Compare With a Friend's Stats..."),
+                                                  folder or os.path.expanduser("~"), "JSON (*.json)")
+        if filename and self.load_friend(filename):
+            self.save_viewer_config(friend_file=filename)
+            self.refresh_friend()
+
+    @Slot()
+    def clearFriend(self):
+        self._friend = None
+        self.save_viewer_config(friend_file="")
+        self.refresh_friend()
+
+    @Property(dict, notify=friendChanged)
+    def friend(self) -> dict:
+        """Friend's personal bests against own: name, rows (track, class, lap times, gap), summary"""
+        return self._friend_view
+
+    def refresh_friend(self):
+        self._friend_view = self.friend_data()
+        self.friendChanged.emit()
+
+    def friend_data(self) -> dict:
+        """Friend's personal bests against own on selected track (every track both drove for All Tracks)"""
+        if self._friend is None:
+            return {"visible": False}
+        tracks = [self.selected_stats_key] if self.selected_stats_key else None
+        rows = compare_friend(self.stats_temp, self.class_of, self._friend, tracks)
+        shown = []
+        for row in rows:
+            gap = row["gap"]
+            shown.append({
+                "track": row["track"], "vehicleClass": row["class"],
+                "mine": calc.sec2laptime_full(row["mine"]) if row["mine"] else "-",
+                "friend": calc.sec2laptime_full(row["friend"]) if row["friend"] else "-",
+                "gap": ("" if not (row["mine"] and row["friend"]) else number_text(0.0, 3) if abs(gap) < 0.0005
+                        else signed(gap, 3)),
+                "gapColor": "" if abs(gap) < 0.0005 else "loss" if gap > 0 else "gain",
+            })
+        compared = [row for row in rows if row["mine"] and row["friend"]]
+        faster = sum(1 for row in compared if row["gap"] < 0)
+        return {"visible": True, "name": self._friend["name"], "rows": shown,
+                "summary": trm(f"Faster on {faster} of {len(compared)}") if compared else
+                tr("No track & class driven by both of you here.")}
 
     def reference_data(self) -> dict:
         """Level ladder of selected vehicle, gap to reference, next level, fastest car (empty: reason)"""
@@ -1171,8 +1644,10 @@ class DriverStatsBackend(QObject):
                 limit_text = f"≤ {calc.sec2laptime_full(limit)}" if limit else "-"
             mark = marks_by_level.get(level, [])
             ladder.append({"name": tr(name), "color": self.level_color(level), "limit": limit_text,
-                           "marks": "  ".join(f"← {text}" for text in mark), "active": bool(mark)})
+                           "marks": "  ".join(f"← {text}" for text in mark), "active": bool(mark), "pills": mark,
+                           "letter": level_letter(level)})
         patch = f" · {tr('patch')} {reference.patch}" if reference.patch else ""
+        next_level = {}
         if best > 0:
             gap = best - reference.reference
             gap_text = trm(f"Personal best {calc.sec2laptime_full(best)}: {gap:+.2f} s ({reference.percent(best):.2f} %) "
@@ -1180,6 +1655,8 @@ class DriverStatsBackend(QObject):
             level, to_find = reference.next_level(best)
             if level >= 0:
                 next_text = trm(f"Next level {tr(LEVELS[level])}: {to_find:.2f} s to find")
+                next_level = {"name": tr(LEVELS[level]), "color": self.level_color(level), "letter": level_letter(level),
+                              "toFind": signed(-to_find, 2, " s")}
             else:
                 next_text = tr("Top level reached") if reference.level(best) == 0 else ""
         else:
@@ -1188,9 +1665,62 @@ class DriverStatsBackend(QObject):
         fastest = ""
         if reference.fastest_car and reference.fastest_time:
             fastest = trm(f"Fastest car: {reference.fastest_car} · {calc.sec2laptime_full(reference.fastest_time)}")
+        level = reference.level(best) if best > 0 else -1
         return {"visible": True, "reason": "", "vehicle": vehicle,
                 "detail": f"{reference.track} · {reference.vehicle_class}{patch}", "ladder": ladder,
-                "gap": gap_text, "next": next_text, "fastest": fastest}
+                "gap": gap_text, "next": next_text, "fastest": fastest, "gauge": self.gauge_data(reference, marks),
+                "level": level_text(level) if level >= 0 else "", "levelColor": self.level_color(level),
+                "letter": level_letter(level), "percent": f"{reference.percent(best):.2f} %" if best > 0 else "",
+                "best": calc.sec2laptime_full(best) if best > 0 else "", "nextLevel": next_level,
+                "referenceTime": calc.sec2laptime_full(reference.reference) if reference.reference > 0 else "",
+                "gapTime": signed(best - reference.reference, 2, " s") if best > 0 and reference.reference > 0 else ""}
+
+    def gauge_data(self, reference: LapReference, marks: list[tuple[str, float]]) -> dict:
+        """Level scale: levels from slowest (left) to fastest (right), positions (0-1) of lap time marks
+
+        Levels take the same width, a lap time is placed in its level by its share of the level lap time range
+        (Alien & Offline as wide as their neighbor). Empty if ladder unknown.
+        """
+        count = len(LEVELS)
+        limits = [reference.level_limit(level) for level in range(count - 1)]
+        if not all(limits):
+            return {}
+        ranges = []  # (fastest, slowest) lap time of each level
+        for level in range(count):
+            if level == 0:
+                ranges.append((limits[0] - (limits[1] - limits[0]), limits[0]))
+            elif level == count - 1:
+                ranges.append((limits[-1], limits[-1] + (limits[-1] - limits[-2])))
+            else:
+                ranges.append((limits[level - 1], limits[level]))
+
+        def position(laptime: float) -> float:
+            level = reference.level(laptime)
+            fast, slow = ranges[level]
+            share = (slow - laptime) / (slow - fast) if slow > fast else 0.5
+            return (count - 1 - level + min(max(share, 0.0), 1.0)) / count
+
+        segments = []
+        for level in reversed(range(count)):
+            fast, slow = ranges[level]
+            if level == count - 1:
+                limit = f"> {calc.sec2laptime_full(fast)}"
+            else:
+                limit = f"≤ {calc.sec2laptime_full(slow)}"
+            segments.append({"name": tr(LEVELS[level]), "letter": level_letter(level), "color": self.level_color(level),
+                             "limit": limit})
+        markers = []
+        for index, (name, laptime) in enumerate(marks):
+            if laptime <= 0:
+                continue
+            level = reference.level(laptime)
+            markers.append({
+                "label": name, "short": name[:1].upper(), "main": index == 0, "pos": round(position(laptime), 4),
+                "time": calc.sec2laptime_full(laptime), "color": self.level_color(level),
+                "tip": f"{name} {calc.sec2laptime_full(laptime)} · {level_text(level)} · {reference.percent(laptime):.2f} %",
+            })
+        markers.sort(key=lambda marker: bool(marker["main"]))  # personal best drawn last (on top)
+        return {"segments": segments, "markers": markers}
 
     def history_data(self) -> tuple[dict, list[dict]]:
         """Progression chart (best lap of each session, personal best so far) & sessions list"""
@@ -1217,16 +1747,14 @@ class DriverStatsBackend(QObject):
         sessions = []
         for record in reversed(records[-MAX_SESSIONS:]):
             laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
-            if record.finish == 1 and record.position > 0:
-                result = f"P{record.position}"
-            else:
-                result = FINISH_TEXTS.get(record.finish, "")
             sessions.append({
                 "date": format_date(record.time),
-                "session": tr(SESSION_NAMES[record.session]) if 0 <= record.session < len(SESSION_NAMES) else "",
+                "session": session_name(record.session),
+                "kind": session_kind(record.session),
                 "best": calc.sec2laptime_full(laptime) if laptime else "-",
                 "laps": f"{record.valid}/{record.valid + record.invalid}",
-                "result": result,
+                "result": race_result(record),
+                "podium": record.position if record.finish == 1 and 0 < record.position <= 3 else 0,
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005),
                 "tip": f"{format_duration(record.seconds)} · {parse_display_value('meters', record.meters)} "
                        f"{tr(format_header_key('meters')).lower()}",
@@ -1251,23 +1779,25 @@ class DriverStatsBackend(QObject):
         last_best = MAX_SECONDS
         for index, (record, best_so_far) in enumerate(progression):
             new_best = record.best < last_best
-            session = tr(SESSION_NAMES[record.session]) if 0 <= record.session < len(SESSION_NAMES) else ""
-            tip = f"{format_date(record.time)} · {session}\n{calc.sec2laptime_full(record.best)}"
+            tip = f"{format_date(record.time)} · {session_name(record.session)}\n{calc.sec2laptime_full(record.best)}"
             if new_best:
                 tip += f" · {tr('PB')}"
             points.append({"x": index / (count - 1), "y": y_of(record.best), "pbY": y_of(best_so_far),
-                           "newPb": new_best, "clipped": record.best > high, "tip": tip})
+                           "newPb": new_best, "clipped": record.best > high, "tip": tip,
+                           "kind": session_kind(record.session)})
             last_best = best_so_far
         limits = []
         if reference is not None:
             for level in range(len(LEVELS) - 1):
                 limit = reference.level_limit(level)
                 if low < limit < high:
-                    limits.append({"y": y_of(limit), "color": self.level_color(level), "name": tr(LEVELS[level])})
+                    limits.append({"y": y_of(limit), "color": self.level_color(level), "name": tr(LEVELS[level]),
+                                   "letter": level_letter(level)})
         marks = sorted({0, count // 2, count - 1}) if count >= 3 else [0, count - 1]
         dates = [{"x": index / (count - 1), "text": format_date(progression[index][0].time)} for index in marks]
-        return {"visible": True, "points": points, "limits": limits, "dates": dates,
-                "top": calc.sec2laptime_full(fastest), "bottom": calc.sec2laptime_full(high)}
+        ticks = [{"y": y_of(value), "text": calc.sec2laptime_full(value)} for value in chart_ticks(low, high)]
+        return {"visible": True, "points": points, "limits": limits, "dates": dates, "ticks": ticks,
+                "top": calc.sec2laptime_full(fastest), "bottom": calc.sec2laptime_full(high), "pbY": y_of(fastest)}
 
     @Property(dict, notify=selectionChanged)
     def reference(self) -> dict:
@@ -1322,6 +1852,7 @@ class DriverStatsBackend(QObject):
             if stats_user is None:
                 return False
             backup_stats_file(cfg.path.config)
+            self._backups = None  # listed again
             before = stats_entry(stats_user, path) if path else copy.deepcopy(stats_user)
             if path:
                 set_stats_entry(stats_user, path, value)
@@ -1461,7 +1992,13 @@ class DriverStatsBackend(QObject):
     # Backups
     @Property(list, notify=editsChanged)
     def backups(self) -> list[dict]:
-        return self.backup_list()
+        return self.cached_backups()
+
+    def cached_backups(self) -> list[dict]:
+        """Automatic backups, listed once (again after an edit makes one), not on every table refresh"""
+        if self._backups is None:
+            self._backups = self.backup_list()
+        return self._backups
 
     @staticmethod
     def backup_list() -> list[dict]:
@@ -1477,7 +2014,7 @@ class DriverStatsBackend(QObject):
         if stats_backup is None:
             self.warning(tr("Unable to read stats file."))
             return
-        date = next((entry["date"] for entry in self.backup_list() if entry["name"] == name), name)
+        date = next((entry["date"] for entry in self.cached_backups() if entry["name"] == name), name)
         if self.confirm(trm(f"Restore stats saved on <b>{date}</b>?<br><br>Undo with Ctrl+Z while this page is open.")):
             self.edit_stats((), validate_stats_file(stats_backup))
 
@@ -1529,7 +2066,8 @@ class DriverStatsBackend(QObject):
 
     @Property(bool, notify=selectionChanged)
     def hasLaps(self) -> bool:
-        return bool(self.lap_folder())
+        """Recorded laps of selected row (checked when selected)"""
+        return self._has_laps
 
     @Slot()
     def openLapViewer(self):

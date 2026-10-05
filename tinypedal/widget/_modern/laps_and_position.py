@@ -20,7 +20,7 @@
 Laps and position Widget, modern design
 
 Lap progress (with final lap highlight), overall & class position, track limits points,
-places gained since start.
+places gained since start. Lap progress in loss color while game invalidated current lap.
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ class Realtime(StatsMixin, ModernOverlay):
     options = (
         "font_size", "layout", "show_laps", "show_predicted_extra_laps", "show_position_overall",
         "show_position_in_class", "show_track_limits_points", "show_position_change", "show_position_change_in_class",
+        "show_invalid_lap_indicator", "display_order_laps", "display_order_position_overall",
+        "display_order_position_in_class", "display_order_track_limits_points", "display_order_position_change",
     )
 
     def __init__(self, config, widget_name):
@@ -57,7 +59,9 @@ class Realtime(StatsMixin, ModernOverlay):
             stats.append(Stat("track_limits", "Track limits", "8.88/88"))
         if wcfg["show_position_change"]:
             stats.append(Stat("position_change", "Gained", "▲88", "strong"))
+        stats = self.display_ordered(stats, names={"track_limits": "track_limits_points"})
         self.keys = tuple(stat.key for stat in stats)
+        self.show_invalid = wcfg["show_invalid_lap_indicator"]
         width, height = self.build_stats(stats, vertical=wcfg["layout"] == 0)
         self.set_size(width, height)
         self.class_position = (0, 0, 0, 0)  # place, total vehicles -> position, class total
@@ -116,7 +120,9 @@ class Realtime(StatsMixin, ModernOverlay):
         if self.wcfg["show_predicted_extra_laps"]:
             text = f"{text} ({minfo.vehicles.finishLapOffset:+.0f})"
         final = lap_num - lap_max >= -1
-        return Value(text, fill=self.theme.tint(self.theme.warning, 60) if final else None)
+        invalid = self.show_invalid and api.read.lap.invalidated()
+        return Value(text, self.theme.negative if invalid else None,
+                     self.theme.tint(self.theme.warning, 60) if final else None)
 
     def position_in_class(self, place: int, total: int) -> tuple[int, int]:
         """Player position in class & class size, computed again only if place or field changes"""

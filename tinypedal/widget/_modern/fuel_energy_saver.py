@@ -35,6 +35,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...const_common import ENERGY_TYPE_ID, MAX_SECONDS
+from ...i18n import tr_overlay
 from ...module_info import minfo
 from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, rounded
@@ -68,7 +69,10 @@ class Realtime(ModernOverlay):
 
         pad = unit * 0.3
         gap = unit * 0.14
-        cell_w = max(self.text_width("value", "8" * self.char_width), self.text_width("small", "88/888")) + unit * 0.6
+        cell_w = max(
+            self.text_width("value", "8" * self.char_width), self.text_width("small", "88/888"),
+            *(self.text_width("label", tr_overlay(text)) for text in ("RATE", "BIAS", "LAST")),  # column labels
+        ) + unit * 0.6
         heights = (unit * 1.0, unit * 1.45, unit * 1.45)
         reversed_layout = wcfg["layout"] != 0
         self.cells = []
@@ -102,10 +106,10 @@ class Realtime(ModernOverlay):
             else:
                 rounded(painter, column, self.radius(0.3), theme.tint(theme.surface_alt, 170))
         if self.consumption_rate:
-            self.draw_text(painter, self.cells[0][self.column_rate], "RATE", "label", theme.text_muted, CENTER)
+            self.draw_text(painter, self.cells[0][self.column_rate], tr_overlay("RATE"), "label", theme.text_muted, CENTER)
         if self.pitin_bias:
-            self.draw_text(painter, self.cells[0][self.column_bias], "BIAS", "label", theme.text_muted, CENTER)
-        self.draw_text(painter, self.cells[0][self.column_last], "LAST", "label", theme.text_muted, CENTER)
+            self.draw_text(painter, self.cells[0][self.column_bias], tr_overlay("BIAS"), "label", theme.text_muted, CENTER)
+        self.draw_text(painter, self.cells[0][self.column_last], tr_overlay("LAST"), "label", theme.text_muted, CENTER)
 
     def paint(self, painter: QPainter):
         theme = self.theme

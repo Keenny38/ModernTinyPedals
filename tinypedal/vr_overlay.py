@@ -35,8 +35,8 @@ import zlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from PySide6.QtCore import QObject, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_signal
@@ -50,16 +50,57 @@ MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window captu
 
 
 class MirrorWindow(QWidget):
-    """Desktop window showing composed overlay image, captured by VR window overlay apps"""
+    """Desktop window showing composed overlay image, captured by VR window overlay apps
+
+    Kept while overlays reload (capture apps follow this window), position remembered.
+    """
 
     def __init__(self, background: str, on_closed: Callable[[], None]):
         super().__init__(None, Qt.WindowType.Window)
         self.on_closed = on_closed
         self.setWindowTitle(MIRROR_TITLE)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.background = QColor(background) if QColor.isValidColorName(background) else QColor("#000000")
+        self.background = QColor("#000000")
+        self.set_background(background)
         self.pixmap = QPixmap()
         self.resize(640, 360)
+        self.restore_position()
+        # Position saved once moving stops
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self.save_position)
+
+    def set_background(self, background: str):
+        """Background color, black if invalid"""
+        self.background = QColor(background) if QColor.isValidColorName(background) else QColor("#000000")
+        self.update()
+
+    def restore_position(self):
+        """Position of last time, if still on a screen"""
+        setting = cfg.user.config["vr_overlay"]
+        try:
+            position = QPoint(int(setting["mirror_position_x"]), int(setting["mirror_position_y"]))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return
+        if QGuiApplication.screenAt(position) is not None:  # never set (default), or screen gone
+            self.move(position)
+
+    def save_position(self):
+        """Remember window position (global config)"""
+        if not self.isVisible() or self.isMinimized():
+            return
+        setting = cfg.user.config["vr_overlay"]
+        position = self.pos()
+        if (setting.get("mirror_position_x"), setting.get("mirror_position_y")) != (position.x(), position.y()):
+            setting["mirror_position_x"] = position.x()
+            setting["mirror_position_y"] = position.y()
+            cfg.save(config_type=ConfigType.CONFIG)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self.isVisible():
+            self._save_timer.start()
 
     def set_image(self, image: QImage | None):
         """Show image, empty (background only) if None"""
@@ -76,6 +117,8 @@ class MirrorWindow(QWidget):
 
     def closeEvent(self, event):
         """Closing window turns mirror off until next reload, so window is not shown again unexpectedly"""
+        self._save_timer.stop()
+        self.save_position()
         cfg.user.config["vr_overlay"]["enable_vr_mirror_window"] = False
         cfg.save(config_type=ConfigType.CONFIG)
         self.on_closed()
@@ -155,12 +198,23 @@ class VROverlay(QObject):
         return self._handle is not None or self._mirror is not None
 
     def enable(self):
-        """Start SteamVR overlay and/or VR mirror window if enabled in setting"""
+        """Start SteamVR overlay and/or VR mirror window if enabled in setting
+
+        Mirror window kept from before reload is used again (window capture apps keep it).
+        """
         setting = cfg.user.config["vr_overlay"]
-        if setting.get("enable_vr_mirror_window", False) and self._mirror is None:
-            self._mirror = MirrorWindow(str(setting.get("mirror_background_color", "#000000")), self.disable_mirror)
+        background = str(setting.get("mirror_background_color", "#000000"))
+        if not setting.get("enable_vr_mirror_window", False):
+            self.disable_mirror()  # turned off in setting
+        elif self._mirror is None:
+            self._mirror = MirrorWindow(background, self.disable_mirror)
             self._mirror.show()
             logger.info("ENABLED: VR mirror window")
+        else:
+            self._mirror.set_background(background)
+            self._mirror_checksum = None  # image sent again
+            if self._mirror.isHidden():
+                self._mirror.show()
         if self._mirror is not None and not self._timer.isActive():
             self._timer.start(max(int(setting["update_interval"]), 20))
         if not setting["enable_vr_overlay"] or self._handle is not None:
@@ -249,9 +303,15 @@ class VROverlay(QObject):
         if self._overlay is None:
             self._timer.stop()
 
-    def disable(self):
-        """Stop VR overlay & mirror window"""
-        self.disable_mirror()
+    def disable(self, close_mirror: bool = False):
+        """Stop VR overlay & mirror window updates
+
+        Args:
+            close_mirror: close mirror window too, else kept open (reload: enable() uses it again,
+                window capture apps keep following it), closed when turned off in setting.
+        """
+        if close_mirror:
+            self.disable_mirror()
         self._timer.stop()
         if self._overlay is not None and self._handle is not None:
             try:

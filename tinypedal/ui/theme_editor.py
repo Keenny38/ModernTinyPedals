@@ -114,8 +114,10 @@ class ThemeEditor(BaseEditor):
         button_export.setToolTip(tr("Export selected theme to a file to share it"))
         button_export.clicked.connect(self.export_theme_file)
         self.base_list = QComboBox(self)
-        self.base_list.addItems([name for name in BUILTIN_THEMES if OVERLAY_THEMES[name] is not None])
-        self.base_list.currentTextChanged.connect(self.change_base)
+        for name in BUILTIN_THEMES:  # shown translated, name kept as data
+            if OVERLAY_THEMES[name] is not None:
+                self.base_list.addItem(tr(name), name)
+        self.base_list.currentIndexChanged.connect(lambda _index: self.change_base(self.base_list.currentData()))
 
         layout_theme = QHBoxLayout()
         layout_theme.addWidget(QLabel(tr("Theme")))
@@ -262,7 +264,7 @@ class ThemeEditor(BaseEditor):
         self.table.setEnabled(theme is not None)
         self.base_list.setEnabled(theme is not None)
         if theme is not None:
-            self.base_list.setCurrentText(theme["base"])
+            self.base_list.setCurrentIndex(max(self.base_list.findData(theme["base"]), 0))
         base: Mapping[str, str] = (OVERLAY_THEMES.get(theme["base"]) if theme else MODERN_PALETTE) or {}
         for row, classic in enumerate(self.classic_colors):
             self.table.setItem(row, COLUMN_CLASSIC, ColorItem(classic))

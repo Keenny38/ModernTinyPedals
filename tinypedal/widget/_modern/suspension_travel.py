@@ -28,7 +28,8 @@ from __future__ import annotations
 from PySide6.QtGui import QPainter
 
 from ...module_info import minfo
-from .base import ModernOverlay
+from .base import ModernOverlay, display_order_options
+from .draw import fraction
 from .quad import QuadMixin, Section, Tile
 
 SECTIONS = (
@@ -52,14 +53,16 @@ class Realtime(QuadMixin, ModernOverlay):
     """Draw widget"""
 
     options = ("font_size", "layout", *(f"show_{key}" for key, _ in SECTIONS),
-               "show_live_position_relative_to_static_position")
+               "show_live_position_relative_to_static_position", *display_order_options("suspension_travel"))
 
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
-        self.keys = tuple(key for key, _ in SECTIONS if self.wcfg[f"show_{key}"])
+        self.keys = tuple(self.display_ordered([key for key, _ in SECTIONS if self.wcfg[f"show_{key}"]], key=str))
+        labels = dict(SECTIONS)
         sections = [
-            Section(key, label, "888%" if key == "travel_ratio" else "88.8", min_width=3.2 if key == "travel_ratio" else 0.0)
-            for key, label in SECTIONS if key in self.keys
+            Section(key, labels[key], "888%" if key == "travel_ratio" else "88.8",
+                    min_width=3.2 if key == "travel_ratio" else 0.0)
+            for key in self.keys
         ]
         self.set_size(*self.build_quads(sections, horizontal=self.wcfg["layout"] != 0))
 
@@ -91,7 +94,7 @@ class Realtime(QuadMixin, ModernOverlay):
             }
             for key in self.keys:
                 if key == "travel_ratio":
-                    sections[key].append(Tile((f"{ratio:.0%}",), level=min(max(ratio, 0.0), 1.0),
+                    sections[key].append(Tile((f"{ratio:.0%}",), level=fraction(ratio),
                                               level_color=theme.tint(theme.warning, 110)))
                 else:
                     color = theme.accent if key == "live_position" else None
