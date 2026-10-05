@@ -39,7 +39,7 @@ import shutil
 import threading
 import time
 from collections import Counter, OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import Any
 
@@ -519,7 +519,7 @@ def setup_text(info: dict) -> str:
     return fingerprint
 
 
-def time_weights(times: list[float]) -> list[float]:
+def time_weights(times: Sequence[float]) -> list[float]:
     """Time each sample stands for (half of time to previous & next sample), histogram weights"""
     count = len(times)
     if count < 2:
@@ -2198,9 +2198,9 @@ class LapViewerBackend(QObject):
         jobs = [(path, os.path.join(folder, os.path.basename(lap_stem(path)) + ".ld"),
                  os.path.basename(os.path.dirname(path)).split(" - ")[0]) for path in paths]
         if not background:
-            errors = [export_lap_job(self.folder, path, target, venue) for path, target, venue in jobs]
-            self.set_status(self.export_message(folder, errors))
-            return errors.count("")
+            results = [export_lap_job(self.folder, path, target, venue) for path, target, venue in jobs]
+            self.set_status(self.export_message(folder, results))
+            return results.count("")
         errors: list[str] = []
         self._exports += len(jobs)
 
@@ -3699,10 +3699,11 @@ class LapViewerBackend(QObject):
         if placed is not None and placed[1] and self._edges[0]:
             line, sides, indexes = placed
             for index, row in enumerate(self._corner_rows):
-                if stats[index] is None or index not in turns:
+                stat = stats[index]
+                if stat is None or index not in turns:
                     continue
                 distance = lap_map.trackout_from_offsets(line.distances, sides, indexes, self._edges,
-                                                         stats[index].apex / scale, row.corner.end / scale,
+                                                         stat.apex / scale, row.corner.end / scale,
                                                          turns[index])
                 found[index] = distance * scale if distance >= 0 else -1.0
         shown = {shown_lap.key for shown_lap in self.data.laps}
@@ -3823,10 +3824,10 @@ class LapViewerBackend(QObject):
                 found = self.lap_offsets(lap)
                 if found is None or not found[1]:
                     continue
-                key = (found[1], self._edges)
+                placement_key = (found[1], self._edges)
                 cached = self._placements.get(lap.key)
-                if cached is None or not keys_match(cached[0], key):
-                    cached = (key, self.lap_placements(found, lefts, rights))
+                if cached is None or not keys_match(cached[0], placement_key):
+                    cached = (placement_key, self.lap_placements(found, lefts, rights))
                 cache[lap.key] = cached
                 placements[lap.key] = cached[1]
         unchanged = cache.keys() == self._placements.keys() and all(
@@ -4078,9 +4079,9 @@ class LapViewerBackend(QObject):
                                             meters_per_pixel * LINE_WIDTH)
         marks = []
         if self._map_lines:
-            reference = self._map_lines[0][0]
+            reference_line = self._map_lines[0][0]
             for distance in self.data.sector_lines:  # sector boundaries across road
-                marks.append(lap_map.cross_mark(reference, distance, road_half * 1.6))
+                marks.append(lap_map.cross_mark(reference_line, distance, road_half * 1.6))
         shapes[self._map["marks"]] = segments(marks)
         # Markers: one buffer per lap & kind, outline (map background color) drawn under fill
         points: dict[tuple[str, str], list[tuple[float, float, float]]] = {}
@@ -4116,12 +4117,12 @@ class LapViewerBackend(QObject):
         # Braking points range of shown laps in each corner, along reference line
         spreads = []
         if self._map_lines and len(self._map_lines) > 1:
-            reference, reference_lap = self._map_lines[0]
-            reference_normals = self.line_normals(reference_lap, reference)
+            reference_line, reference_lap = self._map_lines[0]
+            reference_normals = self.line_normals(reference_lap, reference_line)
             for low, high in self.brake_spreads().values():
                 if high - low >= 1:
-                    spreads.append(band_part(reference.xs, reference.ys, reference_normals,
-                                             range_indexes(reference.distances, low, high), meters_per_pixel * 6))
+                    spreads.append(band_part(reference_line.xs, reference_line.ys, reference_normals,
+                                             range_indexes(reference_line.distances, low, high), meters_per_pixel * 6))
         shapes[self._map["spread"]] = merge_strips(spreads) if spreads else band([], [], 1)
         return shapes
 
@@ -4568,7 +4569,7 @@ class LapViewerBackend(QObject):
             rows.append({"column": channel.column, "title": channel_title(channel) + (f" ({unit})" if unit else "")})
         return rows
 
-    def xy_samples(self, column: str, lap: PlotLap) -> tuple[list[float], list[float]]:
+    def xy_samples(self, column: str, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
         """Reference distances & values of channel (user unit), zoomed chart part only when charts are zoomed"""
         if column not in CHANNEL_MAP or CHANNEL_MAP[column].parts:
             return [], []
@@ -4601,7 +4602,7 @@ class LapViewerBackend(QObject):
         """
         if x_column not in CHANNEL_MAP or y_column not in CHANNEL_MAP or not self.data.laps:
             return {}
-        pairs = []
+        pairs: list[tuple[PlotLap, Sequence[float], Sequence[float]]] = []
         for lap in self.data.laps:
             x_distances, x_values = self.xy_samples(x_column, lap)
             y_distances, y_values = self.xy_samples(y_column, lap)
@@ -4613,13 +4614,13 @@ class LapViewerBackend(QObject):
         if not pairs:
             return {}
         ranges = []
-        for values_index, column in ((1, x_column), (2, y_column)):
+        for series, column in (([pair[1] for pair in pairs], x_column), ([pair[2] for pair in pairs], y_column)):
             channel = CHANNEL_MAP[column]
             if channel.fixed_range:
                 low, high = channel.fixed_range
             else:
-                low = min(min(pair[values_index]) for pair in pairs)
-                high = max(max(pair[values_index]) for pair in pairs)
+                low = min(min(values) for values in series)
+                high = max(max(values) for values in series)
                 if high - low < 1e-6:
                     high = low + 1
                 padding = (high - low) * 0.04
@@ -4628,10 +4629,10 @@ class LapViewerBackend(QObject):
         (x_low, x_high, x_channel), (y_low, y_high, y_channel) = ranges
         laps = []
         keys = set()
-        for lap, xs, ys in pairs:
+        for lap, lap_xs, lap_ys in pairs:
             key = f"{self.prefix}xy|{lap.key}"
-            VertexStore.set(key, dots([(x - x_low) / (x_high - x_low) for x in xs],
-                                      [(y - y_low) / (y_high - y_low) for y in ys], XY_DOT, 6000))
+            VertexStore.set(key, dots([(x - x_low) / (x_high - x_low) for x in lap_xs],
+                                      [(y - y_low) / (y_high - y_low) for y in lap_ys], XY_DOT, 6000))
             keys.add(key)
             laps.append({"key": key, "lap": lap.key, "color": lap.color.name()})
         self._xy_keys = keys

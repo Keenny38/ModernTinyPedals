@@ -95,7 +95,7 @@ def resample(lap: LapData, column: str, grid: list[float], scale: float = 1.0) -
     return resample_sorted(distances, values, grid)
 
 
-def resample_sorted(distances: list[float], values: list[float], grid: list[float]) -> list[float]:
+def resample_sorted(distances: Sequence[float], values: Sequence[float], grid: Sequence[float]) -> list[float]:
     """Linear interpolation at ascending grid distances in one pass (no bisect per point)"""
     result = []
     count = len(distances)
@@ -131,8 +131,8 @@ class ResampledLap:
         self.scale = scale
         self.grid = lap_grid(lap, step, scale)
         self._columns: dict[str, list[float] | None] = {}
-        self._monotonic: dict[str, tuple[list[float], list[float]]] = {}
-        self._times: tuple[list[float], list[float]] | None = None
+        self._monotonic: dict[str, tuple[Sequence[float], Sequence[float]]] = {}
+        self._times: tuple[Sequence[float], Sequence[float]] | None = None
 
     def column(self, name: str) -> list[float] | None:
         if name not in self._columns:  # from samples (shared with crossing & minimum searches)
@@ -152,14 +152,14 @@ class ResampledLap:
             return None
         return interpolate(distances, values, distance)
 
-    def samples(self, name: str) -> tuple[list[float], list[float]]:
+    def samples(self, name: str) -> tuple[Sequence[float], Sequence[float]]:
         """Recorded samples of column by increasing distance (empty if not recorded)"""
         if name not in self._monotonic:
             self._monotonic[name] = self.scaled(monotonic_distance(self.lap, name)) if name in self.lap.columns \
                 else ([], [])
         return self._monotonic[name]
 
-    def scaled(self, samples: tuple[list[float], list[float]]) -> tuple[list[float], list[float]]:
+    def scaled(self, samples: tuple[Sequence[float], Sequence[float]]) -> tuple[Sequence[float], Sequence[float]]:
         """Samples with distances multiplied by lap scale"""
         if self.scale == 1.0:
             return samples

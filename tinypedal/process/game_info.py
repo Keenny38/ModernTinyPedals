@@ -114,7 +114,7 @@ def distance_ahead(target: float, position: float, track_length: float) -> float
 
 def parse_replays(data: Any) -> list[GameReplay]:
     """Replays saved by game, newest first"""
-    replays = []
+    replays: list[GameReplay] = []
     if not isinstance(data, list):
         return replays
     for entry in data:

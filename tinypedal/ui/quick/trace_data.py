@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
+from collections.abc import Sequence
 from itertools import accumulate
 
 from ...userfile.corner_analysis import resample_sorted
@@ -57,11 +58,11 @@ SLIP_ANGLE_MIN_SPEED = 5.0  # m/s, body slip angle not computed slower
 PLACEMENT_COLUMNS = ("path_lateral", "track_position")  # measured on map when circuit & edges known
 
 
-def moving_average(values: list[float], points: int) -> list[float]:
+def moving_average(values: Sequence[float], points: int) -> list[float]:
     """Centered moving average over points samples (cumulative sums: any width costs the same)"""
     count = len(values)
     if points <= 1 or count < 3:
-        return values
+        return list(values)
     half = points // 2
     sums = [0.0, *accumulate(values)]
     return [
@@ -103,8 +104,8 @@ class TraceData:
         self.smoothing = 0  # moving average samples of noisy channels, 0 = off
         self.delta_window = 40.0  # meters, time gain/loss measured over
         self.units = display_units()
-        self._times: dict[str, tuple[list[float], list[float]]] = {}
-        self._series: dict[tuple, tuple[list[float], list[float]]] = {}
+        self._times: dict[str, tuple[Sequence[float], Sequence[float]]] = {}
+        self._series: dict[tuple, tuple[Sequence[float], Sequence[float]]] = {}
         self._ranges: dict[tuple, tuple[float, float]] = {}
         self._mini: dict | None = None
         self._ideal: tuple[list[float], list[float]] | None = None
@@ -224,7 +225,7 @@ class TraceData:
         usable = [lap.clean for lap in self.laps]
         if not any(usable):
             usable = [True] * len(self.laps)
-        times = []
+        times: list[list[float]] = []
         for lap, use in zip(self.laps, usable):
             if not use:
                 times.append([])
@@ -314,7 +315,7 @@ class TraceData:
         return "|".join(parts)
 
     # Axis conversion
-    def lap_times(self, lap: PlotLap) -> tuple[list[float], list[float]]:
+    def lap_times(self, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
         """Distances & lap times of lap, increasing distance"""
         cached = self._times.get(lap.key)
         if cached is None:
@@ -401,10 +402,11 @@ class TraceData:
             for lap in self.laps
         )
 
-    def computed(self, channel: Channel, lap: PlotLap) -> tuple[list[float], list[float]]:
+    def computed(self, channel: Channel, lap: PlotLap) -> tuple[Sequence[float], Sequence[float]]:
         """Distances & values of channel (recorded or computed) by increasing distance, recorded unit"""
         column = channel.column
         columns = lap.data.columns
+        distances: Sequence[float]
         if column == "delta":
             return self.deltas.get(lap.key, ([], []))
         if column == "delta_rate":
@@ -445,11 +447,11 @@ class TraceData:
                 for across, along in zip(lateral, longitudinal)
             ]
         if column in SETTING_CHANNELS:  # -1: car has no such setting (not drawn)
-            distances, values = monotonic_distance(lap.data, column)
-            kept = [index for index, value in enumerate(values) if value >= 0]
-            if len(kept) == len(values):
-                return distances, values
-            return [distances[index] for index in kept], [values[index] for index in kept]
+            distances, settings = monotonic_distance(lap.data, column)
+            kept = [index for index, value in enumerate(settings) if value >= 0]
+            if len(kept) == len(settings):
+                return distances, settings
+            return [distances[index] for index in kept], [settings[index] for index in kept]
         if column == "fuel_used":
             distances, fuel = monotonic_distance(lap.data, "fuel")
             return distances, [fuel[0] - value for value in fuel] if fuel else []
@@ -458,16 +460,16 @@ class TraceData:
             temps = [monotonic_distance(lap.data, f"tyre_temp_{wheel}")[1] for wheel in WHEELS]
             return distances, [max(values) - min(values) for values in zip(*temps)]
         if column.startswith("slip_"):
-            distances, wheel = monotonic_distance(lap.data, f"wheel_speed_{column[5:]}")
+            distances, wheel_speeds = monotonic_distance(lap.data, f"wheel_speed_{column[5:]}")
             speeds = monotonic_distance(lap.data, "speed_kph")[1]
             return distances, [
                 max(min((wheel_speed - speed) / speed * 100, 100.0), -100.0) if speed >= SLIP_MIN_SPEED else 0.0
-                for wheel_speed, speed in zip(wheel, speeds)
+                for wheel_speed, speed in zip(wheel_speeds, speeds)
             ]
         return monotonic_distance(lap.data, column)
 
     def series(self, channel: Channel, lap: PlotLap, time_axis: bool | None = None,
-               ) -> tuple[list[float], list[float]]:
+               ) -> tuple[Sequence[float], Sequence[float]]:
         """Channel samples of lap by increasing axis position, in user units, cached"""
         use_time = self.time_axis if time_axis is None else time_axis
         key = (lap.key, channel.column, use_time)

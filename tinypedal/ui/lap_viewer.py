@@ -30,7 +30,7 @@ import json
 import logging
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 from PySide6.QtGui import QColor
@@ -358,7 +358,7 @@ def save_visible_channels(folder: str, columns: list[str]):
 
 
 
-def delta_limit(series: list[list[float]]) -> float:
+def delta_limit(series: Sequence[Sequence[float]]) -> float:
     """Delta chart half range: 95th percentile of each lap's delta, lowest median of laps
 
     An aberrant lap (cut short, spin) would otherwise flatten every other lap's delta;

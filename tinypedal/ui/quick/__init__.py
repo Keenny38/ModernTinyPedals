@@ -163,7 +163,7 @@ def theme_copy(engine: QQmlEngine, theme: Theme) -> QObject:
     QML bindings read theme values thousands of times per second while charts zoom: from a QML object,
     no Python call (and no wait for interpreter lock held by a background thread).
     """
-    meta = Theme.staticMetaObject
+    meta = Theme.staticMetaObject  # type: ignore[attr-defined]  # PySide6 stubs lack it on subclasses
     lines = ["import QtQuick", "QtObject {", "    required property QtObject source"]  # QtQuick: color type
     for number in range(meta.propertyOffset(), meta.propertyCount()):
         prop = meta.property(number)

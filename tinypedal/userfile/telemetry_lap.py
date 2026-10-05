@@ -38,7 +38,7 @@ import time
 from array import array
 from bisect import bisect_left
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from functools import lru_cache
 from itertools import pairwise
@@ -262,7 +262,7 @@ def load_lap(path: str) -> LapData:
     return LapData(lap_stem(os.path.basename(path)), pack_columns(columns), info or None)
 
 
-def pack_columns(columns: dict[str, Column]) -> dict[str, array]:
+def pack_columns(columns: Mapping[str, Column]) -> dict[str, Column]:
     """Columns as packed arrays: double precision for time & distance, single for others
 
     A list keeps a float object per value (about 32 bytes), an array 4 or 8 bytes: a loaded lap takes
@@ -375,7 +375,7 @@ def _chain(first: str, rest):
     yield from rest
 
 
-def interpolate(xs: list[float], ys: list[float], x: float) -> float:
+def interpolate(xs: Sequence[float], ys: Sequence[float], x: float) -> float:
     """Linear interpolation of y at x (xs sorted ascending)"""
     index = bisect_left(xs, x)
     if index <= 0:
@@ -543,7 +543,7 @@ def theoretical_best(sector_list: list[list[float]]) -> tuple[float, list[float]
 
 
 def decimate_minmax(
-    xs: list[float], ys: list[float], start: float, end: float, buckets: int,
+    xs: Sequence[float], ys: Sequence[float], start: float, end: float, buckets: int,
 ) -> list[tuple[float, float]]:
     """Points of xs range [start, end] reduced to min & max of each bucket (keeps peaks)
 
