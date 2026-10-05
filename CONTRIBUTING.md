@@ -38,7 +38,7 @@ python -m venv .venv
 .venv/Scripts/python run.py
 ```
 
-Before you submit your change, these three commands must pass (CI runs them on Windows and Linux, Python 3.13 and 3.14):
+Before you submit your change, `python tools/check.py` must pass: it runs what CI runs (on Windows and Linux, Python 3.11, 3.13 and 3.14), mainly these three commands, with mypy for Windows and Linux:
 
 ```bash
 ruff check .

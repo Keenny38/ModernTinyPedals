@@ -1,15 +1,11 @@
 name: Build and Release
 
-# A release is published automatically after every push to master once Checks passed.
+# A release is published on demand (python tools/release.py, or "Run workflow" on master), never by a push:
+# pushes to master only run Checks, fixes can follow each other until everything is green.
+# Refused unless Checks passed on the master commit and both changelogs have the version section.
 # Version is computed from commits since the last release (tools/next_version.py):
 # first release 0.10.0, then minor + 1 when a commit title starts with "Add", else patch + 1.
-# workflow_run is safe here: the version job only goes on for Checks of a push to this repository
-# (never a pull request or a fork), so only code already on master is built.
-on:  # zizmor: ignore[dangerous-triggers]
-  workflow_run:
-    workflows: [Checks]
-    types: [completed]
-    branches: [master]
+on:
   workflow_dispatch:
     inputs:
       bump:
@@ -35,18 +31,13 @@ defaults:
     shell: bash
 
 jobs:
-  # Decide version, skip when Checks failed or nothing to release
-  # (only Checks of a push to this repository: never a pull request, nor a fork branch named master)
+  # Decide version, refuse when Checks did not pass, skip when nothing to release
   version:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read  # manual release: look up Checks result of the commit
+      actions: read  # look up Checks result of the commit
     outputs:
       app_ver: ${{ steps.next.outputs.app_ver }}
       sha: ${{ steps.next.outputs.sha }}
@@ -54,12 +45,12 @@ jobs:
     - name: Checkout tested commit with full history and tags
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
-        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        ref: ${{ github.sha }}
         fetch-depth: 0
         persist-credentials: false
 
-    - name: Manual release only from master, after Checks passed
-      if: github.event_name == 'workflow_dispatch' && !inputs.test_build
+    - name: Release only from master, after Checks passed
+      if: ${{ !inputs.test_build }}
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
@@ -83,16 +74,23 @@ jobs:
       id: next
       env:
         BUMP: ${{ inputs.bump || 'auto' }}
+        TEST_BUILD: ${{ inputs.test_build }}
       run: |
         ver=$(python tools/next_version.py --bump "$BUMP")
         echo "app_ver=${ver}" >> $GITHUB_OUTPUT
         echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
         echo "Next version: ${ver:-none (no change since last release)}"
-        if [ -n "$ver" ] && ! python tools/gen_release_notes.py --check-changelog "$ver"; then
-          echo "::warning::CHANGELOG.md has no '## $ver' section: release notes will only list commits"
-        fi
-        if [ -n "$ver" ] && ! python tools/gen_release_notes.py --check-changelog "$ver" --changelog CHANGELOG.fr.md; then
-          echo "::warning::CHANGELOG.fr.md has no '## $ver' section: the French app will show English notes"
+        # Release notes of both app languages come from the changelogs: no release without them
+        # (a test build only warns)
+        missing=0
+        for changelog in CHANGELOG.md CHANGELOG.fr.md; do
+          if [ -n "$ver" ] && ! python tools/gen_release_notes.py --check-changelog "$ver" --changelog "$changelog"; then
+            echo "::error::$changelog has no '## $ver' section"
+            missing=1
+          fi
+        done
+        if [ "$missing" = "1" ] && [ "$TEST_BUILD" != "true" ]; then
+          exit 1
         fi
 
   # Source code archive

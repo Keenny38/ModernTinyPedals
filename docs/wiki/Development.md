@@ -53,6 +53,7 @@ pytest --cov=tinypedal
 - CI fails when total coverage drops under `fail_under` in `pyproject.toml` (88 % at the time of writing; current coverage is about 91 %). There are more than 2,300 tests.
 - Tests run headless in CI with `QT_QPA_PLATFORM=offscreen`, and a hung test fails after 300 seconds (`--timeout=300`).
 - `pytest -m benchmark` runs the widget render benchmark (separate CI step); `pytest -m manual` runs tests that need a running game.
+- `python tools/check.py` runs every check of CI in one command: ruff, mypy for Windows **and** Linux, tests with coverage (`--quick`: without tests). It also warns when a changelog lacks the section of the next version, and lints changed workflows when `actionlint` / `zizmor` are installed. `python tools/check.py --install-hook` runs it before each push to `master` (a failed check refuses the push, pushes to other branches are not checked).
 - CI always installs the latest `ruff` and `mypy`. If a check fails in CI but passes locally, update them: `pip install -U ruff mypy`.
 - `pre-commit install` runs JSON / YAML checks, `ruff --fix` and `mypy` before each commit (not the tests).
 - The `visual-regression` job renders every overlay with the base commit and with your changes and compares them. An overlay change fails the check unless a before / after image is added in `docs/changes` (see [Visuals](#before--after-visuals)) or a commit message contains `[visual]`.
@@ -157,9 +158,21 @@ The display name is "Modern Tiny Pedals", but the internal name stays `TinyPedal
 
 ## Release process
 
-Releases are automatic: every push to `master` publishes a new release once the `Checks` workflow passes. The `Build and Release` workflow computes the version, builds and self-tests the Windows executable, builds the installer and the source ZIP, attests the files, writes the release notes and publishes the release.
+Releases are published **on demand**: pushes to `master` only run the `Checks` workflow, so fixes can follow each other until everything is green. When `master` is ready:
 
-Commits that only change documentation (`docs/wiki/`, `README.md`, `CHANGELOG*.md`, `CONTRIBUTING.md`, `SECURITY.md`, `docs/ROADMAP.md`, `docs/AUDIT.md`, images of `docs/changes` and `docs/changelog`) do not publish a release on their own: they are listed in the next release.
+1. `python tools/check.py` passes (automatic before each push to `master` once the hook is installed), everything is pushed;
+2. both changelogs have the section of the next version (see [Changelog](#changelog));
+3. publish with **one** command, by one person (or one Claude session) at a time:
+
+```bash
+python tools/release.py
+```
+
+It refuses when `master` has changes not pushed, when there is nothing to release, when a changelog lacks the version section, or when `Checks` did not pass on the `master` commit (it waits while they run). Then it asks before publishing, starts the `Build and Release` workflow, follows it and checks the published files. `--dry-run` only checks. `Run workflow` on the Actions tab (branch `master`) does the same without the local checks: the workflow itself refuses a commit without passed `Checks` or without both changelog sections.
+
+The `Build and Release` workflow computes the version, builds and self-tests the Windows executable, builds the installer and the source ZIP, attests the files, writes the release notes and publishes the release.
+
+Commits that only change documentation (`docs/wiki/`, `README.md`, `CHANGELOG*.md`, `CONTRIBUTING.md`, `SECURITY.md`, `docs/ROADMAP.md`, `docs/AUDIT.md`, images of `docs/changes` and `docs/changelog`) are not a release on their own (`tools/release.py` says there is nothing to release): they are listed in the next one.
 
 ### Versioning
 
@@ -167,7 +180,7 @@ The version (`MAJOR.MINOR.PATCH`, from `0.10.0`) comes from the commits since th
 
 - a commit title starting with `Add` (also `New`, `Create`, `Introduce`, `Support`) bumps the minor version (`0.10.3` → `0.11.0`);
 - anything else bumps the patch version (`0.10.0` → `0.10.1`);
-- a major version is chosen by hand: run `Build and Release` from the Actions tab with `bump: major`. The manual run also offers `patch` and `minor`, and `test_build` to build without publishing (any branch).
+- a major version is chosen by hand: `python tools/release.py --bump major` (also `patch` and `minor`). `Run workflow` with `test_build` builds without publishing, from any branch.
 
 Write commit titles in English, in the imperative: they become the release notes, sorted into **Added**, **Fixed** (titles starting with `Fix`, `Correct`, `Prevent`...) and **Changed**. Merge commits and commits with `[skip ci]` are left out of the notes.
 
@@ -183,12 +196,12 @@ python tools/gen_release_notes.py v0.20.0
 
 ### Changelog
 
-Before pushing, run `git fetch --tags` (to start from the real last release), then add the section of the next version, `## X.Y.Z (YYYY-MM-DD)`, to **both** files:
+Before publishing, run `git fetch --tags` (to start from the real last release) and `python tools/next_version.py`, then add the section of that version, `## X.Y.Z (YYYY-MM-DD)`, to **both** files:
 
 - [`CHANGELOG.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md), in English: the start of the GitHub release notes, and the notes the app shows in English;
 - [`CHANGELOG.fr.md`](https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.fr.md), in French: the notes the app shows in French (fetched at the release tag for an available update, bundled file for the installed version).
 
-Without a section, the release notes only list commits and the workflow shows a warning. The `##` to `####` headings inside a section become the cards of the app's What's New page.
+Without both sections, `tools/release.py` and the workflow refuse to publish. The `##` to `####` headings inside a section become the cards of the app's What's New page.
 
 ### Before / after visuals
 
@@ -212,7 +225,7 @@ python tools/make_readme_preview.py
 
 ### Release files and checksums
 
-Each release publishes the Windows installer `ModernTinyPedals-<version>-windows-setup.exe` with its `.sha256` file (the updater of apps up to 0.19 needs both), the same installer zipped as `ModernTinyPedals-<version>-setup.zip` (downloaded by the updater since 0.20) and `ModernTinyPedals-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
+Each release publishes the Windows installer `ModernTinyPedals-<version>-windows-setup.exe` with its `.sha256` file (the updater of apps up to 0.19 needs both), the same installer zipped as `ModernTinyPedals-<version>-setup.zip` (downloaded by the updater since 0.20) and `ModernTinyPedals-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. `tests/test_release_assets.py` reads the workflow and fails when a change of release files would leave an installed app (from 0.10) without an installer to update to. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
 
 ### Code signing
 
