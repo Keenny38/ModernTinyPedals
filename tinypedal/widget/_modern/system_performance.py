@@ -30,7 +30,7 @@ import psutil
 from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
-from ..system_performance import AppMemory
+from ..system_performance import AppMemory, app_cpu_percent
 from .base import ModernOverlay, display_order_options
 from .draw import fraction
 from .stats import Stat, StatsMixin, Value
@@ -76,7 +76,7 @@ class Realtime(StatsMixin, ModernOverlay):
                 self.cpu[key] = self.ema(self.cpu[key], psutil.cpu_percent())
                 memory = f"{psutil.virtual_memory().used / 1024 ** 3:.1f}GB"
             else:
-                self.cpu[key] = self.ema(self.cpu[key], self.app_info.cpu_percent() / self.cpu_count)
+                self.cpu[key] = self.ema(self.cpu[key], app_cpu_percent(self.app_info, self.cpu_count))
                 memory = f"{self.app_memory.megabytes():.1f}MB"
             values.append(Value(f"{self.cpu[key]:.2f}%", bar=fraction(self.cpu[key] / 100), sub=memory))
         self.refresh(tuple(values))

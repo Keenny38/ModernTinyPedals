@@ -386,3 +386,19 @@ def test_app_memory_read_every_few_seconds(monkeypatch):
     clock[0] += system_performance.MEMORY_READ_INTERVAL
     memory.megabytes()
     assert Process.reads == 2
+
+
+def test_app_cpu_kept_within_every_core():
+    """Readings close together go far over 100% (1026.88% cut the modern overlay text): shown at most 100%"""
+    from tinypedal.widget.system_performance import app_cpu_percent
+
+    class Process:
+        def __init__(self, reading):
+            self.reading = reading
+
+        def cpu_percent(self):
+            return self.reading
+
+    assert app_cpu_percent(Process(8213.0), 8) == 100.0
+    assert app_cpu_percent(Process(200.0), 8) == 25.0
+    assert app_cpu_percent(Process(-1.0), 8) == 0.0

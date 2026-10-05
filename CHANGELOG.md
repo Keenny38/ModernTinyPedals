@@ -3,6 +3,12 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.20.2 (2026-10-06)
+
+### Fixes
+
+- **System performance**: the app CPU use is never shown over 100% (readings close together gave values like 1026.88%, too wide for the overlay).
+
 ## 0.20.1 (2026-10-06)
 
 ### Updates from the app

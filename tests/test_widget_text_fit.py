@@ -6,6 +6,7 @@ widget is rendered with all parts shown and large but real values (Le Mans gaps 
 hot brakes in Fahrenheit, 100% CPU...), and every text drawn must fit its cell.
 """
 
+import os
 from importlib import import_module
 
 import pytest
@@ -97,6 +98,8 @@ def widest_values(data, monkeypatch):
     monkeypatch.setattr(minfo.stats, "metersDriven", 2e9)  # odometer at its maximum digits
     monkeypatch.setattr(minfo.wheels, "currentSuspensionPosition", [123.45] * 4)
     monkeypatch.setattr(psutil, "cpu_percent", lambda *args, **kwargs: 100.0)
+    # App on every core (a real reading depends on the machine: 1026.88% once on a CI runner)
+    monkeypatch.setattr(psutil.Process, "cpu_percent", lambda self, *args, **kwargs: 100.0 * (os.cpu_count() or 1))
 
 
 def wide_plan(widget):

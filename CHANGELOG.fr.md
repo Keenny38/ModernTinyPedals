@@ -3,6 +3,12 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.20.2 (2026-10-06)
+
+### Corrections
+
+- **Performances système** : l'utilisation du processeur par l'app n'est plus jamais affichée au-delà de 100 % (des mesures trop rapprochées donnaient des valeurs comme 1026,88 %, trop larges pour l'overlay).
+
 ## 0.20.1 (2026-10-06)
 
 ### Mises à jour depuis l'app

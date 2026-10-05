@@ -49,6 +49,15 @@ class AppMemory:
         return self.used
 
 
+def app_cpu_percent(process: psutil.Process, cpu_count: int) -> float:
+    """App CPU use, share of every core (0 to 100%)
+
+    Measured over the time since the previous reading, in steps of the system clock tick: readings close
+    together can go far over 100% (1026.88% seen), which is noise.
+    """
+    return min(max(process.cpu_percent() / cpu_count, 0.0), 100.0)
+
+
 class Realtime(Overlay):
     """Draw widget"""
 
@@ -129,7 +138,7 @@ class Realtime(Overlay):
             self.update_system(self.bar_system, sys_cpu_ema, self.prefix_sys)
 
         if self.wcfg["show_tinypedal_performance"]:
-            app_cpu_ema = self.calc_ema(self.bar_app.last, self.app_info.cpu_percent() / self.cpu_count)
+            app_cpu_ema = self.calc_ema(self.bar_app.last, app_cpu_percent(self.app_info, self.cpu_count))
             self.update_app(self.bar_app, app_cpu_ema, self.prefix_app)
 
     # GUI update methods
