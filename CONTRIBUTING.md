@@ -1,6 +1,6 @@
-# Contributing to TinyPedal
+# Contributing to Modern Tiny Pedals
 
-Thank you for your interests on **TinyPedal** project, any contribution is welcome and appreciated.
+Thank you for your interests on **Modern Tiny Pedals** project, any contribution is welcome and appreciated.
 
 Before requesting features or reporting issues, make sure to read [Frequently Asked Questions](https://github.com/TinyPedal/TinyPedal/wiki/Frequently-Asked-Questions) and [User Guide](https://github.com/TinyPedal/TinyPedal/wiki/User-Guide) for existing issues to avoid duplicates. You can also use [github search](https://github.com/search?q=repo%3AKeenny38%2FModernTinyPedals&type=issues) to quickly search for related issue.
 
