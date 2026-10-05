@@ -100,7 +100,7 @@ def test_release_notes_visuals(tmp_path):
     from PySide6.QtGui import QColor, QImage
 
     sys.path.insert(0, "tools")
-    from gen_release_notes import Visual, format_visuals, png_title
+    from gen_release_notes import Visual, format_visuals, png_title, unshown_visuals
 
     image = QImage(4, 4, QImage.Format.Format_ARGB32)
     image.fill(QColor("#000000"))
@@ -112,6 +112,10 @@ def test_release_notes_visuals(tmp_path):
     assert notes.startswith("### Visuals\n")
     assert "![MAP](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/abc123/docs/changes/x.png)" in notes
     assert format_visuals([]) == ""
+    shown = Visual("abc123", "docs/changes/shown.png", "SHOWN")
+    summary = "![Shown](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/shown.png)"
+    assert unshown_visuals([shown, Visual("abc123", "docs/changes/x.png", "MAP")], summary)[0].title == "MAP"
+    assert unshown_visuals([shown], "") == [shown]  # no changelog section: every visual shown
 
 
 def test_old_repository_name_is_migrated(ui_env):

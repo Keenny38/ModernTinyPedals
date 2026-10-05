@@ -138,6 +138,11 @@ def visuals(revision_range: str) -> list[Visual]:
     return result
 
 
+def unshown_visuals(items: list[Visual], summary: str) -> list[Visual]:
+    """Visuals not already shown by the changelog section (same image file)"""
+    return [visual for visual in items if visual.path not in summary]
+
+
 def format_visuals(items: list[Visual]) -> str:
     """Visuals section, as Markdown (empty if no image)"""
     if not items:
@@ -184,7 +189,7 @@ def release_notes(tag: str) -> str:
     summary = changelog_section(tag.removeprefix("v"))
     if summary:  # written changelog first, then commits
         notes = f"{summary}\n## Commits\n\n{notes}"
-    images = format_visuals(visuals(revision_range))
+    images = format_visuals(unshown_visuals(visuals(revision_range), summary))
     return f"{notes}\n{images}" if images else notes
 
 
