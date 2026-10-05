@@ -1,5 +1,6 @@
 """Pytest shared setup"""
 
+import faulthandler
 import os
 import sys
 
@@ -34,6 +35,27 @@ def isolated_user_paths(tmp_path_factory):
     yield root
     for name, value in saved.items():
         setattr(cfg.path, name, value)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def quit_like_app(isolated_user_paths):
+    """Session end does what app exit does: lap viewer worker process stopped, lap & setting saving finished
+
+    Left running, interpreter exit waits for them (Windows, Python 3.11 runner hung 30 minutes after the
+    last test). Torn down before user paths are restored: nothing saved to real user folders.
+    """
+    yield
+    # Exit still hanging: stack of every thread printed and run stopped, instead of blocking until job timeout
+    faulthandler.dump_traceback_later(120, exit=True)
+    lap_backend = sys.modules.get("tinypedal.ui.quick.lap_backend")
+    if lap_backend is not None:
+        lap_backend.quit_workers()
+    module_recorder = sys.modules.get("tinypedal.module.module_recorder")
+    if module_recorder is not None:
+        module_recorder.LAP_SAVER.shutdown(wait=True, cancel_futures=True)
+    from tinypedal.setting import cfg
+
+    cfg.flush()
 
 
 @pytest.fixture(autouse=True)
