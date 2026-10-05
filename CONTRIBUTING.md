@@ -2,20 +2,20 @@
 
 Thank you for your interests on **TinyPedal** project, any contribution is welcome and appreciated.
 
-Before requesting features or reporting issues, make sure to read [Frequently Asked Questions](https://github.com/TinyPedal/TinyPedal/wiki/Frequently-Asked-Questions) and [User Guide](https://github.com/TinyPedal/TinyPedal/wiki/User-Guide) for existing issues to avoid duplicates. You can also use [github search](https://github.com/search?q=repo%3ATinyPedal%2FTinyPedal&type=issues) to quickly search for related issue.
+Before requesting features or reporting issues, make sure to read [Frequently Asked Questions](https://github.com/TinyPedal/TinyPedal/wiki/Frequently-Asked-Questions) and [User Guide](https://github.com/TinyPedal/TinyPedal/wiki/User-Guide) for existing issues to avoid duplicates. You can also use [github search](https://github.com/search?q=repo%3AKeenny38%2FModernTinyPedals&type=issues) to quickly search for related issue.
 
 > [!IMPORTANT]
 > Please keep **one request or report per issue with a concise title that clearly describes the issue**, otherwise the developer may not be able to keep track of every request that scattered in random posts and issues.
 
 ## Requesting Features
 
-For requesting features, please open [Issues](https://github.com/TinyPedal/TinyPedal/issues).
+For requesting features, please open [Issues](https://github.com/Keenny38/ModernTinyPedals/issues).
 
 Please note that, we work on this project purely as a hobby and labour of love. We'd love to bring more features whenever possible, but there is no promise or obligation to fulfill every request.
 
 ## Reporting Issues
 
-For reporting issues, please open [Issues](https://github.com/TinyPedal/TinyPedal/issues).
+For reporting issues, please open [Issues](https://github.com/Keenny38/ModernTinyPedals/issues).
 
 When reporting issues, please be specific and provide as much detail as possible.
 
@@ -23,11 +23,11 @@ There are often bug reports which turned out to be issues caused by other third 
 
 ## Contributing Code
 
-For implementing features or fixing bugs, please open [Pull Requests](https://github.com/TinyPedal/TinyPedal/pulls).
+For implementing features or fixing bugs, please open [Pull Requests](https://github.com/Keenny38/ModernTinyPedals/pulls).
 
 Please note that, the primary focus of TinyPedal project is simplicity and efficiency. Every feature should be carefully thought out before implementation. Not every Pull Requests may be accepted, as we will see what fits the best for the project.
 
-It is recommended to open [Issues](https://github.com/TinyPedal/TinyPedal/issues) to discuss about the feature beforehand, to avoid wasting time on feature that will not be considered.
+It is recommended to open [Issues](https://github.com/Keenny38/ModernTinyPedals/issues) to discuss about the feature beforehand, to avoid wasting time on feature that will not be considered.
 
 ### Notes about game API accessing
 
