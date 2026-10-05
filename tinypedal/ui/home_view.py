@@ -95,7 +95,7 @@ class HomeView(QWidget):
 
         self.card_game = HomeCard(content, "Game")
         self.card_preset = HomeCard(content, "Preset", "Open", lambda: select_page("preset"))
-        self.card_widget = HomeCard(content, "Widget", "Open", lambda: select_page("widget"))
+        self.card_widget = HomeCard(content, "Overlays", "Open", lambda: select_page("widget"))
         self.card_module = HomeCard(content, "Module", "Open", lambda: select_page("module"))
         self.card_overlay = HomeCard(content, "Overlay", "Command Palette", window.open_command_palette)
         self.card_version = HomeCard(content, "Version", "Tools", lambda: select_page("tools"))

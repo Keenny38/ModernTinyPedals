@@ -471,6 +471,7 @@ class Realtime(
             "pit_in": self.text["pit_in"], "pit_out": self.text["pit_out"], "penalty": self.text["penalty"],
             "track_limits": self.text["track_limits"], "overheat": self.text["overheat"],
             "oil": self.text["oil"], "water": self.text["water"],
+            "contact": self.text["contact"], "wall": self.text["wall"],
         }
         # Race events in the event log
         log = self.show_event_log
@@ -480,6 +481,10 @@ class Realtime(
         self.log_engine_events = log and bool(wcfg["show_engine_overheat_events"])
         self.log_race_events = (self.log_flag_events or self.log_pit_events
                                 or self.log_penalty_events or self.log_engine_events)
+        self.log_contact_events = log and bool(wcfg["show_contact_events"])
+        self.contacts_seen: tuple = ()  # game contact list last checked
+        self.contacts_logged: dict[str, float] = {}  # other driver: session time of last contact logged
+        self.contacts_session_time = 0.0
         # Frozen incident: replay cursor, previous incident speed drawn behind for comparison
         self.incident_replay = bool(wcfg["enable_incident_replay"])
         self.show_previous_incident = bool(wcfg["show_previous_incident_trace"])

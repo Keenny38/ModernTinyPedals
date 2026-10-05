@@ -94,7 +94,7 @@ def test_cache(tmp_path):
     assert lap_reference.load_cache(f"{tmp_path.as_posix()}/missing/") == ("", 0.0)
 
 
-# --- Driver stats viewer
+# --- Driver stats viewer (Qt Quick page, state in quick/stats_backend.py)
 @pytest.fixture
 def viewer(ui_env, monkeypatch):
     from tinypedal.api_control import api
@@ -115,102 +115,96 @@ def viewer(ui_env, monkeypatch):
     monkeypatch.setattr(type(api.read.session), "track_name",
                         lambda self: "Circuit de Spa-Francorchamps Endurance", raising=False)
     page = driver_stats_viewer.DriverStatsViewer(None)
-    yield page
+    yield page.backend
     page.close()
     page.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def row_of(page, vehicle):
-    table = page.table_stats
-    return next(row for row in range(table.rowCount()) if table.item(row, 0).text() == vehicle)
+class Now:
+    """Thread run at once"""
+
+    def __init__(self, target, **kwargs):
+        self.target = target
+
+    def start(self):
+        self.target()
 
 
 def test_viewer_levels_in_table(viewer):
-    table = viewer.table_stats
-    header = viewer.table_header_key
-    lmp2 = row_of(viewer, "LMP2_ELMS - Oreca")
-    assert table.item(lmp2, header.index("level")).text() == "Competitive"
-    assert table.item(lmp2, header.index("gap")).text() == f"{121.5 / 120.48 * 100:.2f} %"
-    hyper = row_of(viewer, "Hyper - Ferrari")
-    assert table.item(hyper, header.index("level")).text() == "Alien"
-    unknown = row_of(viewer, "Oreca 07")
-    assert table.item(unknown, header.index("level")).text() == "-"  # class unknown
+    assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "Competitive"
+    assert viewer.cell("LMP2_ELMS - Oreca", "gap").text == f"{121.5 / 120.48 * 100:.2f} %"
+    assert viewer.cell("Hyper - Ferrari", "level").text == "Alien"
+    assert viewer.cell("Oreca 07", "level").text == "-"  # class unknown
 
 
 def test_viewer_tiles(viewer):
-    assert viewer.tile_best.label_value.text() == "1:59.000"  # best of track: hypercar
-    assert viewer.tile_best.label_detail.text() == "Hyper - Ferrari"
-    assert viewer.tile_level.label_value.text() == "Alien"
-    assert viewer.tile_races.label_value.text() == "2"
-    assert viewer.tile_laps.label_value.text() == "30"
+    tiles = {tile["title"]: tile for tile in viewer.tiles}
+    assert tiles["Best Lap"]["value"] == "1:59.000"  # best of track: hypercar
+    assert tiles["Best Lap"]["detail"] == "Hyper - Ferrari"
+    assert tiles["Level"]["value"] == "Alien"
+    assert tiles["Races"]["value"] == "2"
+    assert tiles["Valid Laps"]["value"] == "30"
 
 
 def test_viewer_reference_card(viewer):
-    viewer.table_stats.selectRow(row_of(viewer, "LMP2_ELMS - Oreca"))
-    card = viewer.card_reference
-    assert not card.ladder.isHidden() and "Spa" in card.label_subject.text()
-    marks = [row[2].text() for row in card.ladder.rows]
+    viewer.selectRow("LMP2_ELMS - Oreca")
+    reference = viewer.reference
+    assert reference["visible"] and "Spa" in reference["detail"]
+    marks = [row["marks"] for row in reference["ladder"]]
     assert "PB" in marks[1] and "Race" in marks[3]  # PB competitive, race best midpack
-    assert "Oreca ELMS" in card.label_fastest.text()
-    viewer.table_stats.selectRow(row_of(viewer, "Oreca 07"))
-    assert card.ladder.isHidden() and "classification" in card.label_empty.text()
+    assert "Oreca ELMS" in reference["fastest"]
+    viewer.selectRow("Oreca 07")
+    assert not viewer.reference["visible"] and "classification" in viewer.reference["reason"]
 
 
 def test_viewer_reference_off_and_download(viewer, monkeypatch):
-    from tinypedal.ui import driver_stats_viewer
+    from tinypedal.ui.quick import stats_backend
 
-    viewer.action_enable.setChecked(False)
+    viewer.setCompare(False)
     assert cfg.user.config["driver_stats_viewer"]["enable_lap_reference"] is False
-    lmp2 = row_of(viewer, "LMP2_ELMS - Oreca")
-    assert viewer.table_stats.item(lmp2, viewer.table_header_key.index("level")).text() == "-"
+    assert viewer.cell("LMP2_ELMS - Oreca", "level").text == "-"
     # Download (run at once, sheet with Spa LMP2 only)
     only_lmp2 = HEADER + SHEET.splitlines(keepends=True)[2]
     monkeypatch.setattr(lap_reference, "fetch_sheet", lambda url, timeout=15: only_lmp2)
-
-    class Now:
-        def __init__(self, target, **kwargs):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-    monkeypatch.setattr(driver_stats_viewer.threading, "Thread", Now)
-    viewer.action_enable.setChecked(True)  # turned on: downloaded again (cache older? forced below)
-    viewer.download_reference(force=True)
+    monkeypatch.setattr(stats_backend.threading, "Thread", Now)
+    viewer.setCompare(True)  # turned on: downloaded again (cache older? forced below)
+    viewer.updateReference()
     QCoreApplication.processEvents()
     assert set(viewer.references.entries) == {("Spa", "LMP2elms")}
     assert lap_reference.load_cache(cfg.path.config)[0] == only_lmp2
 
 
 def test_viewer_download_failure_keeps_cache(viewer, monkeypatch):
-    from tinypedal.ui import driver_stats_viewer
+    from tinypedal.ui.quick import stats_backend
 
-    class Now:
-        def __init__(self, target, **kwargs):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-    monkeypatch.setattr(driver_stats_viewer.threading, "Thread", Now)
-    viewer.download_reference(force=True)  # offline (conftest)
+    monkeypatch.setattr(stats_backend.threading, "Thread", Now)
+    viewer.updateReference()  # offline (conftest)
     QCoreApplication.processEvents()
     assert viewer.references.entries  # cached reference kept
-    assert viewer.reference_error
+    assert viewer.reference_error and "Community lap times" in viewer.referenceText
 
 
 def test_viewer_change_sheet_url(viewer, monkeypatch):
-    from tinypedal.ui import driver_stats_viewer
+    from tinypedal.ui import _common
+    from tinypedal.ui.quick import stats_backend
 
     dialogs = []
-    monkeypatch.setattr(driver_stats_viewer.TextInputDialog, "open", lambda self: dialogs.append(self))
+    monkeypatch.setattr(_common.TextInputDialog, "open", lambda self: dialogs.append(self))
     warnings = []
-    monkeypatch.setattr(driver_stats_viewer.QMessageBox, "warning",
+    monkeypatch.setattr(stats_backend.QMessageBox, "warning",
                         staticmethod(lambda *args, **kwargs: warnings.append(args)))
-    viewer.change_sheet_url()
+    viewer.changeSheetUrl()
     dialog = dialogs[0]
     assert not dialog._on_accept("https://example.com/sheet") and warnings
     assert dialog._on_accept("https://docs.google.com/spreadsheets/d/abc/edit#gid=5")
     assert cfg.user.config["driver_stats_viewer"]["lap_reference_sheet_url"].endswith("gid=5")
     dialog.deleteLater()
+
+
+def test_reference_track_match_cached():
+    table = parse_lap_references(SHEET)
+    assert table.sheet_track("Circuit de Spa-Francorchamps Endurance") == "Spa"
+    assert table._matches == {"Circuit de Spa-Francorchamps Endurance": "Spa"}
+    # Vehicle key without class (vehicle name): class recorded in session history
+    assert table.find("Circuit de Spa-Francorchamps Endurance", "Oreca 07", "LMP2_ELMS").vehicle_class == "LMP2elms"

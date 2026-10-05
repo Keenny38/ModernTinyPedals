@@ -118,7 +118,12 @@ def test_option_finder(ui_env):
     from tinypedal.ui import option_finder
 
     entries = option_finder.build_index()
-    assert len(entries) > 1500
+    assert len(entries) > 600
+    # Modern design: only options it reads are found (no per cell colors)
+    assert not option_finder.search_options(entries, "speedometer font color")
+    assert option_finder.search_options(entries, "relative column time gap")
+    cfg.user.setting["speedometer"]["enable_classic_layout"] = True  # classic layout: every option
+    entries = option_finder.build_index()
     results = option_finder.search_options(entries, "speedometer font color")
     assert results and all(entry.section == "speedometer" for entry in results)
     set_language("Français")

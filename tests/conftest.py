@@ -47,6 +47,14 @@ def offline_lap_reference(monkeypatch):
     monkeypatch.setattr(lap_reference, "fetch_sheet", offline)
 
 
+@pytest.fixture(autouse=True)
+def offline_track_geometry(monkeypatch):
+    """Official circuit never asked to a running game in tests (tests feed game answers themselves)"""
+    from tinypedal.userfile import track_geometry
+
+    monkeypatch.setattr(track_geometry, "rest_get", lambda *args, **kwargs: None)
+
+
 @pytest.fixture
 def ui_env(monkeypatch, tmp_path):
     """Isolated setting for UI tests: default presets, data paths in tmp folder, saving disabled"""

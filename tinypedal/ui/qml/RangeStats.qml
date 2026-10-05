@@ -8,12 +8,17 @@ Item {
     property var chart
     readonly property bool hasRange: chart ? chart.hasRange : false
     property var stats: ({})
+    property bool stale: false  // markers or laps changed while tab hidden
 
     function update() {
+        if (!visible) { stale = true; return }  // tab kept hidden: refreshed when shown again
+        stale = false
         stats = hasRange ? backend.rangeStats(chart.markerA, chart.markerB) : ({})
     }
 
     onHasRangeChanged: update()
+    onVisibleChanged: if (visible && stale) update()
+    Component.onCompleted: { stale = true; update() }  // tab created when first shown
     Connections {
         target: root.chart
         function onMarkerAChanged() { root.update() }

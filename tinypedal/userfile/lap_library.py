@@ -27,9 +27,12 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import time
 from contextlib import suppress
 
 from .telemetry_lap import IMPORT_FOLDER, LapFile, lap_files
+
+RENAME_RETRIES = 10  # tries 0.1 s apart while a lap file of the log is still open
 
 _invalid_group_name = re.compile(r'[\\/:*?"<>|]')
 
@@ -68,7 +71,14 @@ def rename_group(filepath: str, old: str, new: str) -> dict[str, str]:
     folder = import_folder(filepath)
     source, target = os.path.join(folder, old), os.path.join(folder, new)
     laps = lap_files(source)
-    os.rename(source, target)
+    for attempt in range(RENAME_RETRIES):
+        try:
+            os.rename(source, target)
+            break
+        except PermissionError:  # Windows: a lap file still read (lap viewer loading it): retried a moment later
+            if attempt == RENAME_RETRIES - 1:
+                raise
+            time.sleep(0.1)
     return {
         os.path.normpath(lap.path): os.path.normpath(os.path.join(target, lap.filename))
         for lap in laps

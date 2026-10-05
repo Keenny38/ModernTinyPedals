@@ -166,7 +166,7 @@ class HotkeyList(QWidget):
         for option_name in SHORTCUTS_PRESET:
             self.options_preset.append(self.add_hotkey_item(option_name, option_name))
 
-        self.add_hotkey_category("Widget")
+        self.add_hotkey_category("Overlays")
         for option_name in SHORTCUTS_WIDGET:
             self.add_hotkey_item(option_name, option_name.replace("widget_", ""))
 

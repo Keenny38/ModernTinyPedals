@@ -41,6 +41,7 @@ API_DEFAULT = {
         "enable_session_info": True,
         "enable_vehicle_info": True,
         "enable_weather_info": True,
+        "enable_race_info": True,
     },
     API_RF2_CONFIG: {
         "access_mode": 0,

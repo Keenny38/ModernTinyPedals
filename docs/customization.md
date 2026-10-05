@@ -259,6 +259,8 @@ Modern Tiny Pedals generates and saves user session data in specific folders def
 ## Driver stats
 Driver stats data is stored as `JSON` format (.stats extension) under [Global User Configuration](#global-user-configuration) folder. Driver stats can be viewed with [Driver Stats Viewer](#driver-stats-viewer) from `Tools` menu in main window.
 
+Session history is stored next to it in `driver.history` file (one `JSON` line per driving stint: end time, track, vehicle, game class, session type, best lap time, valid & invalid laps, distance, driving time, finish position & state), used by viewer for last driven date and personal best progression.
+
 Data recording is handled by [Stats Module](#stats-module).
 
 [**`Back to Top`**](#)
@@ -499,16 +501,19 @@ Set number of attempts to retry connection for Rest API. Value range in `0` to `
 Set time delay in seconds to retry connection for Rest API. Value range in `0` to `60`. Default is `1` second.
 
     enable_garage_setup_info
-Enable access to `garage setup` data from Rest API. This is required for accessing various vehicle setup data. This data is requested `only once` when player exited garage each time.
+Enable access to `garage setup` data from Rest API. This is required for accessing various vehicle setup data, and the name of the setup loaded in game (LMU), recorded with each lap for [Lap telemetry viewer](#lap-telemetry-viewer). This data is requested `only once` when player exited garage each time.
 
     enable_session_info
 Enable access to `session` data from Rest API. This is required for accessing various session data, such as time-scale. This data is requested `only once` when player exited garage each time.
 
     enable_vehicle_info
-Enable access to `vehicle` data from Rest API. This is essential for accessing `brake wear`, `vehicle damage`, `pit stop timing` data. Minimum request interval is hard-limited to `0.2` second (5 requests per second) for this data.
+Enable access to `vehicle` data from Rest API. This is essential for accessing `brake wear`, `vehicle damage`, `pit stop timing` data, and the game estimate of `fuel & energy per lap` (used until a lap of the car & track is recorded). Minimum request interval is hard-limited to `0.2` second (5 requests per second) for this data.
 
     enable_weather_info
 Enable access to `weather` data from Rest API. This is required for showing weather forecast. This data is requested `only once` when player exited garage each time.
+
+    enable_race_info
+Enable access to `race` data from Rest API (LMU): chat messages for [Chat](#chat) widget, contacts between cars for contact events of [Black box](#black-box) event log, pit lane entry for [Race plan](#race-plan) widget. Requested while driving, again only when data changes.
 
 [**`Back to Top`**](#)
 
@@ -595,6 +600,9 @@ Set refresh rate for module while idling for conserving resources.
     position_x, position_y
 Define widget position on screen in pixels. Those values will be auto updated and saved.
 
+    enable_classic_layout
+Every widget except Black box has a modern design, used while `enable_modern_style` is on. Enable this option to keep classic layout of this widget (with modern colors) instead. Default is disabled.
+
     opacity
 Set opacity for entire widget. By default, all widgets have a 90% opacity setting, which equals value `0.9`. Lower value adds more transparency to widget. Acceptable value range in `0.0` to `1.0`. Note, opacity can also be set by adjusting alpha value in `color` options for individual elements.
 
@@ -650,7 +658,7 @@ Set amount decimal places to keep.
 ## Application
 **Application options can be accessed from `Config` and `Window` menu in main window.**
 
-Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Tools of the navigation bar are pages like `Widget` or `Module`: their entry is selected while shown, no `Close` button (neither on top nor in the tool), and they are kept as left when coming back. Other open pages (config dialogs, tools outside the bar) are listed by the open pages button at bottom of the bar (shown while any), with `Close All`. `Esc` closes pages that have a `Close` button only. `Alt+Left` or mouse back button shows the page shown before (again to go further back). When a page needs more room, main window grows to fit it (within screen): size is kept while browsing other pages, and restored once every page needing it is closed (unless window was resized meanwhile). Changing language keeps open config pages and pages with unsaved changes as they are, tool pages are reopened translated. Inputs (preset name, key binding, share code, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups. Tool pages left open at quit (or restart, or language change) are opened again at next startup, see `remember_open_pages`.
+Tools, editors and config dialogs opened from main window (tools page, navigation bar, menus, widget gear button) are shown as pages inside main window, with title and `Close` button on top, scrolled when larger than the window. Closing one goes back to previous page. Opening one already open shows its page again, other pages stay open while browsing. Tools of the navigation bar are pages like `Overlays` or `Module`: their entry is selected while shown, no `Close` button (neither on top nor in the tool), and they are kept as left when coming back. Other open pages (config dialogs, tools outside the bar) are listed by the open pages button at bottom of the bar (shown while any), with `Close All`. `Esc` closes pages that have a `Close` button only. `Alt+Left` or mouse back button shows the page shown before (again to go further back). When a page needs more room, main window grows to fit it (within screen): size is kept while browsing other pages, and restored once every page needing it is closed (unless window was resized meanwhile). Changing language keeps open config pages and pages with unsaved changes as they are, tool pages are reopened translated. Inputs (preset name, key binding, share code, theme name) are pages too, also when opened from a tool page (back to it when done). Other dialogs opened from a tool (offset, replace, notes info), confirmations and file selection stay small popups. Tool pages left open at quit (or restart, or language change) are opened again at next startup, see `remember_open_pages`.
 
     show_at_startup
 Show main window at startup, otherwise hides to tray icon.
@@ -801,6 +809,9 @@ Replace default widget font with `modern_font_name`. Width of text bar is calcul
 
     modern_font_name
 Set modern font name. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Ligatures are disabled.
+
+    modern_design_font_name
+Set font of modern design widgets (see [Modern design](#modern-design)). Default is `Barlow Semi Condensed`, which is bundled with Modern Tiny Pedals (`fonts` folder) along with `Barlow`. A proportional font with tabular digits keeps numbers aligned.
 
     corner_radius_scale
 Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
@@ -1162,34 +1173,46 @@ Enable or disable module.
 Fuel value and unit symbol depend on `Fuel Unit` setting from [Units](#units) config dialog, `L` = liter, `gal` = gallon. Virtual energy unit is `%` = percentage. Note, after changed `Fuel Unit` setting, it is required to close and reopen `Race calculator` in order to update units info for calculation. A typed value is applied when pressing `Enter` or leaving the box (arrows & mouse wheel apply at once), then everything is calculated again. Inputs and tyre plan are kept for next time, `Reset to Zero` clears inputs (starting tread back to 100%).
 
     Top of page (shared by both tabs)
-- Data source: live session (`Load Live`) or consumption history file (`Load File`, `.consumption` or `.csv`), with track and class name. An invalid file is reported and current data kept. `Follow Live`: inputs follow each new lap of the live session (saved).
-- `Race Plan` menu: `Save Race Plan As...` saves race setup, every input and tyre plan in one `.race-plan` file to keep or share, `Open Race Plan...` opens one (tyre plan replaced can be undone).
-- Race: `Time` or `Laps` race (only the field of the selected type is shown), formation or rolling start laps (driven before race clock starts), pit stop time (time lost per stop in pit lane, service time added: refuelling, tyre & driver change), safety margin (laps of fuel kept in the tank at every stop and at the finish).
-- Key figures: race fuel & energy (safety margin included), pit stops (what limits stints: fuel, energy or stint length; stops with tyres), longest stint, average refill per stop (or fuel to load at start when no stop is needed, red when the tank is too small for one lap), tyres used by the tyre plan / maximum allowed.
+- Data source: live session (`Load Live`) or consumption history file (`Load File`, `.consumption` or `.csv`, tank capacity of its laps), with track and class name. An invalid file is reported and current data kept. `Follow Live`: inputs follow each new lap of the live session (saved). When the page opens, live laps fill the inputs, except after a race plan was opened (its inputs are kept, live laps only shown, until `Load Live` or `Load File`).
+- `Live Race`: during a race, plan of the rest of the race from now (laps & race time done, fuel, energy & tyres of the car, stops done), planned again at each lap & stop (not while in the pits). Timeline & pit stop plan start at the lap of now (`Now` row), stops keep their race number, the tyre plan of the race is kept (saved). Status next to it (waiting for the race or lap 1, from lap, in the pits); its tooltip shows the values read from the game (laps & lap progress, race time & time left, fuel, energy, tread, stops counted & game count) to check them. Race time is session time minus race start time of the game; a stop is counted when the car stood still in the pits or got fuel, energy or tyres there (drive-through penalties left out), a stop not seen (page closed) is taken from the game count.
+- `Race Plan` menu: `Save Race Plan As...` saves race setup, every input and tyre plan in one `.race-plan` file to keep or share, `Open Race Plan...` opens one (tyre plan replaced can be undone). `Save for Current Car & Track` keeps the plan for the car & track driven, `Open Plan of Car & Track Automatically` opens it again once when that car & track are driven (saved). `Copy Share Code` copies the whole plan as one line of text (to paste in a chat), `Paste Share Code...` opens the plan of a code (line breaks of a chat left out). `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo inputs and tyre plan edits.
+- Race: `Time` or `Laps` race (only the field of the selected type is shown), formation or rolling start laps (driven before race clock starts, 0.5 = half a lap of fuel), pit stop time (time lost per stop in pit lane, service time added: refuelling, tyre & driver change), safety margin kept in the tank at every stop and at the finish: in laps of fuel, in fuel (energy: same laps) or in % more consumption per lap.
+- Key figures: race fuel & energy (safety margin included), pit stops (what limits stints: fuel, energy, stint length or mandatory stops; stops with tyres), longest stint, average refill per stop (or fuel to load at start when no stop is needed), tyres used by the tyre plan / maximum allowed. A tank too small for one lap, or a starting fuel or energy below one lap, is reported in red.
 - On a narrow window, race setup & key figures wrap on two rows, consumption history moves below calculator and tyre stock below tyre plan.
 
     Fuel tab
 - Lap & consumption: lap time (`minutes` : `seconds` . `milliseconds`, carried over between boxes, at half tank), fuel & energy per lap, tank capacity, fuel ratio (fuel used per 1% of virtual energy). `Load Live` and `Load File` fill them with the average of the 5 latest valid laps at race pace (laps over 105% of median lap time, as in & out laps, left out), and `Load Live` also sets race length from a live race session. A car using energy only (no fuel per lap) is planned on energy.
-- Start: starting fuel & energy, `0` = full tank, or exactly what the race needs when it needs no stop.
-- Pit stop: refuel rate and energy rate (amount added per second, `0` = refuelling inside pit stop time), so a splash costs less time than a full tank; driver change time; `Tyres Changed While Refuelling` (longest of refuelling and tyre change counts, not both).
-- Race rules: mandatory stops (stints shortened evenly until the race has as many stops), maximum stint time (driver limit), drivers taking turns (one driver change at each stop, driver of each stint in pit stop plan).
-- Pace: fuel effect (lap time lost per 10 fuel units in the tank, from half tank) and track evolution (lap time change per hour, negative when the track gets faster), used for stint durations and laps of a time race.
-- Strategy: timeline of the race, one block per stint with its laps, pit laps above (in orange when tyres are changed, shortened or left out when stops are too close to read), with a summary line (stints, race laps, stop laps, tyres, time spent in the pits).
-- Pit stop plan: start load, then each stop with its lap, fuel & energy to add (full tank while more stints follow, only what is needed for the last one), tyre change (number of tyres), driver and stop time. `Copy` copies the plan as text.
-- Details: total needed (exact ≈ rounded up), stops each resource alone needs, laps & minutes total amounts last, longest stint laps & minutes (safety margin kept), amount left at stint end, consumption per lap to save one stop (`-` without stop), average refill of the pit stop plan.
-- Saving target: laps per stint and consumption per lap (difference with current one) for one stop less, and consumption & stops for laps per stint to aim for.
+- Start: starting fuel & energy, `0` = full tank, or exactly what the race needs when it needs no stop. Start time (checked): time of day of the race start, midnight included, pit stops then shown at their time of day (unchecked: race time).
+- Pit stop: refuel rate and energy rate (amount added per second, `0` = refuelling inside pit stop time), so a splash costs less time than a full tank; driver change time; `Tyres Changed While Refuelling` (longest of refuelling and tyre change counts, not both); in & out laps consumption (% of race pace, pit lane speed limit: a stint can last one lap more).
+- Race rules: mandatory stops (race laps spread evenly over one stint more than stops), maximum stint time (driver limit, real lap times counted: a heavier car is slower), drivers taking turns, `Balanced Stints` (race laps spread evenly over the stints, same stops: no short splash stint at the end), `Leader Finishes First (+1 Lap)` (time race: the race ends when the leader crosses the line after the timer, so a car behind may drive one lap more: fuel planned for it).
+- Drivers (2 drivers or more): stints driven before the next driver takes over, and for each driver lap time difference (pace), minimum & maximum total driving time. A driver with too little time left for a whole stint is skipped; drivers short of their minimum drive next, stints of the others shortened to leave them the time. Driving time card: stints & time of each driver, limits not met in red.
+- Pace: fuel effect (lap time lost per 10 fuel units in the tank, from half tank) and track evolution (lap time change per hour, negative when the track gets faster), used for stint durations and laps of a time race. Saving cost: lap time lost per 10% less consumption (lift & coast), counted by saving target & strategy comparison. `Estimate from History`: pit stop time (in & out laps against race pace), fuel effect (lap time against fuel burned over stints, tyre wear trend included) and track evolution (2 stints or more) from laps of the consumption history.
+- Safety car: `Safety Car Scenario` plans a safety car (or full course yellow) period from a lap for some laps, with consumption, lap time & tyre wear in % of race pace, and optionally a stop at the end of its first lap (part of pit lane time not lost under safety car). Compared with the plan without safety car (a safety car after the finish has no effect); shown in yellow on the timeline, `SC` stops in pit stop plan.
+- Rain: `Rain Scenario` plans a wet period from a lap for some laps (`0` = until the finish), with consumption & lap time in % of race pace, and optionally `Wet Tyres`: stop for wet tyres at the end of the first lap in the wet and for slicks at the end of the last one (4 tyres). Compared with the plan without rain; shown in blue on the timeline, `Wet` & `Dry` stops in pit stop plan.
+- Strategy: timeline of the race, one block per stint with its laps (one color per driver when drivers take turns), pit laps above (in orange when tyres are changed, shortened or left out when stops are too close to read), mouse over a stint or stop shows its details, with a summary line (stints, race laps, stop laps, tyres, time spent in the pits, safety car).
+- Pit stop plan: start load, then each stop with its lap, pit window (earliest & latest lap keeping the same number of stops, stint time limit counted with real lap times of the slowest driver), time (race time, or time of day with start time), fuel & energy to add (full tank while more stints follow, only what is needed for the last one), tyre change (number of tyres), driver and stop time. `Export`: copy as text, copy for Discord (table in a code block), export CSV, save image (strategy & plan), in the folder of last export.
+- Details: total needed (exact ≈ rounded up), refuel stops each resource alone needs (the plan may stop more often: driver limit, mandatory stops), laps & minutes total amounts last, laps & minutes a full tank lasts (safety margin kept), amount left at stint end, consumption per lap to save one stop (same as saving target, `-` without stop), average refill of the pit stop plan.
+- Saving target: laps per stint (on a full tank) and consumption per lap (difference with current one) for one stop less, planned with the starting fuel; with a saving cost, lap time lost and race time gained or lost (worth it or not). Consumption & stops for laps per stint to aim for.
+- Strategy comparison: plan of now against plans with up to 2 stops less (fuel saving) and one stop more: consumption, lap time lost to saving, time in the pits, laps, race time and gap, best one in bold. Saving target & comparison are calculated at once after a pause, or once quick changes settle (arrow held).
+- Plan against race (race session): stints driven (stint history) against the plan of the race: laps, lap time, fuel & energy per lap (race value / plan value), tyre wear.
+- Class rivals (live race): cars of your class by place, laps, stops (in the pits), laps since last stop and next stop expected (last stop seen while the page is open, plus your full tank laps; `~` when the last stop was not seen).
 - Consumption history: `lap number`, `lap time`, `fuel`, `virtual energy`, `fuel ratio`, `battery drain`, `battery regen`, `battery net change`, `average tyre tread wear`, `tank capacity` of [Consumption History](#consumption-history) data, invalid laps in red. Live history follows new laps while the page is shown. Click a column header to sort (numbers by value), `Valid Laps Only` hides invalid laps (saved). Select laps (whole rows) and click `Add Selected Data`: their average goes to the calculator, invalid laps are left out. `Delete Selected` and `Delete All` remove laps from consumption history (live session or loaded file, asks first, cannot be undone). `Columns` button (or right click on table header) shows or hides optional columns.
 
-How stints are planned: a car pits at the end of a lap, so stints are whole laps; a stint lasts until fuel or energy (whichever runs out first) cannot cover one more lap plus the safety margin, or until stint length limit. In a time race, laps that fit in race time follow lap times and stop times, and fuel & energy share the same stops, so both are calculated for the same race length.
+How stints are planned: a car pits at the end of a lap, so stints are whole laps; a stint lasts until fuel or energy (whichever runs out first) cannot cover one more lap plus the safety margin, or until driver limit (stint time, total driving time). In a time race, laps that fit in race time follow lap times and stop times, and fuel & energy share the same stops, so both are calculated for the same race length (when lengths go back and forth, the longest of them is kept). Tyres are changed at the stop before the stint actually driven next would wear them below minimum tread.
 
     Tyre tab
 - Tyre wear: starting tread (when the tyre plan has no tyre at start, else starting tread of its compound), wear per lap (filled from history like other inputs), measured compound (compound the wear per lap was measured on, saved), minimum tread: the strategy proposes tyre changes at the stop before tread would go below it.
-- Tyre rules: maximum tyres allowed for race, tyre change time by number of tyres changed (default values match `LMU` tyre change rule), restricted allocation (an already used tyre cannot be allocated on a different wheel in later stint, which matches `LMU` tyre allocation rule), highlight new tyres.
+- Tyre rules: maximum tyres allowed for race (`From Game`: tyre allocation of the session in `LMU`), tyre change time by number of tyres changed (default values match `LMU` tyre change rule), restricted allocation (an already used tyre cannot be allocated on a different wheel in later stint, which matches `LMU` tyre allocation rule), highlight new tyres.
 - Tyre life: lifespan in laps, minutes and longest stints, tread used over longest stint.
-- Tyre plan: one row per stint, columns `Front Left`, `Front Right`, `Rear Left`, `Rear Right` (tyre installed on each wheel, with remaining tread at start - end of stint) and `Change` (tyre change time of that stop). Once the fuel strategy is ready, rows follow its stints (stint number and laps shown on each row); rows taken out by a shorter strategy are kept aside and come back when it grows again, added rows keep the tyres of the stint before. Tyre wear of a stint = wear per lap x stint laps x compound factor (wear per stint of compound relative to measured compound; wear per stint of compound without wear per lap), and the tyre change time of each stop is added to that stop. Without strategy, rows are edited by hand (`Duplicate Row`, `New Row`, `Insert Below`, `Insert Above`, `Delete Row`). `Propose Changes` fills the plan with tyres of the compound selected in tyre stock, wheel by wheel at the stint it would go below minimum tread (2 tyres when only one axle needs it), within maximum tyres: short of tyres, the best worn tyre that wheel used before (any wheel without restricted allocation) is fitted again, else tyres are kept and the stints short of tyres are reported. Tyres a previous proposal added are reused or removed, so proposing again adds no stock. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo tyre plan edits. Status line: stock (`invalid` when over maximum tyres, tyres without limited stock not counted), used tyres, stints, pit stops, tyre changes and total tyre change time.
+- Tyre plan: one row per stint, columns `Front Left`, `Front Right`, `Rear Left`, `Rear Right` (tyre installed on each wheel, with remaining tread at start - end of stint) and `Change` (tyre change time of that stop). Once the fuel strategy is ready, rows follow its stints (stint number and laps shown on each row); rows taken out by a shorter strategy are kept aside and come back when it grows again, added rows keep the tyres of the stint before. Tyre wear of a stint = wear per lap x stint laps x compound factor (wear per stint of compound relative to measured compound; wear per stint of compound without wear per lap), and the tyre change time of each stop is added to that stop. Without strategy, rows are edited by hand (`Duplicate Row`, `New Row`, `Insert Below`, `Insert Above`, `Delete Row`). `Propose Changes` fills the plan with tyres of the compound selected in tyre stock, wheel by wheel at the stint it would go below minimum tread (2 tyres when only one axle needs it), within maximum tyres: short of tyres, the best worn tyre that wheel used before (any wheel without restricted allocation) is fitted again, else tyres are kept and the stints short of tyres are reported. Tyres a previous proposal added are reused or removed, so proposing again adds no stock. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) undo tyre plan edits (and inputs). Status line: stock (`invalid` when over maximum tyres, tyres without limited stock not counted), used tyres, stints, pit stops, tyre changes and total tyre change time.
 - Tyre stock: compound selector (tyre name starting with `Q` is a tyre reused from qualifying session), `Add` adds a tyre with a unique number and a label showing the stints it runs, `Config` sets compound setting (`Enable Limited Stock`: counts towards maximum tyres, enabled for dry compounds by default; `Starting Tread`; `Wear Per Stint`), `Sort By` compound type or number of stints, `Remove Unused` removes tyres the plan does not use, `Remove`, `Clear All` (corresponding tyres removed from tyre plan too).
 - File menu of tyre plan: `New File`, `Open File` and `Save As` in [Tyre strategy](#tyre-strategy) format, `Export As` spreadsheet (CSV). Tyre plan is also kept automatically between sessions (nothing asked on close).
 - To add a tyre to the plan, drag it from tyre stock onto a wheel (tyres can be dragged & copied in the plan too). Hold `Ctrl` or `Shift` to select several tyres (drag is disabled then). Right click on tyre stock or plan opens a menu, `Delete` removes selected tyres from the plan (asks first).
+
+    Team tab
+- Stints of every driver of the car read from the game (`LMU` strategy data), teammates included, also from the monitor while a teammate drives: driver, stint, laps, laps counted, fuel, virtual energy and tyre wear per lap (out laps, pit laps and laps with refuelling or new tyres left out), and usage per lap of each driver. Asked to the game when the tab is shown, then every 15 seconds (`Refresh` asks at once).
+- `Fill In Calculator`: average per lap of selected stints (all stints if none selected) goes to fuel, energy & tyre wear inputs, tank capacity of the car from the game.
+- `Load Live` with no valid lap at race pace yet (`LMU`, while driving): fuel & energy per lap estimated by the game are filled in.
 
 [**`Back to Top`**](#)
 
@@ -1197,13 +1220,19 @@ How stints are planned: a car pits at the end of a lap, so stints are whole laps
 ## Driver stats viewer
 **Driver stats viewer can be accessed from `Tools` menu in main window.**
 
-Driver stats viewer is used for viewing [Driver Stats](#driver-stats). Note, the viewer only allows limited reset or removal, stat value cannot be edited by design. Any changes will take immediate effect after confirmation, changes cannot be undone.
+Driver stats viewer is used for viewing [Driver Stats](#driver-stats). Note, the viewer only allows limited reset or removal, stat value cannot be edited by design. Changes are applied to stats file read again at that time (stats saved meanwhile by stats module are kept), and can be undone or redone with `Undo` & `Redo` buttons (`Ctrl+Z`, `Ctrl+Y`) while the page is open: undo keeps stats recorded since (laps, distance added, faster lap time kept). Removing a vehicle or deleting a track also removes its session history; resetting a lap time removes it from session bests (progression). Before each change, stats file is saved as automatic backup (last 10 kept): `View` menu, `Restore Backup` puts back stats of a backup (can be undone too). Stats saved by stats module (back to garage) are shown at once without `Reload`, sort, selection & scroll kept (when page is shown again if hidden meanwhile).
 
-Driver stats are grouped under specific track name, which can be switched from track name selector on the top. Key figures of the track sum all vehicles: best lap (and its vehicle), its level, distance, driving time, valid laps (and share of all laps), races (wins & podiums).
+Driver stats are grouped under specific track name, which can be switched from track name selector on the top (type to search a track, part of name is enough; `Up` / `Down` & `Enter` to choose, last driven date of each track, flag on track of running session). Key figures of the track sum all vehicles: best lap (and its vehicle), its level, distance, driving time, valid laps (and share of all laps), races (wins & podiums).
 
-To sort by specific stat, click on corresponding column name. Stats are sorted by `personal best lap time` by default.
+`All Tracks`, first entry of track selector, shows the career: each track with best lap of each class (colored by its level on community lap times), totals of track and last driven date; key figures of all tracks (tracks driven & most driven one, median level of best laps); the card on the right counts best laps of each level. Each best lap shows the first letter of its level, so levels are told without colors. Double click a track (or `Enter`) to show its vehicles, right click: `Show Track`, `Delete Track`, `Open Recorded Laps`. When stats are saved under vehicle name (`vehicle_classification` option of [Stats Module](#stats-module)), vehicles are grouped by game class recorded in session history.
 
-Community lap times: personal best of each vehicle is compared with community LMU lap times of a published Google Sheet (by default the lap time sheet of [ohne_speed](https://www.youtube.com/@ohne_speed): class reference hotlap of each track & class, race pace ladder from ~100% to 107% of it, fastest car). `Ref.` column shows personal best in percent of class reference, `Level` column its level: `Alien` (~100%), `Competitive` (101%), `Good` (102%), `Midpack` (103-104%), `Tail-ender` (105-106%), `Offline` (slower). The card on the right shows the ladder of selected vehicle with lap time limit of each level, where personal best and race best stand, gap to class reference and fastest car. LMU track names are matched to sheet tracks by name & layout (Spa-Francorchamps Endurance as Spa, Monza Curva Grande as Monza (curvagrande)...), vehicle class from vehicle name (Hyper, LMP2_ELMS, LMP2, LMP3, GT3, GTE): `vehicle_classification` must include class (`Class - Brand` or `Class`) to compare. The sheet is downloaded once a day when page opens and kept in config folder (works offline). `Reference` menu: `Update Reference` downloads again, `Change Sheet Address...` sets another published Google Sheet of same layout, `Compare With Community Lap Times` turns comparison on or off (`enable_lap_reference` and `lap_reference_sheet_url` options of `driver_stats_viewer` in config file).
+Vehicle table columns: personal best, gap to community reference & level, theoretical best (sum of all time best sectors of the class from [Sectors Module](#sectors-module), all brands) & potential (personal best minus theoretical best), qualifying & race best, distance, driving time, fuel, valid & invalid laps, share of valid laps, average speed, fuel consumption per 100 km (or miles), penalties (and per race), race starts, finishes, wins, podiums, DNF (not finished or disqualified), win & podium rates, average finish position, last driven date. Race starts, DNF, average finish position and last driven date are recorded since version adding them. Rates are per start (finishes & DNF for older stats). `View` menu: `Columns` shows or hides columns (also right click on column names, `hidden_columns` option of `driver_stats_viewer` in config file), `Reset Column Widths` (columns are resized by dragging the edge of column names, `column_widths` option), `Sort Tracks by Last Driven` lists tracks driven lately first (`enable_sort_by_last_driven` option), `Colorblind colors` shows levels in colors easier to tell apart with color vision deficiency (`enable_colorblind_colors` option). `Export` saves the table shown (visible columns) to a CSV file, number format of system language: `Export CSV...` as shown, `Export Raw Values (CSV)...` in base units without formatting (lap times in seconds, distance in meters, fuel in liters...) for spreadsheets.
+
+To sort by specific stat, click on corresponding column name (again for reverse order, values not recorded always last). Stats are sorted by `personal best lap time` by default. `Up` / `Down` keys change selected vehicle.
+
+`Telemetry` button (or `Open Recorded Laps` from right click menu) opens recorded laps of selected vehicle class in [Lap Telemetry Viewer](#lap-telemetry-viewer), when [Recorder Module](#recorder-module) recorded laps on this track & class: recorded lap of personal best of selected vehicle (else its fastest lap) is set as reference.
+
+Community lap times: personal best of each vehicle is compared with community LMU lap times of a published Google Sheet (by default the lap time sheet of [ohne_speed](https://www.youtube.com/@ohne_speed): class reference hotlap of each track & class, race pace ladder from ~100% to 107% of it, fastest car). `% Ref.` column shows personal best in percent of class reference, `Level` column its level: `Alien` (~100%), `Competitive` (101%), `Good` (102%), `Midpack` (103-104%), `Tail-ender` (105-106%), `Offline` (slower). The card on the right shows the ladder of selected vehicle with lap time limit of each level, where personal, qualifying and race best stand, gap to class reference, time to find for next level and fastest car. Below it, `Progression` chart shows best lap of each session (dots) and personal best so far (line, faster higher), with lap time limits of levels (dashed lines), dates of first, middle & last session, date of personal best and last session; hover a dot for its date, session & lap time. `All`, `Practice` (test day, practice, warmup), `Qualifying` & `Race` show sessions of that type only. `Sessions` lists sessions of selected vehicle, newest first: date, session, best lap (personal best highlighted), valid / all laps, race result (finish position, DNF or DQ); hover for driving time & distance. Stints shorter than a minute without a lap (garage exit) are not recorded. LMU track names are matched to sheet tracks by name & layout (Spa-Francorchamps Endurance as Spa, Monza Curva Grande as Monza (curvagrande)...), vehicle class from vehicle name (Hyper, LMP2_ELMS, LMP2, LMP3, GT3, GTE): `vehicle_classification` must include class (`Class - Brand` or `Class`) to compare. The sheet is downloaded once a day when page opens and kept in config folder (works offline). `Reference` menu: `Update Reference` downloads again, `Change Sheet Address...` sets another published Google Sheet of same layout, `Compare With Community Lap Times` turns comparison on or off (`enable_lap_reference` and `lap_reference_sheet_url` options of `driver_stats_viewer` in config file).
 
 To view corresponding track map, click `View Map` button.
 
@@ -1577,6 +1606,17 @@ Replay can be paused, sped up or slowed down, looped, and moved with the positio
 [**`Back to Top`**](#)
 
 
+## Game replays
+**Game replays lists replays saved by Le Mans Ultimate, opens them in the game and jumps to contacts between cars, which can be accessed from `Tools` menu in main window.** Everything goes through the game Rest API: the game must be running, with Rest API access enabled in [Le Mans Ultimate API](#le-mans-ultimate-api).
+
+- Replays: date, name, event, session, track and size of each replay of `UserData/Replays`. `Watch in Game` (or double-click) opens the selected replay in the game, after confirmation.
+- Replay playback: rewind, play backwards, pause, play slowly, play and fast forward the replay open in the game (enabled while a replay is open).
+- Contacts: contacts between cars of the session as the game lists them (session time, driver, other car or wall). `Jump to Contact` (or double-click) moves the replay open in the game to the selected contact, `Seconds Before` earlier, camera on the driver's car.
+- Replay state & contacts are asked again every 5 seconds while the page is shown, `Refresh` asks everything at once.
+
+[**`Back to Top`**](#)
+
+
 ## Layout editor
 **Layout editor places and aligns overlay widgets on a game screenshot, which can be accessed from `Tools` menu in main window.**
 
@@ -1787,7 +1827,7 @@ Enable sectors module.
 - `enable_player_index_override` or `enable_active_state_override` option is enabled in [Telemetry API](#telemetry-api).
 - `Single instance mode` is disabled via [Command Line Arguments](#command-line-arguments).
 
-Stats are only saved when driver returned to garage.
+Stats are only saved when driver returned to garage. Each driving stint is also added to session history (`driver.history`). Race sessions count a start once driven after green flag, a DNF when not finished or disqualified, and finish positions for average finish position.
 
     module_stats
 Enable stats module.
@@ -1893,7 +1933,14 @@ This option may be used if weight cannot be automatically measured or inaccurate
 
 
 # Widgets
-Each widget can be configured by accessing `Config` button from `Widget` tab in main window.
+Each widget can be configured by accessing `Config` button from `Overlays` tab in main window.
+
+## Modern design
+While `enable_modern_style` is on in [Overlay Style](#overlay-style), every widget except Black box uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` (or widget `widget_theme`).
+
+Modern design reads fewer options than classic layout: per cell colors, fonts, paddings and display orders are set by design, so config dialog shows only the options the design reads. Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: disable `enable_modern_style` (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
+
+Map, radar, circle and plot widgets keep their drawing with design font & theme colors; their options other than colors and fonts are shown.
 
 Widget context menu can be accessed by `Right-Click` on widget, which provides additional options:
 - Center horizontally: align widget to the center of active screen horizontally.
@@ -2119,6 +2166,27 @@ Set warning threshold for estimated brake lifespan in laps. Default is `5` laps.
 
     warning_threshold_minutes
 Set warning threshold for estimated brake lifespan in minutes. Default is `5` laps.
+
+[**`Back to Top`**](#)
+
+
+## Chat
+**This widget displays chat messages of the game (LMU, Rest API `enable_race_info` option), newest at bottom.** Long messages are wrapped on several lines, newest messages kept when lines run out.
+
+    number_of_lines
+Set number of message lines. Value range in `1` to `20`. Default is `5`.
+
+    line_width
+Set width of message lines, value in chars. Longer messages are wrapped. Default is `40`.
+
+    maximum_display_duration
+Set duration (seconds) each message stays shown after it was sent. Set to `0` to always show last messages. Default is `30`.
+
+    new_message_duration
+Set duration (seconds) a new message is shown in `font_color_new_message`. Default is `5`.
+
+    show_message_time
+Show time of day each message was sent.
 
 [**`Back to Top`**](#)
 
@@ -3426,7 +3494,10 @@ Show number of vehicles that requested for pit stop, and number of vehicles curr
 
 
 ## Race plan
-**This widget displays the next pit stop of the [Race Calculator](#race-calculator) plan: lap, fuel & energy to add, tyres to change and stops left.** The plan is made again from race calculator inputs and tyre plan whenever they change (they are kept between sessions), so the widget works with race calculator closed. Laps count from race start, formation laps of race calculator left out.
+**This widget displays the next pit stop of the [Race Calculator](#race-calculator) plan: lap, fuel & energy to add, tyres to change and stops left.** The race calculator keeps the input of its plan (tyre plan & compounds included) whenever it changes, so the widget shows the same plan with race calculator closed. Laps count from race start, formation laps of race calculator left out. The stop of the lap just completed stays shown while the car is in the pits (finish line before the pit box; after it, the stop is still ahead).
+
+    enable_live_replan
+Plan the rest of the race again at each lap & stop during a race, from the car: laps & time done, fuel, energy & tyres of now, stops done. Disabled: plan made before the race is followed.
 
     pit_window_laps
 Set number of laps before next stop from which next stop is highlighted with `warning_color_pit_window`.
@@ -3445,6 +3516,15 @@ Show number of tyres to change at next stop, highlighted with `highlight_color_t
 
     show_stops_left
 Show stops left, and total stops of plan.
+
+    show_pit_menu
+Show pit menu check: refill set in game pit menu (fuel, or virtual energy for a car using it) against amount after next stop of the plan. `OK` when close (1 unit), `menu>plan` in `warning_color_pit_menu` otherwise, `--` when game gives no refill.
+
+    show_target
+Show consumption per lap to hold to reach next stop (or the finish) with fuel of now (energy for a car using energy only), safety margin kept, in `warning_color_target` when last lap used more.
+
+    show_pit_entry
+Show distance to pit lane entry (LMU, Rest API `enable_race_info` option), in `warning_color_pit_entry` on the lap ending with the next stop. `--` in the pits or when unknown. Distance unit follows `Distance Unit` setting from [Units](#units) config dialog.
 
 [**`Back to Top`**](#)
 
@@ -3591,6 +3671,9 @@ Show average front and rear ride height difference in millimeters.
 
 ## Relative
 **This widget displays relative standings info.**
+
+    column_position, column_class, column_position_change, column_driver_name, column_vehicle_name, column_tyre_compound, column_pit_status, column_pitstop_count, column_laptime, column_best_laptime, column_energy_remaining, column_vehicle_integrity, column_incidents, column_stint_laps, column_time_gap
+Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, `PEN` with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -3891,6 +3974,9 @@ Set bottoming ride height (in millimeters). This option is used for vehicle that
 
 Note, most options are inherited from [Relative](#relative) and [Standings](#standings) widgets, with some additions noted below.
 
+    column_delta_laptime, column_time_interval
+Modern design columns besides those of [Relative](#relative): lap time difference to player over recent laps, and interval to player (car ahead in green, car behind in orange).
+
     time_interval_align_center
 Align time interval in the center when enabled. Default is right alignment when disabled.
 
@@ -4078,6 +4164,9 @@ Set cooldown duration (seconds) before resetting minimum or maximum speed value.
 **This widget displays standings info.**
 
 Note, most options are inherited from [Relative](#relative) widget, with some additions noted below.
+
+    column_delta_laptime, column_time_interval
+Modern design columns besides those of [Relative](#relative): lap time difference to player over recent laps (green if player was faster), and interval to car ahead. `column_time_gap` shows gap to leader (or to leader best lap outside race). Space separates class groups in multi-class split mode.
 
     enable_single_class_exclusive_mode
 Enable single-class exclusive mode, which displays vehicles from player's class only. This mode takes priority over all other display mode.
@@ -5532,6 +5621,9 @@ Log each new penalty (critical, with the number of penalties) and each new track
     show_engine_overheat_events, text_overheat
 Log oil or water temperature reaching `engine_oil_warning_temperature` or `engine_water_warning_temperature` (critical, `OIL HOT 126°`), once each time it gets hot. Default label is `HOT`. Enabled by default.
 
+    show_contact_events, text_contact, text_wall
+Log each contact of the player with another car (`CONTACT` and its driver name) or a wall (`WALL`), from the contact list of the game (LMU, Rest API `enable_race_info` option), at the time of the contact. Contacts with the same car within 2 seconds are logged once, contacts from before the widget started are not logged. Defaults are `CONTACT` and `WALL`. Enabled by default.
+
     text_damage, text_impact
 Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
 
@@ -5565,7 +5657,7 @@ Each plugin is a folder in `plugins` folder (next to Modern Tiny Pedals), named 
     plugins/<name>/setting.json   default options of the widget
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 
-Plugin appears as `plugin_<name>` widget in `Widget` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log. See `plugins/example_speed` for a complete example.
+Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log. See `plugins/example_speed` for a complete example.
 
 Important: plugins run as normal Python code with full access to your computer, only install plugins from trusted sources.
 
@@ -5589,7 +5681,10 @@ Language pack format:
         "ui": {"Config": "Konfiguration", ...},
         "messages": [["^Preset imported: ", "Preset importiert: "], ...],
         "options": {"font_size": "Schriftgröße", ...},
-        "option_help": {"English description": "Übersetzung", ...}
+        "option_help": {"English description": "Übersetzung", ...},
+        "overlay": {"Fuel": "Kraftstoff", ...}
     }
+
+`overlay` holds the short labels of modern design widgets (kept apart from `ui`, as overlays need shorter words).
 
 Invalid files are skipped and reported in the log. A language pack cannot replace English or French.

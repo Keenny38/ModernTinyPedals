@@ -25,6 +25,7 @@ computed channels (wheel slip, steering rate...), smoothing of noisy channels.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left, bisect_right
 from itertools import accumulate
 
@@ -32,6 +33,8 @@ from ...userfile.corner_analysis import resample_sorted
 from ...userfile.telemetry_lap import (
     compute_delta,
     delta_rate,
+    delta_to_curve,
+    distance_scale,
     interpolate,
     monotonic_distance,
     sector_bounds,
@@ -39,6 +42,7 @@ from ...userfile.telemetry_lap import (
 from ..lap_viewer import (
     CHANNEL_MAP,
     DELTA_CHANNELS,
+    SETTING_CHANNELS,
     WHEELS,
     Channel,
     PlotLap,
@@ -49,6 +53,8 @@ from ..lap_viewer import (
 
 ENVELOPE_POINTS = 1500  # grid points of min / max band over displayed laps
 SLIP_MIN_SPEED = 30.0  # km/h, wheel slip not computed slower (division by small speed)
+SLIP_ANGLE_MIN_SPEED = 5.0  # m/s, body slip angle not computed slower
+PLACEMENT_COLUMNS = ("path_lateral", "track_position")  # measured on map when circuit & edges known
 
 
 def moving_average(values: list[float], points: int) -> list[float]:
@@ -76,15 +82,22 @@ class TraceData:
     """Series, value ranges & axis conversion of displayed laps
 
     Axis position (x) is lap distance, or lap time of each lap (time_axis).
-    Track distance of reference lap is used for maps & corners (see distance_at_x).
+    Track distance of reference lap is used for maps & corners (see distance_at_x): a lap measured on
+    another length (imported log on driven distance) has its distances multiplied by its scale
+    (see telemetry_lap.distance_scale), "lap distance" below is its own distance.
     Cached series of laps still shown are kept when laps change (only new laps are computed),
     those depending on reference lap (delta) only while reference stays the same.
+    Delta is measured against reference lap, or against ideal lap (fastest clean shown lap in each mini-sector).
     """
 
     def __init__(self):
         self.laps: list[PlotLap] = []
         self.reference: PlotLap | None = None
-        self.deltas: dict[str, tuple[list[float], list[float]]] = {}
+        self.reference_deltas: dict[str, tuple[list[float], list[float]]] = {}  # against reference lap
+        self.deltas: dict[str, tuple[list[float], list[float]]] = {}  # shown: against reference or ideal lap
+        self.ideal_mode = False  # delta against ideal lap
+        self.delta_version = 0  # ideal lap delta computed again
+        self.scales: dict[str, float] = {}  # lap key: lap distances to reference lap distances
         self.sector_lines: list[float] = []
         self.time_axis = False
         self.smoothing = 0  # moving average samples of noisy channels, 0 = off
@@ -93,9 +106,31 @@ class TraceData:
         self._times: dict[str, tuple[list[float], list[float]]] = {}
         self._series: dict[tuple, tuple[list[float], list[float]]] = {}
         self._ranges: dict[tuple, tuple[float, float]] = {}
+        self._mini: dict | None = None
+        self._ideal: tuple[list[float], list[float]] | None = None
+        self._deltas_ideal = False  # shown deltas are against ideal lap
+        # Lap placement across track measured on map (official center path & track edges), by lap key:
+        # distances, distance to track middle (m, left positive), track position (%): every lap, even without game data
+        self.placements: dict[str, tuple[list[float], list[float], list[float]]] = {}
+        self.placement_version = 0
+
+    def set_placements(self, placements: dict[str, tuple[list[float], list[float], list[float]]]):
+        """Lap placements measured on map (track position & distance to center series drawn again)"""
+        self.placements = placements
+        self.placement_version += 1
+        self._series = {key: value for key, value in self._series.items() if key[1] not in PLACEMENT_COLUMNS}
+        self._ranges = {}
 
     def compared(self) -> list[PlotLap]:
         return [lap for lap in self.laps if lap is not self.reference]
+
+    def delta_laps(self) -> list[PlotLap]:
+        """Laps with a delta: compared laps, every lap against ideal lap"""
+        return [lap for lap in self.laps if lap.key in self.deltas]
+
+    def scale_of(self, lap: PlotLap) -> float:
+        """Factor turning lap distances into reference lap distances (1 unless lap length differs a bit)"""
+        return self.scales.get(lap.key, 1.0)
 
     def set_laps(self, laps: list[PlotLap], reference_key: str = ""):
         previous = {lap.key: lap.data for lap in self.laps}
@@ -104,19 +139,24 @@ class TraceData:
         self.reference = next((lap for lap in laps if lap.key == reference_key), laps[0] if laps else None)
         reference = self.reference.key if self.reference is not None else ""
         kept = {lap.key for lap in laps if previous.get(lap.key) is lap.data}  # same lap data loaded
-        units = display_units()
-        if units.keys() != self.units.keys() or any(
-                self.units[name][1] != units[name][1] for name in units):  # unit setting changed
+        if self.units_changed():
             kept = set()
-        self.units = units
+        self.units = display_units()
         same_reference = reference == previous_reference and reference in kept
-        self.deltas = {key: value for key, value in self.deltas.items() if same_reference and key in kept}
+        if self.reference is not None:
+            self.scales = {lap.key: 1.0 if lap is self.reference else distance_scale(self.reference.data, lap.data)
+                           for lap in laps}
+        else:
+            self.scales = {}
+        self.reference_deltas = {key: value for key, value in self.reference_deltas.items()
+                                 if same_reference and key in kept}
         if self.reference is not None:
             for lap in self.compared():
-                if lap.key not in self.deltas:
+                if lap.key not in self.reference_deltas:
                     points = compute_delta(self.reference.data, lap.data)
                     if points:
-                        self.deltas[lap.key] = ([point[0] for point in points], [point[1] for point in points])
+                        self.reference_deltas[lap.key] = ([point[0] for point in points],
+                                                          [point[1] for point in points])
         self.sector_lines = sector_bounds(self.reference.data) if self.reference else []
         self._series = {
             key: value for key, value in self._series.items()
@@ -124,6 +164,120 @@ class TraceData:
         }
         self._times = {key: value for key, value in self._times.items() if key in kept}
         self._ranges = {}
+        self._mini = None
+        self._ideal = None
+        self.update_deltas()
+
+    def units_changed(self) -> bool:
+        """Whether unit setting changed since series were computed"""
+        units = display_units()
+        return units.keys() != self.units.keys() or any(self.units[name][1] != units[name][1] for name in units)
+
+    def refresh_units(self) -> bool:
+        """Series in user units again if unit setting changed (settings dialog), returns True if changed"""
+        if not self.units_changed():
+            return False
+        self.units = display_units()
+        self._series = {key: value for key, value in self._series.items() if not CHANNEL_MAP[key[1]].quantity}
+        self._ranges = {}
+        return True
+
+    def set_ideal_mode(self, enabled: bool):
+        """Delta against ideal lap (enabled) or reference lap"""
+        if enabled != self.ideal_mode:
+            self.ideal_mode = enabled
+            self.update_deltas()
+
+    def update_deltas(self):
+        """Shown deltas: against reference lap, or against ideal lap (every lap, reference lap too)"""
+        was_ideal, self._deltas_ideal = self._deltas_ideal, self.ideal_mode
+        if self.ideal_mode or was_ideal:  # ideal lap changes with every shown lap
+            self._series = {key: value for key, value in self._series.items() if key[1] not in DELTA_CHANNELS}
+            self._ranges = {}
+            self.delta_version += 1
+        if not self.ideal_mode:
+            self.deltas = self.reference_deltas
+            return
+        self.deltas = {}
+        ideal_distances, ideal_times = self.ideal_curve()
+        if len(ideal_distances) < 2:
+            return
+        for lap in self.laps:
+            points = delta_to_curve(ideal_distances, ideal_times, lap.data, self.scale_of(lap))
+            if points:
+                self.deltas[lap.key] = ([point[0] for point in points], [point[1] for point in points])
+
+    # Mini-sectors & ideal lap: lap split in equal parts, fastest clean shown lap in each part
+    def mini_sectors(self) -> dict:
+        """Mini-sector bounds (reference distances), winner lap index & time of each lap in each part, ideal time
+
+        Invalid, out & in laps never win a part (cut track) unless no clean lap is shown.
+        """
+        reference = self.reference
+        if reference is None or len(reference.data) < 2:
+            return {}
+        if self._mini is not None:
+            return self._mini
+        from .lap_map import mini_sector_bounds, mini_sector_times, mini_sector_winners
+
+        bounds = mini_sector_bounds(reference.data.distance[-1])
+        usable = [lap.clean for lap in self.laps]
+        if not any(usable):
+            usable = [True] * len(self.laps)
+        times = []
+        for lap, use in zip(self.laps, usable):
+            if not use:
+                times.append([])
+                continue
+            distances, lap_times = self.lap_times(lap)
+            scale = self.scale_of(lap)
+            times.append(mini_sector_times(bounds, [distance * scale for distance in distances]
+                                           if scale != 1.0 else distances, lap_times))
+        winners = mini_sector_winners(times)
+        ideal = sum(min(lap_times[index] for lap_times in times if index < len(lap_times) and lap_times[index] > 0)
+                    for index, winner in enumerate(winners) if winner >= 0)
+        self._mini = {"bounds": bounds, "winners": winners, "times": times, "ideal": ideal,
+                      "complete": bool(winners) and all(winner >= 0 for winner in winners)}
+        return self._mini
+
+    def ideal_curve(self) -> tuple[list[float], list[float]]:
+        """Ideal lap: lap time along reference distance, each mini-sector driven by its fastest lap, empty if
+        a mini-sector has no lap time or under 2 laps shown"""
+        if self._ideal is not None:
+            return self._ideal
+        self._ideal = ([], [])
+        mini = self.mini_sectors()
+        if len(self.laps) < 2 or not mini or not mini["complete"]:
+            return self._ideal
+        bounds, winners, times = mini["bounds"], mini["winners"], mini["times"]
+        distances: list[float] = []
+        curve: list[float] = []
+        elapsed = 0.0
+        for index, winner in enumerate(winners):
+            lap = self.laps[winner]
+            own_distances, own_times = self.lap_times(lap)
+            scale = self.scale_of(lap)
+            lap_distances = [distance * scale for distance in own_distances] if scale != 1.0 else own_distances
+            start, end = bounds[index], bounds[index + 1]
+            start_time = interpolate(lap_distances, own_times, start)
+            if not distances or start > distances[-1]:
+                distances.append(start)
+                curve.append(elapsed)
+            for position in range(bisect_right(lap_distances, start), bisect_left(lap_distances, end)):
+                if lap_distances[position] > distances[-1]:
+                    distances.append(lap_distances[position])
+                    curve.append(elapsed + own_times[position] - start_time)
+            elapsed += times[winner][index]
+        if bounds[-1] > distances[-1]:
+            distances.append(bounds[-1])
+            curve.append(elapsed)
+        self._ideal = (distances, curve)
+        return self._ideal
+
+    def ideal_time(self) -> float:
+        """Ideal lap time of shown laps, 0 if unknown"""
+        curve = self.ideal_curve()
+        return curve[1][-1] if curve[1] else 0.0
 
     def set_time_axis(self, enabled: bool):
         self.time_axis = enabled
@@ -147,10 +301,16 @@ class TraceData:
         parts = [str(int(self.time_axis))]
         if channel.noisy:
             parts.append(f"s{self.smoothing}")
-        if channel.column in DELTA_CHANNELS and self.reference is not None:
+        if channel.quantity in self.units:
+            parts.append(f"u{self.units[channel.quantity][1]}")
+        if channel.column in DELTA_CHANNELS and self.ideal_mode:
+            parts.append(f"i{self.delta_version}")
+        elif channel.column in DELTA_CHANNELS and self.reference is not None:
             parts.append(f"r{self.reference.key}")
         if channel.column == "delta_rate":
             parts.append(f"w{self.delta_window:g}")
+        if channel.column in PLACEMENT_COLUMNS:
+            parts.append(f"p{self.placement_version}")
         return "|".join(parts)
 
     # Axis conversion
@@ -181,11 +341,20 @@ class TraceData:
         return interpolate(times, distances, x) if times else x
 
     def lap_distance_at_x(self, lap: PlotLap, x: float) -> float:
-        """Where lap is at axis position: same distance, or (time axis) its own distance at that lap time"""
+        """Where lap is at axis position (its own distance): same place on track, or (time axis) where it is
+        at that lap time"""
         if not self.time_axis:
-            return x
+            scale = self.scale_of(lap)
+            return x / scale if scale != 1.0 else x
         distances, times = self.lap_times(lap)
         return interpolate(times, distances, x) if times else x
+
+    def x_at_lap_distance(self, lap: PlotLap, distance: float) -> float:
+        """Axis position of lap at its own distance"""
+        if not self.time_axis:
+            return distance * self.scale_of(lap)
+        distances, times = self.lap_times(lap)
+        return interpolate(distances, times, distance) if distances else distance
 
     def reference_time_at_x(self, x: float) -> float:
         """Reference lap time at axis position (playback)"""
@@ -206,7 +375,8 @@ class TraceData:
         if self.time_axis:
             return max((self.lap_times(lap)[1][-1] for lap in self.laps if self.lap_times(lap)[1]),
                        default=1.0) or 1.0
-        return max((lap.data.distance[-1] for lap in self.laps if len(lap.data)), default=1.0) or 1.0
+        return max((lap.data.distance[-1] * self.scale_of(lap) for lap in self.laps if len(lap.data)),
+                   default=1.0) or 1.0
 
     # Values
     def unit_of(self, channel: Channel) -> str:
@@ -220,11 +390,14 @@ class TraceData:
             return any(self.available(CHANNEL_MAP[part]) for part in channel.parts)
         if channel.column in DELTA_CHANNELS:
             return bool(self.deltas)
+        if channel.column in PLACEMENT_COLUMNS and any(lap.key in self.placements for lap in self.laps):
+            return True
         sources = channel_sources(channel)
         return any(
             all(source in lap.data.columns for source in sources)
-            # Wheel speeds read as 0 when not available from game
+            # Wheel speeds read as 0 when not available from game, car settings as -1
             and all(any(lap.data.columns[source]) for source in sources if source.startswith("wheel_speed"))
+            and all(max(lap.data.columns[source], default=-1) >= 0 for source in sources if source in SETTING_CHANNELS)
             for lap in self.laps
         )
 
@@ -237,6 +410,9 @@ class TraceData:
         if column == "delta_rate":
             distances, deltas = self.deltas.get(lap.key, ([], []))
             return distances, delta_rate(distances, deltas, self.delta_window)
+        placement = self.placements.get(lap.key) if column in PLACEMENT_COLUMNS else None
+        if placement is not None and (column == "path_lateral" or placement[2]):  # measured on map: every lap
+            return placement[0], placement[1] if column == "path_lateral" else placement[2]
         if not all(source in columns for source in channel_sources(channel)):
             return [], []
         if column == "steering_rate":
@@ -249,6 +425,31 @@ class TraceData:
                 if span > 0:
                     values[index] = (steering[index + 1] - steering[index - 1]) / span * 100
             return distances, values
+        if column == "track_position":  # game: lateral position over track edge (0 center, 100 edge)
+            distances, laterals = monotonic_distance(lap.data, "path_lateral")
+            edges = monotonic_distance(lap.data, "track_edge")[1]
+            return distances, [
+                max(min(lateral / abs(edge) * 100, 150.0), -150.0) if abs(edge) > 0.5 else 0.0
+                for lateral, edge in zip(laterals, edges)
+            ]
+        if column.startswith("camber_spread_"):  # inner minus outer tread temperature
+            wheel = column[-2:]
+            distances, inner = monotonic_distance(lap.data, f"tyre_temp_in_{wheel}")
+            outer = monotonic_distance(lap.data, f"tyre_temp_out_{wheel}")[1]
+            return distances, [first - last for first, last in zip(inner, outer)]
+        if column == "slip_angle":  # angle between car heading & travel direction (degrees)
+            distances, lateral = monotonic_distance(lap.data, "vel_lat")
+            longitudinal = monotonic_distance(lap.data, "vel_long")[1]
+            return distances, [
+                math.degrees(math.atan2(across, abs(along))) if abs(along) >= SLIP_ANGLE_MIN_SPEED else 0.0
+                for across, along in zip(lateral, longitudinal)
+            ]
+        if column in SETTING_CHANNELS:  # -1: car has no such setting (not drawn)
+            distances, values = monotonic_distance(lap.data, column)
+            kept = [index for index, value in enumerate(values) if value >= 0]
+            if len(kept) == len(values):
+                return distances, values
+            return [distances[index] for index in kept], [values[index] for index in kept]
         if column == "fuel_used":
             distances, fuel = monotonic_distance(lap.data, "fuel")
             return distances, [fuel[0] - value for value in fuel] if fuel else []
@@ -280,12 +481,17 @@ class TraceData:
         if channel.noisy and self.smoothing > 1:
             values = moving_average(values, self.smoothing)
         xs = distances
+        scale = self.scale_of(lap)
+        along_reference = channel.column in DELTA_CHANNELS  # delta distances are reference distances already
         if use_time and distances:
             lap_distances, times = self.lap_times(lap)
             if len(lap_distances) == len(distances):  # same samples
                 xs = times
             else:
-                xs = [interpolate(lap_distances, times, distance) for distance in distances]
+                factor = 1 / scale if along_reference else 1.0
+                xs = [interpolate(lap_distances, times, distance * factor) for distance in distances]
+        elif scale != 1.0 and not along_reference:
+            xs = [distance * scale for distance in distances]
         cached = (xs, values)
         self._series[key] = cached
         return cached
@@ -299,7 +505,7 @@ class TraceData:
         if cached is not None:
             return cached
         if channel.column in DELTA_CHANNELS:
-            limit = delta_limit([self.series(channel, lap)[1] for lap in self.compared()])
+            limit = delta_limit([self.series(channel, lap)[1] for lap in self.delta_laps()])
             self._ranges[key] = (-limit, limit)
             return -limit, limit
         low, high = float("inf"), float("-inf")
@@ -352,20 +558,25 @@ class TraceData:
         return grid, [min(values) for values in zip(*columns)], [max(values) for values in zip(*columns)]
 
     def range_stats(self, start: float, end: float, channels: list[Channel]) -> list[dict]:
-        """Each lap between axis positions: time taken, then min, max & mean of each channel"""
-        if end < start:
-            start, end = end, start
+        """Each lap over the same part of track between axis positions: time taken, then min, max & mean of
+        each channel
+
+        Axis positions are turned into reference lap distances first: on time axis, the same time is
+        another place on track for each lap.
+        """
+        low_distance, high_distance = sorted((self.distance_at_x(start), self.distance_at_x(end)))
         result = []
         for lap in self.laps:
-            begin, finish = self.lap_distance_at_x(lap, start), self.lap_distance_at_x(lap, end)
+            scale = self.scale_of(lap)
+            begin, finish = low_distance / scale, high_distance / scale  # lap distances
             distances, times = self.lap_times(lap)
             if not distances or finish <= begin:
                 continue
             time_taken = interpolate(distances, times, finish) - interpolate(distances, times, begin)
             values = []
             for channel in channels:
-                xs, ys = self.series(channel, lap)
-                low, high = bisect_left(xs, start), bisect_right(xs, end)
+                xs, ys = self.series(channel, lap, time_axis=False)  # reference distances
+                low, high = bisect_left(xs, low_distance), bisect_right(xs, high_distance)
                 part = ys[low:high]
                 values.append((min(part), max(part), sum(part) / len(part)) if part else None)
             result.append({"lap": lap, "time": time_taken, "distance": finish - begin, "values": values})

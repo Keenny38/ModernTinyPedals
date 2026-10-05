@@ -50,6 +50,7 @@ TOOL_SECTIONS = (
         ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
         ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
         ("Telemetry Replay", "\ue768", "replay_view.ReplayView"),  # play
+        ("Game Replays", "\ue714", "game_replays.GameReplays"),  # video
     )),
     ("Editors", (
         ("Heatmap Editor", "\ue790", "heatmap_editor.HeatmapEditor"),  # color
@@ -78,6 +79,9 @@ RENAMED_TOOLS = {
 RENAMED_TOOL_KEYS = {old.split(".", 1)[0]: new.split(".", 1)[0] for old, new in RENAMED_TOOLS.items()}
 # Extra words finding a tool in command palette (former names, what it covers), both languages
 TOOL_KEYWORDS = {
+    "game_replays.GameReplays": (
+        "lmu replay incident contact crash watch rediffusion incidents contacts accrochage revoir"
+    ),
     "race_calculator.RaceCalculator": (
         "fuel calculator tyre tire strategy planner energy pit stop stint "
         "carburant calculateur pneus strategie energie arret relais"
@@ -86,27 +90,33 @@ TOOL_KEYWORDS = {
 
 
 def open_tool(dialog_path: str, parent):
-    """Open tool dialog from "module.DialogClass" path relative to ui package"""
+    """Open tool dialog from "module.DialogClass" path relative to ui package, opened dialog returned
+
+    Returns:
+        Dialog shown (already open one brought to front), None if unable to open.
+    """
     dialog_path = RENAMED_TOOLS.get(dialog_path, dialog_path)
     module_name, class_name = dialog_path.rsplit(".", 1)
     host = find_dialog_host(parent)
     if host is not None and host.activate_dialog_page(class_name):  # already open as page in app
-        return
+        return next((page.dialog for page in host.dialog_pages()
+                     if page.dialog is not None and type(page.dialog).__name__ == class_name), None)
     for widget in QApplication.topLevelWidgets():  # already open: bring to front instead of warning
         if type(widget).__name__ == class_name and widget.isVisible():
             if widget.isMinimized():
                 widget.showNormal()
             widget.raise_()
             widget.activateWindow()
-            return
+            return widget
     try:
         dialog_class = getattr(import_module(f"{__package__}.{module_name}"), class_name)
     except (ImportError, AttributeError):  # slot exceptions are silent in the windowed build
         logger.exception("TOOLS: unable to open %s", dialog_path)
         QMessageBox.warning(parent, tr("Error"), tr("Unable to open tool, see log for details."))
-        return
+        return None
     _dialog = dialog_class(parent)
     _dialog.show()
+    return _dialog
 
 
 class ToolCard(QAbstractButton):

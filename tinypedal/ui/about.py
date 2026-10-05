@@ -35,8 +35,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..const_app import APP_NAME, COPYRIGHT, DESCRIPTION, LICENSE, URL_WEBSITE, VERSION
-from ..const_file import ImageFile
 from ..i18n import tr, trm
+from ..setting import cfg
+from . import app_icon_file, resolve_color_theme
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
 logger = logging.getLogger(__name__)
@@ -107,8 +108,9 @@ class About(BaseDialog):
         """New about tab"""
         new_tab = QWidget(self)
 
-        # Logo
-        logo_image = QPixmap(ImageFile.APP_ICON)
+        # Logo, matching window background
+        dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
+        logo_image = QPixmap(app_icon_file(dark))
         logo_image = logo_image.scaledToHeight(UIScaler.size(9), mode=Qt.TransformationMode.SmoothTransformation)
 
         label_logo = QLabel()

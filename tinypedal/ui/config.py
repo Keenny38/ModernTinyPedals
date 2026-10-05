@@ -87,6 +87,8 @@ from .widget_preview import WidgetPreview
 
 COLUMN_LABEL = 0  # grid layout column index
 COLUMN_OPTION = 1
+
+
 # Global options kept up to date by app itself, not shown in config dialog (still in config file)
 HIDDEN_OPTIONS = {
     "application": (
@@ -628,7 +630,12 @@ class UserConfig(BaseDialog):
                 editor.textChanged.connect(self.refresh_state)
 
     def has_display_order(self) -> bool:
-        """Check whether has display order option"""
+        """Check whether has display order option (modern design has fixed order)"""
+        if self.config_type == ConfigType.WIDGET:
+            from ..widget._modern import uses_modern_design
+
+            if uses_modern_design(cfg, self.key_name):
+                return False
         return any("display_order" in key for key in reversed(self.user_setting[self.key_name].keys()))
 
     def search_options(self, text: str):
@@ -751,6 +758,10 @@ class UserConfig(BaseDialog):
 
         hidden = HIDDEN_OPTIONS.get(self.key_name, ()) if self.config_type == ConfigType.CONFIG else ()
         option_keys = [key for key in option_keys if key not in hidden]
+        if self.config_type == ConfigType.WIDGET:
+            from ..widget._modern import design_option_keys
+
+            option_keys = design_option_keys(cfg, self.key_name, option_keys)
         for key, next_key in zip_longest(option_keys, islice(option_keys, 1, None), fillvalue=""):
             row_index += 1
             # Section title, for widgets with many options

@@ -31,6 +31,7 @@ from ... import calculation as calc
 from ...api_control import api
 from ...const_common import WHEELS_ZERO
 from ...module_info import minfo
+from ...process.game_info import IMMOVABLE, player_contacts
 from ...replay import replay
 from ...userfile.heatmap import (
     HEATMAP_DEFAULT_BRAKE,
@@ -68,6 +69,10 @@ def is_new_impact(impact_time: float, last_time: float) -> bool:
     return math.isfinite(impact_time) and impact_time > 0 and impact_time > last_time
 
 
+CONTACT_REPEAT_SECONDS = 2.0  # contacts with the same car closer in time: one contact
+CONTACT_RECENT_SECONDS = 10.0  # contacts older than this when first seen are not logged
+
+
 class DataReader:
     """Read telemetry into widget state, decide when to repaint"""
 
@@ -100,6 +105,10 @@ class DataReader:
     led_h: Any
     lock_threshold: Any
     locked_threshold: Any
+    log_contact_events: Any
+    contacts_logged: Any
+    contacts_seen: Any
+    contacts_session_time: Any
     log_engine_events: Any
     log_flag_events: Any
     log_penalty_events: Any
@@ -464,6 +473,8 @@ class DataReader:
             self.update_recorder(speed)
         if self.log_race_events:
             self.update_race_events(in_pits)
+        if self.log_contact_events:
+            self.update_contact_events()
         if self.show_battery_bar and self.use_hybrid:
             self.battery_charge = minfo.hybrid.batteryCharge
             self.battery_state = minfo.hybrid.motorState
@@ -642,6 +653,28 @@ class DataReader:
             self.event_log, api.read.lap.number(), api.read.session.elapsed(), readings, self.event_labels,
             lambda value: f"{self.unit_temp(value):.0f}{self.sign_text}",
         )
+
+    def update_contact_events(self):
+        """Event log: contacts of player with other cars & walls, from game contact list (LMU),
+        each contact once as it happens (contacts from before widget started not logged)"""
+        now = api.read.session.elapsed()
+        if now < self.contacts_session_time:  # new session
+            self.contacts_logged.clear()
+        self.contacts_session_time = now
+        contacts = api.read.session.contacts()
+        if contacts is self.contacts_seen:  # list unchanged
+            return
+        self.contacts_seen = contacts
+        for time, other in player_contacts(contacts, api.read.vehicle.driver_name()):
+            # Same contact reported again (or by the other car), or contacts in a row: logged once
+            if time <= self.contacts_logged.get(other, -1.0) + CONTACT_REPEAT_SECONDS:
+                continue
+            self.contacts_logged[other] = time
+            if now - time > CONTACT_RECENT_SECONDS:  # already over when first seen
+                continue
+            labels = self.event_labels
+            text = labels["wall"] if other == IMMOVABLE else f"{labels['contact']} {other}"
+            self.event_log.add(api.read.lap.number(), time, text)
 
     def displayed_incident(self, now: float | None = None):
         """Incident the trace shows frozen: picked with the hotkey, or the last one, for

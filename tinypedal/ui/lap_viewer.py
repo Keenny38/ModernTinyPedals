@@ -40,13 +40,15 @@ from .. import units
 from ..i18n import tr, trm
 from ..setting import cfg
 from ..userfile.motec_import import import_ld_file
-from ..userfile.telemetry_lap import IMPORT_FOLDER, LapData, LapFile, lap_number_of, lap_stem, lap_time_of
+from ..userfile.telemetry_lap import IMPORT_FOLDER, LapData, LapFile, csv_number, lap_number_of, lap_stem, lap_time_of
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
 logger = logging.getLogger(__name__)
 
 LAP_COLORS = tuple(QColor(color) for color in (
     "#38BDF8", "#F97316", "#A3E635", "#E879F9", "#FACC15", "#F43F5E", "#2DD4BF", "#A78BFA",
+    # 9th lap onward: hues & lightness apart from first 8
+    "#6366F1", "#EC4899", "#10B981", "#D97706", "#06B6D4", "#DC2626", "#84CC16", "#C084FC",
 ))
 COLOR_A = LAP_COLORS[0]  # reference lap
 COLOR_B = LAP_COLORS[1]  # first compared lap
@@ -56,6 +58,8 @@ GAIN_WINDOW = 40.0  # meters, time gain/loss rate measured over this distance (s
 GAIN_FULL_SCALE = 0.002  # seconds lost or gained per meter shown with full color
 GAIN_COLOR = QColor("#22C55E")
 LOSS_COLOR = QColor("#EF4444")
+COLORBLIND_GAIN = QColor("#3B82F6")  # gain / loss colors told apart with red-green color blindness
+COLORBLIND_LOSS = QColor("#F97316")
 RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
 BACKGROUND_LOAD_COUNT = 1  # laps to read loaded in background from this count (window stays responsive)
 
@@ -111,6 +115,8 @@ CHANNELS = (
     Channel("abs_active", "ABS Active", "", 0.5, (0.0, 1.0)),
     Channel("battery", "Battery", "%", 0.8),
     Channel("pos_z", "Elevation", "m", 0.8),
+    Channel("track_position", "Track Position", "%", 1.0, (-100.0, 100.0), sources=("path_lateral", "track_edge")),
+    Channel("path_lateral", "Distance to Center", "m", 0.8),
     *wheel_channels("tyre_temp", "Tyre Temp", "°C", "temperature"),
     Channel("tyre_temp_spread", "Tyre Temp Spread", "°C", 0.8, quantity="temperature_delta",
             sources=tuple(f"tyre_temp_{wheel}" for wheel in WHEELS)),
@@ -121,18 +127,36 @@ CHANNELS = (
     *wheel_channels("slip", "Wheel Slip", "%", sources=("wheel_speed_{wheel}", "speed_kph"), noisy=True),
     *wheel_channels("ride_height", "Ride Height", "mm"),
     *wheel_channels("susp_defl", "Suspension", "mm"),
+    # Recorded from this version: tread edges (camber), tyre load, body slip, driver settings, engine
+    *wheel_channels("tyre_temp_in", "Tyre Temp Inner", "°C", "temperature"),
+    *wheel_channels("tyre_temp_mid", "Tyre Temp Middle", "°C", "temperature"),
+    *wheel_channels("tyre_temp_out", "Tyre Temp Outer", "°C", "temperature"),
+    *wheel_channels("camber_spread", "Inner - Outer Temp", "°C", "temperature_delta",
+                    sources=("tyre_temp_in_{wheel}", "tyre_temp_out_{wheel}")),
+    *wheel_channels("tyre_load", "Tyre Load", "kN"),
+    Channel("slip_angle", "Body Slip Angle", "°", 1.0, sources=("vel_lat", "vel_long"), noisy=True),
+    Channel("brake_bias", "Brake Bias", "%", 0.6),
+    Channel("tc_level", "TC Level", "", 0.5),
+    Channel("abs_level", "ABS Level", "", 0.5),
+    Channel("engine_map", "Engine Map", "", 0.5),
+    Channel("water_temp", "Water Temp", "°C", 0.6, quantity="temperature"),
+    Channel("oil_temp", "Oil Temp", "°C", 0.6, quantity="temperature"),
 )
 CHANNEL_MAP = {channel.column: channel for channel in CHANNELS}
 TRACK_WIDTH = 12.0  # meters, circuit drawn under driving lines
 DEFAULT_CHANNELS = ("delta", "speed_kph", "throttle", "brake", "gear", "steering")
-PERCENT_RANGES = ((0.0, 1.0), (-1.0, 1.0))  # pedals & steering fractions shown in percent
+PERCENT_RANGES = ((0.0, 1.0), (-1.0, 1.0))  # pedals & steering fractions shown in percent (track position: %)
 DELTA_CHANNELS = ("delta", "delta_rate")  # computed against reference lap, symmetric range
+INTEGER_CHANNELS = ("gear", "tc_level", "abs_level", "engine_map")  # whole numbers, drawn as steps
+SETTING_CHANNELS = ("tc_level", "abs_level", "engine_map")  # game gives -1 when car has no such setting
 CHANNEL_PRESETS = {  # channel menu presets: name, visible channels
     "Default": DEFAULT_CHANNELS,
     "Pedals": ("delta", "speed_kph", "all:pedals", "steering", "gear", "all:slip"),
     "Tyres": ("speed_kph", "all:tyre_temp", "tyre_temp_spread", "all:tyre_pres", "all:tyre_wear"),
     "Brakes": ("speed_kph", "brake", "all:brake_temp", "abs_active", "all:slip"),
     "Suspension": ("speed_kph", "all:ride_height", "all:susp_defl", "accel_lat", "accel_long"),
+    "Camber": ("speed_kph", "all:camber_spread", "all:tyre_temp_in", "all:tyre_temp_out", "all:tyre_load"),
+    "Car Settings": ("delta", "speed_kph", "brake_bias", "tc_level", "abs_level", "engine_map"),
 }
 PART_COLORS = {  # sub-channel colors of combined panels when one lap is shown
     "throttle": "#22C55E", "brake": "#EF4444",
@@ -202,6 +226,16 @@ class PlotLap(NamedTuple):
     label: str
     data: LapData
     color: QColor
+    clean: bool = True  # valid lap, not out or in lap (may count in ideal lap & mini-sectors)
+
+
+def lap_color(slot: int) -> QColor:
+    """Color of shown lap by color slot: palette colors, then lighter & darker turns of them"""
+    color = LAP_COLORS[slot % len(LAP_COLORS)]
+    turn = slot // len(LAP_COLORS)
+    if not turn:
+        return QColor(color)
+    return color.lighter(100 + 35 * ((turn + 1) // 2)) if turn % 2 else color.darker(100 + 35 * (turn // 2))
 
 
 def lap_label(filename: str) -> str:
@@ -255,14 +289,14 @@ def format_channel_value(channel: Channel, value: float) -> str:
         return f"{value:+.3f}"
     if channel.column == "delta_rate":
         return f"{value:+.2f}"
-    if channel.column == "gear":
+    if channel.column in INTEGER_CHANNELS:
         return f"{value:.0f}"
     return format_value(value)
 
 
 def format_axis_value(channel: Channel, value: float, span: float) -> str:
     """Value range label of channel panel"""
-    if channel.fixed_range in PERCENT_RANGES or channel.column in DELTA_CHANNELS or channel.column == "gear":
+    if channel.fixed_range in PERCENT_RANGES or channel.column in DELTA_CHANNELS or channel.column in INTEGER_CHANNELS:
         return format_channel_value(channel, value)
     if span >= 20:
         return f"{value:.0f}"
@@ -341,16 +375,28 @@ def delta_limit(series: list[list[float]]) -> float:
     return max(limits[(len(limits) - 1) // 2] * 1.15, 0.1)
 
 
-def gain_color(rate: float) -> QColor:
-    """Time gain / loss rate color (s/m): red when losing time, green when gaining, neutral grey when even"""
-    amount = min(abs(rate) / GAIN_FULL_SCALE, 1.0)
-    target = LOSS_COLOR if rate > 0 else GAIN_COLOR
-    neutral = QColor("#9CA3AF")
-    return QColor(
-        round(neutral.red() + (target.red() - neutral.red()) * amount),
-        round(neutral.green() + (target.green() - neutral.green()) * amount),
-        round(neutral.blue() + (target.blue() - neutral.blue()) * amount),
-    )
+GAIN_SHADES = 64  # gain / loss color steps (colors shared, not made for each map point)
+_gain_shades: dict[tuple[bool, bool], list[QColor]] = {}
+
+
+def gain_color(rate: float, colorblind: bool = False) -> QColor:
+    """Time gain / loss rate color (s/m): red when losing time, green when gaining, neutral grey when even
+
+    Colorblind palette: orange losing, blue gaining. Returned color is shared: never change it.
+    """
+    shades = _gain_shades.get((rate > 0, colorblind))
+    if shades is None:
+        if colorblind:
+            target = COLORBLIND_LOSS if rate > 0 else COLORBLIND_GAIN
+        else:
+            target = LOSS_COLOR if rate > 0 else GAIN_COLOR
+        neutral = QColor("#9CA3AF")
+        shades = _gain_shades[(rate > 0, colorblind)] = [QColor(
+            round(neutral.red() + (target.red() - neutral.red()) * level / GAIN_SHADES),
+            round(neutral.green() + (target.green() - neutral.green()) * level / GAIN_SHADES),
+            round(neutral.blue() + (target.blue() - neutral.blue()) * level / GAIN_SHADES),
+        ) for level in range(GAIN_SHADES + 1)]
+    return shades[round(min(abs(rate) / GAIN_FULL_SCALE, 1.0) * GAIN_SHADES)]
 
 
 def lap_positions(lap: LapData | None) -> list[tuple[float, float, float]]:
@@ -417,6 +463,7 @@ class LapViewer(BaseDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
+        self.view.setFocus()  # page keys work without clicking it first
         self.resize(UIScaler.size(90), UIScaler.size(48))
         self.backend.refresh()
 
@@ -442,8 +489,5 @@ class LapViewer(BaseDialog):
 
 def format_csv_number(value: float, decimal: str) -> str:
     """Number with up to 4 decimals, locale decimal separator"""
-    text = f"{value:.4f}".rstrip("0").rstrip(".")
-    if text in ("-0", ""):
-        text = "0"
-    return text.replace(".", decimal) if decimal != "." else text
+    return csv_number(value, decimal)
 

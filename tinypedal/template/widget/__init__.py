@@ -63,6 +63,7 @@ WIDGET_DISPLAY_ORDER = (
     "brake_pressure",
     "brake_temperature",
     "brake_wear",
+    "chat",
     "cruise",
     "damage",
     "damage_stats",

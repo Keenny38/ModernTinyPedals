@@ -249,3 +249,27 @@ def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 
         timestamp=timestamp,
     )
     write_ld(filename, lap_channels(lap), info)
+
+
+def export_lap_job(folder: str, path: str, target: str, venue: str = "") -> str:
+    """Export recorded lap file to MoTeC .ld file (worker process job: lap read from binary cache of folder),
+    returns error text ("" if exported)
+
+    Written to a temporary file renamed once complete: job stopped at app exit leaves no partial .ld file.
+    """
+    import logging
+    import os
+    from contextlib import suppress
+
+    from .lap_cache import load_cached_lap
+
+    temporary = f"{target}.tmp"
+    try:
+        export_lap(load_cached_lap(folder, path), temporary, venue=venue, timestamp=os.path.getmtime(path))
+        os.replace(temporary, target)
+    except (OSError, ValueError) as error:
+        logging.getLogger(__name__).error("MOTEC: unable to export %s: %s", path, error)
+        with suppress(OSError):
+            os.remove(temporary)
+        return (error.strerror if isinstance(error, OSError) and error.strerror else str(error)) or type(error).__name__
+    return ""

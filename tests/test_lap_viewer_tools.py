@@ -27,7 +27,7 @@ def test_parse_columns_skips_bad_rows(tmp_path):
     assert parse_columns([], 3) == [[], [], []]
     path = tmp_path / "lap.csv"
     path.write_text("lap_time,distance\n0,0\nbad,1\n1,10\n2\n", encoding="utf-8")
-    assert load_lap(str(path)).distance == [0.0, 10.0]
+    assert list(load_lap(str(path)).distance) == [0.0, 10.0]  # packed array
 
 
 def test_delta_scaled_to_reference_length():
@@ -60,7 +60,9 @@ def test_map_line_keeps_increasing_distance():
     lap = LapData("a", {"distance": [0.0, 10.0, 5.0, 20.0, 20.0, 30.0], "pos_x": [1.0, 2, 3, 4, 5, 6],
                         "pos_y": [1.0] * 6})
     line = lap_map.map_line(lap)
-    assert line is not None and line.distances == [0.0, 10.0, 20.0, 30.0]
+    # Distance far back (glitch) dropped, same distance (late game update) kept just after previous point
+    assert line is not None and line.distances == pytest.approx([0.0, 10.0, 20.0, 20.001, 30.0])
+    assert line.xs == [1.0, 2.0, 4.0, 5.0, 6.0]
 
 
 def test_slip_events_and_map_rotation_helpers():
@@ -134,9 +136,10 @@ def test_trace_data_computed_channels_and_smoothing(ui_env):
     assert not data.available(CHANNEL_MAP["delta"])  # no compared lap
     assert data.available(CHANNEL_MAP["all:tyre_temp"])
     before = data.signature(CHANNEL_MAP["accel_lat"])
+    speed = data.signature(CHANNEL_MAP["speed_kph"])
     data.set_smoothing(7)
     assert data.signature(CHANNEL_MAP["accel_lat"]) != before  # noisy channel drawn again
-    assert data.signature(CHANNEL_MAP["speed_kph"]) == "0"  # others kept
+    assert data.signature(CHANNEL_MAP["speed_kph"]) == speed == "0|ukm/h"  # others kept
 
 
 def test_trace_data_keeps_series_of_shown_laps(ui_env):
@@ -432,7 +435,9 @@ def test_map_driving_points_and_options(viewer):  # noqa: F811
     assert "(" in compared["tip"] and "(" not in reference["tip"]  # differences for compared lap only
     assert compared["value"].isdigit() and reference["value"].isdigit()  # speed shown next to point
     assert backend.mapOptions == {"apex": True, "exit": True, "arrows": True, "sectors": True, "values": False,
-                                  "track": True}
+                                  "track": True, "trackout": True, "zones": False, "trail": True, "limits": True,
+                                  "colorblind": False, "distances": True, "offtrack": True, "limit": True,
+                                  "spread": False, "pit": True, "minimap": True}
     backend.setMapOption("values", True)
     backend.setMapOption("unknown", True)  # ignored
     assert backend.mapOptions["values"] and load_viewer_setting(cfg.path.telemetry)["map_options"]["values"]
@@ -468,3 +473,262 @@ def test_map_modes_cursor_gap_and_sectors(viewer):  # noqa: F811
     sectors = backend.trackMap["sectors"]
     assert [sector["label"] for sector in sectors] == ["S1", "S2", "S3"]
     assert sectors[0]["delta"] == "+0.500" and sectors[0]["deltaColor"] == "loss" and sectors[1]["deltaColor"] == "gain"
+
+
+# --- Track map: GPU markers, track limits, zones, picking, trail, corner card
+def test_marker_shapes_and_faded_band():
+    from PySide6.QtGui import QColor
+
+    from tinypedal.ui.quick import lines
+
+    points = [(0.0, 0.0, 0.0), (10.0, 0.0, math.pi / 2)]
+    counts = {shape: lines.markers(points, shape, 2.0).vertex_count for shape in lines.MARKER_SHAPES}
+    assert counts == {"diamond": 12, "dot": 72, "triangle": 6, "square": 12, "ring": 144, "hollow_triangle": 36,
+                      "cross": 24, "hollow_diamond": 48}
+    tip = lines.markers([(0.0, 0.0, 0.0)], "triangle", 2.0).data[:2]
+    assert list(tip) == pytest.approx([1.0, 0.0])  # points toward heading
+    faded = lines.colored_band([0.0, 1.0], [0.0, 0.0], [QColor("red")] * 2, 1.0, [0.0, 1.0])
+    first, last = (lines.COLORED_VERTEX.unpack_from(faded.data, index * lines.COLORED_VERTEX.size)[2:]
+                   for index in (0, 3))
+    assert first == (0, 0, 0, 0) and last == (255, 0, 0, 255)  # premultiplied alpha
+
+
+def test_track_limits_trackout_zones_grid():
+    from tinypedal.ui.quick import lap_map
+
+    distance = [float(index) for index in range(0, 2001, 5)]
+    base = lap_map.MapLine(distance, distance[:], [0.0] * len(distance))  # straight along x, left is +y
+    others = [lap_map.MapLine(distance, distance[:], [offset] * len(distance)) for offset in (-5.0, 6.0, 1.0)]
+    limits = lap_map.track_limits(base, others)
+    assert limits is not None
+    left, right = limits.left.ys[200], limits.right.ys[200]
+    assert left == pytest.approx(6.0 + lap_map.LIMITS_MARGIN, abs=0.01)
+    assert right == pytest.approx(-5.0 - lap_map.LIMITS_MARGIN, abs=0.01)
+    assert lap_map.track_limits(base, others[:1]) is None  # too few laps
+    narrow = lap_map.track_limits(base, [base, base])
+    assert narrow.left.ys[100] - narrow.right.ys[100] == pytest.approx(lap_map.LIMITS_MIN_WIDTH)
+    # Track-out: closest to outside edge (right edge in a left turn) after apex
+    drift = lap_map.MapLine(distance, distance[:], [-(d - 1000) / 100 if 1000 < d < 1300 else 0.0 for d in distance])
+    lefts = [left] * len(distance)
+    rights = [right] * len(distance)
+    assert lap_map.trackout_point(base, drift, (lefts, rights), 1000.0, 1200.0, 0.01) == pytest.approx(1295, abs=6)
+    assert lap_map.trackout_point(base, drift, ([], []), 1000.0, 1100.0, 0.01) == -1.0
+    keep = lap_map.kept_indexes(base, 50.0)
+    assert keep[0] == 0 and keep[-1] == len(distance) - 1 and lap_map.limits_band(limits, keep).vertex_count == 2 * len(keep)
+    lap = LapData("a", {
+        "distance": distance,
+        "brake": [1.0 if 500 <= d <= 600 or 606 <= d <= 650 else 0.0 for d in distance],  # short release: one zone
+        "throttle": [0.0 if d <= 650 else min((d - 650) / 100, 1.0) for d in distance],
+    })
+    braking, applying = lap_map.pedal_zones(lap)
+    assert braking == [(500.0, 650.0)] and applying == [(665.0, 740.0)]  # from 10% to 90% throttle
+    assert lap_map.zones_band(base, braking, 2.0).vertex_count > 0
+    grid = lap_map.LineGrid(base)
+    assert grid.nearest(503.0, 1.0, 5.0) == 101 and grid.nearest(503.0, 50.0, 5.0) == -1
+    xs, _, alphas = lap_map.trail(base, 100.0, 200.0)
+    assert xs[0] == pytest.approx(100.0) and xs[-1] == pytest.approx(200.0)
+    assert alphas[0] == 0.0 and alphas[-1] == pytest.approx(1.0)
+    colors = lap_map.corner_delta_colors(base, [(100.0, 200.0, 0.2), (300.0, 400.0, -0.1)])
+    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR
+
+    assert colors[30] == LOSS_COLOR and colors[70] != LOSS_COLOR and colors[0].name() == "#6b7280"
+    assert lap_map.corner_delta_colors(base, [(100.0, 200.0, 0.2)], colorblind=True)[30].name() == "#f97316"
+    assert GAIN_COLOR != LOSS_COLOR
+
+
+def test_map_markers_picking_and_card(viewer, laps):  # noqa: F811
+    from tinypedal.ui.quick.lines import VertexStore
+
+    backend = viewer.backend
+    track_map = backend.trackMap
+    reference = track_map["markers"][0]
+    brake = next(shape for shape in reference["shapes"] if shape["kind"] == "brake")
+    assert VertexStore.get(brake["fill"]).vertex_count == 12 and VertexStore.get(brake["outline"]).vertex_count == 12
+    assert VertexStore.get(track_map["arrowsKey"]).vertex_count == 14 * 3
+    backend.setMapView(0, 0, 3.0)
+    cached = VertexStore.get(track_map["road"]).data
+    backend.setMapView(0, 0, 1.0)
+    backend.setMapView(0, 0, 3.0)  # same scale step again: cached vertices
+    assert VertexStore.get(track_map["road"]).data is cached
+    point = track_map["points"][0]
+    found = backend.mapPointAt(point["x"], point["y"], 2.0, ["brake", "apex", "exit"])
+    assert found["tip"] and found["corner"] >= 0
+    assert backend.mapPointAt(point["x"], point["y"], 2.0, []) == {}  # kind hidden
+    line, lap = backend._map_lines[1]
+    assert lap is not backend.data.reference
+    hit = backend.mapPickLap(line.xs[100], line.ys[100], 3.0)
+    assert hit["x"] == pytest.approx(line.distances[100], abs=1)
+    assert backend.mapPickLap(1e6, 1e6, 3.0) == {}
+    card = backend.cornerCard(0)
+    assert card["title"] == "T1" and len(card["laps"]) == 2 and card["laps"][1]["gap"]
+    assert backend.cornerCard(99) == {}
+    backend.setSelectedCorner(1)
+    assert backend.selectedCorner == 1
+    assert [point.get("row") for point in track_map["corners"]] == [0, 1]
+    shown = backend._map_shown
+    backend._map_shown = 0
+    revision = backend.trailRevision
+    backend.cursorState(800.0)  # no map shown: no trail built
+    assert backend.trailRevision == revision
+    backend._map_shown = shown
+    backend.setMapShown(True)
+    backend.cursorState(800.0)  # trail of each lap behind cursor
+    assert backend.trailRevision == revision + 1 and VertexStore.get(track_map["lines"][0]["trail"]).colored
+    backend.setMapMode("corners")
+    assert VertexStore.get(track_map["colored"]).vertex_count > 0
+    backend.setMapOption("colorblind", True)
+    assert backend.mapOptions["colorblind"]
+
+
+def test_track_limits_job_and_cache(viewer, laps):  # noqa: F811
+    from tinypedal.ui.quick import lap_backend
+
+    backend = viewer.backend
+    assert backend._limits is None and backend._limits_job is None  # 2 clean laps: not enough
+    save(5, 71.5, BASE + 500)
+    backend.refresh()  # 3 clean laps with positions: track limits guessed in background
+    wait_loaded(viewer)
+    assert backend._limits is not None or backend._limits_job is not None
+    while backend._limits_job is not None:
+        backend._limits_job.join()
+        backend.check_limits_job()
+    assert backend.hasLimits and backend.trackMap["limits"]
+    cache = backend.limits_cache_path(backend.currentTrack)
+    assert os.path.exists(cache)
+    assert any(point["kind"] == "trackout" for point in backend.trackMap["points"])
+    backend._limits, backend._limits_track = None, ""
+    backend.start_limits(backend.currentTrack)  # same laps: read from cache, no thread
+    assert backend._limits is not None and backend._limits_job is None
+    assert backend.limitsSource == "estimated"  # laps without game track edges
+    backend.setMapOption("limits", False)
+    assert not backend.trackMap["limits"]
+    assert lap_backend.MAP_OPTIONS["limits"]
+
+
+
+# --- Kept position, map following charts back, precision
+def test_kept_position_remembered(viewer, laps):  # noqa: F811
+    from tests.test_lap_viewer import flush_deleted
+    from tinypedal.ui.lap_viewer import LapViewer, load_viewer_setting
+
+    backend = viewer.backend
+    assert backend.pinnedX == -1.0 and backend.mapPin == {}
+    changes = []
+    backend.pinChanged.connect(lambda: changes.append(backend.pinnedX))
+    backend.setPinned(1234.5)
+    assert backend.pinnedX == pytest.approx(1234.5) and changes == [pytest.approx(1234.5)]
+    pin = backend.mapPin
+    line = backend._map_lines[0][0]
+    from tinypedal.ui.quick import lap_map
+
+    assert (pin["x"], pin["y"]) == pytest.approx(lap_map.point_at(line, 1234.5))
+    assert load_viewer_setting(cfg.path.telemetry)["pins"] == {backend.currentTrack: 1234.5}
+    backend.setTimeAxis(True)  # same place on track, time axis position
+    assert backend.distanceAt(backend.pinnedX) == pytest.approx(1234.5, abs=0.5)
+    backend.setTimeAxis(False)
+    viewer.close()
+    flush_deleted()
+    other = LapViewer(None)
+    try:
+        wait_loaded(other)
+        assert other.backend.pinnedX == pytest.approx(1234.5)  # kept next time
+        other.backend.clearPinned()
+        assert other.backend.pinnedX == -1.0 and load_viewer_setting(cfg.path.telemetry)["pins"] == {}
+    finally:
+        other.close()
+        flush_deleted()
+
+
+def test_map_follows_back_overlays_and_projection(viewer):  # noqa: F811
+    from tinypedal.ui.quick.lines import VertexStore
+
+    backend = viewer.backend
+    line = backend._map_lines[0][0]
+    index = len(line.xs) // 4
+    x, y = line.xs[index], line.ys[index]
+    found = backend.mapVisibleRange(x - 60, y - 60, x + 60, y + 60, x, y)  # map zoomed around a point
+    assert len(found) == 2 and found[0] < line.distances[index] < found[1] and found[1] - found[0] < 300
+    assert backend.mapVisibleRange(1e6, 1e6, 1e6 + 10, 1e6 + 10, 1e6, 1e6) == []
+    # Projected between samples: point between two samples gives distance between them
+    middle_x, middle_y = (line.xs[index] + line.xs[index + 1]) / 2, (line.ys[index] + line.ys[index + 1]) / 2
+    expected = (line.distances[index] + line.distances[index + 1]) / 2
+    assert backend.mapPick(middle_x, middle_y, 5.0) == pytest.approx(expected, abs=0.05)
+    backend.setMapRange(500.0, 900.0)  # chart markers A & B on map
+    assert VertexStore.get(backend.trackMap["rangeKey"]).vertex_count > 0
+    backend.setMapRange(-1, -1)
+    assert VertexStore.get(backend.trackMap["rangeKey"]).vertex_count == 0
+    backend.setSelectedCorner(0)
+    assert VertexStore.get(backend.trackMap["selectedKey"]).vertex_count > 0
+    assert len(backend.trackMap["ticks"]) == 3  # every 500 m on a 2 km lap
+
+
+def test_driving_points_between_grid_samples():
+    from tests.test_corner_analysis import make_lap
+    from tinypedal.userfile.corner_analysis import ResampledLap, compare_corners
+
+    lap = make_lap(step=1.0)  # samples every meter, analysis grid every 5 m
+    row = compare_corners(lap)[0]
+    assert row.reference.brake_point % 5 != 0 or row.reference.apex % 5 != 0  # not stuck on grid
+    sampled = ResampledLap(LapData("x", {"distance": [0.0, 10.0, 20.0], "brake": [0.0, 0.0, 1.0],
+                                         "speed_kph": [100.0, 80.0, 90.0]}))
+    assert sampled.crossing("brake", 0.0, 20.0, 0.5) == pytest.approx(15.0)  # between samples
+    assert sampled.crossing("brake", 0.0, 12.0, 0.5) == -1.0
+    assert sampled.minimum("speed_kph", 0.0, 20.0) == (10.0, 80.0)
+    assert sampled.minimum("speed_kph", 30.0, 40.0) is None
+
+
+# --- Game track position, scoring data, sectors
+def test_scoring_steps_smoothed_and_median_sectors():
+    from tinypedal.userfile.telemetry_lap import median_sector_bounds, smooth_steps
+
+    times = [index * 0.02 for index in range(30)]
+    values = [0.0] * 10 + [1.0] * 10 + [2.0] * 10  # game value updated every 0.2s
+    smoothed = smooth_steps(times, values)
+    assert smoothed[5] == pytest.approx(0.5) and smoothed[15] == pytest.approx(1.5)
+    assert smoothed[10] == 1.0 and smoothed[25] == 2.0  # values after last update held
+    paused = [0.0, 0.5, 2.0, 2.1]
+    assert smooth_steps(paused, [0.0, 0.0, 1.0, 1.0]) == [0.0, 0.0, 1.0, 1.0]  # long hold kept as is
+    assert smooth_steps(times[:3], [1.0, 2.0, 3.0]) == [1.0, 2.0, 3.0]  # every sample updated
+
+    def lap(sectors):
+        data = lap_data("a", length=2000.0)
+        return LapData("a", data.columns, {"sectors": sectors})
+
+    speed = 100 / 3.6
+    timed = [lap([10.0, 20.0, 30.0]), lap([10.2, 20.0, 30.0]), lap([30.0, 5.0, 30.0]), LapData("x", lap_data().columns)]
+    bounds = median_sector_bounds(timed)
+    assert bounds == pytest.approx([10.2 * speed, 30.2 * speed])  # lap far off does not move sector lines
+    assert median_sector_bounds([LapData("x", lap_data().columns)]) == []
+
+
+@pytest.mark.parametrize("game_sign", [1.0, -1.0])
+def test_game_track_limits_found_whichever_way_lateral_goes(game_sign):
+    from tinypedal.ui.quick import lap_map
+
+    xs = [index * 2.0 for index in range(251)]
+    base = lap_map.MapLine(list(xs), list(xs), [0.0] * len(xs))  # reference line along x, left is +y
+    car = [3.0 + 4.0 * math.sin(x / 40) for x in xs]  # track center 3 m left of reference, 6 m each side
+    laterals = [game_sign * (y - 3.0) for y in car]
+    edges = [math.copysign(6.0, lateral) for lateral in laterals]
+    line = lap_map.MapLine(list(xs), list(xs), car)
+    limits = lap_map.game_limits(base, [(line, laterals, edges)])
+    assert limits is not None
+    middle = len(xs) // 2
+    assert limits.left.ys[middle] == pytest.approx(9.0, abs=0.2)
+    assert limits.right.ys[middle] == pytest.approx(-3.0, abs=0.2)
+    assert lap_map.game_limits(base, [(line, laterals, [0.0] * len(xs))]) is None  # no track edge recorded
+
+
+def test_track_position_channel(ui_env):
+    from PySide6.QtGui import QColor
+
+    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from tinypedal.ui.quick.trace_data import TraceData
+
+    count = 101
+    lap = lap_data("a", path_lateral=[index / 10 - 5 for index in range(count)], track_edge=5.0)
+    data = TraceData()
+    data.set_laps([PlotLap("a", "a", lap, QColor("red"))])
+    values = data.series(CHANNEL_MAP["track_position"], data.laps[0])[1]
+    assert values[0] == pytest.approx(-100.0) and values[50] == pytest.approx(0.0) and values[-1] == pytest.approx(100.0)
+    assert data.available(CHANNEL_MAP["track_position"]) and data.available(CHANNEL_MAP["path_lateral"])

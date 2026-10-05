@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import io
 import json
 import logging
@@ -46,6 +47,7 @@ from ..const_app import VERSION
 from ..module_info import minfo
 from ..replay import replay
 from ..userfile import write_text_file
+from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files
 from ..validator import generator_init
@@ -68,6 +70,17 @@ CSV_HEADER = (
     *(f"wheel_speed_{wheel}" for wheel in WHEELS),
     *(f"ride_height_{wheel}" for wheel in WHEELS),
     *(f"susp_defl_{wheel}" for wheel in WHEELS),
+    # Game track center path (scoring data): where car is across track, track edges
+    "path_lateral", "track_edge",
+    # Surface under each wheel (grass, gravel: off track), car heading (radians, game orientation)
+    *(f"surface_{wheel}" for wheel in WHEELS), "yaw",
+    # Tread temperature inner / middle / outer edge (camber), tyre load (kN)
+    *(f"tyre_temp_in_{wheel}" for wheel in WHEELS),
+    *(f"tyre_temp_mid_{wheel}" for wheel in WHEELS),
+    *(f"tyre_temp_out_{wheel}" for wheel in WHEELS),
+    *(f"tyre_load_{wheel}" for wheel in WHEELS),
+    # Car velocity across & along car (m/s, body slip angle), driver settings, engine temperatures
+    "vel_lat", "vel_long", "brake_bias", "tc_level", "abs_level", "engine_map", "water_temp", "oil_temp",
 )
 GRAVITY = 9.80665
 NO_WHEELS = (0.0, 0.0, 0.0, 0.0)
@@ -165,6 +178,22 @@ def four(values, digits: int, scale: float = 1.0) -> tuple:
         return NO_WHEELS
 
 
+def tread_bands(values) -> tuple:
+    """Tread temperature inner (4 wheels), middle (4), outer (4) from game left / center / right of each wheel
+
+    Inner edge of a left wheel is its right side, of a right wheel its left side.
+    """
+    try:
+        if len(values) < 12:
+            return NO_WHEELS * 3
+        inner = tuple(round(values[index * 3 + (0 if index % 2 else 2)], 1) for index in range(4))
+        middle = tuple(round(values[index * 3 + 1], 1) for index in range(4))
+        outer = tuple(round(values[index * 3 + (2 if index % 2 else 0)], 1) for index in range(4))
+    except TypeError:
+        return NO_WHEELS * 3
+    return inner + middle + outer
+
+
 def read_sample(lap_start: float) -> tuple:
     """Read one telemetry sample"""
     read = api.read
@@ -205,6 +234,20 @@ def read_sample(lap_start: float) -> tuple:
         *wheel_speed,
         *four(read.wheel.ride_height(), 1),
         *four(read.wheel.suspension_deflection(), 1),
+        round(read.vehicle.path_lateral(), 3),
+        round(read.vehicle.track_edge(), 3),
+        *four(read.wheel.surface_type(), 0),
+        round(read.vehicle.orientation_yaw_radians(), 4),
+        *tread_bands(read.tyre.surface_temperature_ico()),
+        *four(read.tyre.load(), 2, 0.001),
+        round(read.vehicle.velocity_lateral(), 2),
+        round(read.vehicle.velocity_longitudinal(), 2),
+        round(read.brake.bias_front() * 100, 1),
+        read.switch.tc_level(),
+        read.switch.abs_level(),
+        read.switch.motor_map_level(),
+        round(read.engine.water_temperature(), 1),
+        round(read.engine.oil_temperature(), 1),
     )
 
 
@@ -232,9 +275,35 @@ def lap_info(kind: str, rows: list) -> dict:
     if rows:
         info["fuel_start"] = rows[0][10]
         info["fuel_end"] = rows[-1][10]
+        wear = CSV_HEADER.index("tyre_wear_fl")
+        if len(rows[0]) >= wear + 4 and len(rows[-1]) >= wear + 4:  # tyre wear over lap (session view)
+            info["wear_start"] = list(rows[0][wear:wear + 4])
+            info["wear_end"] = list(rows[-1][wear:wear + 4])
     if replay.player is not None:
         info["replay"] = os.path.basename(replay.player.replay.filename)
+    setup = setup_id()
+    if setup:
+        info["setup"] = setup
+    try:
+        setup_name = read.vehicle.setup_name()
+        if setup_name:
+            info["setup_name"] = setup_name
+            if read.vehicle.setup_modified():
+                info["setup_modified"] = True
+    except (AttributeError, TypeError, ValueError):
+        pass
     return info
+
+
+def setup_id() -> str:
+    """Short fingerprint of car setup from game (same setup, same id), empty if unknown"""
+    try:
+        lines = api.read.vehicle.setup()
+    except (AttributeError, TypeError, ValueError):
+        return ""
+    if not lines or not isinstance(lines, (tuple, list)):
+        return ""
+    return hashlib.sha1("\n".join(str(line) for line in lines).encode("utf-8")).hexdigest()[:8]
 
 
 def official_sectors(lap_time: float) -> list[float]:
@@ -444,8 +513,17 @@ def save_lap(
         app_signal.error.emit(f"Telemetry recorder: unable to save lap {lap_number}, see log for details.")
         return False
     logger.info("RECORDER: saved %s (%s samples)", filename, len(rows))
+    cache_lap(filepath, os.path.join(folder, filename))
     remove_old_laps(folder, max_saved_laps, keep_best)
     return True
+
+
+def cache_lap(filepath: str, path: str):
+    """Binary copy of saved lap for lap viewer (opened at once, CSV never parsed there), lap saver thread"""
+    try:
+        load_cached_lap(filepath, path)
+    except (OSError, ValueError) as error:  # optional: lap viewer reads CSV if missing
+        logger.debug("RECORDER: lap %s not cached: %s", path, error)
 
 
 def remove_old_laps(folder: str, max_saved_laps: int, keep_best: int = 0):
@@ -464,6 +542,7 @@ def remove_old_laps(folder: str, max_saved_laps: int, keep_best: int = 0):
             if lap.path in protected:
                 continue
             os.remove(lap.path)
+            remove_cached_lap(os.path.dirname(folder), lap.path)
             excess -= 1
     except OSError as error:
         logger.error("RECORDER: unable to remove old laps: %s", error)

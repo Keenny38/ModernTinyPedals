@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 
 from ..const_common import WHEELS_NA
+from ..process.game_info import parse_chat, parse_contacts, parse_distance, parse_setup_name
 from ..process.garage import export_lmu_car_setup
 from ..process.vehicle import absolute_refilling, export_wheels, steerlock_to_number
 from ..process.weather import FORECAST_DEFAULT, WeatherNode, forecast_rf2
@@ -54,6 +55,13 @@ class RestAPIData:
         "maxVirtualEnergy",
         "brakeWear",
         "suspensionDamage",
+        "expectedFuelConsumption",
+        "expectedEnergyConsumption",
+        "chatMessages",
+        "contacts",
+        "pitEntryDistance",
+        "setupName",
+        "setupModified",
     )
 
     def __init__(self):
@@ -73,6 +81,13 @@ class RestAPIData:
         self.maxVirtualEnergy: float = 0.0
         self.brakeWear: tuple[float, float, float, float] = WHEELS_NA
         self.suspensionDamage: tuple[float, float, float, float] = WHEELS_NA
+        self.expectedFuelConsumption: float = 0.0
+        self.expectedEnergyConsumption: float = 0.0
+        self.chatMessages: tuple[tuple[float, str], ...] = ()
+        self.contacts: tuple[tuple[float, str, str], ...] = ()
+        self.pitEntryDistance: float = -1.0
+        self.setupName: str = ""
+        self.setupModified: bool = False
 
     def __del__(self):
         if logger is not None:  # module globals are cleared at interpreter exit
@@ -102,6 +117,23 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
         ResOutput("timeScale", 1, valid_value_type, ("SESSSET_race_timescale", "currentValue")),
         ResOutput("privateQualifying", 0, valid_value_type, ("SESSSET_private_qual", "currentValue")),
     )
+    res_expectedusage = (
+        ResOutput("expectedFuelConsumption", 0.0, valid_value_type, ("expectedUsage", "fuelConsumption")),
+        ResOutput("expectedEnergyConsumption", 0.0, valid_value_type, ("expectedUsage", "virtualEnergyFractionPerLap")),
+    )
+    res_chat = (
+        ResOutput("chatMessages", (), parse_chat),
+    )
+    res_contacts = (
+        ResOutput("contacts", (), parse_contacts),
+    )
+    res_gamestate = (
+        ResOutput("pitEntryDistance", -1.0, parse_distance, ("PitEntryDist",)),
+    )
+    res_setupsummary = (
+        ResOutput("setupName", "", parse_setup_name, ("activeSetup",)),
+        ResOutput("setupModified", False, valid_value_type, ("unsavedChanges",)),
+    )
     res_pitstoptime = (
         ResOutput("pitStopTime", 0.0, valid_value_type, ("total",)),
         ResOutput("repairTime", 0.0, valid_value_type, ("damage",)),
@@ -111,6 +143,11 @@ def lmu_restapi_tasks() -> tuple[RestAPITask, ...]:
         RestAPITask("/rest/sessions/weather", res_weatherforecast, "enable_weather_info", False, 0.1),
         RestAPITask("/rest/sessions", res_sessionsinfo, "enable_session_info", False, 0.1),
         RestAPITask("/rest/garage/getPlayerGarageData", res_garagesetup, "enable_garage_setup_info", False, 0.1),
+        RestAPITask("/rest/garage/summary", res_setupsummary, "enable_garage_setup_info", False, 0.1),
         RestAPITask("/rest/garage/UIScreen/RepairAndRefuel", res_currentstint, "enable_vehicle_info", True, 0.2),
         RestAPITask("/rest/strategy/pitstop-estimate", res_pitstoptime, "enable_vehicle_info", True, 1.0),
+        RestAPITask("/rest/garage/UIScreen/TireManagement", res_expectedusage, "enable_vehicle_info", True, 1.0),
+        RestAPITask("/rest/chat/", res_chat, "enable_race_info", True, 0.5),
+        RestAPITask("/rest/watch/getIncidentsList/1", res_contacts, "enable_race_info", True, 1.0),
+        RestAPITask("/rest/sessions/GetGameState", res_gamestate, "enable_race_info", True, 1.0),
     )

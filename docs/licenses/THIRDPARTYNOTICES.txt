@@ -24,4 +24,12 @@ TinyPedal relies on following third-party software:
   website: https://github.com/giampaolo/psutil
   license: https://github.com/giampaolo/psutil/blob/master/LICENSE
 
+- JetBrains Mono font, the SIL Open Font License 1.1.
+  website: https://github.com/JetBrains/JetBrainsMono
+  license: https://github.com/JetBrains/JetBrainsMono/blob/master/OFL.txt
+
+- Barlow font, the SIL Open Font License 1.1.
+  website: https://github.com/jpt/barlow
+  license: https://github.com/jpt/barlow/blob/main/OFL.txt
+
 For licenses and notices of each software, see LICENSE file in "docs\licenses" folder, or visit website.

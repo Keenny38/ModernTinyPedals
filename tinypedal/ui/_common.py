@@ -418,6 +418,10 @@ class BaseEditor(BaseDialog):
             self._is_modified = True
         self.__record_change()
 
+    def record_change(self):
+        """Record change to undo history, editor not marked modified (changes saved at once)"""
+        self.__record_change()
+
     def set_unmodified(self):
         """Set unmodified state"""
         if self._is_modified:

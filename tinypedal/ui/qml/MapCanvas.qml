@@ -1,6 +1,7 @@
 import QtQuick
 
-// Map view shared by track maps: world coordinates (meters) to screen, animated zoom & move.
+// Map view shared by track maps: world coordinates (meters) to screen, zoom & move eased every frame
+// (zoom in log scale, point under mouse kept under mouse: wheel steps blend into one smooth move).
 // Content items use canvas.matrix (GpuShape transform) or screenX/screenY (labels, markers).
 // Wheel: zoom at cursor, drag: move, double-click: whole map, click: clicked(world x, y),
 // mouse over map: hovered(world x, y), then hoverEnded() when mouse leaves.
@@ -15,12 +16,18 @@ Item {
     property bool flipY: true  // game coordinates: y up on screen
     property real margin: theme.em * 1.2
     property real maxZoom: 60
-    property real zoom: 1
+    property real zoom: 1  // shown view, eased toward target view
     property real panX: 0
     property real panY: 0
+    property real targetZoom: 1
+    property real targetPanX: 0
+    property real targetPanY: 0
     property bool animate: false
+    property var anchor: null  // zoom at mouse: {px, py, x, y} world point kept at screen point while easing
+    property bool zoomFollows: false  // view moved by a follower (followed vehicles): wheel only sets zoom wanted
     property bool showControls: true
     property bool interactive: true
+    property int clickModifiers: 0  // keyboard modifiers of last click
     default property alias content: layer.data
 
     readonly property bool hasBounds: maxX > minX || maxY > minY
@@ -40,29 +47,82 @@ Item {
     signal hoverEnded()
     signal settled()  // zoom stopped: rebuild what depends on scale
     signal userZoomed(real zoom)  // zoom chosen with wheel or buttons
+    signal userMoved()  // view zoomed or moved by user (not by code): followers can follow map
+    signal scaling(real metersPerPixel)  // scale changing (easing): cheap preview only
 
-    Behavior on zoom { enabled: canvas.animate; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
-    Behavior on panX { enabled: canvas.animate; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
-    Behavior on panY { enabled: canvas.animate; NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+    FrameAnimation {
+        id: easing
+        onTriggered: {
+            var ease = 1 - Math.exp(-frameTime / 0.075)
+            var logZoom = Math.log(canvas.zoom), logTarget = Math.log(canvas.targetZoom)
+            var done = Math.abs(logTarget - logZoom) < 1e-3
+            var next = done ? canvas.targetZoom : Math.exp(logZoom + (logTarget - logZoom) * ease)
+            var scale = canvas.baseScale * next
+            var nextPanX, nextPanY
+            if (canvas.anchor) {
+                nextPanX = canvas.anchor.px - canvas.width / 2 - (canvas.anchor.x - canvas.centerX) * scale
+                nextPanY = canvas.anchor.py - canvas.height / 2 - canvas.ySign * (canvas.anchor.y - canvas.centerY) * scale
+            } else {  // view center (world) moved toward target center
+                var oldScale = canvas.baseScale * canvas.zoom, targetScale = canvas.baseScale * canvas.targetZoom
+                var cx = canvas.panX / oldScale, cy = canvas.panY / oldScale
+                var tcx = canvas.targetPanX / targetScale, tcy = canvas.targetPanY / targetScale
+                nextPanX = (cx + (tcx - cx) * ease) * scale
+                nextPanY = (cy + (tcy - cy) * ease) * scale
+            }
+            if (done && Math.abs(nextPanX - canvas.targetPanX) < 0.5 && Math.abs(nextPanY - canvas.targetPanY) < 0.5) {
+                canvas.zoom = canvas.targetZoom
+                canvas.panX = canvas.targetPanX
+                canvas.panY = canvas.targetPanY
+                canvas.anchor = null
+                stop()
+                return
+            }
+            canvas.zoom = next
+            canvas.panX = nextPanX
+            canvas.panY = nextPanY
+        }
+    }
 
     function screenX(x) { return x * mapScale + tx }
     function screenY(y) { return ySign * y * mapScale + ty }
     function worldX(px) { return (px - tx) / mapScale }
     function worldY(py) { return (py - ty) / (ySign * mapScale) }
+    // World point at screen point in view being eased to
+    function targetWorld(px, py) {
+        var scale = baseScale * targetZoom
+        return [(px - width / 2 - targetPanX) / scale + centerX, (py - height / 2 - targetPanY) / (ySign * scale) + centerY]
+    }
 
-    function setView(nextZoom, nextPanX, nextPanY, animated) {
+    function setView(nextZoom, nextPanX, nextPanY, animated, keptPoint) {
         animate = animated
+        targetZoom = nextZoom
+        targetPanX = nextPanX
+        targetPanY = nextPanY
+        anchor = animated && keptPoint ? keptPoint : null
+        if (animated) {
+            if (!easing.running) easing.start()
+            return
+        }
+        easing.stop()
         zoom = nextZoom
         panX = nextPanX
         panY = nextPanY
     }
+    // Wheel steps add up on target zoom: fast wheel zooms as far as wheel turned, shown view catches up
     function zoomAt(factor, px, py) {
-        var next = Math.max(1, Math.min(zoom * factor, maxZoom))
+        var next = Math.max(1, Math.min(targetZoom * factor, maxZoom))
+        if (zoomFollows) {  // follower eases view to this zoom (no jump between two cameras)
+            targetZoom = next
+            userZoomed(next)
+            return
+        }
         userZoomed(next)
-        var x = worldX(px), y = worldY(py)
+        userMoved()
+        var x = worldX(px), y = worldY(py)  // point under mouse in shown view stays under mouse
         var scale = baseScale * next
         if (next === 1) setView(1, 0, 0, true)
-        else setView(next, px - width / 2 - (x - centerX) * scale, py - height / 2 - ySign * (y - centerY) * scale, true)
+        else setView(next, px - width / 2 - (x - centerX) * scale, py - height / 2 - ySign * (y - centerY) * scale, true,
+                     {px: px, py: py, x: x, y: y})
     }
     function reset(animated) { setView(1, 0, 0, animated) }
     // Center view on world point at zoom, at once (followed vehicle)
@@ -84,6 +144,7 @@ Item {
     // Zoom changing for long (followed vehicles drifting apart): settled at most twice a second meanwhile.
     property double lastSettled: 0
     onMapScaleChanged: {
+        scaling(metersPerPixel)
         if (Date.now() - lastSettled > 500 && settleTimer.running) settleTimer.triggered()
         settleTimer.restart()
     }
@@ -109,10 +170,17 @@ Item {
         onPositionChanged: function(mouse) {
             if (!pressed) { canvas.hovered(canvas.worldX(mouse.x), canvas.worldY(mouse.y)); return }
             if (Math.abs(mouse.x - pressX) + Math.abs(mouse.y - pressY) > 4) moved = true
-            if (moved && canvas.zoom > 1) canvas.setView(canvas.zoom, startPanX + mouse.x - pressX, startPanY + mouse.y - pressY, false)
+            if (moved && canvas.zoom > 1) {
+                canvas.setView(canvas.zoom, startPanX + mouse.x - pressX, startPanY + mouse.y - pressY, false)
+                canvas.userMoved()
+            }
         }
-        onClicked: function(mouse) { if (!moved) canvas.clicked(canvas.worldX(mouse.x), canvas.worldY(mouse.y)) }
-        onDoubleClicked: canvas.reset(true)
+        onClicked: function(mouse) {
+            if (moved) return
+            canvas.clickModifiers = mouse.modifiers
+            canvas.clicked(canvas.worldX(mouse.x), canvas.worldY(mouse.y))
+        }
+        onDoubleClicked: { canvas.reset(true); canvas.userMoved() }
         onExited: canvas.hoverEnded()
         // Zoom follows wheel amount: smooth on touchpads & high resolution wheels
         onWheel: function(wheel) { if (wheel.angleDelta.y !== 0) canvas.zoomAt(Math.pow(1.0019, wheel.angleDelta.y), wheel.x, wheel.y) }
@@ -163,8 +231,10 @@ Item {
                 flat: true
                 implicitHeight: theme.em * 1.9
                 opacity: hovered ? 1 : 0.7
-                onClicked: modelData[1] === 0 ? canvas.reset(true)
-                                              : canvas.zoomAt(modelData[1], canvas.width / 2, canvas.height / 2)
+                onClicked: {
+                    if (modelData[1] === 0) { canvas.reset(true); canvas.userMoved() }
+                    else canvas.zoomAt(modelData[1], canvas.width / 2, canvas.height / 2)
+                }
             }
         }
     }

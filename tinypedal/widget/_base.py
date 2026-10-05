@@ -106,6 +106,10 @@ class Base(QWidget):
         else:
             OverlayStyle.corner_scale = 0
             OverlayStyle.depth_effects = False
+        # Modern design restyle of classic drawing (see widget._modern.restyle)
+        design = self.design_overrides(style)
+        if design:
+            self.wcfg = StyledConfig(self.wcfg, design)
         # Global overlay scale
         scaled = scale_overrides(self.wcfg, style.get("overlay_scale", 1.0), widget_name)
         if scaled:
@@ -127,6 +131,10 @@ class Base(QWidget):
             self.wcfg["update_interval"],
             self.cfg.application["minimum_update_interval"],
         )
+
+    def design_overrides(self, style: dict) -> dict:
+        """Option overrides of design (override), applied before overlay scale"""
+        return {}
 
     def start(self):
         """Set initial widget state in orders, and start update"""

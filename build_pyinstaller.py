@@ -38,7 +38,7 @@ DATA_FILES = {
     "": ["LICENSE.txt", "README.md"],
     "docs": ["docs/changelog.txt", "docs/customization.md", "docs/contributors.md"],
     "docs/licenses": glob("docs/licenses/*"),
-    "fonts": [*glob("fonts/*.ttf"), "fonts/OFL.txt"],
+    "fonts": [*glob("fonts/*.ttf"), *glob("fonts/OFL*.txt")],
     "plugins/example_speed": ["plugins/example_speed/setting.json", "plugins/example_speed/widget.py"],
     "images": [
         "images/CC-BY-SA-4.0.txt",
@@ -47,6 +47,8 @@ DATA_FILES = {
         "images/icon_steering_wheel.png",
         "images/icon_weather.png",
         "images/icon.png",
+        "images/icon_dark.png",
+        "images/icon_dark.ico",  # installer shortcut icon for dark theme
     ],
 }
 

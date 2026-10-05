@@ -104,7 +104,8 @@ class FileFilter:
 class ImageFile:
     """Built-in image file constants"""
 
-    APP_ICON = "images/icon.png"
+    APP_ICON = "images/icon.png"  # black & gold, light theme
+    APP_ICON_DARK = "images/icon_dark.png"  # white & gold, dark theme
     COMPASS = "images/icon_compass.png"
     INSTRUMENT = "images/icon_instrument.png"
     STEERING_WHEEL = "images/icon_steering_wheel.png"
@@ -116,6 +117,7 @@ class FontFile:
 
     FOLDER = "fonts/"
     MODERN_FAMILY = "JetBrains Mono"
+    DESIGN_FAMILY = "Barlow Semi Condensed"  # modern overlay design
 
 
 class StatsFile:

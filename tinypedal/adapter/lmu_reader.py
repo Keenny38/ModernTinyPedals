@@ -241,6 +241,14 @@ class Engine(_reader.Engine, DataAdapter):
         """Maximum virtual energy (joule)"""
         return self.rest.maxVirtualEnergy
 
+    def expected_fuel_consumption(self) -> float:
+        """Fuel consumption per lap estimated by game (liters), 0 if unknown"""
+        return self.rest.expectedFuelConsumption
+
+    def expected_energy_consumption(self) -> float:
+        """Virtual energy consumption per lap estimated by game (percent), 0 if unknown"""
+        return self.rest.expectedEnergyConsumption * 100
+
 
 class Inputs(_reader.Inputs, DataAdapter):
     """Inputs"""
@@ -365,6 +373,10 @@ class Lap(_reader.Lap, DataAdapter):
     def safety_car_active(self) -> bool:
         """Is safety car active on track"""
         return False  # not available for LMU
+
+    def pit_entry_distance(self) -> float:
+        """Lap distance of pit lane entry (meters), -1 if unknown"""
+        return self.rest.pitEntryDistance
 
 
 class Session(_reader.Session, DataAdapter):
@@ -570,6 +582,14 @@ class Session(_reader.Session, DataAdapter):
     def time_scale(self) -> int:
         """Time scale"""
         return max(self.rest.timeScale, 0)
+
+    def chat_messages(self) -> tuple[tuple[float, str], ...]:
+        """Chat messages from game: (Unix time, "Name: message"), oldest first"""
+        return self.rest.chatMessages
+
+    def contacts(self) -> tuple[tuple[float, str, str], ...]:
+        """Contacts between cars from game: (session time, driver, other driver or "Immovable"), oldest first"""
+        return self.rest.contacts
 
     def limits_points(self) -> float:
         """Track limits points per penalty"""
@@ -1063,6 +1083,14 @@ class Vehicle(_reader.Vehicle, DataAdapter):
         """Lateral axis position (meters) related to world plane"""
         return -rmnan(self.shmm.lmuTeleVeh(index).mPos.z)  # in LMU coord system
 
+    def path_lateral(self, index: int | None = None) -> float:
+        """Lateral position (meters) from game track center path (scoring data)"""
+        return rmnan(self.shmm.lmuScorVeh(index).mPathLateral)
+
+    def track_edge(self, index: int | None = None) -> float:
+        """Track edge distance (meters) from game track center path, on vehicle side (scoring data)"""
+        return rmnan(self.shmm.lmuScorVeh(index).mTrackEdge)
+
     def position_vertical(self, index: int | None = None) -> float:
         """Vertical axis position (meters) related to world plane"""
         return rmnan(self.shmm.lmuTeleVeh(index).mPos.y)  # in LMU coord system
@@ -1146,6 +1174,14 @@ class Vehicle(_reader.Vehicle, DataAdapter):
     def setup(self) -> tuple[str, ...]:
         """Car setup data"""
         return self.rest.lastCarSetup
+
+    def setup_name(self) -> str:
+        """Name of car setup loaded in game, empty if unknown"""
+        return self.rest.setupName
+
+    def setup_modified(self) -> bool:
+        """Car setup changed in garage since loaded or saved"""
+        return self.rest.setupModified
 
 
 class Wheel(_reader.Wheel, DataAdapter):
@@ -1262,6 +1298,16 @@ class Wheel(_reader.Wheel, DataAdapter):
             wheel_data[1].mDetached,
             wheel_data[2].mDetached,
             wheel_data[3].mDetached,
+        )
+
+    def surface_type(self, index: int | None = None) -> tuple[int, ...]:
+        """Surface under each wheel: 0 dry, 1 wet, 2 grass, 3 dirt, 4 gravel, 5 rumble strip, 6 special"""
+        wheel_data = self.shmm.lmuTeleVeh(index).mWheels
+        return (
+            wheel_data[0].mSurfaceType,
+            wheel_data[1].mSurfaceType,
+            wheel_data[2].mSurfaceType,
+            wheel_data[3].mSurfaceType,
         )
 
     def offroad(self, index: int | None = None) -> int:

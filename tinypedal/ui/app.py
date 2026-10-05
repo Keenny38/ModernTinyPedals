@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QFontMetricsF,
     QGuiApplication,
+    QIcon,
     QKeySequence,
     QLinearGradient,
     QPainter,
@@ -68,7 +69,7 @@ from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
 from ..userfile.layout_profile import screen_key
-from . import resolve_color_theme, set_style_palette, set_style_window
+from . import app_icon_file, resolve_color_theme, set_style_palette, set_style_window, system_dark_mode
 from ._common import BaseDialog, DialogSingleton, UIScaler
 from .home_view import HomeView
 from .hotkey_view import HotkeyList
@@ -1010,6 +1011,7 @@ class AppWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.last_style = None
+        self.last_icon_dark = None
         self.last_language = cfg.application["language"]
 
         # Status bar
@@ -1116,6 +1118,14 @@ class AppWindow(QMainWindow):
             if isinstance(app_instance, QApplication):
                 app_instance.setStyleSheet(set_style_window(QApplication.font().pointSize()))
             logger.info("GUI: loading window color theme: %s", style)
+        # App icon (window, taskbar, tray): follow OS taskbar light / dark mode
+        icon_dark = system_dark_mode()
+        if self.last_icon_dark != icon_dark:
+            self.last_icon_dark = icon_dark
+            QApplication.setWindowIcon(QIcon(app_icon_file(icon_dark)))
+            tray_icon = self.findChild(QSystemTrayIcon)
+            if tray_icon is not None:
+                tray_icon.setIcon(QApplication.windowIcon())
         # Language
         if self.last_language != cfg.application["language"]:
             self.last_language = cfg.application["language"]

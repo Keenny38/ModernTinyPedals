@@ -3,6 +3,138 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier.
 La liste détaillée des commits de chaque version est aussi sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.19.0 (2026-10-05)
+
+La plus grosse mise à jour depuis le début : tous les overlays changent de look, la page des statistiques pilote est refaite, le calculateur de course sait gérer une voiture de sécurité, la pluie et plusieurs pilotes, et l'app lit beaucoup plus de données de Le Mans Ultimate (chat, contacts, rejeux, relais de l'équipe).
+
+### Nouveau design des overlays
+
+- **Tous les overlays sauf le Black box** ont un nouveau design : un panneau arrondi par overlay, police **Barlow** (incluse avec l'app), libellés courts au-dessus des valeurs, traduits dans la langue de l'app.
+- **Valeurs colorées selon leur sens** : gain en vert, perte en rouge, alerte en orange, meilleur temps en violet.
+- **Classements** (relative, standings, rivals) en lignes : badge de position, pastille de classe avec la position dans la classe, couleur de classe sur le bord de la ligne, tour le plus rapide de la classe en violet. Colonnes au choix (`column_*`), et pour rivals l'écart de temps au tour et l'intervalle.
+- **Carburant et énergie** avec une jauge, le repère du plein et les valeurs clés en tuiles (tours, minutes, conso par tour, économie, arrêts).
+- **Pneus et freins** en tuiles aux couleurs de la heatmap, **LED** en pastilles lumineuses, nouvelles jauges pour le rapport, les pédales et les dégâts.
+- **Options simplifiées** : la fenêtre de configuration et la recherche d'options (`Ctrl+F`) ne montrent que les options que le design utilise.
+- **L'ancien look reste disponible** : pour tous les overlays (désactiver `enable_modern_style` dans `Style d'overlay`) ou pour un seul (`enable_classic_layout`).
+- Police du design réglable (`modern_design_font_name`), couleurs du thème d'overlay comme avant.
+
+![Nouveau design : classements](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
+
+![Nouveau design : carburant et énergie](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-carburant.png)
+
+![Nouveau design : voiture et pneus](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-voiture.png)
+
+![Nouveau design : chronos](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-chrono.png)
+
+### Nouvelle icône et interface
+
+- Nouvelle icône **or et noir**, et sa version **or et blanc** pour le thème sombre.
+- L'icône de la fenêtre, de la barre des tâches et de la zone de notification suit le **mode clair / sombre de Windows**, comme le logo de la fenêtre `À propos` et les raccourcis créés par l'installeur.
+- L'onglet `Widget` de la fenêtre principale s'appelle maintenant **`Overlays`**.
+
+### Visionneuse de télémétrie
+
+#### Tracé officiel et limites de piste (LMU)
+
+- La visionneuse récupère le **tracé officiel** du circuit et la **voie des stands** auprès du jeu, puis les garde : ils restent disponibles sans le jeu.
+- **Bords de piste** du jeu sur la carte, avec la **marge au bord** à chaque point clé (extérieur au freinage, intérieur à la corde, extérieur en sortie) et un nouveau **point extérieur** ■ après chaque corde.
+- **Hors-piste** (2 roues ou plus dans l'herbe, la terre ou le gravier) et **limites de piste dépassées** (4 roues dehors) marqués sur la carte et comptés par tour (hors-pistes : tours enregistrés avec cette version). Pour les tours enregistrés avant cette version, les bords sont déduits des trajectoires.
+- Deux nouvelles colorations de la carte : **mini-secteurs** (la trajectoire de référence colorée par le tour le plus rapide de chaque mini-secteur, avec le **tour idéal des tours affichés**) et **écart par virage**.
+
+![Carte : tracé officiel, bords de piste, mini-secteurs et mini-carte](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
+
+#### Nouveaux onglets Session et XY
+
+- **Session** : tous les tours de la session (tours affichés dans leur couleur, meilleur en or, tours invalides creux), carburant et usure des pneus de chaque tour, hors-pistes et limites de piste. Un clic sur un tour l'affiche ou le masque.
+- **Rythme en long run** : moyenne des tours propres en écartant les tours lents (trafic, erreurs), et **tendance** du temps au tour au fil de la session (usure, carburant, évolution de la piste), aussi par % d'usure des pneus.
+- **XY** : un canal contre un autre au même endroit de la piste, en **nuage de points** (vitesse / G latéral, direction / G latéral, accélérateur / glissement…), ou en **histogramme** (part du tour passée dans chaque plage de valeurs). Limité à la partie zoomée des courbes quand on zoome.
+
+![Onglet Session : rythme en long run et tendance](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-session.png)
+
+![Onglet XY : vitesse / G latéral](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-xy.png)
+
+#### Où le temps est perdu
+
+- En haut de l'onglet Virages, les virages qui coûtent le plus, avec la **cause en clair** : « Freine 6 m plus tôt », « Vitesse minimale inférieure de 7 km/h », « Roue libre 0,7 s de plus », « Plein gaz 8 m plus tard »…
+- Option **delta par rapport au tour idéal** (tour propre le plus rapide de chaque mini-secteur) au lieu du tour de référence.
+- **Écart des points de freinage** d'un tour à l'autre, pour juger de la régularité.
+
+![Onglet Virages : où le temps est perdu](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-coaching.png)
+
+#### Nouveaux canaux enregistrés
+
+- Températures **intérieur / milieu / extérieur** de chaque pneu (et leur écart), **charge** des pneus, **angle de dérive**, **carrossage**.
+- **Répartition de freinage**, niveaux **TC** et **ABS**, **cartographie moteur**, températures **eau** et **huile**, position sur la piste et distance au centre.
+- Le **nom du setup** chargé dans le jeu est gardé avec chaque tour (LMU), affiché et cherchable.
+
+#### Liste des tours
+
+- **Recherche** : véhicule, session, setup, note.
+- **Corbeille** : les tours supprimés vont à la corbeille et se restaurent avec `Ctrl+Z`. Menus de session : afficher, masquer, garder ou mettre à la corbeille tous les tours d'une session ; mêmes actions pour les tours cochés, et export MoTeC des tours cochés.
+- **Utiliser comme delta meilleur tour** : un tour enregistré devient le delta meilleur tour utilisé en piste (l'ancien est gardé en copie de sauvegarde).
+
+#### Carte, courbes et lecture
+
+- **Règle** (`M`) pour mesurer une distance sur la carte, **zones de pédales**, **traînée du curseur**, **repères de distance**, couleurs pour daltoniens.
+- **Export de l'image de la carte** (fichier ou presse-papiers), **passage A ↔ B** en CSV ou en image.
+- **Zoom de la carte synchronisé** avec les courbes (ou indépendant), **zoom précédent / suivant**, **mini-carte** sur la grande carte, **garder une position** d'un clic.
+- Lecture : **boucle sur le passage A-B**, reculer / avancer de 2 s (maintenir pour un retour ou une avance rapide).
+- **Aide clavier et souris** (bouton `?`) et raccourcis de la carte : `F` recadrer, `R` tourner, `1`-`8` coloration, `L` blocages, `Z` zones, `T` traînée.
+
+#### Performances de la visionneuse
+
+- Chaque tour enregistré a une **copie binaire** : la visionneuse l'ouvre sans relire le CSV, le chargement est bien plus rapide.
+- Les calculs lourds (limites de piste, valeurs de session) tournent dans un **processus séparé** : courbes et carte restent fluides pendant le calcul.
+- Les exports se font en arrière-plan ; fermer la visionneuse ou quitter l'app attend qu'ils soient terminés.
+
+### Calculateur de course
+
+- **Course en direct** : pendant une course, le plan de la fin de course est recalculé à chaque tour et à chaque arrêt à partir de la voiture (tours et temps faits, carburant, énergie, pneus, arrêts faits).
+- **Scénario voiture de sécurité** (ou drapeau jaune intégral) : à partir d'un tour, pour quelques tours, avec la conso, le temps au tour et l'usure sous voiture de sécurité, et l'option de s'arrêter sous voiture de sécurité. Comparé au plan sans voiture de sécurité.
+- **Scénario pluie** : période de pluie avec conso et temps au tour adaptés, et arrêts pour pneus pluie puis slicks.
+- **Plusieurs pilotes** : relais par pilote, écart de rythme, temps de conduite minimum et maximum de chacun, carte `Temps de conduite` avec les limites non respectées en rouge.
+- **Comparaison des stratégies** : le plan actuel contre 1 ou 2 arrêts de moins (économie de carburant) et 1 arrêt de plus, avec le **coût de l'économie** sur le temps au tour, le temps aux stands et l'écart à l'arrivée. L'objectif d'économie dit si l'arrêt en moins est **rentable**.
+- **Plan d'arrêts** : **fenêtre d'arrêt** (premier et dernier tour possibles sans changer le nombre d'arrêts), **heure de la journée** de chaque arrêt avec l'heure de départ, export en **texte, pour Discord, en CSV ou en image**.
+- **Relais équilibrés** (pas de court relais d'appoint à la fin), **le leader finit d'abord (+1 tour)** en course au temps, marge de sécurité en **tours, en carburant ou en %**, conso des **tours d'entrée et de sortie** des stands.
+- **Estimer depuis l'historique** : durée d'arrêt, effet du carburant et évolution de la piste tirés de l'historique de consommation.
+- **Code de partage** : tout le plan sur une ligne de texte à coller dans un chat, et **plan enregistré par voiture et circuit**, rouvert automatiquement. **Annuler / rétablir** (`Ctrl+Z` / `Ctrl+Y`) sur toutes les saisies.
+- **Plan contre course** (relais roulés comparés au plan) et **rivaux de la catégorie** (tours, arrêts, prochain arrêt attendu).
+- **Onglet Équipe (LMU)** : relais de chaque pilote de la voiture lus dans le jeu, coéquipiers compris, avec carburant, énergie et usure par tour à reporter dans le calculateur. **Pneus autorisés** repris de la session du jeu.
+
+![Calculateur de course : voiture de sécurité, 2 pilotes, comparaison des stratégies](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-race-calculator.png)
+
+### Statistiques pilote
+
+- La page est **refaite en Qt Quick**, comme la visionneuse de télémétrie.
+- **Tous les circuits** : ta carrière sur une page, le meilleur tour de chaque catégorie sur chaque circuit coloré par son niveau, et le compte de tes niveaux (Alien, Compétitif, Bon…).
+- **Progression** : le meilleur tour de chaque session et ton record au fil du temps, avec les paliers de niveau, filtrable par essais, qualif ou course. Liste des **sessions** avec le résultat de chaque course.
+- **Nouvelles colonnes** : meilleur tour **théorique** (somme des meilleurs secteurs) et **potentiel**, départs, abandons, position moyenne, taux de victoires et de podiums, vitesse moyenne, conso aux 100 km, dernière sortie. Colonnes à afficher au choix, largeurs réglables.
+- **Niveau suivant** : le temps à trouver pour passer au niveau supérieur.
+- **Recherche de circuit**, tri par dernière sortie, export CSV, couleurs pour daltoniens.
+- **Annuler / rétablir** les suppressions et réinitialisations, **sauvegarde automatique** avant chaque modification (les 10 dernières, restaurables).
+- Bouton **`Télémétrie`** : ouvre les tours enregistrés du véhicule dans la visionneuse, avec ton record comme référence.
+
+![Statistiques pilote : niveau, progression et sessions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-driver-stats.png)
+
+![Statistiques pilote : tous les circuits](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-career.png)
+
+### Le Mans Ultimate : nouvelles données du jeu
+
+- Nouveau widget **Chat** : les messages du chat du jeu en overlay, pratique en VR. Retour à la ligne, disparition au bout de quelques secondes, nouveaux messages surlignés, heure optionnelle.
+- Nouvelle page **Rejeux du jeu** (`Outils`) : les rejeux enregistrés par le jeu, ouverture dans le jeu, commandes de lecture, et la liste des **contacts** de la session avec **saut au moment du contact**, caméra sur la voiture.
+- **Black box** : le journal inscrit chaque **contact** avec le nom de l'autre pilote, ou le mur.
+- Widget **Plan de course** : **distance jusqu'à l'entrée des stands**, plan recalculé à chaque tour en course, **vérification du menu des stands** (le plein réglé dans le jeu contre le plan) et **conso cible** pour atteindre le prochain arrêt.
+- **Estimation de conso du jeu** : tant qu'aucun tour de la voiture n'est enregistré sur ce circuit, les overlays carburant et énergie et le calculateur partent de la conso par tour estimée par le jeu.
+
+![Widget Chat](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-chat.png)
+
+### Corrections
+
+- Un virage qui traverse la ligne de départ n'est plus compté deux fois, et un coup de frein bref avant le vrai freinage n'est plus pris pour le point de freinage.
+- Changer d'unités met aussi à jour les bulles de la liste des tours.
+- Un export de la visionneuse qui échoue est signalé au lieu d'échouer sans rien dire.
+- Statistiques pilote : une modification ne perd plus les statistiques enregistrées entre-temps par l'app, et un temps réinitialisé disparaît aussi de la progression.
+
 ## 0.18.0 (2026-10-04)
 
 ### Visionneuse de télémétrie : analyse

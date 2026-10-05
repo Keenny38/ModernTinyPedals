@@ -61,7 +61,13 @@ preview.set_telemetry(sim, data)
 preview.set_vehicles()
 preview.set_modules()
 for name in names:
-    widget = import_module(f"tinypedal.widget.{name}").Realtime(preview.cfg, name)
+    module = import_module(f"tinypedal.widget.{name}")
+    try:  # modern design (older revisions have none)
+        from tinypedal.widget._modern import create_widget
+    except ImportError:
+        widget = module.Realtime(preview.cfg, name)
+    else:
+        widget = create_widget(module, preview.cfg, name)
     widget.adjustSize()
     for _ in range(3):
         widget.timerEvent(QTimerEvent(0))

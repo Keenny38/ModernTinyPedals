@@ -4,16 +4,29 @@ import QtQuick.Layouts
 
 // Corner by corner comparison of a compared lap with reference lap, click a corner to zoom charts on it
 // Time: positive = compared lap slower. Braking: positive = brakes later. Full throttle: negative = earlier.
-// Ideal lap: fastest lap in every corner & straight among shown laps.
+// Ideal lap: fastest lap in every corner & straight among shown clean laps.
+// Coaching: corners where compared lap loses most time, with likely causes (click: zoom on corner).
 Item {
     id: root
     property var chart
     readonly property var rows: backend.corners
     readonly property real maxDelta: rows.reduce(function(top, row) {
         return row.kind === "corner" ? Math.max(top, Math.abs(row.bar)) : top }, 0.05)
-    property int selected: -1
+    readonly property int selected: backend.selectedCorner  // also selected by clicking map corners
+    onSelectedChanged: {  // corner selected on map: row shown
+        for (var i = 0; i < rows.length; i++)
+            if (rows[i].index === selected && rows[i].kind === "corner") { cornerView.positionViewAtIndex(i, ListView.Contain); break }
+    }
 
     function tone(name, fallback) { return name === "loss" ? theme.loss : name === "gain" ? theme.gain : fallback }
+    function showCorner(index) {
+        backend.setSelectedCorner(index)
+        var range = backend.cornerRange(index)
+        if (range.length === 2 && root.chart) {
+            var margin = (range[1] - range[0]) * 0.15
+            root.chart.setView(range[0] - margin, range[1] + margin, true)
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -69,6 +82,76 @@ Item {
             }
         }
 
+        // Where compared lap loses most time
+        Rectangle {
+            visible: backend.coaching.length > 0
+            Layout.fillWidth: true
+            implicitHeight: coachColumn.implicitHeight + theme.em * 0.8
+            radius: theme.em * 0.5
+            color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, theme.dark ? 0.1 : 0.07)
+            border.width: 1
+            border.color: Qt.rgba(theme.loss.r, theme.loss.g, theme.loss.b, 0.35)
+            ColumnLayout {
+                id: coachColumn
+                anchors.fill: parent
+                anchors.margins: theme.em * 0.4
+                spacing: theme.em * 0.15
+                Text {
+                    text: i18n.tr("Where time is lost") + (backend.coachingLap ? " · " + backend.coachingLap : "")
+                    color: theme.text
+                    font.weight: Font.DemiBold
+                    font.pointSize: theme.fontPoint * 0.9
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+                Repeater {
+                    model: backend.coaching
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: tipRow.implicitHeight + theme.em * 0.3
+                        radius: theme.em * 0.35
+                        color: tipArea.containsMouse ? theme.hover : "transparent"
+                        RowLayout {
+                            id: tipRow
+                            anchors.fill: parent
+                            anchors.leftMargin: theme.em * 0.3
+                            anchors.rightMargin: theme.em * 0.3
+                            spacing: theme.em * 0.5
+                            Text {
+                                Layout.alignment: Qt.AlignTop
+                                Layout.preferredWidth: theme.em * 4.2
+                                text: modelData.label
+                                color: theme.text
+                                font.weight: Font.Bold
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                Layout.alignment: Qt.AlignTop
+                                text: modelData.loss
+                                color: theme.loss
+                                font.weight: Font.DemiBold
+                                font.features: { "tnum": 1 }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.causes.join(" · ")
+                                color: theme.dimText
+                                font.pointSize: theme.fontPoint * 0.82
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        MouseArea {
+                            id: tipArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showCorner(modelData.index)
+                        }
+                    }
+                }
+            }
+        }
+
         Text {
             visible: root.rows.length === 0
             text: backend.legend.length === 0 ? i18n.tr("Select recorded laps to compare.")
@@ -97,6 +180,7 @@ Item {
         }
 
         ListView {
+            id: cornerView
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -122,14 +206,7 @@ Item {
                     hoverEnabled: true
                     enabled: rowItem.corner
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.selected = modelData.index
-                        var range = backend.cornerRange(modelData.index)
-                        if (range.length === 2 && root.chart) {
-                            var margin = (range[1] - range[0]) * 0.15
-                            root.chart.setView(range[0] - margin, range[1] + margin, true)
-                        }
-                    }
+                    onClicked: root.showCorner(modelData.index)
                 }
 
                 ColumnLayout {

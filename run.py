@@ -68,6 +68,11 @@ def get_cli_argument() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    # Worker processes (lap viewer heavy jobs) of the frozen app start here: run their job & exit, never the app
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+
     os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
 
     # Load command line arguments

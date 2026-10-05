@@ -33,9 +33,14 @@ import json
 import logging
 import os
 import re
+import threading
 import time
+from array import array
 from bisect import bisect_left
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
+from contextlib import suppress
+from functools import lru_cache
 from itertools import pairwise
 from typing import IO, NamedTuple, TypeVar
 
@@ -48,9 +53,13 @@ _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
 _lap_number_name = re.compile(r"(?:^| )lap(\d+) ")
 SESSION_START_TOLERANCE = 120  # seconds, laps whose recorded session start differ less are same session
 SESSION_GAP = 1800  # seconds without lap: new session (laps recorded without session start)
+SCORING_COLUMNS = ("path_lateral", "track_edge")  # game scoring data, updated less often than telemetry
+SCORING_GAP = 1.0  # seconds, longer holds between scoring updates are not interpolated
 DISTANCE_SCALE_MIN = 0.01  # lap lengths differing less are the same (no distance scaling for delta)
 DISTANCE_SCALE_MAX = 0.10  # lap lengths differing more are not the same lap (lap cut short)
+EXACT_COLUMNS = ("time", "lap_time", "distance")  # double precision, others single (mm precision, half size)
 EntryType = TypeVar("EntryType")
+Column = list | array  # lap column values: packed array once loaded (8 times less memory than a list)
 
 
 def lap_stem(filename: str) -> str:
@@ -80,8 +89,10 @@ def lap_number_of(filename: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+@lru_cache(maxsize=8192)
 def lap_timestamp_of(filename: str) -> float:
-    """Time lap was recorded, from file name date ("YYYY-MM-DD HH-MM-SS ..."), 0 if unknown"""
+    """Time lap was recorded, from file name date ("YYYY-MM-DD HH-MM-SS ..."), 0 if unknown (cached: lap lists
+    sort & group by it often)"""
     try:
         return time.mktime(time.strptime(filename[:19], "%Y-%m-%d %H-%M-%S"))
     except (ValueError, OverflowError):
@@ -135,14 +146,14 @@ class LapFile(NamedTuple):
 
 
 class LapData(NamedTuple):
-    """Lap telemetry columns"""
+    """Lap telemetry columns (packed arrays once loaded from file, lists when built in code)"""
 
     name: str
-    columns: dict[str, list[float]]
+    columns: dict[str, Column]
     info: dict | None = None  # lap info from file first line
 
     @property
-    def distance(self) -> list[float]:
+    def distance(self) -> Column:
         return self.columns["distance"]
 
     @property
@@ -245,7 +256,28 @@ def load_lap(path: str) -> LapData:
     times = columns.get("lap_time")
     if times:
         columns["distance"] = smooth_distance(times, columns["distance"])
-    return LapData(lap_stem(os.path.basename(path)), columns, info or None)
+        for name in SCORING_COLUMNS:  # updated about 5 times per second by game: values between updates
+            if name in columns:
+                columns[name] = smooth_steps(times, columns[name])
+    return LapData(lap_stem(os.path.basename(path)), pack_columns(columns), info or None)
+
+
+def pack_columns(columns: dict[str, Column]) -> dict[str, array]:
+    """Columns as packed arrays: double precision for time & distance, single for others
+
+    A list keeps a float object per value (about 32 bytes), an array 4 or 8 bytes: a loaded lap takes
+    a few MB instead of tens.
+    """
+    return {
+        name: values if isinstance(values, array) and values.typecode == column_type(name)
+        else array(column_type(name), values)
+        for name, values in columns.items()
+    }
+
+
+def column_type(name: str) -> str:
+    """Array type code of lap column"""
+    return "d" if name in EXACT_COLUMNS else "f"
 
 
 def parse_columns(rows: list[list[str]], width: int) -> list[list[float]]:
@@ -311,6 +343,33 @@ def smooth_distance(times: list[float], distances: list[float]) -> list[float]:
     return result
 
 
+def smooth_steps(times: list[float], values: list[float]) -> list[float]:
+    """Values interpolated along time between game updates (value held between updates otherwise)"""
+    count = len(values)
+    changes = [0] + [index for index in range(1, count) if values[index] != values[index - 1]]
+    if len(changes) < 2 or len(changes) == count:
+        return values
+    result = list(values)
+    for first, last in pairwise(changes):
+        t0, t1 = times[first], times[last]
+        if t1 <= t0 or t1 - t0 > SCORING_GAP:  # long hold (pits, pause): kept as is
+            continue
+        v0, v1 = values[first], values[last]
+        for index in range(first + 1, last):
+            result[index] = v0 + (v1 - v0) * (times[index] - t0) / (t1 - t0)
+    return result
+
+
+def median_sector_bounds(laps: Sequence[LapData]) -> list[float]:
+    """Sector 2 & 3 start distances: median over laps with official sector times (one lap off does not move them)"""
+    bounds = [found for lap in laps if official_sector_times(lap) and len(found := sector_bounds(lap)) == 2]
+    if not bounds:
+        return []
+    middle = len(bounds) // 2
+    return [sorted(values)[middle] if len(bounds) % 2 else sum(sorted(values)[middle - 1:middle + 1]) / 2
+            for values in zip(*bounds)]
+
+
 def _chain(first: str, rest):
     yield first
     yield from rest
@@ -329,17 +388,50 @@ def interpolate(xs: list[float], ys: list[float], x: float) -> float:
     return ys[index - 1] + (ys[index] - ys[index - 1]) * (x - x0) / (x1 - x0)
 
 
-def monotonic_distance(lap: LapData, column: str = "lap_time") -> tuple[list[float], list[float]]:
-    """Distance & column samples with increasing distance only (ignore reset glitches)"""
-    distances: list[float] = []
-    values: list[float] = []
+INCREASING_CACHE = 64  # distance columns whose increasing samples are remembered
+_increasing: OrderedDict[int, tuple[Column, int, list[int] | None]] = OrderedDict()
+_increasing_lock = threading.Lock()
+
+
+def increasing_indexes(distances: Column) -> list[int] | None:
+    """Indexes of samples whose distance goes forward (reset glitches left out), None if every sample does
+
+    Found once per distance column (loaded lap columns never change): every channel of a lap, corners,
+    lap times... reuse it instead of walking the lap again.
+    """
+    key = id(distances)
+    with _increasing_lock:
+        cached = _increasing.get(key)
+        if cached is not None and cached[0] is distances and cached[1] == len(distances):
+            _increasing.move_to_end(key)
+            return cached[2]
+    indexes = []
     last = float("-inf")
-    for distance, value in zip(lap.distance, lap.columns[column]):
+    for index, distance in enumerate(distances):
         if distance > last:
-            distances.append(distance)
-            values.append(value)
+            indexes.append(index)
             last = distance
-    return distances, values
+    result = None if len(indexes) == len(distances) else indexes
+    with _increasing_lock:
+        _increasing[key] = (distances, len(distances), result)
+        while len(_increasing) > INCREASING_CACHE:
+            _increasing.popitem(last=False)
+    return result
+
+
+def monotonic_distance(lap: LapData, column: str = "lap_time") -> tuple[Sequence[float], Sequence[float]]:
+    """Distance & column samples with increasing distance only (ignore reset glitches)
+
+    Lap columns themselves are returned when every sample goes forward (no copy): never change them.
+    """
+    distances, values = lap.distance, lap.columns[column]
+    indexes = increasing_indexes(distances)
+    count = min(len(distances), len(values))
+    if indexes is None:
+        if count == len(distances) == len(values):
+            return distances, values
+        return distances[:count], values[:count]
+    return [distances[index] for index in indexes if index < count], [values[index] for index in indexes if index < count]
 
 
 def distance_scale(reference: LapData, compare: LapData) -> float:
@@ -364,10 +456,16 @@ def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, flo
     Compared lap distances scaled to reference lap length if they differ (see distance_scale).
     """
     ref_dist, ref_time = monotonic_distance(reference)
+    return delta_to_curve(ref_dist, ref_time, compare, distance_scale(reference, compare))
+
+
+def delta_to_curve(ref_dist: Sequence[float], ref_time: Sequence[float], compare: LapData,
+                   scale: float = 1.0) -> list[tuple[float, float]]:
+    """Time delta of compared lap against a lap time curve (reference distances & times, ideal lap...),
+    compared lap distances multiplied by scale (reference lap length)"""
     cmp_dist, cmp_time = monotonic_distance(compare)
     if len(ref_dist) < 2 or not cmp_dist:
         return []
-    scale = distance_scale(reference, compare)
     if scale != 1.0:
         cmp_dist = [distance * scale for distance in cmp_dist]
     return [
@@ -484,3 +582,36 @@ def _bucket_points(xs, ys, low_index, high_index):
     if low_index < high_index:
         return (xs[low_index], ys[low_index]), (xs[high_index], ys[high_index])
     return (xs[high_index], ys[high_index]), (xs[low_index], ys[low_index])
+
+
+def csv_number(value: float, decimal: str = ".") -> str:
+    """Number with up to 4 decimals, locale decimal separator"""
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    if text in ("-0", ""):
+        text = "0"
+    return text.replace(".", decimal) if decimal != "." else text
+
+
+def write_lap_csv(filename: str, header: list[str], grid: list[float], columns: list[list[float | None]],
+                  decimal: str = ".") -> str:
+    """Write resampled lap values to CSV (decimal comma: semicolon separator, for Excel), returns error text
+
+    Written to a temporary file renamed once complete: job stopped at app exit leaves no partial file.
+    """
+    delimiter = ";" if decimal == "," else ","
+    temporary = f"{filename}.tmp"
+    try:
+        with open(temporary, "w", newline="", encoding="utf-8-sig") as file:  # BOM: Excel reads UTF-8
+            writer = csv.writer(file, delimiter=delimiter)
+            writer.writerow(header)
+            for index, distance in enumerate(grid):
+                writer.writerow([csv_number(distance, decimal), *(
+                    "" if column[index] is None else csv_number(column[index], decimal)  # type: ignore[arg-type]
+                    for column in columns)])
+        os.replace(temporary, filename)
+    except OSError as error:
+        logger.error("LAP CSV: unable to export %s: %s", filename, error)
+        with suppress(OSError):
+            os.remove(temporary)
+        return error.strerror or str(error)
+    return ""

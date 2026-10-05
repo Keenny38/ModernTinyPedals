@@ -19,11 +19,12 @@
 """
 Race calculator: fuel & tyre strategy of a race in one page
 
-Top: data source & actions, race setup and key figures (shared by both tabs).
+Top: data source & actions, race setup and key figures (shared by all tabs).
 Fuel tab: lap & consumption inputs, strategy timeline, pit stop plan, details, consumption
 history (fuel_calculator). Tyre tab: tyre wear, tyre rules, tyre plan with one row per stint,
 tyre stock (tyre_strategy_planner). The tyre change time of each stop is added to that stop,
-tyre changes of the tyre plan show on the strategy.
+tyre changes of the tyre plan show on the strategy. Team tab: stints of every driver of the car
+read from the game, usage per lap filled in (team_stints).
 
 Replaces the former fuel calculator & tyre strategy planner tools (see tools_view.RENAMED_TOOLS).
 """
@@ -35,12 +36,14 @@ import os
 from collections.abc import Sequence
 
 from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMenu,
     QMessageBox,
@@ -54,15 +57,19 @@ from PySide6.QtWidgets import (
 
 from ..api_control import api
 from ..const_file import ConfigType, FileExt, FileFilter
-from ..fuel_strategy import history_laps
+from ..fuel_strategy import RaceState, full_tank_laps, history_laps
 from ..i18n import tr, trm, untr
 from ..module_info import ConsumptionDataSet, minfo
+from ..race_live import RivalTracker, StopCounter
+from ..race_live import read_race_state as read_live
 from ..setting import cfg
 from ..userfile import atomic_write
 from ..userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
 from ..userfile.tyre_strategy import validate_tyre_strategy
 from ._common import BaseEditor, CompactButton, UIScaler
-from .fuel_calculator import CalculatorPanel, HistoryPanel, checked_inputs, live_race_length
+from .fuel_calculator import RACE_SESSION, CalculatorPanel, HistoryPanel, checked_inputs, live_race_length
+from .race_scenarios import decode_share_code, encode_share_code
+from .team_stints import TeamStintsPanel
 from .toast import show_toast
 from .tyre_strategy_planner import (
     MEASURED_DEFAULT,
@@ -75,6 +82,7 @@ WIDE_PAGE = 80  # page width (in lines) from which history sits beside calculato
 MIN_PAGE = 46  # narrowest page width (in lines): race setup & key figures on two rows
 RACE_PLAN_FORMAT = "modern-tiny-pedals-race-plan"
 RACE_PLAN_VERSION = 1
+LIVE_REFRESH_MS = 2000  # live history check while page shown
 
 
 def write_history(filepath: str, filename: str, extension: str, laps: Sequence[ConsumptionDataSet]):
@@ -86,7 +94,6 @@ def write_history(filepath: str, filename: str, extension: str, laps: Sequence[C
         return
     dataset = list(laps) if len(laps) > 1 else [*laps, ConsumptionDataSet()]  # placeholder: skipped on load
     save_consumption_history_file(dataset=dataset, filepath=filepath, filename=filename, extension=extension)
-LIVE_REFRESH_MS = 2000  # live history check while page shown
 
 
 def scroll_page(widget: QWidget) -> QScrollArea:
@@ -130,15 +137,40 @@ class RaceCalculator(BaseEditor):
         self.check_follow.setToolTip(tr("Inputs follow each new lap of the live session"))
         self.check_follow.setChecked(bool(cfg.user.config["fuel_calculator"].get("enable_follow_live")))
         self.check_follow.toggled.connect(self.toggle_follow_live)
+        config = cfg.user.config["fuel_calculator"]
+        self.check_live_race = QCheckBox(tr("Live Race"))
+        self.check_live_race.setToolTip(tr("During a race: plan of the rest of the race from now "
+                                           "(laps & time done, fuel, energy & tyres of the car, stops done)"))
+        self.check_live_race.setChecked(bool(config.get("enable_live_race")))
+        self.check_live_race.toggled.connect(self.toggle_live_race)
+        self._race_key: tuple | None = None
+        self.label_live = QLabel("")
+        self.label_live.setEnabled(False)  # muted
+        self.stop_counter = StopCounter()
+        self.rival_tracker = RivalTracker()
         plan_menu = QMenu(self)
-        plan_menu.addAction(tr("Open Race Plan...")).triggered.connect(self.load_race_plan)
-        plan_menu.addAction(tr("Save Race Plan As...")).triggered.connect(self.save_race_plan)
+        plan_menu.addAction(tr("Open Race Plan...")).triggered.connect(lambda: self.load_race_plan())
+        plan_menu.addAction(tr("Save Race Plan As...")).triggered.connect(lambda: self.save_race_plan())
+        plan_menu.addAction(tr("Copy Share Code")).triggered.connect(self.copy_share_code)
+        plan_menu.addAction(tr("Paste Share Code...")).triggered.connect(self.paste_share_code)
+        plan_menu.addSeparator()
+        self.action_save_combo = plan_menu.addAction(tr("Save for Current Car & Track"))
+        self.action_save_combo.setToolTip(tr("Opened again when this car & track are driven"))
+        self.action_save_combo.triggered.connect(self.save_combo_plan)
+        self.action_auto_combo = plan_menu.addAction(tr("Open Plan of Car & Track Automatically"))
+        self.action_auto_combo.setCheckable(True)
+        self.action_auto_combo.setChecked(bool(config.get("enable_auto_load_combo_plan", True)))
+        self.action_auto_combo.toggled.connect(self.toggle_auto_combo_plan)
+        plan_menu.aboutToShow.connect(lambda: self.action_save_combo.setEnabled(bool(self.combo_name())))
+        self._combo_loaded = ""
         button_plan = CompactButton(tr("Race Plan"), has_menu=True)
         button_plan.setToolTip(tr("Race setup, fuel & tyre plan in one file, to keep or share"))
         button_plan.setMenu(plan_menu)
         layout_header = QHBoxLayout()
         layout_header.addWidget(self.label_source)
         layout_header.addWidget(self.check_follow)
+        layout_header.addWidget(self.check_live_race)
+        layout_header.addWidget(self.label_live)
         layout_header.addStretch(1)
         for button in (button_plan, button_loadlive, button_loadfile, button_reset, self.button_toggle):
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -159,7 +191,10 @@ class RaceCalculator(BaseEditor):
         planner.status_listener = calc.set_tyre_status
         planner.changed.connect(calc.update_input)
         calc.tyre_link = planner
-        self.enable_undo(planner.capture_state, planner.restore_state)  # tyre plan edits
+        calc.history_source = lambda: self.panel_history.dataset
+        calc.stint_source = self.race_stints
+        self.enable_undo(self.capture_state, self.restore_state)  # inputs & tyre plan edits
+        calc.inputs_changed = self.record_change
         self.add_undo_buttons(planner.tyre_plan_panel.layout_top)
 
         # Fuel tab: calculator & history (history below on narrow page)
@@ -177,6 +212,8 @@ class RaceCalculator(BaseEditor):
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(scroll_page(fuel_body), tr("Fuel"))
         self.tabs.addTab(scroll_page(planner), tr("Tyres"))
+        self.panel_team = TeamStintsPanel(self, calc)
+        self.tabs.addTab(self.panel_team, tr("Team"))
 
         layout_main = QVBoxLayout(self)
         layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
@@ -190,13 +227,17 @@ class RaceCalculator(BaseEditor):
         self.setMinimumWidth(UIScaler.size(MIN_PAGE))
         self._wide = True
 
-        self.button_toggle.setChecked(cfg.user.config["fuel_calculator"]["show_consumption_history"])
-        self.load_live_data()
+        self.button_toggle.setChecked(config["show_consumption_history"])
+        # Inputs of a race plan opened last time kept: live laps shown, not filled in
+        self.show_live_data(fill_inputs=not config.get("enable_plan_inputs"))
+        self.auto_load_combo_plan()
         calc.update_input()  # tyre plan linked: rows & tyre tile
+        self.refresh_race_state()
+        self.reset_undo()  # history starts with the page shown
 
-        # Live history follows new laps while page is shown
+        # Live history follows new laps while page is shown, live race state, plan of car & track
         self._live_timer = QTimer(self)
-        self._live_timer.timeout.connect(self.refresh_live_history)
+        self._live_timer.timeout.connect(self.refresh_live)
         self._live_timer.start(LIVE_REFRESH_MS)
 
     def saving(self):
@@ -209,6 +250,7 @@ class RaceCalculator(BaseEditor):
 
     def closeEvent(self, event):
         self.tyre_planner.autosave()
+        self.panel_calculator.flush_plan_file()
         super().closeEvent(event)
 
     def resizeEvent(self, event):
@@ -251,23 +293,161 @@ class RaceCalculator(BaseEditor):
         if not history_data:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to read consumption history: {filename}{extension}"))
             return
-        self.panel_calculator.fill_in_data(history_data)
+        self.panel_calculator.fill_in_data(history_data, live=False)
         self.panel_history.refresh(history_data)
         self.history_file = (filepath, filename, extension)
         self.set_source(False, filename)
+        self.set_plan_inputs(False)
 
     def load_live_data(self):
-        """Load history data from live session, race length of a live race"""
+        """Load history data from live session, race length of a live race (inputs filled in)"""
+        self.show_live_data(fill_inputs=True)
+        self.set_plan_inputs(False)
+
+    def show_live_data(self, fill_inputs: bool):
+        """History of live session in table, inputs filled in from it (and race length) or kept"""
         history_data = history_laps(minfo.history.consumptionDataSet)
         self._live_signature = self.history_signature(history_data)
-        self.panel_calculator.fill_in_data(history_data, live_race_length())
+        if fill_inputs:
+            self.panel_calculator.fill_in_data(history_data, live_race_length())
         self.panel_history.refresh(history_data)
         self.set_source(True, api.read.session.combo_name())
+
+    @staticmethod
+    def set_plan_inputs(from_plan: bool):
+        """Inputs of a race plan (kept when page opens) or of laps (filled in from live laps)"""
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("enable_plan_inputs") != from_plan:
+            config["enable_plan_inputs"] = from_plan
+            cfg.save(config_type=ConfigType.CONFIG)
 
     @staticmethod
     def history_signature(dataset: Sequence[ConsumptionDataSet]) -> tuple:
         latest = dataset[0] if dataset else None
         return (len(dataset), latest)
+
+    def refresh_live(self):
+        """Every few seconds: stops counted, and while page shown: new laps, live race state,
+        plan of car & track, class rivals"""
+        live = read_live(self.panel_calculator.unit_fuel, self.stop_counter, self.panel_calculator.symbol_fuel)
+        if not self.isVisible():
+            return
+        self.refresh_live_history()
+        self.refresh_race_state(live)
+        self.auto_load_combo_plan()
+        self.refresh_rivals()
+
+    # Undo & redo: inputs & tyre plan
+    def capture_state(self) -> dict:
+        return {"tyres": self.tyre_planner.capture_state(), "inputs": self.panel_calculator.input_values()}
+
+    def restore_state(self, state: dict):
+        with self.panel_calculator.batch():
+            self.tyre_planner.restore_state(state["tyres"])
+            self.panel_calculator.set_input_values(checked_inputs(state["inputs"]))
+
+    @staticmethod
+    def race_stints() -> list:
+        """Stints of the race in progress (stint history of live session), newest first"""
+        if api.read.session.session_type() != RACE_SESSION:
+            return []
+        return [stint for stint in minfo.history.stintDataSet if stint.totalLaps > 0]
+
+    def refresh_rivals(self):
+        """Cars of the player class in a live race"""
+        calc = self.panel_calculator
+        if api.read.session.session_type() != RACE_SESSION or not api.read.state.active():
+            calc.card_rivals.set_rivals([], 0)
+            return
+        calc.card_rivals.set_rivals(self.rival_tracker.update(), full_tank_laps(calc.plan_setup))
+
+    # Live race: plan of the rest of the race
+    def toggle_live_race(self, checked: bool):
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("enable_live_race") != checked:
+            config["enable_live_race"] = checked
+            cfg.save(config_type=ConfigType.CONFIG)
+        self.refresh_race_state()
+
+    # Share code: race plan in one line of text
+    def copy_share_code(self):
+        QGuiApplication.clipboard().setText(encode_share_code(self.race_plan_data()))
+        show_toast(self, tr("Share code of race plan copied"))
+
+    def paste_share_code(self):
+        """Race plan of a share code (clipboard proposed)"""
+        text, accepted = QInputDialog.getText(
+            self, tr("Paste Share Code..."), tr("Race plan share code:"),
+            text=QGuiApplication.clipboard().text().strip())
+        if not accepted or not text.strip():
+            return
+        try:
+            data = decode_share_code(text)
+        except ValueError:
+            QMessageBox.warning(self, tr("Error"), tr("Invalid race plan share code."))
+            return
+        if self.apply_race_plan(data, tr("Shared plan")):
+            show_toast(self, tr("Race plan of share code opened"))
+
+    def refresh_race_state(self, live=None):
+        """Rest of race planned again at each lap & stop (not while in the pits), status shown
+        next to Live Race (values read from the game in its tooltip, to check them)"""
+        calc = self.panel_calculator
+        if live is None:
+            live = read_live(calc.unit_fuel, self.stop_counter, calc.symbol_fuel)
+        checked = self.check_live_race.isChecked()
+        state: RaceState | None = live.state if checked else None
+        if not checked:
+            status = ""
+        elif state is not None:
+            status = f"{tr('from lap')} {state.laps_done + 1}" + (f" · {tr('in the pits')}" if live.in_pits else "")
+        else:
+            status = tr("waiting for the race") if not live.text else tr("waiting for lap 1")
+        self.label_live.setText(status)
+        self.label_live.setToolTip(
+            f"{tr('Lap')} (+{tr('progress')}) · {tr('race time')} / {tr('time left')} · {tr('fuel')} · "
+            f"{tr('energy')} · {tr('tread')} · {tr('stops')} ({tr('game')})<br>{live.text}" if live.text else "")
+        if state is not None and live.in_pits:
+            return
+        key = (state.laps_done, state.stops_done) if state is not None else None
+        if key != self._race_key:
+            self._race_key = key
+            calc.set_race_state(state)
+
+    # Plan of car & track
+    @staticmethod
+    def combo_name() -> str:
+        return api.read.session.combo_name() if api.read.state.active() else ""
+
+    def combo_plan_path(self, combo: str) -> str:
+        return f"{cfg.path.fuel_delta}{combo}{FileExt.RACEPLAN}"
+
+    def save_combo_plan(self):
+        """Race plan opened again when this car & track are driven"""
+        combo = self.combo_name()
+        if combo:
+            self.save_race_plan(self.combo_plan_path(combo))
+            self._combo_loaded = combo
+
+    def toggle_auto_combo_plan(self, checked: bool):
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("enable_auto_load_combo_plan") != checked:
+            config["enable_auto_load_combo_plan"] = checked
+            cfg.save(config_type=ConfigType.CONFIG)
+        if checked:
+            self.auto_load_combo_plan()
+
+    def auto_load_combo_plan(self):
+        """Race plan of car & track driven opened once per car & track"""
+        if not self.action_auto_combo.isChecked():
+            return
+        combo = self.combo_name()
+        if not combo or combo == self._combo_loaded:
+            return
+        self._combo_loaded = combo
+        filename = self.combo_plan_path(combo)
+        if os.path.exists(filename) and self.load_race_plan(filename, quiet=True):
+            show_toast(self, trm(f"Race plan of {combo} opened"))
 
     def refresh_live_history(self):
         """New live laps added to history table (inputs left as they are)"""
@@ -393,42 +573,60 @@ class RaceCalculator(BaseEditor):
             "tyre_strategy": self.tyre_planner.capture_data(),
         }
 
-    def save_race_plan(self):
-        """Save race plan file"""
-        name = self.tyre_planner.tyre_plan_panel.filename() or tr("Untitled plan")
-        filename_full, _ = QFileDialog.getSaveFileName(
-            self, dir=set_tyre_strategy_file_path(f"{name}{FileExt.RACEPLAN}"), filter=FileFilter.RACEPLAN)
+    def save_race_plan(self, filename_full: str = ""):
+        """Save race plan file (asked when no file name given)"""
         if not filename_full:
-            return
+            name = self.tyre_planner.tyre_plan_panel.filename() or tr("Untitled plan")
+            filename_full, _ = QFileDialog.getSaveFileName(
+                self, dir=set_tyre_strategy_file_path(f"{name}{FileExt.RACEPLAN}"), filter=FileFilter.RACEPLAN)
+            if not filename_full:
+                return
+            save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
         with atomic_write(filename_full) as file:
             json.dump(self.race_plan_data(), file, indent=4)
-        save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
         show_toast(self, trm(f"Race plan saved at:<br><b>{filename_full}</b>"))
 
-    def load_race_plan(self):
-        """Open race plan file: race setup, fuel & tyre plan replaced (tyre plan undoable)"""
-        filename_full, _ = QFileDialog.getOpenFileName(
-            self, dir=set_tyre_strategy_file_path(), filter=FileFilter.RACEPLAN)
+    def load_race_plan(self, filename_full: str = "", quiet: bool = False) -> bool:
+        """Open race plan file (asked when no file name given): race setup, fuel & tyre plan
+        replaced (tyre plan undoable), True once opened"""
         if not filename_full:
-            return
+            filename_full, _ = QFileDialog.getOpenFileName(
+                self, dir=set_tyre_strategy_file_path(), filter=FileFilter.RACEPLAN)
+            if not filename_full:
+                return False
+            save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
         try:
             with open(filename_full, encoding="utf-8") as file:
                 data = json.load(file)
+        except (OSError, ValueError):
+            data = None
+        if not self.apply_race_plan(data, os.path.splitext(os.path.basename(filename_full))[0]):
+            if not quiet:
+                QMessageBox.warning(self, tr("Error"), trm(f"Invalid race plan file: {os.path.basename(filename_full)}"))
+            return False
+        return True
+
+    def apply_race_plan(self, data, name: str) -> bool:
+        """Race setup, fuel & tyre plan of race plan data replaced, False if not a race plan"""
+        try:
             if not isinstance(data, dict) or data.get("format") != RACE_PLAN_FORMAT:
                 raise ValueError
             inputs: dict = data["inputs"] if isinstance(data.get("inputs"), dict) else {}
             tyre_data = validate_tyre_strategy(data.get("tyre_strategy") or {})
-        except (OSError, ValueError, TypeError, AttributeError):
-            QMessageBox.warning(self, tr("Error"), trm(f"Invalid race plan file: {os.path.basename(filename_full)}"))
-            return
-        save_tyre_strategy_file_path(os.path.dirname(filename_full) + "/")
+        except (ValueError, TypeError, AttributeError):
+            return False
         planner = self.tyre_planner
-        index = inputs.get("input_measured_compound", MEASURED_DEFAULT)
-        if isinstance(index, int) and 0 <= index < planner.combo_measured.count():
-            planner.combo_measured.setCurrentIndex(index)
-        planner.user_data = tyre_data
-        planner.tyre_plan_panel.set_filename(str(data.get("plan_name") or os.path.splitext(
-            os.path.basename(filename_full))[0]))
-        planner.refresh_table()
-        self.panel_calculator.set_input_values(checked_inputs(inputs))
+        # One calculation with the whole plan loaded: rows of the new tyre plan follow the new
+        # stints, not the ones of the plan replaced (whose rows kept aside are dropped)
+        with self.panel_calculator.batch():
+            index = inputs.get("input_measured_compound", MEASURED_DEFAULT)
+            if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < planner.combo_measured.count():
+                planner.combo_measured.setCurrentIndex(index)
+            planner.user_data = tyre_data
+            planner.clear_kept_rows()
+            planner.tyre_plan_panel.set_filename(str(data.get("plan_name") or name))
+            planner.refresh_table()
+            self.panel_calculator.set_input_values(checked_inputs(inputs))
         planner.autosave()
+        self.set_plan_inputs(True)
+        return True

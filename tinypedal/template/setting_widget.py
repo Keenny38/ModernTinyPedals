@@ -25,6 +25,7 @@ Widget key name must match corresponding file name in 'widget' folder
 
 from ..plugin_loader import load_plugin_defaults
 from .widget import WIDGET_CATEGORIES, WIDGET_DISPLAY_ORDER
+from .widget.modern import add_modern_options
 
 # Merge categories in display order
 _widgets = {}
@@ -33,6 +34,9 @@ for _category in WIDGET_CATEGORIES:
 WIDGET_DEFAULT = {_name: _widgets.pop(_name) for _name in WIDGET_DISPLAY_ORDER}
 if _widgets:  # widget added to a category but missing from display order
     raise RuntimeError(f"widget missing from WIDGET_DISPLAY_ORDER: {sorted(_widgets)}")
+
+# Modern design switch & options of widgets that have a modern design
+add_modern_options(WIDGET_DEFAULT)
 
 # Add widget plugins ("plugins" folder)
 WIDGET_DEFAULT.update(load_plugin_defaults())

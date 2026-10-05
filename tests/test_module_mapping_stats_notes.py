@@ -224,6 +224,40 @@ def test_driver_stats_recorded_and_saved(stats_env):
     assert stats.seconds > 170
 
 
+def test_driver_stats_starts_finish_position_and_history(stats_env):
+    from tinypedal.userfile import driver_history
+
+    tele, filepath = stats_env
+    tele.update({"session.pre_race": True, "vehicle.place": 3})
+    output = StatsInfo()
+    gen = module_stats.record_driver_stats(output, filepath, "Class", max_moved_distance=1500, podium_by_class=False)
+    gen.send(1)
+    tele["vehicle.position_xyz"] = (0.0, 0.0, 0.0)
+    gen.send(1)
+    tele["session.pre_race"] = False  # green flag
+    drive_stats_lap(tele, gen, 0.0, 90.0)
+    tele["vehicle.finish_state"] = 1
+    gen.send(1)
+    tele["vehicle.class_name"] = "LMP2"  # next session vehicle already shown when saved
+    gen.send(2)
+    stats = driver_stats.load_driver_stats(("SimTrack", "GT3"), filepath)
+    assert (stats.starts, stats.races, stats.dnf, stats.positions, stats.placed) == (1, 1, 0, 3, 1)
+    assert (stats.wins, stats.podiums) == (0, 1)
+    # Second race: retired
+    tele.update({"vehicle.finish_state": 0, "session.pre_race": False})
+    gen.send(2)
+    tele["vehicle.finish_state"] = 2
+    gen.send(2)
+    gen.send(3)
+    stats = driver_stats.load_driver_stats(("SimTrack", "LMP2"), filepath)
+    assert (stats.starts, stats.races, stats.dnf) == (1, 0, 1)
+    records = driver_history.load_history(filepath)
+    assert [(record.vehicle, record.session, record.finish, record.position, record.vehicle_class)
+            for record in records] == [
+        ("GT3", 4, 1, 3, "GT3")]  # second stint: not driven (no time, no lap), not recorded
+    assert records[0].best == pytest.approx(90.0) and records[0].valid == 1
+
+
 def test_driver_stats_teleport_not_counted(stats_env):
     tele, filepath = stats_env
     output = StatsInfo()

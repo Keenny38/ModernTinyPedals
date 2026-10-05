@@ -46,6 +46,7 @@ from tinypedal.module_info import ConsumptionDataSet, StintDataSet, VehicleDataS
 from tinypedal.process.weather import WeatherNode
 from tinypedal.setting import cfg
 from tinypedal.userfile.json_setting import copy_setting
+from tinypedal.widget._modern import create_widget
 
 OUTPUT = os.path.join("images", "readme_preview.png")
 TRACK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "readme_preview_track.json")
@@ -656,7 +657,7 @@ def render_widgets() -> dict[str, QPixmap]:
     )
     pixmaps = {}
     for name in names:
-        widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
         widget.adjustSize()
         for _ in range(3):  # a few updates, so smoothed values settle
             widget.timerEvent(QTimerEvent(0))

@@ -14,6 +14,7 @@ from PySide6.QtCore import QCoreApplication
 from tinypedal.module_info import minfo
 from tinypedal.setting import cfg
 from tinypedal.template.widget import WIDGET_DISPLAY_ORDER
+from tinypedal.widget._modern import create_widget
 
 EXTREME_VALUES = {
     "zero": 0.0,
@@ -49,7 +50,7 @@ def test_widgets_survive_extreme_values(ui_env, monkeypatch, mode):
     for name in WIDGET_DISPLAY_ORDER:
         widget = None
         try:
-            widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+            widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
             widget.timerEvent(None)
             widget.grab()
         except Exception as error:  # collect every widget, report them together

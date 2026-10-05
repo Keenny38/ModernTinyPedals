@@ -60,6 +60,36 @@ class DictListModel(QAbstractListModel):
         self.rows = rows
         self.endResetModel()
 
+    def sync(self, rows: list[dict], key: str = "key"):
+        """Rows become rows (same order), matched by key: removed, moved, inserted & changed rows notified one by one
+
+        Delegates of rows kept stay in place (a reset would create every delegate again).
+        """
+        wanted = {row[key] for row in rows}
+        for number in range(len(self.rows) - 1, -1, -1):
+            if self.rows[number].get(key) not in wanted:
+                self.beginRemoveRows(ROOT, number, number)
+                del self.rows[number]
+                self.endRemoveRows()
+        for position, row in enumerate(rows):
+            current = next((number for number in range(position, len(self.rows)) if self.rows[number].get(key) == row[key]),
+                           -1)
+            if current < 0:
+                self.beginInsertRows(ROOT, position, position)
+                self.rows.insert(position, dict(row))
+                self.endInsertRows()
+                continue
+            if current != position:
+                self.beginMoveRows(ROOT, current, current, ROOT, position)
+                self.rows.insert(position, self.rows.pop(current))
+                self.endMoveRows()
+            existing = self.rows[position]
+            values = {name: value for name, value in row.items() if existing.get(name) != value}
+            if values:
+                existing.update(values)
+                index = self.index(position, 0)
+                self.dataChanged.emit(index, index, [self._role_of[name] for name in values if name in self._role_of])
+
     def update_rows(self, change: Callable[[dict], dict]):
         """Apply change (row -> changed values) to every row, notify changed rows only"""
         for number, row in enumerate(self.rows):

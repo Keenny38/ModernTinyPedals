@@ -31,27 +31,34 @@ inputs are kept for next time. Pit stop plan: see fuel_strategy.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+import json
+import os
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import replace
-from math import ceil, floor
+from dataclasses import asdict, replace
+from math import ceil, floor, isfinite
+from time import monotonic
 from typing import Protocol
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -59,13 +66,50 @@ from PySide6.QtWidgets import (
 from .. import calculation as calc
 from .. import units
 from ..api_control import api
-from ..const_file import ConfigType
+from ..const_file import ConfigType, FileFilter
 from ..formatter import laptime_string_to_seconds
-from ..fuel_strategy import Strategy, StrategyInput, plan, representative_laps, saving_target, target_consumption
+from ..fuel_strategy import (
+    MARGIN_UNITS,
+    RaceState,
+    SavingTarget,
+    Strategy,
+    StrategyInput,
+    compare_strategies,
+    consumption,
+    driver_fields,
+    estimate_pace,
+    margin_values,
+    plan,
+    race_result,
+    remaining_input,
+    representative_laps,
+    reserves,
+    saving_input,
+    saving_target,
+)
 from ..i18n import tr, trm
-from ..module_info import ConsumptionDataSet
+from ..module_info import ConsumptionDataSet, StintDataSet
+from ..process.team_usage import StintUsage
 from ..setting import cfg
+from ..userfile import atomic_write
 from ._common import NumericTableItem, UIScaler
+from .race_scenarios import (
+    DRIVER_COLORS,
+    RAIN_COLOR,
+    SAFETY_CAR_COLOR,
+    ComparisonCard,
+    DriverInputs,
+    DriverTimesCard,
+    PlanVsRaceCard,
+    RaceClockInput,
+    RainInputs,
+    RivalsCard,
+    SafetyCarInputs,
+    clock_text,
+    day_time_text,
+    plan_markdown,
+    write_plan_csv,
+)
 from .race_widgets import (
     INVALID_COLOR,
     TYRE_COLOR,
@@ -80,7 +124,7 @@ from .race_widgets import (
 )
 
 VALID_ROLE = Qt.ItemDataRole.UserRole + 1  # history item: lap is valid
-INDEX_ROLE = Qt.ItemDataRole.UserRole + 2  # history item: index of lap in history data
+INDEX_ROLE = Qt.ItemDataRole.UserRole + 2  # history item: serial of lap (index = newest serial - serial)
 RACE_SESSION = 4
 
 
@@ -139,7 +183,32 @@ SAVED_INPUTS = {
     "input_fuel_effect": 0.0,
     "input_track_evolution": 0.0,
     "input_target_stint_laps": 0,
+    "input_safety_margin_kind": 0,  # see fuel_strategy.MARGIN_UNITS
+    "enable_balanced_stints": False,
+    "input_stints_per_driver": 1,
+    "input_driver_table": "",  # pace:min:max of each driver, see race_scenarios.parse_driver_table
+    "input_saving_cost": 0.0,
+    "input_race_start_minutes": -1,
+    "enable_safety_car": False,
+    "input_sc_lap": 1,
+    "input_sc_laps": 3,
+    "input_sc_consumption": 50.0,
+    "input_sc_laptime": 150.0,
+    "enable_sc_pit": False,
+    "input_sc_pit_saving": 50.0,
+    "input_sc_wear": 50.0,
+    "enable_rain": False,
+    "input_rain_lap": 1,
+    "input_rain_laps": 0,
+    "input_rain_consumption": 100.0,
+    "input_rain_laptime": 110.0,
+    "enable_rain_tyres": True,
+    "input_pit_lap_consumption": 100.0,
+    "enable_leader_finish": False,
 }
+SCENARIO_DELAY_MS = 150  # quick input changes (arrow held): scenarios calculated once settled
+PLAN_FILE = "race_calculator_plan.json"  # plan input of race plan widget (config folder)
+PLAN_COLUMNS = ("stop", "lap", "window", "time", "fuel", "energy", "tyres", "driver", "seconds")
 
 
 def live_race_length() -> tuple[str, int] | None:
@@ -155,22 +224,79 @@ def live_race_length() -> tuple[str, int] | None:
 
 
 class PitStopPreview(QWidget):
-    """Strategy timeline: race laps left to right, one block per stint, pit lap above each stop,
-    tyre changes marked"""
+    """Strategy timeline: race laps left to right, one block per stint (one color per driver when
+    drivers take turns), pit lap above each stop, tyre changes & safety car marked, details of
+    stint or stop under the mouse"""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.strategy = Strategy()
+        self.drivers = 1
+        self.symbol_fuel = ""
+        self.time_text: Callable[[float], str] = clock_text  # race clock of a stop
+        self._bar = QRectF()
         self.setFixedHeight(UIScaler.size(4.4))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
 
     @property
     def pit_laps(self) -> list[int]:
         return [stop.lap for stop in self.strategy.stops]
 
-    def set_strategy(self, strategy: Strategy):
+    def set_strategy(self, strategy: Strategy, drivers: int = 1):
         self.strategy = strategy
+        self.drivers = drivers
         self.update()
+
+    def lap_at(self, x: float) -> float:
+        """Plan lap under x (laps from start of timeline)"""
+        strategy = self.strategy
+        if not strategy.ready or self._bar.width() <= 0:
+            return -1.0
+        return strategy.first_lap + (x - self._bar.left()) / self._bar.width() * strategy.race_laps
+
+    def tooltip_text(self, x: float) -> str:
+        """Stop near x, else stint under x"""
+        strategy = self.strategy
+        if not strategy.ready or self._bar.width() <= 0:
+            return ""
+        lap = self.lap_at(x)
+        laps_per_pixel = strategy.race_laps / self._bar.width()
+        for index, stop in enumerate(strategy.stops):
+            if abs(stop.lap - lap) <= max(laps_per_pixel * 4, 0.5):
+                parts = [f"<b>{tr('Stop')} {strategy.stops_done + index + 1}</b> · {tr('Lap')} {stop.lap}",
+                         f"{tr('Time')} {self.time_text(stop.clock)}",
+                         f"+{stop.fuel:.1f} {self.symbol_fuel}" + (f" · +{stop.energy:.1f} %" if stop.energy else "")]
+                if index < len(strategy.windows):
+                    parts.append(f"{tr('Pit Window')} {strategy.windows[index][0]}-{strategy.windows[index][1]}")
+                if stop.tyres:
+                    parts.append(tr("Tyres"))
+                if self.drivers > 1:
+                    parts.append(f"{tr('Driver')} {stop.driver}")
+                if stop.safety_car:
+                    parts.append(tr("Under safety car"))
+                parts.append(f"{stop.seconds:.1f} s")
+                return "<br>".join(parts)
+        for index, (first, last) in enumerate(strategy.stint_bounds()):
+            if first - 1 <= lap <= last:
+                seconds = strategy.stint_seconds[index] if index < len(strategy.stint_seconds) else 0.0
+                parts = [f"<b>{tr('Stint')} {strategy.stops_done + index + 1}</b> · {tr('Laps')} {first}-{last}",
+                         f"{laps_text(last - first + 1)} · {seconds / 60:.1f} min"]
+                if self.drivers > 1:
+                    parts.append(f"{tr('Driver')} {strategy.driver_of(index)}")
+                return "<br>".join(parts)
+        return ""
+
+    def event(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            text = self.tooltip_text(event.pos().x())
+            if text:
+                QToolTip.showText(event.globalPos(), text, self)
+            else:
+                QToolTip.hideText()
+                event.ignore()
+            return True
+        return super().event(event)
 
     def paintEvent(self, event):
         """Draw"""
@@ -184,19 +310,39 @@ class PitStopPreview(QWidget):
 
         strategy = self.strategy
         total = strategy.race_laps
+        first_lap = strategy.first_lap
         if not strategy.ready:
             painter.setPen(muted)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
                              tr("Enter lap time, consumption and race length"))
             return
 
-        pad = metrics.horizontalAdvance(str(total)) / 2 + 2
+        pad = metrics.horizontalAdvance(str(strategy.last_lap)) / 2 + 2
         left, right = pad, width - pad
         # Rows: pit laps, bar (stint lengths inside), lap ticks & first / last lap
-        bar = QRectF(left, text_h + 5, right - left, max(height - text_h * 2 - 12, text_h * 0.6))
+        bar = self._bar = QRectF(left, text_h + 5, right - left, max(height - text_h * 2 - 12, text_h * 0.6))
         radius = min(bar.height() / 2, 6)
 
-        # Stints: blocks between pit stops, alternating shade
+        def x_of(lap: float) -> float:
+            return left + (lap - first_lap) / total * bar.width()
+
+        # Safety car & rain laps: bands behind the stints
+        sc_first, sc_laps = strategy.safety_car
+        for band_first, band_last, band_color in (
+            (sc_first, sc_first + sc_laps - 1, SAFETY_CAR_COLOR) if sc_laps else (0, -1, ""),
+            (*strategy.rain, RAIN_COLOR) if strategy.rain[0] else (0, -1, ""),
+        ):
+            if band_last < band_first or band_first > strategy.last_lap or band_last <= first_lap:
+                continue
+            color = QColor(band_color)
+            color.setAlphaF(0.45)
+            x0 = x_of(max(band_first - 1, first_lap))
+            x1 = x_of(min(band_last, strategy.last_lap))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawRect(QRectF(x0, bar.top() - 3, max(x1 - x0, 2), bar.height() + 6))
+
+        # Stints: blocks between pit stops, alternating shade (driver color when drivers take turns)
         bounds = [0]
         for stint in strategy.stints:
             bounds.append(bounds[-1] + stint)
@@ -206,8 +352,12 @@ class PitStopPreview(QWidget):
         for index in range(len(bounds) - 1):
             x0 = left + bounds[index] / total * bar.width() + (gap / 2 if index else 0)
             x1 = left + bounds[index + 1] / total * bar.width() - (gap / 2 if index < last else 0)
-            color = QColor(highlight)
-            color.setAlphaF(0.85 if index % 2 == 0 else 0.55)
+            if self.drivers > 1:
+                color = QColor(DRIVER_COLORS[(strategy.driver_of(index) - 1) % len(DRIVER_COLORS)])
+                color.setAlphaF(0.85)
+            else:
+                color = QColor(highlight)
+                color.setAlphaF(0.85 if index % 2 == 0 else 0.55)
             block = QRectF(x0, bar.top(), max(x1 - x0, 1), bar.height())
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
@@ -221,16 +371,16 @@ class PitStopPreview(QWidget):
         step = max(1, ceil(total / max(width / (metrics.horizontalAdvance("000") * 2), 1)))
         for lap in range(0, total + 1, step):
             x = left + lap / total * bar.width()
-            painter.drawLine(int(x), int(bar.bottom() + 2), int(x), int(bar.bottom() + 5))
-        for lap in (0, total):
-            x = left + lap / total * bar.width()
+            painter.drawLine(QPointF(x, bar.bottom() + 2), QPointF(x, bar.bottom() + 5))
+        for lap in (first_lap, strategy.last_lap):
+            x = x_of(lap)
             painter.drawText(QRectF(x - pad * 2, bar.bottom() + 5, pad * 4, text_h),
                              Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, str(lap))
         # Pit laps above bar, tyre change in tyre color. Labels never overlap: short label
         # (lap number only) when the full one does not fit, none when even that does not fit.
         label_end = -1.0
         for stop in strategy.stops:
-            x = left + stop.lap / total * bar.width()
+            x = x_of(stop.lap)
             color = QColor(TYRE_COLOR) if stop.tyres else palette.windowText().color()
             painter.setPen(color)
             painter.drawLine(int(x), int(text_h + 1), int(x), int(bar.top() - 1))
@@ -279,6 +429,7 @@ class HistoryPanel(QFrame):
                               "invalid laps (red) left out."))
         hint.setWordWrap(True)
         self.dataset: list[ConsumptionDataSet] = []
+        self._newest_serial = -1  # serial of newest lap row (see refresh)
         self.check_valid_only = QCheckBox(tr("Valid Laps Only"))
         self.check_valid_only.setChecked(bool(cfg.user.config["fuel_calculator"].get("enable_valid_laps_only")))
         self.check_valid_only.toggled.connect(self.toggle_valid_only)
@@ -345,41 +496,38 @@ class HistoryPanel(QFrame):
         self.table_history.setColumnHidden(9, not config["show_column_tank_capacity"])
 
     def refresh(self, dataset: Sequence[ConsumptionDataSet]):
-        """Refresh history data table (sorted by clicked column, numbers sorted by value)"""
-        self.dataset = list(dataset)
-        table = self.table_history
-        invalid_color = QColor(INVALID_COLOR)
-        flag_selectable = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
-        flag_unselectable = Qt.ItemFlag.NoItemFlags
+        """Refresh history data table (sorted by clicked column, numbers sorted by value)
 
+        New laps of a live session only (laps before unchanged, oldest ones dropped when history
+        is full): their rows added, rows of dropped laps removed, the others kept. Rows know their
+        lap by a serial number (newest lap: highest), same when laps are added or dropped.
+        """
+        dataset = list(dataset)
+        table = self.table_history
+        old = self.dataset
+        added = next((count for count in range(1, min(len(dataset), 5) + 1)
+                      if old and dataset[count:] == old[:len(dataset) - count]), 0)
+        self.dataset = dataset
         table.setUpdatesEnabled(False)
         table.setSortingEnabled(False)  # rows filled in history order, sorted once filled
-        table.clearContents()
-        table.setRowCount(len(dataset))  # rows set at once, not one insert per lap
-        for row_index, lap_data in enumerate(dataset):
-            valid = bool(lap_data.isValidLap)
-            highlight_color = None if valid else invalid_color
-            fuel = self.unit_fuel(lap_data.lastLapUsedFuel)
-            ratio = calc.fuel_to_energy_ratio(lap_data.lastLapUsedFuel, lap_data.lastLapUsedEnergy)
-            net = lap_data.batteryRegenLast - lap_data.batteryDrainLast
-            tank = self.unit_fuel(lap_data.capacityFuel)
-            row_items: tuple[tuple, ...] = (
-                ("lap", lap_data.lapNumber, f"{lap_data.lapNumber}", flag_unselectable),
-                ("time", lap_data.lapTimeLast, calc.sec2laptime_full(lap_data.lapTimeLast), flag_selectable, highlight_color),
-                ("fuel", fuel, f"{fuel:.3f}", flag_selectable, highlight_color),
-                ("energy", lap_data.lastLapUsedEnergy, f"{lap_data.lastLapUsedEnergy:.3f}", flag_selectable, highlight_color),
-                ("ratio", ratio, f"{ratio:.3f}", flag_unselectable),
-                ("drain", lap_data.batteryDrainLast, f"{lap_data.batteryDrainLast:.3f}", flag_unselectable),
-                ("regen", lap_data.batteryRegenLast, f"{lap_data.batteryRegenLast:.3f}", flag_unselectable),
-                ("net", net, f"{net:+.3f}", flag_unselectable),
-                ("tyre", lap_data.tyreAvgWearLast, f"{lap_data.tyreAvgWearLast:.3f}", flag_selectable),
-                ("tank", tank, f"{tank:.3f}", flag_selectable),
-            )
-            for column_index, item in enumerate(row_items):
-                table_item = self._add_table_item(*item)
-                table_item.setData(VALID_ROLE, valid)
-                table_item.setData(INDEX_ROLE, row_index)
-                table.setItem(row_index, column_index, table_item)
+        if added:
+            oldest_kept = self._newest_serial - (len(dataset) - added - 1)
+            for row_index in range(table.rowCount() - 1, -1, -1):  # laps dropped of a full history
+                item = table.item(row_index, 0)
+                if item is not None and item.data(INDEX_ROLE) < oldest_kept:
+                    table.removeRow(row_index)
+            newest_first = table.horizontalHeader().sortIndicatorSection() < 0
+            first_row = 0 if newest_first else table.rowCount()
+            for offset in range(added):
+                table.insertRow(first_row + offset)
+                self._fill_row(first_row + offset, dataset[offset], self._newest_serial + added - offset)
+            self._newest_serial += added
+        else:
+            self._newest_serial = len(dataset) - 1
+            table.clearContents()
+            table.setRowCount(len(dataset))  # rows set at once, not one insert per lap
+            for row_index, lap_data in enumerate(dataset):
+                self._fill_row(row_index, lap_data, self._newest_serial - row_index)
         table.setSortingEnabled(True)
         table.setUpdatesEnabled(True)
         has_rows = table.rowCount() > 0
@@ -388,6 +536,35 @@ class HistoryPanel(QFrame):
         for button in (self.button_adddata, self.button_delete, self.button_delete_all):
             button.setEnabled(has_rows)
         self.toggle_valid_only(self.check_valid_only.isChecked())
+
+    def _fill_row(self, row_index: int, lap_data: ConsumptionDataSet, serial: int):
+        """Items of one lap, serial: number of the lap in the table (newest: highest)"""
+        table = self.table_history
+        flag_selectable = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        flag_unselectable = Qt.ItemFlag.NoItemFlags
+        valid = bool(lap_data.isValidLap)
+        highlight_color = None if valid else QColor(INVALID_COLOR)
+        fuel = self.unit_fuel(lap_data.lastLapUsedFuel)
+        ratio = calc.fuel_to_energy_ratio(lap_data.lastLapUsedFuel, lap_data.lastLapUsedEnergy)
+        net = lap_data.batteryRegenLast - lap_data.batteryDrainLast
+        tank = self.unit_fuel(lap_data.capacityFuel)
+        row_items: tuple[tuple, ...] = (
+            ("lap", lap_data.lapNumber, f"{lap_data.lapNumber}", flag_unselectable),
+            ("time", lap_data.lapTimeLast, calc.sec2laptime_full(lap_data.lapTimeLast), flag_selectable, highlight_color),
+            ("fuel", fuel, f"{fuel:.3f}", flag_selectable, highlight_color),
+            ("energy", lap_data.lastLapUsedEnergy, f"{lap_data.lastLapUsedEnergy:.3f}", flag_selectable, highlight_color),
+            ("ratio", ratio, f"{ratio:.3f}", flag_unselectable),
+            ("drain", lap_data.batteryDrainLast, f"{lap_data.batteryDrainLast:.3f}", flag_unselectable),
+            ("regen", lap_data.batteryRegenLast, f"{lap_data.batteryRegenLast:.3f}", flag_unselectable),
+            ("net", net, f"{net:+.3f}", flag_unselectable),
+            ("tyre", lap_data.tyreAvgWearLast, f"{lap_data.tyreAvgWearLast:.3f}", flag_selectable),
+            ("tank", tank, f"{tank:.3f}", flag_selectable),
+        )
+        for column_index, item in enumerate(row_items):
+            table_item = self._add_table_item(*item)
+            table_item.setData(VALID_ROLE, valid)
+            table_item.setData(INDEX_ROLE, serial)
+            table.setItem(row_index, column_index, table_item)
 
     def toggle_valid_only(self, checked: bool):
         """Invalid laps hidden (filter kept for next time)"""
@@ -402,7 +579,7 @@ class HistoryPanel(QFrame):
 
     def selected_indexes(self) -> set[int]:
         """Indexes in history data of selected laps"""
-        return {item.data(INDEX_ROLE) for item in self.table_history.selectedItems()}
+        return {self._newest_serial - item.data(INDEX_ROLE) for item in self.table_history.selectedItems()}
 
     def _add_table_item(self, header: str, value: float, text: str, flags: Qt.ItemFlag, highlight_color=None):
         """Add table item, sorted by value"""
@@ -431,8 +608,25 @@ class CalculatorPanel(QWidget):
         self._batch = 1  # no calculation while inputs are built & loaded
         self._updating = False
         self.strategy = Strategy()
+        self.plan_setup = StrategyInput()  # input of strategy, tyre plan included (saving target plans with it)
+        self.race_setup = StrategyInput()  # input of whole race (before live race state), kept for widget
+        self.race_strategy = Strategy()  # plan of whole race (before live race state)
+        self.race_state: RaceState | None = None  # live race under way: plan of the rest of the race
+        self.race_tyre_changes: list[int] = []  # tyres changed at each stop of tyre plan (whole race)
+        self.history_source: Callable[[], Sequence[ConsumptionDataSet]] = list  # laps for estimates, set by page
         self.tyre_link: TyreLink | None = None  # tyre plan of tyre tab, set by page
         self.proposed_tyre_rows: list[int] = []  # tyre plan rows (stints) needing new tyres (minimum tread)
+        self._plan_file_data: dict = {}
+        self.inputs_changed: Callable[[], None] = lambda: None  # page: undo history
+        self.stint_source: Callable[[], Sequence[StintDataSet]] = list  # stints of live race, set by page
+        self._last_calculation = 0.0
+        self._scenario_timer = QTimer(self)
+        self._scenario_timer.setSingleShot(True)
+        self._scenario_timer.timeout.connect(self.update_scenarios)
+        self._plan_file_timer = QTimer(self)
+        self._plan_file_timer.setSingleShot(True)
+        self._plan_file_timer.setInterval(500)
+        self._plan_file_timer.timeout.connect(self.write_plan_file)
 
         self.input_laptime = InputLapTime(self)
         self.input_fuel = InputFuel(self)
@@ -474,8 +668,9 @@ class CalculatorPanel(QWidget):
             (tr("Pit Stop Time"), self.input_race.pit_seconds,
              tr("Time lost per stop, tyre change time of the tyre plan added "
                 "(time race: fewer laps fit in the race time)")),
-            (tr("Safety Margin"), self.input_race.margin,
-             tr("Laps of fuel kept in the tank at every stop and at the finish")),
+            (tr("Safety Margin"), self.input_race.margin_box,
+             tr("Fuel kept in the tank at every stop and at the finish: laps of fuel, fuel, "
+                "or % more consumption per lap")),
         ):
             label = QLabel(title)
             label.setToolTip(tooltip)
@@ -489,6 +684,8 @@ class CalculatorPanel(QWidget):
                            tooltip=tr("0 = full, or exactly what the race needs without a stop"))
         hint = muted_label(tr("0 = full tank"))
         card_start.grid.addWidget(hint, 2, 1, Qt.AlignmentFlag.AlignRight)
+        self.input_start_time = RaceClockInput(self.update_input)
+        card_start.add_row(tr("Start Time"), self.input_start_time, 3)
 
         card_tyre_input = self.card_tyre_input = Card(self, tr("Tyre Wear"))
         card_tyre_input.add_row(tr("Starting Tread"), self.input_tyre.start_tread, 0)
@@ -504,6 +701,9 @@ class CalculatorPanel(QWidget):
         card_pit.add_row(tr("Driver Change"), self.input_pit.driver_change, 2,
                          tooltip=tr("Time added to every stop when drivers take turns"))
         card_pit.grid.addWidget(self.input_pit.tyres_during_refuel, 3, 0, 1, 2)
+        card_pit.add_row(tr("In & Out Laps"), self.input_pit.pit_laps, 4,
+                         tooltip=tr("Consumption of the laps into & out of the pits (pit lane speed limit), "
+                                    "% of race pace"))
 
         card_rules = Card(self, tr("Race Rules"))
         card_rules.add_row(tr("Mandatory Stops"), self.input_rules.minimum_stops, 0,
@@ -511,18 +711,30 @@ class CalculatorPanel(QWidget):
         card_rules.add_row(tr("Max Stint Time"), self.input_rules.max_stint_minutes, 1,
                            tooltip=tr("Driver limit: longest stint allowed, 0 = none"))
         card_rules.add_row(tr("Drivers"), self.input_rules.drivers, 2,
-                           tooltip=tr("Drivers taking turns, one driver change at each stop"))
+                           tooltip=tr("Drivers taking turns, driver change after their stints (Drivers card)"))
+        card_rules.grid.addWidget(self.input_rules.balanced, 3, 0, 1, 2)
+        card_rules.grid.addWidget(self.input_rules.leader_finish, 4, 0, 1, 2)
+        self.input_drivers = DriverInputs(self, self.update_input)
+        self.input_rules.drivers.valueChanged.connect(self.input_drivers.set_count)
 
         card_pace = Card(self, tr("Pace"))
         card_pace.add_row(tr("Fuel Effect"), self.input_pace.fuel_effect, 0,
                           tooltip=tr("Lap time lost per 10 fuel units in the tank (lap time is the one at half tank)"))
         card_pace.add_row(tr("Track Evolution"), self.input_pace.track_evolution, 1,
                           tooltip=tr("Lap time change per hour of race, negative when the track gets faster"))
+        card_pace.add_row(tr("Saving Cost"), self.input_pace.saving_cost, 2,
+                          tooltip=tr("Lap time lost per 10% less consumption (lift & coast): "
+                                     "saving target & strategy comparison count it"))
+        card_pace.grid.addWidget(self.input_pace.button_estimate, 3, 0, 1, 2)
+        card_pace.grid.addWidget(self.input_pace.label_estimate, 4, 0, 1, 2)
+        self.input_safety_car = SafetyCarInputs(self, self.update_input)
+        self.input_rain = RainInputs(self, self.update_input)
 
         column_inputs = QVBoxLayout()
         column_inputs.setContentsMargins(0, 0, 0, 0)
         column_inputs.setSpacing(UIScaler.pixel(10))
-        for card in (card_lap, card_start, card_pit, card_rules, card_pace):
+        for card in (card_lap, card_start, card_pit, card_rules, self.input_drivers, card_pace,
+                     self.input_safety_car, self.input_rain):
             column_inputs.addWidget(card)
         column_inputs.addStretch(1)
         inputs = QWidget(self)
@@ -542,21 +754,33 @@ class CalculatorPanel(QWidget):
         self.layout_tiles.setSpacing(UIScaler.pixel(10))
         self.arrange_top(wide=True)
 
-        card_strategy = Card(self, tr("Strategy"))
+        card_strategy = self.card_strategy = Card(self, tr("Strategy"))
         self.label_strategy = muted_label("")
         self.label_strategy.setWordWrap(True)
         card_strategy.grid.addWidget(self.pit_preview, 0, 0)
         card_strategy.grid.addWidget(self.label_strategy, 1, 0)
 
-        self.button_copy = QPushButton(tr("Copy"))
-        self.button_copy.setToolTip(tr("Copy pit stop plan as text"))
+        # Export: text, Discord, spreadsheet, image
+        export_menu = QMenu(self)
+        export_menu.addAction(tr("Copy as Text")).triggered.connect(self.copy_plan)
+        export_menu.addAction(tr("Copy for Discord")).triggered.connect(self.copy_plan_markdown)
+        export_menu.addSeparator()
+        export_menu.addAction(tr("Export CSV...")).triggered.connect(self.export_plan_csv)
+        export_menu.addAction(tr("Save Image...")).triggered.connect(self.save_plan_image)
+        self.button_copy = QPushButton(tr("Export"))
+        self.button_copy.setToolTip(tr("Pit stop plan as text, for Discord, as spreadsheet or image"))
         self.button_copy.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.button_copy.clicked.connect(self.copy_plan)
-        card_plan = Card(self, tr("Pit Stop Plan"), (self.button_copy,))
-        self.table_plan = QTableWidget(0, 7, self)
-        self.table_plan.setHorizontalHeaderLabels((
-            tr("Stop"), tr("Lap"), f"{tr('Fuel')} ({self.symbol_fuel})", f"{tr('Energy')} (%)", tr("Tyres"),
-            tr("Driver"), f"{tr('Stop Time')} (s)"))
+        self.button_copy.setMenu(export_menu)
+        card_plan = self.card_plan = Card(self, tr("Pit Stop Plan"), (self.button_copy,))
+        self.table_plan = QTableWidget(0, len(PLAN_COLUMNS), self)
+        self.table_plan.setHorizontalHeaderLabels(self.plan_header())
+        for name, tooltip in (
+            ("window", tr("Earliest & latest lap of the stop keeping the same number of stops")),
+            ("time", tr("Race time of the stop, or time of day when the start time is set")),
+        ):
+            header_item = self.table_plan.horizontalHeaderItem(PLAN_COLUMNS.index(name))
+            if header_item is not None:
+                header_item.setToolTip(tooltip)
         self.table_plan.verticalHeader().setVisible(False)
         self.table_plan.setShowGrid(False)
         self.table_plan.setAlternatingRowColors(True)
@@ -565,8 +789,9 @@ class CalculatorPanel(QWidget):
         self.table_plan.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table_plan.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table_plan.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for column in (4, 6):  # tyre change & stop time: whole header text shown
-            self.table_plan.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        for name in ("window", "tyres", "seconds"):  # whole header text shown
+            self.table_plan.horizontalHeader().setSectionResizeMode(
+                PLAN_COLUMNS.index(name), QHeaderView.ResizeMode.ResizeToContents)
         self.table_plan.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         card_plan.grid.addWidget(self.table_plan, 0, 0)
 
@@ -580,7 +805,9 @@ class CalculatorPanel(QWidget):
         grid.addWidget(self.label_head_energy, 0, 2)
         rows = (
             (tr("Total Needed"), "total_needed", "", tr("Whole race, safety margin included: exact ≈ rounded up")),
-            (tr("Pit Stops"), "pit_stops", "", tr("Stops this resource alone needs: estimate ≈ whole stops")),
+            (tr("Refuel Stops"), "pit_stops", "",
+             tr("Stops this resource alone needs: estimate ≈ whole stops. The pit stop plan may stop "
+                "more often (driver limit, mandatory stops)")),
             (tr("Total Laps"), "total_laps", tr("lap"), tr("Laps the total amount lasts")),
             (tr("Total Minutes"), "total_minutes", "min", tr("Minutes the total amount lasts")),
             (tr("Max Stint Laps"), "stint_laps", tr("lap"), tr("Laps a full tank lasts, safety margin kept")),
@@ -629,10 +856,19 @@ class CalculatorPanel(QWidget):
         column_results = QVBoxLayout()
         column_results.setContentsMargins(0, 0, 0, 0)
         column_results.setSpacing(UIScaler.pixel(10))
+        self.card_comparison = ComparisonCard(self, self.symbol_fuel)
+        self.card_driver_times = DriverTimesCard(self)
+        self.card_plan_vs_race = PlanVsRaceCard(self, self.symbol_fuel)
+        self.card_rivals = RivalsCard(self)
+
         column_results.addWidget(card_strategy)
         column_results.addWidget(card_plan)
+        column_results.addWidget(self.card_driver_times)
         column_results.addWidget(card_detail)
         column_results.addWidget(card_saving)
+        column_results.addWidget(self.card_comparison)
+        column_results.addWidget(self.card_plan_vs_race)
+        column_results.addWidget(self.card_rivals)
         column_results.addStretch(1)
 
         layout_panel = QHBoxLayout(self)
@@ -690,6 +926,8 @@ class CalculatorPanel(QWidget):
     # Saved inputs
     def input_values(self) -> dict:
         race = self.input_race
+        safety_car = self.input_safety_car
+        rain = self.input_rain
         return {
             "input_lap_time": round(self.input_laptime.to_seconds(), 3),
             "input_fuel_per_lap": self.input_fuel.fuel_used.value(),
@@ -716,6 +954,28 @@ class CalculatorPanel(QWidget):
             "input_fuel_effect": self.input_pace.fuel_effect.value(),
             "input_track_evolution": self.input_pace.track_evolution.value(),
             "input_target_stint_laps": self.input_target.value(),
+            "input_safety_margin_kind": race.margin_kind.currentIndex(),
+            "enable_balanced_stints": self.input_rules.balanced.isChecked(),
+            "input_stints_per_driver": self.input_drivers.stints_per_driver.value(),
+            "input_driver_table": self.input_drivers.table_text(),
+            "input_saving_cost": self.input_pace.saving_cost.value(),
+            "input_race_start_minutes": self.input_start_time.minutes(),
+            "enable_safety_car": safety_car.enabled.isChecked(),
+            "input_sc_lap": safety_car.lap.value(),
+            "input_sc_laps": safety_car.laps.value(),
+            "input_sc_consumption": safety_car.consumption.value(),
+            "input_sc_laptime": safety_car.laptime.value(),
+            "enable_sc_pit": safety_car.pit.isChecked(),
+            "input_sc_pit_saving": safety_car.pit_saving.value(),
+            "input_sc_wear": safety_car.wear.value(),
+            "enable_rain": rain.enabled.isChecked(),
+            "input_rain_lap": rain.lap.value(),
+            "input_rain_laps": rain.laps.value(),
+            "input_rain_consumption": rain.consumption.value(),
+            "input_rain_laptime": rain.laptime.value(),
+            "enable_rain_tyres": rain.tyres.isChecked(),
+            "input_pit_lap_consumption": self.input_pit.pit_laps.value(),
+            "enable_leader_finish": self.input_rules.leader_finish.isChecked(),
         }
 
     def set_input_values(self, values: dict):
@@ -746,6 +1006,33 @@ class CalculatorPanel(QWidget):
             self.input_pace.fuel_effect.setValue(values["input_fuel_effect"])
             self.input_pace.track_evolution.setValue(values["input_track_evolution"])
             self.input_target.setValue(int(values["input_target_stint_laps"]))
+            kind = int(values["input_safety_margin_kind"])
+            race.margin_kind.setCurrentIndex(kind if 0 <= kind < len(MARGIN_UNITS) else 0)
+            race.margin.setValue(values["input_safety_margin"])  # again: range of unit
+            self.input_rules.balanced.setChecked(bool(values["enable_balanced_stints"]))
+            self.input_drivers.stints_per_driver.setValue(int(values["input_stints_per_driver"]))
+            self.input_drivers.set_table_text(values["input_driver_table"])
+            self.input_drivers.set_count(int(values["input_drivers"]))
+            self.input_pace.saving_cost.setValue(values["input_saving_cost"])
+            self.input_start_time.set_minutes(int(values["input_race_start_minutes"]))
+            safety_car = self.input_safety_car
+            safety_car.enabled.setChecked(bool(values["enable_safety_car"]))
+            safety_car.lap.setValue(int(values["input_sc_lap"]))
+            safety_car.laps.setValue(int(values["input_sc_laps"]))
+            safety_car.consumption.setValue(values["input_sc_consumption"])
+            safety_car.laptime.setValue(values["input_sc_laptime"])
+            safety_car.pit.setChecked(bool(values["enable_sc_pit"]))
+            safety_car.pit_saving.setValue(values["input_sc_pit_saving"])
+            safety_car.wear.setValue(values["input_sc_wear"])
+            rain = self.input_rain
+            rain.enabled.setChecked(bool(values["enable_rain"]))
+            rain.lap.setValue(int(values["input_rain_lap"]))
+            rain.laps.setValue(int(values["input_rain_laps"]))
+            rain.consumption.setValue(values["input_rain_consumption"])
+            rain.laptime.setValue(values["input_rain_laptime"])
+            rain.tyres.setChecked(bool(values["enable_rain_tyres"]))
+            self.input_pit.pit_laps.setValue(values["input_pit_lap_consumption"])
+            self.input_rules.leader_finish.setChecked(bool(values["enable_leader_finish"]))
 
     def load_inputs(self):
         """Inputs of last time"""
@@ -766,8 +1053,10 @@ class CalculatorPanel(QWidget):
         self.label_fill_source.setText("")
 
     # Data
-    def fill_in_data(self, dataset: Sequence[ConsumptionDataSet], race_length: tuple[str, int] | None = None):
-        """Fill in history data: average of latest laps at race pace, race length of a live race"""
+    def fill_in_data(self, dataset: Sequence[ConsumptionDataSet], race_length: tuple[str, int] | None = None,
+                     live: bool = True):
+        """Fill in history data: average of latest laps at race pace, race length of a live race,
+        tank capacity of live car (live data) or of the laps (file, maybe another car)"""
         with self.batch():
             if race_length is not None:
                 kind, value = race_length
@@ -777,20 +1066,56 @@ class CalculatorPanel(QWidget):
                     self.input_race.minutes.setValue(value)
                 self.input_race.set_lap_race(kind == "laps")
             if not dataset:
+                if live:
+                    self.fill_in_game_estimate()
                 return
             # Load tank capacity
-            capacity = max(api.read.engine.tank_capacity(), dataset[0].capacityFuel)
+            capacity = dataset[0].capacityFuel
+            if live:
+                capacity = max(api.read.engine.tank_capacity(), capacity)
             if capacity:
                 self.input_fuel.capacity.setValue(self.unit_fuel(capacity))
             laps = representative_laps(dataset)
             if not laps:
-                self.label_fill_source.setText(tr("No valid lap at race pace to fill in"))
+                if not (live and self.fill_in_game_estimate()):
+                    self.label_fill_source.setText(tr("No valid lap at race pace to fill in"))
                 return
             self.input_laptime.set_seconds(calc.dataset_mean([lap.lapTimeLast for lap in laps]))
             self.input_fuel.fuel_used.setValue(self.unit_fuel(calc.dataset_mean([lap.lastLapUsedFuel for lap in laps])))
             self.input_fuel.energy_used.setValue(calc.dataset_mean([lap.lastLapUsedEnergy for lap in laps]))
             self.input_tyre.wear_lap.setValue(calc.dataset_mean([lap.tyreAvgWearLast for lap in laps]))
             self.label_fill_source.setText(trm(f"Average of {len(laps)} valid lap(s) at race pace"))
+
+    def fill_in_game_estimate(self) -> bool:
+        """Fuel & energy per lap estimated by game (LMU, while driving) until a valid lap at race pace,
+        False if game gives none"""
+        fuel = api.read.engine.expected_fuel_consumption()
+        energy = api.read.engine.expected_energy_consumption()
+        if fuel <= 0 and energy <= 0:
+            return False
+        capacity = api.read.engine.tank_capacity()
+        if capacity > 0:
+            self.input_fuel.capacity.setValue(self.unit_fuel(capacity))
+        if fuel > 0:
+            self.input_fuel.fuel_used.setValue(self.unit_fuel(fuel))
+        if energy > 0:
+            self.input_fuel.energy_used.setValue(energy)
+        self.label_fill_source.setText(tr("Game estimate per lap: no valid lap at race pace yet"))
+        return True
+
+    def fill_in_usage(self, usage: StintUsage, capacity: float) -> bool:
+        """Fuel, energy & tyre wear per lap of team stints (game strategy data), capacity: tank (fuel unit)
+        to turn fraction of tank into fuel, False if no lap measured"""
+        if usage.laps <= 0:
+            return False
+        with self.batch():
+            if capacity > 0:
+                self.input_fuel.capacity.setValue(capacity)
+                self.input_fuel.fuel_used.setValue(usage.fuel * capacity)
+            self.input_fuel.energy_used.setValue(usage.energy * 100)
+            self.input_tyre.wear_lap.setValue(usage.wear)
+        self.label_fill_source.setText(trm(f"Average of {usage.laps} team lap(s) from game"))
+        return True
 
     def add_table_data(self, selected_data: list[QTableWidgetItem]) -> tuple[int, int]:
         """Add selected history data (invalid laps left out), (laps used, laps left out)"""
@@ -836,8 +1161,13 @@ class CalculatorPanel(QWidget):
 
     # Calculation
     def strategy_input(self) -> StrategyInput:
+        """Input of the whole race (tyre plan & live race state applied by plan_with_tyres)"""
         race = self.input_race
-        return StrategyInput(
+        drivers = self.input_rules.drivers.value()
+        safety_car = self.input_safety_car
+        with_safety_car = safety_car.enabled.isChecked()
+        with_rain = self.input_rain.enabled.isChecked()
+        setup = StrategyInput(
             laptime=self.input_laptime.to_seconds(),
             race_minutes=0 if race.lap_race else race.minutes.value(),
             race_laps=race.laps.value() if race.lap_race else 0,
@@ -848,7 +1178,6 @@ class CalculatorPanel(QWidget):
             energy_per_lap=self.input_fuel.energy_used.value(),
             fuel_start=self.refill_fuel.amount_start.value(),
             energy_start=self.refill_energy.amount_start.value(),
-            margin_laps=race.margin.value(),
             tread_start=self.input_tyre.start_tread.value(),
             wear_per_lap=self.input_tyre.wear_lap.value(),
             minimum_tread=self.input_tyre.minimum_tread.value(),
@@ -857,11 +1186,30 @@ class CalculatorPanel(QWidget):
             tyres_during_refuel=self.input_pit.tyres_during_refuel.isChecked(),
             driver_change_seconds=self.input_pit.driver_change.value(),
             minimum_stops=self.input_rules.minimum_stops.value(),
+            balanced_stints=self.input_rules.balanced.isChecked(),
             max_stint_minutes=self.input_rules.max_stint_minutes.value(),
-            drivers=self.input_rules.drivers.value(),
+            drivers=drivers,
+            stints_per_driver=self.input_drivers.stints_per_driver.value(),
             fuel_effect=self.input_pace.fuel_effect.value(),
             track_evolution=self.input_pace.track_evolution.value(),
+            saving_cost=self.input_pace.saving_cost.value(),
+            sc_lap=safety_car.lap.value() if with_safety_car else 0,
+            sc_laps=safety_car.laps.value() if with_safety_car else 0,
+            sc_consumption=safety_car.consumption.value() / 100,
+            sc_laptime=safety_car.laptime.value() / 100,
+            sc_pit=with_safety_car and safety_car.pit.isChecked(),
+            sc_pit_saving=safety_car.pit_saving.value() / 100,
+            sc_wear=safety_car.wear.value() / 100,
+            rain_lap=self.input_rain.lap.value() if with_rain else 0,
+            rain_laps=self.input_rain.laps.value() if with_rain else 0,
+            rain_consumption=self.input_rain.consumption.value() / 100,
+            rain_laptime=self.input_rain.laptime.value() / 100,
+            rain_tyres=with_rain and self.input_rain.tyres.isChecked(),
+            pit_lap_consumption=self.input_pit.pit_laps.value() / 100,
+            extra_laps=1 if not race.lap_race and self.input_rules.leader_finish.isChecked() else 0,
         )
+        setup = margin_values(setup, race.margin_kind.currentIndex(), race.margin.value())
+        return driver_fields(setup, self.input_drivers.values())
 
     def update_input(self):
         """Calculate and output results"""
@@ -874,42 +1222,55 @@ class CalculatorPanel(QWidget):
         finally:
             self._updating = False
         self.save_inputs()
+        self.inputs_changed()
+
+    def set_race_state(self, state: RaceState | None):
+        """Live race under way: plan of the rest of the race from now (None: whole race)"""
+        if state != self.race_state:
+            self.race_state = state
+            self.update_input()
 
     def plan_with_tyres(self, setup: StrategyInput) -> Strategy:
         """Pit stop plan, tyre change time of the linked tyre plan added to each stop
 
         Tyre plan rows follow stints and stints follow tyre time (time race): settled in a few
         rounds. Tyre plan with tyres: its changes replace the proposed ones (minimum tread).
+        Live race state: plan of the rest of the race, tyre plan rows kept as planned before.
         """
         link = self.tyre_link
-        if link is None:
-            strategy = plan(setup)
-            self.proposed_tyre_rows = [index for index, stop in enumerate(strategy.stops, 1) if stop.tyres]
-            return strategy
-        setup = replace(
-            setup,
-            tyre_change_seconds=link.full_change_seconds(),
-            tread_start=link.start_tread(setup.tread_start),
-            fresh_tread=link.fresh_tread(),
-            wear_per_lap=setup.wear_per_lap * link.wear_factor(),
-        )
+        if link is not None:
+            setup = replace(
+                setup,
+                tyre_change_seconds=link.full_change_seconds(),
+                tread_start=link.start_tread(setup.tread_start),
+                fresh_tread=link.fresh_tread(),
+                wear_per_lap=setup.wear_per_lap * link.wear_factor(),
+            )
 
         def tyre_times() -> tuple[float, ...]:  # proposed changes cost 4 tyres until tyres are planned
-            return tuple(link.stop_change_times()) if link.has_tyres() else ()
+            return tuple(link.stop_change_times()) if link is not None and link.has_tyres() else ()
 
         extra = tyre_times()
         strategy = plan(replace(setup, stop_extra_seconds=extra))
-        for _ in range(3):
-            link.set_stints(strategy)
-            new_extra = tyre_times()
-            if new_extra == extra:
-                break
-            extra = new_extra
-            strategy = plan(replace(setup, stop_extra_seconds=extra))
-        else:
-            link.set_stints(strategy)
+        if link is not None and self.race_state is None:
+            for _ in range(3):
+                link.set_stints(strategy)
+                new_extra = tyre_times()
+                if new_extra == extra:
+                    break
+                extra = new_extra
+                strategy = plan(replace(setup, stop_extra_seconds=extra))
+            else:
+                link.set_stints(strategy)
+        self.race_setup = self.plan_setup = replace(setup, stop_extra_seconds=extra)
+        self.race_strategy = strategy
         self.proposed_tyre_rows = [index for index, stop in enumerate(strategy.stops, 1) if stop.tyres]
-        changes = link.stop_tyre_changes()
+        changes = link.stop_tyre_changes() if link is not None else []
+        self.race_tyre_changes = list(changes)
+        if self.race_state is not None and strategy.ready:
+            self.plan_setup = remaining_input(self.race_setup, strategy, self.race_state)
+            strategy = plan(self.plan_setup)
+            changes = changes[self.race_state.stops_done:]
         if changes:
             strategy.tyre_changes = changes[:len(strategy.stops)]
             strategy.stops = [
@@ -923,10 +1284,17 @@ class CalculatorPanel(QWidget):
         self.tile_tyres.set_text(
             f"{used} / {maximum}", trm(f"{changes} change(s) · {change_time:+.1f} s"), warning=stock > maximum)
 
+    def time_text(self, seconds: float) -> str:
+        """Race clock of a stop: time of day when start time is set, else race time"""
+        start = self.input_start_time.minutes()
+        return day_time_text(start, seconds) if start >= 0 else clock_text(seconds)
+
     def calculate(self):
         setup = self.strategy_input()
         strategy = self.strategy = self.plan_with_tyres(setup)
+        plan_setup = self.plan_setup
         has_energy = setup.energy_per_lap > 0
+        drivers = self.input_rules.drivers.value()
 
         # Calc fuel ratio
         fuel_used = setup.fuel_per_lap * 3.785411784 if self.is_gallon else setup.fuel_per_lap
@@ -936,12 +1304,14 @@ class CalculatorPanel(QWidget):
         # Details of fuel & energy, same race length (pit stops shared)
         ready = strategy.ready
         stops = len(strategy.stops)
+        usage = consumption(plan_setup)
+        reserve = reserves(plan_setup, usage)
         fuel_stint = self._calc_consumption(
-            "fuel", setup.tank_capacity, setup.fuel_per_lap, setup.fuel_start or setup.tank_capacity,
-            strategy.race_laps, setup.margin_laps, setup.laptime)
+            "fuel", setup.tank_capacity, usage.get("fuel", setup.fuel_per_lap),
+            plan_setup.fuel_start or setup.tank_capacity, strategy.fuel_needed, reserve["fuel"], setup.laptime)
         self._calc_consumption(
-            "energy", 100, setup.energy_per_lap, setup.energy_start or 100,
-            strategy.race_laps, setup.margin_laps, setup.laptime)
+            "energy", 100, usage.get("energy", setup.energy_per_lap),
+            plan_setup.energy_start or 100, strategy.energy_needed, reserve["energy"], setup.laptime)
         self.refill_fuel.average_refill.setText(f"{strategy.average_fuel:.2f}" if stops else "-")
         self.refill_energy.average_refill.setText(f"{strategy.average_energy:.2f}" if stops else "-")
         has_fuel = setup.fuel_per_lap > 0 and setup.tank_capacity > 0
@@ -960,13 +1330,52 @@ class CalculatorPanel(QWidget):
         # Calc tyre
         self._calc_tyre_consumption(strategy.max_stint if ready else floor(fuel_stint), setup.laptime)
 
-        self.pit_preview.set_strategy(strategy)
+        self.pit_preview.symbol_fuel = self.symbol_fuel
+        self.pit_preview.time_text = self.time_text
+        self.pit_preview.set_strategy(strategy, drivers)
         self.update_plan(strategy, has_energy)
         self.update_summary(strategy, has_energy, setup)
-        self.update_saving(strategy, has_energy, setup)
+        self.card_driver_times.set_strategy(strategy, drivers, self.input_drivers.values())
+        self.card_plan_vs_race.set_stints(
+            list(reversed(self.stint_source())), self.race_strategy, setup.fuel_per_lap, setup.energy_per_lap,
+            setup.laptime, self.unit_fuel, has_energy)
+        self.schedule_plan_file()
 
-    def update_saving(self, strategy: Strategy, has_energy: bool, setup: StrategyInput):
-        """Saving target: consumption for one stop less, and for laps per stint aimed at"""
+        # Scenarios (saving, comparison, safety car & rain against none): at once, or once quick
+        # changes (arrow held) settle
+        now = monotonic()
+        quick = now - self._last_calculation < SCENARIO_DELAY_MS / 1000
+        self._last_calculation = now
+        if quick and SCENARIO_DELAY_MS > 0:
+            self._scenario_timer.start(SCENARIO_DELAY_MS)
+        else:
+            self._scenario_timer.stop()
+            self.update_scenarios()
+
+    def update_scenarios(self):
+        """Saving target (and one stop less of details), strategies compared, safety car & rain
+        against none"""
+        strategy, plan_setup = self.strategy, self.plan_setup
+        setup = self.strategy_input()
+        has_energy = setup.energy_per_lap > 0
+        ready = strategy.ready
+        target = saving_target(plan_setup, strategy)
+        self.usage_fuel.one_less_stint.setText(f"{target.fuel:.3f}" if target and ready else "-")
+        self.usage_energy.one_less_stint.setText(f"{target.energy:.3f}" if target and has_energy else "-")
+        self.update_saving(strategy, has_energy, setup, target)
+        variants = compare_strategies(plan_setup, strategy) if ready and strategy.feasible else []
+        self.card_comparison.set_variants(variants, has_energy)
+        for card, without_input in (
+            (self.input_safety_car, replace(plan_setup, sc_lap=0, sc_laps=0, sc_pit=False)),
+            (self.input_rain, replace(plan_setup, rain_lap=0, rain_tyres=False)),
+        ):
+            without = plan(without_input) if card.enabled.isChecked() and ready else None
+            card.set_result(strategy, without)
+
+    def update_saving(self, strategy: Strategy, has_energy: bool, setup: StrategyInput,
+                      target: SavingTarget | None):
+        """Saving target: consumption for one stop less (lap time lost & race time it makes),
+        and for laps per stint aimed at"""
         symbol = self.symbol_fuel
 
         def consumption_text(fuel: float, energy: float) -> str:
@@ -977,49 +1386,59 @@ class CalculatorPanel(QWidget):
                 parts.append(trm(f"{energy:.3f} % per lap ({energy - setup.energy_per_lap:+.3f})"))
             return " · ".join(parts)
 
-        target = saving_target(self.strategy_input(), strategy) if strategy.ready else None
         if target is None:
             self.label_one_less.setText(tr("No stop to save") if strategy.ready else "")
         else:
-            laps, fuel, energy, saving = target
-            self.label_one_less.setText(
-                trm(f"One stop less: {laps} laps per stint, {len(saving.stops)} stop(s)") + "<br>"
-                + consumption_text(fuel, energy))
+            saving = target.strategy
+            text = (trm(f"One stop less: {target.laps} laps per stint, {len(saving.stops)} stop(s)") + "<br>"
+                    + consumption_text(target.fuel, target.energy))
+            if setup.saving_cost > 0:
+                cost = saving.saving_seconds - self.plan_setup.saving_seconds
+                if saving.race_laps != strategy.race_laps:
+                    gain = f"{saving.race_laps - strategy.race_laps:+d} {tr('laps')}"
+                else:
+                    gain = f"{saving.race_seconds - strategy.race_seconds:+.1f} s"
+                worth = race_result(saving) < race_result(strategy)
+                text += (f"<br>{tr('Saving Cost')}: +{cost:.2f} s/{tr('lap')} · {tr('Race')} {gain} · "
+                         + (tr("worth it") if worth else tr("not worth it")))
+            self.label_one_less.setText(text)
         laps_target = self.input_target.value()
         if laps_target <= 0 or not strategy.ready:
             self.label_target.setText("")
             return
-        fuel, energy = target_consumption(setup, laps_target)
-        aimed = plan(replace(
-            self.strategy_input(),
-            fuel_per_lap=min(setup.fuel_per_lap, fuel) if setup.fuel_per_lap > 0 else 0.0,
-            energy_per_lap=min(setup.energy_per_lap, energy) if has_energy else 0.0,
-        ))
+        aimed_setup = saving_input(self.plan_setup, laps_target)
+        aimed = plan(aimed_setup)
         self.label_target.setText(
-            consumption_text(fuel, energy) + "<br>" + trm(f"{len(aimed.stops)} stop(s) with this target"))
+            consumption_text(aimed_setup.fuel_per_lap, aimed_setup.energy_per_lap) + "<br>"
+            + trm(f"{len(aimed.stops)} stop(s) with this target"))
 
     def update_summary(self, strategy: Strategy, has_energy: bool, setup: StrategyInput):
         """Key figure tiles & strategy line"""
         symbol = self.symbol_fuel
+        has_fuel = setup.fuel_per_lap > 0 and setup.tank_capacity > 0
         self.tile_energy.setHidden(not has_energy)
+        self.tile_fuel.setHidden(not has_fuel and has_energy)  # energy only car
         self.button_copy.setEnabled(strategy.ready)
+        problem = {
+            "tank": tr("Tank too small for one lap plus the safety margin"),
+            "start": tr("Starting fuel or energy below one lap plus the safety margin"),
+            "stops": tr("Over 200 stops: tank too small for this race"),
+        }.get(strategy.problem, tr("Tank too small for one lap plus the safety margin"))
         if not strategy.ready:
             for tile in (self.tile_fuel, self.tile_energy, self.tile_pits, self.tile_stint, self.tile_refill):
                 tile.set_text("-")
             impossible = strategy.impossible
             self.tile_pits.set_text("-", warning=impossible)
-            self.label_strategy.setText(tr("Tank too small for one lap plus the safety margin") if impossible else "")
+            self.label_strategy.setText(problem if impossible else "")
             set_warning(self.label_strategy, impossible)
             return
-        has_fuel = setup.fuel_per_lap > 0 and setup.tank_capacity > 0
-        self.tile_fuel.setHidden(not has_fuel and has_energy)  # energy only car
         fuel_full = ceil(strategy.fuel_needed * 10) / 10 if self.is_gallon else ceil(strategy.fuel_needed)
         self.tile_fuel.set_text(f"{fuel_full:g} {symbol}", f"{strategy.fuel_needed:.2f} {symbol}")
         self.tile_energy.set_text(f"{ceil(strategy.energy_needed):g} %", f"{strategy.energy_needed:.2f} %")
         stops = len(strategy.stops)
         limit = {
             "energy": tr("limited by energy"), "stint": tr("limited by stint length"),
-            "fuel": tr("limited by fuel") if has_energy else "",
+            "stops": tr("set by mandatory stops"), "fuel": tr("limited by fuel") if has_energy else "",
         }[strategy.limit]
         tyre_stops = len(strategy.tyre_stops)
         detail = " · ".join(text for text in (limit, trm(f"{tyre_stops} with tyres") if tyre_stops else "") if text)
@@ -1039,37 +1458,68 @@ class CalculatorPanel(QWidget):
                 f"{strategy.energy_load:.1f} %" if has_energy else tr("No stop needed"), title=tr("Fuel to Load"))
 
         if not strategy.feasible:
-            self.label_strategy.setText(tr("Tank too small for one lap plus the safety margin"))
+            self.label_strategy.setText(problem)
             set_warning(self.label_strategy, True)
             return
-        set_warning(self.label_strategy, False)
-        text = trm(f"{len(strategy.stints)} stint(s), {strategy.race_laps} race laps")
+        parts = []
+        if strategy.first_lap and self.race_state is not None:
+            parts.append(f"<b>{tr('Live Race')}</b>: {tr('rest of race from lap')} {strategy.first_lap}")
+        parts.append(trm(f"{len(strategy.stints)} stint(s), {strategy.race_laps} race laps"))
         pit_laps = ", ".join(str(stop.lap) for stop in strategy.stops)
         if pit_laps:
-            text += " · " + (tr("Stop at lap") if stops == 1 else tr("Stops at laps")) + " " + pit_laps
+            parts.append((tr("Stop at lap") if stops == 1 else tr("Stops at laps")) + " " + pit_laps)
         if tyre_stops:
-            text += " · " + tr("Tyres at lap") + " " + ", ".join(str(lap) for lap in strategy.tyre_stops)
+            parts.append(tr("Tyres at lap") + " " + ", ".join(str(lap) for lap in strategy.tyre_stops))
         if stops:
-            text += " · " + trm(f"{strategy.pit_seconds:.0f} s in the pits")
-        self.label_strategy.setText(text)
+            parts.append(trm(f"{strategy.pit_seconds:.0f} s in the pits"))
+        sc_first, sc_laps = strategy.safety_car
+        if sc_laps:
+            parts.append(f"{tr('Safety Car')} {sc_first}-{sc_first + sc_laps - 1}")
+        if strategy.driver_issues:
+            parts.append(tr("driving time limits not met (Driving Time)"))
+        self.label_strategy.setText(" · ".join(parts))
+        set_warning(self.label_strategy, bool(strategy.driver_issues))
+
+    def plan_header(self) -> tuple[str, ...]:
+        names = {
+            "stop": tr("Stop"), "lap": tr("Lap"), "window": tr("Window"), "time": tr("Time"),
+            "fuel": f"{tr('Fuel')} ({self.symbol_fuel})", "energy": f"{tr('Energy')} (%)", "tyres": tr("Tyres"),
+            "driver": tr("Driver"), "seconds": f"{tr('Stop Time')} (s)",
+        }
+        return tuple(names[name] for name in PLAN_COLUMNS)
 
     def plan_rows(self, strategy: Strategy, has_energy: bool) -> list[tuple[str, ...]]:
-        """Pit stop plan rows: start load, then every stop (stop, lap, fuel, energy, tyres, driver, time)"""
+        """Pit stop plan rows (columns of PLAN_COLUMNS): start load (or now), then every stop"""
         if not strategy.ready:
             return []
-        rows: list[tuple[str, ...]] = [(tr("Start"), "0", f"{strategy.fuel_load:.1f}",
-                 f"{strategy.energy_load:.1f}" if has_energy else "-", "", "1", "")]
+        live = strategy.first_lap > 0
+        rows: list[tuple[str, ...]] = [(
+            tr("Now") if live else tr("Start"), str(strategy.first_lap), "",
+            self.time_text(self.plan_setup.clock_offset), f"{strategy.fuel_load:.1f}",
+            f"{strategy.energy_load:.1f}" if has_energy else "-", "", str(strategy.driver_of(0)), "")]
         counts = strategy.tyre_changes
-        for index, stop in enumerate(strategy.stops, start=1):
-            tyres = (f"{tr('Change')} ({counts[index - 1]})" if counts else tr("Change")) if stop.tyres else ""
-            rows.append((str(index), str(stop.lap), f"{stop.fuel:.1f}",
+        for index, stop in enumerate(strategy.stops):
+            tyres = (f"{tr('Change')} ({counts[index]})" if index < len(counts) else tr("Change")) if stop.tyres else ""
+            window = f"{strategy.windows[index][0]}-{strategy.windows[index][1]}" if index < len(strategy.windows) else ""
+            mark = {"sc": " SC", "rain": f" {tr('Wet')}", "dry": f" {tr('Dry')}"}.get(stop.reason, " SC" if stop.safety_car else "")
+            number = str(strategy.stops_done + index + 1) + mark
+            rows.append((number, str(stop.lap), window, self.time_text(stop.clock), f"{stop.fuel:.1f}",
                          f"{stop.energy:.1f}" if has_energy else "-", tyres, str(stop.driver), f"{stop.seconds:.1f}"))
         return rows
+
+    def visible_plan(self) -> tuple[list[str], list[tuple[str, ...]]]:
+        """Header & rows of the plan, columns hidden in the table left out (export)"""
+        table = self.table_plan
+        columns = [column for column in range(len(PLAN_COLUMNS)) if not table.isColumnHidden(column)]
+        header = self.plan_header()
+        rows = self.plan_rows(self.strategy, self.input_fuel.energy_used.value() > 0)
+        return [header[column] for column in columns], [tuple(row[column] for column in columns) for row in rows]
 
     def update_plan(self, strategy: Strategy, has_energy: bool):
         """Pit stop plan table, cells updated in place (no new item per calculation)"""
         table = self.table_plan
         rows = self.plan_rows(strategy, has_energy)
+        tyres_column = PLAN_COLUMNS.index("tyres")
         table.setUpdatesEnabled(False)
         table.setRowCount(len(rows))
         for row, texts in enumerate(rows):
@@ -1081,15 +1531,26 @@ class CalculatorPanel(QWidget):
                     table.setItem(row, column, item)
                 if item.text() != text:
                     item.setText(text)
-                if column == 4:
+                if column == tyres_column:
                     item.setForeground(QColor(TYRE_COLOR) if text else table.palette().text().color())
-        table.setColumnHidden(3, not has_energy)
-        table.setColumnHidden(5, self.input_rules.drivers.value() < 2)
+        table.setColumnHidden(PLAN_COLUMNS.index("energy"), not has_energy)
+        table.setColumnHidden(PLAN_COLUMNS.index("driver"), self.input_rules.drivers.value() < 2)
+        table.setColumnHidden(PLAN_COLUMNS.index("window"), not strategy.windows)
         table.setUpdatesEnabled(True)
         # Fit rows without inner scroll, up to 12 rows
         visible = min(max(len(rows), 1), 12)
         row_h = table.verticalHeader().defaultSectionSize()
         table.setFixedHeight(table.horizontalHeader().sizeHint().height() + row_h * visible + 4)
+
+    def plan_title(self) -> str:
+        strategy = self.strategy
+        return f"{tr('Pit Stop Plan')} · {trm(f'{len(strategy.stints)} stint(s), {strategy.race_laps} race laps')}"
+
+    def plan_footer(self) -> str:
+        strategy = self.strategy
+        tyre_seconds = sum(stop.tyre_seconds for stop in strategy.stops)
+        return trm(f"{strategy.pit_seconds:.0f} s in the pits") + (
+            f" · {tr('Tyres')} {tyre_seconds:.1f} s" if tyre_seconds else "")
 
     def plan_text(self) -> str:
         """Pit stop plan as plain text (clipboard)"""
@@ -1097,67 +1558,154 @@ class CalculatorPanel(QWidget):
         symbol = self.symbol_fuel
         has_energy = self.input_fuel.energy_used.value() > 0
         lines = [
-            f"{tr('Pit Stop Plan')} · {trm(f'{len(strategy.stints)} stint(s), {strategy.race_laps} race laps')}",
-            f"{tr('Start')}: {strategy.fuel_load:.1f} {symbol}"
+            self.plan_title(),
+            f"{tr('Now') if strategy.first_lap else tr('Start')}: {strategy.fuel_load:.1f} {symbol}"
             + (f" · {strategy.energy_load:.1f} %" if has_energy else ""),
         ]
         counts = strategy.tyre_changes
         drivers = self.input_rules.drivers.value() > 1
-        for index, stop in enumerate(strategy.stops, start=1):
-            line = f"{tr('Stop')} {index} · {tr('Lap')} {stop.lap} · +{stop.fuel:.1f} {symbol}"
+        for index, stop in enumerate(strategy.stops):
+            line = (f"{tr('Stop')} {strategy.stops_done + index + 1} · {tr('Lap')} {stop.lap}"
+                    f" · {self.time_text(stop.clock)} · +{stop.fuel:.1f} {symbol}")
             if has_energy:
                 line += f" · +{stop.energy:.1f} %"
             if stop.tyres:
-                line += f" · {tr('Tyres')}" + (f" ({counts[index - 1]})" if counts else "")
+                line += f" · {tr('Tyres')}" + (f" ({counts[index]})" if index < len(counts) else "")
             if drivers:
                 line += f" · {tr('Driver')} {stop.driver}"
             line += f" · {stop.seconds:.1f} s"
+            if index < len(strategy.windows):
+                line += f" · {tr('Window')} {strategy.windows[index][0]}-{strategy.windows[index][1]}"
             lines.append(line)
-        tyre_seconds = sum(stop.tyre_seconds for stop in strategy.stops)
-        lines.append(trm(f"{strategy.pit_seconds:.0f} s in the pits") + (
-            f" · {tr('Tyres')} {tyre_seconds:.1f} s" if tyre_seconds else ""))
+        lines.append(self.plan_footer())
         return "\n".join(lines)
 
     def copy_plan(self):
         QGuiApplication.clipboard().setText(self.plan_text())
 
-    def _calc_consumption(self, output_type, tank_capacity, consumption, fuel_start,
-                          total_race_laps, margin_laps, laptime) -> float:
-        """Fuel or energy details for race length of pit stop plan, max stint laps returned"""
+    def copy_plan_markdown(self):
+        """Pit stop plan for Discord (table in a code block)"""
+        header, rows = self.visible_plan()
+        QGuiApplication.clipboard().setText(plan_markdown(self.plan_title(), header, rows, self.plan_footer()))
+
+    @staticmethod
+    def export_folder() -> str:
+        """Folder of last export (CSV, image), config folder at first"""
+        folder = cfg.user.config["fuel_calculator"].get("export_path", "")
+        return folder if isinstance(folder, str) and folder and os.path.isdir(folder) else cfg.path.config
+
+    @staticmethod
+    def keep_export_folder(filename: str):
+        folder = os.path.dirname(filename) + "/"
+        config = cfg.user.config["fuel_calculator"]
+        if config.get("export_path") != folder:
+            config["export_path"] = folder
+            cfg.save(config_type=ConfigType.CONFIG)
+
+    def export_plan_csv(self):
+        """Pit stop plan as spreadsheet"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, dir=os.path.join(self.export_folder(), f"{tr('Pit Stop Plan')}.csv"), filter=FileFilter.CSV)
+        if filename:
+            header, rows = self.visible_plan()
+            write_plan_csv(filename, header, rows)
+            self.keep_export_folder(filename)
+
+    def plan_image(self) -> QPixmap:
+        """Strategy & pit stop plan cards in one image"""
+        cards = [self.card_strategy, self.card_plan]
+        images = [card.grab() for card in cards]
+        width = max(image.width() for image in images)
+        image = QPixmap(width, sum(image.height() for image in images))
+        image.fill(self.palette().window().color())
+        painter = QPainter(image)
+        top = 0
+        for part in images:
+            painter.drawPixmap(0, top, part)
+            top += part.height()
+        painter.end()
+        return image
+
+    def save_plan_image(self):
+        """Strategy & pit stop plan as image (to share)"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, dir=os.path.join(self.export_folder(), f"{tr('Pit Stop Plan')}.png"), filter=FileFilter.PNG)
+        if filename:
+            self.plan_image().save(filename, "PNG")
+            self.keep_export_folder(filename)
+
+    # Race plan widget input (plan made again with race calculator closed)
+    def plan_file_data(self) -> dict:
+        return {"version": 1, "setup": asdict(self.race_setup), "tyre_changes": list(self.race_tyre_changes)}
+
+    def schedule_plan_file(self):
+        """Plan input written for the race plan widget once changed (not at every key)"""
+        data = self.plan_file_data()
+        if data != self._plan_file_data:
+            self._plan_file_data = data
+            self._plan_file_timer.start()
+
+    def flush_plan_file(self):
+        """Plan input change not written yet: written now (page closed)"""
+        if self._plan_file_timer.isActive():
+            self._plan_file_timer.stop()
+            self.write_plan_file()
+
+    def write_plan_file(self):
+        try:
+            with atomic_write(f"{cfg.path.config}{PLAN_FILE}") as file:
+                json.dump(self._plan_file_data, file)
+        except OSError:
+            pass
+
+    def estimate_from_history(self):
+        """Pit stop time, fuel effect & track evolution estimated from consumption history"""
+        estimate = estimate_pace(self.history_source(), self.unit_fuel)
+        found = []
+        with self.batch():
+            if estimate.pit_stops:
+                self.input_race.pit_seconds.setValue(round(estimate.pit_seconds, 1))
+                found.append(f"{tr('Pit Stop Time')}: {estimate.pit_seconds:.1f} s ({estimate.pit_stops} {tr('stop(s)')})")
+            if estimate.fuel_laps:
+                self.input_pace.fuel_effect.setValue(estimate.fuel_effect)
+                found.append(f"{tr('Fuel Effect')}: {estimate.fuel_effect:.3f} ({estimate.fuel_laps} {tr('laps')})")
+            if estimate.track_laps:
+                self.input_pace.track_evolution.setValue(estimate.track_evolution)
+                found.append(f"{tr('Track Evolution')}: {estimate.track_evolution:+.2f} s/h")
+        self.input_pace.label_estimate.setText(
+            "<br>".join(found) if found else tr("Not enough laps: stints of 3 laps or more at race pace needed"))
+
+    def _calc_consumption(self, output_type, tank_capacity, consumption, amount_start,
+                          total_needed, reserve, laptime) -> float:
+        """Fuel or energy details for race length of pit stop plan, laps of a full tank returned
+
+        consumption: planned per lap (safety margin on consumption included), total_needed: whole
+        race incl. safety margin, reserve: kept in tank at every stop.
+        """
         # Total needed incl. margin, rounded up (keep 1 decimal place for Gallon)
-        total_need_frac = calc.total_fuel_needed(total_race_laps + margin_laps, consumption, 0)
+        total_need_frac = total_needed
         if self.is_gallon and output_type == "fuel":
             total_need_full = ceil(total_need_frac * 10) / 10
         else:
             total_need_full = ceil(total_need_frac)
-        reserve = margin_laps * consumption
         usable = max(tank_capacity - reserve, 0)
 
         amount_curr = min(total_need_full, tank_capacity)
         end_stint_fuel = calc.end_stint_fuel(max(amount_curr - reserve, 0), 0, consumption)
         estimate_pit_counts = max(calc.end_stint_pit_counts(
-            total_need_full - fuel_start, usable - end_stint_fuel), 0)
+            total_need_full - amount_start, usable - end_stint_fuel), 0)
         pits = ceil(estimate_pit_counts)
 
         total_runlaps = calc.end_stint_laps(total_need_full, consumption)
         total_runmins = calc.end_stint_minutes(total_runlaps, laptime)
-        if total_need_full > tank_capacity:
-            stint_runlaps = calc.end_stint_laps(usable, consumption)
-            stint_runmins = calc.end_stint_minutes(stint_runlaps, laptime)
-        else:
-            stint_runlaps = total_runlaps
-            stint_runmins = total_runmins
+        # Full tank, whether the race needs it or not
+        stint_runlaps = calc.end_stint_laps(usable, consumption)
+        stint_runmins = calc.end_stint_minutes(stint_runlaps, laptime)
 
         output_usage = self.usage_fuel if output_type == "fuel" else self.usage_energy
         output_usage.total_needed.setText(f"{total_need_frac:.2f} ≈ {total_need_full:g}")
         output_usage.end_stint.setText(f"{end_stint_fuel:.2f}")
         output_usage.pit_stops.setText(f"{estimate_pit_counts:.2f} ≈ {pits}")
-        if pits:  # one less stop only means something with a stop
-            used_one_less = calc.one_less_pit_stop_consumption(
-                estimate_pit_counts, usable, max(amount_curr - reserve, 0), total_race_laps)
-            output_usage.one_less_stint.setText(f"{max(used_one_less, 0):.3f}")
-        else:
-            output_usage.one_less_stint.setText("-")
         output_usage.total_laps.setText(f"{total_runlaps:.2f}")
         output_usage.total_minutes.setText(f"{total_runmins:.2f}")
         output_usage.stint_laps.setText(f"{stint_runlaps:.2f}")
@@ -1189,10 +1737,12 @@ class CalculatorPanel(QWidget):
         set_warning(self.input_tyre.wear_stint, tyre_wear_stint >= usable_tread)
 
     def validate_starting_fuel(self):
-        """Starting fuel never above tank capacity (checked on both changes)"""
+        """Starting fuel never above tank capacity (checked on both changes, calculated once
+        by the change itself)"""
         capacity = self.input_fuel.capacity.value()
         if capacity > 0 and self.refill_fuel.amount_start.value() > capacity:
-            self.refill_fuel.amount_start.setValue(capacity)
+            with QSignalBlocker(self.refill_fuel.amount_start):
+                self.refill_fuel.amount_start.setValue(capacity)
 
 
 class InputLapTime(QWidget):
@@ -1200,9 +1750,10 @@ class InputLapTime(QWidget):
 
     def __init__(self, parent: CalculatorPanel) -> None:
         super().__init__(parent)
+        # Seconds & milliseconds one step past their range, carried over (see carry_over)
         self.minutes = spin_box(9999)
         self.seconds = spin_box(60, minimum=-1)
-        self.mseconds = spin_box(1000, minimum=-1)
+        self.mseconds = spin_box(1099, minimum=-100)
         self.mseconds.setSingleStep(100)
         for box, digits in ((self.minutes, 2), (self.seconds, 2), (self.mseconds, 3)):
             box.valueChanged.connect(parent.update_input)
@@ -1232,26 +1783,11 @@ class InputLapTime(QWidget):
         )
 
     def carry_over(self):
-        """Carry over lap time value"""
-        if self.seconds.value() > 59:
-            self.seconds.setValue(0)
-            self.minutes.setValue(self.minutes.value() + 1)
-        elif self.seconds.value() < 0:
-            if self.minutes.value() > 0:
-                self.seconds.setValue(59)
-                self.minutes.setValue(self.minutes.value() - 1)
-            else:
-                self.seconds.setValue(0)
-
-        if self.mseconds.value() > 999:
-            self.mseconds.setValue(0)
-            self.seconds.setValue(self.seconds.value() + 1)
-        elif self.mseconds.value() < 0:
-            if self.seconds.value() > 0 or self.minutes.value() > 0:
-                self.mseconds.setValue(900)
-                self.seconds.setValue(self.seconds.value() - 1)
-            else:
-                self.mseconds.setValue(0)
+        """Seconds or milliseconds past their range carried over to the next field (1:59.950
+        + 100 ms = 2:00.050), lap time never below zero"""
+        if 0 <= self.seconds.value() <= 59 and 0 <= self.mseconds.value() <= 999:
+            return
+        self.set_seconds(self.to_seconds())
 
 
 class InputFuel:
@@ -1283,6 +1819,18 @@ class InputRace:
         self.pit_seconds.valueChanged.connect(parent.update_input)
         self.margin = double_box(99, 2, 0.1, tr("lap"))
         self.margin.valueChanged.connect(parent.update_input)
+        # Safety margin unit: laps, fuel units (energy: same laps) or % of consumption
+        self.margin_kind = QComboBox()
+        self.margin_kind.addItems((tr("lap"), parent.symbol_fuel, "%"))
+        self.margin_kind.setToolTip(tr("Safety margin in laps, in fuel kept in the tank, "
+                                       "or in % more consumption per lap"))
+        self.margin_kind.currentIndexChanged.connect(self.margin_kind_changed)
+        self.margin_box = QWidget()
+        layout_margin = QHBoxLayout(self.margin_box)
+        layout_margin.setContentsMargins(0, 0, 0, 0)
+        layout_margin.setSpacing(UIScaler.pixel(3))
+        layout_margin.addWidget(self.margin, stretch=1)
+        layout_margin.addWidget(self.margin_kind)
 
         self.button_time = QPushButton(tr("Time"))
         self.button_laps = QPushButton(tr("Laps"))
@@ -1299,6 +1847,15 @@ class InputRace:
             layout.addWidget(button, stretch=1)
         self.button_time.setChecked(True)
         self.mode_group.buttonToggled.connect(self.mode_toggled)
+
+    def margin_kind_changed(self, index: int):
+        """Unit shown in the box, range of the unit"""
+        kind = MARGIN_UNITS[index] if 0 <= index < len(MARGIN_UNITS) else MARGIN_UNITS[0]
+        suffix = {"laps": tr("lap"), "fuel": self.parent.symbol_fuel, "percent": "%"}[kind]
+        with QSignalBlocker(self.margin):
+            self.margin.setMaximum(9999 if kind == "fuel" else 99)
+            self.margin.setSuffix(f" {suffix}")
+        self.parent.update_input()
 
     @property
     def lap_race(self) -> bool:
@@ -1395,6 +1952,8 @@ class InputPit:
         for box in (self.refuel_rate, self.energy_rate, self.driver_change):
             box.valueChanged.connect(parent.update_input)
         self.tyres_during_refuel.toggled.connect(parent.update_input)
+        self.pit_laps = double_box(200, 0, 5.0, "%")
+        self.pit_laps.valueChanged.connect(parent.update_input)
 
 
 class InputRules:
@@ -1406,6 +1965,14 @@ class InputRules:
         self.drivers = spin_box(9, minimum=1)
         for box in (self.minimum_stops, self.max_stint_minutes, self.drivers):
             box.valueChanged.connect(parent.update_input)
+        self.balanced = QCheckBox(tr("Balanced Stints"))
+        self.balanced.setToolTip(tr("Race laps spread evenly over the stints, same stops "
+                                    "(no short splash stint at the end)"))
+        self.balanced.toggled.connect(parent.update_input)
+        self.leader_finish = QCheckBox(tr("Leader Finishes First (+1 Lap)"))
+        self.leader_finish.setToolTip(tr("Time race: the race ends when the leader crosses the line after "
+                                         "the timer, so a car behind may drive one lap more (fuel for it)"))
+        self.leader_finish.toggled.connect(parent.update_input)
 
 
 class InputPace:
@@ -1415,18 +1982,29 @@ class InputPace:
         self.fuel_effect = double_box(9, 3, 0.01, f"s/10 {parent.symbol_fuel}")
         self.track_evolution = double_box(9, 2, 0.05, "s/h")
         self.track_evolution.setMinimum(-9)
-        for box in (self.fuel_effect, self.track_evolution):
+        self.saving_cost = double_box(9, 2, 0.05, "s")
+        for box in (self.fuel_effect, self.track_evolution, self.saving_cost):
             box.valueChanged.connect(parent.update_input)
+        self.button_estimate = QPushButton(tr("Estimate from History"))
+        self.button_estimate.setToolTip(tr("Pit stop time, fuel effect & track evolution from the laps of "
+                                           "the consumption history (stints & stops in a row)"))
+        self.button_estimate.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.button_estimate.clicked.connect(parent.estimate_from_history)
+        self.label_estimate = muted_label("")
+        self.label_estimate.setWordWrap(True)
 
 
 def checked_inputs(values: dict) -> dict:
-    """Saved inputs with type checked (file or config), default for missing or wrong values"""
+    """Saved inputs with type checked (file or config), default for missing or wrong values
+    (nan & infinity of a hand edited file too)"""
     inputs = {}
     for key, default in SAVED_INPUTS.items():
         value = values.get(key, default)
         if isinstance(default, bool):
             value = value if isinstance(value, bool) else default
-        elif not isinstance(value, (int, float)) or isinstance(value, bool):
+        elif isinstance(default, str):
+            value = value if isinstance(value, str) else default
+        elif not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
             value = default
         inputs[key] = value
     return inputs

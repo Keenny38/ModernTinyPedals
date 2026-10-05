@@ -338,11 +338,13 @@ _CONTROLS: dict[str, tuple[str, ...]] = {
     "show_event_log": (
         "number_of_event_log_lines", "font_color_event_log", "text_damage",
         "show_flag_events", "show_pit_events", "show_penalty_events", "show_engine_overheat_events",
+        "show_contact_events",
     ),
     "show_flag_events": ("text_yellow_flag", "text_blue_flag"),
     "show_pit_events": ("text_pit_in", "text_pit_out"),
     "show_penalty_events": ("text_penalty", "text_track_limits"),
     "show_engine_overheat_events": ("text_overheat",),
+    "show_contact_events": ("text_contact", "text_wall"),
     "enable_incident_file_export": ("incident_export_format",),
 }
 # Option: on/off option it depends on

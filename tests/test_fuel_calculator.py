@@ -2,7 +2,7 @@
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint
-from PySide6.QtWidgets import QMenu, QMessageBox
+from PySide6.QtWidgets import QLabel, QMenu, QMessageBox
 
 from tinypedal.module_info import ConsumptionDataSet, minfo
 from tinypedal.setting import cfg
@@ -16,9 +16,10 @@ HISTORY = (
 
 @pytest.fixture
 def calculator(ui_env, monkeypatch):
-    from tinypedal.ui import race_calculator
+    from tinypedal.ui import fuel_calculator, race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(fuel_calculator, "SCENARIO_DELAY_MS", 0)  # scenarios at once, not after a pause
     cfg.units["fuel_unit"] = "Liter"
     monkeypatch.setattr(minfo.history, "consumptionDataSet", HISTORY)
     dialog = race_calculator.RaceCalculator(None)
@@ -85,8 +86,15 @@ def test_start_fuel_limited_to_tank_and_lap_time_carry(calculator):
     panel.input_laptime.minutes.setValue(1)
     panel.input_laptime.seconds.setValue(60)  # carried to next minute
     assert panel.input_laptime.minutes.value() == 2 and panel.input_laptime.seconds.value() == 0
-    panel.input_laptime.mseconds.setValue(-1)
-    assert panel.input_laptime.to_seconds() == pytest.approx(119.9)
+    laptime = panel.input_laptime
+    laptime.mseconds.stepBy(-1)  # 100 ms less, borrowed from seconds & minutes
+    assert (laptime.minutes.value(), laptime.seconds.value(), laptime.mseconds.value()) == (1, 59, 900)
+    laptime.set_seconds(119.95)
+    laptime.mseconds.stepBy(1)  # remainder kept: 2:00.050, not 1:60.000 or 2:00.000
+    assert (laptime.minutes.value(), laptime.seconds.value(), laptime.mseconds.value()) == (2, 0, 50)
+    laptime.set_seconds(0.5)
+    laptime.seconds.stepBy(-1)  # never below zero
+    assert laptime.to_seconds() == 0
 
 
 def test_selected_history_averaged(calculator, monkeypatch):
@@ -155,6 +163,19 @@ def test_load_history_file(calculator, monkeypatch, tmp_path, extension):
     assert calculator.panel_history.table_history.rowCount() == 3
 
 
+def test_file_laps_keep_their_tank(calculator, monkeypatch, tmp_path):
+    from tinypedal.api_control import api
+    from tinypedal.ui import race_calculator
+    from tinypedal.userfile.consumption_history import save_consumption_history_file
+
+    save_consumption_history_file(HISTORY, f"{tmp_path.as_posix()}/", "Monza - LMP2")
+    monkeypatch.setattr(type(api.read.engine), "tank_capacity", lambda self, index=None: 120.0, raising=False)
+    monkeypatch.setattr(race_calculator.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *args, **kwargs: (str(tmp_path / "Monza - LMP2.consumption"), "")))
+    calculator.load_file_data()  # laps of another car than the live one (120 L)
+    assert calculator.panel_calculator.input_fuel.capacity.value() == pytest.approx(100)
+
+
 def test_invalid_history_file_warned(calculator, monkeypatch, tmp_path):
     from tinypedal.ui import race_calculator
 
@@ -193,7 +214,8 @@ def test_key_figures_strategy_and_plan(calculator):
     assert "Stop at lap 33" in panel.label_strategy.text()
     plan_table = panel.table_plan
     assert plan_table.rowCount() == 2  # start, stop 1
-    assert plan_table.item(1, 1).text() == "33" and plan_table.item(1, 2).text() == "20.0"
+    assert plan_table.item(1, 1).text() == "33" and plan_table.item(1, 4).text() == "20.0"
+    assert plan_table.item(1, 3).text() == "0:49"  # race time of the stop (33 laps of 90 s)
     panel.input_fuel.energy_used.setValue(4.0)  # energy runs out first: 25 laps per stint
     assert not panel.tile_energy.isHidden()
     assert panel.tile_pits.label_detail.text() == "limited by energy"
@@ -223,7 +245,7 @@ def test_safety_margin_and_tyre_stops(calculator):
     panel.input_tyre.minimum_tread.setValue(20)
     assert panel.strategy.tyre_stops == [15, 30]
     assert "Tyres at lap 15, 30" in panel.label_strategy.text()
-    assert panel.table_plan.item(1, 4).text() == "Change"
+    assert panel.table_plan.item(1, 6).text() == "Change"
 
 
 def test_infeasible_tank_warned(calculator):
@@ -239,9 +261,34 @@ def test_copy_plan(calculator):
 
     panel = calculator.panel_calculator
     set_race(panel, minutes=60, pit=30)
-    panel.button_copy.click()
+    assert [action.text() for action in panel.button_copy.menu().actions() if action.text()] == [
+        "Copy as Text", "Copy for Discord", "Export CSV...", "Save Image..."]
+    panel.copy_plan()
     text = QGuiApplication.clipboard().text()
-    assert "Stop 1 · Lap 33 · +20.0 L" in text
+    assert "Stop 1 · Lap 33 · 0:49 · +20.0 L" in text and "Window 7-33" in text
+
+
+def test_plan_export_formats(calculator, monkeypatch, tmp_path):
+    from PySide6.QtGui import QGuiApplication
+
+    from tinypedal.ui import fuel_calculator
+
+    panel = calculator.panel_calculator
+    set_race(panel, minutes=60, pit=30)
+    panel.copy_plan_markdown()
+    text = QGuiApplication.clipboard().text()
+    assert text.startswith("**Pit Stop Plan") and "```" in text and "Energy" not in text  # hidden column left out
+    target = tmp_path / "plan.csv"
+    monkeypatch.setattr(fuel_calculator.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *args, **kwargs: (str(target), "")))
+    panel.export_plan_csv()
+    rows = target.read_text(encoding="utf-8").splitlines()
+    assert rows[0].startswith("Stop,Lap,Window,Time") and rows[2].startswith("1,33,7-33,0:49")
+    image = tmp_path / "plan.png"
+    monkeypatch.setattr(fuel_calculator.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *args, **kwargs: (str(image), "")))
+    panel.save_plan_image()
+    assert image.stat().st_size > 0
 
 
 def test_inputs_saved_and_restored(calculator):
@@ -441,8 +488,8 @@ def test_new_inputs_saved_and_used(calculator):
     stop = panel.strategy.stops[0]
     assert stop.seconds == pytest.approx(20 + 15 + 10) and stop.driver == 2
     table = panel.table_plan
-    assert not table.isColumnHidden(5) and table.item(1, 5).text() == "2"
-    assert table.item(1, 6).text() == "45.0"
+    assert not table.isColumnHidden(7) and table.item(1, 7).text() == "2"
+    assert table.item(1, 8).text() == "45.0"
     text = panel.plan_text()
     assert "Driver 2" in text and "45.0 s" in text and "s in the pits" in text
 
@@ -453,6 +500,20 @@ def test_saving_target_card(calculator):
     assert "20 laps per stint, 1 stop(s)" in panel.label_one_less.text()
     panel.input_target.setValue(40)
     assert "0 stop(s) with this target" in panel.label_target.text()
+    # Details show the same consumption as the card (one stop less, safety margin kept)
+    panel.input_race.margin.setValue(1.0)
+    assert "2.143 L per lap" in panel.label_one_less.text()
+    assert panel.usage_fuel.one_less_stint.text() == "2.143"
+
+
+def test_starting_fuel_clamped_in_one_calculation(calculator, monkeypatch):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=100)
+    panel.refill_fuel.amount_start.setValue(80)
+    calculations = []
+    monkeypatch.setattr(panel, "calculate", lambda: calculations.append(1))
+    panel.input_fuel.capacity.setValue(50)
+    assert panel.refill_fuel.amount_start.value() == 50 and len(calculations) == 1
 
 
 def test_energy_only_page(calculator):
@@ -513,3 +574,190 @@ def test_timeline_labels_never_overlap(calculator):
     assert len(preview.pit_laps) > 100  # 24 h: many stops
     preview.resize(600, 80)
     assert not preview.grab().isNull()
+
+
+def test_fuel_tile_back_after_energy_only_car(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=0, fuel=0, energy=4.0)
+    assert panel.tile_fuel.isHidden()
+    set_race(panel, laps=0, tank=100, fuel=3.0)  # fuel car, race not set yet
+    assert not panel.tile_fuel.isHidden()
+
+
+def test_details_full_tank_and_refuel_stops(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=10, tank=100, fuel=3.0)  # race fits in one tank
+    assert panel.usage_fuel.stint_laps.text() == "33.33"  # a full tank, not the race
+    titles = [label.text() for label in calculator.findChildren(QLabel)]
+    assert "Refuel Stops" in titles and "Pit Stops" in titles  # tile keeps plan stops
+
+
+def test_start_fuel_below_one_lap_warned(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=20, tank=100, fuel=3.0)
+    panel.refill_fuel.amount_start.setValue(2.0)
+    assert not panel.strategy.stops and "Starting fuel" in panel.label_strategy.text()
+
+
+def test_start_time_window_balanced_margin_unit(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=45, fuel=3.0)
+    panel.input_start_time.set_minutes(14 * 60)
+    table = panel.table_plan
+    assert table.item(1, 3).text() == "14:22" and table.item(1, 2).text() == "10-15"  # 15 laps of 90 s
+    panel.input_rules.balanced.setChecked(True)
+    assert panel.strategy.stints == [14, 13, 13]
+    panel.input_race.margin_kind.setCurrentIndex(1)  # fuel units
+    panel.input_race.margin.setValue(3.0)
+    assert panel.strategy.max_stint == 14 and panel.input_race.margin.suffix() == " L"
+    config = cfg.user.config["fuel_calculator"]
+    assert config["input_safety_margin_kind"] == 1 and config["enable_balanced_stints"] is True
+    assert config["input_race_start_minutes"] == 14 * 60
+
+
+def test_timeline_tooltip_and_safety_car(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=45, fuel=3.0, pit=60)
+    preview = panel.pit_preview
+    preview.resize(600, 80)
+    preview.grab()
+    x = preview._bar.left() + 15 / 40 * preview._bar.width()
+    assert "Stop 1" in preview.tooltip_text(x) and "Window 10-15" in preview.tooltip_text(x)
+    assert "Stint 1" in preview.tooltip_text(preview._bar.left() + 5)
+    safety_car = panel.input_safety_car
+    with panel.batch():
+        safety_car.enabled.setChecked(True)
+        safety_car.lap.setValue(10)
+        safety_car.laps.setValue(4)
+        safety_car.pit.setChecked(True)
+    assert panel.strategy.safety_car == (10, 4) and panel.strategy.stops[0].lap == 10
+    assert "Without safety car" in safety_car.label_result.text()
+    assert "Safety Car 10-13" in panel.label_strategy.text()
+
+
+def test_drivers_and_comparison_cards(calculator):
+    panel = calculator.panel_calculator
+    assert panel.input_drivers.isHidden() and panel.card_driver_times.isHidden()
+    set_race(panel, laps=60, tank=40, fuel=2.0, pit=60)
+    with panel.batch():
+        panel.input_rules.drivers.setValue(2)
+        panel.input_drivers.rows[1][1].setValue(2.0)  # 2nd driver 2 s slower
+        panel.input_drivers.rows[0][3].setValue(40)  # 1st driver: 40 min at most
+    assert not panel.input_drivers.isHidden() and not panel.card_driver_times.isHidden()
+    assert panel.strategy.stint_drivers == [1, 2, 2]
+    assert cfg.user.config["fuel_calculator"]["input_driver_table"] == "0:0:40,2:0:0"
+    table = panel.card_driver_times.table
+    assert table.rowCount() == 2 and table.item(0, 1).text() == "1"
+    assert not panel.card_comparison.isHidden() and panel.card_comparison.table.rowCount() >= 2
+    panel.input_pace.saving_cost.setValue(0.5)
+    assert "Saving Cost" in panel.label_one_less.text()
+
+
+def test_estimate_from_history(calculator):
+    panel = calculator.panel_calculator
+    laps = []
+    number = 1
+    for stint in range(3):
+        for lap in range(10):
+            laps.append(ConsumptionDataSet(number, 1, 100.0 - 0.09 * lap, 3.0))
+            number += 1
+        if stint < 2:
+            laps += [ConsumptionDataSet(number, 1, 125.0, 3.0), ConsumptionDataSet(number + 1, 1, 125.0, 1.0)]
+            number += 2
+    calculator.panel_history.refresh(list(reversed(laps)))
+    panel.input_pace.button_estimate.click()
+    assert panel.input_race.pit_seconds.value() == pytest.approx(50, abs=1)
+    assert panel.input_pace.fuel_effect.value() == pytest.approx(0.3, abs=0.02)
+    assert "Pit Stop Time" in panel.input_pace.label_estimate.text()
+
+
+def test_history_rows_added_not_rebuilt(calculator):
+    history = calculator.panel_history
+    table = history.table_history
+    kept = table.item(0, 0)
+    newer = ConsumptionDataSet(13, 1, 89.5, 2.9, 2.4, 1.0, 0.5, 0.4, 100.0)
+    history.refresh((newer, *HISTORY))
+    assert table.rowCount() == 4 and table.item(1, 0) is kept  # rows of laps before kept
+    assert table.item(0, 0).text() == "13"  # newest first
+    table.selectRow(0)
+    assert history.selected_indexes() == {0}  # newest lap of history data
+
+
+def test_new_scenario_inputs_saved(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, minutes=60, pit=30)
+    laps = panel.strategy.race_laps
+    with panel.batch():
+        panel.input_rules.leader_finish.setChecked(True)
+        panel.input_pit.pit_laps.setValue(80)
+        panel.input_safety_car.wear.setValue(30)
+        panel.input_rain.enabled.setChecked(True)
+        panel.input_rain.lap.setValue(10)
+        panel.input_rain.laps.setValue(5)
+    assert panel.strategy.rain == (10, 14) and panel.strategy.race_laps < laps + 1  # wet laps slower
+    assert [stop.reason for stop in panel.strategy.stops][:2] == ["rain", "dry"]
+    assert panel.table_plan.item(1, 0).text() == "1 Wet" and panel.table_plan.item(2, 0).text() == "2 Dry"
+    assert "Without rain" in panel.input_rain.label_result.text()
+    config = cfg.user.config["fuel_calculator"]
+    assert config["enable_leader_finish"] is True and config["input_pit_lap_consumption"] == 80
+    assert config["enable_rain"] is True and config["input_rain_lap"] == 10 and config["input_sc_wear"] == 30
+
+
+def test_start_at_midnight(calculator):
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=45, fuel=3.0)
+    panel.input_start_time.set_minutes(0)
+    assert panel.input_start_time.minutes() == 0 and panel.table_plan.item(1, 3).text() == "00:22"
+    panel.input_start_time.check.setChecked(False)
+    assert panel.input_start_time.minutes() == -1 and panel.table_plan.item(1, 3).text() == "0:22"
+
+
+def test_scenarios_deferred_while_changing_quickly(calculator, monkeypatch):
+    from tinypedal.ui import fuel_calculator
+
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=45, fuel=3.0)
+    monkeypatch.setattr(fuel_calculator, "SCENARIO_DELAY_MS", 150)
+    calls = []
+    real = panel.update_scenarios
+    monkeypatch.setattr(panel, "update_scenarios", lambda: calls.append(1) or real())
+    panel._last_calculation = 0.0
+    panel.input_fuel.fuel_used.setValue(3.1)  # after a pause: at once
+    assert calls == [1]
+    panel.input_fuel.fuel_used.setValue(3.2)  # arrow held: once settled
+    panel.input_fuel.fuel_used.setValue(3.3)
+    assert calls == [1] and panel._scenario_timer.isActive()
+
+
+def test_export_folder_remembered(calculator, monkeypatch, tmp_path):
+    from tinypedal.ui import fuel_calculator
+
+    panel = calculator.panel_calculator
+    set_race(panel, laps=40, tank=45, fuel=3.0)
+    folder = tmp_path / "plans"
+    folder.mkdir()
+    asked = []
+
+    def save_dialog(*args, **kwargs):
+        asked.append(kwargs.get("dir", ""))
+        return str(folder / "plan.csv"), ""
+
+    monkeypatch.setattr(fuel_calculator.QFileDialog, "getSaveFileName", staticmethod(save_dialog))
+    panel.export_plan_csv()
+    panel.export_plan_csv()
+    assert asked[1].replace("\\", "/").startswith(folder.as_posix())
+
+
+def test_full_history_shifted_not_rebuilt(calculator):
+    history = calculator.panel_history
+    laps = [ConsumptionDataSet(100 - index, 1, 90.0, 3.0) for index in range(100)]  # full history
+    history.refresh(laps)
+    table = history.table_history
+    kept = next(table.item(row, 0) for row in range(table.rowCount()) if table.item(row, 0).text() == "50")
+    history.refresh([ConsumptionDataSet(101, 1, 90.0, 3.0), *laps[:-1]])  # newest in, oldest out
+    numbers = {table.item(row, 0).text() for row in range(table.rowCount())}
+    assert table.rowCount() == 100 and "101" in numbers and "1" not in numbers
+    assert any(table.item(row, 0) is kept for row in range(table.rowCount()))  # rows kept
+    row = next(row for row in range(table.rowCount()) if table.item(row, 0).text() == "101")
+    table.selectRow(row)
+    assert history.selected_indexes() == {0}

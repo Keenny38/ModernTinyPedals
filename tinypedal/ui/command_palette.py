@@ -134,7 +134,7 @@ def build_commands(window) -> list[Command]:
         commands.append(Command(
             preset_name, tr("Preset"), search_text(preset_name, tr("Preset"), "preset load"),
             partial(load_preset, preset_name)))
-    commands += module_commands(wctrl, "Widget", window)
+    commands += module_commands(wctrl, "Overlays", window)
     commands += module_commands(mctrl, "Module", window)
     return commands
 

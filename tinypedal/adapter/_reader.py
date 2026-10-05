@@ -174,6 +174,14 @@ class Engine(ABC):
     def max_virtual_energy(self) -> float:
         """Maximum virtual energy (joule)"""
 
+    @abstractmethod
+    def expected_fuel_consumption(self) -> float:
+        """Fuel consumption per lap estimated by game (liters), 0 if unknown"""
+
+    @abstractmethod
+    def expected_energy_consumption(self) -> float:
+        """Virtual energy consumption per lap estimated by game (percent), 0 if unknown"""
+
 
 class Inputs(ABC):
     """Inputs"""
@@ -281,6 +289,10 @@ class Lap(ABC):
     @abstractmethod
     def safety_car_active(self) -> bool:
         """Is safety car active on track"""
+
+    @abstractmethod
+    def pit_entry_distance(self) -> float:
+        """Lap distance of pit lane entry (meters), -1 if unknown"""
 
 
 class Session(ABC):
@@ -413,6 +425,14 @@ class Session(ABC):
     @abstractmethod
     def time_scale(self) -> int:
         """Time scale"""
+
+    @abstractmethod
+    def chat_messages(self) -> tuple[tuple[float, str], ...]:
+        """Chat messages from game: (Unix time, "Name: message"), oldest first"""
+
+    @abstractmethod
+    def contacts(self) -> tuple[tuple[float, str, str], ...]:
+        """Contacts between cars from game: (session time, driver, other driver or "Immovable"), oldest first"""
 
     @abstractmethod
     def limits_points(self) -> float:
@@ -739,6 +759,14 @@ class Vehicle(ABC):
         """Lateral axis position (meters) related to world plane"""
 
     @abstractmethod
+    def path_lateral(self, index: int | None = None) -> float:
+        """Lateral position (meters) from game track center path (scoring data)"""
+
+    @abstractmethod
+    def track_edge(self, index: int | None = None) -> float:
+        """Track edge distance (meters) from game track center path, on vehicle side (scoring data)"""
+
+    @abstractmethod
     def position_vertical(self, index: int | None = None) -> float:
         """Vertical axis position (meters) related to world plane"""
 
@@ -810,6 +838,14 @@ class Vehicle(ABC):
     def setup(self) -> tuple[str, ...]:
         """Car setup data"""
 
+    @abstractmethod
+    def setup_name(self) -> str:
+        """Name of car setup loaded in game, empty if unknown"""
+
+    @abstractmethod
+    def setup_modified(self) -> bool:
+        """Car setup changed in garage since loaded or saved"""
+
 
 class Wheel(ABC):
     """Wheel & suspension (front left, front right, rear left, rear right)"""
@@ -863,6 +899,10 @@ class Wheel(ABC):
     @abstractmethod
     def is_detached(self, index: int | None = None) -> tuple[bool, ...]:
         """Whether wheel is detached"""
+
+    @abstractmethod
+    def surface_type(self, index: int | None = None) -> tuple[int, ...]:
+        """Surface under each wheel: 0 dry, 1 wet, 2 grass, 3 dirt, 4 gravel, 5 rumble strip, 6 special"""
 
     @abstractmethod
     def offroad(self, index: int | None = None) -> int:

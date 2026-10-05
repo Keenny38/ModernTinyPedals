@@ -12,7 +12,9 @@ import pytest
 from PySide6.QtGui import QColor, QImage
 
 from tinypedal.setting import cfg
+from tinypedal.template.widget.modern import MODERN_DESIGNS
 from tinypedal.userfile.json_setting import copy_setting
+from tinypedal.widget._modern import create_widget
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "_render")
 WIDGET_NAMES = sorted(
@@ -48,7 +50,7 @@ def default_setting():
 
 def render(name: str, modern: bool) -> QImage:
     cfg.user.config["overlay_style"]["enable_modern_style"] = modern
-    widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     image = widget.grab().toImage()
     widget.deleteLater()
@@ -69,8 +71,10 @@ def is_blank(image: QImage) -> bool:
 def fixed_clock(monkeypatch):
     """Same system clock text in every render: visual diff compares renders of two commits"""
     from tinypedal.widget import session
+    from tinypedal.widget._modern import session as modern_session
 
-    monkeypatch.setattr(session, "strftime", lambda fmt, *args: "15:04PM" if "%" in fmt else fmt)
+    for module in (session, modern_session):
+        monkeypatch.setattr(module, "strftime", lambda fmt, *args: "15:04PM" if "%" in fmt else fmt)
 
 
 @pytest.mark.parametrize("name", WIDGET_NAMES)
@@ -82,6 +86,9 @@ def test_render_widget(default_setting, name):
     if classic.width() <= 4 or classic.height() <= 4:
         pytest.skip("widget has no visible size without live data")
     assert not is_blank(modern), "modern style renders blank widget"
+    if name in MODERN_DESIGNS:  # own layout (labels, panels): only a sane size
+        assert 24 <= modern.width() <= 1600 and 16 <= modern.height() <= 1200
+        return
     # Modern font is narrower, size should never collapse or explode compared to classic
     assert 0.4 < modern.width() / classic.width() < 2.0
     assert 0.4 < modern.height() / classic.height() < 2.0

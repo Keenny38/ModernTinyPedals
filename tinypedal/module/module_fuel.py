@@ -130,6 +130,16 @@ def telemetry_energy() -> tuple[float, float]:
     return 100.0, api.read.engine.virtual_energy() * 100
 
 
+def expected_fuel() -> float:
+    """Fuel consumption per lap estimated by game (liters)"""
+    return api.read.engine.expected_fuel_consumption()
+
+
+def expected_energy() -> float:
+    """Energy consumption per lap estimated by game (percent)"""
+    return api.read.engine.expected_energy_consumption()
+
+
 @generator_init
 def calc_consumption(
     output: FuelInfo,
@@ -176,6 +186,7 @@ def calc_consumption(
             is_pit_lap = 0  # whether pit in or pit out lap
 
             telemetry_func = detect_consumption_type(is_energy)
+            expected_func = expected_energy if is_energy else expected_fuel  # until a lap is recorded
             combo_name = api.read.session.combo_name()
 
             delta_array_last, used_last_valid, laptime_pace = load_fuel_delta_file(
@@ -300,9 +311,12 @@ def calc_consumption(
                 laptime_curr > 0.3 and not in_garage,  # 300ms delay
             )
 
+        # Last valid lap, else game estimate (no lap of car & track recorded yet, no delta)
+        used_ref = used_last_valid if used_last_valid > 0 else max(expected_func(), 0.0)
+
         # Exclude first lap & pit in/out lap
         used_est = calc.end_lap_consumption(
-            used_last_valid, delta_fuel, 0 == is_pit_lap < laps_done)
+            used_ref, delta_fuel, 0 == is_pit_lap < laps_done)
 
         # Total refuel = laps left * last consumption - remaining fuel
         if api.read.session.finish_type(minfo.vehicles.finishAsLap):  # lap-type
@@ -332,7 +346,7 @@ def calc_consumption(
             est_runlaps, laptime_pace)
 
         est_empty = calc.end_lap_empty_capacity(
-            capacity, amount_curr + used_curr, used_last_valid + delta_fuel)
+            capacity, amount_curr + used_curr, used_ref + delta_fuel)
 
         est_pits_late = calc.end_stint_pit_counts(
             amount_need_rel, capacity - amount_end)
@@ -351,7 +365,7 @@ def calc_consumption(
         output.neededRelative = amount_need_rel
         output.neededAbsolute = amount_need_abs
         output.lastLapConsumption = used_last_raw
-        output.estimatedConsumption = used_last_valid + delta_fuel
+        output.estimatedConsumption = used_ref + delta_fuel
         output.estimatedValidConsumption = used_est
         output.estimatedLaps = est_runlaps
         output.estimatedMinutes = est_runmins

@@ -29,6 +29,7 @@ import os
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QPalette, QSurfaceFormat
+from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 QML_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "qml")
 MSAA_SAMPLES = 4  # smooth chart lines
+QML_TYPES = {"bool": "bool", "QColor": "color", "double": "real", "QString": "string"}  # Theme property types
 _registered = False
 
 
@@ -155,6 +157,32 @@ class Theme(QObject):
         return icon_font_family()
 
 
+def theme_copy(engine: QQmlEngine, theme: Theme) -> QObject:
+    """QML object with Theme values (updated when theme changes), Theme itself if it cannot be made
+
+    QML bindings read theme values thousands of times per second while charts zoom: from a QML object,
+    no Python call (and no wait for interpreter lock held by a background thread).
+    """
+    meta = Theme.staticMetaObject
+    lines = ["import QtQuick", "QtObject {", "    required property QtObject source"]  # QtQuick: color type
+    for number in range(meta.propertyOffset(), meta.propertyCount()):
+        prop = meta.property(number)
+        kind = QML_TYPES.get(prop.typeName())
+        if kind is None:
+            logger.error("QML: theme property %s type %s not copied", prop.name(), prop.typeName())
+            return theme
+        lines.append(f"    readonly property {kind} {prop.name()}: source.{prop.name()}")
+    lines.append("}")
+    component = QQmlComponent(engine)
+    component.setData("\n".join(lines).encode(), QUrl("theme_copy.qml"))
+    copy = component.createWithInitialProperties({"source": theme}) if component.isReady() else None
+    if copy is None:
+        logger.error("QML: theme copy: %s", component.errorString())
+        return theme
+    copy.setParent(theme)  # kept as long as theme
+    return copy
+
+
 class Translator(QObject):
     """UI text translation for QML: i18n.tr("Text"), i18n.trm("Lap 3")
 
@@ -182,7 +210,8 @@ def create_quick_view(parent: QWidget, qml_name: str, context: dict[str, QObject
     view.setClearColor(QApplication.palette().color(QPalette.ColorRole.Window))
     view.engine().addImportPath(QML_FOLDER)
     root_context = view.rootContext()
-    for name, value in {"theme": Theme(view), "i18n": Translator(view), **context}.items():
+    theme = theme_copy(view.engine(), Theme(view))
+    for name, value in {"theme": theme, "i18n": Translator(view), **context}.items():
         root_context.setContextProperty(name, value)
     view.setSource(QUrl.fromLocalFile(os.path.join(QML_FOLDER, qml_name)))
     for error in view.errors():

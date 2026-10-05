@@ -26,6 +26,7 @@ import csv
 import logging
 from typing import Any
 
+from ..const_common import MAX_SECONDS
 from ..const_file import FileExt
 from ..validator import invalid_save_name
 from . import atomic_write
@@ -63,6 +64,19 @@ def load_sector_best_file(
     except (IndexError, ValueError, TypeError, OSError):
         logger.info("MISSING: invalid sector best (%s) data", extension)
     return list(defaults), list(defaults), list(defaults), list(defaults)
+
+
+def load_theoretical_best(filepath: str, filename: str, extension: str = FileExt.SECTOR) -> float:
+    """All time theoretical best lap time (sum of all time best sectors), 0 if unknown"""
+    try:
+        with open(f"{filepath}{filename}{extension}", newline="", encoding="utf-8") as csvfile:
+            rows: list[list[Any]] = list(csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC))
+        sectors = rows[3][:3]
+    except (IndexError, ValueError, TypeError, OSError):  # no file, invalid data
+        return 0.0
+    if len(sectors) != 3 or not all(isinstance(value, float) and 0 < value < MAX_SECONDS for value in sectors):
+        return 0.0
+    return sum(sectors)
 
 
 def save_sector_best_file(

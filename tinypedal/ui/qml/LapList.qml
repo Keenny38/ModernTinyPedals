@@ -3,7 +3,8 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
 // Recorded laps grouped by session: click to compare (Shift+click: every lap between), flag (or double-click)
-// to set reference lap, click a sector time: zoom charts on sector
+// to set reference lap, click a sector time: zoom charts on sector, search by vehicle, session, conditions, note.
+// Right-click a lap or a session header: keep, note, move to trash, delta best...
 Card {
     id: root
 
@@ -11,6 +12,10 @@ Card {
     property string menuPath: ""
     property bool menuKept: false
     property string anchorPath: ""  // last clicked lap (Shift+click range start)
+    property string menuSession: ""  // session header right-clicked
+
+    // Keys back to charts (lap clicked, search left): space, arrows, A/B work again without clicking charts
+    function keysToChart() { if (root.chart) root.chart.forceActiveFocus() }
 
     // Right-click on lap: recorded laps of track can also be kept, noted & deleted
     function openLapMenu(path, item, x, y) {
@@ -33,8 +38,19 @@ Card {
             onTriggered: backend.keepLap(root.menuPath, checked)
         }
         Action { text: i18n.tr("Note..."); onTriggered: backend.editNote(root.menuPath) }
+        Action { text: i18n.tr("Use as Delta Best..."); onTriggered: backend.exportDeltaBest(root.menuPath) }
         MenuSeparator {}
-        Action { text: i18n.tr("Delete Lap"); onTriggered: backend.deleteLap(root.menuPath) }
+        Action { text: i18n.tr("Move to Trash"); onTriggered: backend.deleteLap(root.menuPath) }
+    }
+    TpMenu {
+        id: sessionMenu
+        Action { text: i18n.tr("Show Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "show") }
+        Action { text: i18n.tr("Hide Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "hide") }
+        MenuSeparator {}
+        Action { text: i18n.tr("Keep Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "keep") }
+        Action { text: i18n.tr("Stop Keeping Session Laps"); onTriggered: backend.sessionAction(root.menuSession, "unkeep") }
+        MenuSeparator {}
+        Action { text: i18n.tr("Move Session Laps to Trash..."); onTriggered: backend.sessionAction(root.menuSession, "delete") }
     }
     TpMenu {
         id: addedMenu
@@ -48,6 +64,11 @@ Card {
         Action { text: i18n.tr("5 Best Laps"); onTriggered: backend.compareBest(5) }
         MenuSeparator {}
         Action { text: i18n.tr("Uncheck All"); onTriggered: backend.clearSelection() }
+        MenuSeparator {}
+        Action { text: i18n.tr("Keep Checked Laps"); onTriggered: backend.keepChecked(true) }
+        Action { text: i18n.tr("Stop Keeping Checked Laps"); onTriggered: backend.keepChecked(false) }
+        Action { text: i18n.tr("Export Checked Laps (MoTeC)..."); onTriggered: backend.exportMotecMany(false) }
+        Action { text: i18n.tr("Move Checked Laps to Trash..."); onTriggered: backend.deleteChecked() }
     }
 
     ColumnLayout {
@@ -79,6 +100,46 @@ Card {
                 tip: i18n.tr("Hide invalid, out & in laps")
                 checked: backend.hideUnclean
                 onToggled: backend.setHideUnclean(checked)
+            }
+        }
+
+        // Search: every word found in lap name, time, session, vehicle, conditions, note or setup
+        TextField {
+            id: searchField
+            Layout.fillWidth: true
+            implicitHeight: Math.round(theme.em * 2.1)
+            placeholderText: i18n.tr("Search laps: vehicle, session, note...")
+            color: theme.text
+            placeholderTextColor: theme.dimText
+            rightPadding: theme.em * 2
+            text: backend.filterText
+            onTextEdited: searchTimer.restart()
+            Keys.onEscapePressed: { text = ""; backend.setFilter(""); root.keysToChart() }
+            Keys.onReturnPressed: { backend.setFilter(text); root.keysToChart() }
+            Keys.onEnterPressed: { backend.setFilter(text); root.keysToChart() }
+            Timer { id: searchTimer; interval: 250; onTriggered: backend.setFilter(searchField.text) }
+            background: Rectangle {
+                radius: theme.em * 0.45
+                color: theme.base
+                border.width: 1
+                border.color: searchField.activeFocus ? theme.accent : theme.border
+            }
+            Text {
+                visible: searchField.text !== ""
+                anchors.right: parent.right
+                anchors.rightMargin: theme.em * 0.6
+                anchors.verticalCenter: parent.verticalCenter
+                text: "×"
+                color: clearArea.containsMouse ? theme.text : theme.dimText
+                font.weight: Font.Bold
+                MouseArea {
+                    id: clearArea
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: { searchField.text = ""; backend.setFilter("") }
+                }
             }
         }
 
@@ -185,7 +246,16 @@ Card {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.toggleSession(row.session)
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) {
+                                    root.menuSession = row.session
+                                    sessionMenu.popup(headerArea, mouse.x, mouse.y)
+                                } else {
+                                    backend.toggleSession(row.session)
+                                    root.keysToChart()
+                                }
+                            }
                         }
                     }
                 }
@@ -228,9 +298,11 @@ Card {
                                 root.openLapMenu(row.path, lapArea, mouse.x, mouse.y)
                             } else if ((mouse.modifiers & Qt.ShiftModifier) && root.anchorPath !== "") {
                                 backend.selectRange(root.anchorPath, row.path, !row.checked)
+                                root.keysToChart()
                             } else {
                                 backend.toggleLap(row.path)
                                 root.anchorPath = row.path
+                                root.keysToChart()
                             }
                         }
                         onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.setReference(row.path) }

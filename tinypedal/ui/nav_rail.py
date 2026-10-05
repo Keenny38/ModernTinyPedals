@@ -49,7 +49,7 @@ from .tools_view import RENAMED_TOOL_KEYS, TOOL_SECTIONS
 # Pages: (key, label, icon glyph in Segoe Fluent Icons / MDL2 Assets, fallback letter)
 NAV_PAGES = (
     ("home", "Home", "", "A"),  # home
-    ("widget", "Widget", "", "W"),  # all apps grid
+    ("widget", "Overlays", "", "W"),  # all apps grid
     ("module", "Module", "", "M"),  # diagnostic
     ("preset", "Preset", "", "P"),  # library
     ("spectate", "Spectate", "", "S"),  # view

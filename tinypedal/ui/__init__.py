@@ -21,10 +21,16 @@ Application UI, style
 """
 
 import re
+import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication
+
+from ..const_app import PLATFORM
+from ..const_file import ImageFile
+
+WINDOWS_THEME_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 
 
 class UIScaler:
@@ -62,6 +68,23 @@ def resolve_color_theme(color_theme: str) -> str:
     if QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Light:
         return "Light"
     return "Dark"
+
+
+def system_dark_mode() -> bool:
+    """Whether OS taskbar & tray are dark (Windows mode, not app mode), else OS color scheme"""
+    if PLATFORM.WINDOWS and sys.platform == "win32":  # platform check also read by type checker
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_THEME_KEY) as key:
+                return winreg.QueryValueEx(key, "SystemUsesLightTheme")[0] == 0
+        except OSError:  # older Windows without light / dark mode
+            pass
+    return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+
+
+def app_icon_file(dark: bool) -> str:
+    """App icon file: white & gold for dark theme, black & gold for light theme"""
+    return ImageFile.APP_ICON_DARK if dark else ImageFile.APP_ICON
 
 
 def set_style_palette(color_theme: str):

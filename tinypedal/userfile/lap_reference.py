@@ -138,6 +138,20 @@ class LapReference:
                 return LADDER_LEVEL[step]
         return LADDER_LEVEL[-1]
 
+    def level_limit(self, level: int) -> float:
+        """Slowest lap time of a level (its last ladder step), 0 if unknown or Offline (no limit)"""
+        if not 0 <= level < LADDER_LEVEL[-1] or not self.ladder or not all(self.ladder):
+            return 0.0
+        return max(limit for limit, step_level in zip(self.ladder, LADDER_LEVEL) if step_level == level)
+
+    def next_level(self, laptime: float) -> tuple[int, float]:
+        """Next better level of a lap time & time to find (seconds), (-1, 0) if top level or unknown"""
+        level = self.level(laptime)
+        if level <= 0:
+            return -1, 0.0
+        limit = self.level_limit(level - 1)
+        return (level - 1, laptime - limit) if limit else (-1, 0.0)
+
 
 @dataclass
 class LapReferenceTable:
@@ -145,18 +159,34 @@ class LapReferenceTable:
 
     entries: dict[tuple[str, str], LapReference] = field(default_factory=dict)
     updated: str = ""
+    # Sheet tracks & matched sheet track of each track name, computed once (entries set at parse)
+    _tracks: set[str] | None = field(default=None, repr=False, compare=False)
+    _matches: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def tracks(self) -> set[str]:
-        return {track for track, _ in self.entries}
+        if self._tracks is None:
+            self._tracks = {track for track, _ in self.entries}
+        return self._tracks
 
-    def find(self, track_name: str, vehicle_key: str) -> LapReference | None:
-        """Reference of an LMU track name & driver stats vehicle key (class - brand), None if no match"""
-        track = match_track(track_name, self.tracks)
-        vehicle_class = vehicle_class_of(vehicle_key)
-        if not track or not vehicle_class:
+    def sheet_track(self, track_name: str) -> str:
+        """Sheet track of an LMU track name (cached), empty if none"""
+        track = self._matches.get(track_name)
+        if track is None:
+            track = self._matches[track_name] = match_track(track_name, self.tracks)
+        return track
+
+    def find(self, track_name: str, vehicle_key: str, vehicle_class: str = "") -> LapReference | None:
+        """Reference of an LMU track name & driver stats vehicle key (class - brand), None if no match
+
+        Args:
+            vehicle_class: game class name, when vehicle key has no class (vehicle name).
+        """
+        track = self.sheet_track(track_name)
+        sheet_class = vehicle_class_of(vehicle_key) or (vehicle_class_of(vehicle_class) if vehicle_class else "")
+        if not track or not sheet_class:
             return None
-        return self.entries.get((track, vehicle_class))
+        return self.entries.get((track, sheet_class))
 
 
 def parse_time(text: str) -> float:
@@ -262,6 +292,14 @@ def load_cache(filepath: str) -> tuple[str, float]:
             return file.read(MAX_SIZE), os.path.getmtime(path)
     except OSError:
         return "", 0.0
+
+
+def cache_time(filepath: str) -> float:
+    """Time of cached sheet (0 if none), without reading it"""
+    try:
+        return os.path.getmtime(os.path.join(filepath, CACHE_NAME))
+    except OSError:
+        return 0.0
 
 
 def save_cache(filepath: str, text: str):

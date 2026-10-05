@@ -33,6 +33,7 @@ from ..i18n import tr, trm
 from ..i18n.options import module_label, option_label, option_tooltip, search_text
 from ..module_control import mctrl, wctrl
 from ..setting import cfg
+from ..widget._modern import design_option_keys
 from ._common import BaseDialog, UIScaler, singleton_dialog
 
 MAX_RESULTS = 200
@@ -67,8 +68,12 @@ def build_index() -> list[OptionEntry]:
             if section.startswith("api_") and section != cfg.api_key:
                 continue  # only options of selected API
             section_text = f"{module_label(section)} {section}".lower()
-            for key in options:
-                entries.append(OptionEntry(section, key, config_type(section), f"{section_text} {search_text(key)}"))
+            section_type = config_type(section)
+            keys = list(options)
+            if section_type == ConfigType.WIDGET:  # options shown by current design only
+                keys = design_option_keys(cfg, section, keys)
+            for key in keys:
+                entries.append(OptionEntry(section, key, section_type, f"{section_text} {search_text(key)}"))
     return entries
 
 

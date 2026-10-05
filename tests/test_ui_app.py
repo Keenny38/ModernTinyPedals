@@ -143,6 +143,39 @@ def test_system_color_theme(ui_env):
     assert resolve_color_theme("System") in ("Dark", "Light")
 
 
+def test_app_icon_follows_os_dark_mode(ui_env, monkeypatch):
+    """White & gold icon for dark mode, black & gold for light mode, switched live"""
+    from PySide6.QtGui import QPixmap
+
+    from tinypedal.const_file import ImageFile
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui import app_icon_file, system_dark_mode
+
+    assert app_icon_file(False) == ImageFile.APP_ICON
+    assert app_icon_file(True) == ImageFile.APP_ICON_DARK
+    assert not QPixmap(ImageFile.APP_ICON).isNull()
+    assert not QPixmap(ImageFile.APP_ICON_DARK).isNull()
+    assert isinstance(system_dark_mode(), bool)
+
+    loaded = []
+    monkeypatch.setattr(app_module, "app_icon_file", lambda dark: loaded.append(dark) or app_icon_file(dark))
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    monkeypatch.setattr(app_module, "system_dark_mode", lambda: False)
+    window = app_module.AppWindow()
+    try:
+        assert loaded == [False]
+        monkeypatch.setattr(app_module, "system_dark_mode", lambda: True)
+        app_signal.refresh.emit(True)
+        app_signal.refresh.emit(True)  # icon only reloaded on mode change
+        assert loaded == [False, True]
+        tray_icon = window.findChild(QSystemTrayIcon)
+        if tray_icon is not None:
+            assert tray_icon.icon().cacheKey() == QApplication.windowIcon().cacheKey()
+    finally:
+        window.deleteLater()
+        QCoreApplication.processEvents()
+
+
 def test_command_palette(ui_env, monkeypatch):
     from tinypedal.ui import app as app_module
     from tinypedal.ui.command_palette import CommandPalette, match_commands

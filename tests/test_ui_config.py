@@ -26,10 +26,13 @@ def close_dialog(dialog):
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def open_config(section, reload_calls):
+def open_config(section, reload_calls, classic=True):
+    """Widget config dialog, of classic layout (every option) unless classic is False"""
     from tinypedal.const_file import ConfigType
     from tinypedal.ui.config import UserConfig
 
+    if "enable_classic_layout" in cfg.user.setting[section]:
+        cfg.user.setting[section]["enable_classic_layout"] = classic
     return UserConfig(
         parent=None, key_name=section, preset_name="default.json", config_type=ConfigType.WIDGET,
         user_setting=cfg.user.setting, default_setting=cfg.default.setting,
@@ -46,6 +49,26 @@ def test_config_dialog_save(ui_env, no_message_box):
         assert cfg.user.setting["speedometer"]["font_size"] == 21
         assert reloads == ["speedometer"]
         assert "setting" in ui_env  # saved
+    finally:
+        close_dialog(dialog)
+
+
+def test_config_dialog_modern_design_options(ui_env):
+    """Modern design shows only options it reads: no per cell colors, column toggles shown"""
+    dialog = open_config("relative", [], classic=False)
+    try:
+        shown = set(dialog.option_edit)
+        assert "column_time_gap" in shown and "enable_classic_layout" in shown
+        assert not any("color" in key for key in shown)
+        assert "font_name" not in shown and "display_order_position" not in shown
+        assert not dialog.has_display_order()
+    finally:
+        close_dialog(dialog)
+    dialog = open_config("relative", [], classic=True)
+    try:
+        shown = set(dialog.option_edit)
+        assert "font_color_position" in shown and "enable_classic_layout" in shown
+        assert "column_time_gap" not in shown  # modern design only
     finally:
         close_dialog(dialog)
 

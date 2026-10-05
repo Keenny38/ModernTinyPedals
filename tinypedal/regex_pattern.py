@@ -59,6 +59,7 @@ CFG_BOOL = (
     "^save_invalid_laps$|"
     "^vr_compatibility$|"
     # Partial match
+    "^column_|"
     "^notify_|"
     "align_center|"
     "enable|"
@@ -97,6 +98,7 @@ CFG_USER_IMAGE = "_image_file"
 CFG_STRING = (
     # Exact match
     "^bind$|"
+    "^input_driver_table$|"
     "^preset$|"
     "^process_id$|"
     "^open_pages$|"

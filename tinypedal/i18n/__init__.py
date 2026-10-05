@@ -55,6 +55,7 @@ _reverse: dict[str, str] = {}
 _qt_translators: list = []  # keep reference, translator is removed if garbage collected
 _message_rules: tuple = ()
 _current_code = "en"
+_overlay: dict[str, str] = {}  # modern overlay design labels
 
 
 def current_language() -> str:
@@ -80,7 +81,7 @@ def read_language_pack(filename: str) -> dict:
     if not isinstance(name, str) or not name.strip() or not isinstance(code, str) or not _valid_code.match(code):
         raise ValueError("invalid language name or code")
     pack: dict[str, Any] = {"name": name.strip(), "code": code}
-    for section in ("ui", "options", "option_help"):
+    for section in ("ui", "options", "option_help", "overlay"):
         values = data.get(section, {})
         if not isinstance(values, dict):
             raise ValueError(f"invalid {section} section")
@@ -144,10 +145,11 @@ def load_translation(code: str) -> dict[str, str]:
 
 def set_language(name: str) -> str:
     """Set UI language by display name, returns language code"""
-    global _translation, _reverse, _current_code
+    global _translation, _reverse, _current_code, _overlay
     code = LANGUAGES.get(name, "en")
     _current_code = code
     _translation = load_translation(code)
+    _overlay = load_overlay_labels(code)
     _reverse = {translated: original for original, translated in _translation.items()}
     if len(_reverse) != len(_translation):
         logger.warning("I18N: duplicated translation found, some menu actions may not work")
@@ -174,6 +176,22 @@ def _load_message_rules(code: str):
 def tr(text: str) -> str:
     """Translate UI text"""
     return _translation.get(text, text)
+
+
+def load_overlay_labels(code: str) -> dict[str, str]:
+    """Overlay label dictionary by language code (language pack: optional "overlay" table)"""
+    if code == "fr":
+        from .fr_overlay import OVERLAY_LABELS
+
+        return dict(OVERLAY_LABELS)
+    if code in _packs:
+        return dict(_packs[code].get("overlay", {}))
+    return {}
+
+
+def tr_overlay(text: str) -> str:
+    """Translate label of modern overlay design (short labels, apart from UI translation)"""
+    return _overlay.get(text, text)
 
 
 def trm(text: str) -> str:

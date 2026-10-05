@@ -22,7 +22,7 @@ Stats module
 
 from __future__ import annotations
 
-from time import localtime, strftime
+from time import localtime, strftime, time
 
 from .. import calculation as calc
 from .. import realtime_state
@@ -36,6 +36,7 @@ from ..userfile.car_setup import (
     set_car_setup_filename,
     set_car_setup_laptime,
 )
+from ..userfile.driver_history import append_record, session_record, worth_recording
 from ..userfile.driver_stats import DriverStats, load_driver_stats, save_driver_stats
 from ..validator import generator_init
 from ._base import DataModule
@@ -137,26 +138,38 @@ def record_driver_stats(
     max_moved_distance: float,
     podium_by_class: bool,
 ):
-    """Record driver stats"""
+    """Record driver stats, and history record of each stint (track, vehicle, session, best lap, result)"""
     last_reset = None  # reset check
     delayed_save = False
 
     default_stats = DriverStats()
     driver_stats = DriverStats()
     loaded_stats = default_stats
+    key_list = ("", "")
+    vehicle_class = ""
+    session_type = 0
+    finish_place = 0
+    finish_state = 0
 
     while True:
         reset = yield None
 
         # Reset
         if last_reset != reset:
-            # Save data
+            # Save data (keys of stint start: track & vehicle may already be the next ones)
             if delayed_save:
                 save_driver_stats(
-                    key_list=stats_keys(vehicle_classification),
+                    key_list=key_list,
                     stats_update=driver_stats,
                     filepath=filepath,
                 )
+                if all(key_list) and worth_recording(driver_stats.valid, driver_stats.invalid, driver_stats.seconds):
+                    append_record(filepath, session_record(
+                        track=key_list[0], vehicle=key_list[1], session=session_type,
+                        best=driver_stats.pb, valid=driver_stats.valid, invalid=driver_stats.invalid,
+                        meters=driver_stats.meters, seconds=driver_stats.seconds,
+                        position=finish_place, finish=finish_state, time=time(), vehicle_class=vehicle_class,
+                    ))
                 delayed_save = False
 
             # Delay reset until driving
@@ -166,8 +179,10 @@ def record_driver_stats(
 
             # Load driver stats
             driver_stats = DriverStats()
+            key_list = stats_keys(vehicle_classification)
+            vehicle_class = api.read.vehicle.class_name()
             loaded_stats = load_driver_stats(
-                key_list=stats_keys(vehicle_classification),
+                key_list=key_list,
                 filepath=filepath,
             )
             delayed_save = True
@@ -181,6 +196,9 @@ def record_driver_stats(
             fuel_last = 0.0
             last_finish_state = 99999
             gps_last = (FLOAT_INF, FLOAT_INF, FLOAT_INF)
+            race_started = False
+            finish_place = 0
+            finish_state = 0
 
         # General
         lap_stime = api.read.timing.start()
@@ -242,6 +260,11 @@ def record_driver_stats(
 
         # Race session stats
         if session_type == 4:
+            # Race start: once per stint, after green flag
+            if not race_started and not api.read.session.pre_race():
+                race_started = True
+                driver_stats.starts += 1
+
             # Penalties
             num_penalties = api.read.vehicle.number_penalties()
             if last_num_penalties > num_penalties:
@@ -251,18 +274,23 @@ def record_driver_stats(
                 last_num_penalties = num_penalties
 
             # Finish place
-            finish_state = api.read.vehicle.finish_state()
-            if last_finish_state > finish_state:
-                last_finish_state = finish_state
-            elif 0 == last_finish_state < finish_state:
-                last_finish_state = finish_state
-                if finish_state == 1:  # finished
+            curr_finish_state = api.read.vehicle.finish_state()
+            if last_finish_state > curr_finish_state:
+                last_finish_state = curr_finish_state
+            elif 0 == last_finish_state < curr_finish_state:
+                last_finish_state = finish_state = curr_finish_state
+                if curr_finish_state == 1:  # finished
                     driver_stats.races += 1
                     finish_place = finish_position(podium_by_class)
+                    if finish_place > 0:
+                        driver_stats.positions += finish_place
+                        driver_stats.placed += 1
                     if finish_place == 1:
                         driver_stats.wins += 1
                     if finish_place <= 3:
                         driver_stats.podiums += 1
+                elif curr_finish_state in (2, 3):  # DNF, DQ
+                    driver_stats.dnf += 1
 
         # Output stats data
         output.metersDriven = driver_stats.meters + loaded_stats.meters

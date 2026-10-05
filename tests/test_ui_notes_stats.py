@@ -132,7 +132,7 @@ def test_notes_sort_without_errors(notes_editor):
     assert notes_column(notes_editor, 0) == ["0", "100", "200", "300"]
 
 
-# --- Driver stats viewer
+# --- Driver stats viewer (Qt Quick page, state in quick/stats_backend.py)
 @pytest.fixture
 def stats_file(ui_env):
     stats = {
@@ -149,14 +149,17 @@ def stats_file(ui_env):
 
 
 @pytest.fixture
-def stats_viewer(dialogs, stats_file):
+def stats_viewer(dialogs, stats_file, monkeypatch):
     from tinypedal.api_control import api
+    from tinypedal.ui._common import BaseDialog
     from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
 
+    monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     api.read.session.track_name = lambda: "Spa"
     viewer = DriverStatsViewer(None)
-    yield viewer
-    close(viewer)
+    yield viewer.backend
+    viewer.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def load_stats():
@@ -165,44 +168,39 @@ def load_stats():
 
 
 def test_stats_viewer_shows_current_track(stats_viewer):
-    table = stats_viewer.table_stats
     assert stats_viewer.selected_stats_key == "Spa"
-    assert table.rowCount() == 2
-    assert table.item(0, 0).text() == "LMP2"  # sorted by personal best
-    gt3 = 1
-    header = stats_viewer.table_header_key
-    assert table.item(gt3, header.index("pb")).text() == "2:18.500"
-    assert table.item(gt3, header.index("rb")).text() not in ("0", "0.0")  # invalid time shown as no time
-    assert table.item(gt3, header.index("seconds")).text() == "2.0"  # hours
+    assert stats_viewer.row_keys() == ["LMP2", "GT3"]  # sorted by personal best
+    assert stats_viewer.cell("GT3", "pb").text == "2:18.500"
+    assert stats_viewer.cell("GT3", "rb").text not in ("0", "0.0")  # invalid time shown as no time
+    assert stats_viewer.cell("GT3", "seconds").text == "2 h 00 min"  # driving time
+    assert stats_viewer.rows.rowCount() == 2
 
 
 def test_stats_viewer_display_units(stats_viewer, monkeypatch):
-    from tinypedal.ui import driver_stats_viewer
+    from tinypedal.ui.quick import stats_backend
 
     monkeypatch.setitem(cfg.units, "odometer_unit", "Kilometer")
     monkeypatch.setitem(cfg.units, "fuel_unit", "Gallon")
-    assert driver_stats_viewer.parse_display_value("meters", 125000.0) == 125.0
-    assert driver_stats_viewer.parse_display_value("liters", 3.785411784) == pytest.approx(1.0)
-    assert driver_stats_viewer.format_header_key("meters") == "Km"
-    assert driver_stats_viewer.format_header_key("liters") == "Gallons"
+    assert stats_backend.parse_display_value("meters", 125000.0) == 125.0
+    assert stats_backend.parse_display_value("liters", 3.785411784) == pytest.approx(1.0)
+    assert stats_backend.format_header_key("meters") == "Km"
+    assert stats_backend.format_header_key("liters") == "Gallons"
     monkeypatch.setitem(cfg.units, "odometer_unit", "Mile")
-    assert driver_stats_viewer.format_header_key("meters") == "Miles"
-    assert driver_stats_viewer.format_header_key("races") == "Finishes"
+    assert stats_backend.format_header_key("meters") == "Miles"
+    assert stats_backend.format_header_key("races") == "Finishes"
 
 
 def test_stats_viewer_reset_lap_time(stats_viewer, dialogs):
-    header = stats_viewer.table_header_key
-    stats_viewer.reset_stat(1, header.index("rb"))  # no lap time
+    stats_viewer.resetLapTime("GT3", "rb")  # no lap time
     assert dialogs
-    stats_viewer.reset_stat(1, header.index("pb"))
+    stats_viewer.resetLapTime("GT3", "pb")
     assert load_stats()["Spa"]["GT3"]["pb"] > 9999
 
 
 def test_stats_viewer_remove_vehicle_and_track(stats_viewer):
-    table = stats_viewer.table_stats
-    table.setCurrentCell(0, 0)
-    stats_viewer.remove_vehicle()
+    stats_viewer.selectRow("LMP2")
+    stats_viewer.removeVehicle()
     assert list(load_stats()["Spa"]) == ["GT3"]
-    stats_viewer.delete_stats_key()
+    stats_viewer.deleteTrack("")
     assert "Spa" not in load_stats()
     assert stats_viewer.selected_stats_key == "Monza"

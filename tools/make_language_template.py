@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tinypedal.i18n import LANGUAGE_PACK_FORMAT
 from tinypedal.i18n.fr import TRANSLATION
 from tinypedal.i18n.fr_messages import MESSAGE_RULES
+from tinypedal.i18n.fr_overlay import OVERLAY_LABELS
 from tinypedal.i18n.options import load_data
 
 
@@ -32,11 +33,13 @@ def build_template(code: str, name: str) -> dict:
         "messages": [[pattern, ""] for pattern, _ in MESSAGE_RULES if isinstance(pattern, str)],
         "options": {key: "" for key in options},
         "option_help": {key: "" for key in option_help},
+        "overlay": {key: "" for key in OVERLAY_LABELS},
         "_reference": {
             "ui": dict(TRANSLATION),
             "messages": [[pattern, replacement] for pattern, replacement in MESSAGE_RULES
                          if isinstance(pattern, str) and isinstance(replacement, str)],
             "options": options,
+            "overlay": dict(OVERLAY_LABELS),
         },
     }
 

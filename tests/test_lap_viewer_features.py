@@ -249,9 +249,15 @@ def test_keep_note_and_delete(viewer, laps, monkeypatch):
     module_recorder.remove_old_laps(folder, 1, keep_best=0)  # recorder cleanup over limit
     assert os.path.exists(laps[0])  # kept lap never removed
     backend.refresh()
-    backend.deleteLap(laps[0])
+    backend.deleteLap(laps[0])  # lap read by background loading: moved to trash once loaded
+    wait_loaded(viewer)
     assert not os.path.exists(laps[0]) and laps[0] not in rows_by_path(backend)
     assert os.path.basename(laps[0]) not in load_marks(folder)
+    assert backend.undoText  # moved to trash, can be restored
+    backend.undoDelete()
+    wait_loaded(viewer)
+    assert os.path.exists(laps[0]) and laps[0] in rows_by_path(backend)
+    assert os.path.basename(laps[0]) in kept_laps(folder) and not backend.undoText  # marks restored
 
 
 def test_added_lap_actions(viewer, tmp_path):

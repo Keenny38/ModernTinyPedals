@@ -10,6 +10,7 @@ from tests.test_readers import lmu_api
 from tests.test_widget_benchmark import drive, fill_field
 from tinypedal.module_info import minfo
 from tinypedal.setting import cfg
+from tinypedal.widget._modern import create_widget
 
 LIST_WIDGETS = ("standings", "relative")
 
@@ -32,7 +33,7 @@ def run_widget(name: str, data, frames: int = 4, **options):
     """Build widget with options, update & paint a few frames, return last image"""
     wcfg = cfg.user.setting[name]
     wcfg.update(options)
-    widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     event = QTimerEvent(0)
     try:
@@ -55,9 +56,9 @@ def visible_pixels(image) -> int:
 
 
 def all_columns(name: str) -> dict:
-    """Every show_* option of widget enabled"""
+    """Every show_* & column_* (modern design) option of widget enabled"""
     return {key: True for key, value in cfg.default.setting[name].items()
-            if key.startswith("show_") and isinstance(value, bool)}
+            if key.startswith(("show_", "column_")) and isinstance(value, bool)}
 
 
 @pytest.mark.parametrize("name", LIST_WIDGETS)

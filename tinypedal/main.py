@@ -33,7 +33,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import realtime_state, version_check
 from .const_app import APP_NAME, PLATFORM, VERSION
-from .const_file import ConfigType, FontFile, ImageFile, LogFile
+from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language
 from .log_handler import set_logging_level
 from .setting import cfg
@@ -138,8 +138,10 @@ def init_gui() -> QApplication:
 
 
 def set_app_icon(root: QApplication):
-    """Set APP icon"""
-    root.setWindowIcon(QIcon(ImageFile.APP_ICON))
+    """Set APP icon, matching OS light / dark mode (updated on change by main window)"""
+    from .ui import app_icon_file, system_dark_mode  # require QApplication (UI scaler)
+
+    root.setWindowIcon(QIcon(app_icon_file(system_dark_mode())))
     # Set window icon for X11/Wayland (workaround)
     if not PLATFORM.WINDOWS:
         root.setDesktopFileName("TinyPedal-overlay")

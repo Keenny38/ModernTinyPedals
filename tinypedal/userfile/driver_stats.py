@@ -18,28 +18,39 @@
 
 """
 Driver stats file function
+
+Stats file is read, changed & saved by stats module (its thread) and driver stats viewer (page):
+STATS_LOCK keeps each read-modify-save whole (session history file too).
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
-from collections.abc import KeysView
+import os
+import threading
+from collections.abc import KeysView, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from time import sleep
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 from ..const_common import MAX_SECONDS
 from ..const_file import FileExt, StatsFile
 from ..validator import convert_value_type, purge_data_key
 from .json_setting import (
     create_backup_file,
+    create_versioned_backup,
     save_and_verify_json_file,
     save_json_file,
     set_backup_timestamp,
 )
 
 logger = logging.getLogger(__name__)
+
+STATS_LOCK = threading.RLock()  # stats & session history files: one read-modify-save at a time
+BACKUP_COUNT = 10  # automatic backups kept before viewer edits
 
 
 @dataclass
@@ -59,6 +70,10 @@ class DriverStats:
         races: number of races completed.
         wins: number of wins.
         podiums: number of podiums.
+        starts: number of race starts (race session driven after green flag).
+        dnf: number of races not finished or disqualified.
+        positions: sum of finish positions (average finish = positions / placed).
+        placed: number of finishes with recorded position.
     """
 
     pb: float = MAX_SECONDS
@@ -73,6 +88,10 @@ class DriverStats:
     races: int = 0
     wins: int = 0
     podiums: int = 0
+    starts: int = 0
+    dnf: int = 0
+    positions: int = 0
+    placed: int = 0
 
     @classmethod
     def keys(cls) -> KeysView[str]:
@@ -88,17 +107,136 @@ class DriverStats:
 def validate_stats_file(stats_user: dict) -> dict:
     """Validate stats file
 
-    Full validation for every primary key (track name) and secondary key (vehicle name),
+    Full validation for every primary key (track name) and secondary key (vehicle name), and value
+    type of every stat (text, null or bool replaced by number, default if not a number).
     Only required for loading file in Driver Stats Viewer.
     """
+    default_dict = DriverStats.__dict__
+    default_type = get_type_hints(DriverStats)
     for key in stats_user:
         if not isinstance(stats_user[key], dict):
             stats_user[key] = {}
         sub_value = stats_user[key]
         for sub_key in sub_value:
-            if not isinstance(sub_value[sub_key], dict):
+            vehicle_stats = sub_value[sub_key]
+            if not isinstance(vehicle_stats, dict):
                 sub_value[sub_key] = {}
+                continue
+            for name, value in vehicle_stats.items():
+                value_type = default_type.get(name)
+                if value_type is not None and (isinstance(value, bool) or not isinstance(value, value_type)):
+                    vehicle_stats[name] = convert_value_type(value, default_dict[name], value_type)
     return stats_user
+
+
+def stats_entry(stats_user: dict, path: Sequence[str]) -> Any:
+    """Copy of stats value at path (track, vehicle, stat name), None if not found"""
+    value: Any = stats_user
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return None
+        value = value[key]
+    return copy.deepcopy(value)
+
+
+def set_stats_entry(stats_user: dict, path: Sequence[str], value: Any) -> None:
+    """Set stats value at path (track, vehicle, stat name), parents created, removed if value is None"""
+    if not path:
+        return
+    parent = stats_user
+    for key in path[:-1]:
+        parent = get_sub_dict(parent, key)
+    if value is None:
+        parent.pop(path[-1], None)
+    else:
+        parent[path[-1]] = copy.deepcopy(value)
+
+
+def is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def best_lap_time(*values: Any) -> float:
+    """Fastest valid lap time of values, 0 if none"""
+    times = [float(value) for value in values if is_number(value) and 0 < value < MAX_SECONDS]
+    return min(times) if times else 0.0
+
+
+def merge_vehicle_stats(current: dict, restored: dict) -> dict:
+    """Restored vehicle stats (undo) merged with stats recorded since: counters added, best lap times kept"""
+    merged = copy.deepcopy(current)
+    for key, value in restored.items():
+        old = merged.get(key)
+        if DriverStats.is_lap_time(key):
+            merged[key] = best_lap_time(old, value) or copy.deepcopy(value)
+        elif is_number(value) and is_number(old):
+            merged[key] = old + value
+        elif key not in merged:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def merge_stats_entry(current: Any, restored: Any, path: Sequence[str]) -> Any:
+    """Restored stats at path (track, vehicle or stat) merged with current stats there
+
+    Current stats at a removed path were all recorded after removal: added to restored ones.
+    """
+    if restored is None:
+        return copy.deepcopy(current)
+    if current is None:
+        return copy.deepcopy(restored)
+    if len(path) == 1 and isinstance(current, dict) and isinstance(restored, dict):  # track
+        merged = copy.deepcopy(current)
+        for vehicle, stats in restored.items():
+            if isinstance(merged.get(vehicle), dict) and isinstance(stats, dict):
+                merged[vehicle] = merge_vehicle_stats(merged[vehicle], stats)
+            elif vehicle not in merged:
+                merged[vehicle] = copy.deepcopy(stats)
+        return merged
+    if len(path) == 2 and isinstance(current, dict) and isinstance(restored, dict):  # vehicle
+        return merge_vehicle_stats(current, restored)
+    if len(path) == 3 and DriverStats.is_lap_time(path[-1]):  # lap time: best kept
+        return best_lap_time(current, restored) or copy.deepcopy(restored)
+    return copy.deepcopy(restored)
+
+
+def backup_prefix(filename: str = StatsFile.DRIVER) -> str:
+    return f"{filename}{FileExt.STATS}{FileExt.BACKUP}-auto-"
+
+
+def backup_stats_file(filepath: str, filename: str = StatsFile.DRIVER) -> bool:
+    """Automatic backup of stats file before an edit (last BACKUP_COUNT kept), True if created"""
+    return create_versioned_backup(f"{filename}{FileExt.STATS}", filepath, max_count=BACKUP_COUNT, min_interval=0)
+
+
+def list_stats_backups(filepath: str, filename: str = StatsFile.DRIVER) -> list[tuple[str, float]]:
+    """Automatic backups of stats file (name, creation time), newest first"""
+    prefix = backup_prefix(filename)
+    backups = []
+    try:
+        names = [name for name in os.listdir(filepath) if name.startswith(prefix)]
+    except OSError:
+        return []
+    for name in names:
+        try:  # timestamp in name: copy keeps modified time of stats file
+            created = datetime.strptime(name[len(prefix):][:19], "%Y-%m-%d-%H-%M-%S").timestamp()
+        except ValueError:
+            continue
+        backups.append((name, created))
+    backups.sort(key=lambda backup: backup[0], reverse=True)
+    return backups
+
+
+def load_stats_backup(filepath: str, name: str, filename: str = StatsFile.DRIVER) -> dict | None:
+    """Stats of an automatic backup, None if invalid"""
+    if not name.startswith(backup_prefix(filename)) or os.path.basename(name) != name:
+        return None
+    try:
+        with open(os.path.join(filepath, name), encoding="utf-8") as jsonfile:
+            stats_user = json.load(jsonfile)
+    except (OSError, ValueError):
+        return None
+    return stats_user if isinstance(stats_user, dict) else None
 
 
 def get_sub_dict(source: dict, key_name: str) -> dict:
@@ -140,6 +278,12 @@ def save_driver_stats(
     """Save driver stats"""
     if not key_list or not all(key_list):  # ignore invalid key name
         return
+    with STATS_LOCK:  # viewer edit not saved between load & save
+        add_driver_stats(key_list, stats_update, filepath, filename)
+
+
+def add_driver_stats(key_list: tuple[str, str], stats_update: DriverStats, filepath: str, filename: str) -> None:
+    """Add stats to saved stats (best lap times kept), see save_driver_stats"""
     # Load stats with limited attempts
     load_attempts = 10
     while load_attempts > 0:

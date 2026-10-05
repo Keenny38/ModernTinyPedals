@@ -28,6 +28,7 @@ from tinypedal.module_info import VehicleDataSet, minfo
 from tinypedal.perf_monitor import PerfMonitor
 from tinypedal.setting import cfg
 from tinypedal.userfile.json_setting import copy_setting
+from tinypedal.widget._modern import create_widget
 
 pytestmark = pytest.mark.benchmark
 
@@ -169,7 +170,7 @@ def test_widget_frame_time(live_api, name):
     # A number measured against an empty field would be meaningless for the list widgets
     assert minfo.vehicles.totalVehicles == FIELD_SIZE, "field missing from minfo"
     assert len(minfo.relative.standings) == FIELD_SIZE, "standings order missing from minfo"
-    widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     event = QTimerEvent(0)
     PerfMonitor.set_enabled(True)

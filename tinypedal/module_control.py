@@ -31,6 +31,7 @@ from typing import Any
 from . import module, widget
 from .const_file import ConfigType
 from .setting import cfg
+from .widget._modern import create_widget
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,13 @@ class ModuleControl:
         """Start selected module"""
         if cfg.user.setting[name]["enable"] and name not in self._active_modules:
             # Create module instance and add to dict
-            self._active_modules[name] = self._imported_modules[name].Realtime(cfg, name)
-            self._active_modules[name].start()
+            target = self._imported_modules[name]
+            if self.type_id == ConfigType.WIDGET:
+                instance = create_widget(target, cfg, name)  # modern design or classic
+            else:
+                instance = target.Realtime(cfg, name)
+            self._active_modules[name] = instance
+            instance.start()
 
     def __close_enabled(self):
         """Close all enabled module"""

@@ -79,7 +79,7 @@ WIDGET_CATEGORIES = (
         "suspension_", "weight_distribution",
     )),
     ("Track & Traffic", (
-        "black_box", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
+        "black_box", "chat", "elevation", "flag", "heading", "navigation", "pace_notes", "radar", "track_", "traffic",
         "weather",
     )),
 )
