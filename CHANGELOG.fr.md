@@ -3,6 +3,12 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.20.1 (2026-10-06)
+
+### Mises à jour depuis l'app
+
+- **L'installeur Windows est de nouveau publié en `.exe`** : `ModernTinyPedals-<version>-windows-setup.exe`, avec son fichier `.sha256`, à côté de `-setup.zip` et `-source.zip`. Les versions jusqu'à 0.19 peuvent de nouveau se mettre à jour depuis l'app : elles cherchent ces fichiers, absents de la 0.20.0.
+
 ## 0.20.0 (2026-10-05)
 
 Un audit complet de l'app : plus de 150 corrections, 7 nouveaux overlays, le design moderne au niveau de l'ancien, de nouvelles données de Le Mans Ultimate dans les overlays, les pages Calculateur de course, Statistiques pilote, Overlays et Rejeux du jeu refaites, beaucoup d'outils en plus dans la visionneuse, et les notes de version dans la langue de l'app. Plus de 2 300 tests vérifient maintenant 91 % du code.

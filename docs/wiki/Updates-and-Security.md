@@ -27,6 +27,8 @@ The app checks GitHub for a new release at startup (once per start, `check_for_u
 4. checks the installer's **Authenticode signature** when it is signed, and refuses an invalid signature (an unsigned installer is accepted and logged);
 5. runs the installer silently: it closes the app, updates it and starts it again. Your presets and data are kept.
 
+Apps up to 0.19 download `ModernTinyPedals-<version>-windows-setup.exe` instead and check it against its `.sha256` file. Release 0.20.0 has neither: these apps update from the app again from 0.20.1 on.
+
 The SHA-256 check detects a corrupt or altered download. As the checksum comes from the same release page, it does not prove who published the file: the build provenance attestation does (see below).
 
 ### Skip a version
@@ -42,16 +44,18 @@ To turn update checks off, uncheck `check_for_updates_on_startup`. `update_repos
 
 ## Release files
 
-Every release on the [Releases page](https://github.com/Keenny38/ModernTinyPedals/releases) has two files:
+Every release on the [Releases page](https://github.com/Keenny38/ModernTinyPedals/releases) has these files (0.20.0 only has the two ZIP files):
 
 | File | Content |
 |---|---|
-| `ModernTinyPedals-<version>-setup.zip` | The Windows installer `ModernTinyPedals-<version>-windows-setup.exe` |
+| `ModernTinyPedals-<version>-windows-setup.exe` | The Windows installer |
+| `ModernTinyPedals-<version>-windows-setup.exe.sha256` | Its SHA-256 (`sha256sum` format), checked by the updater of apps up to 0.19 |
+| `ModernTinyPedals-<version>-setup.zip` | The same installer, zipped: downloaded by the app updater since 0.20 |
 | `ModernTinyPedals-<version>-source.zip` | The source code with its version number set, for Linux or running from source |
 
 GitHub also adds its own automatic `Source code` archives to every release. They are not built by the release workflow and are not covered by the checksums and attestations: prefer `-source.zip`.
 
-Releases are built and published by GitHub Actions from the code of the repository, with nothing added by hand. The Windows executable is started in a self-test mode before publishing: if a module, data file, QML page or worker process fails, nothing is published. Release notes start with the changelog of the version, then list its commits (**Added**, **Fixed**, **Changed**) and the SHA-256 of both files.
+Releases are built and published by GitHub Actions from the code of the repository, with nothing added by hand. The Windows executable is started in a self-test mode before publishing: if a module, data file, QML page or worker process fails, nothing is published. Release notes start with the changelog of the version, then list its commits (**Added**, **Fixed**, **Changed**) and the SHA-256 of every file.
 
 ## Verifying a download
 
@@ -62,7 +66,7 @@ Compare the checksum of your file with the SHA256 list at the end of the release
 Windows (PowerShell):
 
 ```powershell
-Get-FileHash .\ModernTinyPedals-<version>-setup.zip -Algorithm SHA256
+Get-FileHash .\ModernTinyPedals-<version>-windows-setup.exe -Algorithm SHA256
 ```
 
 Linux:
@@ -76,7 +80,7 @@ sha256sum ModernTinyPedals-<version>-source.zip
 Every release file has a signed **build provenance attestation**: proof that the file was built by the `Build and Release` workflow of this repository, from a commit of this repository. Verify it with the [GitHub CLI](https://cli.github.com/):
 
 ```bash
-gh attestation verify ModernTinyPedals-<version>-setup.zip --repo Keenny38/ModernTinyPedals
+gh attestation verify ModernTinyPedals-<version>-windows-setup.exe --repo Keenny38/ModernTinyPedals
 ```
 
 ```bash

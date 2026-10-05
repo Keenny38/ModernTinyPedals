@@ -133,7 +133,7 @@ jobs:
         name: source
         path: ModernTinyPedals-${{ needs.version.outputs.app_ver }}-source.zip
 
-  # Windows installer, published zipped (setup.zip): with the source ZIP, the only files of a release
+  # Windows installer, published as is (with its .sha256 file) & zipped (setup.zip), beside the source ZIP
   windows:
     needs: version
     if: needs.version.outputs.app_ver != ''
@@ -154,6 +154,7 @@ jobs:
       USE_AZURE_SIGNING: ${{ secrets.WINDOWS_CERT_PFX_BASE64 == '' && vars.AZURE_SIGNING_ACCOUNT != '' && secrets.AZURE_CLIENT_SECRET != '' }}
     outputs:
       sha256: ${{ steps.get_hash.outputs.hash_output }}
+      installer_sha256: ${{ steps.get_hash.outputs.installer_hash }}
     steps:
     - name: Checkout tested commit
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -266,7 +267,7 @@ jobs:
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256
 
-    # The app updater downloads this ZIP and runs the installer inside (only file of the archive)
+    # The app updater (0.20 and later) downloads this ZIP and runs the installer inside (only file of the archive)
     - name: ZIP Windows installer
       shell: pwsh
       run: |
@@ -274,19 +275,28 @@ jobs:
           -DestinationPath "./ModernTinyPedals-$env:APP_VER-setup.zip"
 
     # sha256sum format "<hash>  <file>" (two spaces), listed in release notes, checked by "sha256sum -c"
-    # & by the app updater (with the asset digest given by GitHub)
+    # & by the app updater (with the asset digest given by GitHub). The installer also gets its .sha256 file:
+    # apps up to 0.19 update only from a release with "<name>-windows-setup.exe" & "<name>-windows-setup.exe.sha256"
     - name: Check hash sum
       id: get_hash
       run: |
         sha256hash=$(sha256sum ModernTinyPedals-$APP_VER-setup.zip | sed 's/ \*/  /')
+        installer=ModernTinyPedals-$APP_VER-windows-setup.exe
+        installer_hash=$(sha256sum $installer | sed 's/ \*/  /')
+        printf '%s\n' "$installer_hash" > $installer.sha256
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
+        echo "installer_hash=${installer_hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
+        echo $installer_hash
 
     - name: Upload build
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: windows
-        path: ModernTinyPedals-${{ needs.version.outputs.app_ver }}-setup.zip
+        path: |
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-setup.zip
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe.sha256
 
   # Tag the tested commit and publish release with notes (the changelog)
   release:
@@ -314,13 +324,14 @@ jobs:
         path: builds
         merge-multiple: true
 
-    # Only the source ZIP & setup ZIP are published; the installer inside setup.zip is attested too,
-    # so the extracted file can be checked as well
-    - name: Extract installer for attestation
+    # Published installer, the one inside setup.zip & its .sha256 file must all match
+    - name: Check installer files
       run: |
         mkdir extracted
         unzip -j "builds/ModernTinyPedals-$APP_VER-setup.zip" -d extracted
-        ls -l builds extracted
+        cmp "extracted/ModernTinyPedals-$APP_VER-windows-setup.exe" "builds/ModernTinyPedals-$APP_VER-windows-setup.exe"
+        (cd builds && sha256sum -c "ModernTinyPedals-$APP_VER-windows-setup.exe.sha256")
+        ls -l builds
 
     # Signed proof that the files were built by this workflow from this commit, checked with
     # "gh attestation verify <file> --repo Keenny38/ModernTinyPedals"
@@ -329,20 +340,22 @@ jobs:
       with:
         subject-path: |
           builds/*.zip
-          extracted/*.exe
+          builds/*.exe
 
     - name: Release notes from commits since previous release
       env:
         SOURCE_SHA256: ${{ needs.linux.outputs.sha256 }}
         SETUP_SHA256: ${{ needs.windows.outputs.sha256 }}
+        INSTALLER_SHA256: ${{ needs.windows.outputs.installer_sha256 }}
       run: |
         python3 tools/gen_release_notes.py "v$APP_VER" > release.txt
         {
           echo ""
           echo "### SHA256"
           echo ""
-          echo "- \`$SOURCE_SHA256\`"
+          echo "- \`$INSTALLER_SHA256\`"
           echo "- \`$SETUP_SHA256\`"
+          echo "- \`$SOURCE_SHA256\`"
         } >> release.txt
         cat release.txt
 

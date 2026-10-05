@@ -6,10 +6,9 @@ Modern Tiny Pedals runs on **64-bit Windows** (installer) and on **Linux** (from
 
 ### Install
 
-1. Open the [latest release](https://github.com/Keenny38/ModernTinyPedals/releases/latest) and download `ModernTinyPedals-<version>-setup.zip`.
-2. Extract the ZIP. It contains the installer `ModernTinyPedals-<version>-windows-setup.exe`.
-3. Run the installer. It is available in English and French, asks you to accept the license (GPL v3) and can create a desktop shortcut.
-4. Start Modern Tiny Pedals from the Start menu (or let the installer start it). The [setup wizard](Getting-Started.md#first-launch) opens on first launch.
+1. Open the [latest release](https://github.com/Keenny38/ModernTinyPedals/releases/latest) and download the installer `ModernTinyPedals-<version>-windows-setup.exe` (`ModernTinyPedals-<version>-setup.zip` holds the same installer, zipped).
+2. Run the installer. It is available in English and French, asks you to accept the license (GPL v3) and can create a desktop shortcut.
+3. Start Modern Tiny Pedals from the Start menu (or let the installer start it). The [setup wizard](Getting-Started.md#first-launch) opens on first launch.
 
 The installer:
 
@@ -27,7 +26,7 @@ If a release is not code-signed, Windows SmartScreen may show "Windows protected
 Every release lists the SHA-256 of its files in the release notes, and each file has a signed build provenance attestation. Quick check in PowerShell:
 
 ```powershell
-Get-FileHash .\ModernTinyPedals-<version>-setup.zip -Algorithm SHA256
+Get-FileHash .\ModernTinyPedals-<version>-windows-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with the release notes. Full details: [Updates and Security](Updates-and-Security.md#verifying-a-download).

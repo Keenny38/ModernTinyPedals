@@ -40,7 +40,7 @@ Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/Tin
 
 ## Quick start
 
-1. **Download** `ModernTinyPedals-<version>-setup.zip` from the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page, extract it and run the installer. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
+1. **Download** `ModernTinyPedals-<version>-windows-setup.exe` from the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page and run it. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
 2. **Prepare the game**: `Borderless` or `Windowed` display mode (exclusive fullscreen hides the overlay), then the setting of your game below.
 3. **On first launch**, the setup wizard asks for the language, the game, the theme and the overlays to start with.
 4. **Start a session**: the overlay shows up as soon as the car is on track and hides otherwise.
@@ -51,7 +51,7 @@ Then:
 - **Configure an overlay**: `Overlays` tab of the main window, or `Ctrl+F` to search for an option by name.
 - **Updates**: the app tells you about a new version, shows its release notes in your language and can download and install it (`Download And Install`).
 
-Each release has two files: the Windows installer (`-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) for details and for verifying your download.
+Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) for details and for verifying your download.
 
 ### Game setup
 

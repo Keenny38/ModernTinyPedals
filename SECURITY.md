@@ -22,13 +22,13 @@ In scope: the app and its overlays, the web dashboard and the command server, th
 
 ## Verifying a download
 
-Every release is built and published by GitHub Actions from the code of this repository, with no file added by hand. A release has two files: `ModernTinyPedals-<version>-setup.zip` (the Windows installer) and `ModernTinyPedals-<version>-source.zip`.
+Every release is built and published by GitHub Actions from the code of this repository, with no file added by hand. A release has the Windows installer `ModernTinyPedals-<version>-windows-setup.exe` (with its `.sha256` file, and zipped as `ModernTinyPedals-<version>-setup.zip`) and `ModernTinyPedals-<version>-source.zip`.
 
 - **SHA-256**: the hash of each file is listed in the release notes, and shown by GitHub next to each file. The app updater checks it before running the installer, and checks the installer signature when it is signed.
-- **Build provenance attestation** (since 0.20.0): signed proof that the file was built by the `Build and Release` workflow from a commit of this repository. The installer inside `setup.zip` is attested too. With [GitHub CLI](https://cli.github.com/):
+- **Build provenance attestation** (since 0.20.0): signed proof that the file was built by the `Build and Release` workflow from a commit of this repository. The installer and both ZIP files are attested. With [GitHub CLI](https://cli.github.com/):
 
   ```bash
-  gh attestation verify ModernTinyPedals-0.20.0-setup.zip --repo Keenny38/ModernTinyPedals
+  gh attestation verify ModernTinyPedals-0.20.1-windows-setup.exe --repo Keenny38/ModernTinyPedals
   ```
 
   ```bash

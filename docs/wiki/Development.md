@@ -212,7 +212,7 @@ python tools/make_readme_preview.py
 
 ### Release files and checksums
 
-Each release publishes `ModernTinyPedals-<version>-setup.zip` (the Windows installer inside) and `ModernTinyPedals-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
+Each release publishes the Windows installer `ModernTinyPedals-<version>-windows-setup.exe` with its `.sha256` file (the updater of apps up to 0.19 needs both), the same installer zipped as `ModernTinyPedals-<version>-setup.zip` (downloaded by the updater since 0.20) and `ModernTinyPedals-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
 
 ### Code signing
 

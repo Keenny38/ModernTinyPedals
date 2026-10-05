@@ -3,6 +3,12 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.20.1 (2026-10-06)
+
+### Updates from the app
+
+- **The Windows installer is published as an `.exe` again**: `ModernTinyPedals-<version>-windows-setup.exe`, with its `.sha256` file, beside `-setup.zip` and `-source.zip`. Apps up to 0.19 can update from the app again: they look for these files, missing from 0.20.0.
+
 ## 0.20.0 (2026-10-05)
 
 A full audit of the app: more than 150 fixes, 7 new overlays, the modern design now on par with the classic one, new Le Mans Ultimate data in the overlays, redesigned Race calculator, Driver stats, Overlays and Game Replays pages, many more tools in the telemetry viewer, and release notes in the app language. More than 2,300 tests now cover 91% of the code.
