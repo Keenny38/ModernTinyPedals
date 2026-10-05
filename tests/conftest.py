@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 # QApplication must exist before collecting tests, as UI modules read font metrics on import
 QT_APP = QApplication.instance() or QApplication(sys.argv)
+SESSION: list[pytest.Session] = []  # test session, its exit status ends the process (pytest_unconfigure)
 
 
 
@@ -45,8 +46,9 @@ def quit_like_app(isolated_user_paths):
     last test). Torn down before user paths are restored: nothing saved to real user folders.
     """
     yield
-    # Exit still hanging: stack of every thread printed and run stopped, instead of blocking until job timeout
-    faulthandler.dump_traceback_later(120, exit=True)
+    # Session end or exit still stuck: stack of every thread printed (real stderr, not pytest capture) and run
+    # stopped, instead of blocking until job timeout
+    faulthandler.dump_traceback_later(120, exit=True, file=sys.__stderr__)
     lap_backend = sys.modules.get("tinypedal.ui.quick.lap_backend")
     if lap_backend is not None:
         lap_backend.quit_workers()
@@ -56,6 +58,33 @@ def quit_like_app(isolated_user_paths):
     from tinypedal.setting import cfg
 
     cfg.flush()
+
+
+def pytest_sessionstart(session):
+    SESSION.append(session)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Process ended with pytest exit status once pytest has reported (results, coverage files written)
+
+    Interpreter exit hung on Windows runners after every test passed (Python 3.11, then 3.13: 30+ minutes,
+    randomly). What still runs is printed first, to find what holds exit.
+    """
+    if not SESSION:
+        return
+    import multiprocessing
+    import threading
+
+    alive = [f"thread {thread.name}" for thread in threading.enumerate()
+             if thread is not threading.main_thread() and not thread.daemon]
+    alive += [f"process {child.name} (pid {child.pid})" for child in multiprocessing.active_children()]
+    if alive:
+        print("Still running at exit: " + ", ".join(alive), file=sys.__stderr__)
+    for stream in (sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__):
+        if stream is not None:
+            stream.flush()
+    os._exit(int(SESSION[0].exitstatus))
 
 
 @pytest.fixture(autouse=True)
