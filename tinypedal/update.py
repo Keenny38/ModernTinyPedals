@@ -390,6 +390,8 @@ def installer_signature(path: str) -> str:
 
 def _win_verify_trust(path: str) -> str:
     """Check embedded Authenticode signature with WinVerifyTrust (no UI, no network)"""
+    if sys.platform != "win32":  # Windows API only (also skips type checking on other platforms)
+        raise OSError("WinVerifyTrust is only available on Windows")
     import ctypes
     from ctypes import wintypes
 

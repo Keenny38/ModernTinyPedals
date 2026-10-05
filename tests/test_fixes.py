@@ -65,6 +65,20 @@ def test_versioned_backup(tmp_path, monkeypatch):
     assert not json_setting.create_versioned_backup("preset.json", folder, max_count=0)
 
 
+def test_versioned_backup_without_interval_ignores_clock_resolution(tmp_path, monkeypatch):
+    """No interval: backup file time ahead of time() (coarse clock, Python 3.11 on Windows) never throttles"""
+    from tinypedal.userfile import json_setting
+
+    folder = f"{tmp_path}/"
+    (tmp_path / "preset.json").write_text("{}", encoding="utf-8")
+    assert json_setting.create_versioned_backup("preset.json", folder, max_count=5, min_interval=0)
+    backup = next(p for p in tmp_path.iterdir() if ".backup-auto-" in p.name)
+    monkeypatch.setattr(json_setting, "time", lambda: backup.stat().st_mtime - 0.01)  # clock behind file time
+    monkeypatch.setattr(json_setting, "set_backup_timestamp", lambda prefix: f"{prefix}-9999-0")
+    assert json_setting.create_versioned_backup("preset.json", folder, max_count=5, min_interval=0)
+    assert not json_setting.create_versioned_backup("preset.json", folder, max_count=5, min_interval=600)
+
+
 # --- Package B audit fixes: calculations
 def test_session_time_rounds_whole_time():
     assert calc.sec2sessiontime(599.6) == "00:10:00"  # was "00:09:00" (minutes floored, seconds rounded)

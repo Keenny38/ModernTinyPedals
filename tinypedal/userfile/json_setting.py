@@ -336,8 +336,9 @@ def create_versioned_backup(
     copied = False
     try:
         existing = sorted(name for name in os.listdir(filepath) if name.startswith(prefix))
-        # Backup modified time is its creation time (preset time not copied), for interval
-        if existing and time() - os.path.getmtime(f"{filepath}{existing[-1]}") < min_interval:
+        # Backup modified time is its creation time (preset time not copied), for interval.
+        # No interval: never throttled (file time can be ahead of time() by the clock resolution)
+        if min_interval > 0 and existing and time() - os.path.getmtime(f"{filepath}{existing[-1]}") < min_interval:
             return False
         shutil.copyfile(source, backup)
         copied = True
