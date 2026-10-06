@@ -135,12 +135,24 @@ def test_lazy_imported_packages_bundled():
         assert f'"--collect-submodules={package}"' in build_script, package
 
 
-def test_system_color_theme(ui_env):
-    from tinypedal.ui import resolve_color_theme
+def test_window_color_themes(ui_env):
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication
 
-    assert resolve_color_theme("Dark") == "Dark"
-    assert resolve_color_theme("Light") == "Light"
-    assert resolve_color_theme("System") in ("Dark", "Light")
+    from tinypedal.ui import palette_theme, resolve_color_theme, set_style_palette
+
+    assert resolve_color_theme("Modern Dark") == resolve_color_theme("Legacy Dark") == "Dark"
+    assert resolve_color_theme("Modern Light") == resolve_color_theme("Legacy Light") == "Light"
+    windows = {}
+    try:
+        for theme in ("Modern Dark", "Modern Light", "Legacy Dark", "Legacy Light"):
+            set_style_palette(theme)
+            assert palette_theme() == resolve_color_theme(theme)
+            windows[theme] = QApplication.palette().color(QPalette.ColorRole.Window).name().upper()
+    finally:
+        set_style_palette("Modern Dark")
+    assert windows["Legacy Dark"] == "#202124" and windows["Modern Dark"] == "#111318"  # TinyPedal 2.50 colors
+    assert len(set(windows.values())) == 4
 
 
 def test_app_icon_follows_os_dark_mode(ui_env, monkeypatch):
@@ -306,16 +318,3 @@ def test_plugin_manager_status_badges(ui_env, monkeypatch):
         dialog.close()
         dialog.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # frees single instance dialog
-
-
-def test_module_list_count_badge_from_start(ui_env):
-    """Count badge shown as soon as module page is built (was empty until first toggle)"""
-    from tinypedal.module_control import mctrl
-    from tinypedal.ui.module_view import ModuleList
-
-    view = ModuleList(None, mctrl)
-    assert view.label_loaded.text() == f"{mctrl.number_active} / {mctrl.number_total}"
-    view.search_box.setText("delta")  # search words, case & accents ignored
-    shown = [name for name, item in view.items.items() if not item.isHidden()]
-    assert shown and all("delta" in name for name in shown)
-    view.deleteLater()

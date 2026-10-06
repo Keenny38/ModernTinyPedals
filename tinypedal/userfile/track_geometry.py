@@ -17,12 +17,13 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Official circuit geometry from Le Mans Ultimate REST API: track center path & pit lane
+Official circuit geometry from Le Mans Ultimate REST API: circuit path & pit lane
 
-Game gives each layout as points (x, elevation, z) every 5 meters, by type: 0 track center path
-(the path game lateral position & track edges refer to), 1 pit lane, others grid & pit spots.
-Recorded positions are (x, -z): same map coordinates. Layout of a track (several share a name) is
-the one closest to recorded positions. Saved in telemetry folder: works afterwards without game.
+Game gives each layout as points (x, elevation, z) every 5 meters, by type: 0 circuit path (a driving
+line of game AI, not the track center: game lateral position & track edges refer to another path, not given),
+1 pit lane, others grid & pit spots. Recorded positions are (x, -z): same map coordinates. Layout of a track
+(several share a name) is the one closest to recorded positions. Saved in telemetry folder with game layout name
+& version: works afterwards without game, fetched again when game has another version or laps no longer fit.
 """
 
 from __future__ import annotations
@@ -41,10 +42,10 @@ from typing import NamedTuple
 logger = logging.getLogger(__name__)
 
 GEOMETRY_FOLDER = ".track_maps"  # in telemetry folder (hidden: not a track)
-CENTER_TYPE = 0
+PATH_TYPE = 0  # circuit path: driving line of game AI (not track center)
 PIT_TYPE = 1
 FIT_SAMPLES = 300  # recorded positions compared with each layout
-FIT_MAX_ERROR = 15.0  # meters, median distance of recorded positions to center path: farther is another circuit
+FIT_MAX_ERROR = 15.0  # meters, median distance of recorded positions to circuit path: farther is another circuit
 REQUEST_TIMEOUT = 3.0
 VERSION_SUFFIX = re.compile(r"\s+v?\d+(?:\.\d+)*$")
 
@@ -54,9 +55,10 @@ class TrackGeometry(NamedTuple):
 
     layout: str  # game layout (scene) name
     length: float  # meters, game layout length
-    center: list[tuple[float, float, float]]  # track center path: x, y, elevation (closed loop, driving order)
+    center: list[tuple[float, float, float]]  # circuit path (AI driving line): x, y, elevation (closed loop)
     pit: list[tuple[float, float, float]]  # pit lane
     start: tuple[float, float] | None = None  # start line position (first recorded lap position)
+    name: str = ""  # game track name with version ("Circuit de la Sarthe 1.35"), empty if saved by older versions
 
 
 def base_name(name: str) -> str:
@@ -65,7 +67,7 @@ def base_name(name: str) -> str:
 
 
 def parse_points(points: Sequence[dict]) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
-    """Track center path & pit lane from game trackmap points"""
+    """Circuit path & pit lane from game trackmap points"""
     center: list[tuple[float, float, float]] = []
     pit: list[tuple[float, float, float]] = []
     for point in points:
@@ -74,7 +76,7 @@ def parse_points(points: Sequence[dict]) -> tuple[list[tuple[float, float, float
             position = (float(point["x"]), -float(point["z"]), float(point.get("y", 0.0)))
         except (KeyError, TypeError, ValueError):
             continue
-        if kind == CENTER_TYPE:
+        if kind == PATH_TYPE:
             center.append(position)
         elif kind == PIT_TYPE:
             pit.append(position)
@@ -86,7 +88,7 @@ def path_length(points: Sequence[tuple[float, float, float]]) -> float:
 
 
 def fit_error(center: Sequence[tuple[float, float, float]], positions: Sequence[tuple[float, float]]) -> float:
-    """Median distance of recorded positions to center path (segments): how well a layout matches laps"""
+    """Median distance of recorded positions to circuit path (segments): how well a layout matches laps"""
     if len(center) < 3 or not positions:
         return math.inf
     cell = 50.0
@@ -132,7 +134,7 @@ def load_geometry(folder: str, track: str) -> TrackGeometry | None:
         start = saved.get("start")
         if len(center) >= 3:
             return TrackGeometry(str(saved.get("layout", "")), float(saved.get("length", 0.0)), center, pit,
-                                 (float(start[0]), float(start[1])) if start else None)
+                                 (float(start[0]), float(start[1])) if start else None, str(saved.get("name") or ""))
     return None
 
 
@@ -143,7 +145,7 @@ def save_geometry(folder: str, track: str, geometry: TrackGeometry):
         temp = f"{target}.tmp"
         with open(temp, "w", encoding="utf-8") as file:
             json.dump({
-                "layout": geometry.layout, "length": geometry.length,
+                "layout": geometry.layout, "name": geometry.name, "length": geometry.length,
                 "center": [[round(value, 3) for value in point] for point in geometry.center],
                 "pit": [[round(value, 3) for value in point] for point in geometry.pit],
                 "start": [round(value, 3) for value in geometry.start] if geometry.start else None,
@@ -206,7 +208,19 @@ def fetch_geometry(host: str, port: int, track: str, positions: Sequence[tuple[f
             game_length = 0.0
         if best is None or error < best[0]:
             best = (error, TrackGeometry(layout, game_length or length, center, pit,
-                                         tuple(positions[0]) if positions else None))  # type: ignore[arg-type]
+                                         tuple(positions[0]) if positions else None,  # type: ignore[arg-type]
+                                         str(item.get("shortName") or item.get("name") or "")))
     if best is None or (positions and best[0] > FIT_MAX_ERROR):
         return None
     return best[1]
+
+
+def layout_names(tracks: list, layout: str) -> set[str]:
+    """Game track names with version of a layout (game tracks list): several events share a layout"""
+    return {str(item.get("shortName") or item.get("name") or "") for item in tracks
+            if isinstance(item, dict) and item.get("id") and str(item.get("sceneDesc") or item["id"]) == layout}
+
+
+def fits(geometry: TrackGeometry, positions: Sequence[tuple[float, float]]) -> bool:
+    """Whether recorded positions lie along saved circuit path (laps of another layout or version: no)"""
+    return not positions or fit_error(geometry.center, positions) <= FIT_MAX_ERROR

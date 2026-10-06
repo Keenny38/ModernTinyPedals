@@ -37,6 +37,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
     CAR_HALF_WIDTH,
     EVENT_GAP,
     EVENT_SAMPLES,
+    GAME_LATERAL_SIGN,
     GAME_MIN_COVERAGE,
     GAME_OFF_TRACK,
     LIMITS_MARGIN,
@@ -45,6 +46,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
     LIMITS_MIN_LAPS,
     LIMITS_MIN_WIDTH,
     LIMITS_SMOOTH,
+    LIMITS_VERSION,
     LINE_SEARCH,
     OFF_ROAD_SURFACES,
     OFF_TRACK_WHEELS,
@@ -60,6 +62,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
     game_limits,
     game_limits_from_offsets,
     lateral_offsets,
+    lateral_sign,
     limits_at,
     limits_events,
     limits_from_offsets,
@@ -73,7 +76,16 @@ from ...userfile.lap_geometry import (  # noqa: F401  (re-exported: lap_map.MapL
 )
 from ...userfile.telemetry_lap import LapData, compute_delta, distance_scale, interpolate
 from ..lap_viewer import GAIN_FULL_SCALE, GAIN_WINDOW, gain_color
-from .lines import TRIANGLE_STRIP, Vertices, band, band_part, colored_band, merge_strips, range_indexes
+from .lines import (
+    COLORED_VERTEX,
+    TRIANGLE_STRIP,
+    Vertices,
+    band,
+    band_part,
+    colored_band,
+    merge_strips,
+    range_indexes,
+)
 
 MAP_MODES = ("laps", "gain", "speed", "pedals", "line", "gear", "elevation", "corners", "minisectors", "consistency")
 CONSISTENCY_COLORS = (QColor("#22C55E"), QColor("#FACC15"), QColor("#EF4444"))  # steady to scattered times
@@ -99,6 +111,7 @@ ZONE_MERGE = 10.0  # meters, braking zones closer than this are one zone
 GRID_CELL = 20.0  # meters, mouse picking grid cell
 MINI_SECTOR_LENGTH = 200.0  # meters, mini-sector length (rounded to whole lap)
 MINI_SECTORS_MIN = 10
+TRAIL_ALPHA_STEPS = 64  # cursor trail fading steps (colors computed once per trail)
 
 
 def simplify(line: MapLine, min_gap: float) -> MapLine:
@@ -380,9 +393,10 @@ def cross_mark(line: MapLine, distance: float, half_length: float) -> tuple[floa
 
 def geometry_line(points: Sequence[tuple[float, float, float]], start: tuple[float, float] | None = None,
                   length: float = 0.0) -> MapLine:
-    """Official track center path as closed line from point nearest to lap start, distances scaled to lap length
+    """Official circuit path (game driving line, not track center) as closed line from point nearest to lap start,
+    distances scaled to lap length
 
-    Lap distance (game) & center path length differ slightly: scaled distances keep lap & path aligned.
+    Lap distance (game) & official path length differ slightly: scaled distances keep lap & path aligned.
     """
     if len(points) < 3:
         return MapLine([], [], [])
@@ -577,6 +591,16 @@ def corner_delta_colors(line: MapLine, corners: Sequence[tuple[float, float, flo
 
 
 # Mouse picking
+def _ring_cells(column: int, row: int, ring: int) -> list[tuple[int, int]]:
+    """Grid cells at ring distance around a cell (square ring, ring 0: the cell itself)"""
+    if ring == 0:
+        return [(column, row)]
+    top, bottom = row - ring, row + ring
+    keys = [(cell_x, cell_y) for cell_y in (top, bottom) for cell_x in range(column - ring, column + ring + 1)]
+    keys += [(cell_x, cell_y) for cell_x in (column - ring, column + ring) for cell_y in range(top + 1, bottom)]
+    return keys
+
+
 class LineGrid:
     """Points of a line by grid cell: nearest point to mouse without scanning the whole line"""
 
@@ -586,21 +610,49 @@ class LineGrid:
         self.cells: dict[tuple[int, int], list[int]] = {}
         for index, (x, y) in enumerate(zip(line.xs, line.ys)):
             self.cells.setdefault((int(x // cell), int(y // cell)), []).append(index)
+        columns, rows = [key[0] for key in self.cells], [key[1] for key in self.cells]
+        self.bounds = (min(columns), max(columns), min(rows), max(rows)) if self.cells else (0, -1, 0, -1)
 
     def nearest(self, x: float, y: float, radius: float) -> int:
-        """Index of nearest point within radius, -1 if none"""
-        reach = int(radius // self.cell) + 1
-        column, row = int(x // self.cell), int(y // self.cell)
+        """Index of nearest point within radius, -1 if none
+
+        Cells searched ring by ring around point until no farther ring can hold a nearer point, reach kept within
+        cells holding points. Far from line (rings costing more than the line), occupied cells left are scanned
+        instead: a search over the whole map (zoomed out view) costs no more than the line points.
+        """
+        cells = self.cells
+        if not cells:
+            return -1
+        cell = self.cell
+        column, row = int(x // cell), int(y // cell)
+        low_x, high_x, low_y, high_y = self.bounds
+        reach = min(int(radius // cell) + 1, max(column - low_x, high_x - column, row - low_y, high_y - row))
         best, found = radius * radius, -1
         xs, ys = self.line.xs, self.line.ys
-        for cell_x in range(column - reach, column + reach + 1):
-            for cell_y in range(row - reach, row + reach + 1):
-                for index in self.cells.get((cell_x, cell_y), ()):
+        budget = len(cells)  # cell lookups of rings before occupied cells are scanned instead
+        ring = 0
+        while ring <= reach:
+            if found >= 0 and ring > 1 and best <= ((ring - 1) * cell) ** 2:  # ring points at least this far
+                return found
+            if budget <= 0:
+                break
+            keys = _ring_cells(column, row, ring)
+            budget -= len(keys)
+            for key in keys:
+                for index in cells.get(key, ()):
+                    gap = (xs[index] - x) ** 2 + (ys[index] - y) ** 2
+                    if gap < best:
+                        best, found = gap, index
+            ring += 1
+        else:
+            return found
+        for (cell_x, cell_y), indexes in cells.items():  # rings left: occupied cells only
+            if ring <= max(abs(cell_x - column), abs(cell_y - row)) <= reach:
+                for index in indexes:
                     gap = (xs[index] - x) ** 2 + (ys[index] - y) ** 2
                     if gap < best:
                         best, found = gap, index
         return found
-
 
     def project(self, x: float, y: float, radius: float) -> float:
         """Distance of point projected on line next to nearest point (between samples), -1 if none near"""
@@ -694,3 +746,41 @@ def trail(line: MapLine, start: float, end: float) -> tuple[list[float], list[fl
             distances.append(distance)
     span = max(end - start, 1e-6)
     return xs, ys, [((distance - start) / span) ** 1.5 for distance in distances]
+
+
+def trail_band(line: MapLine, line_normals: Sequence[tuple[float, float]], start: float, end: float,
+               rgb: tuple[int, int, int], half_width: float, min_gap: float = 0.0) -> Vertices:
+    """Cursor trail as thick line of one color fading in toward end (same as trail): line between distances, points
+    about min_gap apart (meters: about a pixel), normals of whole line reused (built for every lap on each cursor move)
+    """
+    count = len(line.xs)
+    if end <= start or count < 2 or len(line_normals) < count:
+        return Vertices(bytearray(), 0, TRIANGLE_STRIP, True)
+    distances, xs, ys = line.distances, line.xs, line.ys
+    first = bisect.bisect_right(distances, start)
+    last = bisect.bisect_left(distances, end, lo=first)  # points strictly between start & end
+    red, green, blue = rgb
+    # Premultiplied color as one 32 bit word (r, g, b, a bytes) at each alpha step
+    colors = [round(red * alpha) | round(green * alpha) << 8 | round(blue * alpha) << 16 | round(255 * alpha) << 24
+              for alpha in (step / TRAIL_ALPHA_STEPS for step in range(TRAIL_ALPHA_STEPS + 1))]
+    start_x, start_y = point_at(line, start)
+    end_x, end_y = point_at(line, end)
+    spacing = (distances[last - 1] - distances[first]) / (last - 1 - first) if last - 1 > first else 0.0
+    inner = range(first, last, max(int(min_gap / spacing), 1) if spacing > 0 else 1)  # points about min_gap apart
+    point_xs = [start_x, *(xs[index] for index in inner), end_x]
+    point_ys = [start_y, *(ys[index] for index in inner), end_y]
+    point_normals = [line_normals[min(first, count - 1)], *(line_normals[index] for index in inner),
+                     line_normals[min(last, count - 1)]]
+    ratio = TRAIL_ALPHA_STEPS ** (1 / 1.5) / (end - start)  # alpha step = (fraction of trail) ** 1.5 * steps
+    words = [colors[int(((distance - start) * ratio) ** 1.5 + 0.5)]
+             for distance in (start, *(distances[index] for index in inner), end)]
+    points = len(point_xs)
+    data = array("I", bytes(COLORED_VERTEX.size * 2 * points))  # vertex: x & y floats, color word (native order)
+    for offset, sign in ((0, 1), (3, -1)):  # both sides of line
+        across = half_width * sign
+        data[offset::6] = array("I", array("f", [x + nx * across for x, (nx, _) in zip(point_xs, point_normals)])
+                                .tobytes())
+        data[offset + 1::6] = array("I", array("f", [y + ny * across for y, (_, ny) in zip(point_ys, point_normals)])
+                                    .tobytes())
+        data[offset + 2::6] = array("I", words)
+    return Vertices(data, points * 2, TRIANGLE_STRIP, True)

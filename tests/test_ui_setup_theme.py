@@ -1,116 +1,6 @@
-"""Setup wizard & theme editor tests (headless)"""
-
-import json
+"""Option finder & preset comparison tests (headless), setup wizard tests: test_setup_wizard.py"""
 
 from tinypedal.setting import cfg
-from tinypedal.widget import _style
-
-
-def test_setup_choices_apply(ui_env, monkeypatch):
-    from tinypedal.ui import setup_wizard
-
-    reloads = []
-    monkeypatch.setattr(setup_wizard.loader, "reload", lambda reload_preset=False: reloads.append(reload_preset))
-    def create_preset(self, filename):
-        with open(f"{cfg.path.settings}{filename}", "w", encoding="utf-8") as file:
-            file.write("{}")
-
-    monkeypatch.setattr(type(cfg), "create", create_preset)
-    cfg.user.setting["relative"]["enable"] = False
-    choices = setup_wizard.SetupChoices(
-        language="Français", api_name="", window_theme="Light", overlay_theme="High Contrast",
-        modern_font=False, preset="", new_preset="my overlay", widgets=("relative",),
-    )
-    setup_wizard.run_setup(choices)
-    assert cfg.application["language"] == "Français"
-    assert cfg.application["window_color_theme"] == "Light"
-    assert cfg.application["show_setup_wizard_at_startup"] is False
-    assert cfg.user.config["overlay_style"]["overlay_theme"] == "High Contrast"
-    assert cfg.user.setting["relative"]["enable"] is True
-    assert reloads == [True, False]  # load new preset, then restart with widgets
-    from tinypedal.i18n import set_language
-
-    set_language("English")
-
-
-def test_setup_wizard_dialog(ui_env):
-    from tinypedal.ui.setup_wizard import SetupWizard
-
-    wizard = SetupWizard(None)
-    choices = wizard.choices()
-    assert choices.language in ("English", "Français")
-    assert "relative" in choices.widgets
-    wizard.page_preset.preset.setCurrentIndex(0)  # create new preset
-    wizard.page_preset.new_name.setText("default")  # existing preset name refused
-    assert not wizard.page_preset.isComplete()
-    wizard.page_preset.new_name.setText("new one")
-    assert wizard.page_preset.isComplete()
-    wizard.deleteLater()
-
-
-def test_custom_theme_palette(tmp_path):
-    from tinypedal.userfile.overlay_theme import load_custom_themes, save_custom_themes
-
-    themes = {"Mine": {"base": "Colorblind Safe", "colors": {"ff2200": "123456", "BAD": "000000"}}}
-    assert save_custom_themes(f"{tmp_path}/", themes)
-    loaded = load_custom_themes(f"{tmp_path}/", _style.BUILTIN_THEMES)
-    assert loaded == {"Mine": {"base": "Colorblind Safe", "colors": {"FF2200": "123456"}}}
-    _style.set_custom_themes(loaded)
-    try:
-        assert "Mine" in _style.overlay_theme_names()
-        palette = _style.theme_palette("Mine")
-        assert palette["FF2200"] == "123456"  # custom color
-        assert palette["009900"] == _style.COLORBLIND_PALETTE["009900"]  # from base
-        assert _style.theme_palette("Deleted theme") is _style.MODERN_PALETTE
-    finally:
-        _style.set_custom_themes({})
-
-
-def test_invalid_theme_file(tmp_path):
-    from tinypedal.userfile.overlay_theme import FILENAME, load_custom_themes
-
-    (tmp_path / FILENAME).write_text("{not json", encoding="utf-8")
-    assert load_custom_themes(f"{tmp_path}/", _style.BUILTIN_THEMES) == {}
-    (tmp_path / FILENAME).write_text(json.dumps({"Classic": {"colors": {}}}), encoding="utf-8")
-    assert load_custom_themes(f"{tmp_path}/", _style.BUILTIN_THEMES) == {}  # built-in name refused
-
-
-def test_widget_theme_override():
-    default = {"font_color": "#FF2200", "widget_theme": "Global"}
-    style = {"overlay_theme": "Modern Dark", "enable_modern_font": False, "minimum_bar_gap": 0}
-    assert _style.modern_overrides(default, default, style)["font_color"] == "#FF4D4F"
-    classic = {**default, "widget_theme": "Classic"}
-    assert "font_color" not in _style.modern_overrides(classic, classic, style)
-    colorblind = {**default, "widget_theme": "Colorblind Safe"}
-    assert _style.modern_overrides(colorblind, colorblind, style)["font_color"] == "#D55E00"
-
-
-def test_theme_editor(ui_env, monkeypatch):
-    from tinypedal.ui import theme_editor
-
-    monkeypatch.setattr(theme_editor.loader, "reload", lambda reload_preset=False: None)
-    def answer(dialog):
-        dialog.edit.setText("Night")
-        dialog.accepting()
-
-    monkeypatch.setattr(theme_editor.TextInputDialog, "open", answer)
-    editor = theme_editor.ThemeEditor(None)
-    try:
-        editor.new_theme()
-        assert editor.theme_list.currentText() == "Night"
-        row = editor.classic_colors.index("FF2200")
-        editor.set_theme_color(row, "00FF00")
-        assert editor.themes["Night"]["colors"]["FF2200"] == "00FF00"
-        assert editor.label_preview.pixmap() is not None and not editor.label_preview.pixmap().isNull()
-        editor.undo()
-        assert "FF2200" not in editor.themes["Night"]["colors"]
-        editor.redo()
-        assert editor.save_themes()
-        assert "Night" in _style.overlay_theme_names()
-    finally:
-        _style.set_custom_themes({})
-        editor.set_unmodified()
-        editor.close()
 
 
 def test_option_finder(ui_env):
@@ -133,14 +23,12 @@ def test_option_finder(ui_env):
         assert any(entry.key == "font_color_speed" for entry in french)
     finally:
         set_language("English")
-    dialog = option_finder.open_option(None, results[0])
-    assert dialog.edit_search.text() == results[0].key
-    visible = [key for key, editor in dialog.option_edit.items() if not editor.isHidden()]
-    assert results[0].key in visible and len(visible) < len(dialog.option_edit)
+    dialog = option_finder.open_option(None, results[0])  # Overlay Options page, scrolled to option
+    assert dialog is not None and dialog.backend.overlay == "speedometer" and dialog.backend.highlightKey
     dialog.close()
     finder = option_finder.OptionFinder(None)
-    finder.edit_search.setText("opacity")
-    assert finder.list_results.count() > 50
+    finder.set_search("opacity")
+    assert finder.backend.model.rowCount() > 50
     finder.close()
 
 
@@ -184,19 +72,3 @@ def test_preset_compare_dialog(ui_env, monkeypatch):
     finally:
         dialog.set_unmodified()
         dialog.close()
-
-
-def test_theme_export_import(tmp_path):
-    import pytest
-
-    from tinypedal.userfile.overlay_theme import export_theme, import_themes, unique_theme_name
-
-    builtin = ("Modern Dark", "Modern Light")
-    filename = str(tmp_path / "mine.json")
-    theme = {"base": "Modern Dark", "colors": {"FF2200": "CC0000"}}
-    assert export_theme(filename, "Mine", theme)
-    assert import_themes(filename, builtin) == {"Mine": theme}
-    (tmp_path / "bad.json").write_text('{"x": 1}', encoding="utf-8")
-    with pytest.raises(ValueError):
-        import_themes(str(tmp_path / "bad.json"), builtin)
-    assert unique_theme_name("Mine", {"Mine", "Mine (2)"}) == "Mine (3)"

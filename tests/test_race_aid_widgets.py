@@ -1,5 +1,6 @@
 """Race aid widgets: delta graph, gap trend, pit lane helper, stint timer, spotter, race notifications,
-tyre temperature trend. Data logic, then rendering of both designs with empty, normal & extreme data."""
+tyre temperature trend, telemetry comparison. Data logic, then rendering of both designs with empty, normal
+& extreme data."""
 
 import math
 from importlib import import_module
@@ -16,6 +17,7 @@ from tinypedal.widget._modern import create_widget
 
 NEW_WIDGETS = (
     "delta_graph", "gap_trend", "pit_lane_helper", "stint_timer", "spotter", "race_notifications", "tyre_temp_trend",
+    "telemetry_compare",
 )
 FIELD_ATTRIBUTES = {
     minfo.vehicles: (
@@ -43,6 +45,15 @@ def set_reader(monkeypatch, group: str, name: str, value):
     monkeypatch.setattr(getattr(api.read, group), name, func)
 
 
+@pytest.fixture(autouse=True)
+def reference_loading():
+    """Background thread finding reference lap (telemetry comparison) ended after each test"""
+    yield
+    from tinypedal.userfile.reference_trace import stop_loading
+
+    stop_loading()
+
+
 @pytest.fixture
 def field(ui_env, bundled_fonts, monkeypatch):
     """Default setting, fake reader, field of 20 cars in minfo (restored after test)"""
@@ -54,7 +65,7 @@ def field(ui_env, bundled_fonts, monkeypatch):
 
 
 def make(name: str, modern: bool, **options):
-    cfg.user.config["overlay_style"]["enable_modern_style"] = modern
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     cfg.user.setting[name].update(options)
     return create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
 

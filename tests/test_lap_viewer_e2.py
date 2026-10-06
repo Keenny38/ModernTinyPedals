@@ -281,8 +281,10 @@ def test_import_foreign_laps(backend, tmp_path):
     library = next(widget for widget in backend._window.findChildren(LapLibrary))
     assert library.tree.topLevelItem(0).text(library.COL_DRIVER) == "foreign laps"
     library.close()
-    backend.import_folder(str(other), background=False)  # imported again: new group
-    assert [name for name, _ in lap_library.list_imported(backend.folder)] == ["Teammate", "Teammate (2)"]
+    backend.import_folder(str(other), background=False)  # imported again: same group, nothing copied twice
+    groups = lap_library.list_imported(backend.folder)
+    assert [name for name, _ in groups] == ["Teammate"] and len(groups[0][1]) == 1
+    assert "1 already imported" in backend.status
     backend.import_folder(backend.folder, background=False)
     assert "own telemetry folder" in backend.status
     assert lap_library.compatible_lap(lap_info(), lap_info(**{"class": "LMP2"}), "GT3") == "class"

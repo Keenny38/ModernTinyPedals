@@ -44,8 +44,8 @@ def test_widget_filename_follows_display_order():
 def test_common_options_present(name):
     setting = WIDGET_DEFAULT[name]
     assert isinstance(setting, dict)
-    for key in ("enable", "update_interval", "position_x", "position_y", "opacity", "widget_theme"):
+    for key in ("enable", "update_interval", "position_x", "position_y", "opacity", "visibility_context"):
         assert key in setting, f"{name} missing {key}"
-    assert setting["widget_theme"] == "Global"
+    assert "widget_theme" not in setting  # overlay theme is global
     assert isinstance(setting["enable"], bool)
     assert setting["update_interval"] > 0

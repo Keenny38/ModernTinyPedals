@@ -173,39 +173,43 @@ def hotkey_spectate_mode():
     """Command - spectate mode"""
     cfg.api["enable_player_index_override"] = not cfg.api["enable_player_index_override"]
     cfg.save()
+    api.setup()  # override applied at once, as from the Spectate page
     app_signal.refresh.emit(True)
+
+
+def spectate_place(offset: int):
+    """Spectate driver at next (1) or previous (-1) overall place, wraps around
+
+    Spectated driver is saved as slot id (api player_index), not as vehicle index: indexes
+    shift when a car leaves the session.
+    """
+    if not cfg.api["enable_player_index_override"]:
+        return
+    total_vehicles = api.read.vehicle.total_vehicles()
+    if total_vehicles < 1:
+        return
+    place = api.read.vehicle.place() + offset
+    if place > total_vehicles:
+        place = 1  # back to leader
+    elif place < 1:
+        place = total_vehicles
+    for vehicle_index in range(total_vehicles):
+        if api.read.vehicle.place(vehicle_index) == place:
+            cfg.api["player_index"] = api.read.vehicle.slot_id(vehicle_index)
+            api.setup()
+            cfg.save()
+            app_signal.refresh.emit(True)  # Spectate page follows
+            return
 
 
 def hotkey_spectate_next_driver():
     """Command - spectate next driver (overall position)"""
-    if not cfg.api["enable_player_index_override"]:
-        return
-    place = api.read.vehicle.place() + 1
-    total_vehicles = api.read.vehicle.total_vehicles()
-    if place > total_vehicles:
-        place = 1  # back to leader
-    for player_index in range(total_vehicles):
-        if api.read.vehicle.place(player_index) == place:
-            cfg.api["player_index"] = player_index
-            api.setup()
-            cfg.save()
-            return
+    spectate_place(1)
 
 
 def hotkey_spectate_previous_driver():
     """Command - spectate previous driver (overall position)"""
-    if not cfg.api["enable_player_index_override"]:
-        return
-    place = api.read.vehicle.place() - 1
-    total_vehicles = api.read.vehicle.total_vehicles()
-    if place < 1:
-        place = total_vehicles
-    for player_index in range(total_vehicles):
-        if api.read.vehicle.place(player_index) == place:
-            cfg.api["player_index"] = player_index
-            api.setup()
-            cfg.save()
-            return
+    spectate_place(-1)
 
 
 def hotkey_pace_notes_playback():

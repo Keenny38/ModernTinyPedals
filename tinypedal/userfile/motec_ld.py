@@ -28,13 +28,16 @@ float or integer (LMU & rF2 built-in loggers store scaled integers).
 from __future__ import annotations
 
 import logging
+import os
 import struct
 import time
 from array import array
+from bisect import bisect_right
+from collections.abc import Collection, Sequence
 from itertools import pairwise
 from typing import NamedTuple
 
-from .telemetry_lap import LapData, interpolate
+from .telemetry_lap import LapData, interpolate, lap_time_of, lap_timestamp_of
 
 logger = logging.getLogger(__name__)
 
@@ -52,55 +55,82 @@ DTYPE_FLOAT = 0x07
 DTYPE_INTEGERS = (0x00, 0x03, 0x05)  # scaled by shift, multiplier, scale & decimal places
 DTYPE_SIZE_32 = 4
 
-# Recorder CSV column: MoTeC channel name, short name, unit, scale factor
+class ExportChannel(NamedTuple):
+    """Recorder CSV column written as MoTeC channel: value * scale + offset"""
+
+    column: str
+    name: str
+    short_name: str
+    unit: str
+    scale: float = 1.0
+    offset: float = 0.0
+    step: bool = False  # held between samples (gear, sector, on/off), never interpolated
+
+
+def wheel_exports(column: str, name: str, short_name: str, unit: str, scale: float = 1.0,
+                  offset: float = 0.0) -> tuple[ExportChannel, ...]:
+    """Channel of each wheel ("{wheel}" in column & names replaced by wheel)"""
+    return tuple(
+        ExportChannel(column.format(wheel=wheel), name.format(wheel=wheel.upper()),
+                      short_name.format(wheel=wheel.upper()), unit, scale, offset)
+        for wheel in WHEELS
+    )
+
+
+# Recorder CSV columns, MoTeC channel names as LMU built-in logger names them where it logs the same value
 CHANNEL_MAP = (
-    ("lap_time", "Lap Time", "LapT", "s", 1.0),
-    ("distance", "Lap Distance", "LapD", "m", 1.0),
-    ("speed_kph", "Ground Speed", "Spd", "km/h", 1.0),
-    ("throttle", "Throttle Pos", "Thr", "%", 100.0),
-    ("brake", "Brake Pos", "Brk", "%", 100.0),
-    ("clutch", "Clutch Pos", "Clu", "%", 100.0),
-    ("steering", "Steering Pos", "Str", "%", 100.0),
-    ("gear", "Gear", "Gear", "", 1.0),
-    ("rpm", "Engine RPM", "RPM", "rpm", 1.0),
-    ("fuel", "Fuel Level", "Fuel", "l", 1.0),
-    ("tyre_temp_fl", "Tyre Temp FL", "TTFL", "C", 1.0),
-    ("tyre_temp_fr", "Tyre Temp FR", "TTFR", "C", 1.0),
-    ("tyre_temp_rl", "Tyre Temp RL", "TTRL", "C", 1.0),
-    ("tyre_temp_rr", "Tyre Temp RR", "TTRR", "C", 1.0),
-    ("tyre_pres_fl", "Tyre Pres FL", "TPFL", "kPa", 1.0),
-    ("tyre_pres_fr", "Tyre Pres FR", "TPFR", "kPa", 1.0),
-    ("tyre_pres_rl", "Tyre Pres RL", "TPRL", "kPa", 1.0),
-    ("tyre_pres_rr", "Tyre Pres RR", "TPRR", "kPa", 1.0),
-    ("pos_x", "Pos X", "PosX", "m", 1.0),
-    ("pos_y", "Pos Y", "PosY", "m", 1.0),
-    ("pos_z", "Pos Z", "PosZ", "m", 1.0),
-    ("accel_lat", "G Force Lat", "GLat", "G", 1.0),
-    ("accel_long", "G Force Long", "GLong", "G", 1.0),
-    ("sector", "Sector", "Sect", "", 1.0),
-    ("tc_active", "TC Active", "TCAct", "", 1.0),
-    ("abs_active", "ABS Active", "ABSAct", "", 1.0),
-    ("battery", "Battery Charge", "Batt", "%", 1.0),
-    *((f"brake_temp_{wheel}", f"Brake Temp {wheel.upper()}", f"BT{wheel.upper()}", "C", 1.0) for wheel in WHEELS),
-    *((f"tyre_wear_{wheel}", f"Tyre Wear {wheel.upper()}", f"TW{wheel.upper()}", "%", 1.0) for wheel in WHEELS),
-    *((f"wheel_speed_{wheel}", f"Wheel Speed {wheel.upper()}", f"WS{wheel.upper()}", "km/h", 1.0) for wheel in WHEELS),
-    *((f"ride_height_{wheel}", f"Ride Height {wheel.upper()}", f"RH{wheel.upper()}", "mm", 1.0) for wheel in WHEELS),
-    *((f"susp_defl_{wheel}", f"Damper Pos {wheel.upper()}", f"DP{wheel.upper()}", "mm", 1.0) for wheel in WHEELS),
+    ExportChannel("lap_time", "Lap Time", "LapT", "s"),
+    ExportChannel("distance", "Lap Distance", "LapD", "m"),
+    ExportChannel("speed_kph", "Ground Speed", "Spd", "km/h"),
+    ExportChannel("throttle", "Throttle Pos", "Thr", "%", 100.0),
+    ExportChannel("brake", "Brake Pos", "Brk", "%", 100.0),
+    ExportChannel("clutch", "Clutch Pos", "Clu", "%", 100.0),
+    ExportChannel("steering", "Steering Pos", "Str", "%", 100.0),
+    ExportChannel("gear", "Gear", "Gear", "", step=True),
+    ExportChannel("rpm", "Engine RPM", "RPM", "rpm"),
+    ExportChannel("fuel", "Fuel Level", "Fuel", "l"),
+    *wheel_exports("tyre_temp_{wheel}", "Tyre Temp {wheel}", "TT{wheel}", "C"),
+    *wheel_exports("tyre_pres_{wheel}", "Tyre Pres {wheel}", "TP{wheel}", "kPa"),
+    ExportChannel("pos_x", "Pos X", "PosX", "m"),
+    ExportChannel("pos_y", "Pos Y", "PosY", "m"),
+    ExportChannel("pos_z", "Pos Z", "PosZ", "m"),
+    ExportChannel("accel_lat", "G Force Lat", "GLat", "G"),
+    ExportChannel("accel_long", "G Force Long", "GLong", "G"),
+    ExportChannel("sector", "Sector", "Sect", "", step=True),
+    ExportChannel("tc_active", "TC Active", "TCAct", "", step=True),
+    ExportChannel("abs_active", "ABS Active", "ABSAct", "", step=True),
+    ExportChannel("battery", "Battery Charge", "Batt", "%"),
+    *wheel_exports("brake_temp_{wheel}", "Brake Temp {wheel}", "BT{wheel}", "C"),
+    # Worn percent, as LMU logs it (recorder: remaining percent)
+    *wheel_exports("tyre_wear_{wheel}", "Tyre Wear {wheel}", "TW{wheel}", "%", -1.0, 100.0),
+    *wheel_exports("wheel_speed_{wheel}", "Wheel Speed {wheel}", "WS{wheel}", "km/h"),
+    *wheel_exports("ride_height_{wheel}", "Ride Height {wheel}", "RH{wheel}", "mm"),
+    *wheel_exports("susp_defl_{wheel}", "Damper Pos {wheel}", "DP{wheel}", "mm"),
+    *wheel_exports("tyre_temp_in_{wheel}", "Tyre Temp {wheel} Inner", "TTI{wheel}", "C"),
+    *wheel_exports("tyre_temp_mid_{wheel}", "Tyre Temp {wheel} Centre", "TTC{wheel}", "C"),
+    *wheel_exports("tyre_temp_out_{wheel}", "Tyre Temp {wheel} Outer", "TTO{wheel}", "C"),
+    *wheel_exports("tyre_load_{wheel}", "Tyre Load {wheel}", "TL{wheel}", "N", 1000.0),  # kN to N
+    ExportChannel("path_lateral", "Path Lateral", "PathL", "m"),
+    ExportChannel("track_edge", "Track Edge", "TrkEdge", "m"),
+    ExportChannel("brake_bias", "Brake Bias Rear", "BBRear", "%", -1.0, 100.0),  # recorder: front percent
+    ExportChannel("water_temp", "Eng Water Temp", "WatT", "C"),
+    ExportChannel("oil_temp", "Eng Oil Temp", "OilT", "C"),
 )
+HEADER_DATE_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%y %H:%M:%S")
 
 
 class Channel(NamedTuple):
-    """Channel to write, samples at fixed frequency"""
+    """Channel to write, samples at fixed frequency (read: packed doubles)"""
 
     name: str
     short_name: str
     unit: str
     frequency: int
-    values: list[float]
+    values: Sequence[float]
 
 
 class LdInfo(NamedTuple):
-    """Session information"""
+    """Session information, timestamp: log start (local date & time of header), 0 if unknown"""
 
     driver: str = ""
     vehicle: str = ""
@@ -162,58 +192,80 @@ def raw_typecode(dtype_a: int, size: int) -> str:
     return ""
 
 
-def read_ld(filename: str) -> tuple[LdInfo, list[Channel]]:
-    """Read MoTeC .ld file: float & integer channels, integers scaled to their unit
+def header_time(date: str, clock: str) -> float:
+    """Log start from header date ("dd/mm/yyyy") & time, local time, 0 if unknown"""
+    for pattern in HEADER_DATE_FORMATS:
+        try:
+            return time.mktime(time.strptime(f"{date} {clock}", pattern))
+        except (ValueError, OverflowError):
+            continue
+    return 0.0
 
-    Raises OSError or ValueError if not a readable .ld file. Channels of unknown type are skipped.
+
+def read_ld(filename: str, names: Collection[str] | None = None) -> tuple[LdInfo, list[Channel]]:
+    """Read MoTeC .ld file: float & integer channels (only channels named in names if set, any case), integers
+    scaled to their unit
+
+    Channels read one by one from file, samples kept packed (doubles): a game log has about 180 channels, an hour of
+    them is millions of samples. Raises OSError or ValueError if not a readable .ld file. Channels of unknown type,
+    or reaching past end of file, are skipped.
     """
-    with open(filename, "rb") as file:
-        data = file.read()
-    try:
-        head = HEAD.unpack_from(data, 0)
-    except struct.error as error:
-        raise ValueError("not a MoTeC ld file") from error
-    if head[0] != LD_MARKER:
-        raise ValueError("not a MoTeC ld file")
-    meta_ptr, event_ptr = head[1], head[3]
+    wanted = {name.lower() for name in names} if names is not None else None
 
     def text(raw: bytes) -> str:
         return raw.split(b"\0", 1)[0].decode("latin-1").strip()
 
-    session = ""
-    if 0 < event_ptr <= len(data) - EVENT.size:
-        session = text(EVENT.unpack_from(data, event_ptr)[1])
-    info = LdInfo(driver=text(head[14]), vehicle=text(head[15]), venue=text(head[16]),
-                  session=session, comment=text(head[18]))
-    channels = []
-    seen = set()
-    while meta_ptr and meta_ptr not in seen and meta_ptr <= len(data) - CHANNEL.size:
-        seen.add(meta_ptr)  # corrupted list could loop
-        chan = CHANNEL.unpack_from(data, meta_ptr)
-        meta_ptr = chan[1]
-        data_ptr, count, dtype_a, size, frequency = chan[2], chan[3], chan[5], chan[6], chan[7]
-        typecode = raw_typecode(dtype_a, size)
-        end = data_ptr + count * size
-        if not typecode or frequency <= 0 or end > len(data):
-            continue
-        raw: array | tuple
+    with open(filename, "rb") as file:
+        file_size = os.fstat(file.fileno()).st_size
+
+        def read_at(offset: int, length: int) -> bytes:
+            file.seek(offset)
+            return file.read(length)
+
         try:
-            if typecode == "e":  # half float: no array type, read by struct
-                raw = struct.unpack_from(f"<{count}e", data, data_ptr)
-            else:
-                raw = array(typecode)
-                raw.frombytes(data[data_ptr:end])
-        except (ValueError, struct.error) as error:  # channel left out, others still read
-            logger.warning("MOTEC: channel %s skipped: %s", text(chan[12]), error)
-            continue
-        shift, multiplier, scale, decimals = chan[8], chan[9], chan[10], chan[11]
-        if (shift, multiplier, scale, decimals) == (0, 1, 1, 0) or not scale:
-            values = [float(sample) for sample in raw]
-        else:  # value = raw * multiplier * 10^-decimals / scale + shift
-            factor = multiplier * 10.0 ** -decimals / scale
-            values = [sample * factor + shift for sample in raw]
-        unit = text(chan[14]) or text(chan[13])
-        channels.append(Channel(text(chan[12]), text(chan[13]), unit, frequency, values))
+            head = HEAD.unpack(read_at(0, HEAD.size))
+        except struct.error as error:
+            raise ValueError("not a MoTeC ld file") from error
+        if head[0] != LD_MARKER:
+            raise ValueError("not a MoTeC ld file")
+        meta_ptr, event_ptr = head[1], head[3]
+        session = ""
+        if 0 < event_ptr <= file_size - EVENT.size:
+            session = text(EVENT.unpack(read_at(event_ptr, EVENT.size))[1])
+        info = LdInfo(driver=text(head[14]), vehicle=text(head[15]), venue=text(head[16]), session=session,
+                      comment=text(head[18]), timestamp=header_time(text(head[12]), text(head[13])))
+        channels = []
+        seen = set()
+        while meta_ptr and meta_ptr not in seen and meta_ptr <= file_size - CHANNEL.size:
+            seen.add(meta_ptr)  # corrupted list could loop
+            chan = CHANNEL.unpack(read_at(meta_ptr, CHANNEL.size))
+            meta_ptr = chan[1]
+            name = text(chan[12])
+            if wanted is not None and name.lower() not in wanted:
+                continue
+            data_ptr, count, dtype_a, size, frequency = chan[2], chan[3], chan[5], chan[6], chan[7]
+            typecode = raw_typecode(dtype_a, size)
+            if not typecode or frequency <= 0 or data_ptr + count * size > file_size:
+                continue
+            raw: array | tuple
+            try:
+                data = read_at(data_ptr, count * size)
+                if typecode == "e":  # half float: no array type, read by struct
+                    raw = struct.unpack(f"<{count}e", data)
+                else:
+                    raw = array(typecode)
+                    raw.frombytes(data)
+            except (ValueError, struct.error) as error:  # channel left out, others still read
+                logger.warning("MOTEC: channel %s skipped: %s", name, error)
+                continue
+            shift, multiplier, scale, decimals = chan[8], chan[9], chan[10], chan[11]
+            if (shift, multiplier, scale, decimals) == (0, 1, 1, 0) or not scale:
+                values = array("d", raw)
+            else:  # value = raw * multiplier * 10^-decimals / scale + shift
+                factor = multiplier * 10.0 ** -decimals / scale
+                values = array("d", (sample * factor + shift for sample in raw))
+            unit = text(chan[14]) or text(chan[13])
+            channels.append(Channel(name, text(chan[13]), unit, frequency, values))
     return info, channels
 
 
@@ -239,25 +291,38 @@ def lap_channels(lap: LapData) -> list[Channel]:
     rate = sample_rate(xs)
     count = int((xs[-1] - xs[0]) * rate) + 1
     ticks = [xs[0] + step / rate for step in range(count)]
+    # Held channels: sample at or before each tick (a gear is never 2.5)
+    held = [max(bisect_right(xs, tick) - 1, 0) for tick in ticks]
     channels = []
-    for column, name, short_name, unit, scale in CHANNEL_MAP:
-        values = lap.columns.get(column)
+    for export in CHANNEL_MAP:
+        values = lap.columns.get(export.column)
         if values is None:
             continue
-        ys = [values[index] * scale for index in keep]
-        channels.append(Channel(name, short_name, unit, rate, [interpolate(xs, ys, tick) for tick in ticks]))
+        ys = [values[index] * export.scale + export.offset for index in keep]
+        if export.step:
+            samples = [ys[index] for index in held]
+        else:
+            samples = [interpolate(xs, ys, tick) for tick in ticks]
+        channels.append(Channel(export.name, export.short_name, export.unit, rate, samples))
     return channels
 
 
 def export_lap(lap: LapData, filename: str, venue: str = "", timestamp: float = 0.0) -> None:
-    """Export recorded lap to MoTeC .ld file, vehicle & session from lap info if recorded"""
+    """Export recorded lap to MoTeC .ld file, vehicle, session & driver from lap info if recorded
+
+    Lap name (date, lap number & time) kept as comment: imported back with the same name. Log date is lap start,
+    from lap name (lap end) if dated, else timestamp.
+    """
     meta = lap.meta
+    finished = lap_timestamp_of(lap.name)
+    lap_time = lap_time_of(f"{lap.name}.csv") or lap.lap_time  # name is file name without extension
     info = LdInfo(
+        driver=str(meta.get("driver", "")),
         vehicle=str(meta.get("vehicle", "")),
         venue=str(meta.get("track") or venue),
         session=str(meta.get("session", "")),
         comment=lap.name,
-        timestamp=timestamp,
+        timestamp=finished - lap_time if finished > 0 else timestamp,
     )
     write_ld(filename, lap_channels(lap), info)
 

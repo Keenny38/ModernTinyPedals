@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Telemetry replay control
+Session recorder: telemetry recording & replay control
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ class ReplayView(BaseDialog):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.set_utility_title(tr("Telemetry Replay"))
+        self.set_utility_title(tr("Session Recorder"))
         self._update_timer = QBasicTimer()
         self._loaded_file = ""
 
@@ -561,6 +561,6 @@ class ReplayView(BaseDialog):
         if api_supported():
             return True
         QMessageBox.information(
-            self, tr("Telemetry Replay"), trm(f"Select {API_LMU_NAME} / {API_RF2_NAME} API to record or replay telemetry.")
+            self, tr("Session Recorder"), trm(f"Select {API_LMU_NAME} / {API_RF2_NAME} API to record or replay telemetry.")
         )
         return False

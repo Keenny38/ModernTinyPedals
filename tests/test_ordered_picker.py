@@ -3,7 +3,7 @@
 import pytest
 from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QBoxLayout
 
 from tinypedal.ui.ordered_picker import ROLE_HEADER, ROLE_KEY, OrderedPicker, PickerEntry
 
@@ -138,47 +138,6 @@ def test_rows_drawn(ui_env, icon_family):
 
 
 # --- Editors built on picker
-class FakeConfig(QWidget):
-    """Config dialog side of display order"""
-
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Relative - default")
-        self.applied: list[dict] = []
-
-    def update_display_order(self, orders: dict):
-        self.applied.append(dict(orders))
-
-    def applying(self):
-        self.applied.append({"saved": True})
-
-
-def test_display_order_editor(ui_env):
-    from tinypedal.ui.display_order import DisplayOrder
-
-    config = FakeConfig()
-    defaults = {"display_order_position": 1, "display_order_driver_name": 2, "display_order_laptime": 3}
-    user = {"display_order_position": 2, "display_order_driver_name": 1, "display_order_laptime": 3}
-    editor = DisplayOrder(config, dict(user), defaults)
-    assert editor.picker.shown_keys() == ["display_order_driver_name", "display_order_position", "display_order_laptime"]
-    assert editor.picker.available_card.isHidden() and editor.windowTitle().startswith("Display Order")
-    editor.picker.move_entry("display_order_laptime", -1)
-    assert editor.is_modified()
-    editor.undo()
-    assert editor.picker.shown_keys()[-1] == "display_order_laptime"
-    editor.redo()
-    editor.applying()
-    assert config.applied[0] == {"display_order_position": 3, "display_order_driver_name": 1,
-                                 "display_order_laptime": 2}
-    assert config.applied[1] == {"saved": True} and not editor.is_modified()
-    editor._reset_order()
-    assert editor.picker.shown_keys() == ["display_order_position", "display_order_driver_name",
-                                          "display_order_laptime"] and editor.is_modified()
-    editor.set_unmodified()
-    editor.close()
-    config.deleteLater()
-
-
 def test_rail_editor_marks_changes_and_undo(ui_env):
     from tinypedal.setting import cfg
     from tinypedal.ui.nav_rail import RailEditor, current_rail_items

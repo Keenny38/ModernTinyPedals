@@ -212,7 +212,7 @@ class ChartTools(BackendBase):
             self._autoscale.discard(column)
         save_viewer_setting(self.folder, panel_autoscale=sorted(self._autoscale))
         self._panels = [dict(panel, autoscale=panel["column"] in self._autoscale) for panel in self._panels]
-        self.chartChanged.emit()
+        self.panelsChanged.emit()
 
     # Laps aligned on braking point of a corner: shifted along distance axis
     def align_row(self) -> int:
@@ -267,14 +267,18 @@ class ChartTools(BackendBase):
     @Slot(int)
     def alignBraking(self, index: int):
         """Align laps on braking start of corner (corner row), -1: laps back at their place"""
-        self._align_apex = self._corner_rows[index].corner.apex if 0 <= index < len(self._corner_rows) else -1.0
+        apex = self._corner_rows[index].corner.apex if 0 <= index < len(self._corner_rows) else -1.0
+        moved = apex != self._align_apex
+        self._align_apex = apex
         if self.update_alignment():
             self._legend = [dict(row, offset=self.legend_offset(row["key"])) for row in self._legend]
             self.legend_model.sync(self._legend)
             self.build_panels()
             self.drop_unused_vertices()
             self.bump_revision()
-        self.chartChanged.emit()
+            self.chartChanged.emit()
+        elif moved:  # laps already there (or none to shift): alignment chip only
+            self.cornersChanged.emit()
 
     @Slot(float)
     def alignBrakingAt(self, x: float):

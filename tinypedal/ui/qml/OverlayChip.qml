@@ -7,6 +7,7 @@ Rectangle {
     property color dotColor: "transparent"
     property bool showDot: true
     property int count: 0
+    property bool showCount: true
     property bool selected: false
     signal clicked()
 
@@ -17,7 +18,7 @@ Rectangle {
          : area.containsMouse ? theme.hover : "transparent"
     border.width: 1
     border.color: selected ? theme.accent : area.containsMouse ? Qt.lighter(theme.border, 1.25) : theme.border
-    opacity: count > 0 || selected ? 1 : 0.5
+    opacity: count > 0 || selected || !showCount ? 1 : 0.5
     Behavior on color { ColorAnimation { duration: 120 } }
     Behavior on border.color { ColorAnimation { duration: 120 } }
     Behavior on opacity { NumberAnimation { duration: 150 } }
@@ -45,6 +46,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
+            visible: chip.showCount
             text: chip.count
             color: chip.selected ? theme.accent : theme.dimText
             font.pointSize: theme.fontPoint * 0.85

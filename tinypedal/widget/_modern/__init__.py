@@ -21,10 +21,10 @@ Modern overlay design
 
 Widgets with a modern design (see template.widget.modern.MODERN_DESIGNS) have a second
 implementation here, same module name: tinypedal.widget._modern.<name>.Realtime. It is used
-while overlay modern style is on, otherwise (or with widget "enable_classic_layout" option)
+while overlay theme is a modern one, otherwise (or with widget "enable_classic_layout" option)
 the classic widget is used, so classic look stays available as it was.
 
-    theme.py  color tokens, remapped by overlay theme palette
+    theme.py  color tokens, remapped by overlay theme
     draw.py   shapes: panel, bars, pills, arrows
     base.py   ModernOverlay: one painted surface, cached text & background
 """
@@ -35,13 +35,14 @@ from importlib import import_module
 from types import ModuleType
 
 from ...template.widget.modern import CLASSIC_LAYOUT_OPTION, MODERN_DESIGN_OPTIONS, MODERN_DESIGNS
+from .._style import overlay_theme
 
 
 def uses_modern_design(config, name: str) -> bool:
     """Whether widget is drawn with modern design"""
     if name not in MODERN_DESIGNS:
         return False
-    if not config.user.config["overlay_style"]["enable_modern_style"]:
+    if not overlay_theme(config.user.config["overlay_style"]).modern:  # legacy theme
         return False
     return not config.user.setting[name].get(CLASSIC_LAYOUT_OPTION, False)
 
@@ -66,7 +67,7 @@ def create_widget(module: ModuleType, config, name: str):
 # Options of every modern design widget, always shown in config dialog
 COMMON_OPTIONS = (
     "enable", CLASSIC_LAYOUT_OPTION, "update_interval", "position_x", "position_y", "opacity",
-    "widget_theme", "visibility_context",
+    "visibility_context", "stream_visibility",
 )
 
 
@@ -79,6 +80,6 @@ def design_option_keys(config, name: str, keys: list[str]) -> list[str]:
     if uses_modern_design(config, name):
         shown = {*COMMON_OPTIONS, *modern_module(name).Realtime.options}
         return [key for key in keys if key in shown]
-    if not config.user.config["overlay_style"]["enable_modern_style"]:  # no design switch either
+    if not overlay_theme(config.user.config["overlay_style"]).modern:  # legacy theme: no design switch either
         modern_only = {**modern_only, CLASSIC_LAYOUT_OPTION: False}
     return [key for key in keys if key not in modern_only]

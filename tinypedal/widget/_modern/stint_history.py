@@ -75,7 +75,7 @@ class Realtime(TableMixin, ModernOverlay):
         if wcfg["show_delta"]:
             columns.append(Column("delta", self.text_width("dim", f"+8.{'8' * self.dec_delta}"), RIGHT, "Delta"))
         if wcfg["show_consistency"]:
-            columns.append(Column("consistency", self.text_width("dim", f"88.{'8' * self.dec_consist}%"), RIGHT, "Consist."))
+            columns.append(Column("consistency", self.text_width("dim", f"188.{'8' * self.dec_consist}%"), RIGHT, "Consist."))  # 100% at stint start
         columns = self.display_ordered(columns)
         self.table = self.build_table(columns, 1.45, header=True)
         self.history_rows: tuple = ()

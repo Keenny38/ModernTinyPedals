@@ -192,7 +192,11 @@ def test_quick_access_setting():
     assert entries["command_palette"].kind == "action"
     assert home_view.parse_quick_items("preset, bogus,preset,fuel_calculator,bug_report") == [
         "preset", "race_calculator", "bug_report"]  # unknown & duplicate dropped, merged tool renamed
-    assert home_view.default_quick_items()[-1] == "command_palette"
+    assert home_view.default_quick_items() == [
+        "lap_viewer", "race_calculator", "driver_stats_viewer", "layout_editor", "perf_view",
+        "game_replays", "widget", "module", "preset", "spectate",
+        "hotkey", "tools", "app_settings", "bug_report", "check_updates",
+    ]
 
 
 def test_current_quick_items(ui_env):

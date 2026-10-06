@@ -30,7 +30,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
 
 from .. import app_signal
-from ..const_file import FileExt
+from ..const_file import ConfigType, FileExt
 from ..i18n import tr
 from ..i18n.options import module_label, option_label
 from ..module_control import ModuleControl, mctrl, wctrl
@@ -75,6 +75,11 @@ def module_commands(control: ModuleControl, kind: str, parent) -> list[Command]:
         app_signal.refresh.emit(True)
 
     def configure(name: str):
+        if control.type_id == ConfigType.WIDGET:  # one page for every overlay
+            from .overlay_options import open_overlay_options
+
+            open_overlay_options(parent, name)
+            return
         UserConfig(
             parent=parent,
             key_name=name,
@@ -123,8 +128,16 @@ def build_commands(window) -> list[Command]:
     commands.append(Command(
         tr("Reload"), tr("Overlay"), search_text(tr("Reload"), "reload preset"), lambda: window.reload_preset(True)))
     commands.append(Command(
-        tr("Application"), tr("Config"), search_text(tr("Application"), "application config settings"),
-        lambda: open_config_application(window)))
+        tr("Reset Window Size and Position"), tr("Window"),
+        search_text(tr("Reset Window Size and Position"), "reset window size position default center"),
+        window.reset_window_size))
+    from .quick.settings_backend import CATEGORIES
+
+    for category in CATEGORIES:  # settings page categories (config.json)
+        commands.append(Command(
+            tr(category.label), tr("Config"),
+            search_text(tr(category.label), category.label, tr(category.description), "config settings"),
+            partial(open_config_application, window, category.key)))
     for _, tools in TOOL_SECTIONS:
         for label, _, dialog_path in tools:
             commands.append(Command(

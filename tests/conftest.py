@@ -112,6 +112,9 @@ def ui_env(monkeypatch, tmp_path):
     from tinypedal.setting import FilePath, Preset, Setting, cfg
     from tinypedal.userfile.json_setting import copy_setting
 
+    # Real save left running by a previous test finished first: while is_saving, run_after_saving
+    # defers reloads past the end of the test
+    cfg.flush()
     cfg.default.set_default()
     for name in Preset.__slots__:
         monkeypatch.setattr(cfg.user, name, copy_setting(dict(getattr(cfg.default, name))), raising=False)

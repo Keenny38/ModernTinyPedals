@@ -5,6 +5,165 @@ C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en 
 
 ## 0.21.0 (2026-10-06)
 
+### Résultats de course
+
+Une nouvelle page **Résultats de course** (`Résultats` dans la barre de navigation, ou `Outils` > `Résultats de course`) montre toutes les sessions que tu as jouées, en ligne ou en solo, d'après les fichiers de résultats que Le Mans Ultimate et rFactor 2 écrivent à la fin de chaque session. Rien à régler : le dossier des résultats est trouvé dans tes bibliothèques Steam, et le jeu n'a pas besoin de tourner.
+
+- **Sessions** par jour avec le type de session, le circuit, le nombre de voitures et ton résultat (position, position dans la catégorie, `DNF`). Recherche, filtre `Courses` / `Qualif` / `Essais libres`, sessions où personne n'a bouclé de tour masquées. Une session qui se termine pendant que la page est ouverte apparaît aussitôt.
+- **Tes chiffres clés** : position et position dans la catégorie, places gagnées ou perdues depuis la grille, meilleur tour et son rang dans ta catégorie, tours et arrêts, contacts avec les voitures et les murs, points de limites de piste et pénalités. Ta voiture est reconnue grâce au nom de pilote de ton profil du jeu, aussi comme pilote d'une voiture d'équipe.
+- **Classement** : position et places gagnées, catégorie, numéro, pilote et équipe, voiture, tours, temps de course puis écarts (temps ou tours de retard), meilleur tour (le plus rapide en violet), arrêts, contacts. Les pastilles de catégorie n'en montrent qu'une, avec positions et écarts dans la catégorie. Une course quittée avant la fin est marquée `Inachevée`, avec des écarts tirés des temps au tour.
+- **Positions** : la place de chaque voiture tour par tour depuis la grille, ta voiture et la voiture choisie mises en avant.
+- **Tours** de n'importe quelle voiture : place, temps au tour, écart à son meilleur, secteurs (meilleurs de la session et personnels en couleur), vitesse de pointe, gomme, passage aux stands, et pour ta voiture l'énergie (ou le carburant) consommée et la gomme restante. Meilleur tour, moyenne, régularité, meilleur théorique et vitesse de pointe en tête.
+- **Événements** : contacts (affichés une fois quand les deux voitures les signalent), pénalités, limites de piste et discussion, avec un filtre par type et les événements d'une seule voiture. Les raisons d'abandon et les pénalités sont affichées dans la langue de l'app.
+
+| Classement d'une course multicatégorie | Positions tour par tour |
+|---|---|
+| ![Résultats de course](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results.png) | ![Positions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results-positions.png) |
+
+### Overlays de stream (OBS Studio, Streamlabs, XSplit, vMix)
+
+Les overlays peuvent maintenant être ajoutés à ton stream comme **sources navigateur** : fond transparent, pas de chroma key, rendu identique à l'écran, même quand le jeu tourne en plein écran exclusif. Ouvre la nouvelle page **Overlays de stream** (`Outils` > `Overlays de stream`), active-la, puis `Copier l'adresse`.
+
+- **Disposition** : tous les overlays à leur place à l'écran, dans une seule source. **Une source par overlay**, à la taille indiquée sur la page.
+- **À l'écran, en stream ou les deux** : chaque overlay est `Écran et stream`, `Stream seulement` (visible par tes spectateurs, pas sur ton écran tant que les overlays sont verrouillés) ou `Écran seulement` (jamais en stream). C'est aussi la nouvelle option `stream_visibility` de chaque overlay.
+- **Résultats de course pour tes spectateurs** : le classement de la dernière course (ou qualif), toutes catégories ou catégorie par catégorie, avec des pages qui défilent, mis à jour quand le jeu écrit un nouveau fichier de résultats.
+- Léger : les images ne sont capturées que pendant qu'une source est affichée, copiées depuis ce qui est déjà à l'écran, et renvoyées seulement quand elles changent (15, 30 ou 60 images par seconde au plus).
+- Chaque adresse contient un jeton d'accès (`Nouveau jeton d'accès` si l'une a été montrée en stream par erreur), et `Autre ordinateur (réseau local)` sert un PC de stream de ton réseau local. Les réglages sont aussi dans la page Réglages (`Overlay de stream`).
+
+![Page Overlays de stream](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-overlays.png)
+
+![Résultats de course en source navigateur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
+
+### Overlay Comparaison de télémétrie
+
+Un nouvel overlay **Comparaison de télémétrie** (désactivé par défaut, catégorie `Commandes pilote`) affiche le tour de référence de la visionneuse de télémétrie pendant que tu roules.
+
+- **Vitesse, accélérateur et frein** de ton tour en cours par-dessus le tour de référence (volant et rapport en option), de `250` m derrière la voiture à `150` m devant (`distance_behind`, `distance_ahead`) : le **prochain point de freinage du tour de référence apparaît devant la voiture**.
+- **Écart de vitesse** et **delta** avec le tour de référence à la même distance, avec le temps du tour de référence.
+- `reference_lap_source` : `Visionneuse` (le tour choisi comme référence dans la visionneuse de télémétrie, sinon le meilleur tour valide), `Meilleur` ou `Dernier` tour enregistré. Un nouveau meilleur tour, ou une référence changée dans la visionneuse, est pris en compte pendant que tu roules.
+
+![Overlay Comparaison de télémétrie : point de freinage du tour de référence devant la voiture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-telemetry-compare.png)
+
+### Visionneuse de télémétrie
+
+- **Seuls les tours du circuit du tour de référence sont comparés** : un tour d'un autre circuit reste dans la liste, grisé, avec un message qui explique pourquoi. Choisis-le comme référence pour le voir.
+- **`Direct`** : un nouveau meilleur tour est comparé au meilleur précédent, un tour de référence que tu as choisi reste la référence, et la visionneuse passe au circuit sur lequel tu roules.
+- **Carte du circuit** : avec LMU, le tracé du circuit fourni par le jeu est une trajectoire, pas le centre de la piste. Les bords de piste viennent des tours qui les ont enregistrés, sinon de l'écart entre tes tours. **Distance au centre** et **Position sur la piste** sont mesurées sur la carte quand un tour ne les a pas enregistrées.
+- **Session** : relais séparés aux arrêts aux stands (ravitaillement, changement de pneus).
+- **Import MoTeC** (`.ld`) : tours nommés avec la date du log, températures moteur, températures intérieur / milieu / extérieur des pneus, répartition de freinage, charge des pneus et position sur la piste importées aussi, un tour déjà importé n'est pas recopié. `Importer un dossier...` une deuxième fois n'ajoute que les nouveaux tours, et `Tours importés...` supprime vers la corbeille avec `Annuler`.
+- **`Utiliser comme delta meilleur tour...`** : ton premier delta meilleur tour est toujours gardé en sauvegarde, plus les 5 derniers, et un tour d'un coéquipier sur le même circuit et dans la même catégorie peut être utilisé.
+- **Plus rapide** : les circuits avec des centaines de tours s'ouvrent vite (détails des tours gardés dans un index), les imports MoTeC tournent dans le processus de calcul en arrière-plan.
+- **Clavier** : dans la grande carte, les touches de la carte vont à la carte et les autres atteignent toujours les graphiques. Sur un clavier AZERTY, la rangée des chiffres marche sans `Maj`. `Échap` ne ferme jamais la visionneuse.
+
+### Page Réglages et pages refaites
+
+#### Page Réglages
+
+Toutes les options globales de l'app dans **une seule page**, `Réglages` dans la barre de navigation (aussi `Ctrl+,`, le bouton engrenage en bas de la barre, chaque entrée du menu `Réglages` et la palette de commandes). Elle remplace les pages séparées Application, Style de l'overlay, Notifications, Compatibilité, Contrôle à distance, Tableau de bord web, Overlay VR et Dossiers utilisateur.
+
+- **Catégories** à gauche, options en groupes avec leur description, et un éditeur fait pour chaque option : interrupteur, liste de choix, nombre avec ses limites, couleur avec un sélecteur, dossier avec `Choisir un dossier...` et `Ouvrir le dossier`.
+- **Recherche dans toutes les catégories**, avec le nombre de résultats à côté de chaque catégorie.
+- **Modifications en attente** jusqu'à `Appliquer` (`Ctrl+S`) : la barre du bas les compte, avec annuler, rétablir (`Ctrl+Z`, `Ctrl+Y`) et `Annuler les modifications`. Une valeur invalide est montrée en rouge avec la raison. La flèche d'une option la remet à sa valeur par défaut, `Réinitialiser la section` toute la catégorie.
+- **Adresses et code d'accès du tableau de bord web** avec boutons de copie, adresses de commande et de flux du contrôle à distance, aperçu de chaque notification avec ses couleurs.
+- Unités, police globale et options de l'API (enregistrées dans le preset) à un clic.
+
+![Page Réglages](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-config-page.png)
+
+#### Page Presets
+
+- Le preset chargé et `Charger automatiquement le preset principal` en haut. Chaque preset montre sa dernière modification, les overlays et modules qu'il active, ses catégories et circuits, ses raccourcis de preset et son verrou.
+- Recherche par nom de preset, de catégorie ou de circuit, tri par dernière modification ou par nom.
+- **Détails du preset sélectionné** sur une fenêtre large : overlays et modules qu'il contient, le jeu qu'il retient, toutes les actions, catégories et circuits ajoutés ou retirés en un clic.
+- Nouveau, dupliquer et renommer dans une boîte qui **vérifie le nom pendant la frappe** (caractères interdits dans un nom de fichier, preset existant). `Ctrl+N`, `F2`, `Suppr`, `Ctrl+Z` remet le dernier preset supprimé.
+- Les fichiers de presets ne sont relus que s'ils ont changé, et seulement quand la page est affichée.
+
+![Page Presets](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-presets-page.png)
+
+#### Page Spectateur
+
+- Les pilotes de la session avec position, couleur de catégorie, voiture, meilleur tour et passage aux stands ou au garage. Recherche, puces de catégorie, tri par position ou par nom. Ta voiture est marquée `Vous`.
+- **Clique sur un pilote pour le suivre** (le mode spectateur s'active tout seul). La carte du haut montre le pilote suivi, avec pilote précédent et suivant au classement (`Alt+Gauche`, `Alt+Droite`) et `Arrêt`.
+- Les pilotes ne sont lus que quand la page est affichée.
+
+![Page Spectateur](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-spectate-page.png)
+
+#### Page Modules
+
+- Chaque module est une **carte qui dit ce qu'il calcule** (temps au tour et deltas, carburant et énergie, positions de toutes les voitures…), avec son état (`En cours`, `Désactivé`, `Erreur` s'il n'a pas pu démarrer) et son intervalle de mise à jour.
+- **Ce qui en dépend** : le nombre d'overlays activés qui utilisent ses données (leurs noms en infobulle) et les modules qui s'en servent, trouvés dans le code de chaque overlay. Un module désactivé dont des overlays ou modules activés ont besoin est signalé, avec `Les activer` en haut de la page ; un module qui a besoin d'un module désactivé l'indique.
+- Recherche (accents et casse ignorés, dans les noms et les descriptions), `Tous` / `Actifs` / `Inactifs`, `Activer les affichés` / `Désactiver les affichés` quand un filtre est actif.
+- Clic droit sur une carte : `Réglages...`, activer ou désactiver, et **réinitialiser ses données enregistrées** (delta meilleur tour, delta de carburant et d'énergie, historique de consommation, meilleurs secteurs, carte du circuit).
+- Clavier comme la page Overlays : taper pour chercher, `/`, flèches, `Espace`, `Entrée`.
+
+![Page Modules](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-modules-page.png)
+
+#### Rechercher une option (`Ctrl+F`)
+
+- **Meilleurs résultats d'abord**, sans tenir compte des accents ni des majuscules, avec la **valeur actuelle** de chaque option et un point sur les options qui ne sont plus à leur valeur par défaut.
+- **Les options oui / non se basculent directement dans la liste** (ou `Espace`) : enregistré et appliqué tout de suite.
+- `Modifiées seulement` liste toutes les options que tu as changées, même sans mot cherché. Des puces limitent les résultats aux overlays, modules, preset ou application.
+- Un résultat ouvre la page Options des overlays, la page Réglages ou la page du module sur l'option. Clic droit : `Réinitialiser`, `Copier la clé de l'option`.
+
+![Rechercher une option](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-find-option.png)
+
+#### Assistant de configuration
+
+- **Six étapes** avec la progression à gauche : Bienvenue, Jeu, Unités, Apparence, Overlays, Prêt. Clique sur une étape pour y revenir, `Entrée` passe à la suivante. Rien ne change avant `Terminer` : fermer l'assistant (`Échap` ou la croix de la fenêtre, après confirmation) laisse tout comme avant.
+- **L'assistant change de langue dès que tu en choisis une**, l'app suit une fois la configuration terminée.
+- **Jeu** : le jeu lancé en ce moment est marqué `En cours` et choisi pour toi.
+- **Unités** (nouveau) : `Métrique` ou `Impérial` pour la vitesse, la température, le carburant, la pression et le poids, enregistré dans le preset. Les unités mélangées d'un preset peuvent être gardées.
+- **Apparence** : les quatre thèmes de fenêtre dessinés dans leurs couleurs, les quatre thèmes d'overlay avec un overlay dessiné dans chacun, `Couleurs adaptées aux daltoniens` et la police moderne, et un aperçu d'overlays dans le style choisi.
+- **Overlays** : nouveau preset ou preset existant (le nom est vérifié pendant la saisie), et overlays présentés en **images** à cocher : `Recommandés`, `Tous` ou `Aucun`. Avec un preset existant, ses overlays déjà activés sont cochés, et en décocher un le désactive. Tous les overlays qu'active un nouveau preset sont listés.
+- **Prêt** : tous les choix avec `Changer` pour y revenir, et des conseils pour la première sortie en piste.
+- Les images des overlays sont dessinées en arrière-plan, seulement à partir de l'étape Apparence, et gardées pour chaque style.
+
+| Apparence | Preset et overlays |
+|---|---|
+| ![Apparence de l'assistant](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-appearance.png) | ![Overlays de l'assistant](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-overlays.png) |
+
+### Thèmes
+
+L'app et les overlays ont maintenant **quatre thèmes**, choisis séparément : `Moderne sombre` (par défaut), `Moderne clair`, `Classique sombre` et `Classique clair`.
+
+- **Overlays** (`Thème de l'overlay` dans `Réglages` > `Style de l'overlay`) : les thèmes `Moderne` utilisent le design moderne, les thèmes `Classique` remettent le look d'origine de TinyPedal (mise en page, couleurs et polices classiques) sur tous les overlays. Les thèmes clairs inversent les panneaux et textes gris, gardent les drapeaux et alertes dans leurs couleurs et assombrissent les couleurs posées sur les panneaux (températures en palette thermique, gains et pertes, gommes) pour qu'elles restent lisibles. Les couleurs que tu as personnalisées sont gardées dans tous les thèmes.
+- **Couleurs pour daltoniens** (option du même nom dans `Style de l'overlay`) : une variante de chaque thème d'overlay avec la palette Okabe-Ito, les paires rouge / vert deviennent orange / bleu. Aussi dans l'assistant de démarrage.
+- **Fenêtre** (`Thème de la fenêtre` dans `Réglages` > `Application`, ou le bouton de thème de la barre d'état) : les thèmes `Moderne` gardent les couleurs actuelles, les thèmes `Classique` reprennent les couleurs de TinyPedal 2.50.
+- **Supprimés** : les thèmes d'overlay `Contraste élevé`, `Adapté aux daltoniens` et `Classique`, le thème propre à chaque overlay (`widget_theme`), l'`Éditeur de thème de l'overlay` et ses thèmes personnalisés (`overlay_themes.json` n'est plus lu), et le thème de fenêtre `Système`. Le `Thème de couleurs...` du Black box garde `Par défaut` et `Adapté aux daltoniens`.
+- **Moderne sombre pour tout le monde** après cette mise à jour, pour la fenêtre et les overlays, quel que soit le thème que tu utilisais (l'ancien thème d'overlay `Adapté aux daltoniens` devient `Moderne sombre` avec les couleurs pour daltoniens). Choisis un autre thème ensuite, il est gardé.
+
+![Thèmes des overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-overlay-themes.png)
+
+### Options des overlays
+
+Les options de tous les overlays sont maintenant dans **une seule page**, `Options des overlays` : les overlays à gauche par catégorie, les options de celui que tu choisis au milieu, un aperçu en direct à droite. Elle s'ouvre depuis l'engrenage d'une carte d'overlay, un clic droit sur un overlay, la recherche d'option et la palette de commandes, et tu passes d'un overlay à l'autre sans rien fermer.
+
+- **Des sections pour chaque overlay**, plus seulement pour le Black box : `Général`, `Position et disposition`, `Polices`, puis une section par élément affiché (Vitesse, Écart, Barre de niveau de carburant...) avec **son interrupteur dans le titre de la section**. Les options d'un élément désactivé sont grisées. Clique sur le titre d'une section pour la replier (`Tout replier`, `Tout déplier`), son bouton `Réinitialiser` ne remet que cette section par défaut.
+- **Des modifications sur plusieurs overlays** gardées en attente jusqu'à `Appliquer` (`Ctrl+S`) : la liste des overlays indique combien chacun en a, avec `Annuler`, `Rétablir` (`Ctrl+Z`, `Ctrl+Y`) et `Annuler les modifications`. Les valeurs invalides sont signalées tout de suite avec la raison. `Appliquer` enregistre le preset une seule fois et ne redémarre que les overlays modifiés.
+- **Recherche dans cet overlay ou dans tous les overlays** : tape `opacité` et règle-la pour tous tes overlays dans une seule liste. `Modifiées seulement` liste les options changées par rapport à leur valeur par défaut, dans un overlay ou dans tous, et la liste des overlays indique combien d'options chacun a changées.
+- **Appliquer à tous les overlays** (bouton `...` d'une option) : sa valeur va à tous les overlays qui l'ont, par exemple une police, l'opacité ou la fréquence de mise à jour.
+- **Ordre d'affichage** sous forme de liste déplacée avec des flèches, directement dans la page (c'était une fenêtre à part).
+- **Aperçu en direct** de l'overlay avec tes valeurs non enregistrées.
+- Seules les options du design utilisé sont affichées, et activer `Utiliser la disposition classique` affiche tout de suite les options de l'autre design. Le Black box garde ses sections, son mode simple, ses thèmes de couleurs et son profil d'affichage (les options réglées par le profil sont verrouillées et l'indiquent).
+
+| Un overlay en sections, aperçu avec les valeurs non enregistrées | L'opacité de tous les overlays dans une seule recherche |
+|---|---|
+| ![Page Options des overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options.png) | ![Recherche dans tous les overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options-search.png) |
+
+### Barre de navigation et accès rapide de l'accueil
+
+- **Nouvelle barre de navigation pour tout le monde** : `Accueil`, `Overlays`, `Stats`, `Résultats`, `Rejeux`, `Télémétrie`, `Spectateur`, `Course`, `Presets`, `Réglages`. `Modules`, `Raccourcis`, `Outils` et `Notes de pilotage` quittent la barre : ouvre-les depuis la palette de commandes (`Ctrl+K`), l'accès rapide de l'accueil, ou remets-les avec `Personnaliser la barre de navigation...`. Une barre que tu avais personnalisée est aussi réinitialisée.
+- **Nouvel accès rapide de l'accueil** : visionneuse de télémétrie, calculateur de course, statistiques pilote, éditeur de disposition, performances des widgets, rejeux du jeu, Overlays, Modules, Presets, Spectateur, Raccourcis, Outils, Réglages, créer un rapport de bug et rechercher des mises à jour.
+
+### Taille de la fenêtre principale
+
+- **Taille confortable au premier lancement**, centrée sur l'écran (elle s'ouvrait à sa taille minimale).
+- **Jamais trop petite** : la zone des pages garde une taille minimale pour que les pages ne se chevauchent ni ne soient coupées, plus grande quand la visionneuse de télémétrie (barre d'outils et trois panneaux entiers, dans toutes les langues) ou les statistiques pilote sont affichées. La barre de navigation garde sa largeur (elle pouvait être écrasée jusqu'à ce que ses entrées disparaissent), et son entrée sélectionnée reste visible quand la fenêtre est basse. Sur un petit écran, le minimum est réduit pour que la fenêtre tienne quand même.
+- **Fenêtre agrandie mémorisée**, et réaffichée agrandie depuis la zone de notification ou la barre des tâches.
+- **Taille et position enregistrées un instant après chaque changement** : un plantage ou un arrêt du PC les conserve aussi (elles n'étaient enregistrées qu'en quittant).
+- **Outils larges** (résultats de course, télémétrie, éditeur de disposition...) : ils agrandissent la fenêtre seulement tant qu'ils sont ouverts. Elle reste dans l'écran (décalée au lieu de déborder) et retrouve sa taille et sa place à leur fermeture. Quitter avec l'un d'eux ouvert ne garde plus la taille agrandie pour de bon.
+- **Fenêtre gardée à l'écran** : ramenée si elle était restée sur un écran débranché, réduite si elle est plus grande que l'écran, barre de titre jamais cachée.
+- **`Fenêtre` > `Réinitialiser la taille et la position de la fenêtre`** (aussi dans la palette de commandes, `Ctrl+K`) : retour à la taille par défaut, centrée.
+
 ### Mémoire réduite
 
 L'app utilise environ un tiers de mémoire en moins : environ 77 Mo au lieu de 115 Mo une fois lancée avec le preset par défaut, et 119 Mo au lieu de 200 Mo quand la fenêtre attend dans la zone de notification après avoir ouvert la page Overlays.
@@ -14,6 +173,10 @@ L'app utilise environ un tiers de mémoire en moins : environ 77 Mo au lieu de 1
 - **Courses longues** : les overlays modernes gardent en cache un nombre de textes proportionnel à ce qu'ils dessinent : leur mémoire n'augmente plus à chaque nouveau temps au tour, écart ou température.
 - **Page Overlays** : les images des overlays dessinés avec le design moderne ne chargent plus le code classique de ces overlays.
 - La police de la fenêtre principale est réglée sur la police de l'app au lieu de la feuille de style : les icônes des cartes de l'accueil ne parcourent plus toutes les polices installées (environ 20 Mo), et les cartes sont un peu plus compactes.
+
+### Corrections
+
+- **Raccourcis du mode spectateur** : `spectate_next_driver` et `spectate_previous_driver` suivaient le mauvais pilote dès qu'une voiture avait quitté la session (sa place dans la liste des voitures était enregistrée au lieu de son slot), et `spectate_mode` ne prenait effet qu'au prochain redémarrage de l'API.
 
 ## 0.20.2 (2026-10-06)
 

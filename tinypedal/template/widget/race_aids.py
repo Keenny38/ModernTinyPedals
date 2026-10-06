@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Default setting of race aid widgets: trends, pit lane, stint, spotter & notifications
+Default setting of race aid widgets: trends, pit lane, stint, spotter, notifications & telemetry comparison
 
 Widget key name must match corresponding file name in 'widget' folder
 """
@@ -209,5 +209,46 @@ WIDGET_RACE_AIDS = {
         "background_color_caption": "#222222",
         "background_color_chart": "#2A2A2A",
         "optimal_line_color": "#AAFFFFFF",
+    },
+    "telemetry_compare": {
+        "enable": False,
+        "update_interval": 30,
+        "position_x": 760,
+        "position_y": 600,
+        "font_name": "Consolas",
+        "font_size": 15,
+        "font_weight": "Bold",
+        "enable_auto_font_offset": True,
+        "font_offset_vertical": 0,
+        "opacity": 0.9,
+        "bar_padding": 0.2,
+        "bar_gap": 2,
+        "display_width": 360,
+        "display_height": 70,
+        "distance_behind": 250,
+        "distance_ahead": 150,
+        "reference_lap_source": "Viewer",
+        "decimal_places": 2,
+        "show_reference_lap_time": True,
+        "show_delta": True,
+        "show_speed_difference": True,
+        "show_speed": True,
+        "show_throttle": True,
+        "show_brake": True,
+        "show_steering": False,
+        "show_gear": False,
+        "reference_line_opacity": 0.45,
+        "font_color_reading": "#EEEEEE",
+        "font_color_time_gain": "#44FF00",
+        "font_color_time_loss": "#FF4400",
+        "background_color": "#CC222222",
+        "background_color_chart": "#2A2A2A",
+        "zero_line_color": "#88AAAAAA",
+        "position_mark_color": "#EEEEEE",
+        "line_color_speed": "#00CCFF",
+        "line_color_throttle": "#44FF00",
+        "line_color_brake": "#FF2200",
+        "line_color_steering": "#FFAA00",
+        "line_color_gear": "#EEEEEE",
     },
 }

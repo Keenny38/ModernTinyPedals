@@ -108,9 +108,11 @@ CIRCUITS = (
         ("1", 0.232), ("2", 0.287), ("3", 0.330), ("4", 0.379), ("5", 0.395), ("6", 0.507), ("7", 0.529),
         ("8", 0.595), ("9", 0.803), ("10", 0.848), ("11", 0.883))),
     Circuit(("sarthe", "le mans"), 13626, (
-        ("Dunlop Curve", 0.047), ("Dunlop Chicane", 0.064), ("Forest Esses", 0.085), ("Tertre Rouge", 0.142),
+        # Forest Esses & Indianapolis checked on recorded laps: Esses first bend ~1500 m (not the kink near
+        # the Dunlop bridge), Indianapolis apex ~9830 m (not the kink before it)
+        ("Dunlop Curve", 0.047), ("Dunlop Chicane", 0.064), ("Forest Esses", 0.110), ("Tertre Rouge", 0.142),
         ("Mulsanne Chicane 1", 0.303), ("Mulsanne Chicane 2", 0.450), ("Mulsanne", 0.568),
-        ("Indianapolis", 0.716), ("Arnage", 0.746), ("Porsche Curves", 0.866), ("Maison Blanche", 0.910),
+        ("Indianapolis", 0.721), ("Arnage", 0.746), ("Porsche Curves", 0.866), ("Maison Blanche", 0.910),
         ("Ford Chicanes", 0.979)), numbered=False),
 )
 

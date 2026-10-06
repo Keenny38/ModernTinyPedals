@@ -4,18 +4,18 @@ Modern Tiny Pedals is a free, open-source telemetry overlay and analysis app for
 
 The app is built with PySide6 (Qt 6) and runs in English or French.
 
-![86 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/images/readme_preview.png)
+![87 overlays with the modern design, on a simulated race at Road Atlanta](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/images/readme_preview.png)
 
 ## Key features
 
-- **86 configurable overlays** with a modern design (rounded panels, short labels, values colored by meaning), themes, a theme editor, and visibility per session type or pit state. The classic look is still available.
+- **87 configurable overlays** with a modern design (rounded panels, short labels, values colored by meaning), four themes (Modern or Legacy, dark or light, with a colorblind variant), and visibility per session type or pit state. The classic look is still available (Legacy themes).
 - **Race aids**: delta graph, gap trend, pit lane helper, stint timer, spotter, race notifications, tyre temperature trend.
 - **Black box**: an all-in-one view of the four wheels, brakes, suspension, damage, fuel and energy, with an incident log.
 - **Telemetry viewer** drawn by the graphics card: every lap is recorded and can be compared, with a racing line map, corner analysis ("where time is lost"), session pace, XY plots, MoTeC import and export.
 - **Race calculator**: fuel, virtual energy and tyre strategy in one page, safety car and rain scenarios, several drivers, live race replanning, share codes.
 - **Driver stats**: your lap times per track and car, compared with community LMU lap times, with progression and session history.
 - **Le Mans Ultimate data**: chat overlay, game replays and contacts, official delta, invalid lap, team stints and more, read from the game REST API with nothing to configure.
-- **Connections**: remote control (Stream Deck, Companion, SimHub), WebSocket telemetry stream, web dashboard for a phone or tablet, SteamVR overlay and VR mirror window, telemetry replays.
+- **Connections**: remote control (Stream Deck, Companion, SimHub), WebSocket telemetry stream, web dashboard for a phone or tablet, stream overlays as browser sources (OBS, Streamlabs, XSplit, vMix), SteamVR overlay and VR mirror window, session recorder.
 - **Reliable updates**: Windows installer, in-app updates with SHA-256 check, signed build provenance for every release file.
 - **Extensible**: widget plugins and JSON language packs.
 
@@ -31,7 +31,8 @@ The app is built with PySide6 (Qt 6) and runs in English or French.
 | [Telemetry Viewer](Telemetry-Viewer.md) | Lap recording and analysis, track map viewer |
 | [Race Calculator](Race-Calculator.md) | Fuel, energy and tyre strategy, live race, Race plan overlay |
 | [Driver Stats](Driver-Stats.md) | Career, levels, progression, sessions |
-| [Connections](Connections.md) | Remote control, WebSocket, web dashboard, VR, replays |
+| [Race Results](Race-Results.md) | Classification, positions lap by lap, laps and events of every session |
+| [Connections](Connections.md) | Remote control, WebSocket, web dashboard, stream overlays, VR, replays |
 | [Updates and Security](Updates-and-Security.md) | In-app updates, release files, verifying downloads, reporting a vulnerability |
 | [Troubleshooting](Troubleshooting.md) | FAQ: overlay not visible, game not detected, safe mode, logs, bug reports |
 | [Development](Development.md) | Running from source, checks, architecture, Windows build, release process |

@@ -9,19 +9,19 @@ Every option is described in the [settings reference (customization.md)](https:/
 
 ## Presets
 
-Open the `Preset` page:
+Open the `Preset` page. The loaded preset is shown on top, with the `Auto Load Primary Preset` switch. Each preset shows when it was last changed, how many overlays and modules it turns on, its car class and track tags, its preset hotkeys and a lock mark. Search by preset, class or track name, and sort by last change or by name. On a wide window, the selected preset's details are shown on the right: its overlays and modules, the game it remembers, its tags (add a car class or track, or remove one with its `×`) and every action.
 
 | Action | How |
 |---|---|
-| Load a preset | Double-click it |
-| Create a default preset | `New` |
+| Load a preset | Double-click it, `Load` on its row (or `Enter`) |
+| Create a default preset | `New` (`Ctrl+N`): the name is checked as you type |
 | Copy settings from the loaded preset to another one | `Transfer` (choose settings and option types: positions, colors, fonts...) |
 | Restore a backup | `Restore`, see [Backups](#backups) |
 | Restore a deleted preset | `Trash`, see [Trash](#trash) |
 | Import a preset package or a share code | `Import` > `Preset Package (.zip)...` or `Share Code...` |
 | Load a preset automatically | `Auto Load Primary Preset`, see [Auto load](#auto-load-per-class-or-track) |
 
-Right-click a preset for more actions: `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Copy Share Code`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag`, `Duplicate`, `Rename` and `Delete`.
+Right-click a preset (or its `...` button) for more actions: `Duplicate...`, `Rename...` (`F2`), `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Copy Share Code`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag` and `Delete` (`Del`). A renamed preset keeps its backups, layout profiles, primary tags and preset hotkeys. Locked and loaded presets cannot be deleted, a locked preset cannot be renamed.
 
 Overlay positions, overlays turned on or off and the lock state are saved automatically; options are saved with `Apply` or `Save` on their page. Hotkeys can load a given preset, or the next and previous preset: see [Getting Started](Getting-Started.md#hotkeys).
 
@@ -44,7 +44,7 @@ You can also drag a preset file, a preset package or a plugin `.zip` onto the ma
 
 ### Trash
 
-`Delete` moves a preset (and its layout profiles) to the trash. For a few seconds, `Undo` in the message at the bottom of the window (or `Ctrl+Z` in the preset list) puts it back.
+`Delete` moves a preset (and its layout profiles) to the trash. `Undo` in the message at the bottom of the window, `Undo Delete` at the bottom of the page, or `Ctrl+Z` on the page puts it back.
 
 The `Trash` page lists deleted presets:
 
@@ -78,7 +78,15 @@ Some settings are shared by all presets and edited with their own tools (`Tools`
 
 ## Global config
 
-Global options are in `config.json`, in the global config folder: `%APPDATA%\TinyPedal` on Windows, `~/.config/TinyPedal/` on Linux. They are edited from the menus:
+Global options are in `config.json`, in the global config folder: `%APPDATA%\TinyPedal` on Windows, `~/.config/TinyPedal/` on Linux. They are all edited in the `Config` page: its entry in the navigation bar, the gear button at the bottom of the bar, `Config` > `All Settings` (`Ctrl+,`), the Home page quick access, the `Tools` page or the command palette. Like the other navigation bar tools, it stays as you left it (category, pending changes) while you browse other pages.
+
+- One category per section of `config.json`, options in groups with their description, and an editor matching each option: switch, choice list, number with its limits, color with a picker, folder with `Choose Folder...` and `Open Folder`.
+- `Search settings` (`Ctrl+F` on the page) looks through every category; the count of matches shows next to each category.
+- Changes stay pending until `Apply` (`Ctrl+S`): the bar at the bottom counts them, with `Undo`, `Redo` (`Ctrl+Z`, `Ctrl+Y`) and `Discard`. Invalid values are shown in red with the reason and block `Apply`. The circular arrow next to an option puts it back to default, `Reset Section` the whole category.
+- The `Web Dashboard` category shows the addresses to open and the access code (with copy buttons), `Remote Control` the command and stream addresses, `Notification` a preview of each notice. The `Stream Overlay` category holds the server settings of the `Stream Overlays` page, which lists the browser source addresses (see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)).
+- Units, global font override and API options belong to the loaded preset: they open their own page from `In the loaded preset`.
+
+The menus open the matching category:
 
 | Menu | Settings |
 |---|---|
@@ -91,7 +99,7 @@ Global options are in `config.json`, in the global config folder: `%APPDATA%\Tin
 | `Config` > `Remote Control`, `Web Dashboard`, `VR Overlay (Experimental)` | See [Connections](Connections.md) |
 | `Config` > `User Path` | Folders for presets, data and recorded laps |
 | `API` > `Options` | Game connection, see [Game Setup](Game-Setup.md) |
-| `Window` | `Show at Startup`, `Minimize to Tray`, `Remember Position`, `Remember Size`, `Reopen Pages at Startup`, `Restart Modern Tiny Pedals` |
+| `Window` | `Show at Startup`, `Minimize to Tray`, `Remember Position`, `Remember Size`, `Reopen Pages at Startup`, `Reset Window Size and Position`, `Restart Modern Tiny Pedals` |
 
 `Config` > `Open Folder` opens any user folder in your file manager. Data folders set inside the app folder are stored as relative paths (each copy keeps its own data); set them outside the app folder to share data between copies.
 

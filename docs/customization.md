@@ -622,10 +622,13 @@ Set refresh rate for module while idling for conserving resources.
 Define widget position on screen in pixels. Those values will be auto updated and saved.
 
     enable_classic_layout
-Every widget except Black box has a modern design, used while `enable_modern_style` is on. Enable this option to keep classic layout of this widget (with modern colors) instead. Default is disabled.
+Every widget except Black box has a modern design, used with `Modern Dark` and `Modern Light` overlay themes. Enable this option to keep classic layout of this widget (with modern colors) instead. Default is disabled.
 
     opacity
 Set opacity for entire widget. By default, all widgets have a 90% opacity setting, which equals value `0.9`. Lower value adds more transparency to widget. Acceptable value range in `0.0` to `1.0`. Note, opacity can also be set by adjusting alpha value in `color` options for individual elements.
+
+    stream_visibility
+Where the widget is shown when [Stream Overlay](#stream-overlay) is enabled: `Screen & Stream` (default), `Stream Only` (window fully transparent on screen while widgets are locked, still sent to streaming software; visible while unlocked, to move it), or `Screen Only` (never sent to streaming software). Can also be set for every widget from `Stream Overlays` page.
 
     bar_gap, inner_gap
 Set gap (screen pixel) between elements in a widget, only accept integer, `1` = 1 pixel.
@@ -710,7 +713,7 @@ Minimize to tray when user clicks `X` close button.
 Remember main window last position.
 
     remember_size
-Remember main window last size.
+Remember main window last size, and whether it was maximized.
 
     enable_high_dpi_scaling
 Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default.
@@ -770,8 +773,11 @@ Define main window position on screen in pixels. Those values will be auto updat
     window_width, window_height
 Define main window size on screen in pixels. Those values will be auto updated and saved while `remember_size` option is enabled.
 
+    window_maximized
+Whether main window was maximized at last quit, shown maximized again at startup. This value will be auto updated and saved while `remember_size` option is enabled.
+
     window_color_theme
-Set color theme for main window and dialog. Default theme is `Dark`. This option does not affect overlay widget.
+Set color theme for main window and dialog: `Modern Dark` (default), `Modern Light`, `Legacy Dark` or `Legacy Light` (colors of TinyPedal 2.50). This option does not affect overlay widget, see `overlay_theme` in Overlay Style.
 
 Color theme can be quickly toggled via `UI` button on main window status bar.
 
@@ -779,7 +785,7 @@ Color theme can be quickly toggled via `UI` button on main window status bar.
 Set user interface language: `English` or `Français`. Main window, menus and dialogs are rebuilt immediately after saving, no restart needed. Option names and descriptions (tooltips) in config dialogs are also translated.
 
     show_setup_wizard_at_startup
-Show setup wizard at next startup. The wizard asks for language, game, window & overlay theme, starting preset and widgets. It is shown once on first launch, and can be opened any time from `Help` menu.
+Show setup wizard at next startup. The wizard asks for language, game, units, window & overlay theme, starting preset and overlays. It is shown once on first launch, and can be opened any time from `Help` menu.
 
     update_repository
 Set GitHub repository (`owner/name`) used by `Check for Updates`. Empty value disables update checks. Default is `Keenny38/ModernTinyPedals` (this fork), so updates never offer the upstream releases.
@@ -794,10 +800,10 @@ Set number of days deleted presets are kept in preset trash (`trash` folder insi
 Update version hidden by `Skip This Version` (kept by app, not shown in config dialog): its notice is not shown again at startup, a newer version is. Stored as one number (major * 1000000 + minor * 1000 + patch), `0` if none.
 
     rail_items
-Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: every page but Pace Notes, then Telemetry, Driver Stats Viewer and Race Calculator.
+Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: Home, Overlays, Driver Stats Viewer, Race Results, Game Replays, Telemetry, Spectate, Race Calculator and Preset (`home,widget,driver_stats_viewer,race_results_viewer,game_replays,lap_viewer,spectate,race_calculator,preset`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.3).
 
     home_quick_access
-Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example `lap_viewer`, `race_calculator`), pages (`widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and actions (`command_palette`, `bug_report`, `check_updates`). Easier to set with `Customize...` next to `Quick Access` on home page (or right-click the buttons): check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. Empty: no quick access button. Default: Telemetry viewer, Race calculator, Driver stats viewer, Layout editor and Command palette.
+Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example `lap_viewer`, `race_calculator`), pages (`widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and actions (`command_palette`, `bug_report`, `check_updates`). Easier to set with `Customize...` next to `Quick Access` on home page (or right-click the buttons): check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. Empty: no quick access button. Default: Telemetry viewer, Race calculator, Driver stats viewer, Layout editor, Widget performance, Game replays, then the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Config, then Create bug report and Check for updates (`lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,game_replays,widget,module,preset,spectate,hotkey,tools,app_settings,bug_report,check_updates`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.3).
 
     remember_open_pages
 Reopen tool pages left open at quit or restart (navigation bar tools like race calculator or telemetry viewer, and tool page shown last, shown again) (saved as soon as it is shown, so a crash or a system shutdown keeps it too). Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
@@ -834,18 +840,20 @@ Note, global background color will only be visible when `enable_translucent_back
 ## Overlay Style
 **Overlay style options can be accessed from `Config` menu in main window. Changes apply to all widgets in all presets.**
 
-Modern style only restyles options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so disabling modern style restores classic look.
-
-    enable_modern_style
-Enable modern overlay style: rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Default is enabled.
+Themes only restyle options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so changing theme never changes presets. Modern themes use modern design, rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Legacy themes keep classic TinyPedal look: modern font, corner, depth and bar gap options do not apply.
 
     overlay_theme
-Set overlay color theme, applied to default colors only (alpha channel is kept):
+Set overlay theme, applied to default colors only (alpha channel is kept):
 
-* `Modern Dark`: slate neutrals with softer accent colors (default).
-* `High Contrast`: darker backgrounds and brighter text, for bright rooms or VR.
-* `Colorblind Safe`: Okabe-Ito palette, red / green pairs become orange / blue.
-* `Classic`: original Modern Tiny Pedals colors.
+* `Modern Dark`: modern design, slate neutrals with softer accent colors (default).
+* `Modern Light`: modern design, light panels and dark text.
+* `Legacy Dark`: classic TinyPedal look: classic layout, colors and fonts.
+* `Legacy Light`: classic TinyPedal look with light panels and dark text.
+
+Light themes invert gray panels and text, keep colored backgrounds (flags, warnings) and darken colors drawn on panels so they stay readable.
+
+    enable_colorblind_colors
+Colorblind safe variant of overlay theme (Okabe-Ito palette): red / green pairs become orange / blue, on every theme. Default is disabled.
 
     enable_modern_font
 Replace default widget font with `modern_font_name`. Width of text bar is calculated from digit width to avoid clipping numbers. Default is enabled.
@@ -864,13 +872,6 @@ Apply black box visual style to all widgets: lighter top, darker bottom and thin
 
     minimum_bar_gap
 Set minimum gap between bars in pixels, only applies to widget `bar_gap` option that uses default value. Default is `2`.
-
-**Custom themes**
-
-Custom overlay themes can be created with `Overlay Theme Editor` from `Tools` menu. Custom themes are stored in `overlay_themes.json` file in [Global User Configuration](#global-user-configuration) folder, and appear in `overlay_theme` list.
-
-    widget_theme
-Each widget has a `widget_theme` option. `Global` (default) uses `overlay_theme`; select any other theme (built-in or custom) to use it for this widget only, or `Classic` to keep classic colors on this widget.
 
 [**`Back to Top`**](#)
 
@@ -964,6 +965,35 @@ Set server port. Default is `8338`.
 
     access_code
 Access code required to open the dashboard. A random code is generated if empty. After 10 wrong codes, the device is blocked for 60 seconds.
+
+[**`Back to Top`**](#)
+
+
+## Stream Overlay
+**Stream overlay options can be accessed from `Stream Overlays` page (`Tools` page, or command palette), or `Stream Overlay` category of `Config` page. Disabled by default.**
+
+Shows widgets in streaming software (OBS Studio, Streamlabs, XSplit, vMix, Twitch Studio...) as browser sources: a transparent page, no chroma key needed, drawn exactly as on screen (also while the game runs in exclusive fullscreen). `Stream Overlays` page gives the addresses to copy into a `Browser` source:
+
+* `Layout`: every widget shown on stream, at its place on screen. Set the browser source size to the screen size shown on the page (smaller sizes are scaled to fit).
+* One address per widget: the widget alone, at top left. Set the browser source size to the widget size shown on the page (`&scale=1.5` in the address enlarges it).
+* `Race Results`: classification of the last race (from game results files, see [Race results](#race-results)), cars of every class (`&class=all`), one class after another (`&class=cycle`) or one class (`&class=<name>`), `&rows=` cars per page and `&cycle=` seconds per page, `&session=qualifying` or `&session=any` for other sessions. A 1920 x 1080 source fits it.
+
+Widget images are only captured while a browser source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change. Each widget can be shown on screen and stream, on stream only, or on screen only, see `stream_visibility` in [Common terms and keywords](#common-terms-and-keywords).
+
+    enable_stream_overlay
+Enable stream overlay server.
+
+    enable_lan_access
+Allow another computer on local network (dual PC streaming setup) to show browser sources. When disabled, sources are only available on this computer (`127.0.0.1`). Windows firewall may ask to allow Modern Tiny Pedals the first time.
+
+    stream_overlay_port
+Set server port. Default is `8339`.
+
+    frame_rate
+Set maximum frame rate of widget images sent to browser sources. Default is `30`. Widgets not changing are not sent again.
+
+    access_token
+Access token included in every source address. A random token is generated if empty. Generate a new one from `Stream Overlays` page when an address has been shared by mistake (shown on stream): addresses copied before stop working.
 
 [**`Back to Top`**](#)
 
@@ -1623,7 +1653,7 @@ To remove all tags from specific notes, select one or more notes, right-click an
 
 
 ## Lap telemetry viewer
-**Lap telemetry viewer compares laps recorded by [Recorder module](#recorder-module), which can be accessed from `Telemetry` button of navigation bar (`Ctrl+9`), or `Tools` menu in main window.**
+**Lap telemetry viewer compares laps recorded by [Recorder module](#recorder-module), which can be accessed from `Telemetry` button of navigation bar (`Ctrl+6`), or `Tools` menu in main window.**
 
 Select track, then check laps to compare in lap list (one color per lap). Fastest valid lap is the reference lap by default, double-click a lap (or right click, `Set as Reference`) to change it. Lap list is grouped by session, newest first: each session row shows session type, start date & time, best lap, number of laps and vehicle, and can be collapsed (sessions with compared laps are expanded). Laps of a session are listed in driving order (`Lap 1`, `Lap 2`...) with lap time, sector times (fastest sector of track in purple) and lap info (invalid, out lap, in lap, other vehicle); invalid, out and in laps are dimmed. Laps recorded by this version keep the session start time, so a session is found even after a garage visit; older laps are grouped by session type, lap number and time between laps. Laps added from other folders or imported are grouped on top. Theoretical best (sum of fastest sectors) is shown below the list, and a warning appears when compared laps come from different vehicles. `Add File...` adds laps from another folder or track. It also imports a MoTeC i2 log (`.ld`), for example one from the built-in logger of Le Mans Ultimate or a lap shared by another driver: every complete lap of the log is converted to a lap file (lap time from start line crossing, between lap distance samples) (in the hidden `.imported` folder of the telemetry folder) and the fastest one becomes the reference lap. Pedals, speed, gear, steering, RPM, lap distance, tyres, brakes, ride height and G forces are imported when the log has them (worn tyre percent is turned into remaining percent), positions are not (no track map line).
 
@@ -1642,8 +1672,8 @@ Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hid
 [**`Back to Top`**](#)
 
 
-## Telemetry replay
-**Telemetry replay records Le Mans Ultimate shared memory while driving, and plays it back through every widget and module without the game, which can be accessed from `Tools` menu in main window.**
+## Session recorder
+**Session recorder records Le Mans Ultimate shared memory while driving, and plays it back through every widget and module without the game, which can be accessed from `Advanced` section of `Tools` menu in main window.** Mostly useful to test overlays without the game, or to reproduce an issue (a recorded section can be attached to a bug report).
 
 Requires `Le Mans Ultimate`, `rFactor 2` or `Le Mans Ultimate (legacy)` API. Click `Start Recording` while in game, and `Stop Recording` when done, or enable `enable_auto_replay_recording` in [Recorder module](#recorder-module). Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute). Frames outside driving are skipped (see `enable_replay_skip_inactive_frames`). Recordings keep track, vehicle and session, lap changes, and incidents detected by Black box incident recorder. REST API data is recorded when it changes.
 
@@ -1670,6 +1700,22 @@ Replay can be paused, sped up or slowed down, looped, and moved with the positio
 - Timeline: incidents along the whole session (session length from the game), replay position, drawn at once (long races). Click an incident to jump to it, click elsewhere to move the replay to that time; wheel: zoom, drag: move, double-click: whole session.
 - `Jump to Incident` (or double-click, `Enter`, previous / next incident arrows) moves the replay open in the game `Seconds Before` the incident, camera on the player car if involved, else on the first car. Right-click: camera on the other car, or incidents of one driver only. In a live session: `Replay This Moment` opens the replay of the session there (game toggle, state read first), `Back to Live` returns. Export button: incidents shown copied to the clipboard (tab separated) or saved as CSV. Incidents & standings of the session left stay shown (`Last Session`).
 - The game is asked only while the page is shown: every 2 seconds while a replay is open, 5 seconds otherwise, 15 seconds while the game does not answer. One connection per answer, one background thread. Standings are asked with each answer while `Drivers` or `Map` is shown or a replay is open, otherwise only when incidents change; track map once per track. Replays list asked again when a session ends (replay saved). `Refresh` (`F5`) asks everything at once. Seconds before, sort, filters, tab and protected replays are kept (`game_replays.json` in the config folder).
+
+[**`Back to Top`**](#)
+
+
+## Race results
+**Race results shows the results of every session played, read from the results files the game writes at the end of each session (Le Mans Ultimate and rFactor 2: `UserData/Log/Results`), which can be accessed from `Tools` page in main window.** The game does not need to run.
+
+- Sessions: newest first, grouped by day, with session kind (`R` race, `Q` qualifying, `P` practice, `W` warmup), track, time, car count, online or single player, and your result (overall position, class position with several classes, `DNF`). Search (every word must match track, layout, server, car or class), `All` / `Races` / `Qualifying` / `Practice` filter, sessions where nobody completed a lap hidden by default. `Up` / `Down` keys move between sessions. A session ending while the page is open is added at once (shown if the newest one was shown).
+- Your car is found by the driver name of the game profile (`UserData/player/Settings.JSON`, also as one of the drivers of a team car), else as the only car driven by a person (single player). Every person online is a player for the game.
+- Header: track, layout, date, online server or single player, session length, car count, track length. `Unfinished`: no car had finished when the file was written (race left before its end): classification and gaps of that moment, gaps from the lap times.
+- Key figures: your position (class position and car count of your class), places gained from the grid, best lap (rank in your class, purple when fastest), laps and pit stops, contacts (with cars and walls), track limits points and penalties. Winner (or fastest car) and fastest lap when you were not in the session.
+- `Classification`: position (places gained or lost from the grid in races), class & class position, number, driver & team (drivers of a team car in the tooltip), car, laps, race time of winner then gap (time, or laps behind; best lap gap in practice & qualifying), best lap (fastest in purple), pit stops, contacts (warning sign: penalties). Your row is tinted. Class chips show one class (class positions). Click a car to pick it, double-click to see its laps.
+- `Positions` (races): place of every car at the end of each lap, grid at lap 0 (class places when a class is shown). Your car in accent color, car picked in text color, others in their class color. Hover: name of the nearest car, click: pick it.
+- `Laps`: laps of the car picked (or picked in the list): place, lap time (session best purple, own best green), gap to own best, sectors (same colors), top speed (speed unit of [Units](#units)), front tyre compound, pit lane, energy (else fuel) used and tyre tread left for your car. Best lap, average & consistency of clean laps (no pit lane, not lap 1), theoretical best (best sectors), top speed, laps through pit lane.
+- `Events`: contacts (both reports of a contact shown once, impact strength), penalties (kind, time, reason), track limits (warnings, invalidated laps, points) and chat, by session time, `All` / `Contacts` / `Penalties` / `Track Limits` / `Chat` filter with counts, `Car picked only`. Game texts (retirement reasons, penalties) are shown in app language.
+- Results folder: found in every Steam library (Le Mans Ultimate, rFactor 2). Folder button: open it, choose another folder (game not installed with Steam, results copied elsewhere), or back to game folders. Files are read in background, only new or changed ones again (`F5`). Filters, tab and folder are kept (`race_results.json` in the config folder). The last race can also be shown on stream, see [Stream Overlay](#stream-overlay).
 
 [**`Back to Top`**](#)
 
@@ -1707,8 +1753,8 @@ Shows each plugin loading status and error message. Plugins can be enabled or di
 
 
 ## Other tools
-* `Find Option...` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its config dialog, filtered on this option.
-* `Setup Wizard` (`Help` menu): first launch setup (language, game, themes, preset, starter widgets).
+* `Find Option...` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its page: Overlay Options page at a widget option, config dialog filtered on a module option.
+* `Setup Wizard` (`Help` menu): first launch setup (language, game, units, themes, preset, starter overlays).
 * `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of Modern Tiny Pedals, modules and game connection.
 * `Create Bug Report...` (`Help` menu): creates a `.zip` file with logs, settings and system info to attach to a bug report. User folder name, access codes and repository names are removed.
 
@@ -1829,7 +1875,7 @@ Files are saved in `telemetry_path` folder, one sub folder per track & class: `<
 
 First line of each file is lap info (`# ` followed by JSON): track, vehicle, class, session, track length, track & air temperature, wetness, fuel at start & end, official sector times, lap kind (`lap`, `out` or `in`) and app version. Then comes the CSV header and one row per sample: time, lap time, distance, speed, pedals, steering, gear, RPM, fuel, tyre temperatures & pressures, position (X, Y, Z), lateral & longitudinal acceleration (G), sector, TC & ABS activity, battery charge, and per wheel brake temperature, tyre wear (remaining percentage, 100 = new tyre), wheel speed (requires Wheels module, which learns wheel radius), ride height & suspension deflection (millimeters). Throttle & brake are unfiltered pedal positions (driver input, without throttle blip or cut from car electronics on gear shifts). Samples are only added when game data has changed. A lap is dropped if game time goes backward (replay looping or rewound).
 
-The module can also record [Telemetry replay](#telemetry-replay) files automatically while driving.
+The module can also record [Session recorder](#session-recorder) replays automatically while driving.
 
     enable_lap_recording
 Record laps to CSV files. Default is enabled.
@@ -1856,10 +1902,10 @@ Also save out laps (started in pit lane) and in laps (ended in pit lane), marked
 Save laps as compressed CSV files (`.csv.gz`, about 5 times smaller). Lap telemetry viewer reads both. Default is disabled.
 
     enable_auto_replay_recording
-Start recording a telemetry replay when driving starts, and stop it 10 seconds after leaving driving (requires `Le Mans Ultimate` or `rFactor 2` API). Automatic recordings are named `replay-auto-<date time>.tpreplay`. A recording stopped from Telemetry replay window is not restarted until next driving. Default is disabled.
+Start recording a telemetry replay when driving starts, and stop it 10 seconds after leaving driving (requires `Le Mans Ultimate` or `rFactor 2` API). Automatic recordings are named `replay-auto-<date time>.tpreplay`. A recording stopped from Session recorder window is not restarted until next driving. Default is disabled.
 
     enable_replay_skip_inactive_frames
-Do not record replay frames outside driving (menus, garage, monitor), so replays only contain driving. Also applies to recordings started from Telemetry replay window. Default is enabled.
+Do not record replay frames outside driving (menus, garage, monitor), so replays only contain driving. Also applies to recordings started from Session recorder window. Default is enabled.
 
     number_of_saved_replays
 Maximum number of automatic replay recordings kept, oldest are removed. Manual recordings are never removed. Default is `20`.
@@ -2001,9 +2047,9 @@ This option may be used if weight cannot be automatically measured or inaccurate
 Each widget can be configured by accessing `Config` button from `Overlays` tab in main window.
 
 ## Modern design
-While `enable_modern_style` is on in [Overlay Style](#overlay-style), every widget except Black box uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` (or widget `widget_theme`).
+With `Modern Dark` or `Modern Light` overlay theme in [Overlay Style](#overlay-style), every widget except Black box uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` and `enable_colorblind_colors`.
 
-Modern design reads fewer options than classic layout: per cell colors, fonts and paddings are set by design, so config dialog shows only the options the design reads. Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: disable `enable_modern_style` (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
+Modern design reads fewer options than classic layout: per cell colors, fonts and paddings are set by design, so Overlay Options page shows only the options the design reads. Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: select a `Legacy` overlay theme (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
 
 Display order options (`display_order_*`) apply where modern layout has the same rows, tiles, bars or columns: design order is kept while every display order option of a widget is at default value, and display order options set the order once one of them is changed. Fuel, virtual energy, pit stop estimate, acceleration, sectors and brake temperature keep design order (their modern layout has no matching rows). Classic text options (pit status texts, leader texts, session names, speed limiter text) replace design labels once changed from default value.
 
@@ -4830,6 +4876,44 @@ Set number of samples for average CPU utilization calculation. Lower value may r
 [**`Back to Top`**](#)
 
 
+## Telemetry comparison
+**This widget compares live telemetry with reference lap of Lap Telemetry Viewer, along a distance window around car.**
+
+Charts show speed, throttle & brake, steering and gear. Reference lap is drawn over whole window, so next braking point of reference lap shows ahead of car; current lap is drawn behind car, up to position mark. With modern design, reference lap is a soft area & faint line, current lap a bright line. Reference lap comes from laps recorded by [Recorder module](#recorder-module) for current track & class, `Recorder module` must be enabled. `Delta module` keeps charts moving smoothly between game position updates.
+
+    display_width, display_height
+Set chart width and speed chart height in pixels. Pedal, steering and gear charts are smaller, in proportion to `display_height`.
+
+    bar_gap
+Set gap between charts in pixels (classic layout).
+
+    distance_behind, distance_ahead
+Set distance in meters shown behind and ahead of car. Default is `250` meters behind and `150` meters ahead.
+
+    reference_lap_source
+Set reference lap. Available values are: `Viewer` = lap set as reference in Lap Telemetry Viewer (last lap selection of track), `Best` = fastest valid recorded lap, `Last` = last recorded lap. Without lap set in viewer, fastest valid lap is used. Reference lap is checked again every few seconds, so a new best lap or a reference changed in viewer is used while driving.
+
+    decimal_places
+Set amount of decimal places of delta reading.
+
+    show_reference_lap_time
+Show reference lap time, or `No reference lap` while track has no recorded lap.
+
+    show_delta
+Show time delta against reference lap at car position: current lap time minus reference lap time at same distance.
+
+    show_speed_difference
+Show speed difference against reference lap at car position: positive when faster than reference lap.
+
+    show_speed, show_throttle, show_brake, show_steering, show_gear
+Show chart of each channel. Throttle and brake share pedal chart.
+
+    reference_line_opacity
+Set opacity of reference lap lines (classic layout), from `0` to `1`. Reference lap lines are drawn with color of channel, thicker and faded.
+
+[**`Back to Top`**](#)
+
+
 ## Timing
 **This widget displays lap time info.**
 
@@ -5752,7 +5836,7 @@ Gauge fill colors. Below `gauge_low_lap_threshold` estimated laps (default `2`),
 Stint start level mark and level after refuel/refill mark.
 
     display_order_*
-Set order of center column items (locking, delta, lap time, pit & limiter, gear, speed, RPM, pedals, brake heat). Can be changed with `Configure Display Order` button in config dialog. ABS, TC, brake bias and motor map are not in the center column: they are stacked between the right wheels.
+Set order of center column items (locking, delta, lap time, pit & limiter, gear, speed, RPM, pedals, brake heat). Can be changed in the `Display Order` section of Overlay Options page. ABS, TC, brake bias and motor map are not in the center column: they are stacked between the right wheels.
 
     show_wheel_angle
 Turn tyres left or right with real wheel angle, 1:1 with the car in game (read from the game, each wheel its own angle, so Ackermann and toe show as they are). How the game signs wheel angles (same sign on both sides, or toe-in per wheel, positive left or right) is learned from steering input within the first corners of each car, then both front wheels turn the way the steering wheel does. The brake disc bar and the suspension turn with their wheel, keeping the corner assembly together, while brake readings stay upright.
@@ -5908,7 +5992,7 @@ Show an extra bottom row with average tread wear per lap (percent) and average t
     text_puncture, text_flat_spot, text_detached, text_abs, text_tc, text_brake_bias, text_brake_migration, text_locking, text_delta, text_laptime, text_pit, text_limiter, text_speed, text_rpm, text_fuel, text_energy, text_stint_wear, text_stint_pressure, text_motor_map
 Custom label texts, for translation or shorter abbreviations. Defaults are `PUNCT`, `FLAT`, `OFF`, `ABS`, `TC`, `BB`, `BMIG`, `MAP`, `LOCK`, `DELTA`, `TIME`, `PIT`, `LIM`, `SPD`, `RPM`, `Fuel`, `Energy`, `Wear/lap` and `Pres`.
 
-The order of the center column items can be changed by drag & drop with the `Configure Display Order` button at the bottom of the config dialog.
+The order of the center column items can be changed with the arrows of the `Center Column Order` section of Overlay Options page.
 
     enable_depth_effects
 Soft drop shadow and rounded rubber shading on tyres, thin highlight edge on info rows.
@@ -5979,7 +6063,7 @@ Log each contact of the player with another car (`CONTACT` and its driver name) 
     text_damage, text_impact
 Custom labels of damage and incident events. Defaults are `DAMAGE` and `IMPACT`.
 
-Options in the config dialog of this widget are split in sections, one per part of the widget: General, Profile & Data, Size & Layout, Visual Style, Units, Steering & Wheel Slip, Tyre Temperature, Tyre Pressure, Tyre Wear & Status, Tyre Readings, Brakes, Suspension, RPM LEDs, Gear & Speed, Center Column, Fuel & Energy Gauges, Battery, Damage Panel, Incident Recorder & Event Log, Labels and Center Column Order. The live preview shows changes before saving. The dialog opens in simple mode, showing on/off and choice options plus the few common ones; tick `Advanced Options` to show every option (colors, thresholds, labels). Click a section title to collapse or expand it, `Reset` beside it resets that section only; a search looks through every option, collapsed or advanced ones included. Options that only matter while another option is on are greyed out while it is off, and options set by the selected `display_profile` are greyed out in italic, their tooltip naming the profile. `Color Theme...` sets every color at once (Default, High Contrast, Colorblind Safe, Soft), saved only with Apply or Save. Double click `tyre_target_by_compound` to edit it as a table. Each label text sits in the section of the part it names. Default colors follow one palette: red for warnings and hot, cyan for cold and low, green for good, orange and yellow for intermediate states.
+Options of this widget in Overlay Options page are in sections, one per part of the widget: General, Profile & Data, Size & Layout, Visual Style, Units, Steering & Wheel Slip, Tyre Temperature, Tyre Pressure, Tyre Wear & Status, Tyre Readings, Brakes, Suspension, RPM LEDs, Gear & Speed, Center Column, Fuel & Energy Gauges, Battery, Damage Panel, Incident Recorder & Event Log, Labels and Center Column Order. The live preview shows changes before saving. The page shows this widget in simple mode, showing on/off and choice options plus the few common ones; tick `Advanced Options` to show every option (colors, thresholds, labels). Click a section title to collapse or expand it, `Reset` beside it resets that section only; a search looks through every option, collapsed or advanced ones included. Options that only matter while another option is on are dimmed while it is off, and options set by the selected `display_profile` are locked in italic, naming the profile. `Color Theme...` sets every color at once (Default, Colorblind Safe), saved only with Apply. The table button of `tyre_target_by_compound` edits it as a table. Each label text sits in the section of the part it names. Default colors follow one palette: red for warnings and hot, cyan for cold and low, green for good, orange and yellow for intermediate states.
 
 [**`Back to Top`**](#)
 

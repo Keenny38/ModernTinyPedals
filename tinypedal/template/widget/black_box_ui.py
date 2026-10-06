@@ -206,9 +206,7 @@ def _theme(*colors: str) -> dict[str, str]:
 
 BLACK_BOX_COLOR_THEMES: dict[str, dict[str, str]] = {
     "Default": {},
-    "High Contrast": _theme("#FF0000", "#00E5FF", "#00FF55", "#FF8800", "#FFEE00", "#2979FF", "#FF00CC"),
     "Colorblind Safe": _theme("#D55E00", "#56B4E9", "#009E73", "#E69F00", "#F0E442", "#0072B2", "#CC79A7"),
-    "Soft": _theme("#E06C75", "#56B6C2", "#98C379", "#D19A66", "#E5C07B", "#61AFEF", "#C678DD"),
 }
 
 

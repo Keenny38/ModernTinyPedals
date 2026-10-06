@@ -64,7 +64,7 @@ def all_columns(name: str) -> dict:
 @pytest.mark.parametrize("name", LIST_WIDGETS)
 @pytest.mark.parametrize("modern", [False, True])
 def test_every_column(field, name, modern):
-    cfg.user.config["overlay_style"]["enable_modern_style"] = modern
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     default = run_widget(name, field)
     full = run_widget(name, field, **all_columns(name))
     assert visible_pixels(full) > 0

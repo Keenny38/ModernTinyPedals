@@ -283,7 +283,7 @@ def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
 
 
 # --- 8. Laps of another circuit
-def test_other_circuit_lap_warned_and_not_in_ideal_lap(ui_env, tmp_path, monkeypatch):
+def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
     from tinypedal.ui.lap_viewer import LapViewer
@@ -310,15 +310,26 @@ def test_other_circuit_lap_warned_and_not_in_ideal_lap(ui_env, tmp_path, monkeyp
     backend = page.backend
     try:
         wait_loaded(page)
-        backend.add_external([path])
+        atlanta = [lap.key for lap in backend.data.laps]
+        assert len(atlanta) == 2
+        backend.add_external([path])  # listed, never drawn nor compared with laps of current track
         wait_loaded(page)
-        assert "another circuit" in backend.warning and "Monza" in backend.warning
-        monza = next(index for index, lap in enumerate(backend.data.laps) if "Monza" in lap.key)
-        assert not backend.data.laps[monza].comparable
-        assert backend.legend[monza]["excluded"] == "Not counted in ideal lap & mini-sectors (other circuit)"
-        mini = backend.data.mini_sectors()
-        assert mini["times"][monza] == [] and monza not in mini["winners"]  # fastest lap, yet never a winner
-        assert backend._ideal is None or monza not in backend._ideal.best
+        assert "another circuit" in backend.status and "Monza" in backend.status
+        assert [lap.key for lap in backend.data.laps] == atlanta and path not in backend.checked
+        assert any(row["path"] == path and not row["checked"] for row in backend.lap_rows())
+        backend.setLapChecked(path, True)
+        wait_loaded(page)
+        assert [lap.key for lap in backend.data.laps] == atlanta and path not in backend.checked
+        backend.setReference(path)  # lap of another circuit as reference: laps of current track left out
+        wait_loaded(page)
+        assert [lap.key for lap in backend.data.laps] == [path] and backend.checked == {path}
+        assert "Atlanta" in backend.status and not backend.warning
+        backend.setLapChecked(atlanta[0], True)
+        wait_loaded(page)
+        assert [lap.key for lap in backend.data.laps] == [path]
+        backend.load_track(TRACK)  # track opened again: its own laps compared, added lap of another circuit dropped
+        wait_loaded(page)
+        assert sorted(lap.key for lap in backend.data.laps) == sorted(atlanta) and path not in backend.checked
     finally:
         page.close()
         flush_deleted()
@@ -366,7 +377,7 @@ def test_motec_half_float_channel_read(tmp_path):
         file.write(array("f", values).tobytes())
     _, channels = read_ld(filename)
     assert [channel.name for channel in channels] == ["Half", "Single"]  # half float no longer fails import
-    assert channels[0].values == values
+    assert list(channels[0].values) == values
 
 
 # --- 10. Plain data caches: pickled files never loaded

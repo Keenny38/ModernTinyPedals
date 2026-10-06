@@ -12,6 +12,7 @@ Check, in this order:
 4. **Overlay turned on**: on the `Overlays` page, its switch must be on. Its `visibility_context` option may limit it to some sessions or to the pits.
 5. **Off screen**: after a screen change, an overlay can be outside the visible area. Use `Tools` > `Layout Editor`, or `Reload` (tray menu). Positions are remembered per screen setup.
 6. **Maps**: Track Map, Navigation and Elevation need one complete, valid lap of the track (recorded by the Mapping module) before they draw anything.
+7. **Overlay shown but empty**: a data module it needs may be off. The `Module` page flags in orange the modules turned off that enabled overlays need: `Enable Them` turns them back on.
 
 ### Linux
 
@@ -92,12 +93,14 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 
 - Overlays and the window follow the Windows display scale (`enable_high_dpi_scaling`, `Scale` button of the status bar, restart needed).
 - `overlay_scale` in `Config` > `Overlay Style` scales every overlay. Resize a single overlay with its corner handle while unlocked.
+- Main window too large, too small or out of sight: `Window` > `Reset Window Size and Position` (or `Ctrl+K`, then type `reset window`) brings it back to its default size, centered on its screen.
+- The main window cannot be made smaller than a minimum size, so pages never overlap or get cut. On a small screen, the minimum is lowered so the window still fits.
 
 ## Where files are
 
 | Files | Windows (installed) | Linux |
 |---|---|---|
-| Global config: `config.json`, `shortcuts.json`, `overlay_themes.json`, `tinypedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\TinyPedal` | `~/.config/TinyPedal/` |
+| Global config: `config.json`, `shortcuts.json`, `tinypedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\TinyPedal` | `~/.config/TinyPedal/` |
 | Presets and style presets (`settings`), `brandlogo`, `pacenotes`, `tracknotes` | Program folder, `%LOCALAPPDATA%\Programs\Modern Tiny Pedals` | `~/.config/TinyPedal/` |
 | `deltabest` (delta, fuel, energy, sectors, consumption), `trackmap`, `carsetups`, `telemetry` (laps and replays) | Program folder | `~/.local/share/TinyPedal/` |
 

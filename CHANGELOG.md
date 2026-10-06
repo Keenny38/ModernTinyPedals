@@ -5,6 +5,165 @@ The full list of commits of each version is on the [Releases](https://github.com
 
 ## 0.21.0 (2026-10-06)
 
+### Race results
+
+A new **Race Results** page (`Results` in the navigation bar, or `Tools` > `Race Results`) shows every session you played, online or single player, from the results files Le Mans Ultimate and rFactor 2 write at the end of each session. Nothing to set up: the results folder is found in your Steam libraries, and the game does not need to run.
+
+- **Sessions** by day with the session kind, track, number of cars and your result (position, class position, `DNF`). Search, `Races` / `Qualifying` / `Practice` filter, sessions where nobody completed a lap hidden. A session that ends while the page is open shows up at once.
+- **Your key figures**: position and class position, places gained or lost from the grid, best lap and its rank in your class, laps and pit stops, contacts with cars and walls, track limits points and penalties. Your car is found by the driver name of your game profile, also as a driver of a team car.
+- **Classification**: position and places gained, class, number, driver and team, car, laps, race time then gaps (time or laps behind), best lap (fastest in purple), pit stops, contacts. Class chips show one class with class positions and gaps. A race left before its end is marked `Unfinished`, with gaps taken from the lap times.
+- **Positions**: the place of every car lap by lap from the grid, your car and the car picked highlighted.
+- **Laps** of any car: place, lap time, gap to its best, sectors (session and own bests colored), top speed, tyre compound, pit lane, and for your car the energy (or fuel) used and the tyre tread left. Best lap, average, consistency, theoretical best and top speed on top.
+- **Events**: contacts (shown once when both cars report them), penalties, track limits and chat, with a filter by kind and the events of one car. Retirement reasons and penalties are shown in the app language.
+
+| Classification of a multiclass race | Positions lap by lap |
+|---|---|
+| ![Race results](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results.png) | ![Positions](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-race-results-positions.png) |
+
+### Stream overlays (OBS Studio, Streamlabs, XSplit, vMix)
+
+The overlays can now be added to your stream as **browser sources**: transparent background, no chroma key, drawn exactly as on screen, also while the game runs in exclusive fullscreen. Open the new **Stream Overlays** page (`Tools` > `Stream Overlays`), turn it on, and `Copy Address`.
+
+- **Layout**: every overlay at its place on screen, in one source. **One source per overlay**, at the size shown on the page.
+- **On screen, on stream or both**: each overlay is `Screen & Stream`, `Stream Only` (shown to your viewers, not on your screen while overlays are locked) or `Screen Only` (never on stream). Also the new `stream_visibility` option of every overlay.
+- **Race results for your viewers**: the classification of the last race (or qualifying), all classes or class by class, pages cycling, refreshed when the game writes a new results file.
+- Light on resources: images are only captured while a source is shown, copied from what is already on screen, and only sent again when they change (15, 30 or 60 images per second at most).
+- Every address holds an access token (`New Access Token` if one was shown on stream by mistake), and `Another computer (LAN)` serves a streaming PC on your local network. The settings are also in the Config page (`Stream Overlay`).
+
+![Stream Overlays page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-overlays.png)
+
+![Race results as a browser source](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
+
+### Telemetry Compare overlay
+
+A new **Telemetry Compare** overlay (off by default, `Driver Inputs` category) shows the reference lap of the telemetry viewer while you drive.
+
+- **Speed, throttle and brake** of your current lap over the reference lap (steering and gear as options), from `250` m behind the car to `150` m ahead (`distance_behind`, `distance_ahead`): the **next braking point of the reference lap shows ahead of the car**.
+- **Speed difference** and **delta** to the reference lap at the same distance, with the reference lap time.
+- `reference_lap_source`: `Viewer` (the lap set as reference in the telemetry viewer, else the fastest valid lap), `Best` or `Last` recorded lap. A new best lap, or a reference changed in the viewer, is used while you drive.
+
+![Telemetry Compare overlay: braking point of the reference lap ahead of the car](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-telemetry-compare.png)
+
+### Telemetry viewer
+
+- **Only laps of the reference lap's circuit are compared**: a lap of another circuit stays in the list, greyed out, with a message telling why. Set it as reference lap to look at it.
+- **`Live`**: a new best lap is compared with the previous best, a reference lap you picked stays the reference, and the viewer switches to the track you are driving.
+- **Track map**: with LMU, the circuit path from the game is a racing line, not the track center. Track edges come from laps that recorded them, else from the spread of your laps. **Distance to Center** and **Track Position** are measured on the map when a lap did not record them.
+- **Session**: stints split on pit stops (refuel, tyre change).
+- **MoTeC import** (`.ld`): laps named with the log date, engine temperatures, inner / middle / outer tyre temperatures, brake bias, tyre load and track position imported too, a lap already imported is not copied again. `Import Folder...` again only adds the new laps, and `Imported Laps...` deletes to the trash with `Undo`.
+- **`Use as Delta Best...`**: your first delta best is always kept as a backup, plus the 5 latest ones, and a teammate's lap of the same track and class can be used.
+- **Faster**: tracks with hundreds of laps open quickly (lap details kept in an index), MoTeC imports run in the background process.
+- **Keyboard**: in the large map, map keys go to the map and the others still reach the charts. On an AZERTY keyboard the digit row works without `Shift`. `Esc` never closes the viewer.
+
+### Config page and redesigned pages
+
+#### Config page
+
+Every global option of the app in **one page**, `Config` in the navigation bar (also `Ctrl+,`, the gear button at the bottom of the bar, every `Config` menu entry and the command palette). It replaces the separate pages of Application, Overlay Style, Notification, Compatibility, Remote Control, Web Dashboard, VR Overlay and User Path.
+
+- **Categories** on the left, options in groups with their description, and an editor made for each option: switch, choice list, number with its limits, color with a picker, folder with `Choose Folder...` and `Open Folder`.
+- **Search through every category**, the number of matches shown next to each category.
+- **Changes kept pending** until `Apply` (`Ctrl+S`): the bar at the bottom counts them, with `Undo`, `Redo` (`Ctrl+Z`, `Ctrl+Y`) and `Discard`. Invalid values are shown in red with the reason. Reset one option to default with its arrow, or the whole category with `Reset Section`.
+- **Web dashboard addresses and access code** with copy buttons, remote control command and stream addresses, a preview of each notification with its colors.
+- Units, global font override and API options (saved in the preset) one click away.
+
+![Config page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-config-page.png)
+
+#### Presets page
+
+- The loaded preset and `Auto Load Primary Preset` on top. Each preset shows its last change, the overlays and modules it turns on, its car class and track tags, its preset hotkeys and its lock.
+- Search by preset, class or track name, sort by last change or by name.
+- **Details of the selected preset** on wide windows: the overlays and modules it contains, the game it remembers, every action, car classes and tracks added or removed in one click.
+- New, duplicate and rename in a box that **checks the name as you type** (characters not allowed in file names, existing preset). `Ctrl+N`, `F2`, `Del`, `Ctrl+Z` puts back the last deleted preset.
+- Preset files are read again only when they changed, and only while the page is shown.
+
+![Presets page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-presets-page.png)
+
+#### Spectate page
+
+- The drivers of the session with place, class color, car, best lap and pit or garage state. Search, class chips, sort by position or by name. Your car is marked `You`.
+- **Click a driver to follow it** (spectate mode turns on by itself). The card on top shows the driver followed, with previous and next driver by place (`Alt+Left`, `Alt+Right`) and `Stop`.
+- Drivers are read only while the page is shown.
+
+![Spectate page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-spectate-page.png)
+
+#### Modules page
+
+- Each module is a **card that says what it computes** (lap times and deltas, fuel and energy, positions of every car...), with its state (`Running`, `Disabled`, `Error` when it could not start) and its update interval.
+- **What depends on it**: the number of enabled overlays using its data (their names in the tooltip) and the modules using it, found in the code of each overlay. A module turned off that enabled overlays or modules need is flagged, with `Enable Them` at the top of the page; a module needing a module that is off says so.
+- Search (accents and case ignored, in names and descriptions), `All` / `Active` / `Inactive`, `Enable Shown` / `Disable Shown` while filtered.
+- Right-click a card: `Config...`, enable or disable, and **reset its saved data** (delta best, fuel and energy delta, consumption history, sector best, track map).
+- Keyboard like the Overlays page: type to search, `/`, arrows, `Space`, `Enter`.
+
+![Modules page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-modules-page.png)
+
+#### Find Option (`Ctrl+F`)
+
+- **Best matches first**, accents and case ignored, with the **current value** of each option and a dot on options changed from their default.
+- **On / off options switch right in the list** (or `Space`): saved and applied at once.
+- `Changed only` lists every option you changed, even without search words. Chips narrow the results to overlays, modules, preset or application options.
+- A result opens the Overlay Options page, the Config page or the module page at the option. Right click: `Reset to Default`, `Copy Option Key`.
+
+![Find Option](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-find-option.png)
+
+#### Setup wizard
+
+- **Six steps** with progress on the left: Welcome, Game, Units, Appearance, Overlays, Ready. Click a step to go back to it, `Enter` goes to the next one. Nothing changes until `Finish Setup`: closing the wizard (`Esc` or the window close button, after a confirmation) keeps everything as it was.
+- **The wizard switches language as soon as you pick one**, the app follows once setup is finished.
+- **Game**: the game running now is marked `Running` and picked for you.
+- **Units** (new): `Metric` or `Imperial` for speed, temperature, fuel, pressure and weight, saved in the preset. Mixed units of a preset can be kept.
+- **Appearance**: the four window themes drawn in their colors, the four overlay themes with an overlay drawn in each, `Colorblind safe colors` and the modern font, and a preview of overlays in the chosen style.
+- **Overlays**: new or existing preset (the name is checked as you type), and overlays shown as **pictures** to pick: `Recommended`, `All` or `None`. With an existing preset, its overlays already on are checked, and unchecking one turns it off. Every overlay a new preset turns on is listed.
+- **Ready**: every choice with `Change` to go back to it, and tips for the first drive.
+- Overlay pictures are drawn in the background, only from the Appearance step on, and kept per style.
+
+| Appearance | Preset and overlays |
+|---|---|
+| ![Setup wizard appearance](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-appearance.png) | ![Setup wizard overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-setup-wizard-overlays.png) |
+
+### Themes
+
+The app and the overlays now have **four themes**, chosen separately: `Modern Dark` (default), `Modern Light`, `Legacy Dark` and `Legacy Light`.
+
+- **Overlays** (`overlay_theme` in `Config` > `Overlay Style`): `Modern` themes use the modern design, `Legacy` themes bring back the original TinyPedal look (classic layout, colors and fonts) for every overlay. Light themes invert gray panels and text, keep flags and warnings in their colors and darken the colors drawn on panels (heatmap temperatures, gains and losses, tyre compounds) so they stay readable. Colors you customized are kept in every theme.
+- **Colorblind safe colors** (`enable_colorblind_colors`): a variant of every overlay theme with the Okabe-Ito palette, red / green pairs become orange / blue. Also in the setup wizard.
+- **Window** (`window_color_theme` in `Config` > `Application`, or the theme button of the status bar): `Modern` themes keep the current colors, `Legacy` themes use the colors of TinyPedal 2.50.
+- **Removed**: the `High Contrast`, `Colorblind Safe` and `Classic` overlay themes, the theme of each overlay (`widget_theme`), the `Overlay Theme Editor` and its custom themes (`overlay_themes.json` is no longer read), and the `System` window theme. Black box `Color Theme...` keeps `Default` and `Colorblind Safe`.
+- **Modern Dark for everyone** after this update, for the window and the overlays, whatever theme you used (the former `Colorblind Safe` overlay theme becomes `Modern Dark` with colorblind safe colors). Choose another theme afterwards, it is kept.
+
+![Overlay themes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-overlay-themes.png)
+
+### Overlay options
+
+The options of every overlay are now in **one page**, `Overlay Options`: the overlays on the left by category, the options of the one you pick in the middle, a live preview on the right. It opens from the gear of an overlay card, a right click on an overlay, Find Option and the command palette, and you switch overlays without closing anything.
+
+- **Sections for every overlay**, not only the Black box: `General`, `Position & Layout`, `Font`, then one section per item the overlay shows (Speed, Time Gap, Fuel Level Bar...) with **its on/off switch in the section title**. Options of an item that is off are dimmed. Fold a section by clicking its title (`Collapse All`, `Expand All`), `Reset` beside it resets that section only.
+- **Changes to several overlays** kept pending until `Apply` (`Ctrl+S`): the overlay list shows how many each one has, with `Undo`, `Redo` (`Ctrl+Z`, `Ctrl+Y`) and `Discard`. Invalid values are marked at once with the reason. `Apply` saves the preset once and restarts only the overlays you changed.
+- **Search this overlay or every overlay**: type `opacity` and set it for all your overlays in one list. `Changed only` lists the options changed from their default, in one overlay or in all of them, and the overlay list shows how many options each overlay has changed.
+- **Apply to All Overlays** (the `...` button of an option): its value goes to every overlay that has it, for example a font, the opacity or the update rate.
+- **Display order** as a list moved with arrows, right in the page (it was a separate window).
+- **Live preview** of the overlay with your unsaved values.
+- Only the options of the design in use are shown, and switching `Enable Classic Layout` shows the options of the other design at once. The Black box keeps its own sections, simple mode, color themes and display profile (options set by the profile are locked and say so).
+
+| An overlay in sections, preview with unsaved values | Opacity of every overlay in one search |
+|---|---|
+| ![Overlay Options page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options.png) | ![Search in every overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-overlay-options-search.png) |
+
+### Navigation bar and Home quick access
+
+- **New navigation bar for everyone**: `Home`, `Overlays`, `Stats`, `Results`, `Replays`, `Telemetry`, `Spectate`, `Race`, `Preset`, `Config`. `Module`, `Hotkey`, `Tools` and `Pacenotes` leave the bar: open them from the command palette (`Ctrl+K`), the Home quick access, or add them back with `Customize Navigation Bar...`. A bar you had customized is reset too.
+- **New Home quick access**: Lap Telemetry Viewer, Race Calculator, Driver Stats Viewer, Layout Editor, Widget Performance, Game Replays, Overlays, Module, Preset, Spectate, Hotkey, Tools, Config, Create Bug Report and Check for Updates.
+
+### Main window size
+
+- **Comfortable size at first launch**, centered on the screen (it opened at its smallest size).
+- **Never too small**: the page area keeps a minimum size so pages never overlap or get cut, larger while the telemetry viewer (toolbar and three panels whole, in every language) or driver stats are shown. The navigation bar keeps its width (it could be squeezed until its entries vanished), and its selected entry stays in view when the window is short. On a small screen, the minimum is lowered so the window still fits.
+- **Maximized window remembered**, and shown maximized again from the tray or the taskbar.
+- **Size and position saved a moment after each change**, so a crash or a system shutdown keeps them too (they were saved only by `Quit`).
+- **Wide tools** (race results, telemetry, layout editor...) grow the window only while they are open: it stays inside the screen (moved instead of going past its edge) and gets back its size and place once they close. Quitting with one open no longer keeps the grown size for good.
+- **Window kept on screen**: brought back if it was left on a monitor that is no longer there, shrunk if larger than the screen, title bar never hidden.
+- **`Window` > `Reset Window Size and Position`** (also in the command palette, `Ctrl+K`): back to the default size, centered.
+
 ### Lower memory use
 
 The app uses about a third less memory: about 77 MB instead of 115 MB once started with the default preset, and 119 MB instead of 200 MB while the window waits in the tray after the Overlays page was opened.
@@ -14,6 +173,10 @@ The app uses about a third less memory: about 77 MB instead of 115 MB once start
 - **Long races**: modern overlays keep cached texts in proportion to what they draw, so their memory no longer grows with every new lap time, gap or temperature.
 - **Overlays page**: pictures of overlays drawn with the modern design no longer load the classic code of these overlays.
 - The main window font is set on the app font instead of the style sheet: the icons of the Home page cards no longer search every installed font (about 20 MB), and the cards are slightly more compact.
+
+### Fixes
+
+- **Spectate hotkeys**: `spectate_next_driver` and `spectate_previous_driver` followed the wrong driver once a car had left the session (its position in the car list was saved instead of its slot), and `spectate_mode` only took effect at the next API restart.
 
 ## 0.20.2 (2026-10-06)
 

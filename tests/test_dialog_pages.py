@@ -57,9 +57,10 @@ def test_rail_items_setting():
     assert parse_rail_items(" home, nope,race_calculator,home ,tools") == ["home", "race_calculator", "tools"]
     # Former fuel calculator & tyre strategy planner entries: merged race calculator, once
     assert parse_rail_items("fuel_calculator,tools,tyre_strategy_planner") == ["race_calculator", "tools"]
-    default = default_rail_items()
-    assert "pacenotes" not in default
-    assert default[-3:] == ["lap_viewer", "driver_stats_viewer", "race_calculator"]
+    assert default_rail_items() == [
+        "home", "widget", "driver_stats_viewer", "race_results_viewer", "game_replays",
+        "lap_viewer", "spectate", "race_calculator", "preset", "app_settings",
+    ]
 
 
 def test_default_rail(window):
@@ -164,9 +165,7 @@ def test_dialog_from_dialog_stays_popup(window):
 
 
 def test_inputs_shown_as_pages(window, monkeypatch):
-    """Preset name & theme name inputs: pages too, also when opened from a dialog page"""
-    from PySide6.QtWidgets import QMessageBox
-
+    """Preset name & other name inputs: pages too, also when opened from a dialog page"""
     from tinypedal.ui._common import TextInputDialog, embedded_host
     from tinypedal.ui.preset_management import CreatePreset
     from tinypedal.ui.tools_view import open_tool
@@ -175,22 +174,20 @@ def test_inputs_shown_as_pages(window, monkeypatch):
     dialog = CreatePreset(view.preset_tab, title="Create new default preset")
     assert embedded_host(dialog) is view
     dialog.close()
-    open_tool("theme_editor.ThemeEditor", window)
+    open_tool("heatmap_editor.HeatmapEditor", window)
     editor = view.dialog_pages()[0].dialog
-    editor.new_theme()
+    names = []
+    TextInputDialog(editor, "New", "Name:", lambda text: names.append(text) or text != "Taken").show()
     pages = view.dialog_pages()
     assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog)
     assert view._pages.currentWidget() is pages[1]
-    warnings = []
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
-    pages[1].dialog.edit.setText("Global")
-    pages[1].dialog.accepting()  # invalid name: warned, input kept open
-    assert warnings and len(view.dialog_pages()) == 2
+    pages[1].dialog.edit.setText("Taken")
+    pages[1].dialog.accepting()  # refused name: input kept open
+    assert len(view.dialog_pages()) == 2
     pages[1].dialog.edit.setText("Dusk")
     pages[1].dialog.accepting()
     assert view.dialog_pages() == pages[:1] and view._pages.currentWidget() is pages[0]  # back to editor
-    assert editor.theme_list.currentText() == "Dusk"
-    editor.set_unmodified()
+    assert names == ["Taken", "Dusk"]
 
 
 def test_open_pages_indicator(window, monkeypatch):
@@ -257,14 +254,14 @@ def test_left_page_with_unsaved_changes_kept(window):
 
 
 def test_page_opened_from_page_keeps_it_open(window):
-    """Input page opened from a page (new theme name): page it was opened from kept behind it"""
+    """Input page opened from a page (new name): page it was opened from kept behind it"""
     from tinypedal.ui._common import TextInputDialog
     from tinypedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
-    open_tool("theme_editor.ThemeEditor", window)
+    open_tool("heatmap_editor.HeatmapEditor", window)
     editor = view.dialog_pages()[0].dialog
-    editor.new_theme()
+    TextInputDialog(editor, "New", "Name:", lambda text: True).show()
     settle()
     pages = view.dialog_pages()
     assert len(pages) == 2 and isinstance(pages[1].dialog, TextInputDialog) and pages[1].opener is pages[0]
@@ -449,11 +446,11 @@ def test_rail_entries_keep_size_and_scroll(window):
     bar = view._rail_scroll.verticalScrollBar()
     assert bar.maximum() > 0
     bar.setValue(0)
-    view.set_current_index(PAGE_INDEX["tools"])  # selected entry scrolled into view
+    view.set_current_index(PAGE_INDEX["preset"])  # selected entry (last one) scrolled into view
     QApplication.processEvents()
-    tools = view._nav.button(PAGE_INDEX["tools"])
-    top = tools.mapTo(view._rail_scroll.viewport(), tools.rect().topLeft()).y()
-    assert 0 <= top <= view._rail_scroll.viewport().height() - tools.height()
+    preset = view._nav.button(PAGE_INDEX["preset"])
+    top = preset.mapTo(view._rail_scroll.viewport(), preset.rect().topLeft()).y()
+    assert 0 <= top <= view._rail_scroll.viewport().height() - preset.height()
 
 
 def test_rail_tools_have_no_close_buttons(window):

@@ -478,3 +478,159 @@ Méthode : ruff (règles du projet et règles étendues), mypy, suite de tests (
 - Tableau de bord web traduit, unités de l'utilisateur, énergie virtuelle. Python 3.10 abandonné (fin de vie), 3.11 minimum. Couverture minimale relevée à 88 %.
 
 Après l'ensemble : 2 188 tests, 91 % de couverture. Ce qui reste à vérifier en jeu est listé dans la [feuille de route](ROADMAP.md).
+
+---
+
+## J. Audit du Lap Telemetry Viewer (06/10/2026)
+
+Périmètre : la visionneuse de télémétrie (~14 000 lignes Python + QML) : état et chargement des tours, calculs (delta, mini-secteurs, tour idéal, relais), carte et virages, interface QML, import / export / bibliothèque. Méthode : 5 revues en parallèle avec reproduction sur une copie des vrais tours (Le Mans, Road Atlanta, Laguna Seca, imports MoTeC), mesures de temps, puis contre-vérification des points majeurs. Les numéros de ligne datent du 06/10/2026, avant les corrections.
+
+Légende : 🔴 données fausses ou blocage · 🟠 moyen · 🟡 mineur · ⚙️ performance · 💡 amélioration
+
+### ✅ Résultat (06/10/2026) : tout est corrigé, J53 en partie
+Correction en 6 lots parallèles, puis J56 et les restes. 6 nouveaux fichiers de tests (`tests/test_lap_viewer_fix_*.py`, 82 tests). Suite complète : aucun échec dans la visionneuse (2 607 tests au vert ; les 14 échecs restants viennent de pages en cours de refonte dans une autre session). ruff et mypy (Windows et Linux) sont propres sur les 22 fichiers touchés.
+
+**Données** :
+- Road Atlanta : bords de piste à 12,5 m de large en médiane au lieu de 5,5 m, et 4 sorties de limites au lieu de 28 (fichier `.track_limits` versionné, donc recalculé une fois).
+- Tour Genesis importé : delta à la ligne de −0,304 s et tour idéal de 68,843 s.
+- La session du 03/10 est découpée en 5 relais.
+- Les canaux calculés suivent la référence.
+- Le Mans : Forest Esses et Indianapolis replacés.
+
+**Robustesse** :
+- Aucun import relancé dans l'app si le processus de travail meurt ; un log d'une heure prend 149 Mo au lieu de 879 Mo, et un fichier piégé 0,02 s au lieu de 20 s.
+- Bibliothèque : suppression vers la corbeille avec annulation, fichiers verrouillés signalés.
+- Imports écrits via un fichier temporaire.
+
+**Clavier** :
+- Les touches vont aux graphiques à l'ouverture ; `Ctrl+Z` ne marche que sur la page affichée.
+- `Échap` ne ferme jamais la visionneuse.
+- La grande carte reçoit ses touches ; la rangée de chiffres AZERTY marche sans `Maj`.
+
+**Performance** :
+- Courbes de 6 tours du Mans : 6,6 Mo au lieu de 100 Mo.
+- Liste de 360 tours : 30 éléments au lieu de 201, recherche en 20 à 80 ms.
+- Ouverture d'un circuit de 360 tours neufs : 0,35 s au lieu de 1,5 s (index des en-têtes).
+- Traînées de la carte 2 à 3 fois moins chères ; recherche sur la carte dézoomée en 3,5 ms au lieu de 40 ms.
+- J56 : signaux séparés pour les panneaux, les virages et la carte.
+- J53 : seul le cercle G est construit à la demande (revenir au Mans : ~0,55 s au lieu de ~0,64 s) ; la carte et les courbes restent nécessaires aux graphiques.
+
+**En plus** :
+- L'enregistreur note l'heure exacte de fin de tour (lien vers le rejeu).
+- La liste déroulante de l'onglet Session ne garde plus le clavier.
+- Plus d'avertissements QML à la fermeture de la visionneuse.
+
+### ✅ Corrigé
+- **J0** : des tours de circuits différents étaient comparés : un tour ajouté restait coché au changement de circuit, et les tours d'un autre circuit étaient tracés et comparés, seulement exclus du tour idéal. Désormais, un tour d'un autre circuit que le tour de référence est décoché, avec un message (`lap_backend.drop_other_circuits`).
+
+### 🔴 Prioritaires
+- **J1** : les bords de piste venant du jeu sont beaucoup trop étroits. Le signe de `path_lateral` est choisi au hasard pour chaque tour, et le bord opposé est complété à partir de quelques points (`lap_geometry.py:251-289`).
+  - Sur tes limites de Road Atlanta enregistrées, la largeur est de 5,5 m en médiane et descend à 1,2 m, au lieu d'environ 12,6 m. C'est vérifié.
+  - Les 26 tours sans bords enregistrés reçoivent ainsi 28 faux « hors limites ».
+  - « Room to edge » et la « Track Position » sont faux aussi.
+  - Après correction, il faudra versionner `.track_limits` (voir J52), sinon les mauvais bords déjà enregistrés resteront.
+- **J2** : « Distance to Center » et « Track Position » sont remplacées par la mesure faite sur la carte, même quand le jeu les a enregistrées (`lap_map_view.py:542-569`, `trace_data.py:547`). Exemple : 0,62 m / +55 % affiché, alors que le jeu donne −5,74 m / −90 %, du côté opposé.
+  - Sans bords de piste, c'est la distance au tracé « type 0 » de l'API qui s'affiche. Ce tracé est une trajectoire de course, pas le centre de la piste : vérifié, ton meilleur tour passe à 0,2–0,7 m de ce tracé en médiane.
+- **J3** : les tours importés ne sont pas recalés sur la longueur du circuit quand l'écart est inférieur à 1 %. L'échelle est calculée sur le dernier échantillon et non sur la longueur du tour (`telemetry_lap.distance_scale`, même logique dans `lap_geometry.py:568`).
+  - Tour Genesis à Road Atlanta : delta à la ligne de +0,056 s au lieu de −0,304 s, et tour idéal trop optimiste de 0,55 s.
+- **J4** : après un changement de tour de référence, les courbes des autres tours gardent l'ancienne échelle de distance. La clé des vertices ne contient pas l'échelle (`trace_data.set_laps` / `signature`). Les courbes, le curseur, la carte et les virages peuvent alors être décalés de jusqu'à ~200 m.
+- **J5** : un canal calculé qui utilise `delta`, `delta_rate`, `path_lateral` ou `track_position` n'est jamais recalculé (`trace_data.py`). Le changement de référence, le mode idéal, la fenêtre de delta ou le recalage sur la carte n'y changent rien. Exemple : `delta * 2` reste à 1,017 alors que le delta vaut 0,395.
+- **J6** : l'import d'un `.ld` convertit les 184 canaux en listes Python (`motec_ld.py:209`).
+  - Un log d'une heure prend environ 45 s et 1 Go.
+  - Un `.ld` piégé de 400 Ko prend 18 s et 472 Mo.
+  - Si le processus de travail meurt, le travail est relancé dans l'app elle-même (`lap_backend.py:713`), avec un risque de gel ou de manque de mémoire. Ensuite, un export de tous les tours lance un fil par tour.
+- **J7** : supprimer dans la bibliothèque des tours importés échoue au milieu si un fichier est verrouillé (`PermissionError`, `lap_library.py:194`). La bibliothèque et la visionneuse restent alors désynchronisées. La suppression est de plus définitive, sans corbeille ni annulation.
+
+### 🟠 Moyens
+**Clavier et interface**
+- **J8** : à l'ouverture, le clavier va dans la liste des circuits et non dans les graphiques (`LapViewer.qml:130-201`). `↓` change de circuit et recharge les tours, `Espace` ne lance pas la lecture. C'est pareil après avoir choisi un circuit et avec les listes de l'onglet XY.
+- **J9** : `Ctrl+Z` reste actif quand la page est cachée (`LapViewer.qml:29`). Depuis l'accueil, il restaure les tours supprimés. Dans Driver Stats, il bloque le `Ctrl+Z` de la page.
+- **J10** : la recherche dans la liste des tours supprime l'espace final après 250 ms (`LapList.qml:142` + `strip()`). « porsche 963 » devient « porsche963 ».
+- **J11** : la largeur de la liste n'est jamais restaurée : `layoutState.length` est indéfini sur un `ArrayBuffer`, il faut `byteLength` (`LapViewer.qml:465`). Vérifié.
+- **J12** : la grande carte (mode focus) n'a jamais le focus clavier (`LapViewer.qml:550`). `Échap`, `R`, `F` et `1-9` agissent sur le graphique caché.
+- **J13** : `Échap` sur la carte latérale ferme la visionneuse quand elle est ouverte en fenêtre séparée (`TrackMap.qml:255`).
+- **J14** : la lecture continue quand la page est cachée, à environ 62 appels Python par seconde (`TraceChart.qml:427`).
+- **J15** : le menu des canaux remonte en haut à chaque case cochée (94 canaux, `LapViewer.qml:327`).
+- **J16** : la liste des tours remonte en haut à chaque nouveau tour enregistré, à chaque « Garder », note, suppression ou annulation : le modèle est remis à zéro (`fill_list` → `reset`).
+
+**Sélection et chargement**
+- **J17** : un tour du circuit courant ajouté par `Add File...` apparaît deux fois, dans la liste et dans la légende : les chemins mélangent `/` et `\` (`add_external`).
+- **J18** : quand la référence est un tour ajouté, la sélection est perdue au rafraîchissement, au changement de circuit ou à la réouverture. Elle est remplacée par meilleur + dernier tour (`load_track` / `save_selection`).
+- **J19** : `check_jobs` évalue `is_alive()` deux fois (`lap_backend.py:709`). Un travail qui se termine entre les deux n'est jamais traité : indicateur d'occupation bloqué, onglet Session ou mini-secteurs jamais mis à jour.
+- **J20** : `Maj` + clic sur une plage coche aussi les tours des sessions repliées, qui restent invisibles (`selectRange`).
+- **J21** : l'alignement sur un virage, le virage sélectionné, les repères A/B et le tour comparé sont gardés au changement de circuit.
+- **J22** : supprimer pendant un chargement : si un fichier est verrouillé, les graphiques ne sont jamais redessinés, et `Annuler` ne restaure qu'une partie de la suppression.
+- **J23** : choisir à nouveau un tour déjà listé dans la bibliothèque ou réimporter le même `.ld` ne fait rien de visible (`add_external`).
+
+**Calculs**
+- **J24** : dans l'onglet Session, les relais ne sont séparés que par les tours de sortie et de rentrée, qui ne sont pas enregistrés par défaut (`stint_analysis.split_stints`).
+  - Exemple : session du 03/10 à Road Atlanta, avec 3 ravitaillements, comptée comme 1 relais.
+  - La tendance est calculée sur la position du tour dans la liste et non sur son numéro : −0,129 s/tour au lieu de −0,060 s/tour.
+- **J25** : la fin du tour est perdue pour la moitié des tours MoTeC importés : `track_length` est arrondi vers le bas (`motec_import.py:295`). Les mini-secteurs et le delta à la ligne sont faux de 0,04 s.
+
+**Carte et virages**
+- **J26** : des écarts par virage manquent sur la carte (`official_points`, `lap_map_view.py:409`).
+  - Au Mans, les Esses et le virage à 12 240 m n'apparaissent pas.
+  - « Maison Blanche » affiche la valeur d'un autre virage.
+- **J27** : si le tour de référence n'a pas de positions (ton `.ld` McLaren), les modes gain et ligne n'affichent rien. Les repères de virages, la zone A–B et le clic sur la carte utilisent alors le tour comparé.
+- **J28** : au Mans, « Forest Esses » est placé au pli de 1 105 m au lieu de l'apex vers 1 450–1 590 m. « Indianapolis » est aussi mal placé (`track_corners.py:111`).
+
+**Import, export et bibliothèque**
+- **J29** : `Import Folder...` prend n'importe quel `.csv` pour un tour : `notes.csv`, exports CSV de la visionneuse, vieux tours sans en-tête.
+- **J30** : la protection contre l'import de son propre dossier fonctionne mal (`startswith`, `lap_library.py:153`). Choisir un dossier parent importe tes propres tours comme tours étrangers, et un dossier voisin `telemetry_mate` est refusé.
+- **J31** : la limite de 2 000 fichiers est comptée avant le filtre circuit/catégorie. Chez un coéquipier qui a beaucoup de circuits, on obtient « aucun tour de ce circuit ».
+- **J32** : réimporter le même dossier crée un groupe « (2) » et recopie tout. Il y a déjà un doublon de lap015 dans ton dossier `.imported`.
+- **J33** : un log MoTeC sans « Lap Number » est importé comme un seul tour (`motec_import.py:246`). Exemple : 3,5 tours deviennent un tour de 210 s nommé `0m29.950s`, qui devient la référence.
+- **J34** : un log MoTeC dont la distance est cumulée (compteur kilométrique) donne des tours décalés, écartés comme « autre circuit ».
+- **J35** : « Reference Lap as Delta Best... » ne fait rien, sans message, quand la référence est un tour importé. C'est le cas juste après un import MoTeC ou un ajout depuis la bibliothèque.
+- **J36** : la copie `.bak` du delta best est écrasée à chaque utilisation : le delta best d'origine est perdu dès la deuxième fois.
+
+### 🟡 Mineurs
+- **J37** : `format_laptime(119.9996)` donne « 1:60.000 », ce qui touche le meilleur théorique et le tour idéal. Vérifié.
+- **J38** : un échec de lecture passager (antivirus) n'est jamais retenté par Rafraîchir.
+- **J39** : si le tour de référence est illisible, l'étoile reste dessus alors que les graphiques utilisent un autre tour.
+- **J40** : `Annuler` après la suppression de la référence ne restaure pas la référence.
+- **J41** : le circuit officiel reçu du jeu est jeté si on a changé de circuit pendant la requête, et il n'est pas redemandé.
+- **J42** : `LapData.lap_time` donne le dernier échantillon et non le temps officiel. Écarts de setup et écart « Ideal Lap » faux de 17 ms (73 ms pour un tour importé). Un « +0,01 » rouge s'affiche alors que la référence est la plus rapide partout.
+- **J43** : le gain/perte de temps est sous-estimé jusqu'à 50 % dans les 75 premiers et derniers mètres du tour (`delta_rate`).
+- **J44** : l'usure devient négative dans l'onglet Session quand les pneus sont changés pendant un tour enregistré.
+- **J45** : les lignes « Straights » et « Total » sont absurdes avec un tour partiel (−75,66 s).
+- **J46** : le mode carte « corners » garde les couleurs du tour comparé précédent (`lap_corners.py:83`).
+- **J47** : l'export MoTeC interpole le rapport, le secteur et le TC, ce qui donne des valeurs comme 2,33, 1,5 ou 0,5.
+- **J48** : lien vers le rejeu.
+  - Tous les tours MoTeC importés pointent vers la fin du log.
+  - Un rejeu interrompu est supposé durer 24 h.
+  - La position arrive jusqu'à 1 s trop tôt.
+- **J49** : les tours importés sont écrits sans fichier temporaire, et ceux de la bibliothèque ne sont pas attendus à la fermeture. Un tour peut donc rester tronqué.
+- **J50** : le curseur de détection des virages ne réagit pas aux flèches du clavier (`CornerList.qml:39`).
+- **J51** : en zoom fort, les libellés d'axe sont dupliqués (« 1501 m » deux fois) et « 1:60 » peut s'afficher.
+- **J52** : les caches `.track_maps` et `.track_limits` ne sont jamais invalidés : ni version d'algorithme, ni version du circuit dans le jeu.
+
+### ⚙️ Performance
+- **J53** : revenir sur un circuit avec 5 tours du Mans bloque l'interface environ 1 s. Répartition : carte 0,3 s, courbes 0,14 s, et 0,2 s pour le cercle G et les virages, calculés même quand leur onglet est caché.
+- **J54** : les traînées de la carte sont reconstruites à chaque mouvement de souris : 8,7 ms par mouvement avec 31 tours, soit 97 % du coût du curseur.
+- **J55** : la liste crée des éléments pour les tours des sessions repliées : avec 360 tours, 199 éléments sont créés pour 31 visibles, et la recherche prend 148 ms.
+- **J56** : `chartChanged` sert à tout. Redimensionner un panneau recrée 164 éléments QML et relit une vingtaine de propriétés calculées.
+- **J57** : 6 tours du Mans × 58 canaux prennent environ 100 Mo en séries, contre 12 Mo pour les tours eux-mêmes : listes de distances recopiées pour chaque canal, valeurs en `float` Python.
+- **J58** : quand la page est cachée, chaque nouveau tour recharge et redessine tout pendant que tu roules, ce qui annule la libération de la mémoire.
+- **J59** : la recherche du point le plus proche sur la carte dézoomée prend 28 ms par geste au Mans (`LineGrid.nearest`).
+- **J60** : avec 600 tours dans un circuit, la première ouverture prend 2,4 s, à cause de la lecture des en-têtes dans l'interface.
+
+### 💡 Améliorations
+- **J61** : mode live. Un nouveau meilleur tour n'est comparé à rien : il faudrait le comparer à l'ancien meilleur. La référence choisie est remplacée à chaque tour. Seul le circuit ouvert est surveillé.
+- **J62** : import MoTeC. Des canaux du log LMU sont ignorés : températures eau et huile, températures pneus intérieur/centre/extérieur, répartition de freinage, charge des pneus. La date, le numéro et le temps exact du tour sont perdus : la date est celle de la copie du fichier.
+- **J63** : bibliothèque. Ajouter une corbeille avec annulation, comme dans la visionneuse, et nettoyer les caches orphelins.
+- **J64** : un tour écarté parce qu'il vient d'un autre circuit n'est signalé que 8 s. Il faudrait une ligne grisée avec une infobulle.
+- **J65** : afficher des états vides quand la recherche ne trouve aucun tour ou aucun canal.
+- **J66** : clavier AZERTY. Les touches 1-9 de la carte demandent `Maj`, et 6 et 8 dézooment (non reproduit hors écran).
+- **J67** : autoriser le delta best depuis un tour importé d'un coéquipier sur le même circuit.
+
+### Vérifié et correct
+- Les canaux calculés sont sûrs : arbre syntaxique avec liste blanche, jamais d'`eval`.
+- Le cache des tours est sans `pickle`, avec des tailles vérifiées et une version à jour.
+- Le format écrit par l'enregistreur et celui lu par la visionneuse concordent.
+- Sur les tours enregistrés, le delta et les mini-secteurs sont exacts.
+- Les conversions d'unités sont justes.
+- Pas d'avertissement QML, traductions complètes.
+- Les travaux de la carte et des limites qui finissent après un changement de circuit sont ignorés.
+- Le survol des courbes est rapide (0,2 ms).

@@ -26,7 +26,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import app_signal, loader
+from .. import regex_pattern as rxp
 from ..api_control import api
 from ..const_app import APP_NAME, VERSION
 from ..const_file import ConfigType
@@ -88,6 +89,14 @@ from .ordered_picker import icon_font_family
 from .pace_notes_view import PaceNotesControl, PaceNotesPlayback
 from .toast import show_toast
 from .tools_view import RENAMED_TOOLS, TOOL_SECTIONS, ToolsView, open_tool
+from .window_geometry import (
+    default_frame_rect,
+    keep_on_screen,
+    max_content_size,
+    page_minimum_size,
+    screen_for,
+    set_frame_rect,
+)
 
 if TYPE_CHECKING:
     from .preset_view import PresetList
@@ -101,6 +110,16 @@ RAIL_TOGGLES = (
     ("auto_hide", "Auto Hide", "\ue7b3", "H"),  # red eye
     ("vr_compatibility", "VR Compatibility", "\ue7f4", "V"),  # tv monitor
 )
+
+
+def show_restored(window: QWidget):
+    """Show hidden (tray) or minimized window as it was: maximized stays maximized"""
+    if window.isFullScreen():
+        window.showFullScreen()
+    elif window.isMaximized():
+        window.showMaximized()
+    else:
+        window.showNormal()
 
 
 def build_page(key: str, host: QWidget, view: "TabView", window: QWidget, icon_family: str) -> QWidget:
@@ -296,10 +315,12 @@ class DialogPage(QWidget):
 
     Emits closed when dialog closes itself (close button, Save & close, Esc): page is then removed.
     Emits modified_changed when dialog unsaved changes marker is shown or cleared.
+    Emits minimum_changed when page area minimum asked by dialog changes, see minimum_size.
     """
 
     closed = Signal(QWidget)
     modified_changed = Signal()
+    minimum_changed = Signal()
 
     def __init__(self, dialog: BaseDialog, parent=None, opener: "DialogPage | None" = None):
         super().__init__(parent)
@@ -338,6 +359,9 @@ class DialogPage(QWidget):
         if dialog.testAttribute(Qt.WidgetAttribute.WA_Resized):
             preferred = preferred.expandedTo(dialog.size())
         self.preferred_size = preferred
+        page_minimum_changed = getattr(dialog, "page_minimum_changed", None)
+        if page_minimum_changed is not None:
+            page_minimum_changed.connect(self.minimum_changed)
         dialog.setMinimumSize(0, 0)
         dialog.setWindowFlags(Qt.WindowType.Widget)
         scroll = QScrollArea(self)
@@ -400,6 +424,13 @@ class DialogPage(QWidget):
                 buttons.append(button)
         return buttons
 
+    @property
+    def minimum_size(self) -> QSize:
+        """Page area minimum while page is shown (QML toolbars & panels are cut below it, they do not
+        scroll): dialog page_minimum_size(), if any, see TabView.update_page_minimum"""
+        minimum = getattr(self.dialog, "page_minimum_size", None)
+        return minimum() if callable(minimum) else QSize(0, 0)
+
     def title_height(self) -> int:
         return self._layout_title.sizeHint().height()
 
@@ -444,6 +475,8 @@ class TabView(QWidget):
         }
         self._pages = QStackedWidget(self)
         self._pages.setObjectName("pageStack")
+        # Pages never squeezed until they show broken: window minimum follows (window layout)
+        self._pages.setMinimumSize(page_minimum_size())
         for page in self._lazy_pages.values():
             self._pages.addWidget(page)
         self._page_release = PageRelease(self, self._lazy_pages.values())  # window hidden: pages freed
@@ -451,6 +484,8 @@ class TabView(QWidget):
         # Navigation rail
         rail = QWidget(self)
         rail.setObjectName("navRail")
+        # Rail keeps its width when window is at its minimum size (squeezed, its entries vanished)
+        rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         layout_rail = QVBoxLayout(rail)
         margin = UIScaler.pixel(6)
         layout_rail.setContentsMargins(margin, margin, margin, margin)
@@ -469,8 +504,11 @@ class TabView(QWidget):
         self._left_pages_timer.timeout.connect(self.close_left_pages)
         self.track_pages = False  # shown page remembered on change, once startup pages are restored
         self._size_before_pages: QSize | None = None  # window size before a dialog page grew it
+        self._pos_before_pages: QPoint | None = None  # window position before growing moved it inside screen
         self._user_resized = False  # window resized by user while grown
+        self._user_moved = False  # window moved by user while grown
         self._grown_for: set[QWidget] = set()  # open pages needing grown window size
+        self._fit_pending: list[DialogPage] = []  # pages shown before view was laid out, see fit_window
         self._rail = rail
         # Rail entries scrolled (wheel or thin scroll bar) when window is too short, quick actions stay below
         rail_list = QWidget()
@@ -512,9 +550,9 @@ class TabView(QWidget):
             button.clicked.connect(lambda _=False, name=option: self.toggle_overlay(name))
             self._toggles[option] = button
             layout_quick.addWidget(button, index // 2, index % 2)
-        button_config = NavButton(tr("Application"), "\ue713", "C", icon_family, rail, compact=True)  # settings
+        button_config = NavButton(f"{tr('Config')} (Ctrl+,)", "\ue713", "C", icon_family, rail, compact=True)
         button_config.setCheckable(False)
-        button_config.clicked.connect(lambda: open_config_application(parent))
+        button_config.clicked.connect(lambda: open_config_application(parent, ""))  # page as left
         layout_quick.addWidget(button_config, 1, 1)
         self._button_api = NavButton(tr("API"), "\ue968", "A", icon_family, rail, compact=True)  # network
         self._button_api.setCheckable(False)
@@ -541,6 +579,7 @@ class TabView(QWidget):
         self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0)
         self._pages.currentChanged.connect(self.page_changed)
         self._pages.currentChanged.connect(self.schedule_close_left_pages)
+        self._pages.currentChanged.connect(self.update_page_minimum)
 
         layout_body = QHBoxLayout()
         layout_body.setContentsMargins(0, 0, 0, 0)
@@ -660,6 +699,7 @@ class TabView(QWidget):
             page.closed.connect(self.close_dialog_page)
             page.modified_changed.connect(self.refresh_open_pages)
             page.modified_changed.connect(self.schedule_close_left_pages)
+            page.minimum_changed.connect(self.update_page_minimum)
             self._pages.addWidget(page)
             self.show_page_widget(page)
             self.refresh_open_pages()
@@ -688,46 +728,137 @@ class TabView(QWidget):
             return True
         return False
 
-    def fit_window(self, page: "DialogPage"):
+    def fit_window(self, page: "DialogPage", resize: bool = True):
         """Grow main window to page preferred size (within screen)
 
         Size is kept while browsing pages (no resize back and forth), restored once every page
-        needing it is closed, see close_dialog_page.
+        needing it is closed, see close_dialog_page. Grown window frame (title bar included)
+        stays inside screen: window moved if it would go past screen edge, moved back once restored.
         """
         window = self.window()
         if window.isMaximized() or window.isFullScreen():
             return
+        if not self.isVisible():  # view not laid out yet (startup, rebuilt in new language): fitted once shown
+            self._fit_pending.append(page)
+            return
         extra_width = window.width() - self._pages.width()  # rail & margins
         extra_height = window.height() - self._pages.height() + page.title_height()  # menu, status, title
-        width = page.preferred_size.width() + extra_width
-        height = page.preferred_size.height() + extra_height
-        screen = window.screen()
-        if screen is not None:
-            area = screen.availableGeometry()
-            width, height = min(width, area.width()), min(height, area.height())
+        largest = max_content_size(window)
+        width = min(page.preferred_size.width() + extra_width, largest.width())
+        height = min(page.preferred_size.height() + extra_height, largest.height())
         before = self._size_before_pages
         if before is not None and (width > before.width() or height > before.height()):
             self._grown_for.add(page)  # relies on grown size
-        if width <= window.width() and height <= window.height():
+        if not resize or (width <= window.width() and height <= window.height()):
             return
         if self._size_before_pages is None:
             self._size_before_pages = window.size()
-            self._user_resized = False
+            self._pos_before_pages = window.pos()
+            self._user_resized = self._user_moved = False
         self._grown_for.add(page)
         window.resize(max(width, window.width()), max(height, window.height()))
+        keep_on_screen(window)
 
     def restore_window_size(self):
-        """Size before a page grew window, unless user resized window meanwhile"""
+        """Size (and position) before a page grew window, unless user resized (or moved) window meanwhile"""
         if self._size_before_pages is None:
             return
         window = self.window()
-        if not self._user_resized and not window.isMaximized():
-            window.resize(self._size_before_pages)
-        self._size_before_pages = None
+        if not window.isMaximized() and not window.isFullScreen():
+            if not self._user_resized:
+                window.resize(self._size_before_pages)
+            if not self._user_moved and self._pos_before_pages is not None:
+                window.move(self._pos_before_pages)
+        self._size_before_pages = self._pos_before_pages = None
 
     def window_resized_by_user(self):
         """Size chosen by user is kept when leaving dialog pages"""
         self._user_resized = True
+
+    def window_moved_by_user(self):
+        """Position chosen by user is kept when leaving dialog pages"""
+        self._user_moved = True
+
+    def window_base_geometry(self) -> tuple[QSize | None, QPoint | None]:
+        """Window size & position before a page grew it, each None if not grown or changed by user
+        since: saved for next startup instead of grown ones (page grows window again if reopened)"""
+        if self._size_before_pages is None:
+            return None, None
+        size = None if self._user_resized else self._size_before_pages
+        pos = None if self._user_moved else self._pos_before_pages
+        return size, pos
+
+    def window_growth(self) -> tuple[QSize | None, QPoint | None, bool, bool]:
+        """Window size & position before pages grew it, and whether user changed them since"""
+        return self._size_before_pages, self._pos_before_pages, self._user_resized, self._user_moved
+
+    def adopt_window_growth(self, growth: tuple[QSize | None, QPoint | None, bool, bool]):
+        """Growth of previous view (rebuilt in new language): size before pages restored once they close"""
+        self._size_before_pages, self._pos_before_pages, self._user_resized, self._user_moved = growth
+
+    def fit_pending_pages(self):
+        """Pages shown while view was not laid out: window grown for the one shown now, the others noted
+        as needing grown size (window back to its size once every such page is closed)"""
+        pages, self._fit_pending = self._fit_pending, []
+        current = self._pages.currentWidget()
+        for page in dict.fromkeys(pages):
+            if shiboken6.isValid(page) and self._pages.indexOf(page) >= 0:
+                self.fit_window(page, resize=page is current)
+
+    def forget_window_growth(self):
+        """Window size set anew (reset): not restored to size before pages anymore"""
+        self._size_before_pages = self._pos_before_pages = None
+        self._grown_for.clear()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_page_minimum()  # window laid out on its screen: minimum kept within it
+        if self._fit_pending:
+            QTimer.singleShot(0, self.fit_pending_pages)  # once view geometry is set by window layout
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.scroll_to_selected_entry()  # window made shorter: selected rail entry kept in view
+
+    def rail_fade_height(self) -> int:
+        """Height of rail scroll fades (see ScrollFade): entry scrolled into view is kept clear of them"""
+        return max(self.fontMetrics().height() * 2, 1)
+
+    def scroll_to_selected_entry(self):
+        """Selected rail entry (page or tool) scrolled into view when rail is too short for every entry"""
+        for index in range(self._rail_items.count()):
+            item = self._rail_items.itemAt(index)
+            button = item.widget() if item is not None else None
+            if isinstance(button, NavButton) and button.isChecked():
+                self._rail_scroll.ensureWidgetVisible(button, 0, self.rail_fade_height())
+                return
+
+    def update_page_minimum(self, *_):
+        """Page area never squeezed until pages show broken (overlapped or cut): base minimum for
+        every page, more for shown page needing it (telemetry viewer...), window minimum follows
+
+        Kept within screen of window (title bar, rail, menu & status bars included), so window
+        always fits its screen.
+        """
+        minimum = page_minimum_size()
+        current = self._pages.currentWidget()
+        if isinstance(current, DialogPage):
+            minimum = minimum.expandedTo(current.minimum_size)
+        window = self.window()
+        if window.isVisible() and not self._pages.size().isEmpty():
+            bars = window.size() - self._pages.size()  # rail, menu & status bars
+            minimum = minimum.boundedTo(max_content_size(window) - bars)
+        if minimum != self._pages.minimumSize():
+            self._pages.setMinimumSize(minimum)
+            # Window minimum applied now, not at next layout pass: restoring size before a page
+            # (closed now) is not blocked by minimum of that page
+            view_layout = self.layout()
+            if view_layout is not None:
+                view_layout.activate()  # nested layouts too (page stack is in a nested one)
+            self.updateGeometry()  # cached minimum of this view in window layout dropped
+            window_layout = window.layout()
+            if window_layout is not None:
+                window_layout.activate()
 
     def rail_tool_buttons(self) -> dict[str, NavButton]:
         """Rail tool entries by dialog class name"""
@@ -756,7 +887,7 @@ class TabView(QWidget):
             if button.isChecked() != (name == shown):
                 button.setChecked(name == shown)
             if name == shown:
-                self._rail_scroll.ensureWidgetVisible(button, 0, 0)
+                self._rail_scroll.ensureWidgetVisible(button, 0, self.rail_fade_height())
 
     def shown_pages(self) -> set[QWidget]:
         """Shown page & pages it was opened from (lap viewer of its lap library...)"""
@@ -875,6 +1006,7 @@ class TabView(QWidget):
             page.closed.disconnect(self.close_dialog_page)
             page.modified_changed.disconnect(self.refresh_open_pages)
             page.modified_changed.disconnect(self.schedule_close_left_pages)
+            page.minimum_changed.disconnect(self.update_page_minimum)
             self._pages.removeWidget(page)
             page.setParent(None)
             kept.append(page)
@@ -890,6 +1022,7 @@ class TabView(QWidget):
             page.closed.connect(self.close_dialog_page)
             page.modified_changed.connect(self.refresh_open_pages)
             page.modified_changed.connect(self.schedule_close_left_pages)
+            page.minimum_changed.connect(self.update_page_minimum)
             self._pages.addWidget(page)
         self.refresh_open_pages()
 
@@ -946,9 +1079,9 @@ class TabView(QWidget):
         if not isinstance(current, DialogPage):
             self._return_index = self._pages.currentIndex()  # back to this page when closed
         self.remember_shown(current, page)
-        self._pages.setCurrentWidget(page)
         if isinstance(page, DialogPage):
-            self.fit_window(page)
+            self.fit_window(page)  # before showing it: its minimum (see update_page_minimum) fits grown window
+        self._pages.setCurrentWidget(page)
         self._nav.setExclusive(False)  # no rail page selected while dialog page shows
         for button in self._nav.buttons():
             button.setChecked(False)
@@ -957,10 +1090,8 @@ class TabView(QWidget):
         if not bring_to_front or self._restoring_pages:
             return
         window = self.window()
-        if not window.isVisible():
-            window.show()
-        if window.isMinimized():
-            window.showNormal()
+        if not window.isVisible() or window.isMinimized():
+            show_restored(window)
         window.raise_()
         window.activateWindow()
 
@@ -1084,7 +1215,7 @@ class TabView(QWidget):
         if button is not None and not button.isChecked():
             button.setChecked(True)
         if button is not None:
-            self._rail_scroll.ensureWidgetVisible(button, 0, 0)  # selected entry scrolled into view
+            self._rail_scroll.ensureWidgetVisible(button, 0, self.rail_fade_height())  # selected entry scrolled into view
 
     def select_preset_tab(self):
         """Select preset tab"""
@@ -1200,8 +1331,8 @@ class StatusButtonBar(QStatusBar):
             loader.restart()
 
     def toggle_color_theme(self):
-        """Toggle color theme: Dark, Light, System"""
-        themes = ("Dark", "Light", "System")
+        """Toggle color theme: Modern Dark, Modern Light, Legacy Dark, Legacy Light"""
+        themes = rxp.THEME_NAMES
         current = cfg.application["window_color_theme"]
         index = themes.index(current) if current in themes else -1
         cfg.application["window_color_theme"] = themes[(index + 1) % len(themes)]
@@ -1220,6 +1351,15 @@ class AppWindow(QMainWindow):
         self.last_icon_dark = None
         self.last_language = cfg.application["language"]
         self._pages_closed = False  # pages closed for quit or restart, see close_pages_for_quit
+        # Window size & position saved shortly after each change (kept after a crash or system
+        # shutdown, not only after Quit), once set at startup, see set_window_state
+        self._track_geometry = False
+        self._normal_rect: QRect | None = None  # normal geometry before maximized, see changeEvent
+        self._geometry_timer = QTimer(self)
+        self._geometry_timer.setSingleShot(True)
+        self._geometry_timer.setInterval(1000)
+        self._geometry_timer.timeout.connect(lambda: self.save_window_state(delay=66))
+
         install_message_icons()  # message box icons drawn in window color theme
 
         # Status bar
@@ -1254,7 +1394,7 @@ class AppWindow(QMainWindow):
         self.set_window_state()
         self.__connect_signal()
         QTimer.singleShot(0, self.restore_open_pages)  # once window is shown: faster startup
-        # Follow OS light / dark switch when window color theme is "System"
+        # Follow OS light / dark switch: app icon matches taskbar
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: app_signal.refresh.emit(True))
 
         # Refresh GUI
@@ -1284,6 +1424,11 @@ class AppWindow(QMainWindow):
         key = screen_key()
         if key == self._screen_key:
             return
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.update_page_minimum()  # minimum within new screen size
+        if cfg.compatibility["enable_window_position_correction"] and self.isVisible():
+            keep_on_screen(self)  # screen unplugged or resolution lowered
         if self.modified_config_dialogs():
             return  # retried once config changes are saved or cancelled
         self._screen_key = key
@@ -1332,10 +1477,10 @@ class AppWindow(QMainWindow):
     def refresh(self):
         """Refresh GUI"""
         # Window style
-        style = resolve_color_theme(cfg.application["window_color_theme"])
+        style = cfg.application["window_color_theme"]
         if self.last_style != style:
             self.last_style = style
-            set_style_palette(self.last_style)
+            set_style_palette(style)
             # Applied at QApplication level (not just this window), so every dialog picks up the
             # style even if not a visual child of AppWindow at the time it is shown, including
             # QMessageBox, QColorDialog and other Qt-built top-level windows.
@@ -1365,7 +1510,9 @@ class AppWindow(QMainWindow):
         open_pages: list[str] = []
         kept: list[DialogPage] = []
         shown = None
+        growth = None
         if isinstance(tab_view, TabView):
+            growth = tab_view.window_growth()  # window grown for a wide page: back to size before once closed
             tab_index = tab_view.current_index()
             if tab_index >= len(NAV_PAGES):  # dialog page shown: app page shown before it
                 tab_index = tab_view._return_index
@@ -1375,6 +1522,8 @@ class AppWindow(QMainWindow):
         self.set_menu_bar()
         tab_view = TabView(self)
         self.setCentralWidget(tab_view)
+        if growth is not None:
+            tab_view.adopt_window_growth(growth)
         tab_view.set_current_index(tab_index)
         tab_view.adopt_pages(kept)  # config & edited pages kept as they are (no edit lost)
         tab_view.restore_pages(open_pages)  # tool pages reopened in new language
@@ -1436,83 +1585,93 @@ class AppWindow(QMainWindow):
             self.show_app()
 
     def set_window_state(self):
-        """Set initial window state"""
-        self.setMinimumSize(UIScaler.size(23), UIScaler.size(36))
+        """Set initial window state: last size & position (comfortable size centered on screen at
+        first launch), kept inside screens, maximized again if it was
 
-        if cfg.application["remember_size"]:
-            self.resize(
-                cfg.application["window_width"],
-                cfg.application["window_height"],
-            )
-
-        if cfg.application["remember_position"]:
-            self.load_window_position()
+        Minimum size is the one of window layout (rail & widest page): never below, so pages
+        are never cut.
+        """
+        logger.info("GUI: loading window setting")
+        self.winId()  # native window created: frame size (title bar) known to fit window inside screen
+        default = default_frame_rect(self)
+        width, height = cfg.application["window_width"], cfg.application["window_height"]
+        if cfg.application["remember_size"] and width > 0 and height > 0:
+            self.resize(width, height)
+        else:
+            set_frame_rect(self, default)
+        pos_x, pos_y = cfg.application["position_x"], cfg.application["position_y"]
+        if cfg.application["remember_position"] and (pos_x, pos_y) != (0, 0):  # 0, 0: not saved yet
+            self.move(pos_x, pos_y)
+        else:  # centered on screen
+            frame = self.frameGeometry()
+            frame.moveCenter(default.center())
+            self.move(frame.topLeft())
 
         if cfg.compatibility["enable_window_position_correction"]:
             self.verify_window_position()
 
+        if cfg.application["remember_size"] and cfg.application["window_maximized"]:
+            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
         if cfg.application["show_at_startup"]:
-            self.showNormal()
+            show_restored(self)
         elif not cfg.application["minimize_to_tray"]:
             self.showMinimized()
-
-    def load_window_position(self):
-        """Load window position"""
-        logger.info("GUI: loading window setting")
-        app_pos_x = cfg.application["position_x"]
-        app_pos_y = cfg.application["position_y"]
-        # Save new x,y position if preset value at 0,0
-        if 0 == app_pos_x == app_pos_y:
-            self.save_window_state()
-        else:
-            self.move(app_pos_x, app_pos_y)
+        self._track_geometry = True
 
     def verify_window_position(self):
-        """Verify window position"""
-        # Get screen size from the screen where app window located
-        screen_geo = self.screen().geometry()
-        # Limiting position value if out of screen range
-        app_pos_x = min(
-            max(self.x(), screen_geo.left()),
-            screen_geo.right() - self.minimumWidth(),
-        )
-        app_pos_y = min(
-            max(self.y(), screen_geo.top()),
-            screen_geo.bottom() - self.minimumHeight(),
-        )
-        # Re-adjust position only if mismatched
-        if self.x() != app_pos_x or self.y() != app_pos_y:
-            self.move(app_pos_x, app_pos_y)
+        """Keep window inside screen showing most of it (nearest one if on none: screen unplugged),
+        shrunk to fit if larger (resolution lowered), title bar never off screen"""
+        if keep_on_screen(self):
             logger.info("GUI: window position corrected")
 
-    def save_window_state(self):
-        """Save window state"""
-        if self.isMaximized() or self.isFullScreen():
-            return  # keep last normal size & position
-        save_changes = False
+    def save_window_state(self, delay: int = 0):
+        """Save window size, position & maximized state
 
+        While maximized, normal size & position are saved (shown again once un-maximized). While
+        a page grew window, size & position before it are saved unless user changed them since:
+        page grows window again when reopened, grown size never becomes window size.
+        """
+        maximized = self.isMaximized() or self.isFullScreen()
+        rect = self.normalGeometry() if maximized else self.geometry()
+        if rect.isEmpty():
+            rect = self.geometry()
+        size = rect.size()
+        pos = rect.topLeft() - (self.geometry().topLeft() - self.pos())  # frame position, as move()
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            base_size, base_pos = view.window_base_geometry()
+            if base_size is not None:
+                size = base_size
+            if base_pos is not None:
+                pos = base_pos
+        values: dict[str, int | bool] = {}
         if cfg.application["remember_position"]:
-            last_pos = cfg.application["position_x"], cfg.application["position_y"]
-            new_pos = self.x(), self.y()
-            if last_pos != new_pos:
-                cfg.application["position_x"] = new_pos[0]
-                cfg.application["position_y"] = new_pos[1]
-                save_changes = True
-
+            values.update(position_x=pos.x(), position_y=pos.y())
         if cfg.application["remember_size"]:
-            last_size = cfg.application["window_width"], cfg.application["window_height"]
-            new_size = self.width(), self.height()
-            if last_size != new_size:
-                cfg.application["window_width"] = new_size[0]
-                cfg.application["window_height"] = new_size[1]
-                save_changes = True
+            values.update(window_width=size.width(), window_height=size.height(), window_maximized=self.isMaximized())
+        changed = {key: value for key, value in values.items() if cfg.application[key] != value}
+        if changed:
+            cfg.application.update(changed)
+            cfg.save(delay, config_type=ConfigType.CONFIG)
 
-        if save_changes:
-            cfg.save(0, config_type=ConfigType.CONFIG)
+    def reset_window_size(self):
+        """Window back to default size, centered on its screen (Window menu, command palette)"""
+        view = self.centralWidget()
+        if isinstance(view, TabView):
+            view.forget_window_growth()
+        if self.isMaximized() or self.isFullScreen() or self.isMinimized():
+            self.showNormal()  # un-maximized first, default geometry applied once done
+            QTimer.singleShot(0, self.reset_window_size)
+            return
+        set_frame_rect(self, default_frame_rect(self, screen_for(self.frameGeometry())))
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.save_window_state()
 
     def show_app(self):
-        """Show app window"""
-        self.showNormal()
+        """Show app window (from tray, notification...), maximized window stays maximized"""
+        show_restored(self)
         self.activateWindow()
         app_signal.refresh.emit(True)
 
@@ -1535,13 +1694,44 @@ class AppWindow(QMainWindow):
             return
         super().mousePressEvent(event)
 
-    @Slot(bool)  # type: ignore[operator]
+    def changed_by_user(self, event: QEvent) -> bool:
+        """Resize or move done by user (window manager): not by app, nor by (un)maximizing"""
+        return event.spontaneous() and not (self.isMaximized() or self.isFullScreen() or self.isMinimized())
+
     def resizeEvent(self, event):
-        if event.spontaneous():  # resized by user (window manager), not by app
-            view = self.centralWidget()
-            if isinstance(view, TabView):
-                view.window_resized_by_user()
+        if self.changed_by_user(event):
+            if self._normal_rect is not None and event.size() == self._normal_rect.size():
+                self._normal_rect.setSize(QSize())  # un-maximized: back to normal size
+            else:
+                view = self.centralWidget()
+                if isinstance(view, TabView):
+                    view.window_resized_by_user()
+        self.geometry_changed()
         super().resizeEvent(event)
+
+    def moveEvent(self, event):
+        if self.changed_by_user(event):
+            if self._normal_rect is not None and event.pos() == self._normal_rect.topLeft():
+                self._normal_rect = None  # un-maximized: back to normal position
+            else:
+                view = self.centralWidget()
+                if isinstance(view, TabView):
+                    view.window_moved_by_user()
+        self.geometry_changed()
+        super().moveEvent(event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            sized = Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen
+            if self.windowState() & sized and not event.oldState() & sized:
+                self._normal_rect = self.geometry()  # un-maximizing comes back to it: not a user change
+            self.geometry_changed()
+        super().changeEvent(event)
+
+    def geometry_changed(self):
+        """Window size, position or state changed: saved once changes settle"""
+        if self._track_geometry:
+            self._geometry_timer.start()
 
     def save_open_pages(self, delay: int = 0):
         """Remember tool pages left open (shown one marked), reopened at next startup"""

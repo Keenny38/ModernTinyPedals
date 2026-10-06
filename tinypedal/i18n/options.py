@@ -130,6 +130,21 @@ def option_help_english(section: str, key: str) -> str:
     return ""
 
 
+def option_help_specific(section: str, key: str) -> str:
+    """Option description (current language), empty if only a generic text of common terms matches
+    (colors, fonts, decimal places...): pages listing many such options skip the repeated text"""
+    text = option_help_english(section, key)
+    if not text:
+        return ""
+    helps, common = _help()
+    common_help = helps.get(common, {})
+    if key not in common_help and key not in helps.get(section, {}):
+        generic = {common_help[word] for word in _GENERIC if word in common_help}
+        if text in generic:
+            return ""
+    return _help_translations(current_language()).get(text, text)
+
+
 def option_tooltip(section: str, key: str) -> str:
     """Tooltip text: description (if documented) and option key"""
     text = option_help(section, key)

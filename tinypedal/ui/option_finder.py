@@ -18,24 +18,31 @@
 
 """
 Global option search: find any option in all widgets, modules & global settings
+
+Results are ranked (words found in the option name first, then in its overlay or section name),
+case & accent folded, in English and in app language. Find Option page: Qt Quick page
+(qml/OptionFinder.qml), state & actions in quick/finder_backend.py.
 """
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
+from PySide6.QtCore import QUrl
+from PySide6.QtQuickWidgets import QQuickWidget
+from PySide6.QtWidgets import QVBoxLayout
 
 from .. import loader
 from ..const_file import ConfigType
-from ..i18n import tr, trm
-from ..i18n.options import module_label, option_label, option_tooltip, search_text
+from ..i18n import tr
+from ..i18n.options import module_label, search_text
 from ..module_control import mctrl, wctrl
 from ..setting import cfg
 from ..widget._modern import design_option_keys
 from ._common import BaseDialog, UIScaler, singleton_dialog
 from .config import HIDDEN_OPTIONS
+from .module_view import sort_key
 
 MAX_RESULTS = 200
 # Global config sections edited from other places (API menu, tool dialogs)
@@ -49,7 +56,8 @@ class OptionEntry(NamedTuple):
     section: str
     key: str
     config_type: str  # ConfigType.CONFIG, SETTING, WIDGET, MODULE
-    text: str  # lowercase searchable text
+    text: str  # searchable text: section & option names, case & accent folded
+    label: str = ""  # searchable option names only (ranking), case & accent folded
 
 
 def build_index() -> list[OptionEntry]:
@@ -68,7 +76,7 @@ def build_index() -> list[OptionEntry]:
                 continue
             if section.startswith("api_") and section != cfg.api_key:
                 continue  # only options of selected API
-            section_text = f"{module_label(section)} {section}".lower()
+            section_text = sort_key(f"{module_label(section)} {section.replace('_', ' ')} {section}")
             section_type = config_type(section)
             keys = list(options)
             if section_type == ConfigType.WIDGET:  # options shown by current design only
@@ -76,33 +84,68 @@ def build_index() -> list[OptionEntry]:
             elif section_type == ConfigType.CONFIG:  # kept up to date by app, not shown in config dialog
                 keys = [key for key in keys if key not in HIDDEN_OPTIONS.get(section, ())]
             for key in keys:
-                entries.append(OptionEntry(section, key, section_type, f"{section_text} {search_text(key)}"))
+                label = sort_key(search_text(key))
+                entries.append(OptionEntry(section, key, section_type, f"{section_text} {label}", label))
     return entries
 
 
-def search_options(entries: list[OptionEntry], text: str) -> list[OptionEntry]:
-    """Options matching all words (any order)"""
-    words = text.lower().split()
+def match_score(entry: OptionEntry, words: tuple[str, ...]) -> int:
+    """Rank of a matching entry: words found in option name count more than words of overlay name,
+    a word starting a name word more than one inside it, the whole phrase most"""
+    label = entry.label or entry.text
+    score = 0
+    for word in words:
+        if word not in label:
+            continue  # found in section name only
+        score += 2
+        if re.search(rf"(^|[\s_]){re.escape(word)}", label):
+            score += 2
+        if label.startswith(word):
+            score += 1
+    if len(words) > 1 and " ".join(words) in label:
+        score += 4
+    return score
+
+
+def search_options(entries: list[OptionEntry], text: str, limit: int = MAX_RESULTS) -> list[OptionEntry]:
+    """Options matching all words (any order, case & accents ignored), best matches first
+
+    Args:
+        limit: most results returned, 0 for all.
+    """
+    words = tuple(sort_key(text).split())
     if not words:
         return []
-    return [entry for entry in entries if all(word in entry.text for word in words)][:MAX_RESULTS]
+    found = [entry for entry in entries if all(word in entry.text for word in words)]
+    # Best score first, then closest name (fewest other words), page order kept among equals
+    found.sort(key=lambda entry: (-match_score(entry, words), len(entry.label.split())))
+    return found[:limit] if limit > 0 else found
 
 
 def open_option(parent, entry: OptionEntry):
-    """Open config dialog of option, filtered to the option"""
+    """Open settings page of option, scrolled to (or filtered on) the option
+
+    Global options: Config page. Overlay options: Overlay Options page (saving restarts the edited
+    overlays itself). Module & preset options: their config page, filtered on the option.
+    """
+    if entry.config_type == ConfigType.CONFIG:
+        from .app_settings import open_app_settings
+
+        return open_app_settings(parent, entry.section, entry.key)
+    if entry.config_type == ConfigType.WIDGET:
+        from .overlay_options import open_overlay_options
+
+        return open_overlay_options(parent, entry.section, entry.key)
+
     from .config import UserConfig
 
-    if entry.config_type == ConfigType.CONFIG:
-        user_setting, default_setting, preset_name = cfg.user.config, cfg.default.config, cfg.filename.config
-    else:
-        user_setting, default_setting, preset_name = cfg.user.setting, cfg.default.setting, cfg.filename.setting
     dialog = UserConfig(
         parent=parent,
         key_name=entry.section,
-        preset_name=preset_name,
+        preset_name=cfg.filename.setting,
         config_type=entry.config_type,
-        user_setting=user_setting,
-        default_setting=default_setting,
+        user_setting=cfg.user.setting,
+        default_setting=cfg.default.setting,
         reload_func=reload_function(entry),
     )
     dialog.open()
@@ -125,52 +168,35 @@ def reload_function(entry: OptionEntry):
 
 @singleton_dialog("option_finder")
 class OptionFinder(BaseDialog):
-    """Find option dialog"""
+    """Find Option page"""
 
     def __init__(self, parent):
+        from .quick import create_quick_view
+        from .quick.finder_backend import FinderBackend
+
         super().__init__(parent)
         self.set_utility_title(tr("Find Option"))
-        self.entries = build_index()
+        self.setMinimumSize(UIScaler.size(34), UIScaler.size(24))
+        self.backend = FinderBackend(self, self.open_entry)
+        self.entries = self.backend.entries
+        self.view: QQuickWidget = create_quick_view(self, "OptionFinder.qml", {"backend": self.backend}, samples=0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
+        self.setFocusProxy(self.view)
 
-        self.edit_search = QLineEdit(self)
-        self.edit_search.setPlaceholderText(tr("Type option name, in any language (ex. font color speed)"))
-        self.edit_search.textChanged.connect(self.update_results)
-        self.edit_search.returnPressed.connect(self.open_selected)
+    def open_entry(self, entry: OptionEntry):
+        open_option(self.parent(), entry)
 
-        self.list_results = QListWidget(self)
-        self.list_results.itemActivated.connect(self.open_item)
-        self.list_results.setMinimumSize(UIScaler.size(34), UIScaler.size(24))
+    def set_search(self, text: str):
+        """Search text (command palette, tests)"""
+        self.backend.setSearch(text)
 
-        self.label_count = QLabel(self)
+    def showEvent(self, event):
+        self.backend.refresh_values()  # values changed while hidden
+        super().showEvent(event)
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.edit_search)
-        layout.addWidget(self.list_results, stretch=1)
-        layout.addWidget(self.label_count)
-        layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        self.setLayout(layout)
-        self.update_results("")
-
-    def update_results(self, text: str):
-        """Refresh result list"""
-        self.list_results.clear()
-        results = search_options(self.entries, text)
-        for entry in results:
-            item = QListWidgetItem(f"{module_label(entry.section)}  →  {option_label(entry.key)}")
-            item.setData(Qt.ItemDataRole.UserRole, entry)
-            item.setToolTip(option_tooltip(entry.section, entry.key))
-            self.list_results.addItem(item)
-        if text.strip():
-            self.label_count.setText(trm(f"Found: {len(results)}"))
-        else:
-            self.label_count.setText(trm(f"Options: {len(self.entries)}"))
-        if results:
-            self.list_results.setCurrentRow(0)
-
-    def open_selected(self):
-        item = self.list_results.currentItem()
-        if item is not None:
-            self.open_item(item)
-
-    def open_item(self, item: QListWidgetItem):
-        open_option(self.parent(), item.data(Qt.ItemDataRole.UserRole))
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if event.isAccepted():  # QML gone before the backend it binds to
+            self.view.setSource(QUrl())

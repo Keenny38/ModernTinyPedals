@@ -103,16 +103,18 @@ def test_spectate_driver_cycles_by_place(commands, monkeypatch, current, step, e
     from tinypedal.api_control import api
     from tinypedal.setting import cfg
 
-    places = (3, 1, 4, 2)  # place of player index 0..3
+    places = (3, 1, 4, 2)  # place of vehicle index 0..3
+    slots = (17, 4, 9, 30)  # slot id of vehicle index 0..3, saved as spectated driver
     monkeypatch.setitem(cfg.api, "enable_player_index_override", True)
     api.read.vehicle.total_vehicles = lambda: 4
     api.read.vehicle.place = lambda index=None: current if index is None else places[index]
+    api.read.vehicle.slot_id = lambda index=None: slots[index]
     if step > 0:
         command.hotkey_spectate_next_driver()
     else:
         command.hotkey_spectate_previous_driver()
-    assert places[cfg.api["player_index"]] == expected
-    assert "setup" in commands
+    assert places[slots.index(cfg.api["player_index"])] == expected
+    assert "setup" in commands and "refresh" in commands
 
 
 def test_spectate_driver_needs_spectate_mode(commands, monkeypatch):
@@ -124,6 +126,7 @@ def test_spectate_driver_needs_spectate_mode(commands, monkeypatch):
     assert "setup" not in commands
     command.hotkey_spectate_mode()
     assert cfg.api["enable_player_index_override"] and "refresh" in commands
+    assert "setup" in commands  # override applied at once
 
 
 def test_cycle_deltabest_source(commands):

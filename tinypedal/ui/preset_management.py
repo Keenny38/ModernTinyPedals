@@ -95,6 +95,7 @@ OPTION_TYPES = {
 }
 LIST_HEADER_SETTING = (
     "Select Setting", "Select all settings from list?", "Deselect all settings from list?")
+INVALID_NAME_CHARACTERS = re.compile(r'[\\/:*?"<>|]')  # not allowed in file names
 LIST_HEADER_OPTION_TYPE = (
     "Select Option Type", "Select all option types from list?", "Deselect all option types from list?")
 
@@ -227,6 +228,69 @@ def days_left(deleted: float, keep_days: int, now: float | None = None) -> int:
     return max(ceil(remaining / SECONDS_PER_DAY), 0)
 
 
+def check_preset_name(name: str, mode: str = "", source_filename: str = "") -> str:
+    """Why name cannot be used by a new, duplicated, renamed or restored preset (translated), "" if it can
+
+    Existing names are compared in any case, as Windows file names are case-insensitive: renaming
+    "race" to "Race" is allowed (same file).
+    """
+    entered_filename = strip_filename_extension(name, FileExt.JSON)
+    if not is_allowed_filename(entered_filename) or INVALID_NAME_CHARACTERS.search(entered_filename):
+        return tr("Invalid preset name.")
+    source_name = source_filename[:-len(FileExt.JSON)]
+    rename_case = (  # renaming by case only ("race" to "Race"): same file
+        mode == "rename" and entered_filename != source_name
+        and entered_filename.lower() == source_name.lower()
+    )
+    for preset in cfg.preset_files():
+        if entered_filename.lower() == preset.lower() and not (rename_case and preset == source_name):
+            return tr("Preset already exists.")
+    return ""
+
+
+def apply_preset_name(name: str, mode: str = "", source_filename: str = "") -> str:
+    """Create (mode ""), duplicate, rename or restore (backup) preset under name
+
+    Renamed preset keeps its backups, layout profiles & primary preset references (hotkeys,
+    tracks, classes), and is loaded again if it was loaded.
+
+    Returns:
+        "" if done, else why not (translated message).
+    """
+    error = check_preset_name(name, mode, source_filename)
+    if error:
+        return error
+    entered_filename = strip_filename_extension(name, FileExt.JSON)
+    source_name = source_filename[:-len(FileExt.JSON)]
+    filepath = cfg.path.settings
+    new_filename = f"{entered_filename}{FileExt.JSON}"
+    try:
+        # Duplicate preset
+        if mode == "duplicate":
+            shutil.copy(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
+        # Restore or rename preset
+        elif mode in ("restore", "rename"):
+            os.rename(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
+    except OSError as error:  # locked file (cloud sync, antivirus), permission
+        logger.error("USERDATA: unable to %s %s: %s", mode, source_filename, error)
+        return trm(f"Unable to access preset file, it may be used by another program.<br><br>{error}")
+    if mode == "rename":
+        rename_preset_backups(filepath, source_filename, new_filename)
+        with suppress(OSError):  # layout profiles of screen setups, if any
+            os.replace(profile_filename(filepath, source_filename), profile_filename(filepath, new_filename))
+        update_preset_references(source_name, entered_filename)
+        # Reload if renamed file was loaded
+        if cfg.is_loaded(source_filename):
+            cfg.set_next_to_load(new_filename)
+            app_signal.reload.emit(True)
+            return ""
+    # Create new preset
+    elif not mode:
+        cfg.create(new_filename)
+    app_signal.refresh.emit(True)
+    return ""
+
+
 class CreatePreset(BaseDialog):
     """Create preset"""
 
@@ -267,58 +331,10 @@ class CreatePreset(BaseDialog):
 
     def create_preset(self):
         """Create & save new preset"""
-        entered_filename = strip_filename_extension(self.preset_entry.text(), FileExt.JSON)
-        source_filename = self.source_filename
-        filepath = cfg.path.settings
-        # Check invalid file name
-        if not is_allowed_filename(entered_filename):
-            QMessageBox.warning(self, tr("Error"), tr("Invalid preset name."))
+        error = apply_preset_name(self.preset_entry.text(), self.edit_mode, self.source_filename)
+        if error:
+            QMessageBox.warning(self, tr("Error"), error)
             return
-        # Check existing preset (any case, as Windows file names are case-insensitive)
-        source_name = source_filename[:-len(FileExt.JSON)]
-        rename_case = (  # renaming by case only ("race" to "Race"): same file
-            self.edit_mode == "rename" and entered_filename != source_name
-            and entered_filename.lower() == source_name.lower()
-        )
-        temp_list = cfg.preset_files()
-        for preset in temp_list:
-            if entered_filename.lower() == preset.lower() and not (rename_case and preset == source_name):
-                QMessageBox.warning(self, tr("Error"), tr("Preset already exists."))
-                return
-        new_filename = f"{entered_filename}{FileExt.JSON}"
-        try:
-            # Duplicate preset
-            if self.edit_mode == "duplicate":
-                shutil.copy(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
-            # Restore preset
-            elif self.edit_mode == "restore":
-                os.rename(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
-            # Rename preset
-            elif self.edit_mode == "rename":
-                os.rename(f"{filepath}{source_filename}", f"{filepath}{new_filename}")
-        except OSError as error:  # locked file (cloud sync, antivirus), permission
-            logger.error("USERDATA: unable to %s %s: %s", self.edit_mode, source_filename, error)
-            QMessageBox.warning(
-                self, tr("Error"),
-                trm(f"Unable to access preset file, it may be used by another program.<br><br>{error}"),
-            )
-            return
-        if self.edit_mode == "rename":
-            rename_preset_backups(filepath, source_filename, new_filename)
-            with suppress(OSError):  # layout profiles of screen setups, if any
-                os.replace(profile_filename(filepath, source_filename), profile_filename(filepath, new_filename))
-            update_preset_references(source_name, entered_filename)
-            # Reload if renamed file was loaded
-            if cfg.is_loaded(source_filename):
-                cfg.set_next_to_load(new_filename)
-                app_signal.reload.emit(True)
-                self.accept()
-                return
-        # Create new preset
-        elif not self.edit_mode:
-            cfg.create(new_filename)
-        # Close window
-        app_signal.refresh.emit(True)
         self.accept()
 
 

@@ -37,7 +37,7 @@ Compare the result with the release notes. Full details: [Updates and Security](
 |---|---|
 | Program | `%LOCALAPPDATA%\Programs\Modern Tiny Pedals` (`tinypedal.exe`) |
 | Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `tinypedal.exe`, in the program folder |
-| Global config: `config.json`, `shortcuts.json`, driver stats, logs, custom overlay themes, language packs, Black box incidents | `%APPDATA%\TinyPedal` |
+| Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Black box incidents | `%APPDATA%\TinyPedal` |
 
 The internal name stays `TinyPedal` (config folder, `tinypedal.exe`) so that existing TinyPedal settings keep working. Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
 

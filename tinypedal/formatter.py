@@ -72,32 +72,36 @@ def rgb_to_gray(rgb: list[int]) -> int:
 
 @lru_cache(maxsize=20)
 def random_color_class(name: str) -> str:
-    """Generate random color for vehicle class"""
+    """Generate random color for vehicle class
+
+    Own random generator seeded by name: same color every time, global random state left alone
+    (also called from server threads, see stream_overlay).
+    """
     max_value = 225
     min_value = 25
     target_brightness = 100
     # Generate random RGB color
-    random.seed(name)
-    rgb = [min_value + 10, max_value - 10, random.randint(min_value, max_value)]
-    random.seed(name)
-    random.shuffle(rgb)
+    rng = random.Random(name)
+    rgb = [min_value + 10, max_value - 10, rng.randint(min_value, max_value)]
+    rng.seed(name)
+    rng.shuffle(rgb)
     # Brightness correction
     brightness = rgb_to_gray(rgb)
     if brightness > target_brightness:
         while brightness > target_brightness:
-            ran_index = random.randint(0, 2)
+            ran_index = rng.randint(0, 2)
             if rgb[ran_index] >= min_value:
                 rgb[ran_index] -= 5
             else:
-                rgb[ran_index] += random.randint(10, 30)
+                rgb[ran_index] += rng.randint(10, 30)
             brightness = rgb_to_gray(rgb)
     elif brightness < target_brightness:
         while brightness < target_brightness:
-            ran_index = random.randint(0, 2)
+            ran_index = rng.randint(0, 2)
             if rgb[ran_index] <= max_value:
                 rgb[ran_index] += 5
             else:
-                rgb[ran_index] -= random.randint(10, 30)
+                rgb[ran_index] -= rng.randint(10, 30)
             brightness = rgb_to_gray(rgb)
     return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
 

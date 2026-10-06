@@ -34,7 +34,6 @@ from typing import Any, ClassVar
 from PySide6.QtGui import QColor
 
 from ...template.setting_widget import WIDGET_DEFAULT
-from .._style import GLOBAL_THEME
 from .base import design_font_family
 from .theme import build_theme
 
@@ -73,7 +72,7 @@ class Restyled:
     def design_overrides(self, style: dict) -> dict:
         user = self.cfg.user.setting[self.widget_name]
         default = self.cfg.default.setting[self.widget_name]
-        theme = build_theme(style, user.get("widget_theme", GLOBAL_THEME))
+        theme = build_theme(style)
         overrides: dict = {}
         tokens = {**{key: "surface" for key in self.background_options}, **self.color_tokens}
         for key, value in default.items():

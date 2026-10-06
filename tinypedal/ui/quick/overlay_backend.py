@@ -79,7 +79,7 @@ WIDGET_CATEGORIES = (
     )),
     ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
     ("Brakes", ("brake_",)),
-    ("Driver Inputs", ("onboard_setting", "pedal", "steering_", "trailing")),
+    ("Driver Inputs", ("onboard_setting", "pedal", "steering_", "trailing", "telemetry_compare")),
     ("Engine & Energy", (
         "battery", "cruise", "drs", "electric_motor", "engine", "fuel", "gear", "instrument", "lift_and_coast",
         "push_to_pass", "rpm_led", "speedometer", "virtual_energy",
@@ -406,6 +406,7 @@ class OverlayBackend(QObject):
         self.proxy.rowsRemoved.connect(self.countsChanged)
         self.proxy.modelReset.connect(self.countsChanged)
         self._search = ""
+        self._grid = bool(self.gridView)  # view shown, see refresh
         self.source.set_rows([self._new_row(name) for name in module_control.names])
 
     # State
@@ -445,6 +446,10 @@ class OverlayBackend(QObject):
         self.previews.invalidate()
         self._emit_previews()  # shown rows read preview again: rendered again in background
         self.countsChanged.emit()
+        grid = bool(self.gridView)
+        if grid != self._grid:  # cards or list set on Config page
+            self._grid = grid
+            self.viewChanged.emit()
 
     def set_active(self, active: bool):
         """Page shown or hidden: previews rendered only while shown"""
@@ -577,6 +582,7 @@ class OverlayBackend(QObject):
         if grid != self.gridView:
             cfg.application["show_overlay_previews"] = grid
             cfg.save(config_type=ConfigType.CONFIG)
+            self._grid = grid
             self.viewChanged.emit()
 
     # Actions

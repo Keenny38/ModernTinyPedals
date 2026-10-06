@@ -126,7 +126,7 @@ def language(request):
 
 @pytest.mark.parametrize("units", list(UNITS))
 def test_modern_text_fits_cells(live, monkeypatch, language, units):
-    cfg.user.config["overlay_style"]["enable_modern_style"] = True
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
     cfg.units.update(UNITS[units])
     cut = set()
     draw_text = base.ModernOverlay.draw_text

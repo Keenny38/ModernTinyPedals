@@ -13,6 +13,7 @@
 - [Telemetry Viewer](Telemetry-Viewer.md)
 - [Race Calculator](Race-Calculator.md)
 - [Driver Stats](Driver-Stats.md)
+- [Race Results](Race-Results.md)
 - [Connections](Connections.md)
 
 **Help**

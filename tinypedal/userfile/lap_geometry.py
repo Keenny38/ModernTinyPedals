@@ -38,13 +38,13 @@ from typing import NamedTuple
 
 from .lap_cache import load_cached_lap, read_arrays_file, write_arrays_file
 from .telemetry_lap import (
-    DISTANCE_SCALE_MAX,
-    DISTANCE_SCALE_MIN,
     LapData,
     interpolate,
     lap_files,
     lap_time_curve,
+    length_ratio,
     official_sector_times,
+    same_track_distance,
     sector_bounds,
 )
 
@@ -60,6 +60,10 @@ LIMITS_MAX_OFFSET = 25.0  # meters off base line: off track or pit lane, left ou
 LIMITS_SMOOTH = 15  # points of edge smoothing
 GAME_OFF_TRACK = 6.0  # meters beyond game track edge: pit lane or far off track, sample left out of track edges
 GAME_MIN_COVERAGE = 0.25  # share of track points with a game edge needed, else edges estimated from laps
+GAME_LATERAL_SIGN = 1.0  # game lateral position toward map left is positive (checked on recorded laps: slope +0.98)
+SIGN_MIN_SPREAD = 50.0  # square meters of game lateral spread at same base points needed to find its sign from laps
+SIGN_SMOOTHER = 0.5  # else game center path this much smoother along laps with one sign: that sign
+LIMITS_VERSION = 2  # track limits algorithm: saved track limits computed again if changed
 WIDTH_DEFAULT = 12.0  # meters, track width where no edge is known on either side
 CAR_HALF_WIDTH = 1.0  # meters, car center this far beyond track edge: four wheels out (track limits)
 OFF_ROAD_SURFACES = (2, 3, 4)  # game wheel surface: grass, dirt, gravel
@@ -229,61 +233,97 @@ def game_limits(base: MapLine, laps: Sequence[tuple[MapLine, list[float], list[f
         LapOffsets(*lateral_offsets(base, line), laterals, edges) for line, laterals, edges in laps], fallback)
 
 
+def _game_sample_kept(side: float, lateral: float, edge: float) -> bool:
+    """Game sample places track edges: edge known, car not far beyond it (pit lane, big off), near base line"""
+    return abs(edge) >= 1.0 and abs(lateral) <= abs(edge) + GAME_OFF_TRACK and abs(side) <= LIMITS_MAX_OFFSET
+
+
+def lateral_sign(laps: Sequence[LapOffsets], count: int) -> float:
+    """Which way game lateral position goes on map: 1 toward left (like base line offsets), -1 toward right
+
+    Found once over all laps: at a same base point, laps lie apart across track by as much as their game lateral
+    positions differ (slope of offsets over lateral positions is +1 or -1). Too few laps or too close together:
+    sign keeping game center path (offset minus lateral position) far smoother along laps if one does (car
+    crossing the track away from base line), else game convention (laps following the base line tell nothing).
+    """
+    sums = [[0, 0.0, 0.0, 0.0, 0.0] for _ in range(count)]  # samples, offsets, laterals, products, squares
+    variations = {1.0: 0.0, -1.0: 0.0}  # center path change along laps with each sign
+    for lap in laps:
+        previous: tuple[float, float] | None = None
+        for side, lateral, edge, index in zip(lap.sides, lap.laterals, lap.edges, lap.indexes):
+            if not _game_sample_kept(side, lateral, edge):
+                previous = None
+                continue
+            found = sums[index]
+            found[0] += 1
+            found[1] += side
+            found[2] += lateral
+            found[3] += side * lateral
+            found[4] += lateral * lateral
+            if previous is not None:
+                for sign in variations:
+                    variations[sign] += abs(side - sign * lateral - previous[0] + sign * previous[1])
+            previous = side, lateral
+    covariance = spread = 0.0
+    for samples, offsets, laterals, products, squares in sums:
+        if samples > 1:
+            covariance += products - offsets * laterals / samples
+            spread += squares - laterals * laterals / samples
+    if spread >= SIGN_MIN_SPREAD and abs(covariance / spread) >= 0.5:
+        return math.copysign(1.0, covariance)
+    smoother = min(variations, key=lambda sign: variations[sign])
+    if variations[smoother] < SIGN_SMOOTHER * variations[-smoother]:
+        return smoother
+    return GAME_LATERAL_SIGN
+
+
 def game_limits_from_offsets(base: MapLine, laps: Sequence[LapOffsets],
                              fallback: TrackLimits | None = None) -> TrackLimits | None:
     """Track edges from game data: each lap line with game lateral position & track edge at each point
 
-    Game gives where the car is from its track center path and how far the track edge is on that side:
-    each sample places the center path & one edge. Which way the game lateral goes is found on each lap:
-    the center path rebuilt with the right sign stays smooth when the car moves across the track.
-    Samples far beyond the edge (pit lane, big off) are left out. Where only one edge was seen, the other
-    is placed at local track width; where none, fallback edges (estimated from laps) are used if given.
-    None if game data covers too little of the track and no fallback.
+    Game gives where the car is from its own track center path (not the official circuit path, a driving line)
+    and how far the track edge is on that side: every sample places the game center path (offset minus lateral
+    position, sign found once over all laps) & the edge on the car side. Each edge is the center path plus the
+    edge distances seen on that side, else on the other side (track taken as symmetric there). Samples far beyond
+    the edge (pit lane, big off) are left out. Where no sample, fallback edges (estimated from laps) are used if
+    given. None if game data covers too little of the track and no fallback.
     """
     count = len(base.xs)
-    lefts: list[list[float]] = [[] for _ in range(count)]
-    rights: list[list[float]] = [[] for _ in range(count)]
-    used = 0
-    for lap in laps:
-        sides, indexes, laterals, edges = lap
-        if not edges or not any(edges):
-            continue
-        best_sign, best_variation = 1.0, math.inf
-        for sign in (1.0, -1.0):
-            centers = [side - sign * lateral for side, lateral in zip(sides, laterals)]
-            variation = sum(abs(second - first) for first, second in pairwise(centers))
-            if variation < best_variation:
-                best_sign, best_variation = sign, variation
-        for side, lateral, edge, index in zip(sides, laterals, edges, indexes):
-            if abs(edge) < 1.0 or abs(lateral) > abs(edge) + GAME_OFF_TRACK or abs(side) > LIMITS_MAX_OFFSET:
-                continue
-            center = side - best_sign * lateral
-            offset = center + best_sign * math.copysign(abs(edge), lateral if lateral else edge)
-            (lefts if offset > center else rights)[index].append(offset)
-        used += 1
-    if not used:
+    laps = [lap for lap in laps if lap.edges and any(lap.edges)]
+    if not laps:
         return None
-    left_known = [sorted(items)[len(items) // 2] if items else None for items in lefts]
-    right_known = [sorted(items)[len(items) // 2] if items else None for items in rights]
-    seen = sum(1 for left_value, right_value in zip(left_known, right_known)
-               if left_value is not None or right_value is not None)
+    sign = lateral_sign(laps, count)
+    centers: list[list[float]] = [[] for _ in range(count)]
+    lefts: list[list[float]] = [[] for _ in range(count)]  # edge distances seen left of game center path
+    rights: list[list[float]] = [[] for _ in range(count)]
+    for lap in laps:
+        for side, lateral, edge, index in zip(lap.sides, lap.laterals, lap.edges, lap.indexes):
+            if not _game_sample_kept(side, lateral, edge):
+                continue
+            centers[index].append(side - sign * lateral)
+            (lefts if sign * (lateral or edge) > 0 else rights)[index].append(abs(edge))  # edge on car side
+
+    def median(values: list[float]) -> float | None:
+        return sorted(values)[len(values) // 2] if values else None
+
+    seen = sum(1 for values in centers if values)
     if seen < count * GAME_MIN_COVERAGE and fallback is None:
         return None
-    if fallback is not None:
-        fallback_left, fallback_right = edge_offsets(base, fallback)
-    widths = _filled([None if left_value is None or right_value is None else left_value - right_value
-                      for left_value, right_value in zip(left_known, right_known)], WIDTH_DEFAULT)
+    fallback_left, fallback_right = edge_offsets(base, fallback) if fallback is not None else ([], [])
     left_values: list[float | None] = []
     right_values: list[float | None] = []
-    for index, (left_value, right_value) in enumerate(zip(left_known, right_known)):
-        if left_value is None and right_value is not None:
-            left_value = right_value + widths[index]
-        elif right_value is None and left_value is not None:
-            right_value = left_value - widths[index]
-        elif left_value is None and fallback is not None:
-            left_value, right_value = fallback_left[index], fallback_right[index]
-        left_values.append(left_value)
-        right_values.append(right_value)
+    for index in range(count):
+        center = median(centers[index])
+        left_half, right_half = median(lefts[index] or rights[index]), median(rights[index] or lefts[index])
+        if center is not None and left_half is not None and right_half is not None:
+            left_values.append(center + left_half)
+            right_values.append(center - right_half)
+        elif fallback is not None:
+            left_values.append(fallback_left[index])
+            right_values.append(fallback_right[index])
+        else:
+            left_values.append(None)
+            right_values.append(None)
     left = _smooth(_filled(left_values, WIDTH_DEFAULT / 2), LIMITS_SMOOTH)
     right = _smooth(_filled(right_values, -WIDTH_DEFAULT / 2), LIMITS_SMOOTH)
     return limits_at(base, left, right)
@@ -484,8 +524,8 @@ def track_limits_job(folder: str, parts_folder: str, track_folder: str, paths: l
     """Track limits of track from clean laps (paths, best lap first): limits, source & sector bounds, file names
     of unreadable laps if any ("unreadable": result not to be kept, see check_limits_job)
 
-    Placement around official center path (game) if known, else around best readable lap line. Saved placements
-    of laps no longer recorded are removed.
+    Placement around official circuit path (game driving line, not track center) if known, else around best
+    readable lap line. Saved placements of laps no longer recorded are removed.
     """
     result: dict = {}
     unreadable: list[str] = []
@@ -555,9 +595,15 @@ def mini_sector_spread(times_by_lap: Sequence[Sequence[float]], minimum: int = 3
 
 
 def mini_sector_job(folder: str, paths: list[str], bounds: list[float], reference_length: float,
-                    ) -> dict[str, list[float]]:
-    """Time of each lap in each mini-sector (bounds: reference lap distances, lap distances scaled to reference
-    lap length like distance_scale): lap path: times, laps without lap time or unreadable left out"""
+                    reference_info: dict | None = None) -> dict[str, list[float]]:
+    """Time of each lap in each mini-sector: lap path: times, laps without lap time or unreadable left out
+
+    Args:
+        bounds: reference lap distances.
+        reference_length: reference lap end distance (see TraceData.lap_end): lap distances scaled to it like
+            distance_scale.
+        reference_info: reference lap info, laps recorded on the same track length never scaled.
+    """
     found = {}
     for path in paths:
         try:
@@ -565,12 +611,12 @@ def mini_sector_job(folder: str, paths: list[str], bounds: list[float], referenc
         except (OSError, ValueError):
             continue
         distances, times = lap_time_curve(lap)
-        length = max(lap.distance) if len(lap) else 0.0
-        if len(distances) < 2 or length <= 0:
+        if len(distances) < 2:
             continue
-        ratio = reference_length / length if reference_length > 0 else 1.0
-        if DISTANCE_SCALE_MIN < abs(ratio - 1) < DISTANCE_SCALE_MAX:
-            distances = [distance * ratio for distance in distances]
+        if not same_track_distance(reference_info or {}, lap.meta):
+            ratio = length_ratio(reference_length, distances[-1])  # lap end distance (see lap_end_distance)
+            if ratio != 1.0:
+                distances = [distance * ratio for distance in distances]
         found[path] = mini_sector_times(bounds, distances, times)
     return found
 
@@ -586,7 +632,7 @@ def session_values(folder: str, todo: list[tuple[str, float]]) -> dict[str, tupl
         values: dict = {"offtrack": len(off_track_events(lap)) if "surface_fl" in lap.columns else -1,
                         "limits": len(limits_events(lap)) if any(lap.columns.get("track_edge") or ()) else -1}
         wears = [lap.columns.get(f"tyre_wear_{wheel}") or [] for wheel in ("fl", "fr", "rl", "rr")]
-        if all(wears) and any(wears[0]):
+        if all(wears) and any(wears[0]) and all(column[0] >= column[-1] for column in wears):  # else tyres changed
             values["wear"] = sum(column[0] - column[-1] for column in wears) / 4
         found[path] = (mtime, values)
     return found

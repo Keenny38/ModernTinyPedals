@@ -32,6 +32,7 @@ from ...userfile.telemetry_lap import lap_number_of
 from .. import lap_viewer
 from ..lap_viewer import LapEntry, format_laptime
 from .lap_base import BackendBase
+from .stint_analysis import info_pair, trend_positions
 
 
 def least_squares(points: list[tuple[float, float]]) -> tuple[float, float]:
@@ -93,9 +94,10 @@ class SessionTab(BackendBase):
             if isinstance(start, (int, float)) and isinstance(end, (int, float)) and start >= end:
                 fuel = float(start - end)
             wear = extra.get("wear", -1.0)
-            wear_start, wear_end = info.get("wear_start"), info.get("wear_end")
-            if isinstance(wear_start, list) and isinstance(wear_end, list) and len(wear_start) == len(wear_end) == 4:
-                wear = sum(first - last for first, last in zip(wear_start, wear_end)) / 4
+            wears = info_pair(info, "wear_start", "wear_end", 4)
+            if wears is not None:  # tread left at lap start & end, more at end: tyres changed during lap (unknown)
+                wear = (sum(first - last for first, last in zip(*wears)) / 4
+                        if all(first >= last for first, last in zip(*wears)) else -1.0)
             temperature = info.get("track_temperature")
             rows.append({
                 "path": entry.file.path, "number": lap_number_of(entry.file.filename),
@@ -119,8 +121,11 @@ class SessionTab(BackendBase):
 
     @staticmethod
     def session_trend(rows: list[dict], group: list[LapEntry]) -> dict:
-        """Long run of session: clean laps without outliers (traffic, mistakes), pace, lap time trend per lap,
-        per % of tyre wear; outlier laps flagged in rows"""
+        """Long run of session: clean laps without outliers (traffic, mistakes), pace, lap time trend per lap
+        (along lap numbers: laps not recorded keep their place), per % of tyre wear; outlier laps flagged in rows
+
+        Trend line ends (x0, x1) are row positions (chart of rows).
+        """
         clean = [(index, row["time"]) for index, row in enumerate(rows) if row["valid"] and row["time"] > 0]
         for row in rows:
             row["outlier"] = False
@@ -136,10 +141,10 @@ class SessionTab(BackendBase):
         result: dict = {"pace": sum(lap_time for _, lap_time in paced) / len(paced), "used": len(paced),
                         "left": len(clean) - len(paced)}
         if len(paced) >= 4:
-            slope, intercept = least_squares([(float(index), lap_time) for index, lap_time in paced])
-            first, last = paced[0][0], paced[-1][0]
-            result.update({"slope": slope, "x0": first, "y0": intercept + slope * first, "x1": last,
-                           "y1": intercept + slope * last})
+            positions = trend_positions([row.get("number", 0) for row in rows], [index for index, _ in paced])
+            slope, intercept = least_squares([(position, lap_time) for position, (_, lap_time) in zip(positions, paced)])
+            result.update({"slope": slope, "x0": paced[0][0], "y0": intercept + slope * positions[0],
+                           "x1": paced[-1][0], "y1": intercept + slope * positions[-1]})
             worn = []  # tread worn at lap start (%), lap time
             for index, lap_time in paced:
                 start = group[index].info.get("wear_start") if index < len(group) else None

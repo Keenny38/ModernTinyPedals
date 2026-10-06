@@ -222,12 +222,8 @@ class UIScaler:
 
 
 def resolve_color_theme(color_theme: str) -> str:
-    """Window color theme in use: "Dark" or "Light", "System" follows OS setting"""
-    if color_theme != "System":
-        return color_theme
-    if QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Light:
-        return "Light"
-    return "Dark"
+    """Colors of window theme (see regex_pattern.THEME_NAMES): "Dark" or "Light" """
+    return "Light" if color_theme.endswith("Light") else "Dark"
 
 
 def system_dark_mode() -> bool:
@@ -248,11 +244,12 @@ def app_icon_file(dark: bool) -> str:
 
 
 def set_style_palette(color_theme: str):
-    """Set style palette"""
-    if resolve_color_theme(color_theme) == "Dark":
-        palette_theme = palette_dark()
+    """Set style palette of window theme: modern, or legacy (TinyPedal 2.50 colors), dark or light"""
+    dark = resolve_color_theme(color_theme) == "Dark"
+    if color_theme.startswith("Legacy"):
+        palette_theme = palette_legacy_dark() if dark else palette_legacy_light()
     else:
-        palette_theme = palette_light()
+        palette_theme = palette_dark() if dark else palette_light()
 
     palette = QGuiApplication.palette()
     group_active = QPalette.ColorGroup.Active
@@ -313,6 +310,60 @@ def palette_dark():
         ("#2E323C", "#2E323C", "#262931", QPalette.ColorRole.Mid),
         ("#0B0B0C", "#0B0B0C", "#0B0B0C", QPalette.ColorRole.Shadow),
         ("#4C8DFF", "#3B78E7", "#2E323C", QPalette.ColorRole.Highlight),
+        ("#FFFFFF", "#FFFFFF", "#9AA0A6", QPalette.ColorRole.HighlightedText),
+        ("#5AAEFF", "#5AAEFF", "#7A7D83", QPalette.ColorRole.Link),
+        ("#C58AF9", "#C58AF9", "#7A7D83", QPalette.ColorRole.LinkVisited),
+    )
+
+
+def palette_legacy_light():
+    """Palette legacy light (TinyPedal 2.50)"""
+    return (
+        #   Active   Inactive   Disabled  Role
+        ("#F3F4F6", "#F3F4F6", "#ECEDF0", QPalette.ColorRole.Window),
+        ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.WindowText),
+        ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Base),
+        ("#F6F7F9", "#F6F7F9", "#EEEFF2", QPalette.ColorRole.AlternateBase),
+        ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.ToolTipBase),
+        ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.ToolTipText),
+        ("#8C9096", "#8C9096", "#8C9096", QPalette.ColorRole.PlaceholderText),
+        ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.Text),
+        ("#FFFFFF", "#FFFFFF", "#F3F4F6", QPalette.ColorRole.Button),
+        ("#1F2328", "#1F2328", "#8C9096", QPalette.ColorRole.ButtonText),
+        ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.BrightText),
+        ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.Light),
+        ("#E9EAED", "#E9EAED", "#F3F4F6", QPalette.ColorRole.Midlight),
+        ("#A3A7AD", "#A3A7AD", "#A3A7AD", QPalette.ColorRole.Dark),
+        ("#D0D3D8", "#D0D3D8", "#D0D3D8", QPalette.ColorRole.Mid),
+        ("#1F2328", "#1F2328", "#1F2328", QPalette.ColorRole.Shadow),
+        ("#1A7FE0", "#2B6CB0", "#DADDE2", QPalette.ColorRole.Highlight),
+        ("#FFFFFF", "#FFFFFF", "#5F6368", QPalette.ColorRole.HighlightedText),
+        ("#1A7FE0", "#1A7FE0", "#8C9096", QPalette.ColorRole.Link),
+        ("#8E44AD", "#8E44AD", "#8C9096", QPalette.ColorRole.LinkVisited),
+    )
+
+
+def palette_legacy_dark():
+    """Palette legacy dark (TinyPedal 2.50)"""
+    return (
+        #   Active   Inactive   Disabled  Role
+        ("#202124", "#202124", "#1C1D20", QPalette.ColorRole.Window),
+        ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.WindowText),
+        ("#17181B", "#17181B", "#1C1D20", QPalette.ColorRole.Base),
+        ("#1D1E22", "#1D1E22", "#222327", QPalette.ColorRole.AlternateBase),
+        ("#2B2D31", "#2B2D31", "#2B2D31", QPalette.ColorRole.ToolTipBase),
+        ("#E8EAED", "#E8EAED", "#E8EAED", QPalette.ColorRole.ToolTipText),
+        ("#8A8D93", "#8A8D93", "#8A8D93", QPalette.ColorRole.PlaceholderText),
+        ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.Text),
+        ("#2B2D31", "#2B2D31", "#25262A", QPalette.ColorRole.Button),
+        ("#E8EAED", "#E8EAED", "#7A7D83", QPalette.ColorRole.ButtonText),
+        ("#FFFFFF", "#FFFFFF", "#FFFFFF", QPalette.ColorRole.BrightText),
+        ("#5A5D63", "#5A5D63", "#3A3C40", QPalette.ColorRole.Light),
+        ("#45484D", "#45484D", "#303236", QPalette.ColorRole.Midlight),
+        ("#121315", "#121315", "#101113", QPalette.ColorRole.Dark),
+        ("#3A3C41", "#3A3C41", "#2A2B2F", QPalette.ColorRole.Mid),
+        ("#0B0B0C", "#0B0B0C", "#0B0B0C", QPalette.ColorRole.Shadow),
+        ("#2D8CF0", "#1F6FC5", "#3A3C41", QPalette.ColorRole.Highlight),
         ("#FFFFFF", "#FFFFFF", "#9AA0A6", QPalette.ColorRole.HighlightedText),
         ("#5AAEFF", "#5AAEFF", "#7A7D83", QPalette.ColorRole.Link),
         ("#C58AF9", "#C58AF9", "#7A7D83", QPalette.ColorRole.LinkVisited),
@@ -774,85 +825,7 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_highlight};
         }}
 
-        /* Module list (tab): search, filter chips, rows with gear button & switch */
-        ModuleList #searchBox {{
-            font-size: {font_pt_item_button}pt;
-            padding: 0.3em 0.5em;
-            border-radius: {border_radius_card}px;
-            background: {color_active_base};
-        }}
-        ModuleList #filterChip {{
-            font-size: {font_pt_text_browser}pt;
-            color: {color_disabled_window_text};
-            background: transparent;
-            border: 1px solid {color_active_mid};
-            border-radius: 0.8em;
-            padding: 0.15em 0.8em;
-        }}
-        ModuleList #filterChip:hover {{
-            color: {color_active_window_text};
-            border-color: {color_active_highlight};
-        }}
-        ModuleList #filterChip:checked {{
-            color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-            border-color: {color_active_highlight};
-        }}
-        ModuleList #countBadge {{
-            font-size: {font_pt_text_browser}pt;
-            font-weight: bold;
-            color: {color_active_window_text};
-            background: {color_active_midlight};
-            border-radius: 0.7em;
-            padding: 0.1em 0.6em;
-        }}
-        ModuleList > QListView {{
-            font-size: {font_pt_item_name}pt;
-            outline: none;
-            border: 1px solid {color_active_mid};
-            border-radius: {border_radius_card}px;
-            background: {color_active_base};
-            padding: 0.2em;
-        }}
-        ModuleList > QListView::item {{
-            border: none;
-            border-radius: {border_radius_input}px;
-            min-height: 1.5em;
-            padding: 0.2em 0.25em 0.2em 0.5em;
-            margin: 1px 0;
-        }}
-        ModuleList > QListView::item:selected {{
-            background: transparent;
-        }}
-        ModuleList > QListView::item:hover {{
-            background: {color_active_midlight};
-        }}
-        ModuleList > QListView:focus {{
-            border-color: {color_active_highlight};
-        }}
-        ModuleList > QListView::item:focus {{
-            background: {color_active_midlight};
-            border: 1px solid {color_active_highlight};
-        }}
-        ModuleList #filterChip:focus {{
-            border-color: {color_active_highlight};
-        }}
-        ModuleControlItem #buttonConfig {{
-            font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif;
-            font-size: {font_pt_item_name}pt;
-            color: {color_disabled_window_text};
-            background: transparent;
-            border: none;
-            border-radius: {border_radius_input}px;
-            padding: 0 0.25em;
-        }}
-        ModuleControlItem #buttonConfig:hover {{
-            color: {color_active_highlight};
-            background: {color_active_mid};
-        }}
-
-        /* Preset list (tab) */
-        PresetList > QListView,
+        /* Preset backups & trash (dialogs) */
         RestoreBackup > QListView,
         PresetTrash > QListView {{
             font-size: {font_pt_item_name}pt;
@@ -862,14 +835,12 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_base};
             padding: 0.2em;
         }}
-        PresetList > QListView::item,
         RestoreBackup > QListView::item,
         PresetTrash > QListView::item {{
             border: none;
             min-height: 1.25em;
             padding: 0.25em 0.25em 0.25em 0;
         }}
-        PresetList > QListView::item:selected,
         RestoreBackup > QListView::item:selected,
         PresetTrash > QListView::item:selected {{
             selection-color: {color_active_highlighted_text};
@@ -877,15 +848,6 @@ def set_style_window(base_font_pt: int) -> str:
         }}
         PresetTrash > QListView:focus {{
             border: 2px solid {color_active_highlight};
-        }}
-        PresetTagItem QLabel {{
-            font-size: {font_pt_item_button}pt;
-            color: {color_active_highlighted_text};
-            border-radius: {border_radius_button}em;
-            margin-left: 0.2em;
-        }}
-        PresetTagItem #trackTag {{
-            background: {color_active_highlight};
         }}
 
         /* Preset transfer (dialog) */
@@ -929,28 +891,11 @@ def set_style_window(base_font_pt: int) -> str:
             background: {color_active_highlight};
         }}
 
-        /* Spectate list (tab) */
-        SpectateList > QListView,
+        /* Hotkey list (tab) */
         HotkeyList > QListView {{
             border: 1px solid {color_active_mid};
             border-radius: {border_radius_card}px;
             background: {color_active_base};
-        }}
-        SpectateList > QListView {{
-            font-size: {font_pt_item_button}pt;
-            outline: none;
-        }}
-        SpectateList > QListView::item {{
-            min-height: 1.75em;
-            border: none;
-        }}
-        SpectateList > QListView::item:selected {{
-            selection-color: {color_active_highlighted_text};
-            background: {color_active_highlight};
-        }}
-
-        /* Hotkey list (tab) */
-        HotkeyList > QListView {{
             font-size: {font_pt_item_name}pt;
             outline: none;
         }}
@@ -1137,25 +1082,6 @@ def set_style_window(base_font_pt: int) -> str:
         UserConfig #optionInvalidStatus {{
             color: {color_danger};
             font-weight: bold;
-        }}
-
-        /* Display order dialog */
-        DisplayOrder > QListView {{
-            font-size: {font_pt_item_name}pt;
-            outline: none;
-        }}
-        DisplayOrder > QListView::item {{
-            margin: 1px;
-            padding: 0.1em;
-            border: 0.1em solid {color_disabled_highlight};
-        }}
-        DisplayOrder > QListView::item:selected {{
-            selection-color: {color_active_highlighted_text};
-            background: {color_selection};
-            border: 0.1em solid {color_active_highlight};
-        }}
-        DisplayOrder > QListView::item:hover {{
-            border: 0.1em solid {color_active_highlight};
         }}
 
         /* Tyre strategy planner (dialog) */

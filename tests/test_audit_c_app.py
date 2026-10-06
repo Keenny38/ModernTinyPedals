@@ -257,56 +257,7 @@ def test_capture_screen_keeps_layout_editor_page(window, monkeypatch):
     window.hide()
 
 
-# Item 9: setup wizard
-def test_setup_wizard_checks_name_while_typing(ui_env):
-    from tinypedal.ui.setup_wizard import SetupWizard
-
-    wizard = SetupWizard(None)
-    try:
-        assert wizard.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        page = wizard.page_preset
-        page.preset.setCurrentIndex(0)
-        changes = []
-        page.completeChanged.connect(lambda: changes.append(page.isComplete()))
-        page.new_name.setText("default")
-        page.new_name.setText("new one")
-        assert changes == [False, True]
-        assert wizard.choices().window_theme in ("Dark", "Light", "System")
-    finally:
-        wizard.deleteLater()
-        flush_deleted()
-
-
-def test_setup_wizard_translated_choices(ui_env, french):
-    from tinypedal.ui.setup_wizard import SetupWizard
-
-    cfg.application["window_color_theme"] = "Light"
-    wizard = SetupWizard(None)
-    try:
-        combo = wizard.page_language.window_theme
-        assert combo.currentText() == "Clair" and wizard.choices().window_theme == "Light"
-        assert wizard.page_preset.new_name.text() == "mon overlay"
-    finally:
-        wizard.deleteLater()
-        flush_deleted()
-
-
-def test_setup_language_set_before_overlays_reload(ui_env, monkeypatch):
-    from tinypedal.ui import setup_wizard
-
-    languages = []
-    monkeypatch.setattr(setup_wizard.loader, "reload", lambda reload_preset=False: languages.append(i18n.current_language()))
-    choices = setup_wizard.SetupChoices(
-        language="Français", api_name="", window_theme="Dark", overlay_theme="Modern Dark",
-        modern_font=False, preset="", new_preset="", widgets=(),
-    )
-    try:
-        setup_wizard.run_setup(choices)
-        assert languages == ["fr"]  # overlays created with French labels
-    finally:
-        i18n.set_language("English")
-
-
+# Item 9: setup wizard, see test_setup_wizard.py
 def test_language_change_reloads_running_overlays(window, monkeypatch):
     from tinypedal.ui import app as app_module
 
@@ -376,23 +327,27 @@ def test_float_cell_rejects_non_finite(text):
 # Item 17: refresh never runs toggle side effects
 def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
     from tinypedal.ui import hotkey_view, spectate_view
+    from tinypedal.ui.quick import spectate_backend
 
     calls = []
     for action in ("reload", "enable", "disable"):
         monkeypatch.setattr(type(hotkey_view.kctrl), action, lambda self, _action=action: calls.append(_action))
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: calls.append("save"))
-    monkeypatch.setattr(type(spectate_view.api), "setup", lambda self: calls.append("api"))
+    monkeypatch.setattr(type(spectate_backend.api), "setup", lambda self: calls.append("api"))
     cfg.application["enable_global_hotkey"] = True
     cfg.api["enable_player_index_override"] = False
     hotkeys = hotkey_view.HotkeyList(None)
     spectate = spectate_view.SpectateList(None)
     try:
         hotkeys.refresh()
+        cfg.api["enable_player_index_override"] = True  # turned on elsewhere (hotkey)
         spectate.refresh()
-        assert hotkeys.button_toggle.isChecked() and not spectate.button_toggle.isChecked()
+        assert hotkeys.button_toggle.isChecked() and spectate.backend.enabled
         assert "reload" not in calls and "save" not in calls and "api" not in calls
         hotkeys.button_toggle.click()  # user click still applies
         assert "reload" in calls and cfg.application["enable_global_hotkey"] is False
+        spectate.backend.setEnabled(False)  # user switch saves & sets API up
+        assert "api" in calls and cfg.api["enable_player_index_override"] is False
     finally:
         hotkeys.deleteLater()
         spectate.deleteLater()
@@ -401,16 +356,26 @@ def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
 
 def test_spectate_texts_translated(ui_env, french, monkeypatch):
     from tinypedal.ui import spectate_view
+    from tinypedal.ui.quick import spectate_backend
 
-    monkeypatch.setattr(type(spectate_view.api), "setup", lambda self: None)
+    monkeypatch.setattr(type(spectate_backend.api), "setup", lambda self: None)
     cfg.api["enable_player_index_override"] = True
     page = spectate_view.SpectateList(None)
     try:
-        page.refresh()
-        assert page.button_toggle.text() == "Activé"
-        assert page.listbox_spectate.item(0).text() == "Anonyme"
+        page.show()
+        for _ in range(10):
+            QApplication.processEvents()
+        texts, stack = set(), [page.view.rootObject()]
+        while stack:
+            item = stack.pop()
+            text = item.property("text")
+            if isinstance(text, str):
+                texts.add(text)
+            stack.extend(item.childItems())
+        assert {"Spectateur", "Activé", "Aucun pilote en session"} <= texts
     finally:
-        page.set_enable_state(False)
+        cfg.api["enable_player_index_override"] = False
+        page.close()
         page.deleteLater()
         flush_deleted()
 
@@ -440,11 +405,11 @@ def test_option_finder_filters_open_page(window):
     from tinypedal.ui import option_finder
 
     entries = option_finder.search_options(option_finder.build_index(), "speedometer opacity")
-    first = option_finder.open_option(window, entries[0])
-    first.edit_search.setText("")
+    first = option_finder.open_option(window, entries[0])  # Overlay Options page
+    first.backend.selectOverlay("relative")  # another overlay shown meanwhile
     second = option_finder.open_option(window, entries[0])
     flush_deleted()
-    assert second is first and first.edit_search.text() == entries[0].key
+    assert second is first and first.backend.overlay == "speedometer" and first.backend.highlightKey
 
 
 def test_option_finder_hides_app_kept_options(ui_env):
@@ -464,21 +429,6 @@ def test_plugin_drop_installed_from_open_page(window, monkeypatch, tmp_path):
     file_drop.handle_drop(window, [str(tmp_path / "plugin.zip")])
     flush_deleted()
     assert installs == [opened]
-
-
-# Item 24: invalid custom theme colors never block loading
-def test_custom_theme_null_colors(tmp_path):
-    from tinypedal.userfile.overlay_theme import FILENAME, import_themes, load_custom_themes, validate_themes
-
-    builtin = ("Modern Dark",)
-    themes = validate_themes({"Mine": {"base": None, "colors": None}, "List": {"colors": [1, 2]}}, builtin)
-    assert themes == {"Mine": {"base": "Modern Dark", "colors": {}}, "List": {"base": "Modern Dark", "colors": {}}}
-    (tmp_path / FILENAME).write_text('{"Mine": {"colors": null}}', encoding="utf-8")
-    assert load_custom_themes(f"{tmp_path}/", builtin) == {"Mine": {"base": "Modern Dark", "colors": {}}}
-    nested = tmp_path / "nested.json"
-    nested.write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
-    with pytest.raises(ValueError):
-        import_themes(str(nested), builtin)
 
 
 # Item 26: empty path never points to drive root
@@ -519,17 +469,12 @@ def test_api_menu_reset_frees_action_group(window):
 # Item 29: titles & literals translated
 def test_titles_translated(window, french):
     from tinypedal.ui.config import FontConfig
-    from tinypedal.ui.display_order import DisplayOrder
 
     font = FontConfig(parent=window, user_setting=cfg.user.setting, reload_func=lambda: None)
     try:
         assert font.windowTitle().startswith("Police globale")
         assert font.edit_fontname.itemText(0) == "aucun changement"
         assert font.edit_autooffset.itemText(1) == "activer"
-        config = open_config_page(window, "relative")
-        order = DisplayOrder(config, user_orders={}, default_orders={})
-        assert order.windowTitle().startswith("Ordre d'affichage")
-        order.close()
     finally:
         font.close()
     from tinypedal.ui.menu import OverlayMenu
@@ -619,27 +564,6 @@ def test_focus_ring_drawn_for_keyboard_focus(ui_env, monkeypatch):
         button.deleteLater()
     flush_deleted()
 
-
-def test_module_list_keyboard(ui_env, monkeypatch):
-    from tinypedal.module_control import mctrl
-    from tinypedal.ui import module_view
-
-    toggled, configs = [], []
-    monkeypatch.setattr(module_view.ModuleControlItem, "toggle_state", lambda self: toggled.append(self.module_name))
-    monkeypatch.setattr(module_view.ModuleControlItem, "open_config_dialog",
-                        lambda self: configs.append(self.module_name))
-    page = module_view.ModuleList(None, mctrl)
-    try:
-        assert page.listbox_module.focusPolicy() == Qt.FocusPolicy.TabFocus
-        assert all(chip.focusPolicy() == Qt.FocusPolicy.TabFocus for chip in page.filter_group.buttons())
-        assert page.list_key_pressed(Qt.Key.Key_Down)  # first key shows first row
-        first = page.listbox_module.currentItem().data(Qt.ItemDataRole.UserRole)
-        assert page.list_key_pressed(Qt.Key.Key_Space) and toggled == [first]
-        assert page.list_key_pressed(Qt.Key.Key_Return) and configs == [first]
-        assert not page.list_key_pressed(Qt.Key.Key_A)
-    finally:
-        page.deleteLater()
-        flush_deleted()
 
 
 def test_tray_single_click_shows_window(window, monkeypatch):

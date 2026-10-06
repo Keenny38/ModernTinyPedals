@@ -36,6 +36,7 @@ import logging
 import math
 import multiprocessing
 import os
+import queue
 import shutil
 import threading
 import time
@@ -68,7 +69,7 @@ from ...userfile.corner_analysis import (
     IdealLap,
     ResampledLap,
 )
-from ...userfile.lap_cache import load_cached_lap, prune_cache, remove_cached_lap
+from ...userfile.lap_cache import CACHE_FOLDER, load_cached_lap, prune_cache, remove_cached_lap
 from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_bounds re-exported)
     Yielder,
     limits_part,
@@ -159,7 +160,7 @@ from .lines import (
 )
 from .math_channels import PRESETS as MATH_PRESETS
 from .math_channels import MathChannel
-from .models import DictListModel
+from .models import DictListModel, FoldedListModel
 from .trace_data import TraceData
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ LEGEND_ROLES = ("key", "label", "full", "color", "reference", "clean", "tip", "e
 MAP_LAP_ROLES = ("lap", "key", "highlight", "trail", "color", "reference", "shapes", "brakeZones", "throttleZones")
 LAP_ROLES = (
     "kind", "session", "path", "title", "time", "s1", "s2", "s3", "best1", "best2", "best3", "info", "note",
-    "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip",
+    "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip", "open", "hint",
 )
 STATUS_DURATION = 8000  # ms, transient status messages shown
 WATCH_DELAY = 1500  # ms after a lap file appears before list is refreshed (file fully written)
@@ -185,6 +186,8 @@ LOD_LEVELS = (1500, 4500)  # buckets over whole lap
 LOD_MIN_RATIO = 2.5  # copy made only for series with this many samples per bucket or more
 TRASH_FOLDER = ".trash"  # deleted laps, in telemetry folder (hidden: not a track), restored by undo
 TRASH_DAYS = 30  # deleted laps kept in trash folder
+INFO_FOLDER = "info"  # in lap cache folder: lap infos of each track (first line of lap files), see track_infos
+INFO_READERS = 8  # threads reading infos of new lap files (first open of a file waits for antivirus scan)
 WORKER_IDLE = 60_000  # ms without job before worker process stops (its memory given back)
 USE_WORKER_PROCESS = True  # heavy jobs (track limits, session values) in a worker process, else in threads
 XY_DOT = 0.007  # scatter dot size, share of plot
@@ -218,11 +221,17 @@ def g_envelope(xs: list[float], ys: list[float]) -> tuple[list[float], list[floa
 
 
 _worker: concurrent.futures.ProcessPoolExecutor | None = None
-_worker_broken = False  # worker process could not start: jobs run in threads
+_worker_broken = False  # worker process could not start (or died running a job): jobs run in fallback thread
 _quit_hooked = False  # worker killed when app quits (a running job would delay exit until done)
 _finishing: list[concurrent.futures.ProcessPoolExecutor] = []  # worker processes of closed pages ending exports
 _export_futures: set[concurrent.futures.Future] = set()  # export jobs not finished yet
+_fallback_jobs: queue.SimpleQueue = queue.SimpleQueue()  # jobs worker process could not run: future, work
+_fallback_thread: threading.Thread | None = None
+_fallback_lock = threading.Lock()
 EXPORT_JOBS = ("MoTeC export", "CSV export", "MoTeC import", "Lap import")  # finished even if viewer closed (whole files)
+# Never run again in page process when worker process died with them: a log too big or malformed for the worker (out of
+# memory) would freeze the page, worker is started again for next jobs instead
+IMPORT_JOBS = ("MoTeC import", "Lap import")
 EXIT_EXPORT_WAIT = 5.0  # seconds app exit waits for exports still running, then they are dropped
 
 
@@ -231,14 +240,17 @@ def worker_pool() -> concurrent.futures.ProcessPoolExecutor | None:
 
     Pure Python work in a thread holds the interpreter lock: page thread (drawing, mouse) would wait for it.
     A worker process runs beside the page instead (frozen app: started by multiprocessing.freeze_support).
+    A worker process found dead (import of a log too big for it, not handled yet) is started again.
     """
     global _worker, _worker_broken, _quit_hooked
+    if _worker is not None and getattr(_worker, "_broken", False):
+        stop_worker(kill=True)
     if _worker is None and not _worker_broken and USE_WORKER_PROCESS:
         try:
             _worker = concurrent.futures.ProcessPoolExecutor(
                 max_workers=1, mp_context=multiprocessing.get_context("spawn"))
         except (OSError, ValueError, RuntimeError) as error:
-            logger.warning("LAP VIEWER: worker process not available, jobs in threads: %s", error)
+            logger.warning("LAP VIEWER: worker process not available, jobs in fallback thread: %s", error)
             _worker_broken = True
         app = QCoreApplication.instance()
         if _worker is not None and app is not None and not _quit_hooked:
@@ -296,16 +308,18 @@ def quit_workers():
 
 
 class JobHandle:
-    """Background job running in a thread, or in worker process (future): same interface for both"""
+    """Background job running in a thread, or in worker process or fallback thread (future): same interface"""
 
-    BROKEN = object()  # result of a job lost with its worker process (run again in a thread)
+    BROKEN = object()  # result of a job lost with its worker process (run again in fallback thread, imports not)
 
     def __init__(self, name: str, thread: threading.Thread | None = None, holder: dict | None = None,
-                 future: concurrent.futures.Future | None = None):
+                 future: concurrent.futures.Future | None = None,
+                 pool: concurrent.futures.ProcessPoolExecutor | None = None):
         self.name = name
         self.thread = thread
         self.holder = holder if holder is not None else {}
         self.future = future
+        self.pool = pool  # worker process running job
 
     def is_alive(self) -> bool:
         if self.future is not None:
@@ -325,7 +339,7 @@ class JobHandle:
         try:
             return self.future.result()
         except concurrent.futures.process.BrokenProcessPool as error:
-            logger.warning("LAP VIEWER: worker process stopped (%s), %s run again in a thread", error, self.name)
+            logger.warning("LAP VIEWER: worker process stopped (%s), %s lost with it", error, self.name)
             return JobHandle.BROKEN
         except concurrent.futures.CancelledError:
             return None
@@ -349,7 +363,7 @@ def start_thread_job(name: str, work: Callable[[], Any]) -> JobHandle:
 
 
 def start_job(name: str, function: Callable, *args) -> JobHandle:
-    """Job in worker process if available (function & args picklable), else in a thread"""
+    """Job in worker process if available (function & args picklable), else in fallback thread"""
     pool = worker_pool()
     if pool is not None:
         try:
@@ -357,17 +371,58 @@ def start_job(name: str, function: Callable, *args) -> JobHandle:
             if name in EXPORT_JOBS:  # waited for a few seconds at app exit
                 _export_futures.add(future)
                 future.add_done_callback(_export_futures.discard)
-            return JobHandle(name, future=future)
+            return JobHandle(name, future=future, pool=pool)
         except (RuntimeError, concurrent.futures.process.BrokenProcessPool) as error:
-            logger.warning("LAP VIEWER: worker process not available (%s), %s in a thread", error, name)
+            logger.warning("LAP VIEWER: worker process not available (%s), %s in fallback thread", error, name)
             mark_worker_broken()
-    return start_thread_job(name, lambda: function(*args))
+    return start_fallback_job(name, function, *args)
+
+
+def start_fallback_job(name: str, function: Callable, *args) -> JobHandle:
+    """Job worker process could not run, in fallback thread of page process: one at a time (every lap of a track
+    exported at once would hold interpreter lock & memory of each), daemon thread (app exit never waits for it)"""
+    global _fallback_thread
+    future: concurrent.futures.Future = concurrent.futures.Future()
+    _fallback_jobs.put((future, lambda: function(*args)))
+    with _fallback_lock:
+        if _fallback_thread is None or not _fallback_thread.is_alive():
+            _fallback_thread = threading.Thread(target=run_fallback_jobs, daemon=True, name="Lap viewer jobs")
+            _fallback_thread.start()
+    if name in EXPORT_JOBS:  # waited for a few seconds at app exit
+        _export_futures.add(future)
+        future.add_done_callback(_export_futures.discard)
+    return JobHandle(name, future=future)
+
+
+def run_fallback_jobs():
+    """Fallback thread: jobs in order (cancelled ones skipped), result or error told by their future"""
+    while True:
+        future, work = _fallback_jobs.get()
+        if not future.set_running_or_notify_cancel():
+            continue
+        try:
+            result = work()
+        except BaseException as error:  # any failure: future done (logged by JobHandle.result)
+            future.set_exception(error)
+        else:
+            future.set_result(result)
 
 
 def mark_worker_broken():
     global _worker_broken
     _worker_broken = True
     stop_worker()
+
+
+def worker_died(handle: JobHandle):
+    """Worker process of job died (killed, out of memory): an import (log too big or malformed for it) only drops it,
+    started again for next jobs; any other job marks worker broken (jobs in fallback thread)"""
+    if handle.pool is None or handle.pool is not _worker:  # other job of same process already handled it
+        return
+    if handle.name in IMPORT_JOBS:
+        stop_worker(kill=True)
+    else:
+        mark_worker_broken()
 
 
 def trash_batch_time(name: str) -> float:
@@ -418,6 +473,12 @@ def time_weights(times: Sequence[float]) -> list[float]:
     return weights
 
 
+def path_key(path: str) -> str:
+    """Lap file path compared with others: listed laps use mixed slashes & relative telemetry folder, picked files
+    absolute paths"""
+    return os.path.normcase(os.path.abspath(path))
+
+
 class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools, LapConditions, QObject):
     """Lap telemetry viewer page state (QML context property "backend")
 
@@ -436,13 +497,22 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     selectionChanged = Signal()  # corner selected on map or in corner table
     pinChanged = Signal()  # position kept by clicking charts or map
     viewRestored = Signal(float, float)  # chart zoom to show again (laps reloaded after release)
+    pageHidden = Signal()  # page in background: lap playback stopped
     sessionChanged = Signal()  # session tab laps
     undoChanged = Signal()  # deleted laps that can be restored
     mathChanged = Signal()  # math channels added, changed or removed
+    gCircleChanged = Signal()  # G circle built (laps changed while its tab is hidden: built once shown)
+    # Parts of charts changed alone (also sent by chartChanged): panel height or autoscale, corner table & marks
+    # (compared lap, sort, sensitivity, alignment), track map (turned). QML items of other parts are kept.
+    panelsChanged = Signal()
+    cornersChanged = Signal()
+    mapDataChanged = Signal()
 
     def __init__(self, parent: QWidget, folder: str):
         super().__init__(parent)
         self._window = parent
+        for part in (self.panelsChanged, self.cornersChanged, self.mapDataChanged):
+            self.chartChanged.connect(part)
         self.folder = folder
         self.prefix = f"lap_viewer_{id(self)}|"  # vertex store keys of this page
         self.data = TraceData()
@@ -450,7 +520,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.external: list[LapEntry] = []
         self.checked: set[str] = set()
         self.reference_key = ""
-        self.lap_model = DictListModel(LAP_ROLES, self)
+        self.lap_model = FoldedListModel(LAP_ROLES, "id", self)  # lap rows of expanded sessions listed
         # Models kept between lap changes: QML keeps delegates of rows still there (only new laps create items)
         self.panel_model = DictListModel(PANEL_ROLES, self)
         self.series_models: dict[str, DictListModel] = {}  # channel column: series of its panel
@@ -468,6 +538,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._legend: list[dict] = []
         self._map: dict = {}
         self._gcircle: dict = {}
+        self._gcircle_stale = False  # laps changed while G circle tab hidden: built once shown (or read)
         self._corners: list[dict] = []
         self._corner_marks: list[dict] = []
         self._corner_rows: list[CornerComparison] = []
@@ -491,7 +562,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._geometry: track_geometry.TrackGeometry | None = None  # official circuit (game REST API)
         self._geometry_track = ""
         self._geometry_tried: set[str] = set()  # tracks asked to game this session (not asked again)
-        self._base = lap_map.MapLine([], [], [])  # line lap placement is measured from (official center path)
+        self._base = lap_map.MapLine([], [], [])  # line lap placement is measured from (official circuit path)
         self._base_official = False
         self._edges: tuple[list[float], list[float]] = ([], [])  # track edge offsets along base line
         self._lap_offsets: dict[str, tuple[tuple, lap_map.MapLine, list[float], list[int]]] = {}
@@ -501,7 +572,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._colored_shown: Vertices | None = None  # colored line vertices put in vertex store
         self._zones: dict[str, tuple[LapData, tuple]] = {}  # lap key: lap data, braking & throttle zones
         # Per lap & per reference results kept while laps stay the same (showing one more lap computes only it)
-        self._official_line: tuple = ()  # (key, official center path line)
+        self._official_line: tuple = ()  # (key, official circuit path line)
         self._official_key: tuple | None = None  # reference & track of placed official corners
         self._edges_cache: tuple = ()  # (key, track edge offsets along base line)
         self._placements: dict[str, tuple[tuple, tuple]] = {}  # lap key: (key, placement)
@@ -519,7 +590,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._groups: tuple[list[LapEntry], list] | None = None  # sessions of current track entries (cached)
         self._labels: dict[str, str] = {}  # shown lap key: short name (told apart when two are the same)
         self._filter = ""  # lap list search text
-        self._undo: list[tuple[str, str, dict, bool]] = []  # deleted laps: path, trash path, marks, checked
+        self._no_match = False  # search or clean only filter leaves no lap (lap list hint)
+        # Deleted laps: path, trash path, marks, checked, reference
+        self._undo: list[tuple[str, str, dict, bool, bool]] = []
         self._pending_delete: list[str] = []  # laps deleted once background loading is done
         self._loaded_paths: set[str] = set()  # laps read by background loading
         self._coaching: list[dict] = []  # corners where compared lap loses most time, causes
@@ -579,6 +652,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._status_timer.setInterval(STATUS_DURATION)
         self._status_timer.timeout.connect(lambda: self.set_status("", False))
         self._released = False
+        self._hidden = False  # page in background: lap files recorded meanwhile listed & read once shown
+        self._refresh_pending = False  # lap files changed while hidden
+        self._chosen_reference = ""  # reference lap picked by user (kept by live mode while on same circuit)
         self._release_timer = QTimer(self)
         self._release_timer.setSingleShot(True)
         self._release_timer.setInterval(lap_viewer.RELEASE_DELAY)
@@ -598,6 +674,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._watch_timer.timeout.connect(self.auto_refresh)
         self._watcher = QFileSystemWatcher(self)
         self._watched: dict[str, tuple] = {}  # folder: lap files & track folders seen (hidden files left out)
+        self._new_lap_tracks: set[str] = set()  # other track folders with new lap files (live mode: track shown)
         self._watcher.directoryChanged.connect(self.folder_changed)
         setting = load_viewer_setting(folder)
         self._hide_unclean = bool(setting.get("hide_unclean_laps", False))
@@ -676,10 +753,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         for timer in (self._job_timer, self._limits_timer, self._idle_timer, self._load_timer, self._prefetch_timer,
                       self._zoom_timer, self._watch_timer, self._release_timer):
             timer.stop()
+        for handle in [job[0] for job in self._jobs] + ([self._limits_job] if self._limits_job is not None else []):
+            if handle.future is not None and handle.name not in EXPORT_JOBS:
+                handle.future.cancel()  # waiting page jobs not done (running one ends soon), in fallback thread too
         if self._exports > 0 or self._imports > 0:
-            for handle, _, _ in self._jobs:
-                if handle.future is not None and handle.name not in EXPORT_JOBS:
-                    handle.future.cancel()  # waiting page jobs not done (running one ends soon)
             stop_worker(finish=True)
         else:
             kill_worker()
@@ -695,7 +772,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.add_job(start_thread_job(name, work), done)
 
     def run_process_job(self, name: str, done: Callable[[Any], None], function: Callable, *args):
-        """Run module level function in worker process (thread if not available), done(result) on page thread"""
+        """Run module level function in worker process (fallback thread if not available), done(result) on page
+        thread"""
         self.add_job(start_job(name, function, *args), done, lambda: function(*args))
 
     def add_job(self, handle: JobHandle, done: Callable[[Any], None], retry: Callable[[], Any] | None = None):
@@ -705,17 +783,26 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot()
     def check_jobs(self):
-        """Finished background jobs: results handled on page thread"""
-        finished = [job for job in self._jobs if not job[0].is_alive()]
-        self._jobs = [job for job in self._jobs if job[0].is_alive()]
-        for handle, done, retry in finished:
-            result = handle.result()
-            if result is JobHandle.BROKEN:  # worker process died: job run again in a thread
-                mark_worker_broken()
-                if retry is not None:
-                    self.add_job(start_thread_job(handle.name, retry), done)
-                continue
-            done(result)
+        """Finished background jobs: results handled on page thread (a result failing never drops the others)"""
+        finished: list[tuple[JobHandle, Callable[[Any], None], Callable[[], Any] | None]] = []
+        running: list[tuple[JobHandle, Callable[[Any], None], Callable[[], Any] | None]] = []
+        for job in self._jobs:  # checked once: a job ending meanwhile is handled next time, never lost
+            (running if job[0].is_alive() else finished).append(job)
+        self._jobs = running
+        results = [(job, job[0].result()) for job in finished]
+        # Imports lost with worker process first: worker blamed on them is started again, not marked broken
+        results.sort(key=lambda item: not (item[1] is JobHandle.BROKEN and item[0][0].name in IMPORT_JOBS))
+        for (handle, done, retry), result in results:
+            if result is JobHandle.BROKEN:  # worker process died: job run again in fallback thread (one at a time)
+                worker_died(handle)
+                if retry is not None and handle.name not in IMPORT_JOBS:
+                    self.add_job(start_fallback_job(handle.name, retry), done)
+                    continue
+                result = None  # import never run in page process (log may have killed worker): failed
+            try:
+                done(result)
+            except Exception:  # page goes on, other results handled
+                logger.exception("LAP VIEWER: %s result not handled", handle.name)
         if not self._jobs and self._limits_job is None:
             self._job_timer.stop()
             if _worker is not None:
@@ -810,7 +897,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def revision(self) -> int:
         return self._revision
 
-    @Property(list, notify=chartChanged)
+    @Property(list, notify=panelsChanged)
     def panels(self) -> list[dict]:
         return self._panels
 
@@ -842,23 +929,26 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             for index, distance in enumerate(self.data.sector_lines)
         ]
 
-    @Property(list, notify=chartChanged)
+    @Property(list, notify=cornersChanged)
     def cornerMarks(self) -> list[dict]:
         return self._corner_marks
 
-    @Property(dict, notify=chartChanged)
+    @Property(dict, notify=mapDataChanged)
     def trackMap(self) -> dict:
         return self._map
 
-    @Property(dict, notify=chartChanged)
+    @Property(dict, notify=gCircleChanged)
     def gCircle(self) -> dict:
+        """Dots of shown laps & G scale, built now if laps changed while G circle tab was hidden"""
+        if self._gcircle_stale:
+            self.build_gcircle(True)
         return self._gcircle
 
-    @Property(list, notify=chartChanged)
+    @Property(list, notify=cornersChanged)
     def corners(self) -> list[dict]:
         return self._corners
 
-    @Property(int, notify=chartChanged)
+    @Property(int, notify=cornersChanged)
     def hysteresis(self) -> int:
         return self._hysteresis
 
@@ -868,12 +958,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return [{"key": lap.key, "label": self.short_label(lap.key), "color": lap.color.name()}
                 for lap in self.data.compared()]
 
-    @Property(str, notify=chartChanged)
+    @Property(str, notify=cornersChanged)
     def compareKey(self) -> str:
         lap = self.compared_lap()
         return lap.key if lap is not None else ""
 
-    @Property(str, notify=chartChanged)
+    @Property(str, notify=cornersChanged)
     def cornerSort(self) -> str:
         return self._corner_sort
 
@@ -957,9 +1047,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def mapPin(self) -> dict:
         """Kept position on map (reference line), empty if none"""
         distance = self._pins.get(self._track, -1.0)
-        if distance < 0 or not self._map_lines:
+        line = self.reference_map_line()
+        if distance < 0 or line is None:
             return {}
-        line = self._map_lines[0][0]
         x, y = lap_map.point_at(line, distance)
         return {"x": x, "y": y, "angle": math.degrees(lap_map.heading_at(line, distance))}
 
@@ -1053,7 +1143,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         """Channel names math channels can use (editor list)"""
         return self.math_inputs()
 
-    @Property(dict, notify=chartChanged)
+    @Property(dict, notify=cornersChanged)
     def alignment(self) -> dict:
         """Corner laps are aligned on (braking start) & offset of each lap, empty if not aligned"""
         return self.alignment_info()
@@ -1146,38 +1236,37 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self.set_status(tr("No recorded lap. Enable the Recorder module, then drive a few laps."), False)
 
     def drop_changed_laps(self):
-        """Forget loaded laps whose file changed or was removed (refresh)"""
+        """Forget loaded laps whose file changed or was removed, and laps that could not be read (refresh: read
+        again, file may be readable now)"""
         for path in list(self._lap_cache):
             try:
-                changed = os.path.getmtime(path) != self._cache_mtime.get(path)
+                changed = self._lap_cache[path] is None or os.path.getmtime(path) != self._cache_mtime.get(path)
             except OSError:
                 changed = True
             if changed:
                 self._lap_cache.pop(path, None)
                 self._cache_mtime.pop(path, None)
 
-    def load_track(self, track: str):
+    def load_track(self, track: str, new_lap: LapFile | None = None):
+        """Laps of track listed, laps shown last time on it shown (new_lap: lap just recorded compared, live mode)"""
+        changed = track != self._track
         self._track = track
         self.tracksChanged.emit()
         laps = list_laps(self.folder, track) if track else []
-        self.entries = [LapEntry(lap, self.lap_info(lap.path)) for lap in laps]
-        # Laps shown last time on this track, else fastest lap compared with newest other lap
-        saved = load_viewer_setting(self.folder).get("selections", {})
-        saved = saved.get(track, {}) if isinstance(saved, dict) else {}
-        paths = {lap.filename: lap.path for lap in laps}
-        checked = {paths[name] for name in saved.get("checked", []) if name in paths}
-        reference = paths.get(saved.get("reference", ""), "")
-        if checked and reference in checked:
-            self.reference_key = reference
+        self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(track, laps))]
+        adopted = self.adopt_external()
+        if changed:  # analysis of former track laps not carried over (distances & laps of another circuit)
+            self._align_apex = -1.0  # laps aligned on a corner
+            self._compare_key = ""
+            self._session_key = ""
+            self._map_range = (-1.0, -1.0)  # chart markers A & B
+            if self._selected_corner != -1:
+                self._selected_corner = -1
+                self.selectionChanged.emit()
+        if new_lap is not None:
+            self.compare_new_lap(laps, new_lap)
         else:
-            best = best_laps(laps, 1)
-            self.reference_key = best[0].path if best else (laps[0].path if laps else "")
-            checked = {self.reference_key} if self.reference_key else set()
-            newest = next((lap.path for lap in laps if lap.valid and lap.path != self.reference_key), "")
-            if newest:
-                checked.add(newest)
-        added = {entry.file.path for entry in self.external}
-        self.checked = checked | (self.checked & added)
+            self.checked, self.reference_key = self.track_selection(track, laps, adopted)
         self._expanded = []
         self.watch_folders()
         self.start_geometry(track)
@@ -1187,7 +1276,52 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if self._side_tab == 4:  # session tab shown (page opened on it, track changed): its laps read
             self.start_session_job()
 
-    # Official circuit: track center path & pit lane from game REST API (saved), base of lap placement
+    def track_selection(self, track: str, laps: list[LapFile], adopted: set[str]) -> tuple[set[str], str]:
+        """Laps shown on track & reference: laps shown last time (saved reference, else fastest of them), else fastest
+        lap compared with newest other lap; added laps stay checked, an added reference stays if on this circuit"""
+        saved = load_viewer_setting(self.folder).get("selections", {})
+        saved = saved.get(track, {}) if isinstance(saved, dict) else {}
+        saved = saved if isinstance(saved, dict) else {}
+        paths = {lap.filename: lap.path for lap in laps}
+        names = saved.get("checked", [])
+        checked = {paths[name] for name in names if name in paths} if isinstance(names, list) else set()
+        reference = paths.get(str(saved.get("reference", "")), "")
+        if checked and reference not in checked:  # reference was an added lap (not saved): fastest checked lap
+            best = best_laps([lap for lap in laps if lap.path in checked], 1)
+            reference = best[0].path if best else next(lap.path for lap in laps if lap.path in checked)
+        elif not checked:
+            best = best_laps(laps, 1)
+            reference = best[0].path if best else (laps[0].path if laps else "")
+            checked = {reference} if reference else set()
+            newest = next((lap.path for lap in laps if lap.valid and lap.path != reference), "")
+            if newest:
+                checked.add(newest)
+        kept = self.checked & ({entry.file.path for entry in self.external} | adopted)
+        if self.reference_key in kept and (not laps or self.same_circuit_paths(laps[0].path, self.reference_key)):
+            reference = self.reference_key  # added lap chosen as reference, still shown & driven on this circuit
+        return checked | kept, reference
+
+    def adopt_external(self) -> set[str]:
+        """Added laps that are laps of shown track listed once, as track laps (check & reference kept), their paths"""
+        if not self.external:
+            return set()
+        listed = {path_key(entry.file.path): entry.file.path for entry in self.entries}
+        moved = {entry.file.path: listed[path_key(entry.file.path)] for entry in self.external
+                 if path_key(entry.file.path) in listed}
+        if not moved:
+            return set()
+        self.external = [entry for entry in self.external if entry.file.path not in moved]
+        self.checked = {moved.get(path, path) for path in self.checked}
+        self.reference_key = moved.get(self.reference_key, self.reference_key)
+        self._chosen_reference = moved.get(self._chosen_reference, self._chosen_reference)
+        return set(moved.values())
+
+    def same_circuit_paths(self, reference: str, path: str) -> bool:
+        """Whether listed lap was driven on circuit of reference lap (lap info: game track name & length)"""
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        return same_circuit(LapData("", {}, infos.get(reference, {})), LapData("", {}, infos.get(path, {})))
+
+    # Official circuit: circuit path (game driving line) & pit lane from game REST API (saved), base of lap placement
     def track_title(self, track: str) -> str:
         """Game track name of track folder (lap info), else folder name without class"""
         for entry in self.entries:
@@ -1196,48 +1330,76 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return track.rsplit(" - ", 1)[0]
 
     def start_geometry(self, track: str):
-        """Official circuit of track: saved file, else asked to game in background (once per session)"""
+        """Official circuit of track: saved file, else asked to game in background (once per session)
+
+        Saved circuit checked in background: dropped if best lap no longer lies along it (another layout), fetched
+        again if game has another version of its layout (or file saved without version).
+        """
         if track == self._geometry_track:
             return
         self._geometry_track = track
-        self._geometry = track_geometry.load_geometry(self.folder, track) if track else None
+        saved = self._geometry = track_geometry.load_geometry(self.folder, track) if track else None
         setting = cfg.user.setting.get(API_LMU_CONFIG, {}) if hasattr(cfg.user, "setting") else {}
-        if (self._geometry is not None or not track or track in self._geometry_tried
-                or not setting.get("enable_restapi_access", True)):
-            return
+        ask = bool(track) and track not in self._geometry_tried and bool(setting.get("enable_restapi_access", True))
         clean = [entry for entry in self.entries if entry.file.valid and entry.info.get("kind", "lap") == "lap"]
-        if not clean:
+        if not clean or (saved is None and not ask):
             return
-        self._geometry_tried.add(track)
+        if ask:
+            self._geometry_tried.add(track)
         best = min(clean, key=lambda entry: entry.file.lap_time or float("inf"))
         host, port = str(setting.get("url_host", "localhost")), int(setting.get("url_port", 6397))
         title, folder = self.track_title(track), self.folder
 
-        def fetching():
-            tracks = track_geometry.rest_get(host, port, "/rest/race/track")
-            if not isinstance(tracks, list):  # game not running: no lap file read
-                return None
-            lap = load_cached_lap(folder, best.file.path)
+        def best_positions() -> tuple[list[tuple[float, float]], float]:
+            """Positions & track length of best lap (empty if unreadable)"""
+            try:
+                lap = load_cached_lap(folder, best.file.path)
+            except (OSError, ValueError):
+                return [], 0.0
             found = lap_map.map_line(lap)
             positions = list(zip(found.xs, found.ys)) if found is not None else []
-            length = float(best.info.get("track_length") or (lap.distance[-1] if len(lap) else 0.0))
-            return track_geometry.fetch_geometry(host, port, title, positions, length, tracks)
+            return positions, float(best.info.get("track_length") or (lap.distance[-1] if len(lap) else 0.0))
 
-        def fetched(geometry):
-            if geometry is None or track != self._track:
+        def fetching() -> tuple:
+            """(circuit to use) : saved one if still right, else from game, None if none"""
+            positions, length = best_positions() if saved is not None else ([], 0.0)
+            fitting = saved is not None and track_geometry.fits(saved, positions)
+            tracks = track_geometry.rest_get(host, port, "/rest/race/track") if ask else None
+            if not isinstance(tracks, list):  # game not running (lap file read only if game answers)
+                return (saved if fitting else None,)
+            if fitting and saved is not None and saved.name in track_geometry.layout_names(tracks, saved.layout):
+                return (saved,)  # current game version
+            if saved is None:
+                positions, length = best_positions()
+            found = track_geometry.fetch_geometry(host, port, title, positions, length, tracks)
+            return (found if found is not None else saved if fitting else None,)
+
+        def fetched(result):
+            if not isinstance(result, tuple) or result[0] is saved:  # job failed or saved circuit still right
                 return
-            track_geometry.save_geometry(self.folder, track, geometry)
+            geometry = result[0]
+            if geometry is not None:
+                track_geometry.save_geometry(self.folder, track, geometry)  # kept even if another track is shown
+            if track != self._track:
+                return
+            before = self.base_key()
             self._geometry = geometry
-            self._limits_track = ""  # placement measured from official center path: track limits again
+            if self.base_key() == before:  # same circuit
+                return
+            self._limits_track = ""  # placement measured from another base line: track limits again
             self.start_limits(track)
             if self.data.laps:
                 self.rebuild_chart()
-            self.set_status(tr("Official circuit map received from game"))
+            if geometry is not None:
+                self.set_status(tr("Official circuit map received from game"))
+            else:
+                logger.info("LAP VIEWER: saved official circuit of %s does not fit recorded laps", track)
 
         self.run_job("official circuit", fetching, fetched)
 
     def official_base(self, length: float = 0.0) -> lap_map.MapLine | None:
-        """Official track center path from start line, distances scaled to lap length, None if unknown"""
+        """Official circuit path (game driving line, not track center) from start line, distances scaled to lap length,
+        None if unknown"""
         geometry = self._geometry
         if geometry is None:
             return None
@@ -1249,9 +1411,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return line
 
     def base_key(self) -> str:
-        """What lap placement is measured from (saved track limits valid only for the same)"""
+        """What lap placement is measured from (saved track limits & lap placements valid only for the same): official
+        circuit layout, game version, points & start line (nearest points of laps change with them), else lap line"""
         geometry = self._geometry
-        return f"official|{geometry.layout}|{len(geometry.center)}" if geometry is not None else "lap"
+        if geometry is None:
+            return "lap"
+        start = "{:.1f},{:.1f}".format(*geometry.start) if geometry.start else "-"
+        return f"official|{geometry.layout}|{geometry.name}|{len(geometry.center)}|{start}"
 
     # Track limits: guessed in background from every clean lap of the track, cached in telemetry folder
     def limits_cache_path(self, track: str) -> str:
@@ -1279,7 +1445,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         try:
             with open(cache, encoding="utf-8") as file:
                 saved = json.load(file)
-            if saved.get("laps") == names and "sectors" in saved and saved.get("base", "lap") == base_key:
+            if (saved.get("laps") == names and "sectors" in saved and saved.get("base", "lap") == base_key
+                    and saved.get("version") == lap_map.LIMITS_VERSION):  # older algorithm: computed again
                 if saved.get("left"):
                     self._limits = lap_map.TrackLimits(*(
                         lap_map.MapLine([p[0] for p in saved[side]], [p[1] for p in saved[side]],
@@ -1307,9 +1474,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             return
         result = self._limits_job.result()
         job = self._limits_result
-        if result is JobHandle.BROKEN:  # worker process died: computed again in a thread
-            mark_worker_broken()
-            self._limits_job = start_thread_job("track limits", lambda: track_limits_job(*job["args"]))
+        if result is JobHandle.BROKEN:  # worker process died: computed again in fallback thread
+            worker_died(self._limits_job)
+            self._limits_job = start_fallback_job("track limits", track_limits_job, *job["args"])
             return
         self._limits_timer.stop()
         self._limits_job = None
@@ -1337,7 +1504,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         try:
             os.makedirs(os.path.dirname(job["cache"]), exist_ok=True)
             saved: dict = {"laps": job["names"], "source": self._limits_source, "sectors": self._track_sectors,
-                           "base": job["base"]}
+                           "base": job["base"], "version": lap_map.LIMITS_VERSION}
             if limits is not None:
                 for side, line in (("left", limits.left), ("right", limits.right)):
                     saved[side] = [[round(d, 2), round(x, 2), round(y, 2)]
@@ -1359,10 +1526,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return self._limits_source if self._limits is not None else ""
 
     def watch_folders(self):
-        """Watch telemetry & current track folders: new laps listed without refresh"""
+        """Watch telemetry & current track folders (every track folder in live mode: lap driven on another track
+        shown): new laps listed without refresh"""
         current = set(self._watcher.directories())
-        wanted = {folder for folder in (self.folder, os.path.join(self.folder, self._track) if self._track else "")
-                  if folder and os.path.isdir(folder)}
+        tracks = self._tracks if self._live else [self._track] if self._track else []
+        folders = (self.folder, *(os.path.join(self.folder, track) for track in tracks))
+        wanted = {folder for folder in folders if folder and os.path.isdir(folder)}
         if current - wanted:
             self._watcher.removePaths(list(current - wanted))
         if wanted - current:
@@ -1384,47 +1553,88 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         lap caches & trash are written in telemetry folder too)"""
         entries = self.folder_entries(folder)
         key = os.path.normpath(folder)
-        if self._watched.get(key) == entries:
+        seen = self._watched.get(key)
+        if seen == entries:
             return
         self._watched[key] = entries
+        track = os.path.basename(key)
+        if (seen is not None and key != os.path.normpath(self.folder) and track != self._track
+                and set(entries) - set(seen)):  # other track folder watched in live mode: new lap there
+            self._new_lap_tracks.add(track)
         self._watch_timer.start()
 
     @Slot()
     def auto_refresh(self):
-        """Lap files added or removed: list updated, newest lap compared with best lap in live mode"""
+        """Lap files added or removed: list updated, newest lap compared with best lap in live mode (lap driven on
+        another track: that track shown); page hidden: done once shown again (no list update nor lap read while
+        driving, laps released stay released)"""
+        if self._hidden:
+            self._refresh_pending = True
+            return
         if self._loader is not None:
             self._watch_timer.start()  # after current loading
             return
         tracks = list_tracks(self.folder)
+        added_tracks = [track for track in tracks if track not in self._tracks]
         if tracks != self._tracks:
             self._tracks = tracks
             self.tracksChanged.emit()
+        changed, self._new_lap_tracks = self._new_lap_tracks, set()
         if not self._track and tracks:  # first lap ever recorded
             self.load_track(tracks[0])
             return
+        if self._live:
+            found = self.other_track_lap(added_tracks + sorted(changed - set(added_tracks)))
+            if found is not None:
+                self.load_track(*found)
+                return
+            if added_tracks:  # new track folders watched
+                self.watch_folders()
         known = {entry.file.path for entry in self.entries}
         laps = list_laps(self.folder, self._track) if self._track else []
         listed = {lap.path for lap in laps}
         if listed == known:
             return
         new = [lap for lap in laps if lap.path not in known]
-        self.entries = [LapEntry(lap, self.lap_info(lap.path)) for lap in laps]
+        self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(self._track, laps))]
         self.checked = {path for path in self.checked if path in listed or path not in known}
         if self.reference_key not in self.checked:
             self.reference_key = ""
         if self._live and new:
-            newest = new[0]  # lap files newest first
-            best = best_laps(laps, 1)
-            self.checked = {newest.path} | ({best[0].path} if best else set())
-            self.reference_key = best[0].path if best and best[0].path != newest.path else newest.path
-            self.set_status(trm(f"New lap: {lap_label(newest.filename)}"))
+            self.compare_new_lap(laps, new[0])  # lap files newest first
         self.fill_list()
         self.load_laps()
+
+    def other_track_lap(self, tracks: list[str]) -> tuple[str, LapFile] | None:
+        """Track & newest lap recorded on other tracks than shown one (live mode), None if none newer than laps of
+        shown track (laps copied there)"""
+        found = None
+        newest = max((lap_timestamp_of(entry.file.filename) for entry in self.entries), default=0.0)
+        for track in tracks:
+            laps = list_laps(self.folder, track) if track != self._track else []
+            timestamp = lap_timestamp_of(laps[0].filename) if laps else 0.0
+            if timestamp > newest:
+                found, newest = (track, laps[0]), timestamp
+        return found
+
+    def compare_new_lap(self, laps: list[LapFile], new_lap: LapFile):
+        """Live mode: lap just recorded compared with reference lap picked by user if driven on same circuit, else with
+        best lap of track (former best lap if new lap is best lap)"""
+        reference = self.reference_key
+        listed = {entry.file.path for entry in self.all_entries()}
+        if not (reference and reference == self._chosen_reference and reference != new_lap.path and reference in listed
+                and self.same_circuit_paths(reference, new_lap.path)):
+            best = [lap.path for lap in best_laps(laps, 2)]
+            reference = next((path for path in best if path != new_lap.path), new_lap.path)
+        self.checked = {new_lap.path, reference}
+        self.reference_key = reference
+        self.set_status(trm(f"New lap: {lap_label(new_lap.filename)}"))
 
     @Slot(bool)
     def setLiveMode(self, enabled: bool):
         self._live = enabled
         save_viewer_setting(self.folder, live_mode=enabled)
+        self.watch_folders()  # every track folder in live mode
         self.optionsChanged.emit()
 
     def lap_info(self, path: str) -> dict:
@@ -1439,6 +1649,74 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         info = read_lap_info(path)
         self._info_cache[path] = (mtime, info)
         return info
+
+    def info_index_path(self, track: str) -> str:
+        return os.path.join(self.folder, CACHE_FOLDER, INFO_FOLDER, f"{track}.json")
+
+    def track_infos(self, track: str, laps: list[LapFile]) -> list[dict]:
+        """Infos of track laps: from memory, else from track index (lap file size & time unchanged), else read from
+        lap files (index saved again): opening hundreds of new files takes seconds (antivirus scan)"""
+        if not laps:
+            return []
+        stamps: dict[str, tuple[int, int, float]] = {}
+        with suppress(OSError), os.scandir(os.path.join(self.folder, track)) as found:  # no file opened
+            for item in found:
+                stat = item.stat()
+                stamps[item.name] = (stat.st_size, stat.st_mtime_ns, stat.st_mtime)
+        path = self.info_index_path(track)
+        saved: Any = {}
+        with suppress(OSError, ValueError), open(path, encoding="utf-8") as file:
+            saved = json.load(file)
+        saved = saved if isinstance(saved, dict) else {}  # damaged index ignored
+        known: dict[str, dict] = {}
+        missing: list[LapFile] = []
+        for lap in laps:
+            stamp = stamps.get(lap.filename)
+            if stamp is None:  # removed meanwhile
+                continue
+            cached = self._info_cache.get(lap.path)
+            indexed = saved.get(lap.filename)
+            if cached is not None and cached[0] == stamp[2]:
+                known[lap.filename] = cached[1]
+            elif (isinstance(indexed, list) and len(indexed) == 3 and indexed[:2] == list(stamp[:2])
+                  and isinstance(indexed[2], dict)):
+                known[lap.filename] = indexed[2]
+            else:
+                missing.append(lap)
+        paths = [lap.path for lap in missing]
+        if len(paths) > 2:  # new files read together: each one is scanned by antivirus on first open
+            with concurrent.futures.ThreadPoolExecutor(INFO_READERS, "Lap viewer infos") as pool:
+                read = list(pool.map(read_lap_info, paths))
+        else:
+            read = [read_lap_info(lap_path) for lap_path in paths]
+        known.update(zip((lap.filename for lap in missing), read))
+        infos, index = [], {}
+        for lap in laps:
+            stamp = stamps.get(lap.filename)
+            if stamp is None:
+                infos.append(self.lap_info(lap.path))
+                continue
+            info = known[lap.filename]
+            self._info_cache[lap.path] = (stamp[2], info)
+            index[lap.filename] = [stamp[0], stamp[1], info]
+            infos.append(info)
+        if missing or index.keys() != saved.keys():
+            self.save_info_index(path, index)
+        return infos
+
+    @staticmethod
+    def save_info_index(path: str, index: dict):
+        """Lap infos of a track saved atomically (temporary file renamed): never read half written"""
+        temp = f"{path}.{os.getpid()}.tmp"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(temp, "w", encoding="utf-8", newline="\n") as file:
+                json.dump(index, file, separators=(",", ":"))
+            os.replace(temp, path)
+        except (OSError, TypeError, ValueError) as error:
+            logger.warning("LAP VIEWER: unable to save lap infos of track: %s", error)
+            with suppress(OSError):
+                os.remove(temp)
 
     def lap_marks(self, path: str) -> dict:
         """Kept state & note of lap"""
@@ -1542,7 +1820,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Property(str, notify=listChanged)
     def filterText(self) -> str:
+        """Search text used (stripped): search field keeps text as typed"""
         return self._filter
+
+    @Property(bool, notify=listChanged)
+    def noMatch(self) -> bool:
+        """Search or clean only filter leaves no lap (checked laps stay listed): hint & action to show laps"""
+        return self._no_match
 
     @Slot(str)
     def setFilter(self, text: str):
@@ -1581,27 +1865,37 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return self._labels.get(key) or lap_label(os.path.basename(key))
 
     def fill_list(self):
-        """Laps grouped by session (newest first), added files on top, sessions with shown laps expanded"""
+        """Laps grouped by session (newest first), added files on top, sessions with shown laps expanded
+
+        Rows kept in place (list keeps scroll position), lap rows of collapsed sessions left out of list model.
+        """
         # Added files may come from other tracks: theoretical best & best sectors of current track only
         sectors = [self.entry_sectors(entry) for entry in self.entries if entry.file.valid]
         best_total, best_sectors = theoretical_best(sectors)
         best_lap = min((entry.file.lap_time for entry in self.entries if entry.file.valid and entry.file.lap_time > 0),
                        default=0.0)
-        entries = [
-            entry for entry in self.entries
-            if entry.file.path in self.checked or entry.file.path == self.reference_key
-            or ((not self._hide_unclean or (entry.file.valid and entry.info.get("kind") not in ("out", "in")))
-                and self.matches_filter(entry))
-        ]
+        shown = self.checked | {self.reference_key}  # listed even if search or clean only filter leaves them out
+        matched = False
+        entries = []
+        for entry in self.entries:
+            match = ((not self._hide_unclean or (entry.file.valid and entry.info.get("kind") not in ("out", "in")))
+                     and self.matches_filter(entry))
+            matched = matched or match
+            if match or entry.file.path in shown:
+                entries.append(entry)
         groups: list[tuple[list[LapEntry], bool]] = [
             (group, False)
             for group in group_sessions(entries, lambda entry: entry.file.filename, lambda entry: entry.info)
         ]
         added: dict[str, list[LapEntry]] = {}  # added laps by folder (imported log, other track)
         for entry in self.external:
-            if entry.file.path in self.checked or entry.file.path == self.reference_key or self.matches_filter(entry):
+            match = self.matches_filter(entry)
+            matched = matched or match
+            if match or entry.file.path in shown:
                 added.setdefault(os.path.dirname(entry.file.path), []).append(entry)
         groups[:0] = [(group, True) for group in added.values()]
+        colors = {lap.key: lap.color.name() for lap in self.data.laps}
+        hint = self.circuit_hints()
         rows: list[dict] = []
         expanded = []
         for index, (group, is_added) in enumerate(groups):
@@ -1611,16 +1905,43 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             fastest = min((entry for entry in group if entry.file.valid and entry.file.lap_time > 0),
                           key=lambda entry: entry.file.lap_time, default=None)
             for entry in group:
-                rows.append(self.lap_row(header["session"], entry, best_sectors, vehicle, entry is fastest, best_lap))
+                row = self.lap_row(header["session"], entry, best_sectors, vehicle, entry is fastest, best_lap,
+                                   colors.get(entry.file.path, ""))
+                row.update(hint(row))
+                rows.append(row)
             if (index == 0 or header["session"] in self._expanded
-                    or any(entry.file.path in self.checked or entry.file.path == self.reference_key
-                           for entry in group)):
+                    or any(entry.file.path in shown for entry in group)):
                 expanded.append(header["session"])
-        self.lap_model.reset(rows)
         self._expanded = expanded
+        self.show_rows(rows)
+        self._no_match = not matched and bool(self.entries or self.external)
         self.sessionChanged.emit()
         self._best_text = trm(f"Theoretical best: {format_laptime(best_total)}") if best_total > 0 else ""
         self.listChanged.emit()
+
+    def show_rows(self, rows: list[dict]):
+        """List rows: lap rows of collapsed sessions left out of list model (no delegate made for them)"""
+        opened = set(self._expanded)
+        for row in rows:
+            if row["kind"] == "session":
+                row["open"] = row["session"] in opened
+        self.lap_model.set_rows(rows, lambda row: row["kind"] == "session" or row["session"] in opened)
+
+    def circuit_hints(self) -> Callable[[dict], dict]:
+        """Lap row change: lap driven on another circuit than reference lap dimmed with a hint (unchecked & never
+        compared with it, see drop_other_circuits)"""
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        reference = LapData("", {}, infos[self.reference_key]) if self.reference_key in infos else None
+        text = tr("Another circuit than reference lap: not compared")
+
+        def hint(row: dict) -> dict:
+            if row["kind"] != "lap":
+                return {}
+            other = (reference is not None and row["path"] != self.reference_key
+                     and not same_circuit(reference, LapData("", {}, infos.get(row["path"], {}))))
+            return {"hint": text if other else ""}
+
+        return hint
 
     def session_row(self, group: list[LapEntry], is_added: bool) -> dict:
         """Session header: session & date, best lap, number of laps & vehicle"""
@@ -1645,14 +1966,15 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if vehicle:
             details.append(vehicle)
         return {
-            "kind": "session", "session": key, "path": "", "title": title, "time": format_laptime(best),
-            "s1": "", "s2": "", "s3": "", "best1": False, "best2": False, "best3": False,
+            "id": f"session:{key}", "kind": "session", "session": key, "path": "", "title": title,
+            "time": format_laptime(best), "s1": "", "s2": "", "s3": "", "best1": False, "best2": False, "best3": False,
             "info": ", ".join(details), "note": "", "count": len(group), "checked": False, "reference": False,
-            "color": "", "dim": False, "fastest": False, "error": False, "gap": "", "tip": "",
+            "color": "", "dim": False, "fastest": False, "error": False, "gap": "", "tip": "", "open": False,
+            "hint": "",
         }
 
     def lap_row(self, session: str, entry: LapEntry, best_sectors: list[float], vehicle: str,
-                is_fastest: bool, best_lap: float = 0.0) -> dict:
+                is_fastest: bool, best_lap: float = 0.0, color: str = "") -> dict:
         """Lap row: number, time, gap to best lap, sectors (best ones flagged), info; invalid & out/in laps dimmed"""
         number = lap_number_of(entry.file.filename)
         sectors = self.entry_sectors(entry) or [0.0, 0.0, 0.0]
@@ -1660,6 +1982,25 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             value > 0 and bool(best_sectors) and abs(value - best) < 0.0005 and entry.file.valid and not entry.external
             for value, best in zip(sectors, best_sectors or [0.0, 0.0, 0.0])
         ]
+        gap = ""
+        if best_lap > 0 and entry.file.lap_time > 0 and not entry.external:
+            difference = entry.file.lap_time - best_lap
+            gap = signed(difference, 3) if difference >= 0.0005 else ""
+        path = entry.file.path
+        return {
+            "id": path, "kind": "lap", "session": session, "path": path, "vehicle": vehicle,
+            "title": trm(f"Lap {number}") if number else lap_stem(entry.file.filename),
+            "time": format_laptime(entry.file.lap_time),
+            "s1": format_laptime(sectors[0]), "s2": format_laptime(sectors[1]), "s3": format_laptime(sectors[2]),
+            "best1": bests[0], "best2": bests[1], "best3": bests[2], **self.mark_values(entry, vehicle),
+            "checked": path in self.checked, "reference": path == self.reference_key,
+            "color": color, "dim": not entry.file.valid or entry.info.get("kind") in ("out", "in"),
+            "fastest": is_fastest, "count": 0, "error": path in self._failed and path in self.checked, "gap": gap,
+            "tip": self.entry_conditions(entry), "open": True, "hint": "",
+        }
+
+    def mark_values(self, entry: LapEntry, vehicle: str) -> dict:
+        """Lap row info & note: details not shown by session header (vehicle), kept state & note of recorded lap"""
         info = self.entry_text(entry, vehicle)
         note = ""
         if not entry.external:
@@ -1667,24 +2008,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             note = str(mark.get("note", ""))
             if mark.get("kept"):
                 info = ", ".join(filter(None, [info, tr("kept")]))
-        gap = ""
-        if best_lap > 0 and entry.file.lap_time > 0 and not entry.external:
-            difference = entry.file.lap_time - best_lap
-            gap = signed(difference, 3) if difference >= 0.0005 else ""
-        return {
-            "kind": "lap", "session": session, "path": entry.file.path,
-            "title": trm(f"Lap {number}") if number else lap_stem(entry.file.filename),
-            "time": format_laptime(entry.file.lap_time),
-            "s1": format_laptime(sectors[0]), "s2": format_laptime(sectors[1]), "s3": format_laptime(sectors[2]),
-            "best1": bests[0], "best2": bests[1], "best3": bests[2], "info": info, "note": note,
-            "checked": entry.file.path in self.checked, "reference": entry.file.path == self.reference_key,
-            "color": "", "dim": not entry.file.valid or entry.info.get("kind") in ("out", "in"),
-            "fastest": is_fastest, "count": 0, "error": entry.file.path in self._failed, "gap": gap,
-            "tip": self.entry_conditions(entry),
-        }
+        return {"info": info, "note": note}
 
     def lap_rows(self) -> list[dict]:
-        return [row for row in self.lap_model.rows if row["kind"] == "lap"]
+        """Lap rows, also of collapsed sessions (their checked laps are shown in charts)"""
+        return [row for row in self.lap_model.all_rows if row["kind"] == "lap"]
 
     def ordered_checked(self) -> list[str]:
         """Checked laps in list order"""
@@ -1692,10 +2020,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot(str)
     def toggleSession(self, key: str):
+        """Session expanded or collapsed: its lap rows added to or removed from list model"""
         if key in self._expanded:
             self._expanded = [session for session in self._expanded if session != key]
         else:
             self._expanded = [*self._expanded, key]
+        self.show_rows(self.lap_model.all_rows)
         self.listChanged.emit()
 
     @Slot(str)
@@ -1712,16 +2042,20 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot(str, str, bool)
     def selectRange(self, first: str, last: str, checked: bool):
-        """Shift+click: every lap listed between two laps checked (or unchecked)"""
+        """Shift+click: every lap seen between two laps checked (or unchecked, reference lap kept): laps of collapsed
+        sessions left as they are"""
         paths = [row["path"] for row in self.lap_rows()]
         if first not in paths or last not in paths:
             self.setLapChecked(last, checked)
             return
+        listed = {row["path"] for row in self.lap_model.rows} | {first, last}
         low, high = sorted((paths.index(first), paths.index(last)))
         for path in paths[low:high + 1]:
+            if path not in listed:
+                continue
             if checked:
                 self.checked.add(path)
-            else:
+            elif path != self.reference_key:
                 self.checked.discard(path)
         self.load_laps()
 
@@ -1740,6 +2074,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             return
         newest = laps[0]
         self.reference_key = best[0].path if best else newest.path
+        self._chosen_reference = ""  # best lap: follows new laps in live mode
         self.checked = {self.reference_key, newest.path}
         self.fill_list()
         self.load_laps()
@@ -1751,6 +2086,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if not best:
             return
         self.reference_key = best[0].path
+        self._chosen_reference = ""
         self.checked = {lap.path for lap in best}
         self.fill_list()
         self.load_laps()
@@ -1759,7 +2095,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def setReference(self, path: str):
         if not path:  # session header
             return
-        self.reference_key = path
+        self.reference_key = self._chosen_reference = path
         self.checked.add(path)
         self.load_laps()
 
@@ -1803,10 +2139,20 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         set_mark(path, kept=keep)
         self.marks_changed(path)
 
-    def marks_changed(self, path: str):
-        self._marks.pop(os.path.dirname(path), None)
-        self.fill_list()
-        self.update_list_state(self.data.laps)
+    def marks_changed(self, path: str = ""):
+        """Lap kept or noted (any lap if no path): its row changed in place, list built again while searching (marks
+        are searched)"""
+        if path:
+            self._marks.pop(os.path.dirname(path), None)
+        else:
+            self._marks.clear()
+        if self._filter:
+            self.fill_list()
+            self.update_list_state(self.data.laps)
+            return
+        entries = {entry.file.path: entry for entry in self.entries}
+        self.lap_model.update_rows(lambda row: self.mark_values(entries[row["path"]], row.get("vehicle", ""))
+                                   if row["path"] in entries and path in ("", row["path"]) else {})
 
     @Slot(str)
     def editNote(self, path: str):
@@ -1840,6 +2186,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 return
         if self._loader is not None:  # file read by background loading: deleted once loaded
             reading = [path for path in paths if path in self._loaded_paths]
+            if reading and not self._pending_delete:  # undo restores this deletion (pending part added to it)
+                self._undo = []
+                self.undoChanged.emit()
             self._pending_delete.extend(path for path in reading if path not in self._pending_delete)
             paths = [path for path in paths if path not in self._loaded_paths]
         if paths:
@@ -1849,8 +2198,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         """New trash batch folder (deletion time)"""
         return os.path.join(self.folder, TRASH_FOLDER, time.strftime("%Y-%m-%d %H-%M-%S"))
 
-    def apply_delete(self, paths: list[str]):
-        """Move laps to trash, forget their caches, undo kept"""
+    def apply_delete(self, paths: list[str], pending: bool = False) -> bool:
+        """Move laps to trash, forget their caches, undo kept (pending: laps deleted while being read, restored with
+        laps of same deletion), False if none moved"""
         batch = self.trash_folder()
         moved = []
         for path in paths:
@@ -1868,10 +2218,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             with suppress(OSError):
                 os.remove(os.path.join(self.limits_parts_folder(os.path.basename(os.path.dirname(path))),
                                        os.path.basename(path) + ".bin"))
-            moved.append((path, target, mark, path in self.checked))
+            moved.append((path, target, mark, path in self.checked, path == self.reference_key))
         if not moved:
-            return
-        gone = {path for path, _, _, _ in moved}
+            return False
+        gone = {item[0] for item in moved}
         for path in gone:
             self._marks.pop(os.path.dirname(path), None)
             self._lap_cache.pop(path, None)
@@ -1879,11 +2229,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.checked -= gone
         if self.reference_key in gone:
             self.reference_key = ""
-        self._undo = moved
+        self._undo = self._undo + moved if pending else moved
         self.undoChanged.emit()
-        self.set_status(trm(f"{len(moved)} lap(s) moved to trash"))
+        self.set_status(trm(f"{len(self._undo)} lap(s) moved to trash"))
         self.fill_list()
         self.load_laps()
+        return True
 
     @Property(str, notify=undoChanged)
     def undoText(self) -> str:
@@ -1892,11 +2243,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot()
     def undoDelete(self):
-        """Restore last deleted laps from trash (marks & check state too)"""
+        """Restore last deleted laps from trash (marks, check state & reference too)"""
         if not self._undo:
             return
         restored = []
-        for path, target, mark, checked in self._undo:
+        for path, target, mark, checked, reference in self._undo:
             if os.path.exists(path):
                 continue
             try:
@@ -1910,6 +2261,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             restored.append(path)
             if checked:
                 self.checked.add(path)
+            if reference:
+                self.reference_key = path
             for folder in (os.path.dirname(target), os.path.dirname(os.path.dirname(target))):
                 with suppress(OSError):  # trash track & batch folders removed once empty (never above)
                     os.rmdir(folder)
@@ -1917,7 +2270,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.undoChanged.emit()
         self._marks.clear()
         if self._track:
-            self.entries = [LapEntry(lap, self.lap_info(lap.path)) for lap in list_laps(self.folder, self._track)]
+            laps = list_laps(self.folder, self._track)
+            self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(self._track, laps))]
         self.set_status(trm(f"{len(restored)} lap(s) restored"))
         self.fill_list()
         self.load_laps()
@@ -1930,9 +2284,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         for path in paths:
             set_mark(path, kept=keep)
         if paths:
-            self._marks.clear()
-            self.fill_list()
-            self.update_list_state(self.data.laps)
+            self.marks_changed()
 
     @Slot()
     def deleteChecked(self):
@@ -1960,34 +2312,36 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             for path in paths:
                 if path in recorded:
                     set_mark(path, kept=action == "keep")
-            self._marks.clear()
-            self.fill_list()
-            self.update_list_state(self.data.laps)
+            self.marks_changed()
         elif action == "delete":
             self.deleteLaps(paths)
 
     # Added laps: other folders, MoTeC logs (see lap_export), imported laps library
     def add_external(self, lap_paths: list[str], reference_from: list[str] | None = None,
                      checked: list[str] | None = None):
-        """Show laps from other folders (checked laps only if given), fastest of reference_from laps set as
-        reference; laps of another driver's folder marked foreign"""
-        known = {entry.file.path for entry in self.all_entries()}
+        """Show laps from other folders (checked laps only if given, else every lap given, listed before or not),
+        fastest of reference_from laps set as reference; laps of another driver's folder marked foreign, laps of shown
+        track listed once (as track laps)"""
+        listed = {path_key(entry.file.path): entry.file.path for entry in self.all_entries()}
         added = []
         for lap_path in lap_paths:
-            path = os.path.normpath(lap_path)
-            if path in known or path in added:
+            key = path_key(lap_path)
+            if key in listed:
                 continue
+            path = os.path.normpath(lap_path)
             name = os.path.basename(path)
             self.external.append(LapEntry(
                 LapFile(name, path, is_valid_name(name), lap_time_of(name)), self.lap_info(path), external=True,
                 foreign=is_foreign(path)))
+            listed[key] = path
             added.append(path)
-        shown = added if checked is None else [os.path.normpath(path) for path in checked]
-        self.checked.update(path for path in shown if path in added or path in known)
+        shown = [listed.get(path_key(path), "") for path in (lap_paths if checked is None else checked)]
+        shown = [path for path in shown if path and path not in self.checked]
+        self.checked.update(shown)
         if reference_from:  # compare own laps with fastest imported lap
-            self.reference_key = os.path.normpath(min(
-                reference_from, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf")))
-        if added or reference_from:
+            fastest = min(reference_from, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
+            self.reference_key = self._chosen_reference = listed.get(path_key(fastest), os.path.normpath(fastest))
+        if added or shown or reference_from:
             self.fill_list()
             self.load_laps()
 
@@ -2016,6 +2370,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.external = external
         if self.reference_key in moved:
             self.reference_key = moved[self.reference_key]
+        self._chosen_reference = moved.get(self._chosen_reference, self._chosen_reference)
         self.fill_list()
         self.load_laps()
 
@@ -2094,15 +2449,16 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         failed = [path for path, lap in self._loaded.items() if lap is None]
         for path, lap in self._loaded.items():
             self.store_lap(path, lap)
+        self._failed.update(failed)  # not read again by load_laps below (read again once checked again, refresh)
         self._loaded = {}
         if failed:
             self.set_status(trm(f"Unable to load lap: {html.escape(os.path.basename(failed[0]))}"))
         else:  # message shown before loading (new lap) shown again
             self.set_status(self._load_message)
-        if self._pending_delete:  # deleted while loading
+        if self._pending_delete:  # deleted while loading: laps list & charts updated by deletion if any lap moved
             paths, self._pending_delete = self._pending_delete, []
-            self.apply_delete(paths)
-            return
+            if self.apply_delete(paths, pending=True):
+                return
         self.load_laps()
 
     def is_loading(self) -> bool:
@@ -2123,24 +2479,29 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     def load_laps(self):
         paths = self.ordered_checked()
-        if paths and self.reference_key not in paths:
-            self.reference_key = paths[0]
+        if paths and self.reference_key not in paths:  # lap of current track first (added laps listed on top)
+            track_paths = {entry.file.path for entry in self.entries}
+            self.reference_key = next((path for path in paths if path in track_paths), paths[0])
+        paths = self.drop_other_circuits(paths)
         ordered = sorted(paths, key=lambda path: path != self.reference_key)  # reference first
+        for path in ordered:  # unreadable lap checked again: read again (file may be readable now, antivirus lock)
+            if path not in self._failed and path in self._lap_cache and self._lap_cache[path] is None:
+                del self._lap_cache[path]
         missing = [path for path in ordered if path not in self._lap_cache]
         if self._loader is not None or len(missing) >= lap_viewer.BACKGROUND_LOAD_COUNT:
             self.update_list_state(self.data.laps)
             self.load_in_background(missing)
             return
-        self.save_selection(paths)
         entries = {entry.file.path: entry for entry in self.all_entries()}
         loaded = [(path, self.read_lap(path)) for path in ordered]
         self._failed = {path for path, lap_data in loaded if lap_data is None}
+        if self.reference_key in self._failed:  # first lap read is reference (star, compared laps, exports, saved)
+            self.reference_key = next((path for path, lap_data in loaded if lap_data is not None), self.reference_key)
+        self.save_selection(paths)
         slots = self.assign_colors([path for path, lap_data in loaded if lap_data is not None])
-        reference = next((lap_data for path, lap_data in loaded if path == self.reference_key and lap_data), None)
         laps = [
             PlotLap(path, self.entry_label(entries.get(path), path), lap_data, lap_color(slots[path]),
-                    self.is_clean(entries.get(path), path, lap_data),
-                    reference is None or same_circuit(reference, lap_data))
+                    self.is_clean(entries.get(path), path, lap_data))
             for path, lap_data in loaded if lap_data is not None
         ]
         self.build_labels(laps)
@@ -2153,18 +2514,24 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self.viewRestored.emit(*self._restore_view)
             self._restore_view = None
 
+    def drop_other_circuits(self, paths: list[str]) -> list[str]:
+        """Checked laps driven on another circuit than reference lap unchecked (told in status line): never drawn
+        nor compared with it (added lap of another track, laps kept checked when track changes)"""
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        reference = LapData("", {}, infos.get(self.reference_key, {}))
+        others = [path for path in paths if not same_circuit(reference, LapData("", {}, infos.get(path, {})))]
+        if not others:
+            return paths
+        self.checked.difference_update(others)
+        names = sorted({str(infos[path].get("track") or os.path.basename(os.path.dirname(path))) for path in others})
+        self.set_status(trm(f"Laps from another circuit, not compared with reference lap: {', '.join(names)}"))
+        return [path for path in paths if path not in others]
+
     @staticmethod
     def laps_warning(laps: list[PlotLap]) -> str:
-        """Shown laps not alike: driven with different vehicles, or on another circuit than reference lap"""
-        warnings = []
+        """Shown laps not alike: driven with different vehicles"""
         vehicles = sorted({str(lap.data.meta.get("vehicle")) for lap in laps if lap.data.meta.get("vehicle")})
-        if len(vehicles) > 1:
-            warnings.append(trm(f"Laps from different vehicles: {', '.join(vehicles)}"))
-        others = sorted({str(lap.data.meta.get("track") or os.path.basename(os.path.dirname(lap.key)))
-                         for lap in laps if not lap.comparable})
-        if others:
-            warnings.append(trm(f"Laps from another circuit, not counted in ideal lap: {', '.join(others)}"))
-        return " · ".join(warnings)
+        return trm(f"Laps from different vehicles: {', '.join(vehicles)}") if len(vehicles) > 1 else ""
 
     @staticmethod
     def is_clean(entry: LapEntry | None, path: str, lap: LapData) -> bool:
@@ -2185,31 +2552,44 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return f"{label} · {where}" if where else label
 
     def update_list_state(self, laps: list[PlotLap]):
-        """Check marks, lap colors, reference & errors in lap list (in place: list keeps scroll position)"""
+        """Check marks, lap colors, reference, errors & other circuit hints in lap list (in place: list keeps scroll
+        position)"""
         colors = {lap.key: lap.color.name() for lap in laps}
+        hint = self.circuit_hints()  # reference may have changed
         self.lap_model.update_rows(lambda row: {
             "checked": row["path"] in self.checked,
             "reference": bool(row["path"]) and row["path"] == self.reference_key,
             "color": colors.get(row["path"], ""),
             "error": row["path"] in self._failed and row["path"] in self.checked,
+            **hint(row),
         })
 
     # Memory release while page is in background
     def page_hidden(self):
+        self._hidden = True
         self._release_timer.start()
+        self.pageHidden.emit()  # playing lap would keep moving cursor (backend calls every frame) while hidden
 
     def page_shown(self):
+        self._hidden = False
         self._release_timer.stop()
-        if self._released:  # same laps & zoom as before
-            self._released = False
+        released, self._released = self._released, False
+        if released:  # same laps & zoom as before
             view = self._released_view
             self._restore_view = view if view[1] > view[0] else None
+        if self._refresh_pending:  # laps recorded while hidden: listed now (new lap compared in live mode)
+            self._refresh_pending = False
+            self.auto_refresh()
+        if released and not self.data.laps and self._loader is None:  # not read by list update
             self.load_laps()
 
     @Slot()
     def release_laps(self):
         """Free memory of loaded laps (several MB each) while page is hidden, see page_shown"""
-        if self._window.isVisible() or self._released or self._loader is not None:
+        if self._window.isVisible() or self._released:
+            return
+        if self._loader is not None:  # released once loading is done
+            self._release_timer.start()
             return
         self._released_view = self._chart_view
         self._lap_cache.clear()
@@ -2265,7 +2645,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self._side_tab = index
             save_viewer_setting(self.folder, side_tab=index)
             self.optionsChanged.emit()
-        if index == 1:  # G circle: zoomed part of charts (not followed while hidden)
+        if index == 1 and self._gcircle_stale:  # laps changed while G circle was hidden: built now
+            self.build_gcircle()
+            self.bump_revision()
+            self.gCircleChanged.emit()
+        elif index == 1:  # G circle: zoomed part of charts (not followed while hidden)
             self.update_gcircle_zoom()
         if index == 4:  # session tab: values read from lap files
             self.start_session_job()
@@ -2344,7 +2728,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 if panel["column"] == column:
                     panel["weight"] = self._weights[column]
             self._panels = [dict(panel) for panel in self._panels]
-            self.chartChanged.emit()
+            self.panelsChanged.emit()
 
     @Slot()
     def resetPanelWeights(self):
@@ -2354,7 +2738,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     # Charts
     def series_key(self, lap: PlotLap, channel: Channel) -> str:
-        return f"{self.prefix}{lap.key}|{channel.column}|{self.data.signature(channel)}{self.shift_key(lap.key, channel)}"
+        signature = self.data.signature(channel, lap)  # only rescaled laps drawn again (reference lap changed)
+        return f"{self.prefix}{lap.key}|{channel.column}|{signature}{self.shift_key(lap.key, channel)}"
 
     def rebuild_chart(self):
         """Vertices & properties of every view from displayed laps"""
@@ -2375,19 +2760,19 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.build_panels()
         self.build_overview()
         self.build_map()
-        self.build_gcircle()
+        self.build_gcircle()  # only if its tab is shown, else once shown
         self.drop_unused_vertices()
         self.bump_revision()
         self.chartChanged.emit()
         self.mapChanged.emit()
         self.channelsChanged.emit()  # channels available in shown laps
         self.pinChanged.emit()
+        if not self._gcircle_stale:
+            self.gCircleChanged.emit()
 
     @staticmethod
     def excluded_text(lap: PlotLap) -> str:
         """Why lap never counts in ideal lap & mini-sectors (legend tooltip), empty if it may"""
-        if not lap.comparable:
-            return tr("Not counted in ideal lap & mini-sectors (other circuit)")
         if not lap.clean:
             return tr("Not counted in ideal lap & mini-sectors (invalid, out or in lap)")
         return ""
@@ -2741,17 +3126,17 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return self.session_data()
 
     # Corners (see lap_corners)
-    @Property(list, notify=chartChanged)
+    @Property(list, notify=cornersChanged)
     def coaching(self) -> list[dict]:
         """Corners where compared lap loses most time (up to 3): row index, name, time lost, causes"""
         return self._coaching
 
-    @Property(str, notify=chartChanged)
+    @Property(str, notify=cornersChanged)
     def coachingLap(self) -> str:
         lap = self.compared_lap()
         return self.short_label(lap.key) if lap is not None else ""
 
-    @Property(list, notify=chartChanged)
+    @Property(list, notify=cornersChanged)
     def cornerRanges(self) -> list[list[float]]:
         """Axis range of every corner in lap order (previous / next corner keys)"""
         return [self.cornerRange(index) for index in range(len(self._corner_rows))]
@@ -2896,12 +3281,19 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 "title": channel_title(channel)}
 
     # G circle: right turn on the right, braking at bottom
-    def build_gcircle(self):
+    def build_gcircle(self, now: bool = False):
+        """Dots & grip envelope of each shown lap, built only while G circle tab is shown or if now (laps changed
+        while hidden: built once shown or read, see gCircle)"""
         self._g_points = []
         peaks = []
         shown = {lap.key for lap in self.data.laps}
         self._g_laps = {name: value for name, value in self._g_laps.items() if name in shown}
         self._g_drawn = {name: value for name, value in self._g_drawn.items() if name in shown}
+        self._gcircle_stale = self._side_tab != 1 and not now
+        if self._gcircle_stale:  # vertices of laps still shown kept (not built again), of other laps dropped
+            kept = [item for item in self._gcircle.get("dots", []) if item["lap"] in shown]
+            self._gcircle = {"dots": kept} if kept else {}
+            return
         for lap in self.data.laps:
             cached = self._g_laps.get(lap.key)
             if cached is None or cached[0] is not lap.data:
@@ -2947,6 +3339,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot(float, result=list)
     def gCursor(self, x: float) -> list[dict]:
+        if self._gcircle_stale:
+            self.build_gcircle(True)
         points = []
         for distances, xs, ys, lap in self._g_points:
             distance = self.data.lap_distance_at_x(lap, x)
@@ -2956,24 +3350,41 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     # Replay
     def replay_target(self, lap: PlotLap, x: float) -> tuple[str, float] | None:
-        """Replay file covering lap & position in it at axis position, None if no replay recorded then"""
+        """Replay file covering lap & position in it at axis position, None if no replay recorded then
+
+        Lap end: exact time of lap info if recorded ("finished"), else file name date (whole seconds: middle of that
+        second). Imported MoTeC laps without a log date (named at import time) are never linked.
+        """
         from ...replay import list_replays
 
-        timestamp = lap_timestamp_of(os.path.basename(lap.key))  # lap end: real time, or replay time if replayed
+        meta = lap.data.meta
+        finished = meta.get("finished")
+        if isinstance(finished, (int, float)) and not isinstance(finished, bool) and finished > 0:
+            timestamp = float(finished)
+        elif meta.get("source") == "MoTeC":
+            return None
+        else:  # lap end: real time, or replay time if replayed
+            timestamp = lap_timestamp_of(os.path.basename(lap.key)) + 0.5
         lap_time = lap.data.lap_time or lap_time_of(os.path.basename(lap.key))
-        if timestamp <= 0 or lap_time <= 0:
+        if timestamp <= 0.5 or lap_time <= 0:
             return None
         distances, times = self.data.lap_times(lap)
         at = interpolate(distances, times, self.data.lap_distance_at_x(lap, x)) if distances else 0.0
         moment = timestamp - lap_time + at
-        replayed = str(lap.data.meta.get("replay", ""))
+        replayed = str(meta.get("replay", ""))
         candidates = list_replays(cfg.path.telemetry or ".")
         if replayed:  # lap recorded while replaying: that replay first
             candidates.sort(key=lambda item: os.path.basename(item.filename) != replayed)
         for item in candidates:
-            end = item.created + (item.duration if item.duration >= 0 else 86400)
+            if item.duration >= 0:
+                end = item.created + item.duration
+            else:  # interrupted recording: written until file last changed
+                try:
+                    end = os.path.getmtime(item.filename)
+                except OSError:
+                    continue
             if item.created - 2 <= moment <= end + 2:
-                return item.filename, max(moment - item.created, 0.0)
+                return item.filename, min(max(moment - item.created, 0.0), max(end - item.created, 0.0))
         return None
 
     @Slot(float, str)

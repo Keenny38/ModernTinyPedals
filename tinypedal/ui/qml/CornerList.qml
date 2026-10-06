@@ -39,10 +39,17 @@ Item {
             Slider {
                 id: slider
                 Layout.fillWidth: true
+                focusPolicy: Qt.NoFocus  // arrows stay for charts
                 from: 3; to: 40; stepSize: 1
                 value: backend.hysteresis
-                // Corners found again once released (dragging stays smooth)
-                onPressedChanged: if (!pressed && Math.round(value) !== backend.hysteresis) backend.setHysteresis(Math.round(value))
+                function apply() {
+                    applyTimer.stop()
+                    if (Math.round(value) !== backend.hysteresis) backend.setHysteresis(Math.round(value))
+                }
+                // Corners found again once released, or once value stays a moment (dragging stays smooth)
+                onMoved: applyTimer.restart()
+                onPressedChanged: if (!pressed) apply()
+                Timer { id: applyTimer; interval: 400; onTriggered: slider.apply() }
                 ToolTip.visible: hovered
                 ToolTip.text: i18n.tr("Speed drop & rise counted as a corner: lower finds more corners")
             }

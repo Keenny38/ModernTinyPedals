@@ -66,7 +66,7 @@ def laptime_text(laptime: float, valid: bool = True) -> str:
 
 def _compound(name: str) -> tuple[str, QColor]:
     """Compound symbol & color (compound presets may be edited: not cached)"""
-    return select_compound_symbol(name), _qcolor(select_compound_color(name))
+    return select_compound_symbol(name), _qcolor(select_compound_color(name, text=False))  # badge
 
 
 def compound_cell(names: tuple[str, ...], per_wheel: bool = True) -> Cell:

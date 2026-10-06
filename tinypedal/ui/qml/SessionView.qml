@@ -44,6 +44,11 @@ Item {
 
         ComboBox {
             id: sessionBox
+            focusPolicy: Qt.NoFocus  // arrows & Space stay for charts (else ↓ switched session)
+            Connections {  // keys back to charts (closed popup gives them to window)
+                target: sessionBox.popup
+                function onClosed() { if (root.chart) root.chart.forceActiveFocus() }
+            }
             Layout.fillWidth: true
             implicitHeight: Math.round(theme.em * 2.2)
             model: backend.sessions.map(function(item) { return item.title })

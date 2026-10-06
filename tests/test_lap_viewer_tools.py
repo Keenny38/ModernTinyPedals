@@ -332,8 +332,8 @@ def test_live_mode_compares_new_lap(viewer, laps):  # noqa: F811
     new = save(5, 69.0, BASE + 500)
     backend.auto_refresh()
     wait_loaded(viewer)
-    assert new in rows_by_path(backend) and set(backend.ordered_checked()) == {new}
-    assert backend.reference_key == new  # new lap is best lap
+    assert new in rows_by_path(backend) and set(backend.ordered_checked()) == {new, laps[1]}
+    assert backend.reference_key == laps[1]  # new lap is best lap: compared with former best lap
     newer = save(6, 75.0, BASE + 600)
     backend.auto_refresh()
     wait_loaded(viewer)

@@ -41,7 +41,6 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QStat
 
 from ...const_file import FontFile
 from .._base import Overlay
-from .._style import GLOBAL_THEME
 from .draw import drawable
 from .theme import Theme, build_theme
 
@@ -104,7 +103,7 @@ class ModernOverlay(Overlay):
     def __init__(self, config, widget_name):
         super().__init__(config, widget_name)
         style = self.cfg.user.config["overlay_style"]
-        self.theme = build_theme(style, self.wcfg.get("widget_theme", GLOBAL_THEME))
+        self.theme = build_theme(style)
         self.unit = max(self.design_unit(), 6.0)
         self.font_family = design_font_family(style)
         corner = min(max(float(style.get("corner_radius_scale", DEFAULT_CORNER_SCALE)), 0.0), 0.5)

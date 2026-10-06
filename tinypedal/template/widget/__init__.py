@@ -123,6 +123,7 @@ WIDGET_DISPLAY_ORDER = (
     "suspension_position",
     "suspension_travel",
     "system_performance",
+    "telemetry_compare",
     "timing",
     "track_clock",
     "track_map",

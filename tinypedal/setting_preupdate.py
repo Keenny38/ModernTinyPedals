@@ -32,6 +32,8 @@ def preupdate_global_setting(preset_version: tuple[int, int, int], dict_user: di
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 50, 4), _global_prior_2_50_4),  # 2026-10-06
+        ((2, 50, 3), _global_prior_2_50_3),  # 2026-10-06
         ((2, 43, 0), _global_prior_2_43_0),  # 2026-03-09
     )
     for _version, _update in reversed(target_versions):
@@ -67,6 +69,28 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
 
 
 # Global setting update function
+def _global_prior_2_50_4(dict_user: dict):
+    # Themes reduced to Modern Dark, Modern Light, Legacy Dark, Legacy Light: Modern Dark for everyone (once),
+    # app window & overlays; former Colorblind Safe overlay theme kept as colorblind safe colors
+    application = dict_user.get("application")
+    if isinstance(application, dict):
+        application["window_color_theme"] = "Modern Dark"
+    style = dict_user.get("overlay_style")
+    if isinstance(style, dict):
+        style.pop("enable_modern_style", None)
+        if style.get("overlay_theme") == "Colorblind Safe":
+            style["enable_colorblind_colors"] = True
+        style["overlay_theme"] = "Modern Dark"
+
+
+def _global_prior_2_50_3(dict_user: dict):
+    # New default navigation bar & home quick access for everyone (once): removed entries are added back as default
+    application = dict_user.get("application")
+    if isinstance(application, dict):
+        application.pop("rail_items", None)
+        application.pop("home_quick_access", None)
+
+
 def _global_prior_2_43_0(dict_user: dict):
     # Rename all "bkg_color" to "background_color"
     for option in dict_user.values():

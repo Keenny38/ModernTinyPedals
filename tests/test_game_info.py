@@ -158,7 +158,7 @@ def test_chat_lines_wrap_hide_and_highlight():
 def test_chat_widget(ui_env, monkeypatch, modern):
     from tinypedal.widget._modern import create_widget
 
-    cfg.user.config["overlay_style"]["enable_modern_style"] = modern
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     cfg.user.setting["chat"]["number_of_lines"] = 3
     monkeypatch.setattr(api.read.session, "chat_messages",
                         lambda: tuple(game_info.parse_chat(CHAT, ())))

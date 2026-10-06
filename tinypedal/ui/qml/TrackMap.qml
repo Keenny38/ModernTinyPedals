@@ -236,12 +236,26 @@ FocusScope {
         onTriggered: root.card = row >= 0 ? backend.cornerCard(row) : ({})
     }
 
+    // Digit of key (0-9, else -1), also digit row of layouts typing other characters there without Shift
+    // (French AZERTY: & é " ' ( - è _ ç à): Windows scan codes of digit row 1-9, 0
+    function digitOf(event) {
+        if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) return event.key - Qt.Key_0
+        if (Qt.platform.os === "windows" && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) === 0
+                && event.nativeScanCode >= 0x02 && event.nativeScanCode <= 0x0B)
+            return (event.nativeScanCode - 1) % 10
+        return -1
+    }
+
     Keys.onPressed: function(event) {
+        var digit = digitOf(event) - 1  // keys 1-9: coloring, before zoom (AZERTY 6 & 8 type - & _)
+        if (digit >= 0 && digit < Math.min(modes.length, 9)) {
+            backend.setMapMode(modes[digit][0])
+            event.accepted = true
+            return
+        }
         if (canvas.handleKey(event.key)) { event.accepted = true; return }  // + / - zoom, arrows move
-        var digit = event.key - Qt.Key_1
         if (event.key === Qt.Key_F) canvas.reset(true)
         else if (event.key === Qt.Key_R) backend.rotateMap()
-        else if (digit >= 0 && digit < Math.min(modes.length, 9)) backend.setMapMode(modes[digit][0])
         else if (event.key === Qt.Key_B) togglePoint("brake")
         else if (event.key === Qt.Key_C) togglePoint("apex")
         else if (event.key === Qt.Key_S) togglePoint("exit")
@@ -252,10 +266,10 @@ FocusScope {
         else if (event.key === Qt.Key_Z) backend.setMapOption("zones", !(options.zones === true))
         else if (event.key === Qt.Key_T) backend.setMapOption("trail", !(options.trail === true))
         else if (event.key === Qt.Key_M) { rulerMode = !rulerMode; rulerPoints = [] }
-        else if (event.key === Qt.Key_Escape) {
+        else if (event.key === Qt.Key_Escape) {  // never left to viewer window: Esc there closes it
             if (rulerMode || rulerPoints.length) { rulerMode = false; rulerPoints = [] }
             else if (expanded) expandToggled()
-            else return
+            else if (chart) chart.forceActiveFocus()  // keys back to charts
         }
         else return
         event.accepted = true
@@ -763,7 +777,7 @@ FocusScope {
                 Item {
                     id: car
                     readonly property var point: root.chart && root.chart.cursorMap[index] ? root.chart.cursorMap[index] : null
-                    readonly property real size: theme.em * (index === 0 ? 1.15 : 0.95)
+                    readonly property real size: theme.em * (model.reference ? 1.15 : 0.95)  // reference lap larger
                     visible: point !== null
                     x: point ? canvas.screenX(point.x) : 0
                     y: point ? canvas.screenY(point.y) : 0
@@ -1221,7 +1235,7 @@ FocusScope {
                 HoverHandler { id: officialHover }
                 ToolTip.visible: officialHover.hovered
                 ToolTip.delay: 400
-                ToolTip.text: i18n.tr("Track center path & pit lane given by Le Mans Ultimate") + (root.info.layout ? " (" + root.info.layout + ")" : "")
+                ToolTip.text: i18n.tr("Circuit path & pit lane given by Le Mans Ultimate") + (root.info.layout ? " (" + root.info.layout + ")" : "")
             }
             Text {
                 visible: backend.limitsSource !== "" && root.options.limits !== false

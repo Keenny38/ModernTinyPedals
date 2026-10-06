@@ -96,6 +96,7 @@ TRANSLATION = MappingProxyType({
     "Remember Position": "Mémoriser la position",
     "Remember Size": "Mémoriser la taille",
     "Reopen Pages at Startup": "Rouvrir les pages au démarrage",
+    "Reset Window Size and Position": "Réinitialiser la taille et la position de la fenêtre",
     "Remember Open Pages": "Mémoriser les pages ouvertes",
     "Restart Modern Tiny Pedals": "Redémarrer Modern Tiny Pedals",
 
@@ -174,9 +175,7 @@ TRANSLATION = MappingProxyType({
     "Show every option, including colors, thresholds and labels": "Afficher toutes les options, y compris couleurs, seuils et libellés",
     "Color Theme...": "Thème de couleurs...",
     "Default": "Par défaut",
-    "High Contrast": "Contraste élevé",
     "Colorblind Safe": "Adapté aux daltoniens",
-    "Soft": "Doux",
     "Set every color to a theme (saved only with Apply or Save)": "Appliquer un thème à toutes les couleurs (enregistré seulement avec Appliquer ou Enregistrer)",
     "Reset options of this section to default": "Réinitialiser les options de cette section",
     "Set by": "Défini par",
@@ -761,6 +760,7 @@ TRANSLATION = MappingProxyType({
     "Utilities": "Utilitaires",
     "Editors": "Éditeurs",
     "Management": "Gestion",
+    "Advanced": "Avancé",
     "Import preset package (.zip) or share code": "Importer un paquet de presets (.zip) ou un code de partage",
     "Preset Package (.zip)...": "Paquet de presets (.zip)...",
     "Share Code...": "Code de partage...",
@@ -804,6 +804,51 @@ TRANSLATION = MappingProxyType({
     "Clear Filters": "Effacer les filtres",
     "Enable Shown": "Activer les affichés",
     "Disable Shown": "Désactiver les affichés",
+    # Modules page (cards: what each module computes, overlays using its data)
+    "Search modules": "Rechercher un module",
+    "Modules compute the data that overlays show (lap times, fuel, positions...). A module turned off computes "
+    "nothing: overlays using its data stay empty.":
+        "Les modules calculent les données affichées par les overlays (temps au tour, carburant, positions…). "
+        "Un module désactivé ne calcule plus rien : les overlays qui utilisent ses données restent vides.",
+    "Enable Them": "Les activer",
+    "1 module could not start, see log.": "1 module n'a pas pu démarrer, voir le journal.",
+    "Module could not start, see log (Help menu)": "Le module n'a pas pu démarrer, voir le journal (menu Aide)",
+    "No module matches the search": "Aucun module ne correspond à la recherche",
+    "Needed by 1 enabled overlay": "Nécessaire à 1 overlay activé",
+    "1 enabled overlay uses it": "1 overlay activé l'utilise",
+    "Used by 1 overlay, not enabled": "Utilisé par 1 overlay, non activé",
+    "Enabled overlays using it:": "Overlays activés qui l'utilisent :",
+    "Modules using it:": "Modules qui l'utilisent :",
+    "Lap times and deltas: current, last and best lap, delta to best, session, stint or last lap, "
+    "lap pace and validity.":
+        "Temps au tour et deltas : tour en cours, dernier et meilleur tour, delta au meilleur tour, à la session, "
+        "au relais ou au dernier tour, rythme et validité du tour.",
+    "G forces, front and rear downforce, braking rate.": "Forces G, appui avant et arrière, intensité de freinage.",
+    "Fuel and virtual energy: consumption per lap, laps and time left, amount to add, pit stops to the finish.":
+        "Carburant et énergie virtuelle : consommation par tour, tours et temps restants, quantité à ajouter, "
+        "arrêts jusqu'à l'arrivée.",
+    "Battery charge, drain and regeneration per lap, electric motor state.":
+        "Charge de la batterie, consommation et récupération par tour, état du moteur électrique.",
+    "Track map: records the layout of each track with elevation, sectors, pit entry and exit.":
+        "Carte du circuit : enregistre le tracé de chaque circuit avec le dénivelé, les secteurs, l'entrée et la "
+        "sortie des stands.",
+    "Pace notes and track notes at the current position on track.":
+        "Notes de pilotage et notes de piste à la position actuelle sur le circuit.",
+    "Records the telemetry of each lap for the Lap Telemetry Viewer, and session replays.":
+        "Enregistre la télémétrie de chaque tour pour la visionneuse de télémétrie, et les replays des sessions.",
+    "Relative and standings order of every car, for the timing overlays.":
+        "Ordre du relatif et du classement de toutes les voitures, pour les overlays de chronométrage.",
+    "Best sectors of the session and of all time, theoretical best lap.":
+        "Meilleurs secteurs de la session et de tous les temps, meilleur tour théorique.",
+    "Driver stats and session history for the Driver Stats Viewer, car setup backups.":
+        "Statistiques et historique des sessions pour la page Statistiques pilote, sauvegarde des réglages de voiture.",
+    "Stint and consumption history of past laps and stints.":
+        "Historique des relais et de la consommation des tours et relais passés.",
+    "Data of every car: class, laps, gaps, pit stops, nearest traffic, blue and yellow flags.":
+        "Données de chaque voiture : classe, tours, écarts, arrêts aux stands, trafic proche, drapeaux bleus et jaunes.",
+    "Tyre and brake wear per lap, wheel locking, suspension travel, weight distribution and slip.":
+        "Usure des pneus et des freins par tour, blocage des roues, débattement des suspensions, répartition des "
+        "masses et glissement.",
     "Page": "Page",
     "Command Palette": "Palette de commandes",
     "Search pages, widgets, tools, presets, options...": "Rechercher pages, widgets, outils, presets, options...",
@@ -860,7 +905,7 @@ TRANSLATION = MappingProxyType({
     "Previous Zoom": "Zoom précédent",
     "Right edge": "Bord droit",
     "Room to edge: outside at braking, inside at apex, outside at exit": "Marge au bord : extérieur au freinage, intérieur à la corde, extérieur en sortie",
-    "Track center path & pit lane given by Le Mans Ultimate": "Ligne centrale de la piste et voie des stands fournies par Le Mans Ultimate",
+    "Circuit path & pit lane given by Le Mans Ultimate": "Tracé du circuit et voie des stands fournis par Le Mans Ultimate",
     "Track limits exceeded": "Limites de piste dépassées",
     "Tyre wear": "Usure des pneus",
     'Where 2 wheels or more go on grass, dirt or gravel (laps recorded with this version)': "Où 2 roues ou plus passent dans l'herbe, la terre ou le gravier (tours enregistrés avec cette version)",
@@ -1000,7 +1045,6 @@ TRANSLATION = MappingProxyType({
     "Web Dashboard": "Tableau de bord web",
     "Web Dashboard Address...": "Adresse du tableau de bord web...",
     "Web dashboard is disabled. Enable it from Config menu, Web Dashboard.": "Le tableau de bord web est désactivé. Activez-le depuis le menu Réglages, Tableau de bord web.",
-    "Overlay Theme Editor": "Éditeur de thème de l'overlay",
     "Preset Comparison": "Comparaison de presets",
     "Plugin Manager": "Gestionnaire de plugins",
     "Setup Wizard": "Assistant de configuration",
@@ -1050,14 +1094,64 @@ TRANSLATION = MappingProxyType({
     "Window theme": "Thème de la fenêtre",
     "Which game do you play?": "À quel jeu jouez-vous ?",
     "Modern Tiny Pedals reads telemetry from the selected game.": "Modern Tiny Pedals lit la télémétrie du jeu sélectionné.",
-    "Overlay style": "Apparence de l'overlay",
-    "Colors of the in-game widgets.": "Couleurs des widgets en jeu.",
     "Modern font (JetBrains Mono)": "Police moderne (JetBrains Mono)",
     "Overlay theme": "Thème de l'overlay",
-    "Preset and widgets": "Preset et widgets",
-    "A preset stores the layout and options of all widgets.": "Un preset enregistre la disposition et les options de tous les widgets.",
-    "Create a new preset": "Créer un nouveau preset",
-    "Enable widgets:": "Widgets à activer :",
+    # Setup wizard (Qt Quick): steps, game, units, appearance, overlays, summary
+    "Welcome": "Bienvenue",
+    "Appearance": "Apparence",
+    "How overlays show speed, temperature, fuel, pressure and weight.":
+        "Comment les overlays affichent la vitesse, la température, le carburant, la pression et le poids.",
+    "Colors of the app window and of the in-game overlays.": "Couleurs de la fenêtre de l'application et des overlays en jeu.",
+    "Preset and overlays": "Preset et overlays",
+    "A preset stores the layout and options of all overlays.":
+        "Un preset enregistre la disposition et les options de tous les overlays.",
+    "Ready to race": "Prêt à rouler",
+    "Check your choices, then finish to start the overlays.":
+        "Vérifiez vos choix, puis terminez pour lancer les overlays.",
+    "Every choice can be changed later.": "Tous les choix pourront être modifiés plus tard.",
+    "Quit the setup wizard?": "Quitter l'assistant de configuration ?",
+    "Continue Setup": "Continuer la configuration",
+    "Your choices will not be applied. Open the wizard again any time from Help > Setup Wizard.":
+        "Vos choix ne seront pas appliqués. Rouvrez l'assistant à tout moment depuis Aide > Assistant de configuration.",
+    "Back": "Précédent",
+    "Next": "Suivant",
+    "Finish Setup": "Terminer",
+    "What you will set up": "Ce que vous allez configurer",
+    "Takes about a minute. Nothing is changed until you finish.":
+        "Environ une minute. Rien ne change avant la fin.",
+    "Uses the shared memory of the game: nothing to install.": "Utilise la mémoire partagée du jeu : rien à installer.",
+    "Through the rF2 Shared Memory Map plugin (Linux, older game versions).":
+        "Par le plugin rF2 Shared Memory Map (Linux, anciennes versions du jeu).",
+    "Needs the rF2 Shared Memory Map plugin, enabled in the game.":
+        "Nécessite le plugin rF2 Shared Memory Map, activé dans le jeu.",
+    "Metric": "Métrique",
+    "Imperial": "Impérial",
+    "Keep current units": "Garder les unités actuelles",
+    "Saved in the preset. Each unit can also be set on its own later.":
+        "Enregistré dans le preset. Chaque unité peut aussi être réglée séparément plus tard.",
+    "App window": "Fenêtre de l'application",
+    "In-game overlays": "Overlays en jeu",
+    "Preview": "Aperçu",
+    "Preset to use": "Preset à utiliser",
+    "Existing preset": "Preset existant",
+    "Enter a preset name": "Saisissez un nom de preset",
+    "This name is reserved, choose another one": "Ce nom est réservé, choisissez-en un autre",
+    "A preset with this name already exists": "Un preset porte déjà ce nom",
+    "Overlays to show": "Overlays à afficher",
+    "Recommended": "Recommandés",
+    "Overlays not listed here keep their state in this preset.":
+        "Les overlays absents de cette liste gardent leur état dans ce preset.",
+    "new": "nouveau",
+    "Good to know": "Bon à savoir",
+    "Overlays show while you drive and hide in the game menus (Auto Hide).":
+        "Les overlays s'affichent quand vous roulez et se masquent dans les menus du jeu (Masquage auto).",
+    "Drag an overlay to place it, then use Lock Overlay so it stays put.":
+        "Faites glisser un overlay pour le placer, puis verrouillez les overlays pour qu'ils restent en place.",
+    "Ctrl+K searches and runs anything in the app.": "Ctrl+K cherche et lance n'importe quoi dans l'application.",
+    "Open this wizard again from Help > Setup Wizard.":
+        "Rouvrez cet assistant depuis Aide > Assistant de configuration.",
+    "Setup complete. Overlays show once you are driving.":
+        "Configuration terminée. Les overlays s'affichent dès que vous roulez.",
     # Audit fixes (package C)
     # - app: main window, config pages, updates, about
     "no change": "aucun changement",
@@ -1139,7 +1233,7 @@ TRANSLATION = MappingProxyType({
     "Select Color": "Choisir une couleur",
     "Create a theme to start.": "Créez un thème pour commencer.",
     "Unable to save themes, see log for details.": "Impossible d'enregistrer les thèmes, voir le journal.",
-    "Telemetry Replay": "Rejeu de télémétrie",
+    "Session Recorder": "Enregistreur de session",
     "Recording": "Enregistrement",
     "Record Le Mans Ultimate shared memory while driving.": "Enregistre la mémoire partagée de Le Mans Ultimate pendant que vous roulez.",
     "Open Replay...": "Ouvrir un rejeu...",
@@ -1171,6 +1265,7 @@ TRANSLATION = MappingProxyType({
     "Map": "Carte",
     "Heatmap": "Heatmap",
     "Compounds": "Gommes",
+    "Recorder": "Enregistreur",
     "Brands": "Marques",
     "Classes": "Classes",
     "Tracks": "Circuits",
@@ -1639,6 +1734,129 @@ TRANSLATION = MappingProxyType({
     "Delete Temporary Files": "Supprimer les fichiers temporaires",
     "No temporary file left by the game.": "Aucun fichier temporaire laissé par le jeu.",
     "%1 replays, %2, %3 protected": "%1 rejeux, %2, %3 protégés",
+    # Race results page (results files of the game)
+    "Race Results": "Résultats de course",
+    "Classification": "Classement",
+    "Positions": "Positions",
+    "Events": "Événements",
+    "Winner": "Vainqueur",
+    "Grid": "Grille",
+    "Fastest Lap": "Tour le plus rapide",
+    "Online Session": "Session en ligne",
+    "Single Player Session": "Session solo",
+    "Online": "En ligne",
+    "Theoretical Best": "Meilleur théorique",
+    "Top Speed": "Vitesse de pointe",
+    "Penalty": "Pénalité",
+    "Results Folder": "Dossier des résultats",
+    "min": "min",
+    "car": "voiture",
+    "cars": "voitures",
+    "wall": "mur",
+    "walls": "murs",
+    "Impact": "Impact",
+    "pts": "pts",
+    "All Classes": "Toutes les catégories",
+    "Reading results files...": "Lecture des fichiers de résultats...",
+    "No results folder found": "Aucun dossier de résultats trouvé",
+    "No session results yet": "Aucun résultat de session pour l'instant",
+    "No session matches the filters": "Aucune session ne correspond aux filtres",
+    "Results are written by Le Mans Ultimate (or rFactor 2) in UserData/Log/Results at the end of each session. "
+    "Choose that folder if the game is not installed with Steam.":
+        "Le Mans Ultimate (ou rFactor 2) écrit les résultats dans UserData/Log/Results à la fin de chaque session. "
+        "Choisis ce dossier si le jeu n'est pas installé avec Steam.",
+    "The game writes a results file at the end of each session (practice, qualifying, race).":
+        "Le jeu écrit un fichier de résultats à la fin de chaque session (essais, qualifications, course).",
+    "Choose Folder...": "Choisir un dossier...",
+    "Use Game Folders": "Utiliser les dossiers du jeu",
+    "Read results files again (F5)": "Relire les fichiers de résultats (F5)",
+    "Search: track, server, car...": "Rechercher : circuit, serveur, voiture...",
+    "Hide sessions without laps": "Masquer les sessions sans tour",
+    "Car picked only": "Voiture choisie seulement",
+    "Car picked": "Voiture choisie",
+    "Your car": "Ta voiture",
+    "No event": "Aucun événement",
+    "No lap completed": "Aucun tour terminé",
+    "Time / Gap": "Temps / écart",
+    "Unfinished": "Inachevée",
+    "No car had finished when this file was written (race left before its end): classification and gaps of that "
+    "moment.":
+        "Aucune voiture n'avait fini quand ce fichier a été écrit (course quittée avant la fin) : classement et "
+        "écarts à ce moment-là.",
+    "Inc.": "Inc.",
+    "Used": "Consommé",
+    "Tread": "Gomme restante",
+    "PIT": "STANDS",
+    "Accident": "Accident",
+    "Engine failure": "Casse moteur",
+    "Suspension failure": "Casse suspension",
+    "Gearbox failure": "Casse de la boîte de vitesses",
+    "Brake failure": "Défaillance des freins",
+    "Electronics failure": "Panne électronique",
+    "Overheating": "Surchauffe",
+    "Damage": "Dégâts",
+    "Track limits warning": "Avertissement limites de piste",
+    "Lap invalidated (corner cut)": "Tour invalidé (virage coupé)",
+    "Lap invalidated (off track)": "Tour invalidé (hors piste)",
+    "Drive-through penalty": "Pénalité drive-through",
+    "Stop & go penalty": "Pénalité stop & go",
+    "Stop & go": "Stop & go",
+    "Drive-through": "Drive-through",
+    "Pit lane speeding": "Excès de vitesse dans les stands",
+    "Pit exit on red light": "Sortie des stands au feu rouge",
+    "Results": "Résultats",
+    # Stream overlays page (browser sources for streaming software)
+    "Stream Overlays": "Overlays de stream",
+    "Stream Overlay": "Overlay de stream",
+    "Overlays in OBS, Streamlabs, XSplit or vMix: addresses on the Stream Overlays page":
+        "Overlays dans OBS, Streamlabs, XSplit ou vMix : adresses sur la page Overlays de stream",
+    "Stream": "Stream",
+    "Server off": "Serveur arrêté",
+    "Port %1 unavailable": "Port %1 indisponible",
+    "On air: %1 sources shown": "En direct : %1 sources affichées",
+    "Ready": "Prêt",
+    "New access token: copy the addresses again into your streaming software.":
+        "Nouveau jeton d'accès : copie à nouveau les adresses dans ton logiciel de stream.",
+    "Address copied: paste it as URL of a Browser source.":
+        "Adresse copiée : colle-la comme URL d'une source navigateur.",
+    "Copy Address": "Copier l'adresse",
+    "Open in browser": "Ouvrir dans le navigateur",
+    "LIVE": "EN DIRECT",
+    "Sources Page": "Page des sources",
+    "Every source in a browser page, to test them": "Toutes les sources dans une page du navigateur, pour les tester",
+    "Add these addresses as Browser sources in OBS Studio, Streamlabs, XSplit or vMix: transparent background, "
+    "overlays exactly as on screen, also with the game in exclusive fullscreen.":
+        "Ajoute ces adresses comme sources navigateur dans OBS Studio, Streamlabs, XSplit ou vMix : fond "
+        "transparent, overlays exactement comme à l'écran, même avec le jeu en plein écran exclusif.",
+    "Sources": "Sources",
+    "Every overlay shown on stream, at its place on screen.":
+        "Tous les overlays affichés en stream, à leur place à l'écran.",
+    "Browser source size": "Taille de la source navigateur",
+    "Classification of the last session, from the results files of the game, updated when a new one is written.":
+        "Classement de la dernière session, d'après les fichiers de résultats du jeu, mis à jour à chaque "
+        "nouveau fichier.",
+    "Any": "N'importe laquelle",
+    "Class by class": "Catégorie par catégorie",
+    "Cars per page": "Voitures par page",
+    "Page time": "Durée par page",
+    "Stream only: hidden on your screen while overlays are locked.":
+        "Stream seulement : masqué sur ton écran tant que les overlays sont verrouillés.",
+    "No overlay enabled: enable overlays on the Overlays page.":
+        "Aucun overlay activé : active des overlays sur la page Overlays.",
+    "Server": "Serveur",
+    "Port": "Port",
+    "Server port (default 8339)": "Port du serveur (8339 par défaut)",
+    "Images per second": "Images par seconde",
+    "Another computer (LAN)": "Autre ordinateur (réseau local)",
+    "Sources for a streaming PC on your local network": "Sources pour un PC de stream sur ton réseau local",
+    "New Access Token": "Nouveau jeton d'accès",
+    "Every address gets a new token: addresses copied before stop working (address shown on stream by mistake)":
+        "Chaque adresse reçoit un nouveau jeton : les adresses copiées avant ne fonctionnent plus (adresse "
+        "montrée en stream par erreur)",
+    "Addresses for another computer": "Adresses pour un autre ordinateur",
+    "Invalid address: copy it again from the Stream Overlays page of Modern Tiny Pedals.":
+        "Adresse invalide : copie-la à nouveau depuis la page Overlays de stream de Modern Tiny Pedals.",
+    "Waiting for results…": "En attente de résultats…",
     # Audit fixes (package A)
     "Replay recorded with another game data structure (older game or app version), it cannot be played.":
         "Rejeu enregistré avec une autre structure de données du jeu (version plus ancienne du jeu ou de "
@@ -1665,7 +1883,6 @@ TRANSLATION = MappingProxyType({
     "Unreadable data": "Données illisibles",
     "Unexpected error": "Erreur inattendue",
     # Audit fixes (package E)
-    "Not counted in ideal lap & mini-sectors (other circuit)": "Non compté dans le tour idéal et les mini-secteurs (autre circuit)",
     "Importing...": "Importation...",
     # Phase 2 (package B2)
     "Laps per Tyre Set": "Tours par train de pneus",
@@ -1812,6 +2029,7 @@ TRANSLATION = MappingProxyType({
     "Centered": "Centré",
     "Justified": "Justifié",
     "Last": "Dernier",
+    "Viewer": "Visionneuse",
     "Personal": "Personnel",
     "Center": "Centre",
     "Class - Brand": "Classe - marque",
@@ -1826,7 +2044,14 @@ TRANSLATION = MappingProxyType({
     "Bottom Left": "En bas à gauche",
     "Bottom Center": "En bas au centre",
     "Bottom Right": "En bas à droite",
+    "Screen & Stream": "Écran et stream",
+    "Stream Only": "Stream seulement",
+    "Screen Only": "Écran seulement",
     "Modern Dark": "Moderne sombre",
+    "Modern Light": "Moderne clair",
+    "Legacy Dark": "Classique sombre",
+    "Legacy Light": "Classique clair",
+    "Colorblind safe colors": "Couleurs adaptées aux daltoniens",
     "Classic": "Classique",
     # Phase 2 (package E2)
     # Charts: value fitting, math channels, laps aligned on braking point, time base CSV
@@ -2029,4 +2254,194 @@ TRANSLATION = MappingProxyType({
     "Add tools, pages or actions from the list on the right.":
         "Boutons de la page d'accueil : fais glisser les entrées pour les réordonner, ou utilise les flèches. "
         "Ajoute des outils, des pages ou des actions depuis la liste de droite.",
+    # Presets, Spectate, Find Option & Settings pages (Qt Quick)
+    "Show the data of another driver in your overlays": "Afficher les données d'un autre pilote dans vos overlays",
+    "Spectate mode": "Mode spectateur",
+    "Spectate mode is off": "Mode spectateur désactivé",
+    "Spectating": "Pilote suivi",
+    "Spectated driver is not in this session": "Le pilote suivi n'est pas dans cette session",
+    "No driver spectated": "Aucun pilote suivi",
+    "Pick a driver in the list": "Choisissez un pilote dans la liste",
+    "Your overlays show your own car": "Vos overlays affichent votre voiture",
+    "Previous driver (by place)": "Pilote précédent (au classement)",
+    "Next driver (by place)": "Pilote suivant (au classement)",
+    "Stop spectating this driver": "Ne plus suivre ce pilote",
+    "Turn On Spectate Mode": "Activer le mode spectateur",
+    "Search drivers, cars, classes": "Rechercher : pilotes, voitures, catégories",
+    "No driver in session": "Aucun pilote en session",
+    "No driver matches the filters": "Aucun pilote ne correspond aux filtres",
+    "Drivers show here while you are in a session, game running.":
+        "Les pilotes s'affichent ici pendant une session, jeu lancé.",
+    "Hotkeys can switch spectate mode & drivers (Hotkey page)":
+        "Des raccourcis peuvent changer le mode spectateur et le pilote (page Raccourcis)",
+    "Unknown": "Inconnue",
+    "Changed only": "Modifiées seulement",
+    "Only options set apart from their default value": "Seulement les options qui n'ont pas leur valeur par défaut",
+    "Find any option": "Trouvez n'importe quelle option",
+    "Every option has its default value": "Toutes les options ont leur valeur par défaut",
+    "No option found": "Aucune option trouvée",
+    "Check spelling, or try fewer or other words.":
+        "Vérifiez l'orthographe, ou essayez moins de mots ou d'autres mots.",
+    "Show All Groups": "Afficher tous les groupes",
+    "Enter opens the option, Space switches it on / off": "Entrée ouvre l'option, Espace l'active ou la désactive",
+    "Open in Settings": "Ouvrir dans les paramètres",
+    "Copy Option Key": "Copier la clé de l'option",
+    "Changed from default": "Différente de la valeur par défaut",
+    "Switch on / off now (saved & applied)": "Activer / désactiver maintenant (enregistré et appliqué)",
+    "Settings": "Paramètres",
+    "All Settings": "Tous les réglages",
+    "Next start": "Au prochain démarrage",
+    "Applied once Modern Tiny Pedals restarts (offered after Apply)":
+        "Appliqué au redémarrage de Modern Tiny Pedals (proposé après Appliquer)",
+    "Used when Modern Tiny Pedals starts": "Utilisé au démarrage de Modern Tiny Pedals",
+    "Search settings": "Rechercher un paramètre",
+    "In the loaded preset": "Dans le preset chargé",
+    "API Options": "Options de l'API",
+    "Search results": "Résultats de la recherche",
+    "Reset Section": "Réinitialiser la section",
+    "Every option of this section back to default (saved with Apply)":
+        "Toutes les options de cette section à leur valeur par défaut (enregistré avec Appliquer)",
+    "Web dashboard is running": "Le tableau de bord web est en marche",
+    "Web dashboard is not running (port in use?), see log":
+        "Le tableau de bord web ne tourne pas (port déjà utilisé ?), voir le journal",
+    "Web dashboard is off: turn on its first option, then Apply":
+        "Le tableau de bord web est désactivé : activez sa première option, puis Appliquer",
+    "Open one of these addresses in a browser:": "Ouvrez une de ces adresses dans un navigateur :",
+    "The browser warns once about this self-signed certificate. Accept it only if its SHA-256 fingerprint is:":
+        "Le navigateur avertit une fois pour ce certificat auto-signé. Acceptez-le seulement si son empreinte SHA-256 est :",
+    "Remote control is listening": "Le contrôle à distance est à l'écoute",
+    "Remote control is not running (port in use?), see log":
+        "Le contrôle à distance ne tourne pas (port déjà utilisé ?), voir le journal",
+    "Remote control is off: turn on its first option, then Apply":
+        "Le contrôle à distance est désactivé : activez sa première option, puis Appliquer",
+    "Run hotkey commands from this computer (Stream Deck, Companion, SimHub, scripts). Example:":
+        "Lancez les commandes des raccourcis depuis cet ordinateur (Stream Deck, Companion, SimHub, scripts). Exemple :",
+    "Command, with its required header": "Commande, avec son en-tête obligatoire",
+    "List of commands (JSON)": "Liste des commandes (JSON)",
+    "Live telemetry (WebSocket)": "Télémétrie en direct (WebSocket)",
+    "No setting found": "Aucun paramètre trouvé",
+    "Search looks through every category. Check spelling, or try other words.":
+        "La recherche couvre toutes les catégories. Vérifiez l'orthographe, ou essayez d'autres mots.",
+    "Discard": "Annuler les modifications",
+    "Drop every unsaved change": "Abandonner toutes les modifications non enregistrées",
+    "Save & apply (Ctrl+S)": "Enregistrer et appliquer (Ctrl+S)",
+    "Preview of the notice": "Aperçu de la notification",
+    "Choose File...": "Choisir un fichier...",
+    "Settings saved": "Paramètres enregistrés",
+    "Folder required": "Dossier attendu",
+    "Folder cannot be used": "Dossier inutilisable",
+    "On or off required": "Activé ou désactivé attendu",
+    "Text required": "Texte attendu",
+    "Interface, startup, updates, presets & backups, overlay editing":
+        "Interface, démarrage, mises à jour, presets et sauvegardes, édition des overlays",
+    "Interface": "Interface",
+    "Startup & Window": "Démarrage et fenêtre",
+    "Updates": "Mises à jour",
+    "Presets & Backups": "Presets et sauvegardes",
+    "Overlay Editing": "Édition des overlays",
+    "Performance & Hotkeys": "Performances et raccourcis",
+    "Modern design, theme, fonts & size of every overlay":
+        "Design moderne, thème, polices et taille de tous les overlays",
+    "Design": "Design",
+    "Notices shown at the bottom of the main window": "Notifications affichées en bas de la fenêtre principale",
+    "Window manager, transparency & positions on some systems":
+        "Gestionnaire de fenêtres, transparence et positions sur certains systèmes",
+    "Run hotkey commands from a Stream Deck or a script": "Commandes des raccourcis depuis un Stream Deck ou un script",
+    "Overlays in a browser of your phone, tablet or PC":
+        "Overlays dans le navigateur d'un téléphone, d'une tablette ou d'un PC",
+    "VR Overlay": "Overlay VR",
+    "Experimental: overlays shown in your VR headset (OpenVR)":
+        "Expérimental : overlays affichés dans votre casque VR (OpenVR)",
+    "Placement": "Placement",
+    "Mirror Window": "Fenêtre miroir",
+    "Folders of presets, data & recorded laps": "Dossiers des presets, des données et des tours enregistrés",
+    "New preset with default options": "Nouveau preset avec les options par défaut",
+    "Loaded preset": "Preset chargé",
+    "Locked: changes are not saved": "Verrouillé : les modifications ne sont pas enregistrées",
+    "On track: primary preset of the track, else of the car class":
+        "En piste : preset principal du circuit, sinon de la catégorie",
+    "Search presets, classes, tracks": "Rechercher : presets, catégories, circuits",
+    "Recent": "Récents",
+    "No preset matches the search": "Aucun preset ne correspond à la recherche",
+    "No preset yet": "Aucun preset pour l'instant",
+    "Clear Search": "Effacer la recherche",
+    "Undo Delete": "Annuler la suppression",
+    "Copy settings of the loaded preset to other presets": "Copier les réglages du preset chargé vers d'autres presets",
+    "Restore an automatic or manual backup": "Restaurer une sauvegarde automatique ou manuelle",
+    "Load": "Charger",
+    "Create": "Créer",
+    "Backups, layout profiles, primary tags & hotkeys follow the new name":
+        "Sauvegardes, profils de disposition, étiquettes principales et raccourcis suivent le nouveau nom",
+    "Every overlay & module with its default options": "Tous les overlays et modules avec leurs options par défaut",
+    "Unreadable file": "Fichier illisible",
+    "Primary preset for class": "Preset principal de la catégorie",
+    "Loaded by preset hotkey": "Chargé par un raccourci de preset",
+    "Game API remembered by the preset": "API du jeu mémorisée par le preset",
+    "Load Preset": "Charger le preset",
+    "Primary preset for": "Preset principal pour",
+    "No car class or track: this preset is only loaded by hand or by hotkey.":
+        "Aucune catégorie ni circuit : ce preset ne se charge qu'à la main ou par raccourci.",
+    "Car Class": "Catégorie de voiture",
+    "Tracks come from Track Info Editor (Tools)": "Les circuits viennent de l'éditeur d'infos circuit (Outils)",
+    "No preset selected": "Aucun preset sélectionné",
+    "Select a preset to see what it contains.": "Sélectionnez un preset pour voir son contenu.",
+    "Cancel": "Abandonner",
+    "Just now": "À l'instant",
+    "Preset not found, it may have been renamed or deleted.":
+        "Preset introuvable, il a peut-être été renommé ou supprimé.",
+    "Unlock the preset to rename it.": "Déverrouillez le preset pour le renommer.",
+    "Unlock the preset to delete it.": "Déverrouillez le preset pour le supprimer.",
+    "New preset": "Nouveau preset",
+    # Lap viewer audit J (D)
+    "No channel matches": "Aucun canal ne correspond",
+    # Lap viewer audit J (B2)
+    "Another circuit than reference lap: not compared": "Autre circuit que le tour de référence : non comparé",
+    "No lap matches the search": "Aucun tour ne correspond à la recherche",
+    "No clean lap": "Aucun tour propre",
+    "Search looks in lap number, time, session, vehicle, conditions, note and setup.":
+        "La recherche porte sur le numéro et le temps du tour, la session, le véhicule, les conditions, "
+        "la note et le setup.",
+    "Every lap is invalid, an out lap or an in lap.": "Tous les tours sont invalides, de sortie ou de rentrée.",
+    "Show All Laps": "Afficher tous les tours",
+    # Lap viewer audit J (E)
+    "Move selected laps to trash": "Mettre les tours sélectionnés à la corbeille",
+    "Lap of another track or class: not usable as delta best of this track.":
+        "Tour d'un autre circuit ou d'une autre catégorie : inutilisable comme delta meilleur tour de ce circuit.",
+    "import stopped, file too big or unreadable": "import arrêté, fichier trop gros ou illisible",
+    # Overlay Options page (Qt Quick)
+    "Overlay Options": "Options des overlays",
+    "Classic layout": "Disposition classique",
+    "Modern design": "Design moderne",
+    "Collapse All": "Tout replier",
+    "Expand All": "Tout déplier",
+    "Copy Option Name": "Copier le nom de l'option",
+    "Default Order": "Ordre par défaut",
+    "Draw overlay with unsaved values": "Dessiner l'overlay avec les valeurs non enregistrées",
+    "Drawing preview...": "Dessin de l'aperçu...",
+    "Edit as a table": "Modifier sous forme de tableau",
+    "Every option of this overlay back to default (saved with Apply)":
+        "Toutes les options de cet overlay aux valeurs par défaut (enregistré avec Appliquer)",
+    "Every overlay": "Tous les overlays",
+    "Find overlay": "Trouver un overlay",
+    "Modified options": "Options modifiées",
+    "Options changed from default": "Options différentes des valeurs par défaut",
+    "Options saved": "Options enregistrées",
+    "Order of shown items, top first: drag them, or use the arrows.":
+        "Ordre des éléments affichés, le premier en haut : faites-les glisser, ou utilisez les flèches.",
+    "Overlay state (saved)": "État de l'overlay (enregistré)",
+    "Position & Layout": "Position et disposition",
+    "Preview not available for this overlay": "Aperçu indisponible pour cet overlay",
+    "Preview off": "Aperçu désactivé",
+    "Reset Overlay": "Réinitialiser l'overlay",
+    "Search Every Overlay": "Chercher dans tous les overlays",
+    "Search looks through every overlay. Check spelling, or try other words.":
+        "La recherche parcourt tous les overlays. Vérifiez l'orthographe ou essayez d'autres mots.",
+    "Search options": "Chercher parmi les options",
+    "Show only options changed from default": "Afficher seulement les options différentes des valeurs par défaut",
+    "Shown Items": "Éléments affichés",
+    "This overlay": "Cet overlay",
+    "Try searching every overlay, or other words.": "Essayez de chercher dans tous les overlays, ou d'autres mots.",
+    "Type more words to narrow the search": "Tapez d'autres mots pour affiner la recherche",
+    "Used only while on:": "Utilisé seulement si activé :",
+    "Where search & filter look": "Où cherchent la recherche et le filtre",
 })

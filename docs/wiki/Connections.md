@@ -1,6 +1,6 @@
 # Connections
 
-Modern Tiny Pedals can be driven by other programs, stream live telemetry, show a dashboard on a phone or tablet, display overlays in VR, and replay sessions without the game. Everything on this page is **off by default**.
+Modern Tiny Pedals can be driven by other programs, stream live telemetry, show a dashboard on a phone or tablet, put overlays in your stream (OBS, Streamlabs, XSplit, vMix), display overlays in VR, and replay sessions without the game. Everything on this page is **off by default**.
 
 ## Remote control
 
@@ -42,13 +42,45 @@ The web dashboard shows live data in a browser, for example on a phone or tablet
 
 1. Open `Config` > `Web Dashboard` and turn on `enable_web_dashboard` (port `8338` by default, `web_dashboard_port`).
 2. To open it from another device, turn on `enable_lan_access`. Windows Firewall may ask you to allow the app the first time.
-3. `Config` > `Web Dashboard Address...` shows the address to open, with the access code.
+3. The `Web Dashboard` settings page shows the addresses to open and the access code, with copy buttons (also `Config` > `Web Dashboard Address...`).
 
 Security:
 
 - An **access code** is always required (`access_code`, a random code is generated if empty). After 10 wrong codes, the device is blocked for 60 seconds. The code is exchanged for a session cookie, so it does not stay in the page address.
 - Without HTTPS, traffic is plain HTTP: only enable LAN access on a network you trust.
 - `enable_https` serves the dashboard over HTTPS with a self-signed certificate created in the config folder. The browser warns once about it: check the SHA-256 fingerprint shown by `Web Dashboard Address...` before accepting it.
+
+## Stream overlays (OBS, Streamlabs, XSplit, vMix)
+
+Stream overlays put your overlays in your stream as **browser sources**: no window capture, no chroma key, a transparent background and the overlays exactly as on your screen. It also works with the game in exclusive fullscreen, where window capture cannot see the overlays.
+
+![Stream overlays page](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-overlays.png)
+
+1. Open the `Stream Overlays` page (`Tools` page, `Stream` in the navigation bar, or the command palette) and turn on `Enabled` (port `8339` by default).
+2. Click `Copy Address` next to a source.
+3. In OBS Studio: `Sources` > `+` > `Browser`, paste the address as `URL`, and set the width and height shown on the page. Streamlabs, XSplit, vMix and Twitch Studio have the same kind of source.
+
+Sources:
+
+| Source | What it shows | Browser source size |
+|---|---|---|
+| `Layout` | Every overlay shown on stream, at its place on your screen | Size of the screen shown on the page (smaller sizes are scaled to fit) |
+| One per overlay | That overlay alone, at top left (`&scale=1.5` in the address enlarges it) | Size of the overlay shown on the page |
+| `Race Results` | Classification of the last race, with classes and pages cycling | 1920 x 1080 |
+
+**Where each overlay is shown**: for each overlay of the page, `Screen & Stream` (default), `Stream Only` (shown to your viewers but not on your screen, for example standings or the track map for the stream only), or `Screen Only` (never on stream, for example your fuel or delta). A stream only overlay is fully transparent on your screen while overlays are locked; unlock overlays to see and move it. This is also the `stream_visibility` option of each overlay.
+
+**Race results source**: the classification of the last race from the game results files (see [Race Results](Race-Results.md)), refreshed when a new file is written. Options on the page (saved in the address): session (`Race`, `Qualifying` or `Any`), `All Classes` or `Class by class`, cars per page, time per page. In the address: `&class=<class name>` for one class only, `&animate=0` without animation.
+
+![Race results source](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
+
+Good to know:
+
+- Overlay images are only captured while a source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change, up to `Images per second` (15, 30 or 60).
+- Overlays hidden by auto hide (no session) are hidden on stream too.
+- Every address contains an **access token**. If an address was shown on stream by mistake, click `New Access Token`: addresses copied before stop working, copy them again.
+- `Another computer (LAN)` lets a streaming PC on your local network show the sources (dual PC setup): the page then lists the addresses to use from that PC. Windows Firewall may ask you to allow the app the first time.
+- `Sources Page` opens every source in your browser, to test them.
 
 ## VR
 
@@ -70,9 +102,9 @@ For OpenXR games on any runtime (Meta, Virtual Desktop, WMR...), turn on `enable
 
 ## Replays
 
-### Telemetry replay
+### Session recorder
 
-`Tools` > `Telemetry Replay` records the game's shared memory while you drive and plays it back through every overlay and module, without the game. Useful to set up overlays, test settings, or review an incident.
+`Tools` > `Advanced` > `Session Recorder` records the game's shared memory while you drive and plays it back through every overlay and module, without the game. Useful to test overlays and settings without the game, or to show an issue: attach a saved section to a bug report. To review an incident, the game replay (below) shows the real footage.
 
 - `Start Recording` / `Stop Recording` while in game, or turn on `enable_auto_replay_recording` in the Recorder module to record each time you drive (`number_of_saved_replays` automatic recordings kept, default `20`; manual recordings are never removed).
 - Recordings are `.tpreplay` files in the `telemetry` folder (about 7 MB per minute). REST API data of LMU is recorded too.
@@ -80,11 +112,11 @@ For OpenXR games on any runtime (Meta, Virtual Desktop, WMR...), turn on `enable
 - Play, pause, speed, loop, position slider with lap changes and incidents, `Go to lap`, `◀ Incident` / `Incident ▶`, frame by frame. Keys: `Space` play / pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame.
 - `Set Start`, `Set End` and `Save Section...` save part of a replay to a new file, for example to share an incident.
 
-The telemetry viewer can open the replay at the cursor position (`Open Replay Here`) when a replay covers that lap.
+The telemetry viewer can open the replay at the cursor position (`Open Replay Here`) when a Session recorder replay covers that lap.
 
 ### Game replays (Le Mans Ultimate)
 
-`Tools` > `Game Replays` controls replays saved by Le Mans Ultimate, through the game REST API (the game must be running). The pill at the top tells what the game is doing: not answering, in the menus, in a session, or replay open.
+The `Replays` entry of the navigation bar (or `Tools` > `Game Replays`) controls replays saved by Le Mans Ultimate, through the game REST API (the game must be running). The pill at the top tells what the game is doing: not answering, in the menus, in a session, or replay open.
 
 - **Replays**: the replays of `UserData/Replays` grouped by day (newest first), with track, session, event, time and size. Search by track or event, `All` / `Practice` / `Qualify` / `Race` filter, sort by date, size or track. `Watch` (or double-click, or `Enter`) opens one in the game, after confirmation (with a warning in a live session). `Open Folder` opens the replay folder.
 - **Replay files**: `Add` copies replay files (`.Vcr`) into the game replay folder (you can also drop them on the page), with a progress bar and `Stop Copy`; a file with the same name gets a number, `Name (2)`; nothing is copied if the disk lacks space. Right-click a replay (or the `...` menu for the selected replays) to `Export` it to another folder, `Rename` it, `Protect From Deletion` (star) or `Delete` it: deleted replays go to the Windows recycle bin, after confirmation; protected ones are always kept. Select several replays with `Ctrl` + click, a range with `Shift` + click, all with `Ctrl+A`. The `...` menu also cleans the folder up: delete replays older than a number of days, keep only the latest ones, delete the temporary files (`_vcr*.tmp`) the game leaves behind. A replay open in the game cannot be deleted or renamed.
@@ -98,4 +130,4 @@ The telemetry viewer can open the replay at the cursor position (`Open Replay He
 
 The page asks the game only while it is shown, on one connection per update: every 2 seconds with a replay open, 5 seconds otherwise, 15 seconds when the game is not running; standings only while `Drivers` or `Map` is shown, while a replay is open, or when the incidents change. `Refresh` (`F5`) asks again at once. Seconds before, sort, filters, the tab shown and protected replays are kept for next time.
 
-All options: [Remote Control](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#remote-control), [Web Dashboard](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#web-dashboard), [VR Overlay](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#vr-overlay), [Telemetry replay](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#telemetry-replay) and [Game replays](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#game-replays).
+All options: [Remote Control](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#remote-control), [Web Dashboard](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#web-dashboard), [VR Overlay](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#vr-overlay), [Session recorder](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#session-recorder) and [Game replays](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#game-replays).

@@ -21,7 +21,7 @@ def test_import_module(module_name):
     importlib.import_module(module_name)
 
 
-@pytest.mark.parametrize("theme", ["Light", "Dark"])
+@pytest.mark.parametrize("theme", ["Modern Dark", "Modern Light", "Legacy Dark", "Legacy Light"])
 def test_window_style(theme):
     """Palette & style sheet can be generated for each theme"""
     from PySide6.QtWidgets import QApplication

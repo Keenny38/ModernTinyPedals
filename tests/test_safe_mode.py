@@ -122,10 +122,10 @@ def test_question_translated(ui_env, monkeypatch):
 
 
 def test_safe_mode_decided_before_widgets_are_imported(ui_env, monkeypatch):
-    """Overlay themes import widgets & plugins: safe mode known before"""
+    """Loader imports widgets & plugins: safe mode known before"""
     calls = []
     for name in ("single_instance_check", "unset_environment", "set_logging_level", "get_version",
-                 "set_environment", "load_overlay_themes"):
+                 "set_environment"):
         monkeypatch.setattr(main, name, lambda *args, _name=name: calls.append(_name))
     monkeypatch.setattr(main, "check_safe_mode", lambda flag: calls.append(f"check_safe_mode {flag}"))
     monkeypatch.setattr(main, "init_gui", lambda: calls.append("init_gui") or SimpleNamespace(exec=lambda: 0))
@@ -133,8 +133,7 @@ def test_safe_mode_decided_before_widgets_are_imported(ui_env, monkeypatch):
     monkeypatch.setattr(loader, "start", lambda: calls.append("loader.start"))
     with pytest.raises(SystemExit):
         main.start_app(SimpleNamespace(single_instance=1, log_level=1, safe_mode=True))
-    assert calls.index("init_gui") < calls.index("check_safe_mode True") < calls.index("load_overlay_themes")
-    assert calls.index("load_overlay_themes") < calls.index("loader.start")
+    assert calls.index("init_gui") < calls.index("check_safe_mode True") < calls.index("loader.start")
 
 
 def test_command_line_flag(monkeypatch):

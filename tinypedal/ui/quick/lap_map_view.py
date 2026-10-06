@@ -57,7 +57,6 @@ from .lines import (
     VertexStore,
     band,
     band_part,
-    colored_band,
     markers,
     merge_strips,
     normals,
@@ -101,6 +100,8 @@ PREFETCH_DELAY = 400  # ms map view stays still before neighbor scales are built
 MILE = 1609.344  # meters
 PIT_PART_GAP = 20.0  # meters between pit lane points: separate parts (not joined by a line)
 CONSISTENCY_SCOPES = ("stint", "session", "shown")  # laps compared in consistency mode (setting)
+ROAD_GRID = "|road"  # mouse picking grid of official circuit when it stands for reference lap line (not a lap key)
+TRAIL_GAP = 1.5  # pixels between cursor trail points kept (built on every cursor move: fewer points zoomed out)
 
 
 def scale_step(meters_per_pixel: float) -> float:
@@ -172,11 +173,9 @@ class MapView(BackendBase):
     @Slot(float, float, float, float, float, float, result=list)
     def mapVisibleRange(self, x0: float, y0: float, x1: float, y1: float, center_x: float, center_y: float) -> list:
         """Axis range of reference line part shown in map view around view center (charts follow map), empty if none"""
-        if not self._map_lines:
-            return []
-        line, lap = self._map_lines[0]
-        grid = self._grids.get(lap.key)
-        found = lap_map.visible_range(line, (x0, y0, x1, y1), (center_x, center_y), grid) if grid else None
+        line, grid = self.reference_map_line(), self.reference_grid()
+        found = lap_map.visible_range(line, (x0, y0, x1, y1), (center_x, center_y), grid) \
+            if line is not None and grid is not None else None
         if found is None or found[1] - found[0] < 20:
             return []
         return [self.data.x_at_distance(found[0]), self.data.x_at_distance(found[1])]
@@ -192,9 +191,10 @@ class MapView(BackendBase):
                 continue
             end = self.data.lap_distance_at_x(lap, x)
             start = interpolate(times, distances, interpolate(distances, times, end) - TRAIL_SECONDS)
-            xs, ys, alphas = lap_map.trail(line, start, end)
             bright = lap.color.lighter(165)  # stands out over its own driving line
-            VertexStore.set(keys["trail"], colored_band(xs, ys, [bright] * len(xs), meters_per_pixel * 3.2, alphas))
+            VertexStore.set(keys["trail"], lap_map.trail_band(
+                line, self.line_normals(lap, line), start, end, (bright.red(), bright.green(), bright.blue()),
+                meters_per_pixel * 3.2, meters_per_pixel * TRAIL_GAP))
         self._trail_revision += 1
         self.trailChanged.emit()
 
@@ -260,6 +260,36 @@ class MapView(BackendBase):
         cos, sin = math.cos(self._map_angle), math.sin(self._map_angle)
         return x * cos - y * sin, x * sin + y * cos
 
+    def reference_map_line(self) -> lap_map.MapLine | None:
+        """Line along reference lap distances on map (turned like map): reference lap line, else official circuit
+        (distances scaled to reference lap) when reference lap has no positions (imported log), None if neither:
+        what is placed at reference distances (corner labels, sectors, chart range, pin, picking) left out"""
+        reference = self.data.reference
+        if reference is None:
+            return None
+        for line, lap in self._map_lines:
+            if lap is reference:
+                return line
+        official = self.official_base(self.reference_length())
+        if official is not None and self._road.distances is official.distances:  # map circuit: official one turned
+            return self._road
+        return None
+
+    def reference_grid(self) -> lap_map.LineGrid | None:
+        """Mouse picking grid of reference map line, None if none"""
+        reference = self.data.reference
+        if reference is not None and any(lap is reference for _, lap in self._map_lines):
+            return self._grids.get(reference.key)
+        return self._grids.get(ROAD_GRID)
+
+    def guide_line(self) -> lap_map.MapLine:
+        """Line distance marks, start line & direction arrows follow: reference map line, else first lap line, else
+        circuit"""
+        line = self.reference_map_line()
+        if line is not None:
+            return line
+        return self._map_lines[0][0] if self._map_lines else self._road
+
     def build_map(self):
         """Circuit, driving lines, start & sector marks, corners, braking points of displayed laps"""
         lines = []
@@ -300,6 +330,10 @@ class MapView(BackendBase):
         grids = self._grids  # mouse picking grid of each lap line, kept while lap & rotation stay the same
         self._grids = {lap.key: grids[lap.key] if lap.key in grids and grids[lap.key].line is line
                        else lap_map.LineGrid(line) for line, lap in self._map_lines}
+        reference_line = self.reference_map_line()
+        if reference_line is not None and reference_line is self._road:  # official circuit stands for reference line
+            kept = grids.get(ROAD_GRID)
+            self._grids[ROAD_GRID] = kept if kept is not None and kept.line is self._road else lap_map.LineGrid(self._road)
         xs = self._road.xs + [x for line, _ in self._map_lines for x in line.xs]
         ys = self._road.ys + [y for line, _ in self._map_lines for y in line.ys]
         limits = self.shown_limits()
@@ -331,7 +365,7 @@ class MapView(BackendBase):
             ],
             "arrowsKey": self.prefix + "map|arrows",
             "rangeKey": self.prefix + "map|range", "selectedKey": self.prefix + "map|selected",
-            "ticks": self.map_ticks(self._map_lines[0][0] if self._map_lines else self._road),
+            "ticks": self.map_ticks(self.guide_line()),
             "limits": limits is not None,
             "minX": min(xs), "minY": min(ys), "maxX": max(xs), "maxY": max(ys),
             "corners": self.map_corner_points(),
@@ -367,7 +401,8 @@ class MapView(BackendBase):
 
     def start_mark(self) -> list[float]:
         """Start line across circuit (reference line start), x0 y0 x1 y1"""
-        if not self._map_lines:
+        line = self.guide_line()
+        if line is self._road and self.reference_map_line() is None:  # track map file (distances: point numbers)
             road = self._road
             if len(road.xs) < 2:
                 return []
@@ -375,7 +410,6 @@ class MapView(BackendBase):
             length = max((dx * dx + dy * dy) ** 0.5, 1e-6)
             nx, ny = -dy / length * TRACK_WIDTH, dx / length * TRACK_WIDTH
             return [road.xs[0] - nx, road.ys[0] - ny, road.xs[0] + nx, road.ys[0] + ny]
-        line = self._map_lines[0][0]
         return list(lap_map.cross_mark(line, line.distances[0] + 1, TRACK_WIDTH))
 
     def map_corner_points(self) -> list[dict]:
@@ -387,49 +421,61 @@ class MapView(BackendBase):
         """
         if self._official:
             return self.official_points()
-        if not self._map_lines or not self._corner_rows:
+        line = self.reference_map_line()
+        if line is None or not self._corner_rows:
             return []
-        line = self._map_lines[0][0]
-        points = []
-        for index, row in enumerate(self._corner_rows):
-            x, y = lap_map.point_at(line, row.corner.apex)
-            delta = row.time_delta
-            points.append({
-                "x": x, "y": y, "label": corner_label(row.corner.number), "index": index, "row": index,
-                "start": row.corner.start, "end": row.corner.end,
-                "delta": signed(delta, 2) if delta is not None else "",
-                "deltaColor": COLOR_LOSS if delta is not None and delta > 0.005
-                else COLOR_GAIN if delta is not None and delta < -0.005 else "",
-                "priority": abs(delta) if delta is not None else 0.0,
-            })
-        return points
+        return [self.corner_point(*lap_map.point_at(line, row.corner.apex), corner_label(row.corner.number), index, row,
+                                  row.corner.start, row.corner.end, row.time_delta)
+                for index, row in enumerate(self._corner_rows)]
 
     def official_points(self) -> list[dict]:
-        """Official corners on map, time lost / gained shown on the official corner nearest to apex"""
-        delta_on: dict[int, CornerComparison] = {}  # official corner index: corner found on reference lap
+        """Official corners on map, time lost / gained of each corner found on reference lap shown on the official
+        corner nearest to its apex
+
+        A corner found that covers the official corner wins it over one only near it. A corner found without
+        official corner left for it (none within 200 m, or taken) gets its own label at its apex.
+        """
+        delta_on: dict[int, tuple[bool, CornerComparison]] = {}  # official corner index: covered, corner found
+        loose: list[CornerComparison] = []  # corners found shown at their own apex
         for row in self._corner_rows:
-            nearest = min(self.official_in(row) or self._official,
-                          key=lambda corner: abs(corner.distance - row.corner.apex))
-            if abs(nearest.distance - row.corner.apex) <= 200:
-                delta_on[self._official.index(nearest)] = row
+            inside = self.official_in(row)
+            nearest = min(inside or self._official, key=lambda corner: abs(corner.distance - row.corner.apex))
+            index = self._official.index(nearest)
+            held = delta_on.get(index)
+            if (inside or abs(nearest.distance - row.corner.apex) <= 200) and (held is None or (inside and not held[0])):
+                if held is not None:  # corner only near the official corner: own label
+                    loose.append(held[1])
+                delta_on[index] = (bool(inside), row)
+            else:
+                loose.append(row)
         points = []
         for index, corner in enumerate(self._official):
-            found = delta_on.get(index) or next(
+            held = delta_on.get(index)
+            found = held[1] if held is not None else next(
                 (row for row in self._corner_rows if corner in self.official_in(row)), None)
-            delta = found.time_delta if found is not None and index in delta_on else None
             start, end = (found.corner.start, found.corner.end) if found is not None else (
                 corner.distance - 120, corner.distance + 120)
-            x, y = self.rotate_point(corner.x, corner.y)
-            points.append({
-                "x": x, "y": y, "label": self.official_text(corner.label), "index": index,
-                "row": self._corner_rows.index(found) if found is not None else -1,
-                "start": start, "end": end,
-                "delta": signed(delta, 2) if delta is not None else "",
-                "deltaColor": COLOR_LOSS if delta is not None and delta > 0.005
-                else COLOR_GAIN if delta is not None and delta < -0.005 else "",
-                "priority": abs(delta) if delta is not None else 0.0,
-            })
+            points.append(self.corner_point(*self.rotate_point(corner.x, corner.y), self.official_text(corner.label),
+                                            index, found, start, end, held[1].time_delta if held is not None else None))
+        line = self.reference_map_line()
+        if line is not None:
+            for row in loose:  # named like in corner table
+                points.append(self.corner_point(*lap_map.point_at(line, row.corner.apex), self.row_label(row),
+                                                len(points), row, row.corner.start, row.corner.end, row.time_delta))
         return points
+
+    def corner_point(self, x: float, y: float, label: str, index: int, row: CornerComparison | None, start: float,
+                     end: float, delta: float | None) -> dict:
+        """Corner label on map: position, name, corner row (-1 if none), range zoomed on click, time delta"""
+        return {
+            "x": x, "y": y, "label": label, "index": index,
+            "row": self._corner_rows.index(row) if row is not None else -1,
+            "start": start, "end": end,
+            "delta": signed(delta, 2) if delta is not None else "",
+            "deltaColor": COLOR_LOSS if delta is not None and delta > 0.005
+            else COLOR_GAIN if delta is not None and delta < -0.005 else "",
+            "priority": abs(delta) if delta is not None else 0.0,
+        }
 
     def map_driving_points(self) -> list[dict]:
         """Braking, apex (minimum speed) & exit (full throttle) points of each lap in each corner
@@ -493,7 +539,7 @@ class MapView(BackendBase):
                     })
         return points
 
-    # Lap placement across track: offset from base line (official center path) & track edges
+    # Lap placement across track: offset from base line (official circuit path, else reference lap) & track edges
     def reference_length(self) -> float:
         reference = self.data.reference
         if reference is None or not len(reference.data):
@@ -518,7 +564,7 @@ class MapView(BackendBase):
         return cached[1], cached[2], cached[3]
 
     def update_base(self):
-        """Line lap placement is measured from: official center path, else reference lap line"""
+        """Line lap placement is measured from: official circuit path (game driving line), else reference lap line"""
         reference = self.data.reference
         official = self.official_base(self.reference_length())
         line = self.lap_line(reference) if reference is not None else None
@@ -527,7 +573,11 @@ class MapView(BackendBase):
         self.update_placements()
 
     def update_placements(self):
-        """Track edges along base line & placement of each shown lap (track position & distance to center charts)"""
+        """Track edges along base line & placement of each shown lap (track position & distance to center charts)
+
+        Measured between track edges for laps without game values only (game lateral position & track edge recorded
+        are exact). Never without track edges: base line is a driving line, not the track center.
+        """
         base = self._base
         if self._limits is not None and len(base.xs) > 2:
             key = (base, self._limits)
@@ -539,8 +589,10 @@ class MapView(BackendBase):
         lefts, rights = self._edges
         placements: dict[str, tuple[list[float], list[float], list[float]]] = {}
         cache: dict[str, tuple[tuple, tuple]] = {}
-        if lefts or self._base_official:
+        if lefts:
             for lap in self.data.laps:
+                if any(lap.data.columns.get("track_edge") or ()):  # game values recorded
+                    continue
                 found = self.lap_offsets(lap)
                 if found is None or not found[1]:
                     continue
@@ -558,14 +610,12 @@ class MapView(BackendBase):
 
     @staticmethod
     def lap_placements(found: tuple, lefts: list[float], rights: list[float]) -> tuple:
-        """Lap distances, distance to track middle (m) & track position (%) of each lap line point"""
+        """Lap distances, distance to track middle (m, left positive like game) & track position (%) of each lap line
+        point, between track edges (left & right edge offsets along base line)"""
         line, sides, indexes = found
-        if lefts:
-            centers = [side - (lefts[index] + rights[index]) / 2 for side, index in zip(sides, indexes)]
-            percents = [max(min(lap_map.placement(side, lefts[index], rights[index])[2], 150.0), -150.0)
-                        for side, index in zip(sides, indexes)]
-        else:  # official center path without edges: distance only
-            centers, percents = list(sides), []
+        centers = [side - (lefts[index] + rights[index]) / 2 for side, index in zip(sides, indexes)]
+        percents = [max(min(lap_map.placement(side, lefts[index], rights[index])[2], 150.0), -150.0)
+                    for side, index in zip(sides, indexes)]
         return list(line.distances[:len(sides)]), centers, percents
 
     def lap_placement(self, lap: PlotLap, distance: float) -> tuple[float, float, float] | None:
@@ -644,7 +694,7 @@ class MapView(BackendBase):
     # Consistency: spread of each mini-sector time over clean laps of a stint, a session or shown laps
     def consistency_paths(self) -> list[str]:
         """Clean laps compared: stint or session of reference lap (recorded laps of track), else shown laps"""
-        shown = [lap.key for lap in self.data.laps if lap.clean and lap.comparable]
+        shown = [lap.key for lap in self.data.laps if lap.clean]
         if self._consistency_scope == "shown":
             return shown
         group = next((group for group in self.track_sessions()
@@ -689,12 +739,17 @@ class MapView(BackendBase):
             else:
                 missing.append((path, mtime))
         if missing:
-            self.start_consistency_job(missing, list(bounds), key, max(reference.data.distance))
+            self.start_consistency_job(missing, list(bounds), key, self.data.lap_end(reference), dict(reference.data.meta))
         return {"bounds": bounds, "spreads": mini_sector_spread(times), "laps": len(times),
                 "busy": bool(missing) or self._mini_busy}
 
-    def start_consistency_job(self, todo: list[tuple[str, float]], bounds: list[float], key: tuple, length: float):
-        """Mini-sector times of laps not shown read in worker process (cached by lap file time), map colored again"""
+    def start_consistency_job(self, todo: list[tuple[str, float]], bounds: list[float], key: tuple, length: float,
+                              reference_info: dict | None = None):
+        """Mini-sector times of laps not shown read in worker process (cached by lap file time), map colored again
+
+        length: reference lap end distance (see TraceData.lap_end), reference_info: reference lap info (laps of the
+        same track length never scaled, see mini_sector_job).
+        """
         if self._mini_busy:
             return
         self._mini_busy = True
@@ -710,7 +765,7 @@ class MapView(BackendBase):
             self.mapChanged.emit()
 
         self.run_process_job("mini-sectors", done, mini_sector_job, self.folder, [path for path, _ in todo], bounds,
-                             length)
+                             length, reference_info)
 
     def consistency_legend(self) -> dict:
         """Map legend of consistency mode: lowest & highest spread (s), laps counted, scope"""
@@ -744,9 +799,9 @@ class MapView(BackendBase):
         """Sector names at mid sector on reference line: reference sector time, gap of compared lap"""
         reference = self.data.reference
         bounds = self.data.sector_lines
-        if reference is None or len(bounds) != 2 or not self._map_lines:
+        line = self.reference_map_line()
+        if reference is None or len(bounds) != 2 or line is None:
             return []
-        line = self._map_lines[0][0]
         reference_times = sector_times(reference.data)
         compared = self.compared_lap()
         compared_times = sector_times(compared.data) if compared is not None else []
@@ -852,7 +907,7 @@ class MapView(BackendBase):
 
     def build_map_overlays(self, meters_per_pixel: float):
         """Chart markers A-B range & selected corner along reference line"""
-        line = self._map_lines[0][0] if self._map_lines else lap_map.MapLine([], [], [])
+        line = self.reference_map_line() or lap_map.MapLine([], [], [])
         start, end = self._map_range
         shown = lap_map.part(line, start, end) if end > start else lap_map.MapLine([], [], [])
         VertexStore.set(self._map["rangeKey"], lap_map.line_band(shown, meters_per_pixel * 7))
@@ -897,8 +952,8 @@ class MapView(BackendBase):
                                             lap_map.kept_indexes(line, meters_per_pixel * 0.75),
                                             meters_per_pixel * LINE_WIDTH)
         marks = []
-        if self._map_lines:
-            reference_line = self._map_lines[0][0]
+        reference_line = self.reference_map_line()
+        if reference_line is not None:
             for distance in self.data.sector_lines:  # sector boundaries across road
                 marks.append(lap_map.cross_mark(reference_line, distance, road_half * 1.6))
         shapes[self._map["marks"]] = segments(marks)
@@ -935,9 +990,10 @@ class MapView(BackendBase):
         shapes[self._map["pit"]] = merge_strips(pits) if pits else band([], [], 1)
         # Braking points range of shown laps in each corner, along reference line
         spreads = []
-        if self._map_lines and len(self._map_lines) > 1:
-            reference_line, reference_lap = self._map_lines[0]
-            reference_normals = self.line_normals(reference_lap, reference_line)
+        if reference_line is not None and len(self._map_lines) > 1:
+            reference_lap = self.data.reference
+            reference_normals = self.line_normals(reference_lap, reference_line) if reference_lap is not None and any(
+                lap is reference_lap for _, lap in self._map_lines) else normals(reference_line.xs, reference_line.ys)
             for low, high in self.brake_spreads().values():
                 if high - low >= 1:
                     spreads.append(band_part(reference_line.xs, reference_line.ys, reference_normals,
@@ -960,7 +1016,7 @@ class MapView(BackendBase):
 
     def direction_marks(self) -> list[tuple[float, float, float]]:
         """Driving direction arrows along reference line (or circuit), once per line"""
-        line = self._map_lines[0][0] if self._map_lines else self._road
+        line = self.guide_line()
         if not self._arrows or self._arrows[0] is not line:
             self._arrows = (line, lap_map.direction_marks(line))
         return self._arrows[1]
@@ -1042,40 +1098,52 @@ class MapView(BackendBase):
         compared = self.compared_lap()
         compared_data = compared.data if compared is not None else None
         colorblind = bool(self._map_options.get("colorblind"))
+        line = self.reference_map_line()  # reference lap line, or official circuit standing for it
         if mode == "gain":
             return (mode, reference, compared_data, self.data.delta_window, colorblind, self._map_angle)
         if mode == "line":
-            return (mode, reference, compared_data, self._map_angle)
+            return (mode, reference, compared_data, line, self._map_angle)
         if mode == "corners":
-            return (mode, reference, self._corner_key, colorblind, self._map_angle)
+            return (mode, reference, self._corner_key, colorblind, line, self._map_angle)
         if mode == "minisectors":
             return (mode, tuple(lap.data for _, lap in self._map_lines), tuple(lap.color.rgba() for _, lap in self._map_lines),
-                    tuple((lap.clean, lap.comparable) for _, lap in self._map_lines), self._map_angle)
+                    tuple(lap.clean for _, lap in self._map_lines), line, self._map_angle)
         if mode == "consistency":  # spreads found again (laps read in background meanwhile)
             self._consistency = self.consistency()
-            return (mode, reference, tuple(self._consistency.get("spreads", [])), self._map_angle)
-        return (mode, reference, self._map_angle)
+            return (mode, reference, tuple(self._consistency.get("spreads", [])), line, self._map_angle)
+        return (mode, reference, line, self._map_angle)
 
     def line_colors(self, mode: str, lines: list[tuple[lap_map.MapLine, PlotLap]],
                     ) -> tuple[lap_map.MapLine | None, list[QColor]]:
-        """Colored line of map mode & its color at each point, None if nothing to color"""
+        """Colored line of map mode & its color at each point, None if nothing to color
+
+        Compared lap line in gain & line modes, else reference map line (reference lap line, official circuit if
+        reference lap has no positions; line mode needs reference lap line).
+        """
         self._speed_range = (0.0, 0.0)
+        reference = self.data.reference
+        compared = self.compared_lap()
+        found = next(((line, lap) for line, lap in lines if compared is not None and lap is compared), None)
+        reference_line = self.reference_map_line()
+        if mode in ("gain", "line"):
+            if found is None or reference is None:
+                return None, []
+        elif reference_line is None or reference is None:
+            return None, []
+        else:
+            line, lap = reference_line, reference
         if mode == "gain":
-            compared = self.compared_lap()
-            found = next(((line, lap) for line, lap in lines[1:] if compared is not None and lap is compared), None)
             delta = self.data.reference_deltas.get(found[1].key) if found is not None else None
-            if found is None or self.data.reference is None or not delta:
+            if found is None or not delta:
                 return None, []
             line, lap = found
             colors = lap_map.gain_colors_from_delta(delta[0], delta[1], line, self.data.scale_of(lap),
                                                     self.data.delta_window, bool(self._map_options.get("colorblind")))
         elif mode == "corners":  # reference line colored corner by corner by compared lap time delta
-            line, lap = lines[0]
             corners = [(row.corner.start, row.corner.end, row.time_delta) for row in self._corner_rows
                        if row.time_delta is not None]
             colors = lap_map.corner_delta_colors(line, corners, bool(self._map_options.get("colorblind")))
         elif mode == "minisectors":  # reference line colored by fastest shown lap of each mini-sector
-            line, lap = lines[0]
             mini = self.mini_sectors()
             if not mini:
                 return None, []
@@ -1088,20 +1156,17 @@ class MapView(BackendBase):
                 winner = winners[sector] if winners else -1
                 colors.append(laps[winner].color if 0 <= winner < len(laps) else neutral)
         elif mode == "consistency":  # reference line colored by spread of each mini-sector time over laps
-            line, lap = lines[0]
             spread = self._consistency
             if not any(value >= 0 for value in spread.get("spreads", [])):
                 return None, []
             colors = lap_map.spread_colors(line, spread["bounds"], spread["spreads"])
-        elif mode == "line":  # compared lap line: inside or outside of reference line
-            compared = self.compared_lap()
-            found = next(((line, lap) for line, lap in lines[1:] if compared is not None and lap is compared), None)
-            if found is None:
+        elif mode == "line":  # compared lap line: inside or outside of reference lap line
+            if (found is None or reference is None or reference_line is None
+                    or not any(lap is reference for _, lap in lines)):
                 return None, []
             line, lap = found
-            colors = lap_map.line_colors(self.line_offsets(lines[0][0], lines[0][1], line, lap))
+            colors = lap_map.line_colors(self.line_offsets(reference_line, reference, line, lap))
         else:
-            line, lap = lines[0]
             if mode == "speed":
                 colors, low, high = lap_map.speed_colors(lap.data, line)
                 self._speed_range = (low, high)
@@ -1204,7 +1269,7 @@ class MapView(BackendBase):
         if self.data.laps:
             self.build_map()
             self.bump_revision()
-            self.chartChanged.emit()
+            self.mapDataChanged.emit()
         self.mapChanged.emit()
 
     @Slot()
@@ -1232,9 +1297,10 @@ class MapView(BackendBase):
     @Slot(float, float, result=list)
     def mapBounds(self, start_x: float, end_x: float) -> list[float]:
         """Map area of reference line between axis positions (map follows chart zoom), empty if none"""
-        if not self._map_lines:
+        reference_line = self.reference_map_line()
+        if reference_line is None:
             return []
-        line = lap_map.part(self._map_lines[0][0], self.data.distance_at_x(start_x), self.data.distance_at_x(end_x))
+        line = lap_map.part(reference_line, self.data.distance_at_x(start_x), self.data.distance_at_x(end_x))
         if len(line.xs) < 2:
             return []
         return [min(line.xs), min(line.ys), max(line.xs), max(line.ys)]
@@ -1293,10 +1359,7 @@ class MapView(BackendBase):
     @Slot(float, float, float, result=float)
     def mapPick(self, map_x: float, map_y: float, radius: float) -> float:
         """Axis position of reference line point nearest to map point, -1 if farther than radius"""
-        if not self._map_lines:
-            return -1.0
-        _, lap = self._map_lines[0]
-        grid = self._grids.get(lap.key)
+        grid = self.reference_grid()
         distance = grid.project(map_x, map_y, radius) if grid is not None else -1.0  # between samples
         return self.data.x_at_distance(distance) if distance >= 0 else -1.0
 

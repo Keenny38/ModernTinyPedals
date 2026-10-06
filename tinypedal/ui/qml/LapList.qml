@@ -139,7 +139,7 @@ Card {
             color: theme.text
             placeholderTextColor: theme.dimText
             rightPadding: theme.em * 2
-            text: backend.filterText
+            Component.onCompleted: text = backend.filterText  // not bound: search stripped by backend, typed text kept
             onTextEdited: searchTimer.restart()
             Keys.onEscapePressed: { text = ""; backend.setFilter(""); root.keysToChart() }
             Keys.onReturnPressed: { backend.setFilter(text); root.keysToChart() }
@@ -175,9 +175,43 @@ Card {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: backend.laps
+            model: backend.laps  // lap rows of expanded sessions only, rows changed in place (scroll position kept)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            // Session laps fade in & out as session is expanded or collapsed, rows below slide
+            add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 } }
+            remove: Transition { NumberAnimation { property: "opacity"; to: 0; duration: 120 } }
+            displaced: Transition {
+                NumberAnimation { property: "y"; duration: 200; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "opacity"; to: 1; duration: 160 }  // fade in cut short: row shown anyway
+            }
+
+            // Search or clean only leaves no lap: say so, with a way back (checked laps stay listed above)
+            footer: Item {
+                width: list.width
+                height: backend.noMatch ? noMatch.height + theme.em * 2.5 : 0
+                EmptyState {
+                    id: noMatch
+                    readonly property bool searching: backend.filterText !== ""
+                    y: theme.em * 1.5
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: backend.noMatch
+                    glyph: searching ? "" : ""  // search, filter
+                    title: searching ? i18n.tr("No lap matches the search") : i18n.tr("No clean lap")
+                    text: searching ? i18n.tr("Search looks in lap number, time, session, vehicle, conditions, note and setup.")
+                                    : i18n.tr("Every lap is invalid, an out lap or an in lap.")
+                    actionText: searching ? i18n.tr("Clear Search") : i18n.tr("Show All Laps")
+                    onAction: {
+                        if (searching) {
+                            searchField.text = ""
+                            backend.setFilter("")
+                        } else {
+                            backend.setHideUnclean(false)
+                        }
+                    }
+                }
+            }
 
             delegate: Item {
                 id: row
@@ -204,15 +238,12 @@ Card {
                 required property bool error
                 required property string gap
                 required property string tip
+                required property bool open  // session expanded
+                required property string hint  // lap of another circuit than reference lap: never compared
 
                 readonly property bool isSession: kind === "session"
-                readonly property bool open: backend.expanded.indexOf(session) >= 0
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
-                height: isSession ? Math.round(theme.em * 2.6) : (open ? Math.round(theme.em * 3.1) : 0)
-                clip: true
-                opacity: isSession || open ? 1 : 0
-                Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 160 } }
+                height: isSession ? Math.round(theme.em * 2.6) : Math.round(theme.em * 3.1)
 
                 // Session header
                 Item {
@@ -297,8 +328,8 @@ Card {
                     color: row.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, lapArea.containsMouse ? 0.16 : 0.10)
                          : lapArea.containsMouse ? theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
-                    ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.error)
-                    ToolTip.text: row.error ? i18n.tr("Unable to read this lap file") : row.tip
+                    ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.hint !== "" || row.error)
+                    ToolTip.text: row.error ? i18n.tr("Unable to read this lap file") : [row.hint, row.tip].filter(Boolean).join("\n")
                     ToolTip.delay: 700
 
                     // Lap color bar when shown in charts
@@ -340,6 +371,7 @@ Card {
                         anchors.leftMargin: theme.em * 1.0
                         anchors.rightMargin: theme.em * 0.4
                         spacing: theme.em * 0.5
+                        opacity: row.hint !== "" ? 0.5 : 1  // other circuit: dimmed
 
                         // Check box (warning if lap file unreadable)
                         Rectangle {

@@ -44,7 +44,9 @@ from ...userfile.corner_analysis import (
     ideal_lap,
     lap_time_delta,
     straights_delta,
+    total_lap_time,
 )
+from ...userfile.telemetry_lap import LapData
 from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
 from ..lap_viewer import (
@@ -61,6 +63,7 @@ from . import lap_map
 from .lap_base import COLOR_GAIN, COLOR_LOSS, BackendBase, keys_match
 
 CORNER_SORTS = ("track", "loss")
+SUM_LENGTH_TOLERANCE = 0.1  # compared lap length difference (fraction) over which Straights & Total rows are left out
 
 
 class CornerTable(BackendBase):
@@ -80,10 +83,11 @@ class CornerTable(BackendBase):
             if self._map:
                 self._map["corners"] = self.map_corner_points()
                 self._map["sectors"] = self.map_sector_labels()
-                if self._map_mode in ("gain", "line"):
+                if self._map_mode in ("gain", "line", "corners"):  # colors depend on compared lap
                     self.build_colored_line(self._map_view[2])
                     self.bump_revision()
-            self.chartChanged.emit()
+                self.mapDataChanged.emit()
+            self.cornersChanged.emit()
 
     @Slot(str)
     def setCornerSort(self, sort: str):
@@ -91,7 +95,7 @@ class CornerTable(BackendBase):
             self._corner_sort = sort
             save_viewer_setting(self.folder, corner_sort=sort)
             self.build_corners()
-            self.chartChanged.emit()
+            self.cornersChanged.emit()
 
     def build_corners(self):
         """Corner by corner comparison of chosen compared lap with reference lap
@@ -104,7 +108,7 @@ class CornerTable(BackendBase):
         other = compared_lap.data if compared_lap is not None else None
         scales = tuple(self.data.scale_of(lap) for lap in self.data.laps)
         key = (reference, other, self._hysteresis, tuple(lap.data for lap in self.data.laps), scales,
-               tuple(lap.clean and lap.comparable for lap in self.data.laps))
+               tuple(lap.clean for lap in self.data.laps))
         if not keys_match(self._corner_key, key):
             self._corner_key = key
             self._corner_rows = compare_corners(
@@ -180,13 +184,13 @@ class CornerTable(BackendBase):
             rows.append(item)
         if self._corner_sort == "loss":
             rows.sort(key=lambda item: -item["bar"])
-        if reference is not None and other is not None and self._corner_rows:  # corners + straights = lap delta
+        if reference is not None and other is not None and self.sums_comparable(reference, other):
             for text, kind, delta in ((tr("Straights"), "sum", straights_delta(self._corner_rows, reference, other)),
                                       (tr("Total"), "total", lap_time_delta(reference, other))):
                 rows.append({"index": -1, "label": text, "apex": "", "kind": kind, "time": signed(delta, 2),
                              "timeColor": judged(delta), "bar": delta})
         if self._ideal is not None and reference is not None:
-            gap = self._ideal.time - reference.lap_time
+            gap = self._ideal.time - total_lap_time(reference)  # same lap time as ideal lap parts & Total row
             rows.append({"index": -1, "label": tr("Ideal Lap"), "apex": "", "speed": format_laptime(self._ideal.time),
                          "speedColor": "", "kind": "ideal", "time": signed(gap, 2), "timeColor": judged(gap),
                          "bar": gap})
@@ -194,10 +198,18 @@ class CornerTable(BackendBase):
         self.build_coaching()
         self.build_corner_marks()
 
+    def sums_comparable(self, reference: LapData, other: LapData) -> bool:
+        """Whether corners + straights = lap delta rows mean something: compared lap has stats in every corner & about
+        the same length (else straights take time of missing corners, or of a stub lap)"""
+        if not self._corner_rows or any(row.compared is None for row in self._corner_rows):
+            return False
+        length, other_length = max(reference.distance, default=0.0), max(other.distance, default=0.0)
+        return length > 0 and abs(other_length / length - 1) <= SUM_LENGTH_TOLERANCE
+
     def clean_ideal_lap(self) -> IdealLap | None:
         """Ideal lap (fastest lap in each corner & straight) among clean shown laps: invalid, out & in laps
-        (cut track) & laps of another circuit never count; best lap indexes are shown lap indexes"""
-        clean = [index for index, lap in enumerate(self.data.laps) if lap.clean and lap.comparable]
+        (cut track) never count; best lap indexes are shown lap indexes"""
+        clean = [index for index, lap in enumerate(self.data.laps) if lap.clean]
         found = ideal_lap([self.resampled(self.data.laps[index]) for index in clean],
                           [row.corner for row in self._corner_rows])
         if found is None:
@@ -334,7 +346,8 @@ class CornerTable(BackendBase):
                 self._band_cache_applied = False
                 self.build_map_bands()
                 self.bump_revision()
-            self.chartChanged.emit()
+                self.mapDataChanged.emit()
+            self.cornersChanged.emit()
 
     def lap_corner_stats(self, lap: PlotLap) -> tuple[ResampledLap, list[CornerStats | None]]:
         """Driving of lap in each corner found on reference lap, computed again only if laps or corners changed"""

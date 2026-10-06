@@ -41,10 +41,10 @@ add_modern_options(WIDGET_DEFAULT)
 # Add widget plugins ("plugins" folder)
 WIDGET_DEFAULT.update(load_plugin_defaults())
 
-# Per widget overlay theme (common option), "Global" = use overlay style theme
 # Visibility context (common option): when widget is shown while driving, see widget._base
+# Stream visibility (common option): shown on screen and/or on stream (browser sources), see stream_overlay
 for _widget_setting in WIDGET_DEFAULT.values():
-    _widget_setting.setdefault("widget_theme", "Global")
     _widget_setting.setdefault("visibility_context", "Always")
+    _widget_setting.setdefault("stream_visibility", "Screen & Stream")
 
 WIDGET_FILENAME = tuple(WIDGET_DEFAULT)

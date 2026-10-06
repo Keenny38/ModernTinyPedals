@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>Telemetry overlays and analysis tools for Le Mans Ultimate and rFactor 2</b><br>
-  86 overlays with a modern design, a telemetry viewer, race strategy and driver stats.<br>
+  87 overlays with a modern design, a telemetry viewer, race strategy and driver stats.<br>
   Free and open source, in English and French.
 </p>
 
@@ -29,12 +29,12 @@
   <a href="docs/ROADMAP.md">Roadmap</a>
 </p>
 
-![The 86 overlays with the new design on a simulated race at Road Atlanta](images/readme_preview.png)
+![The 87 overlays with the new design on a simulated race at Road Atlanta](images/readme_preview.png)
 
 Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same solid base, with a new design, a redesigned interface, new tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.21.0**: about a third less memory used (overlays and pages loaded when used, freed while the window waits in the tray). All the details in the [changelog](CHANGELOG.md).
+> **New in 0.21.0**: a **race results** page for every session you played (classification, positions lap by lap, laps of each car, contacts and penalties), **stream overlays** for OBS Studio, Streamlabs, XSplit and vMix (overlays as browser sources, on stream only if you want, and the last race results for your viewers), the **Telemetry Compare** overlay (the reference lap of the telemetry viewer while you drive) and telemetry viewer fixes (only laps of the same circuit compared, track edges, MoTeC imports, faster opening), an **Overlay Options** page with the options of every overlay (sections, search in every overlay, changes to several overlays applied at once, live preview), a Config page with every global option, redesigned Find Option, Presets, Spectate and Modules pages (what each module computes and the overlays needing it), a redesigned setup wizard (units, theme previews, overlays picked from pictures), four themes for the app and the overlays (Modern or Legacy, dark or light) with a colorblind variant, and a main window that remembers its size and stays on screen, and about a third less memory used (pages and overlays loaded when used, freed while the window waits in the tray). All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -42,13 +42,13 @@ Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/Tin
 
 1. **Download** `ModernTinyPedals-<version>-windows-setup.exe` from the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases/latest) page and run it. No administrator rights needed: the app installs in your profile (`%LOCALAPPDATA%\Programs\Modern Tiny Pedals`).
 2. **Prepare the game**: `Borderless` or `Windowed` display mode (exclusive fullscreen hides the overlay), then the setting of your game below.
-3. **On first launch**, the setup wizard asks for the language, the game, the theme and the overlays to start with.
+3. **On first launch**, the setup wizard asks for the language, the game (a running game is picked for you), metric or imperial units, the themes (previewed) and the overlays to start with (shown as pictures).
 4. **Start a session**: the overlay shows up as soon as the car is on track and hides otherwise.
 
 Then:
 
 - **Move the overlays**: unlock the overlay (notification area icon menu > `Lock Overlay`) and drag them, or use `Tools > Layout Editor` on a screenshot of the game.
-- **Configure an overlay**: `Overlays` tab of the main window, or `Ctrl+F` to search for an option by name.
+- **Configure an overlay**: gear of its card in the `Overlays` tab (or right-click the overlay) opens the Overlay Options page, where every overlay is one click away. `Ctrl+F` searches for an option by name.
 - **Updates**: the app tells you about a new version, shows its release notes in your language and can download and install it (`Download And Install`).
 
 Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-setup.zip`) and the source code (`-source.zip`). The portable ZIP is no longer published: to turn an older portable copy into an installed one, install the setup into its folder, your presets and data are kept. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) for details and for verifying your download.
@@ -70,18 +70,20 @@ With Le Mans Ultimate, the app also reads the game's local REST API (nothing to 
 
 ### Overlays with a modern design
 
-86 configurable overlays: tyres, brakes, fuel and energy, delta, timing, standings, radar, map, weather, engine, suspension, chat…
+87 configurable overlays: tyres, brakes, fuel and energy, delta, timing, standings, radar, map, weather, engine, suspension, chat…
 
 - **One rounded panel per overlay**, Barlow font, short translated labels above the values.
 - **Values colored by meaning**: gain, loss, warning, best time.
 - **Standings** as rows with position badge, class pill and position in class, columns of your choice.
 - **Fuel and energy** with gauge and marks, **tyres and brakes** as tiles in the heatmap colors, **LEDs** as glowing dots.
-- **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay or just one.
-- **Themes** (dark, high contrast, color-blind friendly, classic), theme editor, per-overlay theme, export and import.
+- **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay (Legacy themes) or just one.
+- **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (original TinyPedal look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable.
 - **Visibility by session** (practice, qualifying, race) and pit lane, with fade.
-- **Race aids**: delta graph over the lap, gap trend ahead and behind, pit lane helper (speed limit, pit limiter, distance to the box), stint timer and driving time per driver, spotter on the screen edges, race notifications, tyre temperature trend.
+- **Race aids**: delta graph over the lap, gap trend ahead and behind, pit lane helper (speed limit, pit limiter, distance to the box), stint timer and driving time per driver, spotter on the screen edges, race notifications, tyre temperature trend, and **telemetry compare**: your live speed, pedals, steering and gear over the reference lap of the telemetry viewer, with the next braking point ahead of the car, delta and speed difference.
 
 ![New standings design, before and after](docs/changes/2026-10-05-design-classements.png)
+
+![Overlay themes: Modern Dark, Modern Light, Legacy Dark, Legacy Light](docs/changes/2026-10-06-overlay-themes.png)
 
 **Black box**: tyres, brakes, suspension, damage, fuel and energy gauges, incident log (contacts with the other driver's name, penalties, track limits) and ABS, TC, brake bias and engine map chips, with no overlap even when the wheels turn.
 
@@ -96,6 +98,7 @@ Every lap is recorded and analyzed in a GPU-drawn viewer: smooth zoom, laps grou
 - **Corners**: time, entry, minimum and exit speeds, gear, brake pressure, ideal lap, and **where the time is lost** with the reason in plain words ("Brakes 6 m earlier").
 - **Session**: long run pace and lap time trend, fuel and wear of each lap. **XY**: scatter plot or histogram of any channels.
 - **Tools**: search, trash with undo, lap used as delta best, open the replay at the cursor, **MoTeC `.ld`**, CSV and image export, MoTeC log import to compare with another driver's lap.
+- **On track**: the Telemetry Compare overlay draws your live speed and inputs over the reference lap chosen in the viewer.
 - **In-depth analysis**: values fitted to the visible part, math channels from a formula, laps aligned on braking, consistency per mini-sector, teammate laps, best lap in similar conditions, setup differences, corner report as HTML or PDF.
 
 | Official layout, track edges and mini-sectors | Where the time is lost |
@@ -136,6 +139,19 @@ Your numbers per track and per car, compared with the LMU community times (sheet
 |---|---|
 | ![Driver stats](docs/changelog/0.20.0-driver-stats.png) | ![Career](docs/changelog/0.20.0-driver-stats-career.png) |
 
+### Race results
+
+Every session you played, online or single player, read from the results files of Le Mans Ultimate and rFactor 2: no setup, the game does not need to run.
+
+- **Sessions** by day with your result, search and filter (races, qualifying, practice); a session that ends while the page is open shows up at once.
+- **Your key figures**: position and class position, places gained from the grid, best lap and its rank, laps and pit stops, contacts, track limits and penalties.
+- **Classification** by class, with race time and gaps (also for a race left before its end), best laps, pit stops and contacts.
+- **Positions lap by lap**, the **laps of any car** (sectors, top speed, tyres, energy used and tread left for your car) and the **events** of the session: contacts, penalties, track limits and chat.
+
+| Classification of a multiclass race | Positions lap by lap |
+|---|---|
+| ![Race results](docs/changelog/0.21.0-race-results.png) | ![Positions](docs/changelog/0.21.0-race-results-positions.png) |
+
 ### Le Mans Ultimate: game data
 
 <img src="docs/changelog/0.19.0-chat.png" alt="Chat overlay" width="383" align="right">
@@ -155,19 +171,31 @@ Your numbers per track and per car, compared with the LMU community times (sheet
 - Qt 6 interface in **English or French** (switch without restarting), translated option names and tooltips, **release notes in the app language**.
 - **Home page**: game and current session status, overlay lock, last session, customizable quick access (tools, pages, actions) and **release notes of the installed version**.
 - **Overlays page**: every overlay as a card with a preview drawn with your settings (or a compact list), search ignoring accents, category chips with counts, enable / disable the filtered overlays, start errors flagged.
+- **Modules page**: what each data module computes, its state, the enabled overlays and modules using its data (a module turned off that they need is flagged), reset of its saved data.
 - **Everything opens inside the app window**: tools, editors and settings are pages, with back navigation (`Alt+←` or the mouse back button). A page you leave closes by itself (unless it has unsaved changes), so pages never pile up. Navigation bar tools stay as you left them and come back on next start, even after a crash.
-- **Customizable navigation bar**, global option search (`Ctrl+F`), live overlay preview, undo / redo in editors.
+- **Window size handled for you**: comfortable size centered on screen at first launch, size, position and maximized state remembered (even after a crash), wide pages grow the window only while open and keep it on screen, window brought back on screen when a monitor is unplugged, never shrunk below the size where pages show correctly (more for the telemetry viewer and driver stats), `Window` > `Reset Window Size and Position`.
+- **Overlay Options page**: the options of every overlay in one page, overlays listed by category. Options in sections (general, position and layout, font, then one per item shown with its on/off switch, display order as a list), options of an item that is off dimmed, only the options of the design in use. Search this overlay or every overlay, `Changed only`, `Apply to All Overlays` for a shared option (font, opacity...), live preview with the unsaved values, changes to several overlays kept pending with undo and applied at once (only the edited overlays restart).
+- **Config page** (navigation bar, `Ctrl+,`): every global option in one page by category (Application, Overlay Style, Notification, Compatibility, Remote Control, Web Dashboard, Stream Overlay, VR Overlay, User Path), with descriptions, a search through every category, changes kept pending with undo, discard and apply, notice previews, the web dashboard address and access code.
+- **Find Option** (`Ctrl+F`): best matches first with the current value of each option, options changed from default marked (`Changed only` lists them all), on / off options switched right in the list.
+- **Presets page**: loaded preset and auto load on top, every preset with its last change, the overlays and modules it turns on, its car class and track tags and hotkeys, details of the selected preset, name checked as you type for new, duplicate and rename.
+- **Spectate page**: drivers of the session with place, class, car and best lap; click a driver to follow it, previous / next by place.
+- **Setup wizard** (first launch, `Help` > `Setup Wizard`): six steps that switch language at once, running game detected, metric or imperial units, window and overlay themes previewed with real overlays, new or existing preset with overlays picked from pictures, summary before anything is applied.
+- **Customizable navigation bar**, live overlay preview, undo / redo in editors.
 - **Layout editor** with alignment guides and snapping, global scale, positions remembered per screen setup.
 - **Preset share code**: copy a preset as text, import it with a preview. **Preset trash** with undo.
 - **Unsaved changes** flagged on each page, `Ctrl+S` to save, values checked as you type.
-- **Telemetry replay**: record a session and replay it in every overlay, without the game.
+- **Session recorder** (`Tools` > `Advanced`): record a session and replay it in every overlay, without the game, to test overlays or attach to a bug report.
+- **Four window themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (colors of TinyPedal 2.50), switched from the status bar.
 - Gold and black or gold and white icon, following the Windows light or dark mode.
 
 ### Connections
 
 - **Remote control** for Stream Deck, Companion or SimHub, and live telemetry stream over WebSocket.
 - **Web dashboard** for phone or tablet, in your units and language, with access code and optional HTTPS.
+- **Stream overlays** for OBS Studio, Streamlabs, XSplit or vMix: the overlays as browser sources (whole layout or one by one), transparent and exactly as on screen, also with the game in exclusive fullscreen. Each overlay on screen and stream, stream only or screen only, and the **classification of the last race** for your viewers, classes and pages cycling.
 - **VR**: experimental SteamVR overlay, and a mirror window for OpenXR games (to show in the headset with OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+).
+
+![Race results as a browser source in a stream](docs/changelog/0.21.0-stream-race-results.png)
 
 ### Reliability
 
@@ -188,7 +216,7 @@ The [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki) is the user and de
 |---|---|
 | [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation) · [Game setup](https://github.com/Keenny38/ModernTinyPedals/wiki/Game-Setup) · [Getting started](https://github.com/Keenny38/ModernTinyPedals/wiki/Getting-Started) | [Development](https://github.com/Keenny38/ModernTinyPedals/wiki/Development): run from source, checks, architecture, Windows build, release process |
 | [Overlays](https://github.com/Keenny38/ModernTinyPedals/wiki/Overlays) · [Presets and settings](https://github.com/Keenny38/ModernTinyPedals/wiki/Presets-and-Settings) | [Contributing guide](CONTRIBUTING.md) |
-| [Telemetry viewer](https://github.com/Keenny38/ModernTinyPedals/wiki/Telemetry-Viewer) · [Race calculator](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Calculator) · [Driver stats](https://github.com/Keenny38/ModernTinyPedals/wiki/Driver-Stats) | [Roadmap](docs/ROADMAP.md) |
+| [Telemetry viewer](https://github.com/Keenny38/ModernTinyPedals/wiki/Telemetry-Viewer) · [Race calculator](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Calculator) · [Driver stats](https://github.com/Keenny38/ModernTinyPedals/wiki/Driver-Stats) · [Race results](https://github.com/Keenny38/ModernTinyPedals/wiki/Race-Results) | [Roadmap](docs/ROADMAP.md) |
 | [Connections](https://github.com/Keenny38/ModernTinyPedals/wiki/Connections) · [Updates and security](https://github.com/Keenny38/ModernTinyPedals/wiki/Updates-and-Security) · [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting) | [Security policy](SECURITY.md) |
 
 Every option is described in the [settings reference](docs/customization.md) (also bundled with the app), and what changed in each version in the [changelog](CHANGELOG.md) ([en français](CHANGELOG.fr.md)). The wiki is generated from [docs/wiki](docs/wiki): edit it there.

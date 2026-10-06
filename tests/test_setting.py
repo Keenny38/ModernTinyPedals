@@ -282,6 +282,29 @@ def test_recorder_module_enabled_in_existing_presets_once():
     assert again["module_recorder"]["enable"] is False
 
 
+def test_navigation_rail_and_quick_access_reset_to_new_default_once():
+    from tinypedal import setting_validator, version
+    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+    from tinypedal.userfile.json_setting import copy_setting
+
+    default = copy_setting(GLOBAL_DEFAULT)
+    new_rail = default["application"]["rail_items"]
+    new_quick = default["application"]["home_quick_access"]
+    old = copy_setting(default)
+    old["preset"]["version"] = "2.50.2"
+    old["application"]["rail_items"] = "home,module,tools,pacenotes"  # former default or customized
+    old["application"]["home_quick_access"] = ""  # every button removed
+    updated = setting_validator.PresetValidator.global_preset(old, default)
+    assert updated["application"]["rail_items"] == new_rail  # every existing config, once
+    assert updated["application"]["home_quick_access"] == new_quick
+    assert updated["preset"]["version"] == version.SETTING_VERSION
+    updated["application"]["rail_items"] = "home,pacenotes"  # customized again afterwards: kept
+    updated["application"]["home_quick_access"] = "preset"
+    again = setting_validator.PresetValidator.global_preset(updated, default)
+    assert again["application"]["rail_items"] == "home,pacenotes"
+    assert again["application"]["home_quick_access"] == "preset"
+
+
 # Audit fixes
 def test_change_made_while_saving_not_lost(config, monkeypatch):
     """Option changed while its file is being written: saved again, never lost (was: memory 42, disk 0)"""

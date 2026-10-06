@@ -43,6 +43,7 @@ FocusScope {
     // is toggled or reference lap changes, axis positions follow (chartChanged)
     property real markerDistanceA: NaN
     property real markerDistanceB: NaN
+    property string markerTrack: ""  // track markers were set on (set once, not a binding: change seen first)
     readonly property real markerA: { backend.timeAxis; return axisAt(markerDistanceA) }
     readonly property real markerB: { backend.timeAxis; return axisAt(markerDistanceB) }
     readonly property bool hasRange: !isNaN(markerA) && !isNaN(markerB) && markerA !== markerB
@@ -144,7 +145,7 @@ FocusScope {
         if (animate) { if (!viewEasing.running) viewEasing.start() }
         else { viewEasing.stop(); viewStart = targetStart; viewEnd = targetEnd }
     }
-    Component.onCompleted: { viewStart = targetStart; viewEnd = targetEnd }
+    Component.onCompleted: { viewStart = targetStart; viewEnd = targetEnd; markerTrack = backend.currentTrack }
 
     function setView(start, end, animated) {
         var span = end - start
@@ -323,12 +324,20 @@ FocusScope {
     }
     readonly property real distanceScale: backend.distanceScale  // user distance unit (m or ft) per meter
     readonly property string distanceUnit: backend.distanceUnit
+    // Decimals of axis labels: as many as tick step needs (zoomed in to 5 m or 0.5 s: steps below one)
+    function stepDecimals(step) { return Math.min(Math.max(Math.ceil(-Math.log(step) / Math.LN10 - 1e-6), 0), 3) }
     function axisText(value) {
-        if (!backend.timeAxis) return Math.round(value * distanceScale) + " " + distanceUnit
-        if (value < 60) return value.toFixed(0) + "s"
-        var minutes = Math.floor(value / 60)
-        var seconds = Math.round(value - minutes * 60)
-        return minutes + ":" + (seconds < 10 ? "0" : "") + seconds
+        if (!backend.timeAxis) {
+            var distance = (value * distanceScale).toFixed(stepDecimals(tickStep * distanceScale))
+            return distance.replace(".", theme.decimalPoint) + " " + distanceUnit
+        }
+        var decimals = stepDecimals(tickStep)
+        var factor = Math.pow(10, decimals)
+        var total = Math.round(value * factor) / factor  // rounded first: 119.5 s is 2:00, never 1:60
+        if (total < 60) return total.toFixed(decimals).replace(".", theme.decimalPoint) + "s"
+        var minutes = Math.floor(total / 60 + 1e-9)
+        var seconds = Math.max(total - minutes * 60, 0)
+        return minutes + ":" + (seconds < 10 ? "0" : "") + seconds.toFixed(decimals).replace(".", theme.decimalPoint)
     }
 
     // Laps added or removed: same zoom kept if still inside lap, whole lap otherwise
@@ -413,6 +422,12 @@ FocusScope {
     Connections {
         target: backend
         function onViewRestored(start, end) { chart.setView(start, end, false) }
+        function onPageHidden() { chart.playing = false }  // no cursor update every frame while page is hidden
+        function onTracksChanged() {  // markers A & B are distances of one circuit: cleared for another track
+            if (backend.currentTrack === chart.markerTrack) return
+            chart.markerTrack = backend.currentTrack
+            chart.clearMarkers()
+        }
         function onPinChanged() { if (!chart.hasCursor || chart.cursorSource === "pin") chart.restoreCursor() }
         function onChartChanged() {
             var keys = backend.legend.map(function(item) { return item.key })
@@ -448,6 +463,16 @@ FocusScope {
     readonly property real tickStep: niceStep(viewEnd - viewStart, plotArea.width / (theme.em * 6))
     readonly property real firstTick: Math.ceil(viewStart / tickStep) * tickStep
 
+    // Digit of key (0-9, else -1), also digit row of layouts typing other characters there without Shift
+    // (French AZERTY: & é " ' ( - è _ ç à): Windows scan codes of digit row 1-9, 0
+    function digitOf(event) {
+        if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) return event.key - Qt.Key_0
+        if (Qt.platform.os === "windows" && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) === 0
+                && event.nativeScanCode >= 0x02 && event.nativeScanCode <= 0x0B)
+            return (event.nativeScanCode - 1) % 10
+        return -1
+    }
+
     Keys.onPressed: function(event) {
         var span = targetEnd - targetStart
         var shift = (event.modifiers & Qt.ShiftModifier) !== 0
@@ -473,7 +498,7 @@ FocusScope {
         else if (event.key === Qt.Key_L) playLoop = !playLoop
         else if (event.key === Qt.Key_Comma) changeSpeed(-1)
         else if (event.key === Qt.Key_Period) changeSpeed(1)
-        else if (event.key === Qt.Key_Home || event.key === Qt.Key_0) resetView(true)
+        else if (event.key === Qt.Key_Home || digitOf(event) === 0) resetView(true)
         else if (event.key === Qt.Key_BracketRight) stepCorner(1)
         else if (event.key === Qt.Key_BracketLeft) stepCorner(-1)
         else if (event.key === Qt.Key_A) setMarker("A", cursorX)

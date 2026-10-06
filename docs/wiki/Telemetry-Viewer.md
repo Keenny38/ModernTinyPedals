@@ -32,9 +32,9 @@ Lap list tools:
 
 - `Clean only` hides invalid, out and in laps. The search field finds laps by vehicle, session, setup or note.
 - The quick selection menu checks `Best vs Last Lap`, `3 Best Laps`, `5 Best Laps` or `Best Lap in Similar Conditions` (track temperature, compound, wet track), or `Uncheck All`. `Shift` + click checks every lap between two.
-- Right-click a lap: `Set as Reference`, `Export MoTeC...`, `Keep Lap` (never removed by the recorder), `Note...`, `Use as Delta Best...` (the lap becomes the delta best used on track, the previous one is kept as a backup), `Setup Differences with Reference...`, `Move to Trash`. Session rows have the same actions for all their laps.
+- Right-click a lap: `Set as Reference`, `Export MoTeC...`, `Keep Lap` (never removed by the recorder), `Note...`, `Use as Delta Best...` (the lap becomes the delta best used on track; your first delta best is always kept as a backup, plus the 5 latest ones; a teammate's lap of the same track and class can be used too), `Setup Differences with Reference...`, `Move to Trash`. Session rows have the same actions for all their laps.
 - Deleted laps go to a trash: `Ctrl+Z` restores them.
-- `Live` lists new laps as soon as they are recorded and compares the newest lap with the best one.
+- `Live` lists new laps as soon as they are recorded and compares the newest lap with the best one (a new best lap with the previous best). A reference lap you picked stays the reference, and the viewer switches to the track you are driving.
 
 ## Charts
 
@@ -42,11 +42,12 @@ Lap list tools:
 - **Delta and time gain/loss**: delta to the reference along the lap, and where time is gained or lost (`Gain/Loss window` from 20 to 150 m). `Delta vs ideal lap` compares with the fastest clean lap in each mini-sector instead.
 - **Cursor**: move the mouse to read every lap's value and its gap to the reference.
 - **Markers A and B** (right-click, or `A` / `B` keys) and the `Range` tab: time of each lap between the markers, gap to the reference, minimum, maximum and mean of each channel.
+- **Distance to Center** and **Track Position**: the game's values when the lap recorded them, else measured on the map once track edges are known.
 - **Calculated channels**: wheel slip (lock under braking, spin on throttle), steering rate, fuel used, tyre temperature spread. `Math Channels...` adds your own formulas (`+ - * /`, `abs`, `min`, `max`, `d()` change per second) and has built-in understeer angle, brake release rate and throttle application rate.
 - **Display**: `Smoothing` for noisy channels, `Min / max band` of the shown laps (3 laps or more), `Time axis` (charts along lap time instead of distance).
 - **Align on braking**: right-click > `Align Laps on Braking Point Here` shifts laps so their braking starts line up with the reference.
 - **Playback**: `Space` plays the reference lap at real speed (0.25x to 4x), with optional loop between markers A and B.
-- **Right-click menu**: markers, zoom to sector or between markers, copy values or picture, `Open Replay Here` when a telemetry replay covers the lap.
+- **Right-click menu**: markers, zoom to sector or between markers, copy values or picture, `Open Replay Here` when a [Session recorder](Connections.md#session-recorder) replay covers the lap.
 
 Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Reset` to reset. Click `S1`, `S2`, `S3` to zoom on a sector. Drag a channel name to reorder channels, drag a panel edge to resize it. Right-click a panel and choose `Fit Values to Visible Part` to scale its values to the zoomed part.
 
@@ -56,7 +57,7 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 
 ![Track map: official layout, track edges, mini-sectors and minimap](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.19.0-track-map.png)
 
-- Driving line of each lap over the circuit. With LMU, the **official track layout**, track edges and pit lane come from the game and are kept for offline use.
+- Driving line of each lap over the circuit. With LMU, the **official circuit path** (a racing line) and pit lane come from the game and are kept for offline use; track edges come from laps that recorded them, else from the spread of your laps.
 - **Driving points** of each lap in each corner: braking, apex (minimum speed), exit (back to full throttle) and track-out, with the margin to the track edge.
 - **Off track** (2 wheels or more on grass, dirt or gravel) and **track limits exceeded** (4 wheels out), counted per lap.
 - **Line coloring**: `Laps`, `Gain / Loss`, `Speed`, `Pedals`, `Racing Line`, `Gear`, `Elevation`, `Delta per corner`, `Mini-sectors` (with the ideal lap of the shown laps) and `Consistency` (spread of mini-sector times over the stint, session or shown laps).
@@ -75,14 +76,19 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 ### G Circle, Session and XY
 
 - **G Circle**: lateral against longitudinal acceleration of each lap, with the grip envelope.
-- **Session**: every lap of the session with fuel and tyre wear per lap, off tracks and track limits, **long-run pace** (clean laps, slow laps left out), lap time **trend** (also per % of tyre wear) and consistency. Click a lap to show or hide it.
+- **Session**: every lap of the session with fuel and tyre wear per lap, off tracks and track limits, **long-run pace** (clean laps, slow laps left out), stints split on pit stops (refuel, tyre change), lap time **trend** per lap (also per % of tyre wear) and consistency. Click a lap to show or hide it.
 - **XY**: one channel against another as a scatter plot (presets: speed / lateral G, steering / lateral G, throttle / wheel slip...) or a histogram. Limited to the zoomed part when zoomed.
+
+## Compare on track
+
+The [Telemetry Compare](Overlays.md#telemetry-compare) overlay shows the reference lap of the viewer while you drive: speed, pedals, steering and gear of your current lap over the reference lap, with the next braking point ahead of the car, delta and speed difference. Set a lap as reference here (double-click or flag button), the overlay picks it up within a few seconds.
 
 ## Compare with other drivers
 
-- `Add File...` adds laps from another folder or track, or imports a **MoTeC i2 log** (`.ld`), for example one from the LMU built-in logger or a lap shared by another driver. You can also drop a `.ld` file on the main window.
-- `Imported Laps...` opens the library of imported laps: search, add to the viewer, rename, delete.
-- `Import Folder...` imports laps of the same track and class from another folder (a teammate, a shared folder). They are marked as foreign.
+- `Add File...` adds laps from another folder or track, or imports a **MoTeC i2 log** (`.ld`), for example one from the LMU built-in logger or a lap shared by another driver. You can also drop a `.ld` file on the main window. Laps are named with the log date, and engine temperatures, inner/middle/outer tyre temperatures, brake bias, tyre load and track position are imported too. Laps already imported are not copied again.
+- `Imported Laps...` opens the library of imported laps: search, add to the viewer, rename, delete (moved to the trash, with `Undo`).
+- `Import Folder...` imports laps of the same track and class from another folder (a teammate, a shared folder). They are marked as foreign. Importing the same folder again only adds its new laps.
+- Only laps of the reference lap's circuit are compared: a lap of another circuit stays in the list, greyed out, and is not shown (a message tells why). To look at it, set it as reference lap.
 
 ## Export
 
@@ -95,11 +101,11 @@ The `Export` menu saves:
 
 ## Keyboard
 
-Click the `?` button for the full list. Main keys: `Space` play / pause, `Left` / `Right` move the cursor (`Shift`: the view), `[` / `]` previous / next corner, `A` / `B` markers, `Esc` clears them, `R` sets the highlighted lap as reference, `+` / `-` zoom, `Home` resets. On the map: `F` fit, `R` turn, `1`-`9` coloring, `L` lockups, `Z` zones, `T` trail, `M` ruler.
+Click the `?` button for the full list. Main keys: `Space` play / pause, `Left` / `Right` move the cursor (`Shift`: the view), `[` / `]` previous / next corner, `A` / `B` markers, `Esc` clears them, `R` sets the highlighted lap as reference, `+` / `-` zoom, `Home` resets. On the map: `F` fit, `R` turn, `1`-`9` coloring, `L` lockups, `Z` zones, `T` trail, `M` ruler. In the large map, these keys go to the map and the others still reach the charts. On an AZERTY keyboard the digit row works without `Shift`. `Esc` never closes the viewer.
 
 ## Performance notes
 
-- Laps load in the background with a progress bar. Heavy computations (track limits, session values) run in a separate process, so the page stays fluid.
+- Laps load in the background with a progress bar. Heavy computations (track limits, session values, MoTeC imports) run in a separate process, so the page stays fluid. Lap details are kept in an index (`telemetry/.lap_cache/info`), so tracks with hundreds of laps open quickly.
 - When the page stays in the background for 3 minutes, loaded laps are released from memory, then reloaded with the same zoom when you come back.
 
 ## Track Map Viewer

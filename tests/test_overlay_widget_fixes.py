@@ -25,7 +25,7 @@ def widgets(ui_env, bundled_fonts):
     created = []
 
     def make(name: str, modern: bool = True, **options):
-        cfg.user.config["overlay_style"]["enable_modern_style"] = modern
+        cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
         widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
         created.append(widget)
@@ -290,9 +290,9 @@ def test_lap_time_history_oldest_delta_and_static_rows(widgets, monkeypatch):
     assert widget.history_version == 1 and widget._static_layer is not None  # unchanged: kept
 
 
-# --- Damage colors from theme (Colorblind Safe recolors green & red)
-def test_modern_damage_colors_follow_theme(widgets):
-    cfg.user.config["overlay_style"]["overlay_theme"] = "Colorblind Safe"
+# --- Damage colors from theme (colorblind variant recolors green & red)
+def test_modern_damage_colors_follow_theme(widgets, monkeypatch):
+    monkeypatch.setitem(cfg.user.config["overlay_style"], "enable_colorblind_colors", True)
     widget = widgets("damage")
     assert widget.wcfg["damage_panel_suspension_color"] == widget.theme.positive
     assert widget.theme.positive.name().upper() != "#2FB36A"

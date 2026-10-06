@@ -97,6 +97,11 @@ Item {
         id: box
         property string column: ""
         signal picked(string column)
+        focusPolicy: Qt.NoFocus  // arrows & Space stay for charts
+        Connections {  // keys back to charts (closed popup gives them to window)
+            target: box.popup
+            function onClosed() { if (root.chart) root.chart.forceActiveFocus() }
+        }
         Layout.fillWidth: true
         implicitHeight: Math.round(theme.em * 2.1)
         model: root.channels

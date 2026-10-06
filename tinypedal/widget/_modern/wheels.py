@@ -100,7 +100,7 @@ class TyreCompounds:
 
 def badge(name: str) -> tuple[str, QColor]:
     """Compound symbol & color"""
-    return select_compound_symbol(name), QColor(select_compound_color(name))
+    return select_compound_symbol(name), QColor(select_compound_color(name, text=False))  # badge
 
 
 def axle_badges(left: str, right: str) -> tuple:

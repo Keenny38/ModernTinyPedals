@@ -42,7 +42,7 @@ def test_write_read_roundtrip(tmp_path):
     write_ld(filename, channels, LdInfo(driver="Me", vehicle="Car", venue="Spa", session="Race", comment="c"))
     info, result = read_ld(filename)
     assert (info.driver, info.vehicle, info.venue, info.session, info.comment) == ("Me", "Car", "Spa", "Race", "c")
-    assert [(c.name, c.unit, c.frequency, c.values) for c in result] ==         [(c.name, c.unit, c.frequency, c.values) for c in channels]
+    assert [(c.name, c.unit, c.frequency, list(c.values)) for c in result] ==         [(c.name, c.unit, c.frequency, c.values) for c in channels]
     assert result[0].short_name == "km/h"  # unit also in short name field, like MoTeC files seen in the wild
 
 

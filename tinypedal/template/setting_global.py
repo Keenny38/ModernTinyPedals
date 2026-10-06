@@ -59,18 +59,23 @@ GLOBAL_DEFAULT = {
         "position_y": 0,
         "window_width": 0,
         "window_height": 0,
-        "window_color_theme": "Dark",
+        "window_maximized": False,  # shown maximized at startup, while remember_size is enabled
+        "window_color_theme": "Modern Dark",  # see regex_pattern.THEME_NAMES
         "language": "English",
         "show_setup_wizard_at_startup": True,
         "last_page_index": 0,
         # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
         "rail_items": (
-            "home,widget,module,preset,spectate,hotkey,tools,"
-            "lap_viewer,driver_stats_viewer,race_calculator"
+            "home,widget,driver_stats_viewer,race_results_viewer,game_replays,"
+            "lap_viewer,spectate,race_calculator,preset,app_settings"
         ),
         # Home page quick access buttons in order: tool dialog module names, page keys & actions,
         # see ui.home_view.quick_access_entries
-        "home_quick_access": "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,command_palette",
+        "home_quick_access": (
+            "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,"
+            "game_replays,widget,module,preset,spectate,"
+            "hotkey,tools,app_settings,bug_report,check_updates"
+        ),
         "enable_layout_per_screen_setup": True,
         # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
         "open_pages": "",
@@ -107,9 +112,16 @@ GLOBAL_DEFAULT = {
         "web_dashboard_port": 8338,
         "access_code": "",
     },
+    "stream_overlay": {
+        "enable_stream_overlay": False,
+        "enable_lan_access": False,
+        "stream_overlay_port": 8339,
+        "frame_rate": 30,
+        "access_token": "",
+    },
     "overlay_style": {
-        "enable_modern_style": True,
-        "overlay_theme": "Modern Dark",
+        "overlay_theme": "Modern Dark",  # see regex_pattern.THEME_NAMES, legacy = classic TinyPedal look
+        "enable_colorblind_colors": False,
         "enable_modern_font": True,
         "modern_font_name": "JetBrains Mono",
         "modern_design_font_name": "Barlow Semi Condensed",

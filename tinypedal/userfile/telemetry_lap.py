@@ -51,17 +51,20 @@ logger = logging.getLogger(__name__)
 LAP_EXTS = (".csv.gz", ".csv")
 INFO_PREFIX = "# "
 IMPORT_FOLDER = ".imported"  # laps imported from other files (MoTeC), not a track folder
+VIEWER_SETTING = ".lap_viewer.json"  # lap viewer settings (see ui.lap_viewer), lap selection of each track
 _lap_time_name = re.compile(r" lap\d+ (\d+)m(\d+(?:\.\d+)?)s(?: invalid)?$")
 _lap_number_name = re.compile(r"(?:^| )lap(\d+) ")
 SESSION_START_TOLERANCE = 120  # seconds, laps whose recorded session start differ less are same session
 SESSION_GAP = 1800  # seconds without lap: new session (laps recorded without session start)
 SCORING_COLUMNS = ("path_lateral", "track_edge")  # game scoring data, updated less often than telemetry
 SCORING_GAP = 1.0  # seconds, longer holds between scoring updates are not interpolated
-DISTANCE_SCALE_MIN = 0.01  # lap lengths differing less are the same (no distance scaling for delta)
+DISTANCE_SCALE_MIN = 0.01  # recorded track lengths differing more are another circuit (see same_circuit)
+DISTANCE_SCALE_TOLERANCE = 0.001  # lap end distances differing less are the same (no distance scaling)
 DISTANCE_SCALE_MAX = 0.10  # lap lengths differing more are not the same lap (lap cut short)
 EXACT_COLUMNS = ("time", "lap_time", "distance")  # double precision, others single (mm precision, half size)
 LAP_END_SECONDS = 1.0  # lap start & end added to lap time curve only if first / last sample this close in time
 LAP_END_METERS = 60.0  # and in distance (farther: lap cut short, not a late game update)
+LAP_END_OVERSHOOT = 1.0  # meters, last samples this far past track length (rounded imported length) end the lap
 EntryType = TypeVar("EntryType")
 Column = list | array  # lap column values: packed array once loaded (8 times less memory than a list)
 
@@ -201,6 +204,38 @@ def lap_files(folder: str) -> list[LapFile]:
 def list_laps(filepath: str, track: str) -> list[LapFile]:
     """Recorded laps of track, newest first"""
     return lap_files(os.path.join(filepath, track))
+
+
+WINDOWS_RESERVED_NAMES = frozenset((
+    "CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
+))
+
+
+def lap_folder_name(combo_name: str) -> str:
+    """Folder name of track & class laps, valid on every system ("unknown" if empty)
+
+    Windows silently drops trailing spaces & dots of a folder name, then files cannot be
+    written in it ("Track - " when class is empty).
+    """
+    name = combo_name.strip().rstrip(". ")
+    if name.endswith(" -"):  # empty class name
+        name = name[:-2].rstrip(". ")
+    if name.split(".")[0].upper() in WINDOWS_RESERVED_NAMES:
+        name = f"{name}_"
+    return name or "unknown"
+
+
+def viewer_reference_name(filepath: str, track: str) -> str:
+    """File name of lap set as reference in lap viewer for track folder (last selection), empty if none"""
+    try:
+        with open(os.path.join(filepath, VIEWER_SETTING), encoding="utf-8") as file:
+            setting = json.load(file)
+    except (OSError, ValueError):
+        return ""
+    selections = setting.get("selections") if isinstance(setting, dict) else None
+    selection = selections.get(track) if isinstance(selections, dict) else None
+    name = selection.get("reference") if isinstance(selection, dict) else None
+    return name if isinstance(name, str) else ""
 
 
 def best_laps(laps: list[LapFile], count: int) -> list[LapFile]:
@@ -393,7 +428,7 @@ def interpolate(xs: Sequence[float], ys: Sequence[float], x: float) -> float:
 
 
 INCREASING_CACHE = 64  # distance columns whose increasing samples are remembered
-_increasing: OrderedDict[int, tuple[Column, int, list[int] | None]] = OrderedDict()
+_increasing: OrderedDict[int, tuple[Column, int, array | None, Column]] = OrderedDict()
 _increasing_lock = threading.Lock()
 
 
@@ -403,39 +438,58 @@ def increasing_indexes(distances: Column) -> list[int] | None:
     Found once per distance column (loaded lap columns never change): every channel of a lap, corners,
     lap times... reuse it instead of walking the lap again.
     """
+    indexes = increasing_samples(distances)[0]
+    return None if indexes is None else list(indexes)
+
+
+def increasing_samples(distances: Column) -> tuple[array | None, Column]:
+    """Indexes of samples whose distance goes forward (None if every sample does) & their distances (column itself
+    if every sample does), found once per distance column: every channel of a lap shares the same distances"""
     key = id(distances)
     with _increasing_lock:
         cached = _increasing.get(key)
         if cached is not None and cached[0] is distances and cached[1] == len(distances):
             _increasing.move_to_end(key)
-            return cached[2]
-    indexes = []
+            return cached[2], cached[3]
+    indexes = array("i")  # packed: a few bytes per sample, kept for 64 laps
     last = float("-inf")
     for index, distance in enumerate(distances):
         if distance > last:
             indexes.append(index)
             last = distance
     result = None if len(indexes) == len(distances) else indexes
+    kept = distances if result is None else picked(distances, indexes)
     with _increasing_lock:
-        _increasing[key] = (distances, len(distances), result)
+        _increasing[key] = (distances, len(distances), result, kept)
         while len(_increasing) > INCREASING_CACHE:
             _increasing.popitem(last=False)
-    return result
+    return result, kept
+
+
+def picked(values: Column, indexes: Sequence[int]) -> Column:
+    """Values at indexes, packed array kept packed (4 or 8 bytes a value instead of a float object)"""
+    if isinstance(values, array):
+        return array(values.typecode, map(values.__getitem__, indexes))
+    return [values[index] for index in indexes]
 
 
 def monotonic_distance(lap: LapData, column: str = "lap_time") -> tuple[Sequence[float], Sequence[float]]:
     """Distance & column samples with increasing distance only (ignore reset glitches)
 
-    Lap columns themselves are returned when every sample goes forward (no copy): never change them.
+    Lap columns themselves are returned when every sample goes forward (no copy), else the same distances for
+    every column of lap: never change them.
     """
     distances, values = lap.distance, lap.columns[column]
-    indexes = increasing_indexes(distances)
+    indexes, kept = increasing_samples(distances)
     count = min(len(distances), len(values))
     if indexes is None:
         if count == len(distances) == len(values):
             return distances, values
         return distances[:count], values[:count]
-    return [distances[index] for index in indexes if index < count], [values[index] for index in indexes if index < count]
+    if count < len(distances):  # shorter column (lap built in code)
+        inside = [index for index in indexes if index < count]
+        return picked(distances, inside), picked(values, inside)
+    return kept, picked(values, indexes)
 
 
 def official_lap_time(lap: LapData) -> float:
@@ -459,7 +513,8 @@ def lap_time_curve(lap: LapData) -> tuple[Sequence[float], Sequence[float]]:
     smooth_distance): first sample comes up to 0.2 s after lap start, last one up to 20 m before lap end. Lap
     start (0, 0) & lap end (track length, official lap time) are added when that close: delta at the line is the
     lap time gap, mini-sectors add up to lap time. Samples beyond them (distance still before the line at lap
-    start, not updated yet past lap time at lap end) are left out.
+    start, not updated yet past lap time at lap end, or a bit past rounded track length of an imported lap) are
+    left out.
     """
     if "lap_time" not in lap.columns or len(lap) < 2:
         return [], []
@@ -476,8 +531,8 @@ def lap_time_curve(lap: LapData) -> tuple[Sequence[float], Sequence[float]]:
     end_distance, end_time = lap_length(lap), official_lap_time(lap)
     last = count
     if end_distance > 0 and end_time > 0:
-        while (last - 2 > first and times[last - 1] >= end_time
-               and 0 < end_distance - distances[last - 1] <= LAP_END_METERS):
+        while (last - 2 > first and (times[last - 1] >= end_time or distances[last - 1] >= end_distance)
+               and -LAP_END_OVERSHOOT <= end_distance - distances[last - 1] <= LAP_END_METERS):
             last -= 1
     end = 0 < end_distance - distances[last - 1] <= LAP_END_METERS and 0 < end_time - times[last - 1] <= LAP_END_SECONDS
     if not end:
@@ -517,16 +572,41 @@ def distance_scale(reference: LapData, compare: LapData) -> float:
     """Factor bringing compared lap distances to reference lap length, 1 if lengths match
 
     Recorded laps use track distance (same length every lap). An imported log may use driven
-    distance, a bit longer or shorter: its distances are scaled so corners line up. Lengths more
+    distance, a bit longer or shorter: its distances are scaled so corners line up. Lap lengths are
+    lap end distances (track length once lap reaches the line, see lap_end_distance). Lengths more
     than 10% apart are not the same lap (cut short): left unscaled.
     """
-    if len(reference) < 2 or len(compare) < 2:
+    if len(reference) < 2 or len(compare) < 2 or same_track_distance(reference.meta, compare.meta):
         return 1.0
-    ref_length, cmp_length = max(reference.distance), max(compare.distance)
-    if ref_length <= 0 or cmp_length <= 0:
+    return length_ratio(lap_end_distance(reference), lap_end_distance(compare))
+
+
+def same_track_distance(reference_info: Mapping, compare_info: Mapping) -> bool:
+    """Whether both laps were recorded by the app on the same track length (game track distance: never scaled,
+    even if one lap stops before the line)"""
+    if "combo" not in reference_info or "combo" not in compare_info:
+        return False
+    length = reference_info.get("track_length")
+    return (isinstance(length, (int, float)) and not isinstance(length, bool) and length > 0
+            and compare_info.get("track_length") == length)
+
+
+def length_ratio(reference_end: float, compare_end: float) -> float:
+    """Reference lap end distance over compared lap end distance, 1 if within DISTANCE_SCALE_TOLERANCE (same
+    length) or beyond DISTANCE_SCALE_MAX (lap cut short)"""
+    if reference_end <= 0 or compare_end <= 0:
         return 1.0
-    ratio = ref_length / cmp_length
-    return ratio if DISTANCE_SCALE_MIN < abs(ratio - 1) < DISTANCE_SCALE_MAX else 1.0
+    ratio = reference_end / compare_end
+    return ratio if DISTANCE_SCALE_TOLERANCE < abs(ratio - 1) < DISTANCE_SCALE_MAX else 1.0
+
+
+def lap_end_distance(lap: LapData) -> float:
+    """Lap distance at lap end: track length if lap reaches the line (see lap_time_curve), else last sample going
+    forward, 0 if no sample"""
+    distances = lap_time_curve(lap)[0] if "lap_time" in lap.columns else ()
+    if not len(distances) and len(lap):
+        distances = increasing_samples(lap.distance)[1]
+    return distances[-1] if len(distances) else 0.0
 
 
 def compute_delta(reference: LapData, compare: LapData) -> list[tuple[float, float]]:
@@ -554,16 +634,19 @@ def delta_to_curve(ref_dist: Sequence[float], ref_time: Sequence[float], compare
     ]
 
 
-def delta_rate(distances: list[float], deltas: list[float], window: float = 40.0) -> list[float]:
-    """Time lost (positive) or gained per 100 m along delta, measured over window meters"""
+def delta_rate(distances: Sequence[float], deltas: Sequence[float], window: float = 40.0) -> list[float]:
+    """Time lost (positive) or gained per 100 m along delta, measured over window meters (shorter at lap start
+    & end: over the part of window inside lap)"""
     if len(distances) < 2:
         return [0.0] * len(distances)
     half = window / 2
-    return [
-        (interpolate(distances, deltas, distance + half) - interpolate(distances, deltas, distance - half))
-        / window * 100
-        for distance in distances
-    ]
+    first, last = distances[0], distances[-1]
+    rates = []
+    for distance in distances:
+        low, high = max(distance - half, first), min(distance + half, last)
+        rates.append((interpolate(distances, deltas, high) - interpolate(distances, deltas, low)) / (high - low) * 100
+                     if high > low else 0.0)
+    return rates
 
 
 def official_sector_times(lap: LapData) -> list[float]:

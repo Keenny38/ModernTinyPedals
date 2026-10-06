@@ -1,6 +1,6 @@
 # Overlays
 
-Modern Tiny Pedals has **86 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+Modern Tiny Pedals has **87 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
 
 ![Standings, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
 
@@ -13,38 +13,33 @@ Every overlay except the Black box has a **modern design**:
 - standings as rows with a position badge, class pill and position in class, with selectable columns (`column_*` options of Relative, Standings and Rivals);
 - fuel and energy with a gauge and markers, tyres and brakes as tiles in heatmap colors, LEDs as glowing dots.
 
-The modern design reads fewer options than the classic layout: the config page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them.
+The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them.
 
 The **classic layout** is still available:
 
-- for every overlay: turn off `enable_modern_style` in `Config` > `Overlay Style`;
+- for every overlay: choose a `Legacy` theme (see below), the original TinyPedal look;
 - for one overlay: turn on its `enable_classic_layout` option (classic layout with modern colors).
 
 Other options of `Config` > `Overlay Style` (they apply to all presets): `modern_design_font_name` (default `Barlow Semi Condensed`), `modern_font_name` (classic layout font, default `JetBrains Mono`, bundled), `corner_radius_scale`, `enable_depth_effects`, `minimum_bar_gap`, `overlay_scale` (scale of all overlays) and `enable_fade_animation`.
 
 ## Themes
 
-`overlay_theme` in `Config` > `Overlay Style` sets the colors of all overlays:
+`overlay_theme` in `Config` > `Overlay Style` sets the look of all overlays:
 
-| Theme | Use |
+| Theme | Look |
 |---|---|
-| `Modern Dark` | Default: slate neutrals, softer accent colors |
-| `High Contrast` | Darker backgrounds and brighter text, for bright rooms or VR |
-| `Colorblind Safe` | Okabe-Ito palette: red / green pairs become orange / blue |
-| `Classic` | Original colors |
+| `Modern Dark` | Default: modern design, slate neutrals, softer accent colors |
+| `Modern Light` | Modern design, light panels and dark text |
+| `Legacy Dark` | Original TinyPedal look: classic layout, colors and fonts |
+| `Legacy Light` | Original TinyPedal look with light panels and dark text |
 
-Each overlay has a `widget_theme` option: `Global` (default) follows `overlay_theme`, any other theme applies to this overlay only.
+`enable_colorblind_colors` turns on the colorblind safe variant of any theme (Okabe-Ito palette: red / green pairs become orange / blue).
 
-### Theme editor
+Light themes invert gray panels and text, keep colored backgrounds (flags, warnings) and darken the colors drawn on panels (heatmap temperatures, gains and losses) so they stay readable. Themes only change options that still have their default value: a color you customized is kept in every theme.
 
-`Tools` > `Overlay Theme Editor` creates your own themes:
+The window of the app has the same four themes (`window_color_theme` in `Config` > `Application`, or the theme button of the status bar). Window and overlays have separate themes.
 
-1. `New` creates a theme from a base theme (`Based on`).
-2. Double-click a color (or type a hex code) to change it. `Reset Color` restores the base color. The preview shows a few overlays with your theme.
-3. `Apply` or `Save` applies the theme to every overlay using it. `Ctrl+Z` / `Ctrl+Y` undo and redo.
-4. `Export` saves the selected theme to a file to share it, `Import` loads a theme shared by someone else.
-
-Custom themes are stored in `overlay_themes.json` in the global config folder and appear in the theme lists.
+![Overlay themes](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-overlay-themes.png)
 
 ## Visibility by session and pit
 
@@ -67,6 +62,16 @@ Seven overlays added in 0.20.0 help during a race. They are off by default: turn
 | **Tyre Temp Trend** | Surface temperature of each tyre over the last seconds or per lap, with the optimal temperature given by LMU. |
 
 ![New race aid overlays](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-nouveaux-overlays-course.png)
+
+## Telemetry Compare
+
+The **Telemetry Compare** overlay (off by default, `Driver Inputs` category) compares your live telemetry with the reference lap of the [Telemetry Viewer](Telemetry-Viewer.md), on track:
+
+- Charts of speed, throttle and brake (on by default), steering and gear (off by default), over a window of distance around the car: `250` m behind and `150` m ahead by default (`distance_behind`, `distance_ahead`).
+- The reference lap is drawn over the whole window, so its **next braking point shows ahead of the car**. Your current lap is drawn behind the car, up to the position mark. With the modern design, the reference lap is a soft area with a faint line, your lap a bright line.
+- At the top: reference lap time, **speed difference** (green when you are faster) and **delta** to the reference lap at the same distance (red when you are slower).
+- `reference_lap_source`: `Viewer` (default) uses the lap set as reference in the Telemetry Viewer for the track and class (with a double-click or the flag button), `Best` the fastest valid recorded lap, `Last` the last recorded lap. Without a lap set in the viewer, the fastest valid lap is used. The reference lap is checked again every few seconds: a new best lap, or a reference changed in the viewer, is used while you drive.
+- Laps come from the [Recorder module](Telemetry-Viewer.md#lap-recording): drive a few laps first, `No reference lap` is shown until the track and class have one. The `Delta` module (on by default) keeps the charts moving smoothly between position updates of the game.
 
 ## List of overlays
 
@@ -128,6 +133,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Overlay | Shows |
 |---|---|
 | Pedal | Pedal inputs and force feedback |
+| Telemetry Compare | Speed, pedals, steering and gear against the reference lap of the Telemetry Viewer, with delta |
 | Steering Angle | Steering and wheel angle |
 | Steering Meter | Steering input |
 | Steering Wheel | Virtual steering wheel |
@@ -209,7 +215,7 @@ The **Black box** is an all-in-one view of the four wheels and the car, with its
 - chips for ABS, TC, brake bias and engine map;
 - an **event log and incident recorder**: contacts (with the name of the other driver, or the wall, in LMU), penalties and track limits.
 
-Its config page is split into sections (profile, size and layout, tyres, brakes, incident recorder...) with a simple mode for the common options. Hotkeys `black_box_next_incident` (show older incidents) and `black_box_open_incident_folder` work with the incident recorder; incidents are saved in the `blackbox` folder of the global config folder. While incident file export is on, right-click the Black box (overlay unlocked) for `Open Incident Folder`.
+In the Overlay Options page its options are in its own sections (profile, size and layout, tyres, brakes, incident recorder...), with a simple mode for the common options (`Advanced Options` shows them all), default or colorblind safe colors, and the options set by the display profile locked. Hotkeys `black_box_next_incident` (show older incidents) and `black_box_open_incident_folder` work with the incident recorder; incidents are saved in the `blackbox` folder of the global config folder. While incident file export is on, right-click the Black box (overlay unlocked) for `Open Incident Folder`.
 
 ## Widget plugins
 

@@ -8,10 +8,9 @@ import zlib
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QMenu, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 from tinypedal import app_signal, i18n
-from tinypedal.i18n import untr
 from tinypedal.setting import cfg
 
 
@@ -58,27 +57,16 @@ def page(ui_env, warnings, monkeypatch):
     cfg.user.tracks = {"Spa": {"preset": ""}}
     cfg.user.filelock = {}
     widget = preset_view.PresetList(None)
-    widget.refresh()
+    widget.backend.set_active(True)  # presets read while page is shown
     yield widget
     widget.deleteLater()
     flush()
 
 
-def choose(page, monkeypatch, preset: str, text: str):
-    """Run context menu of preset, picking action by (English) text"""
-    from tinypedal.ui import preset_view
-
-    names = [page.listbox_preset.item(row).text() for row in range(page.listbox_preset.count())]
-    page.listbox_preset.setCurrentRow(names.index(preset))
-    item = page.listbox_preset.item(names.index(preset))
-
-    class PickMenu(QMenu):
-        def exec(self, *args):
-            return next(action for action in self.actions() if untr(action.text()) == text)
-
-    monkeypatch.setattr(preset_view, "QMenu", PickMenu)
-    monkeypatch.setattr(page.listbox_preset, "itemAt", lambda pos: item)
-    page.open_context_menu(page.listbox_preset.visualItemRect(item).center())
+def choose(page, preset: str, text: str):
+    """Run action of preset menu (English text)"""
+    actions = {"Delete": page.backend.remove}
+    actions[text](f"{preset}.json")
 
 
 def share_code(raw: str) -> str:
@@ -116,7 +104,7 @@ def test_share_code_valid_still_accepted(page, warnings, monkeypatch):
 # Preset deletion
 def test_delete_loaded_preset_refused(page, warnings, monkeypatch):
     monkeypatch.setattr(cfg.filename, "setting", "race.json")
-    choose(page, monkeypatch, "race", "Delete")
+    choose(page, "race", "Delete")
     assert exists("race.json")
     assert warnings and "loaded preset cannot be deleted" in warnings[0][1]
 
@@ -126,7 +114,7 @@ def test_delete_clears_primary_preset_references(page, warnings, ui_env, monkeyp
     cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": "practice"}}
     cfg.user.shortcuts["preset_1"]["preset"] = "practice"
     cfg.user.shortcuts["preset_2"]["preset"] = "race"
-    choose(page, monkeypatch, "practice", "Delete")
+    choose(page, "practice", "Delete")
     assert not exists("practice.json") and not warnings
     assert cfg.user.tracks["Spa"]["preset"] == "" and cfg.user.classes["GT3"]["preset"] == ""
     assert cfg.user.shortcuts["preset_1"]["preset"] == ""
@@ -142,7 +130,7 @@ def test_delete_locked_file_warns(page, warnings, monkeypatch):
 
     cfg.user.tracks = {"Spa": {"preset": "practice"}}
     monkeypatch.setattr(preset_trash.os, "replace", locked)  # deleted preset moved to trash
-    choose(page, monkeypatch, "practice", "Delete")
+    choose(page, "practice", "Delete")
     assert exists("practice.json") and warnings and "used by another program" in warnings[0][1]
     assert cfg.user.tracks["Spa"]["preset"] == "practice"  # kept, preset still there
 
@@ -285,17 +273,17 @@ def test_preset_compare_save_keeps_changes_made_meanwhile(ui_env, warnings, monk
 
 
 # Translations
-def test_french_preset_dialog_titles(page, monkeypatch, french):
-    from tinypedal.ui import preset_view
+def test_french_preset_dialog_titles(page, french):
+    """Titles of preset name box (Presets page) & name dialog (restore backup) translated"""
+    from tinypedal.ui.preset_management import CreatePreset
 
-    titles = []
-    monkeypatch.setattr(preset_view.CreatePreset, "open", lambda self: titles.append(self.windowTitle()))
-    page.open_create_preset()
-    choose(page, monkeypatch, "race", "Duplicate")
-    choose(page, monkeypatch, "race", "Rename")
-    assert titles == [i18n.tr("Create new default preset"), i18n.tr("Duplicate Preset"), i18n.tr("Rename Preset")]
+    titles = [i18n.tr(text) for text in ("Create new default preset", "Duplicate Preset", "Rename Preset")]
     assert all(title != english for title, english in zip(
         titles, ("Create new default preset", "Duplicate Preset", "Rename Preset"), strict=True))
+    dialog = CreatePreset(None, title=titles[1], mode="duplicate", source_filename="race.json")
+    assert dialog.windowTitle() == titles[1]
+    dialog.close()
+    assert page.backend.nameError("", "", "race") == i18n.tr("Preset already exists.") != "Preset already exists."
     flush()
 
 

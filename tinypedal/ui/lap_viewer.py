@@ -34,8 +34,8 @@ import os
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
-from PySide6.QtCore import QLocale
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QLocale, QMetaObject, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
 from .. import units
@@ -285,7 +285,6 @@ class PlotLap(NamedTuple):
     data: LapData
     color: QColor
     clean: bool = True  # valid lap, not out or in lap (may count in ideal lap & mini-sectors)
-    comparable: bool = True  # same circuit as reference lap (laps of another circuit never count in ideal lap)
 
 
 def lap_color(slot: int) -> QColor:
@@ -368,7 +367,7 @@ def format_laptime(seconds: float) -> str:
     """Lap time text, "-" if unknown"""
     if seconds <= 0:
         return "-"
-    minutes, seconds = divmod(seconds, 60)
+    minutes, seconds = divmod(round(seconds, 3), 60)  # rounded first: 119.9996 is 2:00.000, not 1:60.000
     return f"{int(minutes)}:{seconds:06.3f}" if minutes else f"{seconds:.3f}"
 
 
@@ -520,7 +519,10 @@ class LapViewer(BaseDialog):
     """Recorded lap telemetry viewer (Qt Quick page)
 
     Loaded laps (several MB each) are released after a while in background, reloaded when shown again.
+    Emits page_minimum_changed when page needs another width (language, toolbar buttons shown).
     """
+
+    page_minimum_changed = Signal()
 
     def __init__(self, parent):
         from .quick import create_quick_view
@@ -535,8 +537,46 @@ class LapViewer(BaseDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
         self.view.setFocus()  # page keys work without clicking it first
+        content = self.page_content()
+        if content is not None:
+            content.implicitWidthChanged.connect(self.page_minimum_changed)
         self.resize(UIScaler.size(90), UIScaler.size(48))
+        # Deleted laps restored: shortcut of this page only (a QML shortcut also matched while another page of app
+        # window was shown), text fields keep their own undo (shortcut override)
+        self.undo_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self, self.backend.undoDelete)
+        self.backend.undoChanged.connect(self.update_undo_shortcut)
+        self.update_undo_shortcut()
         self.backend.refresh()
+
+    def update_undo_shortcut(self):
+        self.undo_shortcut.setEnabled(self.backend.undoText != "")
+
+    def page_content(self):
+        """Toolbar, panels & status line of page (root ColumnLayout of LapViewer.qml), None if not loaded"""
+        root = self.view.rootObject()
+        if root is None:
+            return None
+        return next((item for item in root.childItems() if item.metaObject().className() == "QQuickColumnLayout"), None)
+
+    def page_minimum_size(self) -> QSize:
+        """Page area minimum while shown in app window (see app.DialogPage), cut below: toolbar at its
+        full width (its buttons never shrink) and lap list, charts & side panel at their minimum width
+        (LapViewer.qml SplitView, 62 em with handles & margins)"""
+        width = UIScaler.size(64.6)
+        content = self.page_content()
+        if content is not None:  # toolbar, with page margins on both sides
+            width = max(width, math.ceil(content.implicitWidth() + 2 * content.x()))
+        return QSize(width, 0)
+
+    def focus_charts(self):
+        """Keys to charts: dialog shown as window gives them to first control of page (track list, lap search),
+        page of app window shown has none"""
+        if not self.isVisible():
+            return
+        self.view.setFocus(Qt.FocusReason.OtherFocusReason)
+        root = self.view.rootObject()
+        if root is not None:
+            QMetaObject.invokeMethod(root, "focusCharts")
 
     def is_loading(self) -> bool:
         return self.backend.is_loading()
@@ -552,10 +592,14 @@ class LapViewer(BaseDialog):
     def showEvent(self, event):
         self.backend.page_shown()
         super().showEvent(event)
+        if not event.spontaneous():  # page shown (not app window restored): after focus given by dialog show
+            QTimer.singleShot(0, self, self.focus_charts)
 
     def closeEvent(self, event):
         self.backend.release()
         super().closeEvent(event)
+        if event.isAccepted():  # QML gone before the backend it binds to (deleted first: created first)
+            self.view.setSource(QUrl())
 
 
 def format_csv_number(value: float, decimal: str) -> str:

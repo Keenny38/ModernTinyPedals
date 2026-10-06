@@ -20,9 +20,8 @@
 Modern overlay design: color tokens
 
 Each token is a role (panel surface, dim text, gain, loss...) instead of a per cell color.
-Tokens are defined as classic colors and remapped by the overlay theme palette, so built-in
-themes (Modern Dark, High Contrast, Colorblind Safe) and user custom themes recolor modern
-widgets the same way they recolor classic ones.
+Tokens are defined as classic colors and remapped by the overlay theme (Modern Dark or Light,
+colorblind variant), so themes recolor modern widgets the same way they recolor classic ones.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from typing import NamedTuple
 
 from PySide6.QtGui import QColor
 
-from .._style import GLOBAL_THEME, remap_color, theme_palette
+from .._style import BACKGROUND, FOREGROUND, overlay_theme, theme_rgb
 
 # Token -> classic color (remapped by theme palette)
 TOKEN_COLORS = {
@@ -56,6 +55,7 @@ TOKEN_COLORS = {
 }
 
 BORDER_ALPHA = 20  # panel hairline border (white)
+LIGHT_BORDER_ALPHA = 28  # panel hairline border on light themes (black)
 HIGHLIGHT_ALPHA = 46  # player row tint
 _tints: dict[tuple[int, int], QColor] = {}  # (color rgba, alpha): tinted color
 
@@ -100,25 +100,23 @@ class Theme(NamedTuple):
         return tinted
 
 
-def theme_name(style: dict, widget_theme: str) -> str:
-    """Theme used by widget: own theme, or global overlay theme"""
-    if widget_theme and widget_theme != GLOBAL_THEME:
-        return widget_theme
-    return style.get("overlay_theme", "Modern Dark")
-
-
-def build_theme(style: dict, widget_theme: str = GLOBAL_THEME, surface_alpha: int = 235) -> Theme:
-    """Theme colors for overlay style & widget theme option
+def build_theme(style: dict, surface_alpha: int = 235) -> Theme:
+    """Theme colors of overlay theme
 
     Args:
         style: global overlay style setting.
-        widget_theme: widget "widget_theme" option.
         surface_alpha: panel background alpha (0-255).
     """
-    palette = theme_palette(theme_name(style, widget_theme))
-    colors = {name: QColor(remap_color(value, palette)) for name, value in TOKEN_COLORS.items()}
+    theme = overlay_theme(style)
+    colors = {
+        name: QColor(f"#{theme_rgb(value[1:], theme, BACKGROUND if name.startswith('surface') else FOREGROUND)}")
+        for name, value in TOKEN_COLORS.items()
+    }
     colors["surface"].setAlpha(surface_alpha)
-    border = QColor(255, 255, 255, BORDER_ALPHA)
+    if theme.light:
+        border = QColor(0, 0, 0, LIGHT_BORDER_ALPHA)
+    else:
+        border = QColor(255, 255, 255, BORDER_ALPHA)
     highlight = QColor(colors["accent"])
     highlight.setAlpha(HIGHLIGHT_ALPHA)
     return Theme(border=border, highlight=highlight, **colors)

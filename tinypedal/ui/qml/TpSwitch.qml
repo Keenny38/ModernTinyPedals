@@ -40,6 +40,8 @@ AbstractButton {
             id: label
             text: control.text
             color: theme.text
+            width: Math.min(implicitWidth, control.width - track.width - theme.em * 0.5)  // cut when squeezed
+            elide: Text.ElideRight
             anchors.left: track.right
             anchors.leftMargin: theme.em * 0.5
             anchors.verticalCenter: parent.verticalCenter

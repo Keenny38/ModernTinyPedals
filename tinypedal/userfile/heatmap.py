@@ -31,6 +31,7 @@ from ..template.setting_brakes import BRAKEINFO_DEFAULT
 from ..template.setting_compounds import COMPOUNDINFO_DEFAULT
 from ..template.setting_heatmap import HEATMAP_DEFAULT_BRAKE, HEATMAP_DEFAULT_TYRE
 from ..validator import invalid_save_name, is_hex_color
+from ..widget._style import overlay_theme, theme_color
 from .brands import select_brand_name
 
 
@@ -134,14 +135,19 @@ def select_compound_symbol(compound_name: str) -> str:
     return compound.get("symbol", "?")
 
 
-def select_compound_color(compound_name: str) -> str:
-    """Select compound color"""
+def select_compound_color(compound_name: str, text: bool = True) -> str:
+    """Select compound color, as text color on panel (darkened on light overlay themes) unless text is False"""
     compound = cfg.user.compounds.get(compound_name)
     if compound is None:
         if invalid_save_name(compound_name):
             return "#AAAAAA"
         compound = add_missing_compound(compound_name)
-    return compound.get("color", "#AAAAAA")
+    color = compound.get("color", "#AAAAAA")
+    if text:
+        theme = overlay_theme(cfg.user.config["overlay_style"])
+        if theme.light:
+            return theme_color(long_hex_color(color), theme)
+    return color
 
 
 def select_tyre_heatmap_name(compound_name: str) -> str:
@@ -155,6 +161,13 @@ def select_tyre_heatmap_name(compound_name: str) -> str:
 
 
 # Heatmap function
+def long_hex_color(color: str) -> str:
+    """#RRGGBB form of #RGB color (other forms unchanged)"""
+    if len(color) == 4 and color[0] == "#":
+        return "#" + "".join(digit * 2 for digit in color[1:])
+    return color
+
+
 def verify_heatmap(heatmap_dict: dict | None) -> bool:
     """Verify color in heatmap"""
     if not heatmap_dict:
@@ -183,6 +196,9 @@ def load_heatmap_color(
     heatmap_dict = cfg.user.heatmap.get(heatmap_name)
     if heatmap_dict is None or not verify_heatmap(heatmap_dict):
         heatmap_dict = cfg.default.heatmap[default_name]
+    theme = overlay_theme(cfg.user.config["overlay_style"])
+    if theme.light and not swap_style:  # text on light panel: darkened to stay readable
+        heatmap_dict = {temp: theme_color(long_hex_color(color), theme) for temp, color in heatmap_dict.items()}
     if swap_style:
         return tuple(sorted(
             (float(temp), (fg_color, heatmap_color))

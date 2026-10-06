@@ -24,12 +24,46 @@ TpPage {
     Timer { id: passageTimer; interval: 900; onTriggered: page.grabPicture(false) }
 
     Component.onCompleted: chart.forceActiveFocus()
+    // Keys to charts: page shown (dialog first gives them to first control), map focus mode left.
+    // Deleted laps restored with Ctrl+Z: shortcut of page dialog (lap_viewer.py), only while page is shown
+    function focusCharts() { chart.forceActiveFocus() }
+    onMapFocusChanged: if (!mapFocus) chart.forceActiveFocus()
+    // Esc left by a control (map, slider...): keys back to charts, never closes viewer window or page
+    Keys.onEscapePressed: function(event) {
+        page.mapFocus = false
+        chart.forceActiveFocus()
+        event.accepted = true
+    }
 
-    // Deleted laps restored (Ctrl+Z)
-    Shortcut {
-        sequences: [StandardKey.Undo]
-        enabled: backend.undoText !== ""
-        onActivated: backend.undoDelete()
+    // Channel menu rows matching search, changed in place: list keeps its scroll position when a channel is
+    // shown or hidden (a new array model rebuilt every row, back at top)
+    ListModel { id: channelRows }
+    function syncChannels() {
+        var query = searchField.text.toLowerCase().trim()
+        var rows = []
+        backend.channelMenu.forEach(function(item) {
+            if (query === "" || item.search.indexOf(query) >= 0 || item.group.toLowerCase().indexOf(query) >= 0)
+                rows.push({column: item.column, group: item.group, title: item.title, available: item.available,
+                           shown: item.visible})
+        })
+        var same = rows.length === channelRows.count
+        for (var i = 0; same && i < rows.length; i++) same = channelRows.get(i).column === rows[i].column
+        if (!same) {
+            channelRows.clear()
+            channelRows.append(rows)
+            return
+        }
+        for (var j = 0; j < rows.length; j++) {
+            var row = channelRows.get(j)
+            if (row.shown !== rows[j].shown || row.available !== rows[j].available || row.title !== rows[j].title
+                    || row.group !== rows[j].group)
+                channelRows.set(j, rows[j])
+        }
+    }
+    Connections {
+        target: backend
+        enabled: channelPopup.visible  // rows read again when menu opens
+        function onChannelsChanged() { page.syncChannels() }
     }
 
     // Math channels editor (channel menu), setup differences (lap chip menu)
@@ -129,6 +163,8 @@ TpPage {
 
             ComboBox {
                 id: trackBox
+                objectName: "trackBox"
+                focusPolicy: Qt.NoFocus  // arrows & Space stay for charts (else ↓ switched track)
                 Layout.preferredWidth: theme.em * 20
                 implicitHeight: Math.round(theme.em * 2.3)
                 model: backend.tracks
@@ -164,6 +200,7 @@ TpPage {
                     width: trackBox.width
                     padding: 4
                     implicitHeight: Math.min(contentItem.implicitHeight + 8, theme.em * 24)
+                    onClosed: chart.forceActiveFocus()  // keys back to charts (popup gives them to window)
                     enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 } }
                     exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
                     contentItem: ListView {
@@ -282,6 +319,7 @@ TpPage {
                     width: theme.em * 19
                     height: Math.min(theme.em * 38, page.height - theme.em * 6)
                     padding: theme.em * 0.5
+                    onAboutToShow: page.syncChannels()
                     onOpened: searchField.forceActiveFocus()
                     onClosed: chart.forceActiveFocus()  // keys back to charts
                     enter: Transition {
@@ -303,6 +341,7 @@ TpPage {
                             placeholderText: i18n.tr("Search channel")
                             color: theme.text
                             placeholderTextColor: theme.dimText
+                            onTextChanged: page.syncChannels()
                             background: Rectangle {
                                 radius: theme.em * 0.45
                                 color: theme.base
@@ -325,16 +364,12 @@ TpPage {
                             }
                         }
                         ListView {
+                            id: channelList
+                            objectName: "channelList"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            model: {
-                                var query = searchField.text.toLowerCase().trim()
-                                if (query === "") return backend.channelMenu
-                                return backend.channelMenu.filter(function(item) {
-                                    return item.search.indexOf(query) >= 0 || item.group.toLowerCase().indexOf(query) >= 0
-                                })
-                            }
+                            model: channelRows
                             boundsBehavior: Flickable.StopAtBounds
                             ScrollBar.vertical: ScrollBar {}
                             section.property: "group"
@@ -350,12 +385,17 @@ TpPage {
                                 font.weight: Font.DemiBold
                             }
                             delegate: Rectangle {
+                                id: channelRow
+                                required property string column
+                                required property string title
+                                required property bool available
+                                required property bool shown
                                 width: ListView.view.width - theme.em * 0.6
                                 height: theme.em * 2
                                 radius: theme.em * 0.4
                                 color: channelArea.containsMouse ? theme.hover : "transparent"
-                                opacity: modelData.available || modelData.visible ? 1 : 0.45
-                                ToolTip.visible: channelArea.containsMouse && !modelData.available
+                                opacity: available || shown ? 1 : 0.45
+                                ToolTip.visible: channelArea.containsMouse && !available
                                 ToolTip.text: i18n.tr("Not recorded in shown laps")
                                 ToolTip.delay: 500
                                 RowLayout {
@@ -366,20 +406,29 @@ TpPage {
                                         implicitWidth: theme.em * 1.05
                                         implicitHeight: implicitWidth
                                         radius: theme.em * 0.28
-                                        color: modelData.visible ? theme.accent : "transparent"
-                                        border.width: modelData.visible ? 0 : 1.5
+                                        color: channelRow.shown ? theme.accent : "transparent"
+                                        border.width: channelRow.shown ? 0 : 1.5
                                         border.color: theme.dimText
-                                        Icon { anchors.centerIn: parent; glyph: ""; size: theme.em * 0.7; color: "white"; visible: modelData.visible && theme.iconFont !== "" }
+                                        Icon { anchors.centerIn: parent; glyph: ""; size: theme.em * 0.7; color: "white"; visible: channelRow.shown && theme.iconFont !== "" }
                                     }
-                                    Text { text: modelData.title; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
+                                    Text { text: channelRow.title; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
                                 }
                                 MouseArea {
                                     id: channelArea
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: backend.setChannelVisible(modelData.column, !modelData.visible)
+                                    onClicked: backend.setChannelVisible(channelRow.column, !channelRow.shown)
                                 }
+                            }
+                            Text {  // search without result
+                                width: channelList.width
+                                y: theme.em * 0.8
+                                visible: channelList.count === 0
+                                text: i18n.tr("No channel matches")
+                                color: theme.dimText
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
                             }
                         }
                         // Display options
@@ -462,10 +511,12 @@ TpPage {
                         Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
-                Component.onCompleted: if (backend.layoutState.length > 0) restoreState(backend.layoutState)
+                // Saved state (QByteArray) is an ArrayBuffer here: byteLength, not length
+                Component.onCompleted: if (backend.layoutState.byteLength > 0) restoreState(backend.layoutState)
                 onResizingChanged: if (!resizing) backend.setLayoutState(saveState())
 
                 LapList {
+                    objectName: "lapList"
                     chart: chart
                     SplitView.preferredWidth: theme.em * 21
                     SplitView.minimumWidth: theme.em * 14
@@ -547,20 +598,24 @@ TpPage {
 
             // Focus mode: large track map over laps & charts (charts keep driving cursor & zoom),
             // created only while shown (a second map otherwise keeps all its shapes)
+            // Keys to large map (F, R, 1-9, Esc leaves), keys it leaves to charts (Space plays, arrows, A, ?)
             Loader {
                 anchors.fill: parent
                 active: page.mapFocus
+                onLoaded: item.focusMap()
+                Keys.forwardTo: [chart]
                 sourceComponent: Card {
+                    function focusMap() { largeMap.forceActiveFocus() }
                     opacity: 0
                     Component.onCompleted: opacity = 1
                     Behavior on opacity { NumberAnimation { duration: 200 } }
                     TrackMap {
+                        id: largeMap
                         anchors.fill: parent
                         anchors.margins: theme.em * 0.6
                         chart: page.traceChart
                         expanded: true
-                        focus: true
-                        onExpandToggled: page.mapFocus = false
+                        onExpandToggled: page.mapFocus = false  // keys back to charts (onMapFocusChanged)
                     }
                 }
             }

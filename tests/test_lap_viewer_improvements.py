@@ -290,7 +290,7 @@ def test_new_computed_channels(ui_env):
     lap = PlotLap("a", "a", LapData("a", columns), QColor("red"))
     data = TraceData()
     data.set_laps([lap], "a")
-    assert data.series(CHANNEL_MAP["camber_spread_fl"], lap)[1] == [10.0, 11.0]
+    assert list(data.series(CHANNEL_MAP["camber_spread_fl"], lap)[1]) == [10.0, 11.0]  # packed array
     angles = data.series(CHANNEL_MAP["slip_angle"], lap)[1]
     assert angles[0] == pytest.approx(math.degrees(math.atan2(1.0, 10.0))) and angles[1] == 0.0  # too slow
 

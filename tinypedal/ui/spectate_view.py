@@ -17,208 +17,66 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Spectate list view
+Spectate page: spectate mode, spectated driver, drivers of the session
+
+Qt Quick page (qml/Spectate.qml), state & actions in quick/spectate_backend.py. The QML page is
+created when first shown, drivers are read only while it is shown.
 """
 
 from __future__ import annotations
 
-import logging
+from PySide6.QtCore import QUrl, Slot
+from PySide6.QtQuickWidgets import QQuickWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from PySide6.QtCore import QBasicTimer, Slot
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
-
-from .. import app_signal, realtime_state
-from ..api_control import api
-from ..i18n import tr, trm
-from ..module_control import mctrl
-from ..setting import cfg
-from ._common import UIScaler
-
-logger = logging.getLogger(__name__)
+from .quick.spectate_backend import SpectateBackend
 
 
 class SpectateList(QWidget):
-    """Spectate list view"""
+    """Spectate page"""
 
     def __init__(self, parent):
         super().__init__(parent)
-        self._driver_none = tr("Anonymous")  # first row, no driver spectated
-        self.last_enabled = None
-        self.last_driver_name = ""
-        self.last_total_vehicles = 0
+        self.backend = SpectateBackend(self)
+        self.view: QQuickWidget | None = None  # see ensure_view
+        self._creating = False
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
 
-        # Set update timer
-        self._update_timer = QBasicTimer()
-        # Timer is not unregistered if widget is deleted by parent while Python object lives on
-        self.destroyed.connect(self._update_timer.stop)
+    def ensure_view(self) -> QQuickWidget | None:
+        """QML page, created on first use"""
+        if self.view is None and not self._creating:
+            from .quick import create_quick_view
 
-        # Label
-        self.label_spectating = QLabel("")
+            self._creating = True  # page shown again while QML loads: one page only
+            try:
+                view = create_quick_view(self, "Spectate.qml", {"backend": self.backend}, samples=0)
+            finally:
+                self._creating = False
+            view.setAcceptDrops(False)  # preset & plugin files dropped go to main window
+            self._layout.addWidget(view)
+            view.show()  # child added to a shown page is not shown by itself
+            self.setFocusProxy(view)
+            self.view = view
+        return self.view
 
-        # List box
-        self.listbox_spectate = QListWidget(self)
-        self.listbox_spectate.setAlternatingRowColors(True)
-        self.listbox_spectate.itemDoubleClicked.connect(self.spectate_selected)
+    def showEvent(self, event):
+        self.ensure_view()
+        self.backend.set_active(True)
+        super().showEvent(event)
 
-        # Button
-        self.button_spectate = QPushButton(tr("Spectate"))
-        self.button_spectate.clicked.connect(self.spectate_selected)
+    def hideEvent(self, event):
+        self.backend.set_active(False)  # nothing read while another page (or the race) is shown
+        super().hideEvent(event)
 
-        self.button_refresh = QPushButton(tr("Refresh"))
-        self.button_refresh.clicked.connect(self.refresh)
-
-        self.button_toggle = QPushButton("")
-        self.button_toggle.setCheckable(True)
-        self.button_toggle.toggled.connect(self.toggle_spectate)
-
-        layout_button = QHBoxLayout()
-        layout_button.addWidget(self.button_spectate)
-        layout_button.addWidget(self.button_refresh)
-        layout_button.addStretch(1)
-        layout_button.addWidget(self.button_toggle)
-
-        # Layout
-        layout_main = QVBoxLayout()
-        layout_main.addWidget(self.label_spectating)
-        layout_main.addWidget(self.listbox_spectate)
-        layout_main.addLayout(layout_button)
-        margin = UIScaler.pixel(6)
-        layout_main.setContentsMargins(margin, margin, margin, margin)
-        self.setLayout(layout_main)
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if self.view is not None:  # QML gone before the backend it binds to
+            view, self.view = self.view, None
+            view.setSource(QUrl())
+            view.deleteLater()
 
     @Slot(bool)  # type: ignore[operator]
-    def refresh(self):
-        """Refresh spectate list"""
-        enabled = cfg.api["enable_player_index_override"]
-
-        if enabled:
-            self.update_drivers(selected_slot=cfg.api["player_index"])
-        else:
-            self.listbox_spectate.clear()
-            self.last_total_vehicles = 0
-            self.reload_data_module("")
-
-        # Update button state only if changed
-        if self.last_enabled != enabled:
-            self.last_enabled = enabled
-            self.set_enable_state(enabled)
-
-    def timerEvent(self, event):
-        """Update when data not paused"""
-        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
-            return
-        if not realtime_state.paused:
-            total_vehicles = api.read.vehicle.total_vehicles()
-            driver_name = api.read.vehicle.driver_name()
-            if not driver_name:
-                driver_name = self._driver_none
-            if (
-                self.last_driver_name != driver_name
-                or self.last_total_vehicles != total_vehicles
-            ):
-                self.last_total_vehicles = total_vehicles
-                self.update_drivers(selected_slot=cfg.api["player_index"])
-                logger.info("Spectating: driver list updated")
-
-    def reload_data_module(self, driver_name: str):
-        """Reload data recording module if driver changed"""
-        if self.last_driver_name == driver_name:
-            return
-
-        self.last_driver_name = driver_name
-        self.label_spectating.setText(trm(f"Spectating: <b>{driver_name}</b>"))
-
-        if realtime_state.active:
-            for module_name in (
-                "module_delta",
-                "module_fuel",
-                "module_mapping",
-                "module_sectors",
-                "module_stint",
-            ):
-                mctrl.reload(module_name)
-
-    def set_enable_state(self, enabled: bool):
-        """Set enable state"""
-        # Shown state only: toggle signal saves setting & restarts API (user click)
-        blocked = self.button_toggle.blockSignals(True)
-        self.button_toggle.setChecked(enabled)
-        self.button_toggle.blockSignals(blocked)
-        self.button_toggle.setText(tr("Enabled") if enabled else tr("Disabled"))
-        self.listbox_spectate.setDisabled(not enabled)
-        self.button_spectate.setDisabled(not enabled)
-        self.button_refresh.setDisabled(not enabled)
-        self.label_spectating.setDisabled(not enabled)
-        if enabled:
-            self._update_timer.start(200, self)
-            logger.info("ENABLED: spectate mode")
-        else:
-            self._update_timer.stop()
-            self.label_spectating.setText(tr("Spectating: <b>Disabled</b>"))
-            logger.info("DISABLED: spectate mode")
-
-    def toggle_spectate(self, checked: bool):
-        """Toggle spectate mode"""
-        cfg.api["enable_player_index_override"] = checked
-        cfg.save()
-        api.setup()
-        app_signal.refresh.emit(True)
-
-    def spectate_selected(self):
-        """Spectate selected player"""
-        self.update_drivers(selected_name=self.selected_name())
-
-    def update_drivers(self, selected_slot: int = -1, selected_name: str = ""):
-        """Update drivers list"""
-        listbox = self.listbox_spectate
-        driver_list = []
-
-        for driver_index in range(api.read.vehicle.total_vehicles()):
-            driver_name = api.read.vehicle.driver_name(driver_index)
-            driver_slot = api.read.vehicle.slot_id(driver_index)
-            driver_list.append(driver_name)
-            if selected_slot != -1:  # match slot
-                if selected_slot == driver_slot:
-                    selected_name = driver_name
-            elif selected_name:  # match name
-                if driver_name == selected_name:
-                    selected_slot = driver_slot
-
-        driver_list.sort(key=str.lower)
-        listbox.clear()
-        listbox.addItem(self._driver_none)
-        listbox.addItems(driver_list)
-
-        self.focus_on_selected(selected_name)
-        self.save_selected_index(selected_slot)
-        self.reload_data_module(self.selected_name())
-
-    def focus_on_selected(self, driver_name: str):
-        """Focus on selected driver row"""
-        listbox = self.listbox_spectate
-        for row_index in range(listbox.count()):
-            if driver_name == listbox.item(row_index).text():
-                break
-        else:  # fallback to 0 if name not found
-            row_index = 0
-        listbox.setCurrentRow(row_index)
-
-    def selected_name(self) -> str:
-        """Selected driver name"""
-        selected_item = self.listbox_spectate.currentItem()
-        return self._driver_none if selected_item is None else selected_item.text()
-
-    @staticmethod
-    def save_selected_index(index: int):
-        """Save selected driver index"""
-        if cfg.api["player_index"] != index:
-            cfg.api["player_index"] = index
-            api.setup()
-            cfg.save()
+    def refresh(self, *_):
+        """Spectate mode or driver changed elsewhere (hotkey, API menu): shown state only, nothing saved"""
+        self.backend.refresh()

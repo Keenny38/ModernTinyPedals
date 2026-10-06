@@ -74,18 +74,31 @@ def menu_restart_api():
     app_signal.refresh.emit(True)
 
 
-def open_config_application(parent):
-    """Config global application"""
-    _dialog = UserConfig(
+def open_config_application(parent, section: str = "application"):
+    """Config page (global options of config.json) at category of config section ("": as left)"""
+    from .app_settings import open_app_settings
+
+    return open_app_settings(parent, section)
+
+
+def open_preset_config(parent, name: str):
+    """Settings kept in the loaded preset: "units", "font" (global font override) or "api" (API options)"""
+    if name == "font":
+        FontConfig(parent=parent, user_setting=cfg.user.setting, reload_func=menu_reload_only).open()
+        return
+    if name == "api":
+        key_name, reload_func = cfg.api_key, menu_restart_api
+    else:
+        key_name, reload_func = "units", menu_reload_only
+    UserConfig(
         parent=parent,
-        key_name="application",
-        preset_name=cfg.filename.config,
-        config_type=ConfigType.CONFIG,
-        user_setting=cfg.user.config,
-        default_setting=cfg.default.config,
-        reload_func=menu_reload_preset,
-    )
-    _dialog.open()
+        key_name=key_name,
+        preset_name=cfg.filename.setting,
+        config_type=ConfigType.SETTING,
+        user_setting=cfg.user.setting,
+        default_setting=cfg.default.setting,
+        reload_func=reload_func,
+    ).open()
 
 
 class OverlayMenu(QMenu):
@@ -310,6 +323,9 @@ class ConfigMenu(QMenu):
         super().__init__(title, parent)
         self._parent = parent
 
+        config_page = self.addAction(tr("All Settings"))
+        config_page.setShortcut(QKeySequence("Ctrl+,"))
+        config_page.triggered.connect(lambda: open_config_application(self._parent, ""))
         find_option = self.addAction(tr("Find Option..."))
         find_option.setShortcut(QKeySequence.StandardKey.Find)
         find_option.triggered.connect(self.open_option_finder)
@@ -390,55 +406,19 @@ class ConfigMenu(QMenu):
 
     def open_config_compatibility(self):
         """Config global compatibility"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="compatibility",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "compatibility")
 
     def open_config_vr_overlay(self):
         """Config native VR overlay"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="vr_overlay",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "vr_overlay")
 
     def open_config_remote_control(self):
         """Config remote control (command server)"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="remote_control",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "remote_control")
 
     def open_config_web_dashboard(self):
         """Config web dashboard"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="web_dashboard",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "web_dashboard")
 
     def show_web_dashboard_address(self):
         """Show web dashboard address & access code"""
@@ -468,65 +448,23 @@ class ConfigMenu(QMenu):
 
     def open_config_overlay_style(self):
         """Config global overlay style"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="overlay_style",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "overlay_style")
 
     def open_config_userpath(self):
         """Config global user path"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="user_path",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_reload_preset,
-            option_width=22,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "user_path")
 
     def open_config_notification(self):
         """Config GUI notification"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="notification",
-            preset_name=cfg.filename.config,
-            config_type=ConfigType.CONFIG,
-            user_setting=cfg.user.config,
-            default_setting=cfg.default.config,
-            reload_func=menu_refresh_only,
-        )
-        _dialog.open()
+        open_config_application(self._parent, "notification")
 
     def open_config_units(self):
         """Config display units"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name="units",
-            preset_name=cfg.filename.setting,
-            config_type=ConfigType.SETTING,
-            user_setting=cfg.user.setting,
-            default_setting=cfg.default.setting,
-            reload_func=menu_reload_only,
-        )
-        _dialog.open()
+        open_preset_config(self._parent, "units")
 
     def open_config_font(self):
         """Config global font"""
-        _dialog = FontConfig(
-            parent=self._parent,
-            user_setting=cfg.user.setting,
-            reload_func=menu_reload_only,
-        )
-        _dialog.open()
+        open_preset_config(self._parent, "font")
 
 
 class APIMenu(QMenu):
@@ -603,16 +541,7 @@ class APIMenu(QMenu):
 
     def open_config_api(self):
         """Config API"""
-        _dialog = UserConfig(
-            parent=self._parent,
-            key_name=cfg.api_key,
-            preset_name=cfg.filename.setting,
-            config_type=ConfigType.SETTING,
-            user_setting=cfg.user.setting,
-            default_setting=cfg.default.setting,
-            reload_func=menu_restart_api,
-        )
-        _dialog.open()
+        open_preset_config(self._parent, "api")
 
     def __api_selector(self):
         """Generate API selector"""
@@ -677,6 +606,10 @@ class WindowMenu(QMenu):
         self.remember_open_pages = self.addAction(tr("Reopen Pages at Startup"))
         self.remember_open_pages.setCheckable(True)
         self.remember_open_pages.triggered.connect(self.is_remember_open_pages)
+
+        reset_size = getattr(parent, "reset_window_size", None)
+        if callable(reset_size):
+            self.addAction(tr("Reset Window Size and Position")).triggered.connect(reset_size)
         self.addSeparator()
 
         restart_app = self.addAction(tr("Restart Modern Tiny Pedals"))

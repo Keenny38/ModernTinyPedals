@@ -21,7 +21,8 @@ Driver stats from recorded laps & session history (no Qt): stint pace & tyre deg
 index, session history export, a friend's exported stats compared track by track
 
 Recorded laps (lap viewer files) give every lap time of a session: stints are laps between pit exit (out lap) &
-pit entry (in lap). Clean laps: valid timed laps, not out or in laps, without outliers (traffic, mistakes).
+pit entry (in lap), or around a pit stop seen in lap info (out & in laps are not recorded by default): fuel added
+or taken out, tyres changed. Clean laps: valid timed laps, not out or in laps, without outliers (traffic, mistakes).
 """
 
 from __future__ import annotations
@@ -33,10 +34,11 @@ import os
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
+from itertools import pairwise
 from typing import NamedTuple
 
 from ...userfile.driver_history import SessionRecord, parse_record
-from ...userfile.telemetry_lap import group_sessions, lap_files, lap_timestamp_of, read_lap_info
+from ...userfile.telemetry_lap import group_sessions, lap_files, lap_number_of, lap_timestamp_of, read_lap_info
 
 HISTORY_FORMAT = "modern-tiny-pedals-driver-history"  # exported session history (JSON), friend's stats read back
 HISTORY_VERSION = 1
@@ -44,7 +46,10 @@ OUTLIER_FACTOR = 1.07  # laps slower than fastest of session by this factor left
 MIN_CLEAN_LAPS = 3  # clean laps needed for a consistency index or a stint pace
 MIN_TREND_LAPS = 4  # clean laps of a stint needed for its lap time trend (degradation)
 UNKNOWN_COMPOUND = ""  # compound not recorded in lap info
-STAT_KEYS = ("pb", "qb", "rb", "meters", "seconds", "valid", "invalid", "races", "wins", "podiums")
+REFUEL_MIN = 0.5  # liters, more fuel at lap start than at previous lap end: refuelled (pit stop)
+FUEL_USE_FACTOR = 2.0  # fuel gone between laps more than this many laps can use: fuel taken out in garage
+TYRE_CHANGE_MIN = 1.0  # % of tread, more at lap start than at previous lap end on a wheel: tyres changed
+STAT_KEYS =("pb", "qb", "rb", "meters", "seconds", "valid", "invalid", "races", "wins", "podiums")
 
 
 class StintLap(NamedTuple):
@@ -57,6 +62,46 @@ class StintLap(NamedTuple):
     timestamp: float  # lap end
     session: str  # session type name
     session_start: float = 0.0
+    number: int = 0  # lap number, 0 if unknown
+    fuel: tuple[float, float] | None = None  # fuel at lap start & end, None if not recorded
+    wear: tuple[tuple[float, ...], tuple[float, ...]] | None = None  # tread left of each wheel at lap start & end
+
+
+def info_pair(info: dict, start: str, end: str, size: int = 0) -> tuple | None:
+    """Lap start & end values of lap info (numbers, or lists of size numbers), None if not recorded"""
+    first, last = info.get(start), info.get(end)
+
+    def number(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    if size:
+        if (isinstance(first, list) and isinstance(last, list) and len(first) == len(last) == size
+                and all(number(item) for item in (*first, *last))):
+            return tuple(float(item) for item in first), tuple(float(item) for item in last)
+        return None
+    if isinstance(first, (int, float)) and isinstance(last, (int, float)) and number(first) and number(last):
+        return float(first), float(last)
+    return None
+
+
+def pit_stop_between(previous: StintLap, lap: StintLap) -> bool:
+    """Whether car stopped in pits between two recorded laps: laps not recorded in between (out & in laps, unless
+    lap numbers are unknown) and lap info shows fuel added, or taken out (more gone than laps in between can use),
+    tyres changed, other compound"""
+    numbered = previous.number > 0 and lap.number > 0
+    laps = lap.number - previous.number  # previous lap end to lap start: laps not recorded in between + 1
+    if numbered and laps < 2:  # next lap (or numbers going back): no time to stop
+        return False
+    if previous.fuel is not None and lap.fuel is not None:
+        if lap.fuel[0] > previous.fuel[1] + REFUEL_MIN:
+            return True
+        use = previous.fuel[0] - previous.fuel[1]  # one lap
+        if numbered and use > 0 and previous.fuel[1] - lap.fuel[0] > laps * use * FUEL_USE_FACTOR + REFUEL_MIN:
+            return True
+    if previous.wear is not None and lap.wear is not None and any(
+            start > end + TYRE_CHANGE_MIN for start, end in zip(lap.wear[0], previous.wear[1])):
+        return True
+    return bool(previous.compound and lap.compound and previous.compound != lap.compound)
 
 
 def lap_compound(info: dict) -> str:
@@ -96,6 +141,8 @@ def read_laps(folder: str, keep: Callable[[dict], bool] | None = None,
             lap.lap_time, lap.valid, str(info.get("kind", "lap")), lap_compound(info), lap_timestamp_of(lap.filename),
             str(info.get("session", "")),
             float(info["session_start"]) if isinstance(info.get("session_start"), (int, float)) else 0.0,
+            lap_number_of(lap.filename), info_pair(info, "fuel_start", "fuel_end"),
+            info_pair(info, "wear_start", "wear_end", 4),
         ) for lap, info in group])
     return sessions
 
@@ -136,12 +183,22 @@ def trend(points: Sequence[tuple[float, float]]) -> float:
     return sum((x - mean_x) * (y - mean_y) for x, y in points) / spread
 
 
+def trend_positions(numbers: Sequence[int], indexes: Sequence[int]) -> list[float]:
+    """Lap time trend x of laps at indexes (numbers: lap number of each lap, 0 if unknown): lap number (laps not
+    recorded keep their place), else (a number unknown or going back) position among recorded laps"""
+    picked = [numbers[index] for index in indexes]
+    if all(number > 0 for number in picked) and all(first <= second for first, second in pairwise(picked)):
+        return [float(number) for number in picked]
+    return [float(index) for index in indexes]
+
+
 def split_stints(laps: Sequence[StintLap]) -> list[list[StintLap]]:
-    """Laps of a session split in stints: a stint starts with an out lap, ends with an in lap"""
+    """Laps of a session split in stints: a stint starts with an out lap, ends with an in lap, or a pit stop shows
+    between two laps (see pit_stop_between)"""
     stints: list[list[StintLap]] = []
     current: list[StintLap] = []
     for lap in laps:
-        if lap.kind == "out" and current:
+        if current and (lap.kind == "out" or pit_stop_between(current[-1], lap)):
             stints.append(current)
             current = []
         current.append(lap)
@@ -154,18 +211,20 @@ def split_stints(laps: Sequence[StintLap]) -> list[list[StintLap]]:
 
 
 def stint_summary(laps: Sequence[StintLap]) -> dict | None:
-    """Stint pace (mean clean lap time), degradation (lap time trend, seconds per lap, MIN_TREND_LAPS clean laps
-    or more), compound (most laps), lap counts, start time; None under MIN_CLEAN_LAPS clean laps"""
+    """Stint pace (mean clean lap time), degradation (lap time trend, seconds per lap along lap numbers,
+    MIN_TREND_LAPS clean laps or more), compound (most laps), lap counts, start time; None under MIN_CLEAN_LAPS
+    clean laps"""
     clean = clean_times(laps)
     if len(clean) < MIN_CLEAN_LAPS:
         return None
     compounds = Counter(lap.compound for lap in laps if lap.compound)
+    positions = trend_positions([lap.number for lap in laps], [index for index, _ in clean])
     return {
         "compound": compounds.most_common(1)[0][0] if compounds else UNKNOWN_COMPOUND,
         "laps": len(laps), "clean": len(clean),
         "pace": sum(lap_time for _, lap_time in clean) / len(clean),
-        "slope": trend([(float(index), lap_time) for index, lap_time in clean]) if len(clean) >= MIN_TREND_LAPS
-        else None,
+        "slope": trend([(position, lap_time) for position, (_, lap_time) in zip(positions, clean)])
+        if len(clean) >= MIN_TREND_LAPS else None,
         "start": next((lap.timestamp - lap.time for lap in laps if lap.timestamp > 0), 0.0),
         "session": laps[0].session if laps else "",
     }

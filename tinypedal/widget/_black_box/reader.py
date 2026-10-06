@@ -214,8 +214,8 @@ class DataReader:
                                   fg_color=self.wcfg["font_color_temperature"])
 
     def load_brake_heatmap(self, name: str):
-        return load_heatmap_color(heatmap_name=name, default_name=HEATMAP_DEFAULT_BRAKE, swap_style=True,
-                                  fg_color=self.wcfg["font_color_temperature"])
+        # Text & disc mark color on panel (first color: darkened on light overlay themes)
+        return load_heatmap_color(heatmap_name=name, default_name=HEATMAP_DEFAULT_BRAKE)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -289,7 +289,7 @@ class DataReader:
             wheel.pressure = pressure[index]
             wheel.tread = tread[index] * 100
             wheel.tyre_color = calc.select_grade(self.heatmap_tyre[index], wheel.tyre_temp)[1]
-            wheel.brake_color = calc.select_grade(self.heatmap_brake[index], wheel.brake_temp)[1]
+            wheel.brake_color = calc.select_grade(self.heatmap_brake[index], wheel.brake_temp)[0]
             if ico:
                 temps = ico[index * 3:index * 3 + 3]
                 if wcfg["show_tyre_temperature_bands"]:
@@ -622,7 +622,7 @@ class DataReader:
             f"{self.event_labels['impact']} {incident.peak_g:.1f}g{direction}", incident.peak_g >= 10,
         )
         self.browse_incident = None  # a new incident is shown first
-        # Marker at trigger time in replay being recorded, see Telemetry replay window
+        # Marker at trigger time in replay being recorded, see Session recorder window
         latest = incident.samples[-1].time if incident.samples else incident.time
         replay.add_marker("incident", f"{incident.peak_g:.1f}g", latest - incident.time)
         if self.export_folder:

@@ -37,7 +37,7 @@ def test_french_messages(french):
         "Supprimer définitivement le preset <b>race</b> ?<br><br>Cette action est irréversible !"
     )
     assert i18n.trm("<b>Disable</b> all modules?") == "<b>Désactiver</b> tous les modules ?"
-    assert i18n.trm("UI: Dark") == "Thème : sombre"
+    assert i18n.trm("UI: Legacy Light") == "Thème : classique clair"
     assert i18n.trm("Unknown message stays") == "Unknown message stays"
 
 

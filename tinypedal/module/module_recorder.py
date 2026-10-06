@@ -51,7 +51,7 @@ from ..replay import replay
 from ..userfile import write_text_file
 from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
-from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files
+from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
 from ..validator import generator_init
 from ._base import DataModule
 
@@ -487,6 +487,7 @@ def record_telemetry(
                     info=lap_info(kind, rows),
                     timestamp=timestamp(),
                 )
+                pending.info["finished"] = round(pending.timestamp, 3)  # exact lap end (lap viewer replay link)
             rows = LapSamples()
             lap_complete_start = True
             started_in_pits = in_pits
@@ -580,25 +581,6 @@ def write_gzip_file(filename: str, text: str) -> bool:
         with suppress(OSError):
             os.remove(temp_filename)
         return False
-
-
-WINDOWS_RESERVED_NAMES = frozenset((
-    "CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(10)), *(f"LPT{index}" for index in range(10)),
-))
-
-
-def lap_folder_name(combo_name: str) -> str:
-    """Folder name of track & class laps, valid on every system ("unknown" if empty)
-
-    Windows silently drops trailing spaces & dots of a folder name, then files cannot be
-    written in it ("Track - " when class is empty).
-    """
-    name = combo_name.strip().rstrip(". ")
-    if name.endswith(" -"):  # empty class name
-        name = name[:-2].rstrip(". ")
-    if name.split(".")[0].upper() in WINDOWS_RESERVED_NAMES:
-        name = f"{name}_"
-    return name or "unknown"
 
 
 def save_lap(

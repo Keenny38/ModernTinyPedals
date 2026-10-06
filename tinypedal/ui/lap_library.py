@@ -23,12 +23,14 @@ drivers' folders (foreign laps)
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import time
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QTimer
+import shiboken6
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -51,10 +53,12 @@ from ..userfile.lap_library import (
     is_foreign,
     list_imported,
     rename_group,
+    restore_laps,
 )
 from ..userfile.motec_ld import import_ld_job
 from ..userfile.telemetry_lap import read_lap_info
 from ._common import BaseDialog, TextInputDialog, UIScaler
+from .toast import show_toast
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +82,8 @@ class LapLibrary(BaseDialog):
         filepath: telemetry folder.
         on_add: called with lap paths to show in lap viewer.
         on_changed: called with moved lap paths after rename or delete (old path: new path, "" if deleted).
+        import_motec: imports logs as lap viewer page jobs, then calls done with (log, lap paths, error) of each
+            (default: import_motec of on_add page). Page jobs finish when page closes, app exit waits for them.
     """
 
     EMBED_FROM_PAGE = True
@@ -86,12 +92,17 @@ class LapLibrary(BaseDialog):
     def __init__(
         self, parent, filepath: str,
         on_add: Callable[[list[str]], None], on_changed: Callable[[dict[str, str]], None],
+        import_motec: Callable[..., None] | None = None,
     ):
         super().__init__(parent)
         self.set_utility_title(tr("Imported Laps"))
         self.filepath = filepath
         self._on_add = on_add
         self._on_changed = on_changed
+        page = getattr(on_add, "__self__", None)  # lap viewer page, on_add is one of its methods
+        self._import_motec = import_motec or getattr(page, "import_motec", None)
+        self._importing = False
+        self._undo: list[tuple[str, str]] = []  # deleted files: path, path in trash
 
         self.edit_filter = QLineEdit(self)
         self.edit_filter.setPlaceholderText(tr("Search track, vehicle, driver or log..."))
@@ -103,11 +114,6 @@ class LapLibrary(BaseDialog):
         layout_top = QHBoxLayout()
         layout_top.addWidget(self.edit_filter, stretch=1)
         layout_top.addWidget(self.button_import)
-        # Imports run in lap viewer worker process (a long log takes seconds to read): (log name, job)
-        self._imports: list = []
-        self._import_timer = QTimer(self)
-        self._import_timer.setInterval(100)
-        self._import_timer.timeout.connect(self.check_imports)
 
         self.tree = QTreeWidget(self)
         self.tree.setHeaderLabels([tr("Name"), tr("Time"), tr("Track"), tr("Vehicle"), tr("Driver"), tr("Imported")])
@@ -123,13 +129,18 @@ class LapLibrary(BaseDialog):
         button_rename.setToolTip(tr("Rename selected imported log"))
         button_rename.clicked.connect(self.rename)
         button_delete = QPushButton(tr("Delete"))
+        button_delete.setToolTip(tr("Move selected laps to trash"))
         button_delete.clicked.connect(self.delete)
+        self.button_undo = QPushButton(tr("Undo Delete"))
+        self.button_undo.clicked.connect(self.undo_delete)
+        self.button_undo.setVisible(False)
         button_close = QPushButton(tr("Close"))
         button_close.clicked.connect(self.close)
         layout_button = QHBoxLayout()
         layout_button.addWidget(button_add)
         layout_button.addWidget(button_rename)
         layout_button.addWidget(button_delete)
+        layout_button.addWidget(self.button_undo)
         layout_button.addStretch(1)
         layout_button.addWidget(button_close)
 
@@ -212,45 +223,35 @@ class LapLibrary(BaseDialog):
                 group.setExpanded(True)
 
     def import_logs(self):
-        """Import MoTeC logs into library in background, new logs shown expanded once done"""
-        if self._imports:
+        """Import MoTeC logs into library in background (lap viewer page jobs), new logs shown expanded once done"""
+        if self._importing:
             return
         filenames, _ = QFileDialog.getOpenFileNames(self, tr("Import MoTeC..."), "", "MoTeC i2 (*.ld)")
         if not filenames:
             return
-        from .quick.lap_backend import start_job
-
-        folder = import_folder(self.filepath)
-        self._imports = [(os.path.basename(filename), start_job("motec import", import_ld_job, filename, folder))
-                         for filename in filenames]
+        self._importing = True
         self.button_import.setEnabled(False)
         self.button_import.setText(tr("Importing..."))
-        self._import_timer.start()
-
-    def check_imports(self, wait: bool = False):
-        """Show imported logs once every import is done (wait: block until done, for tests)"""
-        if wait:
-            for _, job in self._imports:
-                job.join()
-        if not self._imports or any(job.is_alive() for _, job in self._imports):
+        if self._import_motec is not None:
+            self._import_motec(filenames, done=self.imported)
             return
-        from .quick.lap_backend import JobHandle
+        folder = import_folder(self.filepath)  # no lap viewer page: imported now
+        self.imported([(filename, *import_ld_job(filename, folder)) for filename in filenames])
 
-        self._import_timer.stop()
+    def imported(self, results: list[tuple[str, list[str], str]]):
+        """Every log imported (log, lap paths, error): imported logs shown expanded, problems told"""
+        if not shiboken6.isValid(self):  # library closed meanwhile: laps are in library
+            return
         groups: set[str] = set()
         problems: list[str] = []
-        for name, job in self._imports:
-            result = job.result()
-            if result is None or result is JobHandle.BROKEN:
-                paths, error = [], tr("Unexpected error")
-            else:
-                paths, error = result
+        for filename, paths, error in results:
+            name = html.escape(os.path.basename(filename))
             if error:
-                problems.append(trm(f"Unable to import <b>{name}</b>: {error}"))
+                problems.append(trm(f"Unable to import <b>{name}</b>: {html.escape(error)}"))
             elif not paths:
                 problems.append(trm(f"No complete lap in: {name}"))
             groups.update(os.path.basename(os.path.dirname(path)) for path in paths)
-        self._imports = []
+        self._importing = False
         self.button_import.setEnabled(True)
         self.button_import.setText(tr("Import MoTeC..."))
         self.edit_filter.clear()
@@ -315,11 +316,36 @@ class LapLibrary(BaseDialog):
         TextInputDialog(self, tr("Rename"), tr("Imported log name:"), renaming, old).show()
 
     def delete(self):
+        """Move selected laps to trash (lap viewer trash, kept 30 days), undo offered, laps that can not be deleted
+        (file open elsewhere) told"""
+        from .quick.lap_backend import TRASH_FOLDER
+
         paths = self.lap_paths(self.tree.selectedItems())
         if not paths:
             return
-        if not self.confirm_operation("Delete", f"Delete {len(paths)} imported lap(s)?"):
+        if not self.confirm_operation("Delete", f"Move {len(paths)} laps to trash?"):
             return
-        deleted = delete_laps(self.filepath, paths)
+        trash = os.path.join(self.filepath, TRASH_FOLDER, time.strftime("%Y-%m-%d %H-%M-%S"))
+        deletion = delete_laps(self.filepath, paths, trash)
+        if deletion.trashed:
+            self._undo = deletion.trashed
+            self.button_undo.setVisible(True)
         self.refresh()
-        self._on_changed(deleted)
+        if deletion.deleted:
+            self._on_changed(dict.fromkeys(deletion.deleted, ""))
+        if deletion.failed:
+            QMessageBox.warning(self, tr("Error"), "<br>".join(
+                trm(f"Unable to delete lap: {html.escape(os.path.basename(path))} ({html.escape(reason)})")
+                for path, reason in deletion.failed.items()))
+        elif deletion.trashed:
+            count = len({path for path, _ in deletion.trashed} & set(deletion.deleted))  # laps, not group marks
+            show_toast(self, trm(f"{count} lap(s) moved to trash"), action_text=tr("Undo"), action=self.undo_delete)
+
+    def undo_delete(self):
+        """Restore laps deleted last from trash, restored groups shown expanded"""
+        if not self._undo or not shiboken6.isValid(self):
+            return
+        restored = restore_laps(self._undo)
+        self._undo = []
+        self.button_undo.setVisible(False)
+        self.refresh({os.path.basename(os.path.dirname(path)) for path in restored})

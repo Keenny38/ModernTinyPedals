@@ -416,16 +416,6 @@ def test_qml_page_translated(overlays):
         i18n.set_language("English")
 
 
-def test_config_saved_updates_card(page):
-    page.backend.previews.render_now("fuel")
-    cfg.user.setting["fuel"]["enable"] = True
-    page.reload_overlay("fuel")
-    assert page.module_control.reloaded == ["fuel"]
-    index = page.backend.source.index(page.backend.source.index_of["fuel"], 0)
-    assert index.data(OverlayModel.EnabledRole) is True
-    assert "fuel" in page.backend.previews._stale
-
-
 def test_refresh_slot(page):
     cfg.user.setting["relative"]["enable"] = True
     page.refresh(True)

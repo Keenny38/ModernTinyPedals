@@ -41,6 +41,7 @@ from .module_control import mctrl, wctrl
 from .overlay_control import octrl
 from .replay import replay
 from .setting import cfg
+from .stream_overlay import streamoverlay
 from .update import update_checker
 from .vr_overlay import vroverlay
 from .web_dashboard import webdashboard
@@ -86,6 +87,7 @@ def start():
     webdashboard.enable()
     if not safe_mode.state.enabled:
         vroverlay().enable()
+        streamoverlay.enable()
     # 4 Check for updates
     if cfg.application["check_for_updates_on_startup"]:
         update_checker.check(False)
@@ -224,11 +226,13 @@ def load_modules():
     webdashboard.enable()  # 5 web dashboard
     if not safe_mode.state.enabled:
         vroverlay().enable()  # 6 vr overlay
+        streamoverlay.enable()  # 7 stream overlay
 
 
 def unload_modules():
     """Unload modules, widgets"""
     vroverlay().disable()  # 0 vr overlay
+    streamoverlay.disable()  # 0 stream overlay
     cmdserver.disable()  # 0 remote control
     webdashboard.disable()  # 0 web dashboard
     kctrl.disable()  # 1 hotkey

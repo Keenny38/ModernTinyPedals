@@ -40,7 +40,7 @@ from ._common import FontMetrics, MousePosition
 from ._edit_frame import EditFrame, scale_widget_setting
 from ._layout_guide import layout_guide
 from ._painter import OverlayStyle, RawImage, RawText
-from ._style import StyledConfig, modern_overrides, scale_overrides
+from ._style import StyledConfig, overlay_theme, scale_overrides, theme_overrides
 
 logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
@@ -95,17 +95,17 @@ class Base(QWidget):
 
         # Overlay style
         style = self.cfg.user.config["overlay_style"]
-        self.modern_style = style["enable_modern_style"]
+        self.modern_style = overlay_theme(style).modern
         if self.modern_style:
             OverlayStyle.corner_scale = min(max(style["corner_radius_scale"], 0), 0.5)
             OverlayStyle.depth_effects = bool(style.get("enable_depth_effects", True))
-            self.wcfg = StyledConfig(
-                self.wcfg,
-                modern_overrides(self.wcfg, self.cfg.default.setting[widget_name], style),
-            )
         else:
             OverlayStyle.corner_scale = 0
             OverlayStyle.depth_effects = False
+        # Theme colors (also legacy light & colorblind variants), modern font
+        themed = theme_overrides(self.wcfg, self.cfg.default.setting[widget_name], style)
+        if themed or self.modern_style:
+            self.wcfg = StyledConfig(self.wcfg, themed)
         # Modern design restyle of classic drawing (see widget._modern.restyle)
         design = self.design_overrides(style)
         if design:
@@ -166,9 +166,16 @@ class Base(QWidget):
         """Unload widget resource"""
         self.__dict__.clear()
 
+    def screen_opacity(self) -> float:
+        """Window opacity on screen: none for overlay shown on stream only while locked (see stream_overlay),
+        visible while unlocked for positioning"""
+        if self.cfg.overlay["fixed_position"] and self.wcfg.get("stream_visibility") == "Stream Only":
+            return 0.0
+        return self.wcfg["opacity"]
+
     def __set_window_attributes(self):
         """Set window attributes"""
-        self.setWindowOpacity(self.wcfg["opacity"])
+        self.setWindowOpacity(self.screen_opacity())
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         if self.cfg.compatibility["enable_translucent_background"]:
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -257,7 +264,7 @@ class Base(QWidget):
     def __refresh_visibility(self, animate: bool = True):
         """Show or hide widget, fade if enabled"""
         hide = self.should_hide()
-        opacity = self.wcfg["opacity"]
+        opacity = self.screen_opacity()
         # No update while hidden (hotkey, visibility context), saves CPU while driving
         if realtime_state.active:
             if hide and not self.update_while_hidden:
@@ -265,7 +272,7 @@ class Base(QWidget):
             elif not self._update_timer.isActive():
                 self._update_timer.start(self._update_interval, self)
         self._fade.stop()
-        if not (animate and self._fade_enabled):
+        if not (animate and self._fade_enabled) or opacity <= 0:  # nothing to fade on screen (stream only)
             self.setWindowOpacity(opacity)
             self.setHidden(hide)
             return
@@ -285,7 +292,7 @@ class Base(QWidget):
     def __fade_finished(self):
         if self._fade.endValue() == 0.0:
             self.hide()
-            self.setWindowOpacity(self.wcfg["opacity"])
+            self.setWindowOpacity(self.screen_opacity())
 
     def __connect_signal(self):
         """Connect overlay lock and hide signal"""
@@ -800,12 +807,10 @@ def reload_widget(widget_name: str):
 
 
 def config_widget(widget_name: str):
-    """Open widget config dialog"""
+    """Open Overlay Options page at widget"""
     from PySide6.QtWidgets import QApplication, QMainWindow
 
-    from ..module_control import wctrl
-    from ..setting import cfg
-    from ..ui.config import UserConfig
+    from ..ui.overlay_options import open_overlay_options
 
     # Find main window instance
     for _widget in QApplication.topLevelWidgets():
@@ -813,13 +818,4 @@ def config_widget(widget_name: str):
             break
     else:
         return
-    _dialog = UserConfig(
-        parent=_widget,
-        key_name=widget_name,
-        preset_name=cfg.filename.setting,
-        config_type=wctrl.type_id,
-        user_setting=cfg.user.setting,
-        default_setting=cfg.default.setting,
-        reload_func=lambda name=widget_name: reload_widget(name),
-    )
-    _dialog.open()
+    open_overlay_options(_widget, widget_name)

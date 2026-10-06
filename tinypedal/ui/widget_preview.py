@@ -17,22 +17,17 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Live widget preview for widget config dialog
+Widget drawn with edited (unsaved) options, for pictures of Overlays & Overlay Options pages
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from importlib import import_module
 
-from PySide6.QtCore import QBasicTimer, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QCheckBox, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from ..i18n import tr, trm
 from ..setting import Setting
-from ._common import UIScaler
 
 logger = logging.getLogger(__name__)
 
@@ -77,84 +72,3 @@ def render_widget(config: Setting, widget_name: str, widget_setting: dict) -> QP
         return widget.grab()
     finally:
         widget.deleteLater()
-
-
-class WidgetPreview(QWidget):
-    """Live preview panel, refresh when edited values change"""
-
-    REFRESH_MS = 400
-
-    def __init__(self, parent, config: Setting, widget_name: str, read_values: Callable[[], dict | None]):
-        """
-        Args:
-            config: app setting.
-            widget_name: widget name.
-            read_values: return edited widget setting, or None if any value is invalid.
-        """
-        super().__init__(parent)
-        self._config = config
-        self._widget_name = widget_name
-        self._read_values = read_values
-        self._last_values: dict | None = None
-        self._timer = QBasicTimer()
-        # Timer is not unregistered if widget is deleted by parent while Python object lives on
-        self.destroyed.connect(self._timer.stop)
-
-        self.checkbox = QCheckBox(tr("Live Preview"))
-        self.checkbox.setChecked(True)
-        self.checkbox.toggled.connect(self.toggle)
-
-        self.label_preview = QLabel(self)
-        self.label_preview.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        self.label_preview.setObjectName("widgetPreview")
-
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setWidget(self.label_preview)
-        self.scroll_area.setWidgetResizable(True)
-        # Beside the option list, as tall as it: room for tall widgets without scrolling
-        self.scroll_area.setMinimumWidth(UIScaler.size(16))
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.checkbox)
-        layout.addWidget(self.scroll_area)
-        self.setLayout(layout)
-        self.toggle(True)
-
-    def toggle(self, enabled: bool):
-        """Enable or disable preview"""
-        self.scroll_area.setVisible(enabled)
-        if enabled:
-            self._last_values = None
-            self.refresh()
-            self._timer.start(self.REFRESH_MS, self)
-        else:
-            self._timer.stop()
-
-    def timerEvent(self, event):
-        """Refresh periodically"""
-        if not self.isVisible():  # hidden page (other page shown) or window: nothing to refresh
-            return
-        self.refresh()
-
-    def refresh(self):
-        """Render preview if values changed"""
-        values = self._read_values()
-        if values is None:
-            self.label_preview.setText(tr("Invalid value, preview not updated"))
-            return
-        if values == self._last_values:
-            return
-        self._last_values = values
-        try:
-            pixmap = render_widget(self._config, self._widget_name, values)
-        except Exception as error:  # show error instead of breaking config dialog
-            logger.debug("Preview error: %s", error, exc_info=True)
-            self.label_preview.setText(trm(f"Preview not available: {error}"))
-            return
-        self.label_preview.setPixmap(pixmap)
-
-    def closeEvent(self, event):
-        """Stop refresh"""
-        self._timer.stop()
-        super().closeEvent(event)

@@ -50,8 +50,9 @@ TOOL_SECTIONS = (
         ("Driver Stats Viewer", "\ue77b", "driver_stats_viewer.DriverStatsViewer"),  # contact
         ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
         ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
-        ("Telemetry Replay", "\ue768", "replay_view.ReplayView"),  # play
         ("Game Replays", "\ue714", "game_replays.GameReplays"),  # video
+        ("Race Results", "\ue7c1", "race_results_viewer.RaceResultsViewer"),  # flag
+        ("Stream Overlays", "\ue93e", "stream_overlay_view.StreamOverlaysView"),  # streaming
     )),
     ("Editors", (
         ("Heatmap Editor", "\ue790", "heatmap_editor.HeatmapEditor"),  # color
@@ -62,12 +63,15 @@ TOOL_SECTIONS = (
         ("Track Info Editor", "\ue946", "track_info_editor.TrackInfoEditor"),  # info
         ("Track Notes Editor", "\ue70b", "track_notes_editor.TrackNotesEditor"),  # quick note
         ("Layout Editor", "\ue8a9", "layout_editor.LayoutEditor"),  # view all
-        ("Overlay Theme Editor", "\ue771", "theme_editor.ThemeEditor"),  # personalize
     )),
     ("Management", (
+        ("Config", "\ue713", "app_settings.AppSettings"),  # settings
         ("Preset Comparison", "\ue8ab", "preset_compare.PresetCompare"),  # switch
         ("Plugin Manager", "\uea86", "plugin_manager.PluginManager"),  # puzzle
         ("Widget Performance", "\uec4a", "perf_view.PerformanceView"),  # speed
+    )),
+    ("Advanced", (
+        ("Session Recorder", "\uec57", "replay_view.ReplayView"),  # replay
     )),
 )
 
@@ -80,12 +84,30 @@ RENAMED_TOOLS = {
 RENAMED_TOOL_KEYS = {old.split(".", 1)[0]: new.split(".", 1)[0] for old, new in RENAMED_TOOLS.items()}
 # Extra words finding a tool in command palette (former names, what it covers), both languages
 TOOL_KEYWORDS = {
+    "app_settings.AppSettings": (
+        "settings configuration options preferences application config.json overlay style theme notification "
+        "compatibility remote control web dashboard vr user path folder language startup update backup "
+        "parametres reglages preferences style theme notifications compatibilite controle a distance "
+        "tableau de bord dossiers langue demarrage mise a jour sauvegardes"
+    ),
+    "stream_overlay_view.StreamOverlaysView": (
+        "obs streamlabs xsplit vmix twitch youtube stream streaming browser source broadcast layout "
+        "diffusion direct source navigateur streamer"
+    ),
+    "race_results_viewer.RaceResultsViewer": (
+        "results classification standings finish position grid laps sectors incidents penalties session "
+        "resultats classement arrivee grille tours secteurs incidents penalites"
+    ),
     "game_replays.GameReplays": (
         "lmu replay incident contact crash watch rediffusion incidents contacts accrochage revoir"
     ),
     "race_calculator.RaceCalculator": (
         "fuel calculator tyre tire strategy planner energy pit stop stint "
         "carburant calculateur pneus strategie energie arret relais"
+    ),
+    "replay_view.ReplayView": (
+        "telemetry replay tpreplay record playback without game overlay test "
+        "rejeu telemetrie enregistrer lecture sans jeu"
     ),
 }
 
@@ -205,6 +227,8 @@ class ToolsView(QWidget):
                 card = ToolCard(tr(label), glyph, icon_family, content)
                 card.clicked.connect(lambda _=False, path=dialog_path: open_tool(path, dialog_parent))
                 grid.addWidget(card, index // 2, index % 2)
+            if len(tools) % 2:  # fill last row: a single card stays as wide as cards of other sections
+                grid.addWidget(QWidget(content), len(tools) // 2, 1)
             layout_content.addLayout(grid)
             layout_content.addSpacing(UIScaler.pixel(4))
         layout_content.addStretch(1)

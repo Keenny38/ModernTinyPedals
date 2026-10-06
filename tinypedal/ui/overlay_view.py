@@ -25,18 +25,12 @@ created when first shown: no QML engine started at launch while another page is 
 
 from __future__ import annotations
 
-from functools import partial
-
-import shiboken6
 from PySide6.QtCore import Slot
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QMessageBox, QVBoxLayout, QWidget
 
-from ..const_file import ConfigType
 from ..i18n import tr
 from ..module_control import ModuleControl, wctrl
-from ..setting import cfg
-from .config import UserConfig
 from .quick.overlay_backend import OverlayBackend
 
 
@@ -84,23 +78,10 @@ class OverlayView(QWidget):
         self.backend.refresh()
 
     def open_config(self, name: str):
-        _dialog = UserConfig(
-            parent=self,
-            key_name=name,
-            preset_name=cfg.filename.setting,
-            config_type=ConfigType.WIDGET,
-            user_setting=cfg.user.setting,
-            default_setting=cfg.default.setting,
-            reload_func=partial(self.reload_overlay, name),
-        )
-        _dialog.open()
+        """Overlay Options page at overlay (saved options restart it & refresh this page)"""
+        from .overlay_options import open_overlay_options
 
-    def reload_overlay(self, name: str):
-        """Config saved: overlay restarted, its card updated (page may be gone after language change)"""
-        self.module_control.reload(name)
-        if shiboken6.isValid(self):
-            self.backend.update_overlay(name)
-            self.backend.invalidate_preview(name)
+        open_overlay_options(self, name)
 
     def confirm(self, text: str) -> bool:
         answer = QMessageBox.question(

@@ -184,6 +184,7 @@ MODERN_DESIGN_OPTIONS = MappingProxyType({
     "spotter": {},
     "race_notifications": {},
     "tyre_temp_trend": {},
+    "telemetry_compare": {},
 })
 
 MODERN_DESIGNS = frozenset(MODERN_DESIGN_OPTIONS)

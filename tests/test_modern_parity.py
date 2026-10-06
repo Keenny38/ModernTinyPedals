@@ -25,7 +25,7 @@ def widgets(ui_env, bundled_fonts):
     created = []
 
     def make(name: str, modern: bool = True, **options):
-        cfg.user.config["overlay_style"]["enable_modern_style"] = modern
+        cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
         widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
         created.append(widget)

@@ -196,14 +196,6 @@ def set_environment():
         logger.info("High DPI scaling: OFF")
 
 
-def load_overlay_themes():
-    """Load custom overlay themes"""
-    from .userfile.overlay_theme import load_custom_themes
-    from .widget._style import BUILTIN_THEMES, set_custom_themes
-
-    set_custom_themes(load_custom_themes(cfg.path.config, BUILTIN_THEMES))
-
-
 def ask_safe_mode() -> bool:
     """Previous start did not finish: ask whether to start in safe mode"""
     answer = QMessageBox.question(
@@ -245,9 +237,8 @@ def start_app(cli_args):
     set_environment()
     # Main GUI
     root = init_gui()
-    # Safe mode decided before widgets & plugins are imported (overlay themes import them)
+    # Safe mode decided before widgets & plugins are imported
     check_safe_mode(bool(getattr(cli_args, "safe_mode", False)))
-    load_overlay_themes()
     # Load core modules
     from . import loader
     loader.start()

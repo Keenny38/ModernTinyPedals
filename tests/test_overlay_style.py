@@ -1,24 +1,46 @@
-"""Modern overlay style tests"""
+"""Overlay themes & style tests"""
 
-from tinypedal.widget._style import StyledConfig, modern_overrides, remap_color
+import pytest
+
+from tinypedal.widget._style import (
+    BACKGROUND,
+    FOREGROUND,
+    ON_COLOR,
+    THEME_NAMES,
+    StyledConfig,
+    option_role,
+    overlay_theme,
+    theme_color,
+    theme_overrides,
+)
 
 STYLE = {
-    "enable_modern_style": True,
     "overlay_theme": "Modern Dark",
+    "enable_colorblind_colors": False,
     "enable_modern_font": True,
     "modern_font_name": "Bahnschrift",
     "corner_radius_scale": 0.2,
     "minimum_bar_gap": 2,
 }
+MODERN_DARK = overlay_theme(STYLE)
 
 
-def test_remap_color():
-    assert remap_color("#222222") == "#1B1F27"
-    assert remap_color("#ffffff") == "#F4F6F9"
-    assert remap_color("#88444444") == "#88373E4C"  # keep alpha
-    assert remap_color("#123456") == "#123456"  # not in palette
-    assert remap_color("#FFF") == "#FFF"  # short form untouched
-    assert remap_color("") == ""
+def test_theme_color():
+    assert theme_color("#222222", MODERN_DARK) == "#1B1F27"
+    assert theme_color("#ffffff", MODERN_DARK) == "#F4F6F9"
+    assert theme_color("#88444444", MODERN_DARK) == "#88373E4C"  # keep alpha
+    assert theme_color("#123456", MODERN_DARK) == "#123456"  # not in palette
+    assert theme_color("#FFF", MODERN_DARK) == "#FFF"  # short form untouched
+    assert theme_color("#GG2200", MODERN_DARK) == "#GG2200"  # not a color
+    assert theme_color("", MODERN_DARK) == ""
+
+
+def test_overlay_theme():
+    assert THEME_NAMES == ("Modern Dark", "Modern Light", "Legacy Dark", "Legacy Light")
+    assert overlay_theme({"overlay_theme": "Legacy Light"}) == (False, True, False)
+    assert overlay_theme({"overlay_theme": "Modern Light", "enable_colorblind_colors": True}) == (True, True, True)
+    assert overlay_theme({"overlay_theme": "High Contrast"}) == overlay_theme({})  # removed theme: Modern Dark
+    assert not overlay_theme({"overlay_theme": "Legacy Dark"}).recolors  # classic colors
 
 
 def test_only_default_values_are_restyled():
@@ -30,7 +52,7 @@ def test_only_default_values_are_restyled():
         "position_x": 0,
     }
     user = dict(default, font_color="#FF0000", position_x=100)
-    overrides = modern_overrides(user, default, STYLE)
+    overrides = theme_overrides(user, default, STYLE)
     assert overrides == {
         "font_name": "Bahnschrift",
         "bar_gap": 2,
@@ -41,13 +63,14 @@ def test_only_default_values_are_restyled():
 def test_custom_font_and_gap_kept():
     default = {"font_name": "Consolas", "bar_gap": 0}
     user = {"font_name": "Arial", "bar_gap": 5}
-    assert modern_overrides(user, default, STYLE) == {}
+    assert theme_overrides(user, default, STYLE) == {}
 
 
-def test_disabled_options():
-    default = {"font_name": "Consolas", "font_color": "#FFFFFF"}
-    style = dict(STYLE, overlay_theme="Classic", enable_modern_font=False)
-    assert modern_overrides(dict(default), default, style) == {}
+def test_legacy_themes_keep_classic_look():
+    default = {"font_name": "Consolas", "bar_gap": 0, "font_color": "#FFFFFF"}
+    assert theme_overrides(dict(default), default, dict(STYLE, overlay_theme="Legacy Dark")) == {}
+    light = theme_overrides(dict(default), default, dict(STYLE, overlay_theme="Legacy Light"))
+    assert light == {"font_color": "#000000"}  # colors only: no modern font, no bar gap
 
 
 def test_styled_config_writes_through():
@@ -59,19 +82,104 @@ def test_styled_config_writes_through():
     assert source["font_color"] == "#FFFFFF"  # override never saved
 
 
-def test_theme_palettes():
-    from tinypedal.widget._style import OVERLAY_THEMES, overlay_theme_names
-
-    assert overlay_theme_names()[:len(OVERLAY_THEMES)] == tuple(OVERLAY_THEMES)
+@pytest.mark.parametrize(("theme", "colorblind", "expected"), [
+    ("Modern Dark", False, "#FF4D4F"),
+    ("Modern Dark", True, "#D55E00"),
+    ("Legacy Dark", True, "#D55E00"),
+])
+def test_colorblind_variant(theme, colorblind, expected):
     default = {"font_color": "#FF2200"}
-    for theme, expected in (
-        ("Modern Dark", "#FF4D4F"),
-        ("High Contrast", "#FF3B3B"),
-        ("Colorblind Safe", "#D55E00"),
-    ):
-        style = dict(STYLE, overlay_theme=theme)
-        assert modern_overrides(dict(default), default, style) == {"font_color": expected}
-    assert modern_overrides(dict(default), default, dict(STYLE, overlay_theme="Classic")) == {}
+    style = dict(STYLE, overlay_theme=theme, enable_colorblind_colors=colorblind)
+    assert theme_overrides(dict(default), default, style) == {"font_color": expected}
+
+
+@pytest.mark.parametrize("theme", ["Modern Light", "Legacy Light"])
+def test_light_themes_stay_readable(theme):
+    """Panels & text inverted, colors on panels darkened, text on colored background kept"""
+    from tinypedal.widget._style import _contrast
+
+    default = {
+        "font_color_gap": "#FFFFFF", "background_color_gap": "#222222",  # text on panel
+        "font_color_player": "#000000", "background_color_player": "#DDDDDD",  # highlighted row
+        "font_color_flag": "#000000", "background_color_flag": "#FFFF00",  # text on colored background
+        "font_color_gain": "#66EE00", "background_color_gain": "#333333",  # colored text on panel
+        "bar_color": "#00CCFF",  # mark on panel
+    }
+    styled = {**default, **theme_overrides(dict(default), default, dict(STYLE, overlay_theme=theme))}
+    rgb = {key: value[1:] for key, value in styled.items()}
+    assert _contrast(rgb["background_color_gap"], "FFFFFF") < 1.5  # light panel
+    assert _contrast(rgb["font_color_gap"], rgb["background_color_gap"]) > 7
+    assert _contrast(rgb["font_color_player"], rgb["background_color_player"]) > 7  # dark row, light text
+    assert styled["background_color_flag"] in ("#FFFF00", "#FDE047")  # kept (modern palette only)
+    assert styled["font_color_flag"] in ("#000000", "#0E1116")
+    assert _contrast(rgb["font_color_gain"], rgb["background_color_gain"]) >= 3
+    assert _contrast(rgb["bar_color"], rgb["background_color_gap"]) >= 3
+
+
+def test_option_role():
+    options = {
+        "font_color_x": "#000000", "background_color_x": "#222222", "font_color_y": "#AAAAAA",
+        "font_color_z": "#333333", "font_color": "#FFFFFF", "background_color": "#FF2200",
+    }
+    assert option_role("background_color_x", options) == BACKGROUND
+    assert option_role("bar_color", options) == FOREGROUND
+    assert option_role("font_color_x", options) == ON_COLOR  # unreadable on own background: on a colored element
+    assert option_role("font_color_y", options) == FOREGROUND  # light text on panel
+    assert option_role("font_color_z", options) == ON_COLOR  # dark text without background
+    assert option_role("font_color", options) == ON_COLOR  # on colored background
+
+
+def test_theme_selects_design(ui_env):
+    from tinypedal.setting import cfg
+    from tinypedal.widget._modern import uses_modern_design
+    from tinypedal.widget._modern.theme import build_theme
+
+    style = cfg.user.config["overlay_style"]
+    saved = style["overlay_theme"]
+    try:
+        style["overlay_theme"] = "Legacy Light"
+        assert not uses_modern_design(cfg, "speedometer")
+        style["overlay_theme"] = "Modern Light"
+        assert uses_modern_design(cfg, "speedometer")
+        theme = build_theme(style)
+        assert theme.surface.lightness() > 200 and theme.text.lightness() < 60
+        assert theme.border.red() == 0  # dark hairline on light panels
+        style["overlay_theme"] = "Modern Dark"
+        assert build_theme(style).border.red() == 255
+    finally:
+        style["overlay_theme"] = saved
+
+
+@pytest.mark.parametrize(("before", "colorblind"), [
+    ({"enable_modern_style": False, "overlay_theme": "Modern Dark"}, False),
+    ({"enable_modern_style": True, "overlay_theme": "Colorblind Safe"}, True),
+    ({"overlay_theme": "Classic"}, False),
+    ({"overlay_theme": "High Contrast"}, False),
+    ({"overlay_theme": "My custom theme"}, False),
+    ({"overlay_theme": "Legacy Light"}, False),  # dev build saved before update
+])
+def test_overlay_theme_migration(before, colorblind):
+    """Update: Modern Dark for everyone, former Colorblind Safe theme kept as colorblind safe colors"""
+    from tinypedal.setting_preupdate import preupdate_global_setting
+
+    setting = {"overlay_style": dict(before)}
+    preupdate_global_setting((2, 50, 3), setting)
+    assert setting["overlay_style"]["overlay_theme"] == "Modern Dark"
+    assert "enable_modern_style" not in setting["overlay_style"]
+    assert setting["overlay_style"].get("enable_colorblind_colors", False) == colorblind
+
+
+def test_window_theme_migration():
+    from tinypedal.setting_preupdate import preupdate_global_setting
+
+    for before in ("Dark", "Light", "System", "Legacy Light"):
+        setting = {"application": {"window_color_theme": before}}
+        preupdate_global_setting((2, 50, 3), setting)
+        assert setting["application"]["window_color_theme"] == "Modern Dark"  # update: Modern Dark for everyone
+    setting = {"application": {"window_color_theme": "Legacy Light"}, "overlay_style": {"overlay_theme": "Modern Light"}}
+    preupdate_global_setting((2, 50, 4), setting)  # chosen after update: kept
+    assert setting["application"]["window_color_theme"] == "Legacy Light"
+    assert setting["overlay_style"]["overlay_theme"] == "Modern Light"
 
 
 def test_overlay_scale_overrides():

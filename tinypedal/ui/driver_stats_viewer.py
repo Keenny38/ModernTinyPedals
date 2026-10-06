@@ -22,6 +22,7 @@ Driver stats viewer: stats of each track & vehicle, community lap time levels, p
 Qt Quick page (ui/qml/DriverStats.qml), state & actions in quick/stats_backend.py.
 """
 
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
@@ -50,6 +51,12 @@ class DriverStatsViewer(BaseDialog):
         QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.backend.redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.backend.redo)
         QShortcut(QKeySequence(QKeySequence.StandardKey.Refresh), self, self.backend.reload)  # F5, focus anywhere
+
+    @staticmethod
+    def page_minimum_size() -> QSize:
+        """Page area minimum while shown in app window (see app.DialogPage): tiles & cards text whole,
+        French included (narrower, empty tracks card note is cut, shorter, levels card note)"""
+        return QSize(UIScaler.size(64), UIScaler.size(40))
 
     def showEvent(self, event):
         self.backend.page_shown()

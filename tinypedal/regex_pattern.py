@@ -56,6 +56,7 @@ CFG_BOOL = (
     "^remember_position$|"
     "^remember_open_pages$|"
     "^remember_size$|"
+    "^window_maximized$|"
     "^save_invalid_laps$|"
     "^vr_compatibility$|"
     # Partial match
@@ -86,8 +87,7 @@ CFG_TARGET_LAPTIME = "target_laptime"
 CFG_TEXT_ALIGNMENT = "text_alignment"
 CFG_STATS_CLASSIFICATION = "vehicle_classification"
 CFG_WINDOW_COLOR_THEME = "window_color_theme"
-CFG_OVERLAY_THEME = "^overlay_theme$"  # built-in & custom theme names, see widget._style
-CFG_WIDGET_THEME = "^widget_theme$"  # per widget theme, "Global" = use overlay theme
+CFG_OVERLAY_THEME = "^overlay_theme$"  # see widget._style.overlay_theme
 CFG_LANGUAGE = "^language$"
 
 # String common
@@ -139,6 +139,8 @@ CFG_INTEGER = (
     "^position_x$|"
     "^position_y$|"
     "^remote_control_port$|"
+    "^stream_overlay_port$|"
+    "^frame_rate$|"
     "^snap_distance$|"
     "^snap_gap$|"
     "^stint_history_count$|"
@@ -246,6 +248,8 @@ CHOICE_UNITS = MappingProxyType({
     "tyre_pressure_unit": ("kPa", "psi", "bar"),
     "weight_unit": ("Kilogram", "Pound"),
 })
+# App window & overlay themes: modern or legacy (classic TinyPedal look) design, dark or light colors
+THEME_NAMES = ("Modern Dark", "Modern Light", "Legacy Dark", "Legacy Light")
 # Built-in languages, language packs are added when loaded (see i18n.load_language_packs)
 LANGUAGE_NAMES: list[str] = ["English", "Français"]
 
@@ -259,14 +263,17 @@ CHOICE_COMMON = MappingProxyType({
     CFG_TARGET_LAPTIME: ("Theoretical", "Personal"),
     CFG_TEXT_ALIGNMENT: ("Left", "Center", "Right"),
     CFG_STATS_CLASSIFICATION: ("Class - Brand", "Class", "Vehicle"),
-    CFG_WINDOW_COLOR_THEME: ("Light", "Dark", "System"),
+    CFG_WINDOW_COLOR_THEME: THEME_NAMES,
+    CFG_OVERLAY_THEME: THEME_NAMES,
     CFG_LANGUAGE: LANGUAGE_NAMES,
     "^visibility_context$": ("Always", "Race", "Qualifying & Race", "Practice & Qualifying", "On Track", "In Pits"),
+    "^stream_visibility$": ("Screen & Stream", "Stream Only", "Screen Only"),  # stream_overlay.STREAM_VISIBILITY
     "^display_profile$": ("Custom", "Minimal", "Sprint", "Endurance"),
     "^tyre_temperature_source$": ("Inner layer", "Carcass", "Surface"),
     "^tyre_load_display$": ("Percent", "Kilogram", "Newton"),
     "^brake_wear_display$": ("Percent", "Laps"),
     "^pedal_input_source$": ("Raw", "Filtered"),
+    "^reference_lap_source$": ("Viewer", "Best", "Last"),  # telemetry comparison: lap viewer reference
     "^incident_export_format$": ("JSON", "CSV", "Both"),
     "^status_icons_side$": ("Left", "Right"),
     "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),

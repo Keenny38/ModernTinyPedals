@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import Slot
 
 from ...i18n import tr, trm
-from ...userfile.telemetry_lap import LapData, monotonic_distance
+from ...userfile.telemetry_lap import LapData, monotonic_distance, official_lap_time
 from .. import lap_viewer
 from ..lap_viewer import LapEntry, format_laptime, lap_label, number_text, save_viewer_setting
 from .lap_base import BackendBase
@@ -208,7 +208,8 @@ class LapConditions(BackendBase):
         result.update({
             "a": self.short_label(first.key), "b": self.short_label(second.key),
             "colorA": first.color.name(), "colorB": second.color.name(),
-            "timeA": format_laptime(first.data.lap_time), "timeB": format_laptime(second.data.lap_time),
+            "timeA": format_laptime(official_lap_time(first.data) or first.data.lap_time),  # timed by game
+            "timeB": format_laptime(official_lap_time(second.data) or second.data.lap_time),
             "note": notes[result["state"]],
             "values": tr("Setup values are not recorded, only a fingerprint: same or different setup. "
                          "Driver settings below are read from lap samples."),

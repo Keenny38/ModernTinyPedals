@@ -29,10 +29,12 @@ import functools
 import html
 import logging
 import os
+import re
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
+from typing import Any
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QLocale, QPointF, QRectF, Qt, QUrl, Slot
 from PySide6.QtGui import (
@@ -58,10 +60,12 @@ from ...userfile.telemetry_lap import (
     IMPORT_FOLDER,
     LapData,
     export_series_csv,
+    lap_folder_name,
     lap_stem,
     lap_time_of,
     monotonic_distance,
     official_lap_time,
+    same_circuit,
 )
 from ..lap_viewer import CHANNEL_MAP, Channel, channel_title, format_laptime, lap_label
 from . import lap_map
@@ -79,15 +83,52 @@ REPORT_COLUMNS = (  # corner report table: corner row key, column title
 )
 REPORT_MAP = "corner-map.png"  # map picture of PDF report (text document resource)
 REPORT_PDF_MAP = 560  # map picture largest side on PDF page (fits on a landscape page)
+DELTA_BEST_BACKUPS = 5  # dated backups kept of delta best files replaced by a lap (first backup kept apart)
+IMPORT_STOPPED = "import stopped, file too big or unreadable"  # import job without result (worker process died)
+
+
+def backup_delta_best(target: str):
+    """Copy delta best file about to be replaced: first one to <file>.bak (never overwritten: delta best driven
+    before a lap was first used), later ones dated (newest DELTA_BEST_BACKUPS kept), raises OSError"""
+    first = f"{target}.bak"
+    if not os.path.exists(first):
+        shutil.copy2(target, first)
+        return
+    shutil.copy2(target, f"{target}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
+    folder, name = os.path.split(target)
+    dated = re.compile(re.escape(name) + r"\.\d{8}-\d{6}\.bak")
+    backups = sorted(entry for entry in os.listdir(folder) if dated.fullmatch(entry))
+    for old in backups[:-DELTA_BEST_BACKUPS]:
+        with suppress(OSError):
+            os.remove(os.path.join(folder, old))
 
 
 class LapExports(BackendBase):
     """Exports & imports of lap viewer page"""
 
     # Delta best: recorded lap as delta reference of Delta Best widgets (same file as module_delta)
-    def delta_best_file(self, path: str) -> str:
-        """Delta best file of recorded lap track (track & class folder is the game combo name)"""
-        return os.path.join(cfg.path.delta_best, f"{os.path.basename(os.path.dirname(path))}.csv")
+    @staticmethod
+    def delta_best_file(track: str) -> str:
+        """Delta best file of track (track & class folder is the game combo name)"""
+        return os.path.join(cfg.path.delta_best, f"{track}.csv")
+
+    def delta_best_track(self, path: str) -> str:
+        """Track folder (game combo) whose delta best lap can be: its track for a lap of current track, current track
+        for an added lap driven there (foreign lap of same combo, imported lap of same track name & length), empty if
+        none"""
+        if path in {entry.file.path for entry in self.entries}:
+            return os.path.basename(os.path.dirname(path))
+        entry = next((entry for entry in self.external if entry.file.path == path), None)
+        if entry is None or not self._track:
+            return ""
+        combo = str(entry.info.get("combo", ""))
+        if combo:
+            return self._track if lap_folder_name(combo).lower() == self._track.lower() else ""
+        track = str(entry.info.get("track", ""))
+        if not track or track.lower() != self._track.rsplit(" - ", 1)[0].lower():
+            return ""
+        recorded = self.entries[0].info if self.entries else {}
+        return self._track if same_circuit(LapData("", {}, recorded), LapData("", {}, entry.info)) else ""
 
     @staticmethod
     def delta_best_rows(lap: LapData, lap_time: float) -> list[tuple[float, float]]:
@@ -102,19 +143,25 @@ class LapExports(BackendBase):
 
     @Slot(str)
     def exportDeltaBest(self, path: str = ""):
-        """Use recorded lap as delta best reference of its track (former file kept as backup)"""
+        """Use lap (recorded, or added lap driven on current track & class) as delta best reference of its track
+        (former file kept as backup)"""
         from ...userfile.delta_best import load_delta_best_file
 
         path = path or self.reference_key
-        if path not in {entry.file.path for entry in self.entries}:
+        if not path:
+            self.set_status(tr("Check laps to export first."))
+            return
+        track = self.delta_best_track(path)
+        if not track:
+            self.set_status(tr("Lap of another track or class: not usable as delta best of this track."))
             return
         lap = self.read_lap(path)
         lap_time = lap_time_of(os.path.basename(path)) or (lap.lap_time if lap is not None else 0.0)
         if lap is None or lap_time <= 0 or "lap_time" not in lap.columns:
             self.set_status(tr("This lap has no lap time: not usable as delta best."))
             return
-        target = self.delta_best_file(path)
-        name = os.path.splitext(os.path.basename(target))[0]
+        target = self.delta_best_file(track)
+        name = track
         current = load_delta_best_file(f"{os.path.dirname(target)}/", name, ((), 0.0))[1]
         message = trm(f"Use <b>{html.escape(lap_label(os.path.basename(path)))}</b> as delta best of "
                       f"<b>{html.escape(name)}</b>?")
@@ -126,13 +173,12 @@ class LapExports(BackendBase):
             defaultButton=QMessageBox.StandardButton.No)
         if confirm != QMessageBox.StandardButton.Yes:
             return
-        if self.write_delta_best(path, lap, lap_time):
+        if self.write_delta_best(target, lap, lap_time):
             self.set_status(trm(f"Delta best of {html.escape(name)}: {format_laptime(lap_time)} "
                                 "(used next time you drive)"))
 
-    def write_delta_best(self, path: str, lap: LapData, lap_time: float) -> bool:
-        """Write delta best file of lap track, former file copied to .bak"""
-        target = self.delta_best_file(path)
+    def write_delta_best(self, target: str, lap: LapData, lap_time: float) -> bool:
+        """Write delta best file of lap, former file kept as backup (see backup_delta_best)"""
         rows = self.delta_best_rows(lap, lap_time)
         if len(rows) < 12:
             self.set_status(tr("This lap has no lap time: not usable as delta best."))
@@ -141,7 +187,7 @@ class LapExports(BackendBase):
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)
             if os.path.exists(target):
-                shutil.copy2(target, f"{target}.bak")
+                backup_delta_best(target)
             with open(temp, "w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerows(rows)
             os.replace(temp, target)
@@ -190,20 +236,23 @@ class LapExports(BackendBase):
         name = html.escape(os.path.basename(os.path.normpath(source)))
 
         def imported(result):
-            if background:
-                self._imports -= 1
-            if not isinstance(result, dict):  # job failed (logged)
-                result = {"paths": [], "error": tr("Unknown error")}
+            if not isinstance(result, dict):  # job failed (logged), or its worker process died: never run again
+                result = {"paths": [], "error": IMPORT_STOPPED}
             paths = [os.path.normpath(path) for path in result.get("paths", [])]
+            present = int(result.get("present", 0))
             skipped = int(result.get("circuit", 0)) + int(result.get("class", 0))
             if result.get("error"):
                 self.set_status(trm(f"Unable to import laps: {html.escape(tr(str(result['error'])))}"))
             elif not paths:
                 self.set_status(trm(f"No lap of this track & class in: {name}"))
             else:
-                message = trm(f"{len(paths)} foreign lap(s) imported from {name}")
+                message = trm(f"{len(paths) - present} foreign lap(s) imported from {name}")
+                if present:
+                    message += " · " + trm(f"{present} already imported")
                 if skipped:
                     message += " · " + trm(f"{skipped} skipped (other circuit or class)")
+                if result.get("file"):  # CSV files not recorded laps (notes, exports)
+                    message += " · " + trm(f"{int(result['file'])} other file(s) skipped")
                 self.set_status(message)
             if paths:
                 fastest = min(paths, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
@@ -212,12 +261,24 @@ class LapExports(BackendBase):
         if not background:
             imported(import_foreign_job(self.folder, source, reference, vehicle_class))
             return
-        self._imports += 1
+        self.run_import_job("Lap import", imported, import_foreign_job, self.folder, source, reference, vehicle_class)
         self.set_status(trm(f"Importing laps from {name}..."), False)
-        self.run_process_job("Lap import", imported, import_foreign_job, self.folder, source, reference, vehicle_class)
 
-    def import_motec(self, filenames: list[str], background: bool = True):
-        """Import complete laps of MoTeC .ld files, shown once every log is read (fastest imported lap as reference)
+    def run_import_job(self, name: str, done: Callable[[Any], None], function: Callable, *args):
+        """Run import job in worker process (laps written to imported laps), counted while running: busy indicator
+        shown, page closing lets it finish (app exit waits for it a few seconds, see lap_backend.IMPORT_JOBS)"""
+
+        def finished(result):
+            self._imports -= 1
+            done(result)
+
+        self._imports += 1
+        self.run_process_job(name, finished, function, *args)
+
+    def import_motec(self, filenames: list[str], background: bool = True,
+                     done: Callable[[list[tuple[str, list[str], str]]], None] | None = None):
+        """Import complete laps of MoTeC .ld files, shown once every log is read (fastest imported lap as reference),
+        or results given to done instead (imported laps library): log, lap paths, error of each log
 
         Logs read by worker process if background: a long log takes seconds, window stays responsive.
         """
@@ -225,10 +286,9 @@ class LapExports(BackendBase):
         results: list[tuple[str, list[str], str]] = []
 
         def imported(filename: str, result):
-            paths, error = result if isinstance(result, tuple) else ([], tr("Unknown error"))  # None: job failed
+            # None: job failed (logged), or its worker process died (log too big or broken): never run again
+            paths, error = result if isinstance(result, tuple) else ([], tr(IMPORT_STOPPED))
             results.append((filename, [os.path.normpath(path) for path in paths], error))
-            if background:
-                self._imports -= 1
             if len(results) < len(filenames):
                 return
             laps = [path for _, paths, _ in results for path in paths]
@@ -241,16 +301,18 @@ class LapExports(BackendBase):
             else:
                 self.set_status(trm(f"MoTeC log imported: <b>{html.escape(os.path.basename(results[0][0]))}</b> "
                                     f"({len(laps)} laps)"))
-            self.add_external(laps, laps)
+            if done is not None:
+                done(results)
+            else:
+                self.add_external(laps, laps)
 
         if not background:
             for filename in filenames:
                 imported(filename, import_ld_job(filename, folder))
             return
-        self._imports += len(filenames)
-        self.set_status(trm(f"Importing MoTeC log: {html.escape(os.path.basename(filenames[0]))}..."), False)
         for filename in filenames:
-            self.run_process_job("MoTeC import", functools.partial(imported, filename), import_ld_job, filename, folder)
+            self.run_import_job("MoTeC import", functools.partial(imported, filename), import_ld_job, filename, folder)
+        self.set_status(trm(f"Importing MoTeC log: {html.escape(os.path.basename(filenames[0]))}..."), False)
 
     # Export
     @Slot(str)
@@ -398,10 +460,10 @@ class LapExports(BackendBase):
     # Corner report: corner table, deltas, coaching notes & map in one HTML file (or PDF)
     def corner_map_image(self, size: int = 900) -> QImage | None:
         """Track map of report: reference line, each corner colored by time lost or gained, corner names & deltas"""
-        if not self._map_lines or not self._map:
+        if not self._map:
             return None
-        line = self._map_lines[0][0]
-        if len(line.xs) < 2:
+        line = self.reference_map_line()  # reference lap line, else official circuit (lap without positions)
+        if line is None or len(line.xs) < 2:
             return None
         x0, x1, y0, y1 = min(line.xs), max(line.xs), min(line.ys), max(line.ys)
         margin = 48

@@ -289,7 +289,7 @@ def test_delta_rate_channel(viewer):
     from tinypedal.ui.lap_viewer import CHANNEL_MAP
     from tinypedal.userfile.telemetry_lap import delta_rate
 
-    assert delta_rate([0, 100, 200], [0.0, 0.5, 1.0], window=100) == pytest.approx([0.25, 0.5, 0.25])
+    assert delta_rate([0, 100, 200], [0.0, 0.5, 1.0], window=100) == pytest.approx([0.5, 0.5, 0.5])  # ends too
     backend = viewer.backend
     backend.setChannelVisible("delta_rate", True)
     data = backend.data

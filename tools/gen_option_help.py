@@ -24,7 +24,7 @@ DOC = "docs/customization.md"
 OUTPUT = "tinypedal/i18n/data/option_help.json"
 MAX_LENGTH = 700
 COMMON = "_common"  # options shared by all sections (Common terms and keywords)
-SHARED_OPTIONS = ("widget_theme",)  # documented once in a section, present in every widget
+SHARED_OPTIONS: tuple[str, ...] = ()  # documented once in a section, present in every widget
 
 SECTION_ALIAS = {
     "common terms and keywords": COMMON,

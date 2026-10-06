@@ -284,7 +284,6 @@ def test_invalid_value_marked_inline(window, answers):
     assert not mark.isHidden() and "Between 0 and 1" in mark.text() and "Opacity" in mark.toolTip()
     assert not dialog.button_save.isEnabled() and not dialog.button_apply.isEnabled()
     assert not dialog.label_invalid.isHidden() and "1 invalid" in dialog.label_invalid.text()
-    assert dialog.read_edited_values() is None  # preview kept
     assert dialog.save_setting() is False and not answers.warnings  # no modal: shown inline
     assert window.focusWidget() in (opacity, None)
     font_size = dialog.option_edit["font_size"]
@@ -357,11 +356,11 @@ def test_choice_lists_translated_value_kept(window, french):
     page = open_config_page(window, "application", ConfigType.CONFIG, cfg.user.config, cfg.default.config)
     dialog = page.dialog
     combo = dialog.option_edit["window_color_theme"]
-    combo.setCurrentText("Light")
-    assert combo.currentText() == i18n.tr("Light") != "Light"
-    assert combo.validate() == "Light"  # English value saved
+    combo.setCurrentText("Modern Light")
+    assert combo.currentText() == i18n.tr("Modern Light") != "Modern Light"
+    assert combo.validate() == "Modern Light"  # English value saved
     texts = [combo.itemText(index) for index in range(combo.count())]
-    assert "Sombre" in texts or i18n.tr("Dark") in texts
+    assert texts == ["Moderne sombre", "Moderne clair", "Classique sombre", "Classique clair"]
     language = dialog.option_edit["language"]
     assert language.validate() in i18n.LANGUAGES  # names never translated
     combo.reset_to_default()
@@ -373,7 +372,7 @@ def test_choice_undo_restores_translated_choice(window, french):
     dialog = page.dialog
     combo = dialog.option_edit["window_color_theme"]
     before = combo.validate()
-    combo.setCurrentText("System" if before != "System" else "Light")
+    combo.setCurrentText("Legacy Light" if before != "Legacy Light" else "Modern Light")
     dialog.history.undo()
     assert combo.validate() == before and not page.is_modified()
 
@@ -442,7 +441,7 @@ def preset_page(ui_env, answers, monkeypatch):
     cfg.user.filelock = {}
     cfg.user.shortcuts["preset_1"]["preset"] = "practice"
     widget = preset_view.PresetList(None)
-    widget.refresh()
+    widget.backend.set_active(True)  # presets read while page is shown
     widget.toasts = toasts
     yield widget
     widget.deleteLater()
@@ -487,23 +486,8 @@ def test_undo_after_preset_removed_from_trash(preset_page):
 
 
 def test_loaded_preset_still_refused(preset_page, answers, monkeypatch):
-    from PySide6.QtWidgets import QMenu
-
-    from tinypedal.i18n import untr
-    from tinypedal.ui import preset_view
-
     monkeypatch.setattr(cfg.filename, "setting", "race.json")
-    names = [preset_page.listbox_preset.item(row).text() for row in range(preset_page.listbox_preset.count())]
-    preset_page.listbox_preset.setCurrentRow(names.index("race"))
-    item = preset_page.listbox_preset.item(names.index("race"))
-
-    class PickMenu(QMenu):
-        def exec(self, *args):
-            return next(action for action in self.actions() if untr(action.text()) == "Delete")
-
-    monkeypatch.setattr(preset_view, "QMenu", PickMenu)
-    monkeypatch.setattr(preset_page.listbox_preset, "itemAt", lambda pos: item)
-    preset_page.open_context_menu(preset_page.listbox_preset.visualItemRect(item).center())
+    preset_page.backend.remove("race.json")
     assert os.path.exists(f"{cfg.path.settings}race.json") and answers.warnings
 
 
@@ -865,74 +849,6 @@ def test_new_texts_translated(french):
     assert trm("race · deleted 05/10/2026 10:00 · 29 day(s) left") == (
         "race · supprimé le 05/10/2026 10:00 · 29 jour(s) restant(s)")
     assert tr("Press a key or key combination").startswith("Appuyez")
-
-
-def test_theme_names_translated_in_editor_and_wizard(ui_env, french):
-    from tinypedal.ui.setup_wizard import SetupWizard
-    from tinypedal.ui.theme_editor import ThemeEditor
-
-    editor = ThemeEditor(None)
-    try:
-        texts = [editor.base_list.itemText(index) for index in range(editor.base_list.count())]
-        assert "Moderne sombre" in texts
-        assert editor.base_list.itemData(texts.index("Moderne sombre")) == "Modern Dark"
-    finally:
-        editor.set_unmodified()
-        editor.close()
-        flush_deleted()
-    wizard = SetupWizard(None)
-    try:
-        combo = wizard.page_style.overlay_theme
-        assert combo.currentData() == cfg.user.config["overlay_style"]["overlay_theme"]
-        assert wizard.choices().overlay_theme == combo.currentData()
-    finally:
-        wizard.deleteLater()
-        flush_deleted()
-
-
-# --- From package D2: display order button follows options shown by widget design
-def test_display_order_button_follows_design_options(ui_env, monkeypatch):
-    from PySide6.QtWidgets import QPushButton
-
-    from tinypedal.ui import config as config_module
-    from tinypedal.widget import _modern
-
-    orders = [key for key in cfg.user.setting["relative"] if key.startswith("display_order_")]
-    assert len(orders) > 1
-    shown_order = orders[0]
-
-    def open_relative():
-        return config_module.UserConfig(
-            parent=None, key_name="relative", preset_name="default.json", config_type=ConfigType.WIDGET,
-            user_setting=cfg.user.setting, default_setting=cfg.default.setting, reload_func=lambda: None)
-
-    def has_button(dialog) -> bool:
-        return any(button.text() == "Configure Display Order" for button in dialog.findChildren(QPushButton))
-
-    # Design without display order options (modern design on base): no button
-    monkeypatch.setattr(_modern, "design_option_keys", lambda config, name, keys: [
-        key for key in keys if not key.startswith("display_order_")])
-    dialog = open_relative()
-    try:
-        assert not dialog.has_display_order() and not has_button(dialog)
-    finally:
-        dialog.close()
-        flush_deleted()
-    # Design listing one display order option (modern design honouring it): button, that order only
-    monkeypatch.setattr(_modern, "design_option_keys", lambda config, name, keys: [
-        key for key in keys if not key.startswith("display_order_") or key == shown_order])
-    dialog = open_relative()
-    opened = []
-    monkeypatch.setattr(config_module, "DisplayOrder", lambda parent, user_orders, default_orders: type(
-        "Dialog", (), {"open": lambda self: opened.append((user_orders, default_orders))})())
-    try:
-        assert dialog.has_display_order() and has_button(dialog)
-        dialog.open_display_order()
-        assert [list(user) for user, _ in opened] == [[shown_order]]
-        assert list(opened[0][1]) == [shown_order]
-    finally:
-        dialog.close()
-        flush_deleted()
 
 
 # --- From package B2: safe mode keeps tool pages closed, plugin errors translated

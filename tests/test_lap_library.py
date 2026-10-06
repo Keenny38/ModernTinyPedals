@@ -49,9 +49,11 @@ def test_list_rename_delete(tmp_path):
     laps = [lap.path for lap in list_imported(folder)[0][1]]
     outside = tmp_path / "own.csv"
     outside.write_text("x", encoding="utf-8")
-    assert delete_laps(folder, [laps[0], str(outside)]) == {laps[0]: ""}  # library laps only
+    trash = str(tmp_path / "trash")
+    deletion = delete_laps(folder, [laps[0], str(outside)], trash)
+    assert deletion.deleted == [laps[0]] and not deletion.failed  # library laps only
     assert outside.exists()
-    delete_laps(folder, laps[1:])
+    delete_laps(folder, laps[1:], trash)
     assert [name for name, _ in list_imported(folder)] == ["Pro lap"]  # group removed when empty
     assert not os.path.exists(os.path.join(folder, IMPORT_FOLDER, "b_log"))
 
@@ -141,7 +143,7 @@ def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: warnings.append(args[2])))
     library.import_logs()
     assert not library.button_import.isEnabled()  # import running in background
-    library.check_imports(wait=True)
+    viewer.backend.wait_jobs()  # imports are lap viewer page jobs
     assert library.button_import.isEnabled()
     names = [item.text(library.COL_NAME) for item in library.top_items()]
     assert names == ["Monza run", "Spa race"] and warnings  # broken log reported

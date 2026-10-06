@@ -17,49 +17,63 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-First launch setup wizard: language, game, themes, starting preset & widgets
+First launch setup wizard: language, game, units, themes, starting preset & overlays
+
+Qt Quick page (qml/SetupWizard.qml) in its own window, state in quick/setup_backend.py.
+Choices are applied only when finished (run_setup), never while browsing steps.
 """
 
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from typing import NamedTuple
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QButtonGroup,
-    QCheckBox,
-    QComboBox,
-    QGridLayout,
-    QLabel,
-    QLineEdit,
-    QRadioButton,
-    QVBoxLayout,
-    QWizard,
-    QWizardPage,
-)
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout
 
 from .. import app_signal, loader
-from ..api_control import api
+from .. import regex_pattern as rxp
 from ..const_file import ConfigType, FileExt
-from ..formatter import strip_filename_extension
-from ..i18n import LANGUAGES, set_language, tr
-from ..i18n.options import module_label
-from ..module_control import wctrl
+from ..i18n import set_language, tr
 from ..setting import cfg
-from ..validator import is_allowed_filename
-from ..widget._style import overlay_theme_names
-from ._common import QVAL_FILENAME, UIScaler
+from ._common import UIScaler
 
 logger = logging.getLogger(__name__)
 
-# Starter pack: widgets useful for most drivers
+# Starter pack: overlays useful for most drivers (also every overlay on in a new preset), recommended ones on
 STARTER_WIDGETS = (
-    "relative", "standings", "deltabest", "fuel", "pedal", "gear",
-    "tyre_temperature", "brake_temperature", "flag", "session", "weather", "radar",
+    "relative", "standings", "deltabest", "fuel", "virtual_energy", "pedal", "gear", "steering_wheel",
+    "tyre_temperature", "brake_temperature", "flag", "session", "weather", "radar", "track_map", "trailing",
 )
 DEFAULT_STARTER = ("relative", "deltabest", "fuel", "pedal", "gear", "flag")
-WINDOW_THEMES = ("Dark", "Light", "System")
+WINDOW_THEMES = rxp.THEME_NAMES
+# Unit systems: every unit of preset "units" section
+UNIT_SYSTEMS = {
+    "Metric": {
+        "distance_unit": "Meter",
+        "fuel_unit": "Liter",
+        "odometer_unit": "Kilometer",
+        "power_unit": "Kilowatt",
+        "speed_unit": "KPH",
+        "temperature_unit": "Celsius",
+        "turbo_pressure_unit": "bar",
+        "tyre_pressure_unit": "kPa",
+        "weight_unit": "Kilogram",
+    },
+    "Imperial": {
+        "distance_unit": "Feet",
+        "fuel_unit": "Gallon",
+        "odometer_unit": "Mile",
+        "power_unit": "Horsepower",
+        "speed_unit": "MPH",
+        "temperature_unit": "Fahrenheit",
+        "turbo_pressure_unit": "psi",
+        "tyre_pressure_unit": "psi",
+        "weight_unit": "Pound",
+    },
+}
+UNITS_KEEP = ""  # units of the preset kept
 
 
 class SetupChoices(NamedTuple):
@@ -73,6 +87,9 @@ class SetupChoices(NamedTuple):
     preset: str  # existing preset file name, "" to keep loaded preset
     new_preset: str  # new preset name (without extension), "" to not create
     widgets: tuple[str, ...]  # widgets to enable
+    colorblind: bool = False  # colorblind safe overlay colors
+    units: str = UNITS_KEEP  # unit system (UNIT_SYSTEMS), "" to keep preset units
+    disabled: tuple[str, ...] = ()  # widgets to disable (starter widgets left unchecked)
 
 
 def apply_global_choices(choices: SetupChoices) -> str:
@@ -84,6 +101,7 @@ def apply_global_choices(choices: SetupChoices) -> str:
     style = cfg.user.config["overlay_style"]
     style["overlay_theme"] = choices.overlay_theme
     style["enable_modern_font"] = choices.modern_font
+    style["enable_colorblind_colors"] = choices.colorblind
     cfg.save(0, config_type=ConfigType.CONFIG)
     if choices.new_preset:
         filename = f"{choices.new_preset}{FileExt.JSON}"
@@ -95,15 +113,22 @@ def apply_global_choices(choices: SetupChoices) -> str:
 
 
 def apply_preset_choices(choices: SetupChoices) -> list[str]:
-    """Apply preset choices (API, widgets) to loaded preset, returns newly enabled widgets"""
+    """Apply preset choices (API, units, widgets) to loaded preset, returns newly enabled widgets"""
     if choices.api_name:
         cfg.api_name = choices.api_name
+    units = cfg.user.setting.get("units")
+    if choices.units in UNIT_SYSTEMS and isinstance(units, dict):
+        units.update(UNIT_SYSTEMS[choices.units])
     enabled = []
     for name in choices.widgets:
         setting = cfg.user.setting.get(name)
         if isinstance(setting, dict) and not setting.get("enable", True):
             setting["enable"] = True
             enabled.append(name)
+    for name in choices.disabled:
+        setting = cfg.user.setting.get(name)
+        if isinstance(setting, dict) and name not in choices.widgets:
+            setting["enable"] = False
     cfg.save()
     return enabled
 
@@ -122,166 +147,79 @@ def run_setup(choices: SetupChoices):
     app_signal.refresh.emit(True)
 
 
-class LanguagePage(QWizardPage):
-    """Language & window theme"""
+class SetupWizard(QDialog):
+    """First launch setup wizard window"""
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setTitle(tr("Welcome to Modern Tiny Pedals"))
-        self.setSubTitle(tr("A few questions to get you started. Every choice can be changed later."))
-        self.language = QComboBox(self)
-        self.language.addItems(tuple(LANGUAGES))
-        self.language.setCurrentText(cfg.application["language"])
-        self.window_theme = QComboBox(self)
-        for theme in WINDOW_THEMES:
-            self.window_theme.addItem(tr(theme), theme)
-        self.window_theme.setCurrentIndex(max(self.window_theme.findData(cfg.application["window_color_theme"]), 0))
-        layout = QGridLayout()
-        layout.addWidget(QLabel(tr("Language")), 0, 0)
-        layout.addWidget(self.language, 0, 1)
-        layout.addWidget(QLabel(tr("Window theme")), 1, 0)
-        layout.addWidget(self.window_theme, 1, 1)
-        layout.setColumnStretch(1, 1)
-        self.setLayout(layout)
+    def __init__(self, parent, detect_games: bool = True):
+        from .quick import create_quick_view
+        from .quick.setup_backend import SetupBackend
 
-
-class GamePage(QWizardPage):
-    """Game (API) selection"""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setTitle(tr("Which game do you play?"))
-        self.setSubTitle(tr("Modern Tiny Pedals reads telemetry from the selected game."))
-        self.group = QButtonGroup(self)
-        layout = QVBoxLayout()
-        for api_class in api.available:
-            button = QRadioButton(api_class.NAME, self)
-            button.setChecked(cfg.api_name == api_class.NAME)
-            self.group.addButton(button)
-            layout.addWidget(button)
-        layout.addStretch(1)
-        self.setLayout(layout)
-
-    def api_name(self) -> str:
-        button = self.group.checkedButton()
-        return button.text() if button else ""
-
-
-class StylePage(QWizardPage):
-    """Overlay style"""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setTitle(tr("Overlay style"))
-        self.setSubTitle(tr("Colors of the in-game widgets."))
-        style = cfg.user.config["overlay_style"]
-        self.overlay_theme = QComboBox(self)
-        for name in overlay_theme_names():  # shown translated, name kept as data
-            self.overlay_theme.addItem(tr(name), name)
-        self.overlay_theme.setCurrentIndex(max(self.overlay_theme.findData(style["overlay_theme"]), 0))
-        self.modern_font = QCheckBox(tr("Modern font (JetBrains Mono)"), self)
-        self.modern_font.setChecked(style["enable_modern_font"])
-        layout = QGridLayout()
-        layout.addWidget(QLabel(tr("Overlay theme")), 0, 0)
-        layout.addWidget(self.overlay_theme, 0, 1)
-        layout.addWidget(self.modern_font, 1, 0, 1, 2)
-        layout.setColumnStretch(1, 1)
-        layout.setRowStretch(2, 1)
-        self.setLayout(layout)
-
-
-class PresetPage(QWizardPage):
-    """Starting preset & widgets"""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setTitle(tr("Preset and widgets"))
-        self.setSubTitle(tr("A preset stores the layout and options of all widgets."))
-        self.preset = QComboBox(self)
-        self.preset.addItem(tr("Create a new preset"), "")
-        for name in cfg.preset_files():
-            self.preset.addItem(name, f"{name}{FileExt.JSON}")
-        loaded = cfg.filename.setting
-        index = self.preset.findData(loaded)
-        self.preset.setCurrentIndex(max(index, 0))
-        self.new_name = QLineEdit(self)
-        self.new_name.setPlaceholderText(tr("Enter a new preset name"))
-        self.new_name.setValidator(QVAL_FILENAME)
-        self.new_name.setText(tr("my overlay"))
-        self.new_name.textChanged.connect(lambda _: self.completeChanged.emit())  # name checked while typing
-        self.preset.currentIndexChanged.connect(self.update_name_state)
-
-        layout = QGridLayout()
-        layout.addWidget(QLabel(tr("Preset")), 0, 0)
-        layout.addWidget(self.preset, 0, 1)
-        layout.addWidget(self.new_name, 1, 1)
-        layout.addWidget(QLabel(tr("Enable widgets:")), 2, 0, 1, 2)
-        self.widgets: dict[str, QCheckBox] = {}
-        for index, name in enumerate(name for name in STARTER_WIDGETS if name in wctrl.names):
-            checkbox = QCheckBox(module_label(name), self)
-            checkbox.setChecked(name in DEFAULT_STARTER)
-            self.widgets[name] = checkbox
-            layout.addWidget(checkbox, 3 + index // 2, index % 2)
-        layout.setColumnStretch(1, 1)
-        self.setLayout(layout)
-        self.update_name_state()
-
-    def update_name_state(self):
-        self.new_name.setEnabled(self.preset.currentData() == "")
-        self.completeChanged.emit()
-
-    def new_preset_name(self) -> str:
-        if self.preset.currentData() != "":
-            return ""
-        return strip_filename_extension(self.new_name.text().strip(), FileExt.JSON)
-
-    def isComplete(self) -> bool:
-        if self.preset.currentData() != "":
-            return True
-        name = self.new_preset_name()
-        existing = {preset.lower() for preset in cfg.preset_files()}
-        return is_allowed_filename(name) and name.lower() not in existing
-
-
-class SetupWizard(QWizard):
-    """First launch setup wizard"""
-
-    def __init__(self, parent):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)  # not kept once finished
-        self.setWindowTitle(tr("Setup Wizard"))
-        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
-        self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
-        self.setMinimumSize(UIScaler.size(34), UIScaler.size(26))
-        self.page_language = LanguagePage(self)
-        self.page_game = GamePage(self)
-        self.page_style = StylePage(self)
-        self.page_preset = PresetPage(self)
-        for page in (self.page_language, self.page_game, self.page_style, self.page_preset):
-            self.addPage(page)
-        self.rejected.connect(self.skip)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumSize(UIScaler.size(40), UIScaler.size(30))
+        self.resize(UIScaler.size(60), UIScaler.size(40))
+        self.backend = SetupBackend(self, detect_games=detect_games)
+        # Queued: closing deletes the QML page, never inside the click handler of its button (crash)
+        self.backend.finished.connect(self.accept, Qt.ConnectionType.QueuedConnection)
+        self.backend.skipped.connect(self.skip_now, Qt.ConnectionType.QueuedConnection)
+        self.backend.languageChanged.connect(self.retranslate)
+        self.view = create_quick_view(
+            self, "SetupWizard.qml", {"backend": self.backend, "i18n": self.backend.translator}, samples=0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
+        self.setFocusProxy(self.view)
+        self.retranslate()
+        app = QApplication.instance()
+        if app is not None:  # app quit while open: QML gone before the backend it binds to
+            app.aboutToQuit.connect(self.release_page)
+
+    def retranslate(self):
+        """Window & QML texts in language picked in the wizard (app language changed once finished)"""
+        self.setWindowTitle(self.backend.tr("Setup Wizard"))
+        self.view.rootContext().setContextProperty("i18n", self.backend.translator)  # bindings read texts again
 
     def choices(self) -> SetupChoices:
         """Collect choices from pages"""
-        return SetupChoices(
-            language=self.page_language.language.currentText(),
-            api_name=self.page_game.api_name(),
-            window_theme=self.page_language.window_theme.currentData() or WINDOW_THEMES[0],
-            overlay_theme=self.page_style.overlay_theme.currentData() or self.page_style.overlay_theme.currentText(),
-            modern_font=self.page_style.modern_font.isChecked(),
-            preset=self.page_preset.preset.currentData() or "",
-            new_preset=self.page_preset.new_preset_name(),
-            widgets=tuple(name for name, box in self.page_preset.widgets.items() if box.isChecked()),
-        )
+        return self.backend.choices()
 
     def accept(self):
         """Apply choices"""
         choices = self.choices()
+        parent = self.parentWidget()
         super().accept()
         run_setup(choices)
+        if parent is not None:
+            from .toast import show_toast
+
+            show_toast(parent, tr("Setup complete. Overlays show once you are driving."))
+
+    def reject(self):
+        """Esc or window close: quit confirmed in the page first (closed at once if the page failed to load)"""
+        if self.view.rootObject() is None:
+            self.skip_now()
+        else:
+            self.backend.skipRequested.emit()
+
+    def skip_now(self):
+        """Quit confirmed: choices dropped"""
+        self.skip()
+        super().reject()
 
     def skip(self):
         """Do not show again after skipped"""
         if cfg.application.get("show_setup_wizard_at_startup", False):
             cfg.application["show_setup_wizard_at_startup"] = False
             cfg.save(0, config_type=ConfigType.CONFIG)
+
+    def release_page(self):
+        """Rendering stopped, QML gone before the backend it binds to"""
+        self.backend.stop_previews()
+        with suppress(RuntimeError):
+            self.view.setSource(QUrl())
+
+    def done(self, result: int):
+        """Closed"""
+        self.release_page()
+        super().done(result)
