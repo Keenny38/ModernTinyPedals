@@ -26,10 +26,12 @@ pages ask the game themselves, also from the monitor or the menus.
 from __future__ import annotations
 
 import http.client
+import inspect
 import json
 import logging
 import queue
 import threading
+import weakref
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import Any
@@ -173,8 +175,11 @@ def _serve(jobs: queue.SimpleQueue, received: Any, failed: Any):
             with suppress(RuntimeError):
                 failed.emit()
             continue
+        finally:
+            job = None  # work (may hold its page) dropped once done, not kept until next request
         with suppress(RuntimeError):  # page closed meanwhile
             received.emit(result)
+        result = None
 
 
 class GameRequest(QObject):
@@ -191,7 +196,10 @@ class GameRequest(QObject):
         super().__init__(parent)
         self.resources = tuple(resources)
         self.busy = False
-        self._callback = callback
+        # Method of page held weakly: no reference cycle, so a page without parent is freed at once, in UI
+        # thread (freed by garbage collector on any thread, its file watcher left a dangling socket notifier)
+        self._callback: Callable[[], Callable[[Any], None] | None] = (
+            weakref.WeakMethod(callback) if inspect.ismethod(callback) else lambda: callback)
         self._jobs: queue.SimpleQueue | None = None
         self.received.connect(self._done)
         self.failed.connect(self._failed)
@@ -215,7 +223,9 @@ class GameRequest(QObject):
 
     def _done(self, result: Any):
         self.busy = False
-        self._callback(result)
+        callback = self._callback()
+        if callback is not None:
+            callback(result)
 
     def _failed(self):
         self.busy = False

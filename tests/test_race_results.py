@@ -526,6 +526,8 @@ def test_backend_without_folder(ui_env, monkeypatch, tmp_path):
     assert wait_until(lambda: backend.loaded_once)
     assert (backend.sessionCount, backend.folderText, backend.hasSession) == (0, "", False)
     backend.release()
+    backend.deleteLater()  # deleted now, in UI thread (file watcher with it)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_page_loads(results_folder, english):

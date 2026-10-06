@@ -1132,6 +1132,42 @@ def test_game_request_thread_kept(ui_env, monkeypatch):
     parent.deleteLater()
 
 
+def test_game_request_page_freed_at_once(ui_env):
+    """Request holds method of its page weakly: page without parent freed as soon as unused, in UI thread
+
+    With a reference cycle, the garbage collector freed it later on any thread (game request thread
+    reading results files): its file watcher left a dangling socket notifier in the Linux event loop, and
+    the next page shown crashed.
+    """
+    import gc
+    import weakref
+
+    from PySide6.QtCore import QObject
+
+    from tinypedal.ui import game_rest
+
+    class Page(QObject):
+        def __init__(self):
+            super().__init__()
+            self.answers: list = []
+            self.request = game_rest.GameRequest(self, (), self.received)
+
+        def received(self, answer):
+            self.answers.append(answer)
+
+    page = Page()
+    page.request.start(lambda: "done")
+    wait_requests(page.request)
+    assert page.answers == ["done"]
+    freed = weakref.ref(page)
+    gc.disable()
+    try:
+        del page
+        assert freed() is None  # no cycle: freed without garbage collector
+    finally:
+        gc.enable()
+
+
 def test_game_replays_text_helpers(ui_env):
     from PySide6.QtCore import QDate, QDateTime
 
