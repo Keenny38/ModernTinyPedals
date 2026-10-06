@@ -22,15 +22,20 @@ Vehicle function
 
 from __future__ import annotations
 
+from math import isfinite
+
 from ..regex_pattern import rex_number_extract
 
 
 def export_wheels(data: list, default: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     """Export wheel data"""
     try:
-        return data[0], data[1], data[2], data[3]
-    except (IndexError, TypeError, ValueError):
+        output = float(data[0]), float(data[1]), float(data[2]), float(data[3])
+    except (IndexError, KeyError, TypeError, ValueError):
         return default
+    if not all(map(isfinite, output)):
+        return default
+    return output
 
 
 def expected_usage(value: str, default: float) -> float:

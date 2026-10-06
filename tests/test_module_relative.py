@@ -156,6 +156,7 @@ FIELD = [  # class, place, time into lap (s), in pits, in garage, best, last
     ("HY", 2, 15.0, True, False, 96.0, 0.0),  # 3 in pits, ahead of player
     ("GT3", 5, 95.0, False, True, 0.0, 0.0),  # 4 in garage
 ]
+SLOT_IDS: dict[int, int] = {}  # slot id of index if not same as index
 
 
 @pytest.fixture
@@ -168,7 +169,8 @@ def field(ui_env, monkeypatch):
     vehicle = SimpleNamespace(
         total_vehicles=lambda: len(FIELD), player_index=lambda: 0,
         place=lambda index=0: FIELD[index][1], class_name=lambda index=0: FIELD[index][0],
-        in_pits=lambda index=0: FIELD[index][3], in_garage=lambda index=0: FIELD[index][4])
+        in_pits=lambda index=0: FIELD[index][3], in_garage=lambda index=0: FIELD[index][4],
+        slot_id=lambda index=0: SLOT_IDS.get(index, index))
     timing = SimpleNamespace(
         estimated_laptime=lambda: 100.0, estimated_time_into=lambda index=0: FIELD[index][2],
         best_laptime=lambda index=0: FIELD[index][5], last_laptime=lambda index=0: FIELD[index][6])
@@ -194,6 +196,34 @@ def test_vehicles_info_relative_gaps_and_draw_order(field):
     with_garage, *_ = get_vehicles_info(
         len(FIELD), 0, True, False, minfo.relative.relativeDeltaAhead, minfo.relative.relativeDeltaBehind)
     assert 4 in {index for _, index in with_garage}
+
+
+def test_relative_delta_reset_when_other_car_takes_index(field, monkeypatch):
+    from tinypedal.module.module_relative import get_vehicles_info, reset_relative_delta
+    from tinypedal.module_info import DeltaTimeInterval
+
+    ahead = tuple(DeltaTimeInterval() for _ in FIELD)
+    behind = tuple(DeltaTimeInterval() for _ in FIELD)
+    slot_ids = [-1] * len(FIELD)
+    original = FIELD[3]
+    try:
+        for gap in (6.0, 5.5, 5.0):  # car 3 closing in
+            FIELD[3] = (*original[:2], 10.0 + gap, *original[3:])
+            get_vehicles_info(len(FIELD), 0, False, True, ahead, behind, slot_ids)
+    finally:
+        FIELD[3] = original
+    assert ahead[3].last == pytest.approx(5.0) and ahead[3].short > 0 and slot_ids[3] == 3
+    # Car of index 3 left, another car (slot 42) took index: history of previous car not kept
+    monkeypatch.setitem(SLOT_IDS, 3, 42)
+    get_vehicles_info(len(FIELD), 0, False, True, ahead, behind, slot_ids)
+    assert slot_ids[3] == 42
+    assert (ahead[3].long, ahead[3].normal, ahead[3].short) == (0.0, 0.0, 0.0)  # new car from scratch
+    assert ahead[3].last == pytest.approx(5.0)
+    assert ahead[1].short == 0.0 and ahead[1].last == pytest.approx(95.0)  # same car, no gap change
+    # Module reset (new session): all from scratch
+    reset_relative_delta(slot_ids, ahead, behind)
+    assert slot_ids == [-1] * len(FIELD)
+    assert all(delta.last == delta.short == 0.0 for delta in ahead + behind)
 
 
 def test_standings_split_by_class_fastest_class_first():

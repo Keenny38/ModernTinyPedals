@@ -198,7 +198,8 @@ class Realtime(Overlay):
             temp_air = api.read.session.ambient_temperature()
             temperature = temp_track + temp_air
             # Temperature
-            self.update_temperature(self.bar_temp, temperature, temp_track, temp_air)
+            # Both readings compared (sum unchanged when one goes up as much as the other goes down)
+            self.update_temperature(self.bar_temp, (temp_track, temp_air), temp_track, temp_air)
             # Temperature trend
             if self.wcfg["show_trend"]:
                 temp_trend = self.temp_trend.update(round(temperature, 1), lap_etime)

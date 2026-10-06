@@ -38,7 +38,7 @@ import os
 import time
 from array import array
 from collections.abc import Callable, Iterator, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from contextlib import suppress
 from typing import NamedTuple
@@ -48,7 +48,7 @@ from ..api_control import api
 from ..const_app import VERSION
 from ..module_info import minfo
 from ..replay import replay
-from ..userfile import write_text_file
+from ..userfile import flush_to_disk, temp_file_name, write_text_file
 from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
@@ -175,7 +175,16 @@ def wait_lap_saver(timeout: float | None = None) -> bool:
 
 def save_lap_background(pending: PendingLap, options: SaveOptions, valid: bool):
     """Save lap in background, so sampling of next lap is not paused while writing file"""
-    LAP_SAVER.submit(pending.save, options, valid)
+    LAP_SAVER.submit(pending.save, options, valid).add_done_callback(log_save_error)
+
+
+def log_save_error(future: Future):
+    """Log unexpected error of lap saved in background (otherwise lost with discarded future)"""
+    if future.cancelled():
+        return
+    error = future.exception()
+    if error is not None:
+        logger.error("RECORDER: failed saving lap: %s", error, exc_info=error)
 
 
 def save_lap_now(pending: PendingLap, options: SaveOptions, valid: bool):
@@ -570,10 +579,12 @@ def lap_text(rows: Sequence | LapSamples, info: dict | None = None) -> str:
 
 def write_gzip_file(filename: str, text: str) -> bool:
     """Write compressed text file atomically, returns True if saved"""
-    temp_filename = f"{filename}.tmp"
+    temp_filename = temp_file_name(filename)
     try:
-        with gzip.open(temp_filename, "wb", compresslevel=6) as file:
-            file.write(text.encode("utf-8"))
+        with open(temp_filename, "wb") as file:
+            with gzip.GzipFile(fileobj=file, mode="wb", compresslevel=6) as gzip_file:
+                gzip_file.write(text.encode("utf-8"))
+            flush_to_disk(file)
         os.replace(temp_filename, filename)
         return True
     except OSError as error:

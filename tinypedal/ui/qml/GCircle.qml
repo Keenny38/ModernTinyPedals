@@ -22,6 +22,8 @@ Item {
     readonly property bool chartZoomed: chart ? chart.zoomed : false
     readonly property var matrix: Qt.matrix4x4(gScale, 0, 0, originX, 0, -gScale, 0, originY, 0, 0, 1, 0, 0, 0, 0, 1)
     readonly property string highlightKey: chart ? chart.highlightKey : ""
+    // Shown cursor positions: none while hidden (no item updated on every cursor move)
+    readonly property var cursorPoints: visible && chart ? chart.cursorG : []
 
     function lapOpacity(lapKey) { return highlightKey === "" || lapKey === highlightKey ? 1 : 0.15 }
     // Zoom at screen point (G under it stays under it), whole circle again at zoom 1
@@ -161,7 +163,7 @@ Item {
                 Repeater {
                     model: circle.info.dots ? circle.info.dots.length : 0
                     Rectangle {
-                        readonly property var point: circle.chart && circle.chart.cursorG[index] ? circle.chart.cursorG[index] : null
+                        readonly property var point: circle.cursorPoints[index] || null
                         readonly property real size: theme.em * 0.85
                         visible: point !== null && lapFilter.shown(point.lap)
                         x: point ? circle.originX + point.x * circle.gScale - size / 2 : 0

@@ -520,8 +520,11 @@ TpPage {
                                     source: backend.previewUrl
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
-                                    mipmap: true
-                                    cache: false
+                                    // Old picture kept while the new one decodes off the UI thread
+                                    asynchronous: true
+                                    retainWhileLoading: true
+                                    cache: false  // one picture per edit: never shown again
+                                    sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                                     opacity: backend.previewState === 4 ? 0.4 : 1
                                     Behavior on opacity { NumberAnimation { duration: 150 } }
                                 }

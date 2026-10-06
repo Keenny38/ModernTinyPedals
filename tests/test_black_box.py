@@ -1455,6 +1455,20 @@ def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):
     assert not widget.impact_visible  # cone expired
 
 
+def test_impact_cone_hidden_on_new_session(widget, monkeypatch):
+    from tinypedal.api_control import api
+
+    widget.timerEvent(None)
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 95.0)
+    widget.timerEvent(None)
+    assert widget.impact_visible
+    # New session: game impact time & elapsed time start again from 0
+    monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 0.0)
+    monkeypatch.setattr(api.read.timing, "elapsed", lambda: 2.0)
+    widget.timerEvent(None)
+    assert not widget.impact_visible
+
+
 def test_battery_percentage_follows_fill_level(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter

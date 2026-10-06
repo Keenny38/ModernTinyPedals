@@ -36,12 +36,12 @@ from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
 from ..const_api import API_RF2_NAME
-from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF
+from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..const_file import FileExt
 from ..module_info import FuelInfo, minfo
 from ..userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 from ..validator import generator_init, valid_delta_raw
-from ._base import MODULE_STOP, DataModule, round6
+from ._base import MODULE_STOP, DataModule, data_stamp, round6
 
 # Consumption estimate method in use (FuelInfo.consumptionMethod)
 METHOD_GAME = "game"  # game estimate, no lap of car & track recorded yet
@@ -64,6 +64,7 @@ class Realtime(DataModule):
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval
+        last_stamp: tuple = ()  # game data stamp of last update
         green_flag_laps = (
             max(self.mcfg["number_of_green_flag_laps"], 1)
             if self.mcfg["enable_green_flag_consumption"] else 0
@@ -95,6 +96,13 @@ class Realtime(DataModule):
                 if not reset:
                     reset = True
                     update_interval = self.active_interval
+                    last_stamp = ()  # never skip first tick
+
+                # Skip while game data not updated since last tick
+                stamp = (data_stamp(), minfo.delta.lapDistance)  # consumption recorded at delta module position
+                if last_stamp == stamp:
+                    continue
+                last_stamp = stamp
 
                 # Calculate fuel
                 gen_fuel_usage.send(vehicle_resets)
@@ -264,6 +272,7 @@ def calc_consumption(
 
             last_elapsed_time = 0.0
             last_lap_stime = FLOAT_INF  # last lap start time
+            laptime_last = 0.0  # last laptime from lap start times, matched by game laptime
             laps_left = 0.0  # amount laps left at current lap distance
             end_timer_laps_left = 0.0  # amount laps left from start of current lap to end of race timer
             pos_recorded = 0.0  # last recorded vehicle position
@@ -308,13 +317,14 @@ def calc_consumption(
 
         # Lap start & finish detection
         if lap_stime > last_lap_stime:
+            laptime_last = lap_stime - last_lap_stime
             # Median: laps under yellow & invalid laps never become reference lap
             green_lap = not (is_yellow_lap or is_invalid_lap)
             if not is_pit_lap and green_lap and valid_delta_raw(delta_array_raw, used_curr, 1):
                 delta_array_raw.append((  # set end value
                     round6(pos_last + 10),
                     round6(used_curr),
-                    round6(lap_stime - last_lap_stime)
+                    round6(laptime_last)
                 ))
                 delta_array_temp = tuple(delta_array_raw)
                 validating = elapsed_time
@@ -348,10 +358,12 @@ def calc_consumption(
         # Validating 1s after passing finish line
         if validating:
             timer = elapsed_time - validating
+            laptime_valid = api.read.timing.last_laptime()
             if timer > 3:  # switch off after 3s
                 validating = 0
             elif (timer > 0.3 and  # compare current time
-                api.read.timing.last_laptime() > 0):  # is valid laptime
+                laptime_valid > 0 and  # is valid laptime
+                abs(laptime_valid - laptime_last) < 0.001):  # is lap just completed (scoring lags)
                 used_last_valid = used_last_raw
                 delta_array_last = delta_array_temp
                 delta_array_temp = DELTA_DEFAULT
@@ -391,7 +403,7 @@ def calc_consumption(
                 api.read.lap.maximum(), laps_done)
             laps_left = calc.lap_type_laps_remain(
                 full_laps_left, lap_into)
-        elif laptime_pace > 0:  # time-type race
+        elif 0 < laptime_pace < MAX_SECONDS:  # time-type race (MAX_SECONDS: no laptime known)
             time_left -= minfo.vehicles.finishTimeOffset
             end_timer_laps_left = calc.end_timer_laps_remain(
                 lap_into, laptime_pace, time_left)
@@ -410,8 +422,11 @@ def calc_consumption(
         est_runlaps = calc.end_stint_laps(
             amount_curr, used_est)
 
-        est_runmins = calc.end_stint_minutes(
-            est_runlaps, laptime_pace)
+        if 0 < laptime_pace < MAX_SECONDS:
+            est_runmins = calc.end_stint_minutes(
+                est_runlaps, laptime_pace)
+        else:  # no laptime known yet
+            est_runmins = 0.0
 
         est_empty = calc.end_lap_empty_capacity(
             capacity, amount_curr + used_curr, used_ref + delta_fuel)

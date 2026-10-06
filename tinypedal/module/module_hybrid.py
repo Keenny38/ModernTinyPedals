@@ -26,7 +26,7 @@ from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import HybridInfo, minfo
 from ..validator import generator_init
-from ._base import DataModule
+from ._base import DataModule, data_stamp
 
 
 class Realtime(DataModule):
@@ -42,6 +42,7 @@ class Realtime(DataModule):
         _event_wait = self._event.wait
         reset = False
         update_interval = self.idle_interval
+        last_stamp: tuple = ()  # game data stamp of last update
 
         gen_motor = calc_motor(
             output=minfo.hybrid,
@@ -55,6 +56,13 @@ class Realtime(DataModule):
                 if not reset:
                     reset = True
                     update_interval = self.active_interval
+                    last_stamp = ()  # never skip first tick
+
+                # Skip while game data not updated since last tick
+                stamp = data_stamp()
+                if last_stamp == stamp:
+                    continue
+                last_stamp = stamp
 
                 # Run calculate
                 gen_motor.send(vehicle_resets)

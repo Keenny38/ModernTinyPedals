@@ -35,8 +35,10 @@ if TYPE_CHECKING:  # for type checker only
 else:  # run time only
     from pyRfactor2SharedMemory import rF2data
 
+from pyRfactor2SharedMemory import rF2data as rf2_struct  # ctypes structures (rF2data is typed view)
 from pyRfactor2SharedMemory.rF2MMap import (
     INVALID_INDEX,
+    MAX_VEHICLES,
     MMapControl,
     rFactor2Constants,
 )
@@ -47,6 +49,11 @@ from ..thread_guard import run_supervised
 
 logger = logging.getLogger(__name__)
 STOP_TIMEOUT = 3.0  # seconds to wait for update thread to stop
+# Vehicle wrappers & scoring to telemetry index map of no data structure
+NO_ROWS: tuple = (None, ())
+NO_TELE_MAP: tuple = (None, None, ())
+# Zeroed telemetry of vehicle without telemetry match (never another car's data)
+EMPTY_TELE: Any = rf2_struct.rF2VehicleTelemetry()
 
 # Shared memory zones recorded in replay frame, in order: (name, structure)
 REPLAY_ZONES: tuple[tuple[str, Any], ...] = (
@@ -64,8 +71,8 @@ def replay_layout() -> list[list]:
 
 
 def default_tele_indexes() -> dict[int, int]:
-    """Telemetry index of slot id, before any match (same index)"""
-    return {_index: _index for _index in range(128)}
+    """Telemetry index of slot id, before any match (none: unknown slot id has no telemetry)"""
+    return {}
 
 
 def copy_struct(struct_data):
@@ -78,25 +85,28 @@ def copy_struct(struct_data):
     )
 
 
-def local_scoring_index(scor_veh: Sequence[rF2data.rF2VehicleScoring]) -> int:
+def local_scoring_index(scor_veh: Sequence[rF2data.rF2VehicleScoring], veh_total: int = MAX_VEHICLES) -> int:
     """Find local player scoring index
 
     Args:
         scor_veh: scoring vehicle array.
+        veh_total: number of vehicles in session (slots beyond may be stale).
     """
-    for scor_idx, veh_info in enumerate(scor_veh):
+    for scor_idx, veh_info in zip(range(min(veh_total, MAX_VEHICLES)), scor_veh):
         if veh_info.mIsPlayer:
             return scor_idx
     return INVALID_INDEX
 
 
-def local_scoring_index_by_id(slot_id: int, scor_veh: Sequence[rF2data.rF2VehicleScoring]) -> int:
+def local_scoring_index_by_id(
+    slot_id: int, scor_veh: Sequence[rF2data.rF2VehicleScoring], veh_total: int = MAX_VEHICLES) -> int:
     """Find local player scoring index by slot id
 
     Args:
         scor_veh: scoring array.
+        veh_total: number of vehicles in session (slots beyond may be stale).
     """
-    for scor_idx, veh_info in enumerate(scor_veh):
+    for scor_idx, veh_info in zip(range(min(veh_total, MAX_VEHICLES)), scor_veh):
         if veh_info.mID == slot_id:
             return scor_idx
     return INVALID_INDEX
@@ -202,6 +212,8 @@ class SyncData:
         player_tele: Local player telemetry data.
         error: why shared memory could not be opened, empty if opened.
         last_update: monotonic time of last game data change, 0 if none.
+        tele_map: (scoring data, telemetry data, telemetry index per scoring index of vehicles in session),
+            rebuilt every update tick.
     """
 
     __slots__ = (
@@ -209,6 +221,9 @@ class SyncData:
         "_update_thread",
         "_event",
         "_tele_indexes",
+        "_scor_rows",
+        "_tele_rows",
+        "tele_map",
         "paused",
         "synced",
         "resets",
@@ -227,6 +242,9 @@ class SyncData:
         self._update_thread: threading.Thread | None = None
         self._event = threading.Event()
         self._tele_indexes = default_tele_indexes()
+        self._scor_rows = NO_ROWS
+        self._tele_rows = NO_ROWS
+        self.tele_map = NO_TELE_MAP
 
         self.paused = False
         self.synced = False
@@ -249,8 +267,11 @@ class SyncData:
         self.player_scor = self.dataset.scor.data.mVehicles[scor_index]
 
     def __sync_player_tele(self, tele_index: int = INVALID_INDEX) -> None:
-        """Sync local player vehicle telemetry data"""
-        self.player_tele = self.dataset.tele.data.mVehicles[tele_index]
+        """Sync local player vehicle telemetry data, zeroed if no telemetry index"""
+        if tele_index < 0:
+            self.player_tele = EMPTY_TELE
+        else:
+            self.player_tele = self.dataset.tele.data.mVehicles[tele_index]
 
     def __sync_player_data(self) -> bool:
         """Sync local player data
@@ -260,10 +281,12 @@ class SyncData:
             True, set player data.
         """
         # Update scoring index
+        scoring = self.dataset.scor.data
         if self.override_player_index:
-            scor_idx = local_scoring_index_by_id(self.player_slot_id, self.dataset.scor.data.mVehicles)
+            scor_idx = local_scoring_index_by_id(
+                self.player_slot_id, scoring.mVehicles, scoring.mScoringInfo.mNumVehicles)
         else:
-            scor_idx = local_scoring_index(self.dataset.scor.data.mVehicles)
+            scor_idx = local_scoring_index(scoring.mVehicles, scoring.mScoringInfo.mNumVehicles)
         if scor_idx == INVALID_INDEX:
             return False  # index not found, not synced
         self.player_scor_index = scor_idx
@@ -300,7 +323,33 @@ class SyncData:
             Player telemetry index.
         """
         return self._tele_indexes.get(
-            self.dataset.scor.data.mVehicles[scor_idx].mID, INVALID_INDEX)
+            self.scoring_rows(self.dataset.scor.data)[scor_idx].mID, INVALID_INDEX)
+
+    def scoring_rows(self, data: Any) -> tuple:
+        """Scoring vehicle wrappers of scoring data structure, created once per structure
+
+        Mmap data copy (and replay frame) is updated in place, wrappers stay valid
+        until data structure is replaced (start, close, replay, not connected).
+        """
+        rows = self._scor_rows
+        if rows[0] is not data:
+            rows = self._scor_rows = (data, tuple(data.mVehicles))
+        return rows[1]
+
+    def telemetry_rows(self, data: Any) -> tuple:
+        """Telemetry vehicle wrappers of telemetry data structure, created once per structure"""
+        rows = self._tele_rows
+        if rows[0] is not data:
+            rows = self._tele_rows = (data, tuple(data.mVehicles))
+        return rows[1]
+
+    def __update_tele_map(self) -> None:
+        """Map telemetry index of every scoring index in session, once per update tick"""
+        scor_data = self.dataset.scor.data
+        get_index = self._tele_indexes.get
+        veh_total = min(max(scor_data.mScoringInfo.mNumVehicles, 0), MAX_VEHICLES)
+        self.tele_map = (scor_data, self.dataset.tele.data, tuple(
+            get_index(veh_info.mID, INVALID_INDEX) for veh_info in self.scoring_rows(scor_data)[:veh_total]))
 
     def start(self, access_mode: int, rf2_pid: str) -> None:
         """Update & sync mmap data copy in separate thread
@@ -326,12 +375,14 @@ class SyncData:
             self.dataset.tele.data,
             self._tele_indexes,
         )
+        self.__update_tele_map()
         if not self.__sync_player_data():
             self.__sync_player_scor()
             self.__sync_player_tele()
-        # Setup updating thread
-        self._event.clear()
-        self._update_thread = threading.Thread(target=self.__update, daemon=True, name="rF2 shared memory")
+        # Setup updating thread, own stop event for each thread (a previous thread still stopping never resumes)
+        self._event = threading.Event()
+        self._update_thread = threading.Thread(
+            target=self.__update, args=(self._event,), daemon=True, name="rF2 shared memory")
         self._update_thread.start()
         logger.info("sharedmemory: UPDATING: thread started")
         logger.info("sharedmemory: player index override: %s", self.override_player_index)
@@ -360,29 +411,33 @@ class SyncData:
             self._updating = False
             if self._update_thread is not None:
                 self._update_thread.join(STOP_TIMEOUT)
+                if self._update_thread.is_alive():  # exits on its own event, close only makes its reads fail
+                    logger.warning("sharedmemory: UPDATING: thread still stopping in background")
             # Make final copy before close, otherwise mmap won't close if using direct access
             if self.player_scor is not None:
                 self.player_scor = copy_struct(self.player_scor)
             if self.player_tele is not None:
                 self.player_tele = copy_struct(self.player_tele)
+            self._scor_rows = self._tele_rows = NO_ROWS  # release wrappers of mmap data
+            self.tele_map = NO_TELE_MAP
             self.dataset.close_mmap()
         else:
             logger.warning("sharedmemory: UPDATING: already stopped")
 
-    def __update(self) -> None:
+    def __update(self, event: threading.Event) -> None:
         """Run update loop, restart after unexpected error"""
-        if not run_supervised(self.__update_loop, "sharedmemory (rF2) update", self._event) and not self._event.is_set():
+        if not run_supervised(lambda: self.__update_loop(event), "sharedmemory (rF2) update", event) and not event.is_set():
             # Stopped after repeated errors: hide overlays instead of showing frozen values
             self.paused = True
             self.synced = False
 
-    def __update_loop(self) -> None:
+    def __update_loop(self, event: threading.Event) -> None:
         """Update synced player data"""
         self.paused = False  # make sure initial pause state is false
         self.synced = False
         self.resets = 0
 
-        _event_wait = self._event.wait
+        _event_wait = event.wait
         freezed_timestamp = 0  # store freezed timestamp
         last_session_timestamp = 0  # store last timestamp
         last_update_time = 0.0
@@ -402,6 +457,7 @@ class SyncData:
                 self.dataset.tele.data,
                 self._tele_indexes,
             )
+            self.__update_tele_map()
 
             # Update player data & index
             if not data_freezed:
@@ -568,7 +624,7 @@ class RF2Info:
         """
         if index is None:
             return self._sync.player_scor
-        return self._scor.data.mVehicles[index]
+        return self._sync.scoring_rows(self._scor.data)[index]
 
     def rf2TeleVeh(self, index: int | None = None) -> rF2data.rF2VehicleTelemetry:
         """rF2 telemetry vehicle data
@@ -580,7 +636,17 @@ class RF2Info:
         """
         if index is None:
             return self._sync.player_tele
-        return self._tele.data.mVehicles[self._sync.sync_tele_index(index)]
+        sync = self._sync
+        tele_data = self._tele.data
+        tele_rows = sync.telemetry_rows(tele_data)
+        map_scor, map_tele, tele_map = sync.tele_map
+        if map_tele is tele_data and map_scor is self._scor.data and 0 <= index < len(tele_map):
+            tele_index = tele_map[index]
+        else:
+            tele_index = sync.sync_tele_index(index)  # not mapped: match now
+        if tele_index < 0:  # no telemetry of vehicle (yet): zeroed, never another car's data
+            return EMPTY_TELE
+        return tele_rows[tele_index]
 
     @property
     def rf2Ext(self) -> rF2data.rF2Extended:

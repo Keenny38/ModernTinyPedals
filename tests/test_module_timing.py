@@ -93,6 +93,24 @@ def test_sector_best_reloaded_from_file(tele, tmp_path):
     assert alltime.sectorBestTB == pytest.approx([29.0, 39.0, 19.0])
 
 
+@pytest.mark.parametrize("flag", ["vehicle.in_pits", "lap.invalidated"])
+def test_sector_best_s1_s2_ignored_from_pit_or_invalid_lap(tele, tmp_path, flag):
+    session, alltime = SectorData(), SectorData()
+    gen = module_sectors.record_sectors(session, alltime, f"{tmp_path}/")
+    tele["timing.current_laptime"] = 5.0
+    # Out lap / cut lap: quick S1 & S2, lap time invalid
+    tele.update({"timing.start": 10.0, flag: True})
+    drive_sectors(tele, gen, [(25.0, 35.0, 20.0)])
+    tele[flag] = False
+    assert session.sectorPrev[:2] == pytest.approx([25.0, 35.0])
+    assert alltime.sectorBestTB[:2] == [MAX_SECONDS, MAX_SECONDS]
+    assert session.sectorBestTB[:2] == [MAX_SECONDS, MAX_SECONDS]
+    # Next clean lap recorded
+    tele["timing.start"] = 90.0
+    drive_sectors(tele, gen, [(30.0, 40.0, 20.0)])
+    assert alltime.sectorBestTB[:2] == pytest.approx([30.0, 40.0])
+
+
 def test_sector_first_lap_has_no_delta():
     output = SectorData()
     module_sectors.calc_sector_time(output, 1, 0, -1.0, 30.0, -1.0, -1.0)
@@ -418,3 +436,19 @@ def test_hybrid_net_change_reference_skips_pit_lap(tele):
     # Lap C: estimate from lap A (reference lap), not from pit lap net change
     drive_hybrid(tele, gen, [76], [1], lap_start=elapsed + 0.5, elapsed=elapsed)
     assert output.batteryNetChange < 0
+
+
+@pytest.mark.parametrize(("seconds", "short", "full"), [
+    (59.9996, "1:00.000", "1:00.000"),  # rounded before minutes split: never "0:60.000"
+    (119.9996, "2:00.000", "2:00.000"),  # never "1:60.000"
+    (60.0, "1:00.000", "1:00.000"),
+    (61.1, "1:01.100", "1:01.100"),
+    (95.4321, "1:35.432", "1:35.432"),
+    (45.5, "45.500", "0:45.500"),
+    (-0.0004, "0.000", "0:00.000"),
+])
+def test_laptime_format_rounded_before_split(seconds, short, full):
+    from tinypedal.calculation import sec2laptime, sec2laptime_full
+
+    assert sec2laptime(seconds) == short
+    assert sec2laptime_full(seconds) == full

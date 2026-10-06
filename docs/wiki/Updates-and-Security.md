@@ -24,8 +24,10 @@ The app checks GitHub for a new release at startup (once per start, `check_for_u
 1. downloads `ModernTinyPedals-<version>-setup.zip` from GitHub;
 2. checks its **SHA-256**, against the digest GitHub gives for the file, or else the SHA256 list of the release notes, and refuses a file that does not match;
 3. extracts the installer from the ZIP;
-4. checks the installer's **Authenticode signature** when it is signed, and refuses an invalid signature (an unsigned installer is accepted and logged);
+4. checks the installer's **Authenticode signature** when it is signed, and refuses an invalid signature. An unsigned installer is accepted (and logged) only from the official repository: with a custom update repository, the installer must be signed. The repository checked is the one the update was found in, even if the setting changed since;
 5. runs the installer silently: it closes the app, updates it and starts it again. Your presets and data are kept.
+
+Running from source on Windows, the update installs the Windows app the same way: it updates your installed copy (folder found from the installer registry entry, else from the `Modern Tiny Pedals` Start menu shortcut), or installs it if there is none, then the installed app starts. The source folder itself is not changed: update it with `git pull`.
 
 Apps up to 0.19 download `ModernTinyPedals-<version>-windows-setup.exe` instead and check it against its `.sha256` file. Release 0.20.0 has neither: these apps update from the app again from 0.20.1 on.
 
@@ -37,7 +39,7 @@ The SHA-256 check detects a corrupt or altered download. As the checksum comes f
 
 ### When the app cannot install the update
 
-- **Running from source** (Windows or Linux): `Download And Install` opens the download in your browser. Update your source folder instead (`git pull`, or a new `-source.zip`).
+- **Running from source on Linux**: `Download And Install` opens the download in your browser. Update your source folder instead (`git pull`, or a new `-source.zip`).
 - **Portable copy** (ZIP from releases up to 0.19): the app opens the releases page. Turn it into an installed copy once: see [Moving from a portable copy](Installation.md#moving-from-a-portable-copy).
 
 To turn update checks off, uncheck `check_for_updates_on_startup`. `update_repository` (default `Keenny38/ModernTinyPedals`) sets the GitHub repository checked; an empty value disables checks.

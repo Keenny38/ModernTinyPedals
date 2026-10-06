@@ -26,10 +26,23 @@ from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
 from ..const_common import MAX_METERS, MAX_SECONDS
-from ..module_info import VehicleDataSet, VehiclesInfo, minfo
+from ..module_info import (
+    DeltaFuelHistory,
+    DeltaLapTimeHistory,
+    LicoTimer,
+    PitTimer,
+    SpeedTrap,
+    VehicleDataSet,
+    VehiclesInfo,
+    minfo,
+)
 from ..userfile.brands import select_brand_name
 from ..validator import state_timer
-from ._base import DataModule
+from ._base import DataModule, data_stamp
+
+# Slot id per vehicle index: game compacts vehicle array when a car leaves (multiplayer),
+# so another car may take the index of a previous one
+_index_slot_ids: dict[int, int] = {}
 
 
 class Realtime(DataModule):
@@ -60,13 +73,23 @@ class Realtime(DataModule):
                     reset = True
                     update_interval = self.active_interval
                     output.dataSetVersion = -1
+                    _index_slot_ids.clear()  # new session or reload: slot ids from scratch
                     last_veh_total = -1
                     last_session_elapsed = -1.0
                     last_in_race = -1
                     last_scoring_time = -1.0
                     last_tick_veh_total = -1
+                    last_stamp: tuple = ()  # never skip first tick
 
                 veh_total = output.totalVehicles = api.read.vehicle.total_vehicles()
+
+                # Skip while game data not updated since last tick,
+                # so dataSetVersion (overlays redraw on change) only changes with new data
+                stamp = (data_stamp(), veh_total)
+                if last_stamp == stamp:
+                    continue
+                last_stamp = stamp
+
                 if veh_total > 0:
                     update_low_priority = next(gen_low_priority_timer)
                     session_elapsed = api.read.timing.elapsed()
@@ -169,6 +192,10 @@ def update_vehicle_data(
         data.isPlayer = api.read.vehicle.is_player(index)
         read_scoring = update_scoring or update_low_priority or data.inPit
         if read_scoring:
+            slot_id = api.read.vehicle.slot_id(index)
+            if _index_slot_ids.get(index, slot_id) != slot_id:
+                reset_vehicle_history(data)
+            _index_slot_ids[index] = slot_id
             laps_completed = api.read.lap.completed_laps(index)
             lap_distance = api.read.lap.distance(index)
             data.inPit = api.read.vehicle.in_paddock(index)
@@ -485,6 +512,18 @@ def calc_gap_behind_leader(index: int) -> float:
     if laps_behind_leader > 0:
         return laps_behind_leader
     return api.read.timing.behind_leader(index)
+
+
+def reset_vehicle_history(data: VehicleDataSet) -> None:
+    """Reset per car history data, index now holds another car"""
+    data.pitTimer = PitTimer()
+    data.fuelHistory = DeltaFuelHistory()
+    data.energyHistory = DeltaFuelHistory()
+    data.lapTimeHistory = DeltaLapTimeHistory("d", (0, 0, 0, 0, 0))
+    data.licoTimer = LicoTimer()
+    data.speedTrap = SpeedTrap()
+    data.currentStintLaps = 0  # recalculated from new pit timer & histories
+    data.estimatedStintLaps = 0.0
 
 
 def update_stint_usage(

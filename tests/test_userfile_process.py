@@ -111,6 +111,61 @@ def test_consumption_history_not_saved_or_loaded_when_invalid(tmp_path):
     assert load_consumption_history_file(filepath, "missing") == (ConsumptionDataSet(),)
     (tmp_path / "bad.consumption").write_text("lapNumber\nnot a number\n", encoding="utf-8")
     assert load_consumption_history_file(filepath, "bad") == (ConsumptionDataSet(),)
+    assert not [path.name for path in tmp_path.iterdir() if path.name.startswith("bad.consumption.")]
+    # Own history file (stint module): unreadable file kept as backup, as next save replaces it
+    assert load_consumption_history_file(filepath, "bad", backup=True) == (ConsumptionDataSet(),)
+    assert [path.name for path in tmp_path.iterdir() if path.name.startswith("bad.consumption.")]
+
+
+def backups(tmp_path, name: str) -> list:
+    return [path.name for path in tmp_path.iterdir() if path.name.startswith(f"{name}.consumption.")]
+
+
+def test_consumption_history_backup_only_of_unreadable_content(tmp_path, monkeypatch):
+    filepath = f"{tmp_path.as_posix()}/"
+    header = ",".join(f'"{name}"' for name in ConsumptionDataSet._fields)
+    # Header only (no lap yet) or empty file: nothing worth keeping, no backup at each session start
+    (tmp_path / "header.consumption").write_text(f"{header}\n", encoding="utf-8")
+    (tmp_path / "empty.consumption").write_text("", encoding="utf-8")
+    for name in ("header", "empty"):
+        assert load_consumption_history_file(filepath, name, backup=True) == (ConsumptionDataSet(),)
+        assert not backups(tmp_path, name)
+    # Not text (binary or other encoding): content, kept
+    (tmp_path / "binary.consumption").write_bytes(b"\xff\xfe\x00garbage\x00\xff")
+    assert load_consumption_history_file(filepath, "binary", backup=True) == (ConsumptionDataSet(),)
+    assert backups(tmp_path, "binary")
+    # File locked (OSError): never backed up
+    (tmp_path / "locked.consumption").write_text(f"{header}\n1,0,90,2,2,0,0,0,100\n", encoding="utf-8")
+    import builtins
+
+    real_open = builtins.open
+
+    def locked_open(file, *args, **kwargs):
+        if str(file).endswith("locked.consumption"):
+            raise PermissionError("locked")
+        return real_open(file, *args, **kwargs)
+
+    from tinypedal.userfile import consumption_history
+
+    monkeypatch.setattr(consumption_history, "open", locked_open, raising=False)
+    assert load_consumption_history_file(filepath, "locked", backup=True) == (ConsumptionDataSet(),)
+    monkeypatch.undo()
+    assert not backups(tmp_path, "locked")
+
+
+def test_consumption_history_bad_line_left_out(tmp_path):
+    filepath = f"{tmp_path.as_posix()}/"
+    dataset = [
+        ConsumptionDataSet(5, 1, 92.5, 2.85, 3.1, 0.0, 0.0, 0.4, 100.0),
+        ConsumptionDataSet(4, 0, 98.1, 3.05, 3.3, 0.0, 0.0, 0.5, 100.0),
+    ]
+    save_consumption_history_file(dataset, filepath, "Spa")
+    file = tmp_path / "Spa.consumption"
+    lines = file.read_text(encoding="utf-8").splitlines()
+    lines.insert(2, "3.5,1,92.5,2.85,3.1,0.0,0.0,0.4,100.0")  # float in int field
+    lines.insert(3, ",,,,,,,,")  # empty values
+    file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert load_consumption_history_file(filepath, "Spa") == tuple(dataset)
 
 
 # --- Fuel delta
@@ -136,3 +191,20 @@ def test_fuel_delta_invalid(tmp_path):
     backward = (*make_delta()[:-1], (1900.0, 0.0, 85.5))  # usage lower at end of lap
     save_fuel_delta_file(filepath, "Bad", ".fuel", backward)
     assert load_fuel_delta_file(filepath, "Bad", ".fuel", defaults) == defaults
+
+
+# --- User data path
+def test_invalid_user_data_path_falls_back(tmp_path, monkeypatch):
+    """Invalid path (Windows "<": WinError 123) returns "" (default path used), no startup crash"""
+    import os
+
+    from tinypedal.userfile import set_user_data_path
+
+    def invalid(path):
+        raise OSError(22, "The filename, directory name, or volume label syntax is incorrect")
+
+    monkeypatch.setattr(os, "mkdir", invalid)
+    assert set_user_data_path(str(tmp_path / "bad<name")) == ""
+    monkeypatch.undo()
+    assert set_user_data_path(str(tmp_path / "good")) == str(tmp_path / "good")
+    assert (tmp_path / "good").is_dir()

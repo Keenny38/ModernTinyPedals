@@ -91,15 +91,17 @@ class Realtime(Overlay):
         else:
             temp_rot_range = api.read.inputs.steering_range_physical()
 
-        # Recalculate scale mark
-        if self.wcfg["show_scale_mark"] and self.rot_range != temp_rot_range:
+        # Rotation range (angle reading), recalculate scale mark if shown
+        if self.rot_range != temp_rot_range:
             self.rot_range = temp_rot_range
-            mark_gap, mark_num = self.scale_mark(
-                self.wcfg["scale_mark_degree"],
-                self.rot_range,
-                self.bar_width
-            )
-            self.draw_scale_mark(mark_gap, mark_num)
+            if self.wcfg["show_scale_mark"]:
+                mark_gap, mark_num = self.scale_mark(
+                    self.wcfg["scale_mark_degree"],
+                    self.rot_range,
+                    self.bar_width
+                )
+                self.draw_scale_mark(mark_gap, mark_num)
+            self.update()
 
         # Steering
         temp_raw_steering = api.read.inputs.steering_raw()

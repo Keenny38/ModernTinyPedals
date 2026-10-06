@@ -275,7 +275,7 @@ def test_preview_cache_renders_while_active_only():
     assert rendered == ["gear"] and ready == ["gear"]
     assert cache.role("gear", OverlayModel.PreviewStateRole) == PREVIEW_READY
     url = cache.role("gear", OverlayModel.PreviewRole)
-    assert url.startswith("data:image/png;base64,")
+    assert url.startswith("image://overlaypreview/")
     assert cache.role("gear", OverlayModel.PreviewWidthRole) == 40
     assert cache.role("gear", OverlayModel.PreviewHeightRole) == 20
     cache.stop()
@@ -334,7 +334,7 @@ def test_refresh_redraws_previews_in_background(overlays):
     changed = []
     overlays.source.dataChanged.connect(lambda first_index, last, roles: changed.append(tuple(roles)))
     overlays.refresh()
-    assert any(OverlayModel.PreviewRole in roles for roles in changed)  # shown rows read preview again
+    assert not any(OverlayModel.PreviewRole in roles for roles in changed)  # page told only once a picture changed
     assert overlays.previews.role("fuel", OverlayModel.PreviewRole) == first
     assert overlays.previews.pending() >= 1
 

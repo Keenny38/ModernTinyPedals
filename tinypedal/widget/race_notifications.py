@@ -196,7 +196,9 @@ class RaceEvents:
             return
         if best < self.class_best - 0.0005 and self.class_best < MAX_SECONDS and self.enabled["show_class_fastest_lap"]:
             messages.append(Message("Fastest lap", f"{best_car.driverName} {calc.sec2laptime(best)}", BEST))
-        self.class_best = best
+        # Never goes up (best lap holder leaving): same lap back on reconnect is not a new fastest lap;
+        # reset on new session
+        self.class_best = min(self.class_best, best)
 
 
 class Toast(NamedTuple):

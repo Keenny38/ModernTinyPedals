@@ -37,6 +37,20 @@ Item {
     function flash() {
         flashAnimation.restart()
     }
+    function holdsFocus() {
+        for (var item = Window.activeFocusItem; item; item = item.parent)
+            if (item === row) return true
+        return false
+    }
+
+    // Row of a ListView with reuseItems: required properties fed again for another option, editor Loader
+    // follows kind (same kind: editor kept, its bindings read the new option)
+    ListView.onPooled: {
+        if (holdsFocus())
+            ListView.view.forceActiveFocus()  // field left (typed text taken) before it shows another option
+        flashAnimation.stop()
+        flashRect.opacity = 0
+    }
 
     implicitHeight: header.height + card.height
 

@@ -27,7 +27,7 @@ from typing import Any
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
-from .._painter import fill_rect, fit_font
+from .._painter import fill_rect, fit_font, layer_fits
 from .common import FONT_CACHE_SIZE
 
 
@@ -68,9 +68,9 @@ class PaintBase:
         size or screen scale changes"""
         ratio = self.devicePixelRatioF()
         layer = self.static_layer
-        if layer is not None and layer.devicePixelRatio() == ratio and layer.deviceIndependentSize() == self.size():
+        if layer is not None and layer_fits(layer, self.width(), self.height(), ratio):
             return layer
-        layer = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
+        layer = QPixmap(max(round(self.width() * ratio), 1), max(round(self.height() * ratio), 1))
         layer.setDevicePixelRatio(ratio)
         layer.fill(Qt.GlobalColor.transparent)
         painter = QPainter(layer)

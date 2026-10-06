@@ -90,9 +90,11 @@ def read_language_pack(filename: str) -> dict:
     rules = []
     for rule in data.get("messages", []):
         if isinstance(rule, list) and len(rule) == 2 and all(isinstance(part, str) for part in rule) and rule[1]:
+            # Bad replacement ("\9", "\g<x>") only raises at sub(), test it once here
             try:
-                re.compile(rule[0])
-            except re.error:
+                re.compile(rule[0], re.MULTILINE).sub(rule[1], "")
+            except (re.error, IndexError) as error:
+                logger.warning("I18N: invalid message rule skipped in %s: %r (%s)", filename, rule, error)
                 continue
             rules.append((rule[0], rule[1]))
     pack["messages"] = tuple(rules)

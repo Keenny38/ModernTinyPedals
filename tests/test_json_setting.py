@@ -110,6 +110,85 @@ def test_load_validator_error_falls_back(folder, monkeypatch):
     assert load_setting_json_file("user.json", folder, DEFAULT, validator=validator, max_attempts=2) == DEFAULT
 
 
+def locked_open(locked_path: str, monkeypatch):
+    """Make open() raise PermissionError for one file (antivirus or cloud sync lock)"""
+    real_open = open
+
+    def fake_open(file, *args, **kwargs):
+        if os.path.normcase(os.path.abspath(file)) == os.path.normcase(os.path.abspath(locked_path)):
+            raise PermissionError(13, "Permission denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    monkeypatch.setattr(json_setting, "_unreadable_files", set())
+
+
+def test_load_locked_file_not_saved_over(folder, monkeypatch):
+    write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
+    locked_open(f"{folder}user.json", monkeypatch)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2, access_timeout=0.1)
+    assert loaded == DEFAULT
+    unreadable = json_setting._unreadable_files
+    assert json_setting.is_unreadable_file("user.json", folder)
+    monkeypatch.undo()  # lock released, but defaults never saved over user file this session
+    monkeypatch.setattr(json_setting, "_unreadable_files", unreadable)
+    save_and_verify_json_file(DEFAULT, "user.json", folder)
+    assert read_json(folder, "user.json") == {"widget": {"enable": True}}
+    assert backups(folder, "user.json") == []
+
+
+def test_skipped_save_of_locked_file_notified_once(folder, monkeypatch):
+    from types import SimpleNamespace
+
+    import tinypedal
+
+    write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
+    locked_open(f"{folder}user.json", monkeypatch)
+    load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2, access_timeout=0.1)
+    unreadable = json_setting._unreadable_files
+    monkeypatch.undo()
+    monkeypatch.setattr(json_setting, "_unreadable_files", unreadable)
+    monkeypatch.setattr(json_setting, "_notified_files", set())
+    errors = []
+    monkeypatch.setattr(tinypedal, "app_signal", SimpleNamespace(error=SimpleNamespace(emit=errors.append)))
+    monkeypatch.setattr(json_setting, "_notices_ready", False)  # first save runs before main window
+    monkeypatch.setattr(json_setting, "_pending_notices", [])
+    save_and_verify_json_file(DEFAULT, "user.json", folder)
+    assert not errors  # kept until main window shows messages
+    json_setting.notices_ready()
+    save_and_verify_json_file(DEFAULT, "user.json", folder)
+    assert len(errors) == 1 and "user.json" in errors[0] and "not saved" in errors[0]
+    assert read_json(folder, "user.json") == {"widget": {"enable": True}}
+
+
+def test_load_lock_released_while_retrying(folder, monkeypatch):
+    write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
+    real_open = open
+    calls = []
+
+    def flaky_open(file, *args, **kwargs):
+        calls.append(file)
+        if len(calls) < 4:  # more than max_attempts: access errors retried by time, not attempts
+            raise PermissionError(13, "Permission denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", flaky_open)
+    monkeypatch.setattr(json_setting, "sleep", lambda _: None)
+    loaded = load_setting_json_file("user.json", folder, DEFAULT, validator=keep_all, max_attempts=2)
+    assert loaded == {"widget": {"enable": True}}
+    assert not json_setting.is_unreadable_file("user.json", folder)
+
+
+def test_load_style_locked_file_not_saved_over(folder, monkeypatch):
+    write(folder, "style.json", '{"A":{"color":"#000"}}')
+    locked_open(f"{folder}style.json", monkeypatch)
+    loaded = load_style_json_file("style.json", folder, {"A": {}}, max_attempts=2, access_timeout=0.1)
+    assert loaded == {"A": {}}
+    monkeypatch.undo()
+    with open(f"{folder}style.json", encoding="utf-8") as file:
+        assert file.read() == '{"A":{"color":"#000"}}'
+
+
 # Load style preset
 def test_load_style_missing_file_creates_default(folder):
     loaded = load_style_json_file("style.json", folder, {"A": {"color": "#FFF"}}, max_attempts=1)

@@ -22,13 +22,15 @@ Overlays page backend (qml/Overlays.qml): overlay list model, filters, previews 
 Rows are filtered by a proxy model (search words, All / Active / Inactive, category), so the QML
 grid animates rows in & out instead of being rebuilt. Previews are rendered one per event loop
 tick, only for rows the page shows and only while the page is visible (never during a race with
-the window hidden), then kept as PNG data URLs: a refresh re-renders them in the background and
+the window hidden), then served to QML by preview_provider (image:// URL, serial changed only when the
+picture changes): a refresh re-renders them in the background and
 the old picture stays shown until the new one is ready (unchanged picture: page not told).
 """
 
 from __future__ import annotations
 
 import logging
+import weakref
 from collections import deque
 from collections.abc import Callable
 from typing import NamedTuple
@@ -58,6 +60,7 @@ from ...i18n.options import module_label
 from ...module_control import ModuleControl
 from ...setting import cfg
 from ..module_view import sort_key
+from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +145,7 @@ class OverlayRow:
 
 
 class Preview(NamedTuple):
-    """Rendered overlay picture: PNG data URL ("" if not available) & logical size"""
+    """Rendered overlay picture: image provider URL ("" if not available) & logical size"""
 
     url: str
     width: int
@@ -268,6 +271,8 @@ class PreviewCache:
         self._timer = QTimer(parent)  # deleted with backend: never fires on a deleted model
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._render_next)
+        self._prefix = STORE.new_prefix("overlays")  # pictures served to QML by preview_provider
+        weakref.finalize(self, STORE.release, self._prefix)
 
     def role(self, name: str, role: int):
         """Preview role value of overlay, render queued if missing or out of date"""
@@ -293,6 +298,12 @@ class PreviewCache:
     def invalidate(self, name: str = ""):
         """Overlay setting changed (all overlays if no name): rendered again when shown"""
         self._stale.update((name,) if name else self._previews)
+
+    def redraw(self, names: list[str]):
+        """Render again pictures of names already drawn & out of date (shown rows), in background"""
+        for name in names:
+            if name in self._stale and name in self._previews:
+                self.request(name)
 
     def set_active(self, active: bool):
         self.active = active
@@ -327,11 +338,14 @@ class PreviewCache:
     def render_now(self, name: str):
         """Render overlay picture, page told only if it changed"""
         image = self._render(name)
+        key = f"{self._prefix}{name}"
         if image is None:
             preview = Preview("", 0, 0)
+            STORE.discard(key)
         else:
             ratio = image.devicePixelRatio() or 1
-            preview = Preview(image_url(image), round(image.width() / ratio), round(image.height() / ratio))
+            # Same picture: same URL (serial kept)
+            preview = Preview(STORE.put(key, image), round(image.width() / ratio), round(image.height() / ratio))
         if self._previews.get(name) == preview:
             return  # same picture: kept, no reload in page
         self._previews[name] = preview
@@ -339,7 +353,7 @@ class PreviewCache:
 
 
 def image_url(image: QImage) -> str:
-    """Picture as PNG data URL for QML Image (no image provider shared with the QML engine)"""
+    """Picture as PNG data URL (pages without the overlaypreview image provider, HTML)"""
     data = QByteArray()
     buffer = QBuffer(data)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -444,7 +458,8 @@ class OverlayBackend(QObject):
             for row in self.source.rows:
                 self._update_row(row)
         self.previews.invalidate()
-        self._emit_previews()  # shown rows read preview again: rendered again in background
+        # Rows drawn before & shown: rendered again in background, page told per row only if picture changed
+        self.previews.redraw(self.proxy.shown_names())
         self.countsChanged.emit()
         grid = bool(self.gridView)
         if grid != self._grid:  # cards or list set on Config page
@@ -457,12 +472,6 @@ class OverlayBackend(QObject):
 
     def _preview_ready(self, name: str):
         self.source.row_changed(name, OverlayModel.PREVIEW_ROLES)
-
-    def _emit_previews(self):
-        count = self.source.rowCount()
-        if count:
-            self.source.dataChanged.emit(self.source.index(0, 0), self.source.index(count - 1, 0),
-                                         OverlayModel.PREVIEW_ROLES)
 
     def invalidate_preview(self, name: str):
         self.previews.invalidate(name)

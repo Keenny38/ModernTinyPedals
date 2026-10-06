@@ -422,7 +422,12 @@ class Realtime(Overlay):
 
             if self.wcfg["show_delta"]:
                 last_data = dataset[index] if index < len(dataset) else self.empty_data
-                self.update_delta(self.bars_delta[index], data.lapTimeLast - last_data.lapTimeLast)
+                # No lap to compare (oldest lap, or no time set): dash, not the whole lap time
+                if data.lapTimeLast > 0 and last_data.lapTimeLast > 0:
+                    delta = data.lapTimeLast - last_data.lapTimeLast
+                else:
+                    delta = None
+                self.update_delta(self.bars_delta[index], delta)
                 self.bars_delta[index].setHidden(hidden)
 
             if self.wcfg["show_fuel"]:

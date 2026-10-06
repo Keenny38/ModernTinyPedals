@@ -221,6 +221,7 @@ def test_unchanged_data_interval_limit(monkeypatch):
     from tinypedal.adapter import restapi_connector
 
     connector = RestAPIConnector((), SimpleNamespace())
+    state = restapi_connector.TaskState()
     intervals = []
 
     async def same_data(self, *args):
@@ -229,11 +230,11 @@ def test_unchanged_data_interval_limit(monkeypatch):
     async def sleep(seconds):
         intervals.append(seconds)
         if len(intervals) >= 12:
-            connector._task_cancel = True
+            state.cancel = True
 
     monkeypatch.setattr(RestAPIConnector, "output_resource", same_data)
     monkeypatch.setattr(restapi_connector.asyncio, "sleep", sleep)
-    asyncio.run(connector.update_repeat(None, b"", "/x", (), 0.2, 1.0))
+    asyncio.run(connector.update_repeat(None, b"", "/x", (), state, 0.2, 1.0))
     assert intervals[0] == 0.2 and intervals[1] > 0.2 and max(intervals) == 1.0
 
 
@@ -267,9 +268,10 @@ def test_dead_after_repeated_errors_resets_data(monkeypatch):
     output = ResOutput("speed", 0.0, parse_float)
     data = SimpleNamespace(speed=90.0)
     connector = RestAPIConnector((RestAPITask("/rest/car", (output,), "", True, 0.1),), data)
-    connector._active_tasks["/rest/car"] = (output,)
+    state = restapi_connector.TaskState()
+    state.active_tasks["/rest/car"] = (output,)
     monkeypatch.setattr(restapi_connector, "run_supervised", lambda *args: False)
-    connector._RestAPIConnector__update(threading.Event())
+    connector._RestAPIConnector__update(threading.Event(), state)
     assert data.speed == 0.0  # no frozen value left
     assert connector.status()[0].state == "dead"
 
@@ -294,3 +296,54 @@ def test_health_lists_rest_resources():
     assert health.data_age == -1.0 and not health.replaying and not health.error
     assert len(health.rest) == len(lmu_restapi.lmu_restapi_tasks())
     assert {status.state for status in health.rest} == {"idle"}
+
+
+# --- Audit fixes (thread & task state)
+def test_host_resolving_cancelled_by_brief_leave_retried(server, monkeypatch):
+    """Resolving cancelled while briefly off track: tasks launched again once back on track"""
+    import asyncio
+
+    from tinypedal.adapter import restapi_connector
+
+    calls = []
+
+    async def resolve(host, port, timeout=3):
+        calls.append(host)
+        if len(calls) == 1:  # active flicker during first resolving
+            realtime_state.active = False
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                realtime_state.active = True
+                raise
+        return host
+
+    monkeypatch.setattr(restapi_connector, "resolve_hostname_async", resolve)
+    monkeypatch.setattr(realtime_state, "active", True)
+    data = SimpleNamespace(speed=0.0, gear=0.0, missing=-1.0, session="", other="x", off="d")
+    connector = RestAPIConnector(TASKS, data)
+    connector.setConnection(config(server))
+    connector.start()
+    try:
+        assert wait_until(lambda: data.speed == 55.5)  # was default the whole stint
+        assert len(calls) >= 2
+    finally:
+        monkeypatch.setattr(realtime_state, "active", False)
+        connector.stop()
+
+
+def test_each_thread_has_own_task_state(monkeypatch):
+    """Previous thread still stopping never shares cancel state & active tasks with the new one"""
+    runs = []
+    monkeypatch.setattr(
+        RestAPIConnector, "_RestAPIConnector__update", lambda self, event, state: runs.append((event, state)))
+    connector = RestAPIConnector(TASKS, SimpleNamespace())
+    connector.setConnection(config(1))
+    connector.start()
+    connector.stop()
+    connector.start()
+    connector.stop()
+    assert len(runs) == 2
+    (event1, state1), (event2, state2) = runs
+    assert event1 is not event2 and state1 is not state2
+    assert state1.active_tasks is not state2.active_tasks

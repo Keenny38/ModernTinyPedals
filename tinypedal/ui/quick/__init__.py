@@ -24,10 +24,11 @@ QML files are in ui/qml, Python items (GPU drawn lines) registered as "TinyPedal
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QEvent, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QPalette, QSurfaceFormat
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuickWidgets import QQuickWidget
@@ -206,6 +207,105 @@ class Translator(QObject):
         return trm(text)
 
 
+# i18n.tr in JavaScript: same lookup as i18n.tr (table of current language, text itself if missing).
+# Non-string keys (numbers) are converted like the Python slot's str argument; "toString" & other
+# Object prototype names are not table strings, so they give the text back too.
+_TRANSLATOR_QML = """import QtQuick
+QtObject {
+    required property QtObject source
+    required property var table
+    function tr(text) {
+        var key = typeof text === "string" ? text : (text === undefined || text === null ? "" : String(text))
+        var value = table[key]
+        return typeof value === "string" ? value : key
+    }
+    function trm(text) { return source.trm(text) }
+}
+"""
+
+
+def translator_copy(engine: QQmlEngine, translator: Translator) -> QObject:
+    """QML object translating i18n.tr() in JavaScript, Translator itself if it cannot be made
+
+    QML pages call i18n.tr() from about 1400 bindings: a Python slot call each (interpreter lock,
+    argument conversion), a JavaScript table lookup here. Table is the language when the page is
+    created: app language change rebuilds pages (MainWindow.retranslate), like Translator before
+    (no notify, bindings never read texts again). trm (regex rules) stays in Python, rarely used.
+    """
+    from ...i18n import current_language, load_translation
+
+    component = QQmlComponent(engine)
+    component.setData(_TRANSLATOR_QML.encode(), QUrl("translator_copy.qml"))
+    copy = None
+    if component.isReady():
+        table = load_translation(current_language())
+        copy = component.createWithInitialProperties({"source": translator, "table": table})
+    if copy is None:
+        logger.error("QML: translator copy: %s", component.errorString())
+        return translator
+    copy.setParent(translator)  # kept as long as translator
+    return copy
+
+
+class PageState(QObject):
+    """Page shown on screen or not, "pageState.active" in QML: timers & animations stop while hidden
+
+    A QQuickWidget page keeps its QML root visible when the widget, a parent (stacked page, closed
+    tab) or its window (minimized, tray) is hidden: QML "visible" guards never stop timers. Follows
+    Show / Hide events of the view (sent for hidden parents too) & window state of its window.
+    """
+
+    activeChanged = Signal()
+
+    def __init__(self, view: QWidget):
+        super().__init__(view)
+        self._view = view
+        self._window: QWidget | None = None
+        self._active = False
+        view.installEventFilter(self)
+        self._update()
+
+    @Property(bool, notify=activeChanged)
+    def active(self) -> bool:
+        return self._active
+
+    def _watch_window(self):
+        """Window state changes (minimized) seen on the view's current window (page may be moved)"""
+        window = self._view.window()
+        if window is self._window:
+            return
+        if self._window is not None:
+            with contextlib.suppress(RuntimeError):  # window already deleted
+                self._window.removeEventFilter(self)
+        self._window = window if window is not self._view else None
+        if self._window is not None:
+            self._window.installEventFilter(self)
+
+    def _update(self):
+        self._watch_window()
+        window = self._view.window()
+        active = self._view.isVisible() and not window.isMinimized()
+        if active != self._active:
+            self._active = active
+            self.activeChanged.emit()
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if kind in _PAGE_STATE_EVENTS:
+            if kind == QEvent.Type.Hide and watched is self._view:
+                if self._active:  # hidden, spontaneous too (window minimized: isVisible() stays True)
+                    self._active = False
+                    self.activeChanged.emit()
+            else:
+                self._update()
+        return False
+
+
+_PAGE_STATE_EVENTS = frozenset((
+    QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.WindowStateChange, QEvent.Type.ParentChange,
+))
+
+
 def create_quick_view(
     parent: QWidget,
     qml_name: str,
@@ -227,9 +327,17 @@ def create_quick_view(
     view.setClearColor(QApplication.palette().color(QPalette.ColorRole.Window))
     view.engine().addImportPath(QML_FOLDER)
     root_context = view.rootContext()
-    theme = theme_copy(view.engine(), Theme(view))
-    for name, value in {"theme": theme, "i18n": Translator(view), **context}.items():
+    engine = view.engine()
+    theme = theme_copy(engine, Theme(view))
+    # Context properties (not required properties / singletons): they only block qmlsc / AOT compiled
+    # bindings, and QML files are not compiled ahead of time (loaded from ui/qml, no qmlcachegen step in
+    # build_pyinstaller.py): bindings run in the same JIT either way. Set once, before setSource. Child
+    # QML files read backend / theme / i18n / pageState by name through the context chain.
+    shared = {"theme": theme, "i18n": translator_copy(engine, Translator(view)), "pageState": PageState(view)}
+    for name, value in {**shared, **context}.items():
         root_context.setContextProperty(name, value)
+    from .preview_provider import install_provider
+    install_provider(engine)  # overlay pictures (image://overlaypreview/), registered before loading
     view.setSource(QUrl.fromLocalFile(os.path.join(QML_FOLDER, qml_name)))
     for error in view.errors():
         logger.error("QML: %s", error.toString())

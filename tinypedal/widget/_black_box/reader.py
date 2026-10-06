@@ -561,6 +561,8 @@ class DataReader:
             return
         impact_time = api.read.vehicle.impact_time()
         if self.impact_time is None or not is_new_impact(impact_time, self.impact_time):
+            if self.impact_time is not None and impact_time < self.impact_time:
+                self.impact_visible = False  # new session: impact of old one no longer shown
             self.impact_time = impact_time  # before widget started, or new session: not shown
         elif impact_time != self.impact_time:
             self.impact_time = impact_time

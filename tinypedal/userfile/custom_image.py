@@ -20,9 +20,12 @@
 Custom image file function
 """
 
+import contextlib
 import hashlib
 import os
 import re
+import threading
+from array import array
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPixmap
@@ -41,6 +44,7 @@ MAIN_SHARE = 0.5  # logo too close to background: more than this share of its pi
 OTHER_SHARE = 0.1  # ...less than this share contrasting (white lion of a black shield: kept)...
 COLORED_SHARE = 0.35  # ...and less than this share in color (gold bull of a black shield: kept)
 _tinted: dict[tuple[str, bool, float], str] = {}  # logo file, light background, file time -> logo shown
+_tinted_lock = threading.Lock()  # logo_for_background runs on GUI & stream server threads
 _own_logos: dict[str, tuple[float, dict[str, str]]] = {}  # folder -> folder time, normalized name -> file
 _NOT_WORD = re.compile(r"[^a-z0-9]+")
 _DRAWN = bytes(value > DRAWN_ALPHA for value in range(256))  # alpha -> 1 if drawn
@@ -134,19 +138,29 @@ def is_dark_logo(image: QImage) -> bool:
 
 
 def readable_copy(image: QImage, light_background: bool) -> QImage:
-    """Copy of logo, parts too close to background recolored (colored parts of a black logo kept)"""
+    """Copy of logo, parts too close to background recolored (colored parts of a black logo kept)
+
+    Pixels read & written as a whole (ARGB32 words), each distinct color recolored once: no per-pixel
+    Qt calls (logos have few distinct colors, a per-pixel loop froze painting).
+    """
     image = image.convertToFormat(QImage.Format.Format_ARGB32)
-    for y in range(image.height()):
-        for x in range(image.width()):
-            color = image.pixelColor(x, y)
-            alpha = color.alpha()
-            if not alpha:
-                continue
-            if light_background and is_light_part(color):
-                image.setPixelColor(x, y, QColor(ON_LIGHT.red(), ON_LIGHT.green(), ON_LIGHT.blue(), alpha))
-            elif not light_background and is_dark_part(color):
-                hue = color.hsvHue()
-                image.setPixelColor(x, y, QColor.fromHsv(max(hue, 0), color.hsvSaturation() // 2, ON_DARK_VALUE, alpha))
+    if image.isNull():
+        return image
+    pixels = array("I", bytes(image.constBits()))  # ARGB32: native 0xAARRGGBB words, no line padding
+    recolored = {}
+    for rgba in set(pixels):
+        recolored[rgba] = rgba
+        color = QColor.fromRgba(rgba)
+        alpha = color.alpha()
+        if not alpha:
+            continue
+        if light_background and is_light_part(color):
+            recolored[rgba] = QColor(ON_LIGHT.red(), ON_LIGHT.green(), ON_LIGHT.blue(), alpha).rgba()
+        elif not light_background and is_dark_part(color):
+            hue = color.hsvHue()
+            recolored[rgba] = QColor.fromHsv(
+                max(hue, 0), color.hsvSaturation() // 2, ON_DARK_VALUE, alpha).rgba()
+    memoryview(image.bits())[:] = array("I", map(recolored.__getitem__, pixels)).tobytes()
     return image
 
 
@@ -216,28 +230,44 @@ def logo_for_background(path: str, light_background: bool) -> str:
     found = _tinted.get(key)
     if found is not None and (found == path or os.path.isfile(found)):
         return found
+    with _tinted_lock:  # one thread makes a copy, others wait & reuse it
+        found = _tinted.get(key)
+        if found is not None and (found == path or os.path.isfile(found)):
+            return found
+        found = _tinted[key] = _make_logo_for_background(path, light_background, stamp)
+    return found
+
+
+def _make_logo_for_background(path: str, light_background: bool, stamp: float) -> str:
+    """Readable copy of logo made in game image folder if needed (see logo_for_background), under lock"""
     from .game_images import images
 
     digest = hashlib.sha1(f"{os.path.abspath(path)}|{stamp}|{TINT_VERSION}".encode()).hexdigest()[:16]
     target = os.path.join(images.folder, TINTED_FOLDER, f"{'on_light' if light_background else 'on_dark'}_{digest}.png")
-    found = path
     if os.path.isfile(target):
-        found = target
-    else:
-        whole = read_picture(path, TINT_HEIGHT * 4, TINT_HEIGHT)
-        recolor = is_light_logo(whole) if light_background else is_dark_logo(whole)
-        if recolor or has_margins(whole):
-            image = read_logo(path)
-            if recolor:
-                image = readable_copy(image, light_background)
-            try:
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                if not image.isNull() and image.save(target):
-                    found = target
-            except OSError:
-                pass
-    _tinted[key] = found
-    return found
+        return target
+    whole = read_picture(path, TINT_HEIGHT * 4, TINT_HEIGHT)
+    recolor = is_light_logo(whole) if light_background else is_dark_logo(whole)
+    if not recolor and not has_margins(whole):
+        return path
+    image = read_logo(path)
+    if recolor:
+        image = readable_copy(image, light_background)
+    if image.isNull():
+        return path
+    # Written under a temporary name then renamed: a copy cut half-way (crash, full disk) is never
+    # taken for a finished one (reused as long as it exists)
+    temp = f"{target}.{os.getpid()}-{threading.get_ident()}.tmp.png"  # format from extension
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if image.save(temp):
+            os.replace(temp, target)
+            return target
+    except OSError:
+        pass
+    with contextlib.suppress(OSError):
+        os.remove(temp)
+    return path
 
 
 def own_logo_file(logo_folder: str, *brands: str) -> str:
@@ -300,6 +330,23 @@ def load_brand_logo_image(
     else:
         logo_scaled = image.scaledToHeight(max_height, mode=Qt.TransformationMode.SmoothTransformation)
     return logo_scaled
+
+
+def cached_brand_logo(
+    cache: dict, filepath: str, filename: str, max_width: int, max_height: int
+) -> QPixmap:
+    """Brand logo from widget cache {brand: (pixmap, game pictures version)}
+
+    A missing logo is looked for again only once game pictures change (game logo may come),
+    not on every row update: file checks & image reading run on GUI thread.
+    """
+    from .game_images import images
+
+    cached = cache.get(filename)
+    if cached is None or (cached[0].isNull() and cached[1] != images.version):
+        cached = cache[filename] = (
+            load_brand_logo_image(filepath, filename, max_width, max_height), images.version)
+    return cached[0]
 
 
 def load_custom_image(

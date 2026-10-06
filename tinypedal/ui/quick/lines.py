@@ -34,10 +34,12 @@ from __future__ import annotations
 import ctypes
 import math
 import struct
+import sys
 import weakref
 from array import array
 from bisect import bisect_left, bisect_right
 from collections.abc import Collection, Sequence
+from itertools import chain
 from typing import NamedTuple, cast
 
 from PySide6.QtCore import Property, Signal
@@ -275,20 +277,20 @@ def step_strip(xs: Sequence[float], ys: Sequence[float]) -> Vertices:
     count = min(len(xs), len(ys))
     if count < 2:
         return line_strip(xs, ys)
-    data = array("f")
-    previous = ys[0]
-    for x, y in zip(xs[:count], ys[:count]):
-        data.extend((x, previous, x, y))
-        previous = y
+    # Slice assignment (C loops) instead of one extend per point: same bytes
+    data = array("f", bytes(count * 16))
+    x_values, y_values = array("f", xs[:count]), array("f", ys[:count])
+    data[0::4] = x_values
+    data[2::4] = x_values
+    data[3::4] = y_values
+    data[1] = y_values[0]
+    data[5::4] = y_values[:-1]  # value held from previous point
     return Vertices(data, count * 2, LINE_STRIP)
 
 
 def segments(points: Sequence[tuple[float, float, float, float]]) -> Vertices:
     """Separate lines: (x0, y0, x1, y1) each"""
-    data = array("f")
-    for line in points:
-        data.extend(line)
-    return Vertices(data, len(points) * 2, LINES)
+    return Vertices(array("f", chain.from_iterable(points)), len(points) * 2, LINES)
 
 
 def normals(xs: Sequence[float], ys: Sequence[float]) -> list[tuple[float, float]]:
@@ -349,15 +351,27 @@ def colored_band(xs: Sequence[float], ys: Sequence[float], colors: Sequence[QCol
     if count < 2:
         return Vertices(bytearray(), 0, TRIANGLE_STRIP, True)
     data = bytearray(COLORED_VERTEX.size * count * 2)
-    offset = 0
     alphas = alphas if alphas is not None else [1.0] * count
+    corners: list[float] = []  # 2 vertices per point: x, y each
+    rgbas: list[int] = []  # 2 vertices per point: rgba each
     for x, y, (nx, ny), color, alpha in zip(xs, ys, _normals(xs[:count], ys[:count]), colors, alphas):
         opacity = min(max(alpha, 0.0), 1.0)  # premultiplied color
         rgba = (round(color.red() * opacity), round(color.green() * opacity), round(color.blue() * opacity),
                 round(255 * opacity))
-        COLORED_VERTEX.pack_into(data, offset, x + nx * half_width, y + ny * half_width, *rgba)
-        COLORED_VERTEX.pack_into(data, offset + COLORED_VERTEX.size, x - nx * half_width, y - ny * half_width, *rgba)
-        offset += COLORED_VERTEX.size * 2
+        corners += (x + nx * half_width, y + ny * half_width, x - nx * half_width, y - ny * half_width)
+        rgbas += rgba * 2
+    positions = array("f", corners)
+    filled = len(corners) // 4  # points written (others left zero: alphas shorter than points)
+    if sys.byteorder != "little":  # COLORED_VERTEX floats are little endian
+        positions.byteswap()
+    # Interleave x, y floats (8 bytes) & rgba (4 bytes) of each vertex record, byte column by column
+    size = COLORED_VERTEX.size
+    end = filled * 2 * size
+    raw = positions.tobytes()
+    for column in range(8):
+        data[column:end:size] = raw[column::8]
+    for column in range(4):
+        data[8 + column:end:size] = bytes(rgbas[column::4])
     return Vertices(data, count * 2, TRIANGLE_STRIP, True)
 
 
@@ -365,27 +379,43 @@ def merge_strips(strips: Sequence[Vertices]) -> Vertices:
     """Triangle strips (2 floats per vertex) drawn as one buffer of separate triangles"""
     data = array("f")
     for strip in strips:
-        source = strip.data
-        for index in range(0, strip.vertex_count * 2 - 4, 2):  # triangle: 3 consecutive vertices, 6 floats
-            data.extend(source[index:index + 6])
+        source = cast(array, strip.data)  # float strips only
+        triangles = strip.vertex_count - 2  # triangle: 3 consecutive vertices, 6 floats
+        if triangles <= 0:
+            continue
+        if len(source) < strip.vertex_count * 2:  # short data: slices cut at its end
+            for index in range(0, strip.vertex_count * 2 - 4, 2):
+                data.extend(source[index:index + 6])
+            continue
+        # Triangle k = floats 2k to 2k + 6 of strip: column j of every triangle in one slice assignment
+        part = array("f", bytes(triangles * 24))
+        for column in range(6):
+            part[column::6] = source[column:column + triangles * 2:2]
+        data.extend(part)
     return Vertices(data, len(data) // 2, TRIANGLES)
 
 
 def range_band(xs: Sequence[float], lows: Sequence[float], highs: Sequence[float]) -> Vertices:
     """Filled area between low & high lines (min / max band of laps)"""
     count = min(len(xs), len(lows), len(highs))
-    data = array("f")
-    for x, low, high in zip(xs[:count], lows[:count], highs[:count]):
-        data.extend((x, low, x, high))
+    data = array("f", bytes(count * 16))
+    x_values = array("f", xs[:count])
+    data[0::4] = x_values
+    data[1::4] = array("f", lows[:count])
+    data[2::4] = x_values
+    data[3::4] = array("f", highs[:count])
     return Vertices(data, count * 2 if count > 1 else 0, TRIANGLE_STRIP)
 
 
 def area(xs: Sequence[float], ys: Sequence[float], base: float) -> Vertices:
     """Filled area between line & base level (profile charts)"""
     count = min(len(xs), len(ys))
-    data = array("f")
-    for x, y in zip(xs[:count], ys[:count]):
-        data.extend((x, base, x, y))
+    data = array("f", bytes(count * 16))
+    x_values = array("f", xs[:count])
+    data[0::4] = x_values
+    data[1::4] = array("f", (base,)) * count
+    data[2::4] = x_values
+    data[3::4] = array("f", ys[:count])
     return Vertices(data, count * 2 if count > 1 else 0, TRIANGLE_STRIP)
 
 

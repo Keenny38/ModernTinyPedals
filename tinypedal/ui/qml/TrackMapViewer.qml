@@ -35,16 +35,10 @@ TpPage {
         function onPositionChanged() { if (page.follow) page.centerOnPosition(false) }
         function onMapChanged() { page.playing = false; canvas.reset(false) }
     }
-    Timer {
-        interval: 16
-        repeat: true
-        running: page.playing && page.loaded
-        property double last: 0
-        onRunningChanged: last = Date.now()
+    FrameAnimation {  // play: one step per rendered frame, none while page hidden or window minimized
+        running: page.playing && page.loaded && pageState.active
         onTriggered: {
-            var now = Date.now()
-            var next = backend.position + page.playSpeed * (now - last) / 1000
-            last = now
+            var next = backend.position + page.playSpeed * Math.min(frameTime, 0.1)
             backend.setPosition(next >= backend.length ? 0 : next)
         }
     }

@@ -170,7 +170,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 MouseArea { id: lapArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                 ToolTip.visible: lapArea.containsMouse
-                ToolTip.text: i18n.tr("Best Lap") + (row.lastLap !== "" ? "  ·  " + i18n.tr("Last lap") + " " + row.lastLap : "")
+                ToolTip.text: lapArea.containsMouse  // text built only while hovered, not on each lap for every row
+                    ? i18n.tr("Best Lap") + (row.lastLap !== "" ? "  ·  " + i18n.tr("Last lap") + " " + row.lastLap : "") : ""
                 ToolTip.delay: 500
             }
             Item {

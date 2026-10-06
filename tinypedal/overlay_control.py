@@ -69,7 +69,7 @@ class OverlayControl:
 
     __slots__ = (
         "toggle",
-        "_stopped",
+        "_thread",
         "_event",
         "_last_active_state",
         "_last_hide_state",
@@ -77,35 +77,38 @@ class OverlayControl:
 
     def __init__(self):
         self.toggle = OverlayToggle()
-        self._stopped = True
+        self._thread: threading.Thread | None = None
         self._event = threading.Event()
 
         self._last_active_state = None
         self._last_hide_state = None
 
+    def _stopped(self) -> bool:
+        """Whether update thread stopped (or never started)"""
+        return self._thread is None or not self._thread.is_alive()
+
     def enable(self):
         """Enable overlay control"""
-        if self._stopped:
-            self._stopped = False
-            self._event.clear()
-            threading.Thread(target=self.__updating, daemon=True, name="Overlay control").start()
+        # A previous thread still stopping (event set) is replaced, it exits on its own event
+        if self._stopped() or self._event.is_set():
+            self._event = threading.Event()
+            self._thread = threading.Thread(
+                target=self.__updating, args=(self._event,), daemon=True, name="Overlay control")
+            self._thread.start()
             logger.info("ENABLED: overlay control")
 
     def disable(self):
         """Disable overlay control, wait (bounded) until stopped"""
         self._event.set()
-        wait_stopped(lambda: self._stopped, "overlay control")
+        wait_stopped(self._stopped, "overlay control")
 
-    def __updating(self):
-        """Run update loop, always mark stopped (disable() waits for it)"""
-        try:
-            run_supervised(self.__update_loop, "overlay control", self._event)
-        finally:
-            self._stopped = True
+    def __updating(self, event: threading.Event):
+        """Run update loop"""
+        run_supervised(lambda: self.__update_loop(event), "overlay control", event)
 
-    def __update_loop(self):
+    def __update_loop(self, event: threading.Event):
         """Update global state"""
-        _event_wait = self._event.wait
+        _event_wait = event.wait
         while not _event_wait(0.2):
             # Read state
             active = api.read.state.active()
@@ -142,7 +145,6 @@ class OverlayControl:
                 # Set overlay timer state
                 overlay_signal.paused.emit(not active)
 
-        self._stopped = True
         logger.info("DISABLED: overlay control")
 
     def __check_preset_track(self) -> bool:

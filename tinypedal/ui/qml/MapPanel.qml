@@ -10,7 +10,10 @@ Item {
 
     readonly property var view: backend.mapView
     readonly property bool loaded: view.road !== undefined
-    readonly property int glide: backend.replayActive ? 1900 : 4800  // about the time between game answers
+    // Glide well under the time between game answers (about 1.9 s replay, 4.8 s live): cars stop before the next
+    // answer, scene idle (no redraw) in between. No glide while page hidden: positions jump, nothing animates.
+    readonly property int glide: backend.replayActive ? 1150 : 2900
+    readonly property bool gliding: pageState.active
 
     MapCanvas {
         id: canvas
@@ -60,8 +63,8 @@ Item {
                 // World position glides to each new answer, screen position follows zoom at once
                 property real worldX: mapX
                 property real worldY: mapY
-                Behavior on worldX { NumberAnimation { duration: root.glide } }
-                Behavior on worldY { NumberAnimation { duration: root.glide } }
+                Behavior on worldX { enabled: root.gliding; NumberAnimation { duration: root.glide; easing.type: Easing.OutSine } }
+                Behavior on worldY { enabled: root.gliding; NumberAnimation { duration: root.glide; easing.type: Easing.OutSine } }
                 z: onCamera ? 3 : player ? 2 : 1
 
                 Rectangle {
@@ -94,7 +97,8 @@ Item {
                         onClicked: backend.watchCar(car.key)
                     }
                     ToolTip.visible: carArea.containsMouse
-                    ToolTip.text: car.position + ". " + car.driver + (backend.inSession ? "\n" + i18n.tr("Camera on This Car") : "")
+                    ToolTip.text: carArea.containsMouse  // text built only while hovered, not for every car on each answer
+                        ? car.position + ". " + car.driver + (backend.inSession ? "\n" + i18n.tr("Camera on This Car") : "") : ""
                     ToolTip.delay: 200
                 }
             }

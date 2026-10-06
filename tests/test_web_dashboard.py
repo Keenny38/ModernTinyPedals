@@ -250,3 +250,31 @@ def test_https_error_reported_when_certificate_fails(ui_env, monkeypatch):
     server.enable()
     assert not server.running
     DashboardHandler.secure = False
+
+
+def test_idle_client_disconnected(dashboard, monkeypatch):
+    """Plain HTTP client sending nothing never holds a handler thread (socket timeout)"""
+    import socket
+
+    assert DashboardHandler.timeout == 15
+    monkeypatch.setattr(DashboardHandler, "timeout", 0.5)
+    with socket.create_connection(("127.0.0.1", PORT), timeout=5) as client:
+        start = time.monotonic()
+        assert client.recv(1024) == b""  # closed by server, no request sent
+        assert time.monotonic() - start < 4
+
+
+def test_port_out_of_range_reported(ui_env):
+    """OverflowError at bind reported like a busy port, never crashes app start"""
+    from tinypedal import app_signal
+
+    errors = []
+    app_signal.error.connect(errors.append)
+    try:
+        cfg.user.config["web_dashboard"].update(enable_web_dashboard=True, web_dashboard_port=70000, enable_https=False)
+        server = WebDashboard()
+        server.enable()
+        assert not server.running
+        assert errors and "port 70000 unavailable" in errors[0]
+    finally:
+        app_signal.error.disconnect(errors.append)

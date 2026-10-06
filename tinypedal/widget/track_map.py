@@ -22,8 +22,8 @@ Track map Widget
 
 from typing import Any
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QFontMetricsF, QPainter, QPainterPath, QPen, QPixmap, QStaticText, QTransform
 
 from .. import calculation as calc
 from ..api_control import api
@@ -375,6 +375,12 @@ class Realtime(TrackMapMixin, Overlay):
         self.veh_shape_safetycar = QRectF(-veh_size_sc * 0.5, -veh_size_sc * 0.5, veh_size_sc, veh_size_sc)
         self.veh_text_shape = QRectF(-veh_size_base * 0.5, -veh_size_base * 0.5 + font_m.voffset, veh_size_base, veh_size_base)
 
+        # Per car drawing options & place number text laid out once per number
+        self.show_proximity = self.wcfg["show_proximity_circle"]
+        self.show_standings = self.wcfg["show_vehicle_class_standings"]
+        self.circle_pit_offset = self.wcfg["font_size"]  # cars in pit inside temporary circle map
+        self.place_texts: dict[int, tuple[QPointF, QStaticText] | None] = {}
+
         if self.wcfg["show_pitout_prediction"]:
             self.pit_text_shape = QRectF(
                 -veh_size_base * 0.5 - 2,
@@ -514,7 +520,7 @@ class Realtime(TrackMapMixin, Overlay):
         """Draw vehicles on temporary circle map"""
         for index in veh_draw_order:
             data = veh_info[index]
-            painter.translate(*self.circle_position(data, self.wcfg["font_size"]))
+            painter.translate(*self.circle_position(data, self.circle_pit_offset))
 
             painter.setPen(self.outline_vehicle(data))
             painter.setBrush(self.color_vehicle(data))
@@ -525,12 +531,12 @@ class Realtime(TrackMapMixin, Overlay):
                 painter.drawEllipse(self.veh_shape)
 
             # Draw text standings
-            if self.wcfg["show_vehicle_class_standings"]:
+            if self.show_standings:
                 if data.isPlayer:
                     painter.setPen(self.pen_text["player"])
                 else:
                     painter.setPen(self.pen_text["opponent"])
-                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{self.place_number(data)}")
+                self.draw_place_number(painter, self.place_number(data))
             painter.resetTransform()
 
     def draw_vehicle_on_map(self, painter, veh_info, veh_draw_order):
@@ -544,7 +550,7 @@ class Realtime(TrackMapMixin, Overlay):
 
             if data.isPlayer:
                 painter.drawEllipse(self.veh_shape_player)
-                if self.wcfg["show_proximity_circle"]:
+                if self.show_proximity:
                     painter.setPen(self.pen_outline["proximity"])
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     painter.drawEllipse(self.rect_proximity)
@@ -552,13 +558,37 @@ class Realtime(TrackMapMixin, Overlay):
                 painter.drawEllipse(self.veh_shape)
 
             # Draw text standings
-            if self.wcfg["show_vehicle_class_standings"]:
+            if self.show_standings:
                 if data.isPlayer:
                     painter.setPen(self.pen_text["player"])
                 else:
                     painter.setPen(self.pen_text["opponent"])
-                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{self.place_number(data)}")
+                self.draw_place_number(painter, self.place_number(data))
             painter.resetTransform()
+
+    def draw_place_number(self, painter, place: int):
+        """Draw place number centered in car shape, static text laid out once per number"""
+        if place in self.place_texts:
+            cached = self.place_texts[place]
+        else:
+            cached = self.place_texts[place] = self.create_place_text(place)
+        if cached is None:  # text exceeds car shape: clipped as drawText does
+            painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{place}")
+        else:
+            painter.drawStaticText(*cached)
+
+    def create_place_text(self, place: int) -> tuple[QPointF, QStaticText] | None:
+        """Position & static text of place number, None if glyphs exceed car shape (clipped by drawText)"""
+        text = f"{place}"
+        metrics = QFontMetricsF(self.font())
+        rect = metrics.boundingRect(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, text)
+        ink = metrics.tightBoundingRect(text).translated(rect.left(), rect.top() + metrics.ascent())
+        if not self.veh_text_shape.contains(ink.adjusted(-1, -1, 1, 1)):  # 1 pixel antialiasing margin
+            return None
+        static_text = QStaticText(text)
+        static_text.setTextFormat(Qt.TextFormat.PlainText)
+        static_text.prepare(QTransform(), self.font())
+        return rect.topLeft(), static_text
 
     def draw_safetycar_on_map(self, painter, map_data):
         """Draw safety car on map"""

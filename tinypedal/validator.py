@@ -187,16 +187,16 @@ def image_exists(filepath: str, extension: str = FileExt.PNG, max_size: int = 10
 # Delta list validate
 def valid_delta_set(data: tuple) -> tuple:
     """Validate delta data set"""
+    # Delta list must have at least 10 lines of samples
+    if len(data) < 10:
+        raise ValueError
     # Final row value(second column) must be higher than previous row
     if data[-1][1] < data[-2][1]:
         raise ValueError
     # Check distance greater than next row for first 10 rows
-    for idx in range(11, 0, -1):
+    for idx in range(min(11, len(data) - 2), 0, -1):
         if data[idx][0] > data[idx + 1][0]:
             raise ValueError
-    # Delta list must have at least 10 lines of samples
-    if len(data) < 10:
-        raise ValueError
     # Numbers only (no text, nan or inf)
     if not all(is_finite_number(value) for row in data for value in row):
         raise ValueError
@@ -326,6 +326,8 @@ def vehicle_position_interp():
     time_last = 0.0
     dist_last = 0.0
     dist_est = 0.0
+    time_delta = 0.0
+    dist_delta = 0.0
 
     while True:
         time_curr, dist_curr = yield dist_est

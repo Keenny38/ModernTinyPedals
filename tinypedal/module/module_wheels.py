@@ -34,7 +34,7 @@ from ..userfile.heatmap import (
     set_predefined_brake_name,
 )
 from ..validator import generator_init
-from ._base import DataModule
+from ._base import DataModule, data_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class Realtime(DataModule):
         _event_wait = self._event.wait
         reset = False
         update_interval = self.idle_interval
+        last_stamp: tuple = ()  # game data stamp of last update
 
         gen_wheel_rotation = calc_wheel_rotation(
             output=minfo.wheels,
@@ -93,6 +94,13 @@ class Realtime(DataModule):
                 if not reset:
                     reset = True
                     update_interval = self.active_interval
+                    last_stamp = ()  # never skip first tick
+
+                # Skip while game data not updated since last tick
+                stamp = data_stamp()
+                if last_stamp == stamp:
+                    continue
+                last_stamp = stamp
 
                 # Run calculate
                 gen_wheel_rotation.send(vehicle_resets)
@@ -394,6 +402,7 @@ def calc_brake_wear(output: WheelsInfo, min_delta_distance: float):
             brake_wear_curr[:] = WHEELS_ZERO
             brake_wear_valid[:] = WHEELS_ZERO
             brake_max_thickness[:] = WHEELS_ZERO
+            failure_record[:] = WHEELS_ZERO
             delta_array_raw[:] = (WHEELS_DELTA_DEFAULT,)
             delta_array_last = (WHEELS_DELTA_DEFAULT,)
             is_valid_delta = False

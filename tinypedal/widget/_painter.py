@@ -264,6 +264,20 @@ def fit_font(painter: QPainter, font: QFont, text: str, width: float, height: fl
     return fitted
 
 
+def layer_fits(layer: QPixmap | None, width: int, height: int, ratio: float) -> bool:
+    """Cached layer still matches widget size & screen scale
+
+    Compare device pixels: with a fractional scale (125%, 150%), the device independent
+    size of a rounded pixmap (round(101 * 1.25) / 1.25 = 100.8) never equals widget size.
+    """
+    return (
+        layer is not None
+        and layer.devicePixelRatio() == ratio
+        and layer.width() == max(round(width * ratio), 1)
+        and layer.height() == max(round(height * ratio), 1)
+    )
+
+
 def fill_pixmap(pixmap: QPixmap, color) -> None:
     """Fill pixmap background, with rounded corner if enabled in overlay style"""
     if OverlayStyle.corner_scale <= 0:

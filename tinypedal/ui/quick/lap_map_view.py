@@ -94,6 +94,7 @@ ARROW_PIXELS = 11  # driving direction arrows
 TRAIL_SECONDS = 3.0  # cursor trail length (lap time)
 ZOOM_BUCKETS = 2  # map scale steps per doubling: thick lines & markers built once per step (cached)
 BAND_CACHE_STEPS = 10  # map scale steps kept (least recently used dropped)
+CIRCUIT_LOCK = threading.Lock()  # circuit shapes cache filled & trimmed by several map jobs at once
 MINIMAP_PIXELS = 150  # minimap size across (thin lines sized for it)
 EVENT_TITLES = {"offtrack": "Off track", "limit": "Track limits exceeded"}
 PREFETCH_DELAY = 400  # ms map view stays still before neighbor scales are built
@@ -181,15 +182,25 @@ class MapView(BackendBase):
         return [self.data.x_at_distance(found[0]), self.data.x_at_distance(found[1])]
 
     def build_trails(self, x: float):
-        """Last seconds of each lap behind cursor, fading in (trail option)"""
+        """Last seconds of each lap behind cursor, fading in (trail option)
+
+        Built again only once a lap moved about a pixel on map (cursor moves of a few meters: same trails).
+        """
         if not self._map or not self._map_options.get("trail") or not self._map_shown:
+            self._trail_state = None
             return
         meters_per_pixel = self._map_view[2]
-        for (line, lap), keys in zip(self._map_lines, self._map["lines"]):
+        ends = [self.data.lap_distance_at_x(lap, x) for _, lap in self._map_lines]
+        state = self._trail_state
+        if (state is not None and state[0] is self._map and state[1] == meters_per_pixel
+                and len(state[2]) == len(ends)
+                and all(abs(end - last) < meters_per_pixel for end, last in zip(ends, state[2]))):
+            return
+        self._trail_state = (self._map, meters_per_pixel, ends)
+        for (line, lap), keys, end in zip(self._map_lines, self._map["lines"], ends):
             distances, times = self.data.lap_times(lap)
             if not distances:
                 continue
-            end = self.data.lap_distance_at_x(lap, x)
             start = interpolate(times, distances, interpolate(distances, times, end) - TRAIL_SECONDS)
             bright = lap.color.lighter(165)  # stands out over its own driving line
             VertexStore.set(keys["trail"], lap_map.trail_band(
@@ -931,9 +942,11 @@ class MapView(BackendBase):
             shapes[self._map["road"]], shapes[self._map["edge"]] = cached_circuit[1]
         else:
             shapes[self._map["road"]], shapes[self._map["edge"]] = self.circuit_shapes(road, road_half, meters_per_pixel)
-            self._circuit_shapes[meters_per_pixel] = (circuit_key, (shapes[self._map["road"]], shapes[self._map["edge"]]))
-            while len(self._circuit_shapes) > BAND_CACHE_STEPS * 2:
-                self._circuit_shapes.pop(next(iter(self._circuit_shapes)))
+            with CIRCUIT_LOCK:
+                self._circuit_shapes[meters_per_pixel] = (
+                    circuit_key, (shapes[self._map["road"]], shapes[self._map["edge"]]))
+                while len(self._circuit_shapes) > BAND_CACHE_STEPS * 2:
+                    self._circuit_shapes.pop(next(iter(self._circuit_shapes)), None)
         reference = self.data.reference.data if self.data.reference is not None else None
         # Lap shapes depend on map rotation, corners of reference lap & track edges (driving points, track-out,
         # events): not on other laps shown

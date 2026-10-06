@@ -276,8 +276,8 @@ class PluginManager(BaseDialog):
         ):
             return
         try:
-            trust_plugin(name)
-        except OSError as error:
+            trust_plugin(name, expected_digest=digest)  # refuse code changed after confirmation
+        except (OSError, ValueError) as error:
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to save plugin trust:<br>{error}"))
             return
         if name in wctrl.names:

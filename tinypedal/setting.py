@@ -27,7 +27,7 @@ import os
 import threading
 from collections import ChainMap
 from copy import deepcopy
-from time import sleep
+from time import monotonic, sleep
 from types import MappingProxyType
 from typing import Any
 
@@ -199,10 +199,11 @@ class Setting:
     """APP setting"""
 
     __slots__ = (
-        "_save_delay",
+        "_save_deadline",
         "_save_queue",
         "_save_lock",
         "_save_done",
+        "_save_wake",
         "_setting_to_load",
         "is_saving",
         "version_update",
@@ -214,11 +215,12 @@ class Setting:
 
     def __init__(self):
         # States
-        self._save_delay = 0
+        self._save_deadline = 0.0  # monotonic time saving thread starts writing files
         self._save_queue = {}
-        self._save_lock = threading.Lock()
+        self._save_lock = threading.Lock()  # guards save queue, deadline & is_saving
         self._save_done = threading.Event()
         self._save_done.set()
+        self._save_wake = threading.Event()  # deadline changed: saving thread waits again
         self._setting_to_load = ""
         self.is_saving = False
         self.version_update = 0
@@ -483,36 +485,38 @@ class Setting:
                 Skip adding save task, run next save task in queue.
         """
         if next_task:
-            self._save_delay = 0
+            with self._save_lock:
+                self._save_deadline = 0.0
+            self._save_wake.set()
             return
 
-        self._save_delay = delay
         filename = getattr(self.filename, config_type, None)
-        if filename in self._save_queue:
-            return
-
         # Check if valid file name
         if filename is None:
             logger.error("USERDATA: invalid config type %s, abort saving", config_type)
+            filename = ""
         # Check if file is locked
         elif filename in self.user.filelock:
             logger.info("USERDATA: %s is locked, changes not saved", filename)
-        # Add to save queue
-        elif filename not in self._save_queue:
-            # Save to global config path
-            if config_type in (
-                ConfigType.CONFIG,
-                ConfigType.FILELOCK,
-                ConfigType.SHORTCUTS,
-            ):
-                filepath = self.path.config
-            # Save to settings (preset) path
-            else:
-                filepath = self.path.settings
-            dict_user = getattr(self.user, config_type)
-            self._save_queue[filename] = (filepath, dict_user)
+            filename = ""
 
+        # Save to global config path
+        if config_type in (
+            ConfigType.CONFIG,
+            ConfigType.FILELOCK,
+            ConfigType.SHORTCUTS,
+        ):
+            filepath = self.path.config
+        # Save to settings (preset) path
+        else:
+            filepath = self.path.settings
+
+        # Queue & delay changed within lock: saving thread takes files out of queue at the same time
         with self._save_lock:
+            self._save_deadline = monotonic() + delay * 0.01  # delay refreshed by each call
+            self._save_wake.set()  # waiting saving thread follows new deadline (also a shorter one)
+            if filename and filename not in self._save_queue:
+                self._save_queue[filename] = (filepath, getattr(self.user, config_type))
             if self._save_queue and not self.is_saving:
                 self.is_saving = True
                 self._save_done.clear()
@@ -534,10 +538,14 @@ class Setting:
 
     def __saving(self):
         """Saving thread"""
-        # Update save delay
-        while self._save_delay > 0:
-            self._save_delay -= 1
-            sleep(0.01)
+        # Wait until save delay passed, delay refreshed by each save() call meanwhile
+        while True:
+            with self._save_lock:
+                remaining = self._save_deadline - monotonic()
+                if remaining <= 0:
+                    break
+                self._save_wake.clear()  # within lock: a deadline change after this wakes the wait
+            self._save_wake.wait(remaining)
 
         # Run next save task until queue empty
         saving_attempts = self.max_saving_attempts

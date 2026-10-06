@@ -44,6 +44,7 @@ import logging
 import os
 import re
 import sys
+import time
 from contextlib import suppress
 from types import MappingProxyType, ModuleType
 from typing import Any
@@ -92,6 +93,8 @@ def discover_plugins(folder: str = PLUGIN_FOLDER) -> dict[str, str]:
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)
         if not os.path.isdir(path):
+            continue
+        if name.startswith("."):  # hidden or temporary install folder
             continue
         if not _valid_name.match(name):
             logger.warning("PLUGIN: invalid folder name %s (use lowercase letters, digits, _)", name)
@@ -230,13 +233,19 @@ def is_trusted_digest(widget_name: str, digest: str) -> bool:
     return digest in (BUNDLED_PLUGINS.get(widget_name), load_trusted().get(widget_name))
 
 
-def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER) -> str:
+def trust_plugin(widget_name: str, folder: str = PLUGIN_FOLDER, expected_digest: str | None = None) -> str:
     """Trust current plugin code, returns digest
 
+    Args:
+        expected_digest: digest shown to user for confirmation, refuse if code changed since.
+
     Raises:
+        ValueError: plugin code changed since expected digest was computed.
         OSError: unable to save trust file.
     """
     digest = plugin_digest(plugin_path(widget_name, folder))
+    if expected_digest is not None and digest != expected_digest:
+        raise ValueError("plugin code changed after confirmation, review it again")
     trusted = load_trusted()
     trusted[widget_name] = digest
     filename = trust_filename()
@@ -340,6 +349,18 @@ def install_plugin_package(zip_filename: str, folder: str = PLUGIN_FOLDER) -> st
     """
     import zipfile
 
+    try:
+        return _install_plugin_package(zip_filename, folder)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, NotImplementedError, EOFError) as error:
+        # corrupt, encrypted (RuntimeError) or unsupported compression (NotImplementedError) package
+        raise ValueError(f"invalid package: {error}") from error
+
+
+def _install_plugin_package(zip_filename: str, folder: str) -> str:
+    """Extract into temporary folder next to target, then rename into place (no partial plugin left)"""
+    import shutil
+    import zipfile
+
     with zipfile.ZipFile(zip_filename) as package:
         members = [info for info in package.infolist() if not info.is_dir()]
         tops = {info.filename.replace("\\", "/").split("/", 1)[0] for info in members}
@@ -354,21 +375,44 @@ def install_plugin_package(zip_filename: str, folder: str = PLUGIN_FOLDER) -> st
         target = os.path.join(folder, name)
         if os.path.exists(target):
             raise ValueError(f"plugin {name} already exists")
-        real_target = os.path.realpath(target)
-        for relative, info in files.items():
-            parts = relative.split("/")
-            if not is_safe_package_path(parts) or not relative.lower().endswith(ALLOWED_PACKAGE_FILES):
-                continue  # skip unsafe or unexpected file
-            if info.file_size > 10 * 1024 * 1024:
-                continue
-            path = os.path.join(target, *parts)
-            if not is_inside_folder(path, real_target):
-                continue  # outside plugin folder
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "wb") as file:
-                file.write(package.read(info))
+        temp_target = os.path.join(folder, f".{name}.installing")
+        if os.path.exists(temp_target):  # left over from interrupted install
+            shutil.rmtree(temp_target, ignore_errors=True)
+            if os.path.exists(temp_target):  # still locked, use unique temporary folder
+                temp_target = os.path.join(folder, f".{name}.{os.getpid()}.{time.monotonic_ns()}.installing")
+        os.makedirs(temp_target)
+        try:
+            real_temp = os.path.realpath(temp_target)
+            for relative, info in files.items():
+                parts = relative.split("/")
+                if not is_safe_package_path(parts) or not relative.lower().endswith(ALLOWED_PACKAGE_FILES):
+                    continue  # skip unsafe or unexpected file
+                if info.file_size > 10 * 1024 * 1024:
+                    continue
+                path = os.path.join(temp_target, *parts)
+                if not is_inside_folder(path, real_temp):
+                    continue  # outside plugin folder
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as file:
+                    file.write(package.read(info))
+            rename_folder(temp_target, target)
+        except BaseException:
+            shutil.rmtree(temp_target, ignore_errors=True)
+            raise
     logger.info("PLUGIN: installed %s", name)
     return f"{PLUGIN_PREFIX}{name}"
+
+
+def rename_folder(source: str, target: str, retries: int = 3, delay: float = 0.1) -> None:
+    """Rename folder, retry on PermissionError (Windows antivirus may briefly lock new files)"""
+    for attempt in range(retries + 1):
+        try:
+            os.rename(source, target)
+            return
+        except PermissionError:
+            if attempt >= retries:
+                raise
+            time.sleep(delay)
 
 
 def is_inside_folder(path: str, real_folder: str) -> bool:

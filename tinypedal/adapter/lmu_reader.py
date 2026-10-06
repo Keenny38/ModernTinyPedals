@@ -269,7 +269,7 @@ class Engine(_reader.Engine, DataAdapter):
 
     def virtual_energy(self, index: int | None = None) -> float:
         """Remaining virtual energy (fraction)"""
-        return self.shmm.lmuTeleVeh(index).mVirtualEnergy
+        return rmnan(self.shmm.lmuTeleVeh(index).mVirtualEnergy)
 
     def max_virtual_energy(self) -> float:
         """Maximum virtual energy (joule)"""

@@ -125,6 +125,33 @@ class MirrorWindow(QWidget):
         super().closeEvent(event)
 
 
+def window_image(widget: QWidget) -> QImage | None:
+    """Overlay window as last painted: backing store copy (no repaint) once window painted (paint serial
+    counted, see widget._base.PaintCounter), else rendered again (grab)"""
+    if getattr(widget, "paint_serial", None) is not None:
+        store = widget.backingStore()
+        device = store.paintDevice() if store is not None else None
+        if isinstance(device, QImage) and not device.isNull():
+            ratio = device.devicePixelRatio()
+            width, height = round(widget.width() * ratio), round(widget.height() * ratio)
+            if 0 < width <= device.width() and 0 < height <= device.height():
+                return device.copy(0, 0, width, height)
+    pixmap = widget.grab()
+    return pixmap.toImage() if not pixmap.isNull() else None
+
+
+def compose_key(widgets: list) -> tuple | None:
+    """State of overlay windows (paint serial, opacity): composed image unchanged while same,
+    None if a window is not counted (always composed again)"""
+    key = []
+    for widget in widgets:
+        serial = getattr(widget, "paint_serial", None)
+        if serial is None:
+            return None
+        key.append((id(widget), serial, widget.windowOpacity()))
+    return tuple(key)
+
+
 def compose_widgets(widgets: list) -> QImage | None:
     """Compose visible overlay widgets into one RGBA image, keeping desktop layout"""
     visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
@@ -137,8 +164,10 @@ def compose_widgets(widgets: list) -> QImage | None:
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
     for widget in visible:
-        painter.setOpacity(widget.windowOpacity())
-        painter.drawPixmap(widget.frameGeometry().topLeft() - bounds.topLeft(), widget.grab())
+        window = window_image(widget)
+        if window is not None:
+            painter.setOpacity(widget.windowOpacity())
+            painter.drawImage(widget.frameGeometry().topLeft() - bounds.topLeft(), window)
     painter.end()
     pixels = image.width() * image.height()
     if pixels > MAX_PIXELS:
@@ -161,11 +190,19 @@ class ImageFrame(NamedTuple):
     checksum: int
 
 
-def image_frame(image: QImage) -> ImageFrame:
+def image_checksum(image: QImage) -> int:
+    """Checksum of image pixels & size (change detection, no copy)"""
+    view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
+    return zlib.crc32(view, image.width() << 16 | image.height())
+
+
+def image_frame(image: QImage, checksum: int | None = None) -> ImageFrame:
     """Copy image pixels once into ctypes buffer, with checksum for change detection"""
-    view = memoryview(image.constBits())[:image.sizeInBytes()]
+    view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
     buffer = (ctypes.c_ubyte * len(view)).from_buffer_copy(view)
-    return ImageFrame(buffer, image.width(), image.height(), zlib.crc32(buffer))
+    if checksum is None:
+        checksum = image_checksum(image)
+    return ImageFrame(buffer, image.width(), image.height(), checksum)
 
 
 def overlay_transform(distance: float, vertical: float, horizontal: float) -> list[list[float]]:
@@ -192,6 +229,7 @@ class VROverlay(QObject):
         self._visible = False
         self._mirror: MirrorWindow | None = None
         self._mirror_checksum: int | None = None
+        self._compose_key: tuple | None = None  # overlay windows state of last composed image
 
     @property
     def running(self) -> bool:
@@ -203,6 +241,7 @@ class VROverlay(QObject):
         Mirror window kept from before reload is used again (window capture apps keep it).
         """
         setting = cfg.user.config["vr_overlay"]
+        self._compose_key = None  # composed again on next update
         background = str(setting.get("mirror_background_color", "#000000"))
         if not setting.get("enable_vr_mirror_window", False):
             self.disable_mirror()  # turned off in setting
@@ -236,7 +275,7 @@ class VROverlay(QObject):
         except Exception as error:  # SteamVR not running, or openvr error
             logger.debug("VR overlay: init failed", exc_info=True)
             self.__fail(f"VR overlay unavailable: {error}")
-            self.disable()
+            self.__disable_vr()
             return
         self._timer.start(max(int(setting["update_interval"]), 20))
         logger.info("ENABLED: VR overlay")
@@ -264,9 +303,13 @@ class VROverlay(QObject):
         if overlay is None and self._mirror is None:  # timer tick queued after disable()
             return
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
+        key = compose_key(widgets)
+        if key is not None and key == self._compose_key:
+            return  # no overlay window painted, moved, shown or hidden since last update
+        self._compose_key = key
         image = compose_widgets(widgets)
+        checksum = image_checksum(image) if image is not None else None
         if self._mirror is not None:
-            checksum = image_frame(image).checksum if image is not None else None
             if checksum != self._mirror_checksum:
                 self._mirror_checksum = checksum
                 self._mirror.set_image(image)
@@ -279,8 +322,8 @@ class VROverlay(QObject):
                     self._visible = False
                     self._checksum = None
                 return
-            frame = image_frame(image)
-            if frame.checksum != self._checksum:  # skip unchanged image
+            if checksum != self._checksum:  # skip unchanged image
+                frame = image_frame(image, checksum)
                 self._checksum = frame.checksum
                 self._buffer = frame.buffer  # keep reference until next frame
                 overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
@@ -290,7 +333,13 @@ class VROverlay(QObject):
         except Exception as error:  # SteamVR closed, or openvr error
             logger.debug("VR overlay: update failed", exc_info=True)
             self.__fail(f"VR overlay stopped: {error}")
-            self.disable()
+            self.__disable_vr()
+
+    def __disable_vr(self):
+        """SteamVR failed or closed: stop VR overlay only, mirror window (sharing timer) kept updating"""
+        self.disable()
+        if self._mirror is not None:
+            self._timer.start()  # same interval as before stopped
 
     def disable_mirror(self):
         """Close VR mirror window"""
@@ -313,6 +362,7 @@ class VROverlay(QObject):
         if close_mirror:
             self.disable_mirror()
         self._timer.stop()
+        self._compose_key = None
         if self._overlay is not None and self._handle is not None:
             try:
                 self._overlay.destroyOverlay(self._handle)

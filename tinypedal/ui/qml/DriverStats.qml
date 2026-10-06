@@ -167,8 +167,9 @@ TpPage {
                                 color: theme.gain
                                 anchors.verticalCenter: parent.verticalCenter
                                 SequentialAnimation on opacity {
-                                    running: page.info.live === true && page.visible
-                                    loops: Animation.Infinite
+                                    // A few pulses when state starts or page shows again, then still: no endless redraw
+                                    running: page.info.live === true && pageState.active
+                                    loops: 3
                                     onRunningChanged: if (!running) liveDot.opacity = 1
                                     NumberAnimation { to: 0.3; duration: 800; easing.type: Easing.InOutSine }
                                     NumberAnimation { to: 1; duration: 800; easing.type: Easing.InOutSine }

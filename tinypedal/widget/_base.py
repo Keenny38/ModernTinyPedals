@@ -55,6 +55,18 @@ ARROW_KEYS = {
     Qt.Key.Key_Down: (0, 1),
 }
 OPACITY_STEPS = (100, 90, 80, 70, 60, 50, 40)  # percent, context menu
+# Window content (own or child widget repainted: update request on window) or place changed
+PAINT_EVENTS = frozenset((
+    QEvent.Type.UpdateRequest, QEvent.Type.Paint, QEvent.Type.Show, QEvent.Type.Hide,
+    QEvent.Type.Move, QEvent.Type.Resize,
+))
+
+
+class PaintCounter:
+    """Overlay window changes (GUI thread): each change gives the window a new "paint_serial",
+    so stream & VR capture skip windows unchanged since their last copy"""
+
+    count = 0
 
 
 def position_values(pos: QPoint) -> dict:
@@ -456,6 +468,14 @@ class Base(QWidget):
             self.disable_overlay()
         else:
             super().keyPressEvent(event)
+
+    def event(self, event):
+        """Count window repaints & moves (paint serial, see PaintCounter)"""
+        result = super().event(event)
+        if event.type() in PAINT_EVENTS:
+            PaintCounter.count += 1
+            self.paint_serial = PaintCounter.count
+        return result
 
     def changeEvent(self, event):
         """Overlay no longer active window (game or app clicked): not selected"""

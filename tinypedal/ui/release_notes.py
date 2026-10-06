@@ -313,7 +313,8 @@ class ReleaseNotesDialog(BaseDialog):
         self.button_details.setText(f"{label} ({tr('commits, SHA256')})")
 
     def request_install(self):
-        """Installed Windows app: install asked (downloaded & run by caller), else download opened in browser
+        """Installed Windows app or run from source on Windows: install asked (downloaded & run by caller),
+        else download opened in browser
 
         Portable copy: release page opened (new ZIP), never the installer. Page stays open
         while downloading (progress & cancel), when installer progress is known.

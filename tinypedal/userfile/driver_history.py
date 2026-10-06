@@ -46,6 +46,8 @@ MIN_SESSION_SECONDS = 60  # stint without lap shorter than this not recorded (ga
 # Session filter: all, practice (test day, practice, warmup), qualifying, race
 SESSION_GROUPS: tuple[tuple[int, ...], ...] = ((), (0, 1, 3), (2,), (4,))
 TEXT_FIELDS = ("vehicle_class",)
+TAIL_BYTES = 64 * 1024  # end of file read for last record (hundreds of records)
+_last_records: dict[str, tuple[tuple[int, int], SessionRecord | None]] = {}  # path: file time & size, record
 
 
 class SessionRecord(NamedTuple):
@@ -113,6 +115,55 @@ def read_records(filepath: str) -> list[SessionRecord]:
         return []
     records.sort(key=lambda record: record.time)
     return records
+
+
+def latest_record(lines: Iterable[bytes]) -> SessionRecord | None:
+    """Newest valid record of JSON lines (latest time, last line of equal times: as read_records sorts)"""
+    latest = None
+    for line in lines:
+        try:
+            record = parse_record(json.loads(line.decode("utf-8", errors="replace")))
+        except ValueError:  # half written line, cut line, empty line
+            continue
+        if record is not None and (latest is None or record.time >= latest.time):
+            latest = record
+    return latest
+
+
+def last_record(filepath: str) -> SessionRecord | None:
+    """Last driven session, as read_records(filepath)[-1], None if none
+
+    Only end of file read (records appended in time order, file rewritten sorted), whole file if no valid
+    record there; result kept until file changes (time & size).
+    """
+    path = history_path(filepath)
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        logger.error("USERDATA: unable to read %s: %s", HISTORY_FILE, error)
+        return None
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _last_records.get(path)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    start = max(stat.st_size - TAIL_BYTES, 0)
+    try:
+        with open(path, "rb") as file:
+            file.seek(start)
+            lines = file.read().split(b"\n")
+    except OSError as error:
+        logger.error("USERDATA: unable to read %s: %s", HISTORY_FILE, error)
+        return None
+    if start > 0:
+        del lines[0]  # cut line
+    record = latest_record(lines)
+    if record is None and start > 0:  # no valid record at end of file
+        records = read_records(filepath)
+        record = records[-1] if records else None
+    _last_records[path] = (key, record)
+    return record
 
 
 def load_history(filepath: str) -> list[SessionRecord]:

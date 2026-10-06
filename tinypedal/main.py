@@ -43,12 +43,15 @@ log_stream = BoundedLogStream()  # latest log text only (log dialog, bug report)
 
 
 def save_pid_file():
-    """Save PID info to file"""
-    with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as f:
-        current_pid = os.getpid()
-        pid_create_time = psutil.Process(current_pid).create_time()
-        pid_str = f"{current_pid},{pid_create_time}"
-        f.write(pid_str)
+    """Save PID info to file (locked file or read-only config folder: single instance not enforced)"""
+    try:
+        with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as f:
+            current_pid = os.getpid()
+            pid_create_time = psutil.Process(current_pid).create_time()
+            pid_str = f"{current_pid},{pid_create_time}"
+            f.write(pid_str)
+    except (OSError, psutil.Error) as error:
+        logger.warning("PID file not saved: %s", error)
 
 
 def is_pid_exist() -> bool:
@@ -63,7 +66,7 @@ def is_pid_exist() -> bool:
         # Verify if last PID is running and belongs to TinyPedal
         if psutil.pid_exists(pid_last) and str(psutil.Process(pid_last).create_time()) == pid_last_create_time:
             return True  # already running
-    except (ProcessLookupError, psutil.NoSuchProcess, ValueError, IndexError, FileNotFoundError):
+    except (OSError, psutil.Error, ValueError, IndexError):  # also unreadable (locked) file
         logger.info("PID not found or invalid")
     return False  # no running
 
@@ -107,6 +110,14 @@ def get_version():
     logger.info("psutil: %s", version_check.psutil())
 
 
+def load_ui_language_packs():
+    """Register language packs, before global config is loaded (validates language name)"""
+    load_language_packs(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "i18n", "data", LANGUAGE_PACK_FOLDER),
+        os.path.join(cfg.path.config, LANGUAGE_PACK_FOLDER),
+    )
+
+
 def init_gui() -> QApplication:
     """Initialize Qt Gui"""
     # Set global locale
@@ -119,10 +130,6 @@ def init_gui() -> QApplication:
     QApplication.setStyle("Fusion")
     root = QApplication(sys.argv)
     # Set UI language (main window is rebuilt when changed later)
-    load_language_packs(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "i18n", "data", LANGUAGE_PACK_FOLDER),
-        os.path.join(cfg.path.config, LANGUAGE_PACK_FOLDER),
-    )
     language_code = set_language(cfg.application["language"])
     install_qt_translation(root, language_code)
     root.setQuitOnLastWindowClosed(False)
@@ -230,7 +237,8 @@ def start_app(cli_args):
     unset_environment()
     set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
     get_version()
-    # load global config
+    # load global config (language packs first, else a pack language is reset to English)
+    load_ui_language_packs()
     cfg.load_global()
     cfg.save(config_type=ConfigType.CONFIG)
     cfg.save(config_type=ConfigType.SHORTCUTS)

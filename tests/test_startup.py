@@ -25,6 +25,18 @@ def test_pid_file_stale_or_invalid(ui_env, content):
     assert not main.is_pid_exist()  # other process, reused PID or broken file
 
 
+def test_pid_file_unwritable_or_locked(ui_env, monkeypatch, caplog):
+    """Locked pid file or read-only config folder: no crash at launch"""
+    def locked(*args, **kwargs):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(main, "open", locked, raising=False)
+    with caplog.at_level("WARNING", logger="tinypedal"):
+        main.save_pid_file()
+    assert "PID file not saved" in caplog.text
+    assert not main.is_pid_exist()
+
+
 def test_single_instance_modes(ui_env, monkeypatch):
     from tinypedal.const_file import LogFile
 
@@ -141,6 +153,33 @@ def test_restart_waits_for_lap_saving(controls, monkeypatch):
     monkeypatch.setenv("TINYPEDAL_RESTART", "")
     loader.restart()
     assert controls.index("api.close") < controls.index("wait_lap_saver") < controls.index("exit")
+
+
+def test_restart_failure_reloads_app(controls, monkeypatch):
+    """Relaunch failed (exe moved or blocked): app reloaded and kept running, no exit"""
+    def blocked(*args, **kwargs):
+        raise OSError("blocked")
+
+    monkeypatch.setattr(loader.replay, "stop_recording", lambda: None)
+    monkeypatch.setattr(loader, "wait_lap_saver", lambda timeout: True)
+    monkeypatch.setattr(loader.subprocess, "Popen", blocked)
+    monkeypatch.setattr(loader.os, "execv", blocked)
+    monkeypatch.setattr(loader.os, "_exit", lambda code: controls.append("exit"))
+    monkeypatch.setattr(loader.logging, "shutdown", lambda: None)
+    monkeypatch.setenv("TINYPEDAL_RESTART", "")
+    loader.restart()
+    assert "exit" not in controls and "TINYPEDAL_RESTART" not in os.environ
+    assert controls.index("api.close") < controls.index("api.connect") < controls.index("api.start")
+    assert controls.index("api.start") < controls.index("mctrl.start")
+
+
+def test_api_stop_after_close():
+    """close() run again (quit after failed restart): stopping closed API is no error"""
+    from tinypedal.api_control import APIControl
+
+    control = APIControl()
+    control.close()
+    control.stop()
 
 
 def test_screen_layout_sync_optional(controls, monkeypatch):

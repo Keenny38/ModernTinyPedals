@@ -389,6 +389,7 @@ def test_qml_page_keyboard(page, monkeypatch):
     settle()
     assert page.module_control.toggled == [first] and configs == [first]
     QTest.keyClicks(page.view, "sect")
+    QTest.qWait(250)  # search applied after a pause in typing (TpSearchField debounce)
     settle()
     assert page.backend.searchText == "sect"
     assert [row["key"] for row in page.backend.rows_model.rows] == ["module_sectors"]

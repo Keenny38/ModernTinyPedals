@@ -47,6 +47,19 @@ FocusScope {
     readonly property real trackWindow: 300  // meters shown around vehicles when following starts
     readonly property real trackMargin: 60  // meters kept around followed vehicles
     property real trackZoom: 1  // zoom while following, changed with wheel
+    readonly property var comparedLaps: backend.comparedLaps  // read once (list built by backend)
+    // Shown cursor positions: none while hidden (no item updated on every cursor move)
+    readonly property var cursorPoints: visible && chart ? chart.cursorMap : []
+    // Map scale corner labels were placed for: overlaps only depend on scale (moving the map changes none),
+    // placed again once scale changed by 2% (zoom easing) and when zoom settles
+    property real labelScale: 1  // set at start & by changes below (never a binding: one per frame)
+    Connections {
+        target: canvas
+        function onMapScaleChanged() {
+            if (Math.abs(canvas.mapScale - root.labelScale) > root.labelScale * 0.02) root.labelScale = canvas.mapScale
+        }
+        function onSettled() { root.labelScale = canvas.mapScale }
+    }
     // Corner labels shown: highest time delta first, labels overlapping a shown one hidden
     readonly property var labelShown: {
         var corners = info.corners || []
@@ -55,11 +68,11 @@ FocusScope {
         var placed = []
         var shown = []
         var lineHeight = theme.em * 1.3
-        var matrix = canvas.matrix  // dependency: map moved or zoomed
+        var scale = labelScale, ySign = canvas.ySign  // places relative to map origin: same overlaps wherever moved
         for (var i = 0; i < order.length; i++) {
             var corner = corners[order[i]]
             var width = (corner.label.length + (corner.delta ? corner.delta.length + 1 : 0)) * theme.em * 0.55 + theme.em * 0.8
-            var x = canvas.screenX(corner.x) + 6, y = canvas.screenY(corner.y) - lineHeight - 4
+            var x = corner.x * scale + 6, y = ySign * corner.y * scale - lineHeight - 4
             var free = true
             for (var j = 0; j < placed.length && free; j++) {
                 var other = placed[j]
@@ -167,9 +180,10 @@ FocusScope {
         if (visible !== reportedShown) {
             reportedShown = visible
             backend.setMapShown(visible)
+            if (visible && chart && chart.hasCursor) chart.fetchCursor()  // cursor positions skipped while hidden
         }
     }
-    Component.onCompleted: reportShown()
+    Component.onCompleted: { labelScale = canvas.mapScale; reportShown() }
     Component.onDestruction: if (reportedShown) backend.setMapShown(false)
     function exportPicture(copy) {
         canvas.grabToImage(function(result) {
@@ -387,11 +401,11 @@ FocusScope {
         // Compared lap (gain / loss, racing line, delta per corner)
         Flow {
             Layout.fillWidth: true
-            visible: (root.mode === "gain" || root.mode === "line" || root.mode === "corners") && backend.comparedLaps.length > 1
+            visible: (root.mode === "gain" || root.mode === "line" || root.mode === "corners") && root.comparedLaps.length > 1
             spacing: theme.em * 0.3
             Text { text: i18n.tr("Compared:"); color: theme.dimText; height: theme.em * 1.8; verticalAlignment: Text.AlignVCenter }
             Repeater {
-                model: backend.comparedLaps
+                model: root.comparedLaps
                 TpButton {
                     text: modelData.label
                     flat: true
@@ -519,20 +533,25 @@ FocusScope {
                 revision: backend.revision
                 transform: Matrix4x4 { matrix: canvas.matrix }
             }
-            // Distance marks
-            Repeater {
-                model: root.options.distances === true ? (root.info.ticks || []) : []
-                Item {
-                    x: canvas.screenX(modelData.x)
-                    y: canvas.screenY(modelData.y)
-                    Rectangle { x: -2; y: -2; width: 4; height: 4; radius: 2; color: theme.dimText }
-                    Text {
-                        x: 4; y: -height - 1
-                        text: modelData.label
-                        color: theme.dimText
-                        font.pointSize: theme.fontPoint * 0.68
-                        style: Text.Outline
-                        styleColor: theme.window
+            // Distance marks, placed from map origin in an item moved with the map: moving the map moves one item,
+            // not every label (same place on screen as canvas.screenX / screenY)
+            Item {
+                x: canvas.tx
+                y: canvas.ty
+                Repeater {
+                    model: root.options.distances === true ? (root.info.ticks || []) : []
+                    Item {
+                        x: modelData.x * canvas.mapScale
+                        y: canvas.ySign * modelData.y * canvas.mapScale
+                        Rectangle { x: -2; y: -2; width: 4; height: 4; radius: 2; color: theme.dimText }
+                        Text {
+                            x: 4; y: -height - 1
+                            text: modelData.label
+                            color: theme.dimText
+                            font.pointSize: theme.fontPoint * 0.68
+                            style: Text.Outline
+                            styleColor: theme.window
+                        }
                     }
                 }
             }
@@ -700,21 +719,25 @@ FocusScope {
                     }
                 }
             }
-            // Speed next to driving points (option): laps stacked
-            Repeater {
-                model: root.options.values === true ? (root.info.points || []) : []
-                Text {
-                    visible: root.pointShown(modelData.kind)
-                    x: canvas.screenX(modelData.x) + theme.em * 0.6
-                    y: canvas.screenY(modelData.y) - height / 2 + (modelData.order - 0.5) * height * 0.9
-                    opacity: root.lapOpacity(modelData.lap)
-                    text: modelData.value
-                    color: modelData.color
-                    style: Text.Outline
-                    styleColor: theme.window
-                    font.pointSize: theme.fontPoint * 0.7
-                    font.weight: Font.Bold
-                    font.features: { "tnum": 1 }
+            // Speed next to driving points (option): laps stacked, moved with the map like distance marks
+            Item {
+                x: canvas.tx
+                y: canvas.ty
+                Repeater {
+                    model: root.options.values === true ? (root.info.points || []) : []
+                    Text {
+                        visible: root.pointShown(modelData.kind)
+                        x: modelData.x * canvas.mapScale + theme.em * 0.6
+                        y: canvas.ySign * modelData.y * canvas.mapScale - height / 2 + (modelData.order - 0.5) * height * 0.9
+                        opacity: root.lapOpacity(modelData.lap)
+                        text: modelData.value
+                        color: modelData.color
+                        style: Text.Outline
+                        styleColor: theme.window
+                        font.pointSize: theme.fontPoint * 0.7
+                        font.weight: Font.Bold
+                        font.features: { "tnum": 1 }
+                    }
                 }
             }
 
@@ -776,7 +799,7 @@ FocusScope {
                 model: backend.mapLaps
                 Item {
                     id: car
-                    readonly property var point: root.chart && root.chart.cursorMap[index] ? root.chart.cursorMap[index] : null
+                    readonly property var point: root.cursorPoints[index] || null
                     readonly property real size: theme.em * (model.reference ? 1.15 : 0.95)  // reference lap larger
                     visible: point !== null
                     x: point ? canvas.screenX(point.x) : 0
@@ -1257,7 +1280,7 @@ FocusScope {
                 font.pointSize: theme.fontPoint * 0.85
             }
             Text {
-                visible: (root.mode === "gain" || root.mode === "line" || root.mode === "corners") && backend.comparedLaps.length === 0
+                visible: (root.mode === "gain" || root.mode === "line" || root.mode === "corners") && root.comparedLaps.length === 0
                 text: i18n.tr("Check a second lap to compare")
                 color: theme.dimText
                 font.pointSize: theme.fontPoint * 0.85

@@ -141,6 +141,7 @@ class StreamOverlaysBackend(QObject):
         self.notice = ""
         self.notice_count = 0
         self.watched: set[str] = set()
+        self._server_state: tuple = ()
         self._model = DictListModel(OVERLAY_ROLES, self)
         self._timer = QTimer(self)
         self._timer.setInterval(REFRESH_MS)
@@ -149,7 +150,7 @@ class StreamOverlaysBackend(QObject):
 
     # Page
     def page_shown(self):
-        self.refresh()
+        self.refresh(force=True)
         self._timer.start()
 
     def page_hidden(self):
@@ -167,11 +168,23 @@ class StreamOverlaysBackend(QObject):
         })
 
     @Slot()
-    def refresh(self):
-        """Live sources & sizes (every second while shown)"""
+    def refresh(self, force: bool = False):
+        """Live sources & sizes (every second while shown), server state signaled only when changed"""
         self.watched = streamoverlay.watched()
         self.refresh_overlays()
-        self.serverChanged.emit()
+        state = self.server_state()
+        if force or state != self._server_state:
+            self._server_state = state
+            self.serverChanged.emit()
+
+    def server_state(self) -> tuple:
+        """Everything server properties depend on"""
+        setting = self.setting()
+        return (
+            bool(setting["enable_stream_overlay"]), streamoverlay.running, frozenset(self.watched),
+            bool(setting["enable_lan_access"]), streamoverlay.port(), setting["frame_rate"],
+            streamoverlay.access_token(), self.lanText, self.screenText,
+        )
 
     def refresh_overlays(self, *_args):
         self._model.sync(overlay_rows(self.watched))
@@ -195,7 +208,7 @@ class StreamOverlaysBackend(QObject):
         setting[key] = value
         cfg.save(config_type=ConfigType.CONFIG)
         streamoverlay.enable()
-        self.refresh()
+        self.refresh(force=True)
 
     @Property(bool, notify=serverChanged)
     def enabled(self) -> bool:
@@ -262,7 +275,7 @@ class StreamOverlaysBackend(QObject):
     def newToken(self):
         """New access token: addresses copied before stop working"""
         streamoverlay.new_access_token()
-        self.refresh()
+        self.refresh(force=True)
         self.notify(tr("New access token: copy the addresses again into your streaming software."))
 
     # Addresses

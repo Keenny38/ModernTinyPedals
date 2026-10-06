@@ -3,6 +3,73 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.22.2 (2026-10-06)
+
+### Corrections
+
+- **Mise à jour installée par l'app aussi quand elle est lancée depuis les sources** : sous Windows, `Télécharger et installer` (ou `Installer maintenant`) d'une copie lancée depuis les sources ouvrait le téléchargement dans le navigateur, et il fallait extraire le ZIP puis lancer l'installeur à la main. Elle télécharge, vérifie et lance maintenant l'installeur comme l'app installée : ta copie installée est mise à jour, ou installée s'il n'y en a pas, puis démarrée. Son dossier vient de l'inscription de l'installeur dans le registre, sinon du raccourci du menu Démarrer.
+- L'app installée met maintenant toujours à jour son propre dossier.
+- `Ouvrir le dossier` de la page `Rejeux` n'affichait pas d'infobulle et restait actif sans dossier de rejeux.
+- Fermer le `Visionneuse de carte` n'écrit plus d'erreur QML dans le journal.
+- Des réglages enregistrés depuis plusieurs threads à la fois (marques de voitures apprises en roulant) pouvaient interrompre l'enregistrement d'un autre fichier de réglages.
+
+### Fiabilité
+
+Une relecture complète du code a trouvé et corrigé environ 90 problèmes, la plupart rares.
+
+- **Jeton d'accès des overlays de stream et code d'accès du tableau de bord web conservés au redémarrage** : ils étaient remis à zéro à chaque lancement, donc les sources navigateur d'OBS ne marchaient plus après chaque redémarrage de l'app. Copie une dernière fois les adresses des sources après cette mise à jour. Les sections repliées du calculateur, les colonnes masquées des stats pilote et leurs largeurs étaient aussi oubliées à chaque lancement.
+- **Une langue installée par un pack de langue** revenait à l'anglais à chaque lancement.
+- **Fichier de réglages tenu par un autre programme au lancement** (antivirus, OneDrive) : il était remplacé par les réglages par défaut et sa copie de sauvegarde supprimée. L'app l'attend maintenant et, s'il reste verrouillé, utilise les réglages par défaut sans jamais enregistrer par-dessus ton fichier, et te le signale.
+- **Données enregistrées justes après un arrêt aux stands ou un tour coupé** : un tour invalidé par le jeu (limites de piste) ne peut plus devenir ton meilleur delta ni tes meilleurs secteurs 1 et 2 ; le tour de sortie des stands ne fait plus monter le rythme de référence du module carburant ; un tour passé par la voie des stands n'est plus enregistré comme carte de piste ; l'épaisseur de rupture des freins n'est plus enregistrée sous la voiture suivante ; la consommation n'est enregistrée qu'avec le temps du tour qui vient de finir.
+- **Sessions en ligne** : quand un pilote part, la voiture qui prend sa place dans la liste du jeu n'hérite plus de ses arrêts, tours de relais, temps au tour, consommation, vitesse au speed trap ni tendance d'écart. Une voiture dont la télémétrie est inconnue n'affiche plus les données d'une autre.
+- **Module carburant** sans temps au tour connu (premiers tours avec une nouvelle voiture sur un circuit) : plus de tours ni de minutes restants aberrants en course au temps.
+- **Overlays** :
+  - Les overlays modernes redessinaient tout leur fond à chaque image avec une mise à l'échelle Windows de 125 %, 150 % ou 175 %.
+  - Le cône d'impact de `Damage` restait affiché dans la session suivante.
+  - `Gear` se figeait pendant un ravitaillement avec la barre de consommation progressive.
+  - `Steering Meter` affichait un angle de 0 quand les graduations étaient masquées.
+  - `Pit Lane Helper` avec `show_always` affichait « – » pour la distance au stand après le premier arrêt.
+  - `Elevation` affichait tout le tour comme parcouru sur la ligne de départ.
+  - `Delta Graph` pouvait perdre la trace du tour précédent sur la ligne.
+  - `Lap Time History` affichait un faux delta sur son plus ancien tour.
+  - `Race Notifications` pouvait annoncer un vieux tour comme meilleur tour au retour d'un pilote.
+  - Le `Delta Best` classique plantait avec une plage de barre de 0.
+  - `Black Box` ne masque plus l'avertissement « module off » quand il n'a pas pu démarrer un module nécessaire.
+  - Logos des marques : les logos absents ne sont plus recherchés sur le disque à chaque changement de ligne, et les logos recolorés pour fond sombre sont préparés environ 50 fois plus vite, sans figer les overlays.
+- **Photos de voitures et de circuits du jeu** : un nom de voiture accentué bloquait tous les téléchargements pendant une minute, une erreur du serveur marquait une image comme manquante pendant 7 jours, et un catalogue vide hors session n'était jamais relu.
+- **Fichiers enregistrés** : une ligne abîmée de l'historique de consommation ne fait plus perdre tout le fichier, des valeurs abîmées des stats pilote n'arrêtent plus le module de stats, les fichiers delta de 10 à 12 lignes sont de nouveau lus, les notes de piste aux distances invalides sont ignorées, et les tours de télémétrie compressés sont bien écrits sur le disque.
+- **Presets** : renommer le preset chargé pendant qu'une page avait des modifications non enregistrées pouvait créer un second preset, renommer ou dupliquer juste après une modification pouvait la perdre, `Transférer` revérifie que la destination n'est pas chargée ou verrouillée, un nom tapé avec `.json` est géré, et les noms réservés par Windows (`CON`, `NUL`...) sont refusés.
+- **Connexions** :
+  - Sous Windows, un port déjà utilisé par un autre programme est maintenant signalé, au lieu d'être partagé par les deux.
+  - Désactiver les overlays de stream ou leur accès réseau local déconnecte aussi les navigateurs déjà connectés.
+  - Un port hors limites n'empêche plus l'app de démarrer.
+  - Les clients inactifs du tableau de bord web et du contrôle à distance sont déconnectés après 15 secondes.
+- **Mises à jour** : un installeur non signé n'est accepté que depuis le dépôt officiel, vérifié d'après le dépôt où la mise à jour a été trouvée.
+- **Plugins** : un `.zip` de plugin abîmé affiche une erreur au lieu d'échouer sans rien dire, aucun plugin à moitié installé ne reste, et un plugin approuvé après relecture est refusé si son code a changé entre-temps.
+- **App** : quitter l'app après un redémarrage raté fonctionne de nouveau, plus d'icône restée dans la zone de notification après un redémarrage, un `pid.log` verrouillé ou un dossier utilisateur invalide n'empêche plus le démarrage, le miroir VR continue de se mettre à jour quand SteamVR échoue, les pages qui interrogent le jeu ne restent plus occupées après une erreur, les copies de `Rejeux` ne restent plus bloquées sur « copie en cours », les stats pilote ne lisent leurs tours qu'une fois quand on parcourt la liste, et la **Visionneuse de télémétrie** lit en arrière-plan les tours d'un circuit qui en a beaucoup.
+- **Raccourcis** avec des touches de modification tapées dans un autre ordre (`shift+ctrl+f1`) fonctionnent, et le jeton d'accès des overlays de stream est retiré des rapports de bug.
+
+### Performances
+
+Moins de CPU utilisé en roulant, et des pages de l'app plus fluides.
+
+- **Modules de données** (delta, force, carburant, hybride, cartographie, notes, secteurs, véhicules, roues) : ils sautent leur travail quand le jeu n'a pas envoyé de nouvelles données depuis la dernière mise à jour, au lieu de tout recalculer 100 fois par seconde. Les lissages (force G, delta, position moyenne des suspensions) comptent maintenant des échantillons du jeu, comme le dit leur option : avant, les échantillons répétés les faisaient réagir plus vite que réglé.
+- **Overlays de carte** (carte du circuit, radar, navigation, spotter) : ils ne se redessinent que si les voitures ont bougé. Les numéros de position de la carte classique viennent d'un cache.
+- **Arrêt des modules** (rechargement d'un preset, fermeture, spectateur d'un autre pilote) : tous les modules sont arrêtés en même temps, puis attendus ensemble.
+- **Overlay VR** et **capture des overlays de stream** : seuls les overlays qui ont changé depuis la dernière image sont copiés, et l'overlay VR ne dessine plus chaque overlay deux fois.
+- **Accueil** : la dernière session est lue à la fin de l'historique du pilote au lieu de tout le fichier.
+- **Page Stream** : plus de recherche des adresses réseau chaque seconde (adresses gardées 30 secondes).
+- **Statistiques pilote** : la page n'attend plus pendant qu'un module enregistre le fichier de stats.
+- **Pages de l'app** : leurs minuteries et animations s'arrêtent quand elles sont cachées derrière une autre page, dans la zone de notification ou réduites (carte des rejeux, calculateur de course, overlays de stream, lecture de la visionneuse de carte, frise des incidents). Les points d'état clignotent trois fois au lieu de sans arrêt, et les voitures de la carte des rejeux glissent entre deux réponses du jeu puis s'arrêtent.
+- **Visionneuse de télémétrie** : zoomer, déplacer la vue et la lecture demandent moins de travail par image (une seule mise à jour de la vue par image, listes en cache, valeurs du curseur calculées une fois, étiquettes des virages replacées seulement quand le zoom change). Les onglets latéraux cachés ne suivent plus le curseur, et graphiques et cartes sont construits 3 à 6 fois plus vite.
+- **Aperçus des overlays** des pages `Overlays`, `Options des overlays` et de configuration : chargés en arrière-plan et rechargés seulement quand ils ont changé.
+- **Options des overlays** : changer une option ne met à jour que sa ligne au lieu de toute la page.
+- **Champs de recherche** : la recherche part 120 ms après la dernière touche au lieu de chaque touche (Entrée cherche tout de suite).
+- **Réglages** et la liste des tours du **Visionneuse de télémétrie** réutilisent leurs lignes pendant le défilement.
+- Le graphique des positions des **Résultats de course** et celui des **Statistiques pilote** ne redessinent que les lignes mises en avant au survol.
+- **Page Rejeux** : tailles des dossiers calculées une fois au lieu de chaque étape de copie, et frise des incidents, classement et tours mis à jour seulement quand ils ont changé.
+- Les listes triées à nouveau (statistiques, rejeux, spectateur) se mettent à jour en une fois au lieu de déplacer les lignes une par une.
+
 ## 0.22.1 (2026-10-06)
 
 ### Corrections

@@ -104,7 +104,11 @@ class Realtime(Overlay):
         self.update_elevation(modified)
 
         # Vehicle position
-        temp_veh_pos = self.display_width * api.read.lap.progress()
+        # Whole pixels: repainted only when mark moves (not on every tick)
+        progress = api.read.lap.progress()
+        if not 0 <= progress <= 1:  # also nan
+            progress = 0.0
+        temp_veh_pos = int(self.display_width * progress)
         if self.veh_pos != temp_veh_pos:
             self.veh_pos = temp_veh_pos
             self.update()
@@ -128,13 +132,14 @@ class Realtime(Overlay):
         painter.drawPixmap(0, 0, self.pixmap_background)
 
         # Draw elevation progress
-        if self.wcfg["show_elevation_progress"]:
+        # Traveled part (source width 0 would draw whole pixmap: nothing drawn at lap start)
+        if self.wcfg["show_elevation_progress"] and self.veh_pos >= 1:
             painter.drawPixmap(0, 0, self.pixmap_progress, 0, 0, self.veh_pos, 0)
 
         # Draw marks
         painter.drawPixmap(0, 0, self.pixmap_marks)
 
-        if self.wcfg["show_elevation_progress_line"]:
+        if self.wcfg["show_elevation_progress_line"] and self.veh_pos >= 1:
             painter.drawPixmap(0, 0, self.pixmap_progress_line, 0, 0, self.veh_pos, 0)
 
         if self.wcfg["show_position_mark"]:

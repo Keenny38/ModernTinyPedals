@@ -1195,6 +1195,8 @@ TRANSLATION = MappingProxyType({
         "depuis l'app.",
     "Installer signature is not valid, update was not installed.":
         "La signature de l'installateur n'est pas valide, la mise à jour n'a pas été installée.",
+    "Installer of custom update repository is not signed, update was not installed.":
+        "L'installateur du dépôt de mise à jour personnalisé n'est pas signé, la mise à jour n'a pas été installée.",
     "Modern Tiny Pedals is a modified version of TinyPedal. Modifications copyright (C) 2026 Steven Vezzu and contributors.":
         "Modern Tiny Pedals est une version modifiée de TinyPedal. "
         "Modifications copyright (C) 2026 Steven Vezzu et contributeurs.",
@@ -2415,6 +2417,8 @@ TRANSLATION = MappingProxyType({
         "Preset introuvable, il a peut-être été renommé ou supprimé.",
     "Unlock the preset to rename it.": "Déverrouillez le preset pour le renommer.",
     "Unlock the preset to delete it.": "Déverrouillez le preset pour le supprimer.",
+    "Destination preset is now loaded or locked, choose another preset.":
+        "Le preset de destination est maintenant chargé ou verrouillé, choisissez-en un autre.",
     "New preset": "Nouveau preset",
     # Lap viewer audit J (D)
     "No channel matches": "Aucun canal ne correspond",

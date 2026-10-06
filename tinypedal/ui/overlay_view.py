@@ -50,10 +50,12 @@ class OverlayView(QWidget):
         """QML page, created on first use"""
         if self.view is None and not self._creating:
             from .quick import create_quick_view
+            from .quick.preview_provider import install_provider as install_preview_provider
 
             self._creating = True  # page shown again while QML loads: one page only
             try:
                 view = create_quick_view(self, "Overlays.qml", {"backend": self.backend}, samples=0)
+                install_preview_provider(view.engine())  # overlay pictures (image://overlaypreview)
             finally:
                 self._creating = False
             view.setAcceptDrops(False)  # preset & plugin files dropped go to main window

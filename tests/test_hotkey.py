@@ -33,6 +33,16 @@ def test_load_hotkey():
     assert load_hotkey("", GENERAL, MODIFIER) == ()
 
 
+def test_modifiers_in_detected_order():
+    """Modifiers sorted like detected key combo (modifier map order), duplicates removed"""
+    assert validate_hotkey("shift+ctrl+f1", GENERAL, MODIFIER) == "ctrl+shift+f1"
+    assert validate_hotkey("alt+ctrl+ctrl+a", GENERAL, MODIFIER) == "ctrl+alt+a"
+    assert load_hotkey("shift+ctrl+f1", GENERAL, MODIFIER) == (17, 16, 112)
+    assert load_hotkey("alt+shift+alt+a", GENERAL, MODIFIER) == (16, 18, 65)
+    codes = sort_key_codes([load_hotkey("alt+shift+ctrl+a", GENERAL, MODIFIER)], MODIFIER)
+    assert codes == load_hotkey("alt+shift+ctrl+a", GENERAL, MODIFIER)
+
+
 def test_sort_key_codes_modifiers_first():
     codes = sort_key_codes([(17, 65), (16, 18, 32)], MODIFIER)
     assert codes[:3] == (17, 16, 18)
@@ -174,6 +184,20 @@ def test_load_shortcut_preset(commands, monkeypatch, tmp_path):
     assert loaded == ["race.json"] and "reload" in commands
 
 
+def test_load_shortcut_preset_rejects_reserved_name(commands, monkeypatch, tmp_path):
+    """brands.json (style file) never loaded as a preset, then saved over"""
+    from tinypedal.setting import cfg
+
+    key = next(iter(cfg.user.shortcuts))
+    loaded = []
+    monkeypatch.setattr(type(cfg), "set_next_to_load", lambda self, filename: loaded.append(filename))
+    (tmp_path / "settings" / "brands.json").write_text("{}", encoding="utf-8")
+    cfg.user.shortcuts[key]["preset"] = "brands"
+    command.hotkey_load_preset(key)
+    assert loaded == [] and "reload" not in commands
+    assert cfg.user.shortcuts[key]["preset"] == ""
+
+
 def test_pace_notes_playback_and_quit(commands):
     from tinypedal.setting import cfg
 
@@ -257,6 +281,15 @@ def test_hotkey_not_repeated_when_longer_combo_released(ui_env, monkeypatch):
     states = [{ctrl, key_a}, {ctrl, shift, key_a}, {ctrl, key_a}, {ctrl, key_a}]
     binds = {"overlay_lock": "ctrl+a", "overlay_auto_hide": "ctrl+shift+a"}
     assert run_hotkeys(monkeypatch, states, binds) == ["overlay_lock", "overlay_auto_hide"]
+
+
+@WINDOWS_KEYS
+def test_hotkey_with_modifiers_in_any_order(ui_env, monkeypatch):
+    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+
+    ctrl, shift, key_f1 = KEYMAP_MODIFIER["ctrl"], KEYMAP_MODIFIER["shift"], KEYMAP_GENERAL["f1"]
+    states = [set(), {ctrl, shift, key_f1}]
+    assert run_hotkeys(monkeypatch, states, {"overlay_lock": "shift+ctrl+f1"}) == ["overlay_lock"]
 
 
 def test_hotkey_control_stops_without_commands(ui_env, monkeypatch):

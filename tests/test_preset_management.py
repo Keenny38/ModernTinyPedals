@@ -138,6 +138,93 @@ def test_transfer_selected_option_types(presets, monkeypatch):
         flush()
 
 
+@pytest.mark.parametrize("name", [
+    "CON", "con", "nul.json", "Aux.txt", "prn ", "COM1", "lpt9", "a\x01b", "tab\tname"])
+def test_reserved_and_control_character_names_refused(presets, name):
+    from tinypedal.ui.preset_management import check_preset_name
+    from tinypedal.validator import is_allowed_filename
+
+    assert check_preset_name(name) == "Invalid preset name."
+    assert not is_allowed_filename(name.removesuffix(".json"))
+
+
+@pytest.mark.parametrize("name", ["console", "com10", "lpt", "nullable", "aux race"])
+def test_names_close_to_reserved_allowed(presets, name):
+    from tinypedal.ui.preset_management import check_preset_name
+
+    assert check_preset_name(name) == ""
+
+
+@pytest.fixture
+def loaded_a(presets, monkeypatch):
+    """Preset a loaded, flush & reload recorded (reload refused: nothing loaded)"""
+    from tinypedal import app_signal
+
+    calls = []
+    monkeypatch.setattr(cfg.filename, "setting", "a.json")
+    monkeypatch.setattr(cfg, "_setting_to_load", "")
+    monkeypatch.setattr(type(cfg), "flush", lambda self, *args, **kwargs: calls.append("flush") or True)
+    reloaded = []
+    app_signal.reload.connect(reloaded.append)
+    yield calls, reloaded
+    app_signal.reload.disconnect(reloaded.append)
+
+
+def test_rename_loaded_preset_follows_new_name(loaded_a, monkeypatch):
+    from tinypedal.ui import preset_management
+
+    calls, reloaded = loaded_a
+    rename = os.rename
+    monkeypatch.setattr(preset_management.os, "rename", lambda *args: calls.append("rename") or rename(*args))
+    create(mode="rename", source="a.json", name="renamed")
+    assert calls == ["flush", "rename"]  # queued save written before rename, not re-creating a.json
+    assert exists("renamed.json") and not exists("a.json")
+    # Even if reload is refused (config page with unsaved changes), saves go to renamed preset
+    assert cfg.filename.setting == "renamed.json" and reloaded == [True]
+    flush()
+
+
+def test_duplicate_loaded_preset_flushes_first(loaded_a):
+    calls, _ = loaded_a
+    create(mode="duplicate", source="a.json", name="copy")
+    assert calls == ["flush"] and exists("copy.json") and cfg.filename.setting == "a.json"
+    create(mode="duplicate", source="b.json", name="copy b")  # not loaded: no flush needed
+    assert calls == ["flush"]
+    flush()
+
+
+@pytest.mark.parametrize("change", ["loaded", "locked"])
+def test_transfer_refused_if_destination_loaded_or_locked_meanwhile(presets, monkeypatch, change):
+    from tinypedal.ui import preset_management
+
+    monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cfg.filename, "setting", "a.json")
+    monkeypatch.setattr(cfg.user, "filelock", {})
+    dialog = preset_management.PresetTransfer(None)
+    try:
+        dialog.dest_selector.setCurrentText("b")
+        for listbox in (dialog.listbox_setting, dialog.listbox_options):
+            for row in range(listbox.count()):
+                listbox.itemWidget(listbox.item(row)).setChecked(True)
+        with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
+            before = file.read()
+        if change == "loaded":  # auto-loaded since page was opened
+            monkeypatch.setattr(cfg.filename, "setting", "b.json")
+        else:
+            cfg.user.filelock["b.json"] = {"version": "1.0"}
+        dialog.transfer()
+        assert presets == ["Destination preset is now loaded or locked, choose another preset."]
+        with open(f"{cfg.path.settings}b.json", encoding="utf-8") as file:
+            assert file.read() == before
+        choices = [dialog.dest_selector.itemText(index) for index in range(dialog.dest_selector.count())]
+        assert "b" not in choices
+        assert dialog.loaded_preset == cfg.filename.setting[:-5]
+    finally:
+        dialog.set_unmodified()
+        dialog.close()
+        flush()
+
+
 def test_list_header_select_all(presets):
     from tinypedal.ui import preset_management
 

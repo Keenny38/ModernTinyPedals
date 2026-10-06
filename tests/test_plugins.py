@@ -355,3 +355,152 @@ def test_module_reload_discard_reaches_data_modules(ui_env, monkeypatch):
     control.reload("module_fake")
     assert created[0].stop_args == ((), {"discard": True})
     assert created[1].stop_args == ((), {})
+
+def make_plugin_zip(path, name: str = "my_gauge"):
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{name}/widget.py", "Realtime = object")
+        archive.writestr(f"{name}/setting.json", "{}")
+        archive.writestr(f"{name}/extra.py", "x = 1")
+    return path
+
+
+def test_install_corrupt_package_is_value_error(tmp_path):
+    from tinypedal.plugin_loader import install_plugin_package
+
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"not a zip file")
+    with pytest.raises(ValueError, match="invalid package"):
+        install_plugin_package(str(bad), str(tmp_path / "plugins"))
+
+
+@pytest.mark.parametrize("error", [RuntimeError("encrypted"), NotImplementedError("compression")])
+def test_install_failure_leaves_no_partial_plugin(tmp_path, monkeypatch, error):
+    """Encrypted or unsupported member mid-extraction: ValueError, no folder left, reinstall works"""
+    import zipfile
+
+    from tinypedal.plugin_loader import install_plugin_package
+
+    package = make_plugin_zip(tmp_path / "plugin.zip")
+    folder = tmp_path / "plugins"
+    original_read = zipfile.ZipFile.read
+    calls = []
+
+    def failing_read(self, name, pwd=None):
+        calls.append(name)
+        if len(calls) == 2:
+            raise error
+        return original_read(self, name, pwd)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", failing_read)
+    with pytest.raises(ValueError, match="invalid package"):
+        install_plugin_package(str(package), str(folder))
+    assert list(folder.iterdir()) == []  # no partial plugin, no temporary folder
+    monkeypatch.setattr(zipfile.ZipFile, "read", original_read)
+    assert install_plugin_package(str(package), str(folder)) == "plugin_my_gauge"
+    assert sorted(path.name for path in (folder / "my_gauge").iterdir()) == ["extra.py", "setting.json", "widget.py"]
+    assert [path.name for path in folder.iterdir()] == ["my_gauge"]
+
+
+def test_trust_refused_if_code_changed_after_confirmation(tmp_path, trust_file):
+    make_plugin(tmp_path, "gauge", "Realtime = object", trusted=False)
+    shown = plugin_digest(str(tmp_path / "gauge"))
+    (tmp_path / "gauge" / "widget.py").write_text("Realtime = int", encoding="utf-8")  # changed meanwhile
+    with pytest.raises(ValueError, match="changed"):
+        trust_plugin("plugin_gauge", str(tmp_path), expected_digest=shown)
+    assert not trust_file.exists() and not is_trusted("plugin_gauge", str(tmp_path))
+    current = plugin_digest(str(tmp_path / "gauge"))
+    assert trust_plugin("plugin_gauge", str(tmp_path), expected_digest=current) == current
+    assert is_trusted("plugin_gauge", str(tmp_path))
+
+
+def test_plugin_manager_trusts_reviewed_code_only(ui_env, tmp_path, monkeypatch):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    from tinypedal.ui.plugin_manager import PluginManager
+
+    monkeypatch.chdir(tmp_path)
+    make_plugin(tmp_path / "plugins", "gauge", "Realtime = object", trusted=False)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda parent, title, text, *a, **k: warnings.append(text)))
+    manager = PluginManager(None)
+
+    def confirm_then_change(*args, **kwargs):  # code replaced while trust dialog is shown
+        (tmp_path / "plugins" / "gauge" / "widget.py").write_text("Realtime = int", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(manager, "confirm_operation", confirm_then_change)
+    monkeypatch.setattr(manager, "selected_name", lambda: "plugin_gauge")
+    try:
+        manager.trust_selected()
+        assert warnings and "changed" in warnings[0]
+        assert not is_trusted("plugin_gauge", "plugins")
+    finally:
+        manager.close()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_temporary_install_folder_skipped_silently(tmp_path, caplog):
+    make_plugin(tmp_path, "good", "Realtime = object")
+    (tmp_path / ".good.installing").mkdir()
+    with caplog.at_level("WARNING", logger=plugin_loader.__name__):
+        assert list(discover_plugins(str(tmp_path))) == ["plugin_good"]
+    assert "invalid folder name" not in caplog.text
+
+
+def test_install_with_locked_leftover_temporary_folder(tmp_path, monkeypatch):
+    """Leftover temporary folder that cannot be removed (locked): install uses another one"""
+    import shutil
+
+    from tinypedal.plugin_loader import install_plugin_package
+
+    package = make_plugin_zip(tmp_path / "plugin.zip")
+    folder = tmp_path / "plugins"
+    leftover = folder / ".my_gauge.installing"
+    leftover.mkdir(parents=True)
+    (leftover / "widget.py").write_text("locked", encoding="utf-8")
+    original_rmtree = shutil.rmtree
+
+    def locked_rmtree(path, ignore_errors=False, **kwargs):
+        if str(path) == str(leftover):
+            if not ignore_errors:
+                raise PermissionError(32, "locked")
+            return
+        original_rmtree(path, ignore_errors=ignore_errors, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", locked_rmtree)
+    assert install_plugin_package(str(package), str(folder)) == "plugin_my_gauge"
+    assert sorted(path.name for path in folder.iterdir()) == [".my_gauge.installing", "my_gauge"]
+    assert list(discover_plugins(str(folder))) == ["plugin_my_gauge"]
+
+
+def test_install_rename_retried_while_locked(tmp_path, monkeypatch):
+    """Antivirus briefly locks extracted files: rename retried, then given up"""
+    import os
+
+    from tinypedal.plugin_loader import install_plugin_package
+
+    package = make_plugin_zip(tmp_path / "plugin.zip")
+    folder = tmp_path / "plugins"
+    original_rename = os.rename
+    attempts = []
+
+    def busy_rename(source, target):
+        attempts.append(source)
+        if len(attempts) <= failures:
+            raise PermissionError(5, "access denied")
+        original_rename(source, target)
+
+    monkeypatch.setattr(plugin_loader.os, "rename", busy_rename)
+    monkeypatch.setattr(plugin_loader.time, "sleep", lambda seconds: None)
+    failures = 2
+    assert install_plugin_package(str(package), str(folder)) == "plugin_my_gauge"
+    assert len(attempts) == 3
+    original_rename(folder / "my_gauge", tmp_path / "moved")
+    attempts.clear()
+    failures = 99
+    with pytest.raises(PermissionError):
+        install_plugin_package(str(package), str(folder))
+    assert len(attempts) == 4 and list(folder.iterdir()) == []  # temporary folder removed

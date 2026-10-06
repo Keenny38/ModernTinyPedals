@@ -106,6 +106,23 @@ def test_track_info_waits_for_driving(tele, monkeypatch):
     assert output.sunlightPhases is not None
 
 
+def test_pit_lane_calibration_saved_when_module_stops(tele, ui_env):
+    from tinypedal.module._base import MODULE_STOP
+    from tinypedal.setting import cfg
+
+    output = MappingInfo()
+    gen = module_mapping.record_track_info(output)
+    tele.update({"vehicle.in_pits": False, "vehicle.speed": 50.0, "lap.distance": 3500.0})
+    gen.send(1)
+    tele.update({"vehicle.in_pits": True, "lap.distance": 3800.0})
+    gen.send(1)
+    assert "SimTrack" not in cfg.user.tracks or cfg.user.tracks["SimTrack"].get("pit_entry") != 3800.0
+    tele["session.track_name"] = "Other"  # module stopping (quit, preset reload): saved, nothing reloaded
+    gen.send(MODULE_STOP)
+    assert cfg.user.tracks["SimTrack"]["pit_entry"] == 3800.0
+    assert "Other" not in cfg.user.tracks
+
+
 # --- Mapping: track map
 def drive_map_lap(tele: dict, gen, lap_start: float, points: int = 40, length: float = 4000.0):
     """Drive one lap around a square, crossing sector lines at 1/3 & 2/3"""
@@ -157,6 +174,27 @@ def test_track_map_discarded_without_valid_lap_time(tele, tmp_path):
     gen.send(1)
     gen.send(1)
     assert not (tmp_path / "SimTrack.svg").exists()
+
+
+def test_track_map_discarded_for_pit_lap(tele, tmp_path):
+    filepath = f"{tmp_path.as_posix()}/"
+    output = MappingInfo()
+    gen = module_mapping.record_track_map(output, filepath)
+    tele.update({"timing.start": 0.0, "timing.last_laptime": -1.0})
+    gen.send(1)
+    tele["vehicle.in_pits"] = True  # lap through pit lane
+    drive_map_lap(tele, gen, lap_start=10.0)
+    tele["vehicle.in_pits"] = False
+    tele.update({"timing.start": 100.0, "timing.current_laptime": 2.0, "timing.last_laptime": 90.0})
+    gen.send(1)
+    gen.send(1)
+    assert not (tmp_path / "SimTrack.svg").exists()
+    # Next lap without pit visit is saved
+    drive_map_lap(tele, gen, lap_start=100.0)
+    tele.update({"timing.start": 190.0, "timing.current_laptime": 2.0, "timing.last_laptime": 90.0})
+    gen.send(1)
+    gen.send(1)
+    assert (tmp_path / "SimTrack.svg").exists()
 
 
 def test_existing_track_map_not_recorded_again(tele, tmp_path):
@@ -302,6 +340,32 @@ def test_save_driver_stats_keeps_best_and_adds_totals(tmp_path):
     assert stats.pb == 90.0 and stats.valid == 5 and stats.meters == 1500.0
     driver_stats.save_driver_stats(("", "Car"), driver_stats.DriverStats(valid=9), filepath)  # invalid key ignored
     assert driver_stats.load_driver_stats(keys, filepath).valid == 5
+
+
+def test_load_driver_stats_converts_value_type(tmp_path):
+    """Hand-edited or damaged value (null, text, bool) converted or reverted to default, never kept"""
+    import json
+
+    filepath = f"{tmp_path.as_posix()}/"
+    stats_file = {"Track": {"Car": {"pb": None, "meters": "12.5", "valid": "12.5", "wins": True, "races": "3", "x": 1}}}
+    (tmp_path / f"driver{driver_stats.FileExt.STATS}").write_text(json.dumps(stats_file), encoding="utf-8")
+    stats = driver_stats.load_driver_stats(("Track", "Car"), filepath)
+    default = driver_stats.DriverStats()
+    assert stats.pb == default.pb and stats.meters == 12.5 and stats.races == 3
+    assert stats.valid == default.valid and stats.wins == 1
+    assert all(type(getattr(stats, key)) is type(getattr(default, key)) for key in vars(default))
+
+
+def test_load_driver_stats_rejects_nan_and_inf(tmp_path):
+    """"nan"/"inf" text or NaN/Infinity literal: default, as a nan best lap would never improve"""
+    filepath = f"{tmp_path.as_posix()}/"
+    (tmp_path / f"driver{driver_stats.FileExt.STATS}").write_text(
+        '{"Track": {"Car": {"pb": "nan", "qb": NaN, "rb": "-inf", "meters": Infinity, "seconds": "12.5",'
+        ' "valid": "inf"}}}', encoding="utf-8")
+    stats = driver_stats.load_driver_stats(("Track", "Car"), filepath)
+    default = driver_stats.DriverStats()
+    assert (stats.pb, stats.qb, stats.rb, stats.meters) == (default.pb, default.qb, default.rb, default.meters)
+    assert stats.seconds == 12.5 and stats.valid == default.valid
 
 
 def test_save_driver_stats_fixes_wrong_types(tmp_path):

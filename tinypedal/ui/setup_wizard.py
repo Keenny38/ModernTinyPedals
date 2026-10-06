@@ -152,6 +152,7 @@ class SetupWizard(QDialog):
 
     def __init__(self, parent, detect_games: bool = True):
         from .quick import create_quick_view
+        from .quick.preview_provider import install_provider as install_preview_provider
         from .quick.setup_backend import SetupBackend
 
         super().__init__(parent)
@@ -166,6 +167,7 @@ class SetupWizard(QDialog):
         self.backend.languageChanged.connect(self.retranslate)
         self.view = create_quick_view(
             self, "SetupWizard.qml", {"backend": self.backend, "i18n": self.backend.translator}, samples=0)
+        install_preview_provider(self.view.engine())  # overlay pictures (image://overlaypreview)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)

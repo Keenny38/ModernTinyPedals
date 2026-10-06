@@ -44,6 +44,7 @@ import logging
 import select
 import socket
 import struct
+import sys
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,11 +67,31 @@ STREAM_INTERVAL = 100  # ms, default push interval
 STREAM_INTERVAL_RANGE = (20, 5000)
 
 
+class LocalHTTPServer(ThreadingHTTPServer):
+    """Threading HTTP server, port held exclusively on Windows
+
+    SO_REUSEADDR on Windows lets a second server bind a listening port in use,
+    SO_EXCLUSIVEADDRUSE makes bind fail instead (port unavailable reported).
+    """
+
+    if sys.platform == "win32":
+        allow_reuse_address = False
+
+        def server_bind(self):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
+
 def available_commands() -> dict[str, Callable]:
     """Available commands (same as hotkey commands): name -> function"""
     from .hotkey.command import COMMANDS_GENERAL, COMMANDS_MODULE, COMMANDS_PRESET, COMMANDS_WIDGET
 
     return dict(chain(COMMANDS_GENERAL, COMMANDS_PRESET, COMMANDS_MODULE, COMMANDS_WIDGET))
+
+
+def bind_error_text(error: Exception) -> str:
+    """Server bind error reason (OverflowError has no strerror)"""
+    return getattr(error, "strerror", None) or str(error)
 
 
 def is_allowed_host(host: str | None, port: int) -> bool:
@@ -199,6 +220,8 @@ class CommandHandler(BaseHTTPRequestHandler):
     """Command request handler"""
 
     server_version = "TinyPedal"
+    timeout = 15  # idle client releases its thread
+    stream_timeout = 5  # WebSocket send timeout, server can stop a stream to a stalled client
     commands: dict[str, Callable] = {}
     snapshot: Callable[[], dict] = staticmethod(default_snapshot)
     stopping = threading.Event()
@@ -261,6 +284,7 @@ class CommandHandler(BaseHTTPRequestHandler):
         interval = stream_interval(self.path)
         options = StreamOptions.from_path(self.path)
         sock = self.connection
+        sock.settimeout(self.stream_timeout)  # client not reading: sendall times out (OSError), never blocks
         logger.info("REMOTE CONTROL: stream client connected (%sms)", round(interval * 1000))
         try:
             while not self.stopping.is_set():
@@ -306,7 +330,7 @@ class CommandServer:
     __slots__ = ("_server", "_thread")
 
     def __init__(self):
-        self._server: ThreadingHTTPServer | None = None
+        self._server: LocalHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -322,10 +346,10 @@ class CommandServer:
         CommandHandler.commands = available_commands()
         CommandHandler.stopping.clear()
         try:
-            self._server = ThreadingHTTPServer((HOST, port), CommandHandler)
-        except OSError as error:
+            self._server = LocalHTTPServer((HOST, port), CommandHandler)
+        except (OSError, OverflowError) as error:  # OverflowError: port out of range
             logger.error("REMOTE CONTROL: unable to listen on %s:%s (%s)", HOST, port, error)
-            app_signal.error.emit(f"Remote control: port {port} unavailable ({error.strerror}).")
+            app_signal.error.emit(f"Remote control: port {port} unavailable ({bind_error_text(error)}).")
             return
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Remote control")

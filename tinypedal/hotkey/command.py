@@ -130,12 +130,13 @@ def hotkey_load_preset(preset_key: str):
     if not preset_name:
         logger.error("USERDATA: preset not found, abort loading")
         return
-    filename = f"{preset_name}{FileExt.JSON}"
-    if os.path.exists(f"{cfg.path.settings}{filename}"):
+    # Verify name (reserved names such as "brands" are not presets) & file
+    filename = cfg.get_primary_preset_name(preset_name)
+    if filename:
         cfg.set_next_to_load(filename)
         app_signal.reload.emit(True)
     else:
-        logger.error("USERDATA: %s file not found, abort loading", filename)
+        logger.error("USERDATA: %s%s preset not found or invalid, abort loading", preset_name, FileExt.JSON)
         cfg.user.shortcuts[preset_key]["preset"] = ""
         cfg.save(config_type=ConfigType.SHORTCUTS)
         app_signal.refresh.emit(True)

@@ -50,12 +50,14 @@ import logging
 import os
 import re
 import secrets
+import socket
 import struct
 import threading
 import time
 import zlib
+from contextlib import suppress
 from html import escape
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -64,6 +66,7 @@ from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_signal
+from .command_server import LocalHTTPServer, bind_error_text
 from .const_file import ConfigType, FontFile
 from .i18n import current_language, tr
 from .process import results_file as rf
@@ -166,6 +169,17 @@ def canvas_screen(widgets: list[QWidget]):
     return QGuiApplication.primaryScreen()
 
 
+def screens_key() -> tuple:
+    """Screens & their place, size, scale (canvas found again when changed)"""
+    return tuple(
+        (screen, screen.geometry().getRect(), screen.devicePixelRatio()) for screen in QGuiApplication.screens())
+
+
+def paint_serial(widget: QWidget) -> int | None:
+    """Overlay window change count (widget._base.PaintCounter), None if not counted"""
+    return getattr(widget, "paint_serial", None)
+
+
 class OverlayCapture(QObject):
     """Overlay images copied while a source is watching (GUI thread), handed to frame store"""
 
@@ -173,6 +187,9 @@ class OverlayCapture(QObject):
         super().__init__()
         self.store = store
         self._checksums: dict[str, int] = {}
+        self._serials: dict[str, tuple[int, int]] = {}  # window id & paint serial of last copy
+        self._canvas_key: tuple | None = None
+        self._canvas: tuple[QPoint, float, tuple[int, int]] = (QPoint(0, 0), 1.0, (0, 0))
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.capture)
 
@@ -186,41 +203,62 @@ class OverlayCapture(QObject):
     def stop(self):
         self._timer.stop()
         self._checksums.clear()
+        self._serials.clear()
+        self._canvas_key = None
 
     def capture(self):
         watched = self.store.watched()
         if not watched:
             if self._checksums:  # nobody watching: next source gets fresh images
                 self._checksums.clear()
+                self._serials.clear()
                 self.store.clear()
             return
         overlays = stream_overlays()
         everything = LAYOUT in watched
-        screen = canvas_screen([widget for _, widget in overlays])
-        if screen is not None:
-            origin, ratio = screen.geometry().topLeft(), screen.devicePixelRatio()
-            canvas = (round(screen.geometry().width() * ratio), round(screen.geometry().height() * ratio))
-        else:  # no screen (headless)
-            origin, ratio, canvas = QPoint(0, 0), 1.0, (0, 0)
+        origin, ratio, canvas = self.canvas([widget for _, widget in overlays])
         images: dict[str, QImage] = {}
         shown: list[Placement] = []
         for name, widget in overlays:
             if not everything and name not in watched:
                 continue
-            image = window_image(widget)
-            if image is None:
-                continue
-            checksum = image_checksum(image)
-            if self._checksums.get(name) != checksum:
-                self._checksums[name] = checksum
-                images[name] = image
+            serial = paint_serial(widget)
+            last = self._serials.get(name)
+            if serial is None or last != (id(widget), serial) or name not in self._checksums:
+                image = window_image(widget)  # changed since last copy (or not counted)
+                if image is None:
+                    continue
+                checksum = image_checksum(image)
+                if self._checksums.get(name) != checksum:
+                    self._checksums[name] = checksum
+                    images[name] = image
+                if serial is None:
+                    self._serials.pop(name, None)
+                else:
+                    self._serials[name] = (id(widget), serial)
             position = widget.pos() - origin
             shown.append(Placement(name, round(position.x() * ratio), round(position.y() * ratio),
                                    round(stream_opacity(widget), 3)))
         names = {placement.name for placement in shown}
         for name in [name for name in self._checksums if name not in names]:
             del self._checksums[name]  # gone: image sent again when back
+            self._serials.pop(name, None)
         self.store.publish(images, shown, canvas)
+
+    def canvas(self, widgets: list[QWidget]) -> tuple[QPoint, float, tuple[int, int]]:
+        """Canvas origin, scale & size (screen pixels), found again when an overlay moved or screens changed"""
+        key = (tuple(widget.geometry().getRect() for widget in widgets), screens_key())
+        if key != self._canvas_key:
+            screen = canvas_screen(widgets)
+            if screen is not None:
+                ratio = screen.devicePixelRatio()
+                geometry = screen.geometry()
+                self._canvas = (
+                    geometry.topLeft(), ratio, (round(geometry.width() * ratio), round(geometry.height() * ratio)))
+            else:  # no screen (headless)
+                self._canvas = (QPoint(0, 0), 1.0, (0, 0))
+            self._canvas_key = key
+        return self._canvas
 
 
 # Frames (shared by GUI & server threads)
@@ -599,10 +637,38 @@ class StreamHandler(BaseHTTPRequestHandler):
         pass  # every frame is a request
 
 
-class StreamServer(ThreadingHTTPServer):
-    """Stream overlay HTTP server, client errors (dropped connection) only logged"""
+class StreamServer(LocalHTTPServer):
+    """Stream overlay HTTP server, client errors (dropped connection) only logged
+
+    Open (keep-alive) connections tracked: server_close() leaves them open,
+    close_connections() ends them so a client stops receiving frames.
+    """
 
     daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        self._connections: set[socket.socket] = set()
+        self._connections_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        with self._connections_lock:
+            self._connections.add(request)
+        super().process_request(request, client_address)
+
+    def shutdown_request(self, request):
+        with self._connections_lock:
+            self._connections.discard(request)
+        super().shutdown_request(request)
+
+    def close_connections(self):
+        """Shut down open client connections"""
+        with self._connections_lock:
+            connections = tuple(self._connections)
+            self._connections.clear()
+        for sock in connections:
+            with suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
 
     def handle_error(self, request, client_address):
         logger.debug("STREAM OVERLAY: request from %s failed", client_address[0], exc_info=True)
@@ -661,7 +727,7 @@ class StreamOverlay:
 
     def url(self, path: str, query: str = "", host: str = "") -> str:
         """Address of a source with access token"""
-        base = host or self.base_urls()[0]
+        base = host or f"http://127.0.0.1:{self.port()}"  # = base_urls()[0], without LAN address lookup
         extra = f"&{query}" if query else ""
         return f"{base}{path}?token={quote(self.access_token())}{extra}"
 
@@ -680,9 +746,9 @@ class StreamOverlay:
         if self._server is None:
             try:
                 self._server = StreamServer(address, StreamHandler)
-            except OSError as error:
+            except (OSError, OverflowError) as error:  # OverflowError: port out of range
                 logger.error("STREAM OVERLAY: unable to listen on %s:%s (%s)", *address, error)
-                app_signal.error.emit(f"Stream overlay: port {address[1]} unavailable ({error.strerror}).")
+                app_signal.error.emit(f"Stream overlay: port {address[1]} unavailable ({bind_error_text(error)}).")
                 return
             self._address = address
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Stream overlay")
@@ -700,6 +766,7 @@ class StreamOverlay:
             return
         self._server.shutdown()
         self._server.server_close()
+        self._server.close_connections()
         self._server = None
         self._thread = None
         self._address = None

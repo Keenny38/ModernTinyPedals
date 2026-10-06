@@ -453,7 +453,14 @@ def test_enable_required_modules(ui_env, monkeypatch):
     from tinypedal.setting import cfg
 
     started = []
-    monkeypatch.setattr(module_control.ModuleControl, "start", lambda self, name="": started.append(name))
+    active = {}
+
+    def start(self, name=""):
+        started.append(name)
+        active[name] = object()
+
+    monkeypatch.setattr(module_control.ModuleControl, "start", start)
+    monkeypatch.setattr(module_control.mctrl, "active_modules", active)
     cfg.user.setting["module_wheels"]["enable"] = False
     widget = new_widget({"enable_required_modules": True})
     try:

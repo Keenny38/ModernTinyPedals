@@ -74,6 +74,7 @@ class Game:
         self.speed = 40.0
         self.laps = 0
         self.pitstops = 0
+        self.invalid_laps: set[int] = set()  # laps invalidated by game (track limits)
 
     def reader(self):
         return SimpleNamespace(
@@ -84,7 +85,7 @@ class Game:
                 elapsed=lambda: self.elapsed,
                 reference_laptime=lambda laptime=0.0: laptime,
             ),
-            lap=SimpleNamespace(distance=lambda: self.distance),
+            lap=SimpleNamespace(distance=lambda: self.distance, invalidated=lambda: self.laps in self.invalid_laps),
             vehicle=SimpleNamespace(
                 in_pits=lambda: self.in_pits, speed=lambda: self.speed, number_pitstops=lambda: self.pitstops),
             session=SimpleNamespace(
@@ -229,6 +230,36 @@ def test_last_lap_comparable_after_flying_lap(driver):
     driver.lap(100.0)
     driver.lap(99.0)
     assert driver.output.isDeltaAvailable and driver.output.hasLastLap
+
+
+def test_pace_ignores_pit_lap(driver):
+    """Pace validated 1 s after line: lap with pit stop (completed lap) never enters pace"""
+    for laptime in (100.0, 98.0):
+        driver.lap(laptime)
+    assert driver.output.lapTimePace == 98.0
+    driver.pit_stop()  # early in lap: the lap now completed has a pit visit, new lap does not
+    driver.lap(160.0)
+    assert driver.output.lapTimePace == 98.0  # not EMA of 160 s lap (was capped at 98 + margin)
+    driver.lap(99.0)  # flying lap after pit lap enters pace
+    assert 98.0 < driver.output.lapTimePace < 99.0
+
+
+def test_invalidated_lap_never_best(driver):
+    """Lap invalidated by game (track limits): no delta best (file), session or stint best, pace"""
+    driver.game.invalid_laps.add(2)  # third lap (first partial)
+    for laptime in (100.0, 98.0, 95.0):
+        driver.lap(laptime)
+    output = driver.output
+    assert driver.bests() == (98.0, 98.0) and output.lapTimeBest == 98.0
+    assert output.lapTimePace == 98.0
+    assert output.deltaBestData[-1][1] == 98.0
+    # Clean lap after invalid one counts (flag of new lap reset at line)
+    driver.lap(97.0)
+    assert driver.bests() == (97.0, 97.0) and output.lapTimeBest == 97.0
+    # Delta best file never had the invalid lap: module restart loads 97 s lap
+    driver.start_module()
+    driver.tick()
+    assert output.lapTimeBest == 97.0
 
 
 @pytest.fixture

@@ -152,7 +152,8 @@ class AppSettings(BaseDialog):
         with suppress(RuntimeError, TypeError):  # closed twice
             app_signal.refresh.disconnect(self.refresh)
         view, self.view = self.view, None  # type: ignore[assignment]
-        view.setSource(QUrl())  # QML gone before the backend it binds to
+        if view is not None:  # closed twice (nested event loop while asking to save)
+            view.setSource(QUrl())  # QML gone before the backend it binds to
 
     def reject(self):
         """Esc: close, asking to save pending changes"""
@@ -189,8 +190,11 @@ class AppSettings(BaseDialog):
             os.makedirs(folder, exist_ok=True)
         if os.path.isdir(folder):
             if sys.platform == "win32":  # platform check also read by type checker
-                os.startfile(folder)
-                return
+                try:
+                    os.startfile(folder)
+                    return
+                except OSError:  # no associated application, access denied: try Qt below
+                    pass
             if QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
                 return
         QMessageBox.warning(self, tr("Error"), trm(f"Cannot open folder:<br><b>{folder}</b>"))

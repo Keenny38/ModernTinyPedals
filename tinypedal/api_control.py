@@ -26,7 +26,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from . import api_connector, realtime_state
-from .const_api import API_MAP_ALIAS
+from .const_api import API_DEFAULT_NAME, API_MAP_ALIAS
 from .setting import cfg
 
 if TYPE_CHECKING:
@@ -42,8 +42,11 @@ def _set_available_api(enable_legacy: bool):
         api_connector.SimLMULegacy,
         api_connector.SimRF2,
     )
-    # Sort API by name
-    api_gen = (_api for _api in available_api if not _api.LEGACY or enable_legacy)
+    # Sort API by name, platform default always selectable (legacy API on Linux)
+    api_gen = (
+        _api for _api in available_api
+        if not _api.LEGACY or enable_legacy or _api.NAME == API_DEFAULT_NAME
+    )
     return tuple(sorted(api_gen, key=lambda _api:_api.NAME))
 
 
@@ -94,7 +97,8 @@ class APIControl:
                 return
 
         logger.warning("CONNECTING: Invalid API name, fall back to default")
-        self._api = self._available_api[0]()
+        default = next((_api for _api in self._available_api if _api.NAME == API_DEFAULT_NAME), None)
+        self._api = (default or self._available_api[0])()
         cfg.api_name = self._api.NAME
 
     def start(self):
@@ -113,7 +117,9 @@ class APIControl:
         logger.info("CONNECTED: %s API (%s)", self._connected.NAME, self.read.state.version())
 
     def stop(self):
-        """Stop API"""
+        """Stop API (no-op once closed, close() may run twice: failed restart then quit)"""
+        if self._api is None:
+            return
         logger.info("DISCONNECTING: %s API (%s)", self._connected.NAME, self.read.state.version())
         self._connected.stop()
         logger.info("DISCONNECTED: %s API", self._connected.NAME)

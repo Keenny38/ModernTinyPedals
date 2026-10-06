@@ -124,6 +124,7 @@ class Realtime(DamagePainter, ModernOverlay):
         self.impact_position = (0.0, 0.0)
         self.impact_visible = False
         self.last_impact_time = None
+        self.impact_old = False  # impact of a previous session (impact time ahead of elapsed)
 
     # Black box painter helpers
     def pulse(self) -> float:
@@ -185,7 +186,14 @@ class Realtime(DamagePainter, ModernOverlay):
             if self.last_impact_time != impact_time:
                 self.last_impact_time = impact_time
                 self.impact_position = vehicle.impact_position()
-            self.impact_visible = bool(impact_time) and api.read.timing.elapsed() - impact_time <= self.cone_duration
+                self.impact_old = False
+            # Impact time not reset on a new session while elapsed restarts: negative age = old impact,
+            # kept hidden even once elapsed catches up with it
+            impact_age = api.read.timing.elapsed() - impact_time
+            if impact_age < 0:
+                self.impact_old = True
+            self.impact_visible = (
+                bool(impact_time) and not self.impact_old and 0 <= impact_age <= self.cone_duration)
         self.body_damage = tuple(vehicle.damage_severity())
         self.damage_aero = vehicle.aero_damage()
         self.damage_detached = tuple(api.read.wheel.is_detached())

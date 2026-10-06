@@ -23,7 +23,7 @@ Menu
 import os
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QActionGroup, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import QMenu, QMessageBox
 
@@ -380,14 +380,10 @@ class ConfigMenu(QMenu):
                 filepath = filepath.replace("/", "\\")
                 if sys.platform == "win32":  # platform check also read by type checker
                     os.startfile(filepath)
-            except (FileNotFoundError, RuntimeError):
+            except (OSError, RuntimeError):  # missing folder, no associated application, access denied
                 error = True
-        else:  # Linux
-            try:
-                import subprocess
-                subprocess.run(["xdg-open", filepath], check=True)
-            except (FileNotFoundError, subprocess.SubprocessError):
-                error = True
+        else:  # Linux: opened asynchronously, GUI never waits for file manager
+            error = not QDesktopServices.openUrl(QUrl.fromLocalFile(filepath))
         if error:
             QMessageBox.warning(
                 self._parent,

@@ -45,6 +45,7 @@ from ..i18n import current_language, tr, trm
 from ..setting import cfg
 from ..update import (
     DownloadCancelled,
+    UnsignedInstallerError,
     can_auto_update,
     download_installer,
     is_portable_copy,
@@ -68,17 +69,20 @@ def main_window() -> QWidget | None:
     return None
 
 
-def install_update(window: QWidget | None, path: str) -> bool:
+def install_update(window: QWidget | None, path: str, repository: str | None = None) -> bool:
     """Run downloaded installer then quit, False if cancelled or installer not started
 
     Open pages are closed first (each may ask to save changes): cancelling keeps app as is,
     installer is only started once app can quit.
+
+    Args:
+        repository: update repository the installer was downloaded from, None for current setting.
     """
     close_pages = getattr(window, "close_pages_for_quit", None)
     if callable(close_pages) and not close_pages():
         return False
     try:
-        run_installer(path)
+        run_installer(path, repository=repository)
     except (OSError, ValueError) as error:
         logger.error("UPDATES: unable to run installer: %s", error)
         cancel_quit = getattr(window, "cancel_quit", None)
@@ -87,6 +91,9 @@ def install_update(window: QWidget | None, path: str) -> bool:
         if isinstance(error, ValueError):  # broken signature: installer never kept
             with suppress(OSError):
                 os.remove(path)
+        if isinstance(error, UnsignedInstallerError):
+            msg_text = tr("Installer of custom update repository is not signed, update was not installed.")
+        elif isinstance(error, ValueError):
             msg_text = tr("Installer signature is not valid, update was not installed.")
         else:
             msg_text = trm(f"Unable to install update: {error}")
@@ -129,6 +136,7 @@ class UpdateInstaller(QObject):
         self.received = 0
         self.total = 0
         self._auto_install = False
+        self._repository: str | None = None  # update repository of downloading installer
         self._cancel = threading.Event()
         self.downloaded.connect(self.install_downloaded)
         self.progress.connect(self.store_progress)
@@ -141,6 +149,8 @@ class UpdateInstaller(QObject):
         self.busy = True
         self.received = self.total = 0
         self._auto_install = auto_install
+        # Repository of release found at check time: setting may change before installing
+        self._repository = asset.repository or None
         self._cancel = cancel = threading.Event()
         self.busy_changed.emit(True)
         last_report = [0.0]
@@ -200,7 +210,7 @@ class UpdateInstaller(QObject):
             )
             if confirm != QMessageBox.StandardButton.Yes:
                 return
-        install_update(window, path)
+        install_update(window, path, self._repository)
 
 
 _update_installer: UpdateInstaller | None = None

@@ -172,6 +172,16 @@ def retry_delay(attempt: int, retry: int, delay: float) -> float:
     return min(max(delay, 1.0) * 2 ** min(attempt - retry, 8), MISSING_RETRY_MAX)
 
 
+class TaskState:
+    """Task cancel state & active tasks of one update thread (a previous thread still stopping keeps its own)"""
+
+    __slots__ = ("cancel", "active_tasks")
+
+    def __init__(self):
+        self.cancel = False
+        self.active_tasks: dict[str, tuple[ResOutput, ...]] = {}
+
+
 class RestAPIConnector:
     """Rest API connector"""
 
@@ -179,13 +189,11 @@ class RestAPIConnector:
         "_taskset",
         "_dataset",
         "_cfg",
-        "_task_cancel",
         "_updating",
         "_update_thread",
         "_active_interval",
         "_event",
         "_on_start",
-        "_active_tasks",
         "_status",
         "_status_lock",
         "_warned",
@@ -204,12 +212,10 @@ class RestAPIConnector:
         self._on_start = on_start
 
         self._cfg: dict = {}
-        self._task_cancel = False
         self._updating = False
         self._update_thread: threading.Thread | None = None
         self._active_interval = 0.2
         self._event = threading.Event()
-        self._active_tasks: dict[str, tuple[ResOutput, ...]] = {}
         self._status = {task.path: EndpointStatus(task.path, "idle") for task in taskset}
         self._status_lock = threading.Lock()
         self._warned: set[tuple[str, str]] = set()
@@ -231,10 +237,10 @@ class RestAPIConnector:
             if previous is not None and previous.is_alive():  # still stopping, see stop()
                 previous.join(STOP_TIMEOUT)
             self._updating = True
-            # Own stop event for each thread, so a previous thread still stopping never resumes
+            # Own stop event & task state for each thread, so a previous thread still stopping never resumes
             self._event = threading.Event()
             self._update_thread = threading.Thread(
-                target=self.__update, args=(self._event,), daemon=True, name="RestAPI")
+                target=self.__update, args=(self._event, TaskState()), daemon=True, name="RestAPI")
             self._update_thread.start()
             logger.info("RestAPI: UPDATING: thread started")
 
@@ -277,14 +283,14 @@ class RestAPIConnector:
             self._warned.add(key)
             logger.warning(message, *args, exc_info=exc_info)
 
-    def __update(self, event: threading.Event) -> None:
+    def __update(self, event: threading.Event, state: TaskState) -> None:
         """Run update loop, restart after unexpected error"""
-        if not run_supervised(lambda: self.__update_loop(event), "RestAPI update", event) and not event.is_set():
+        if not run_supervised(lambda: self.__update_loop(event, state), "RestAPI update", event) and not event.is_set():
             # Stopped after repeated errors: no stale value left behind
-            reset_to_default(self._dataset, self._active_tasks)
+            reset_to_default(self._dataset, state.active_tasks)
             self._reset_status("dead")
 
-    def __update_loop(self, event: threading.Event) -> None:
+    def __update_loop(self, event: threading.Event, state: TaskState) -> None:
         """Update Rest API data"""
         _event_wait = event.wait
         reset = False
@@ -294,11 +300,11 @@ class RestAPIConnector:
             if realtime_state.active:
 
                 # Also check task cancel state in case delay
-                if not reset or self._task_cancel:
+                if not reset or state.cancel:
                     reset = True
                     update_interval = self._active_interval
-                    self._task_cancel = False
-                    self.run_tasks(event)
+                    state.cancel = False
+                    self.run_tasks(event, state)
 
             else:
                 if reset:
@@ -306,40 +312,41 @@ class RestAPIConnector:
                     update_interval = 0.5
 
         # Reset to default on close
-        reset_to_default(self._dataset, self._active_tasks)
+        reset_to_default(self._dataset, state.active_tasks)
         self._reset_status("idle")
 
-    def run_tasks(self, event: threading.Event):
+    def run_tasks(self, event: threading.Event, state: TaskState):
         """Run tasks, blocks until leaving track or stopped"""
         logger.info("RestAPI: CONNECTING")
         if self._on_start is not None:
             self._on_start()
         self._data_received = False
-        asyncio.run(self.task_init(event))
+        asyncio.run(self.task_init(event, state))
         logger.info("RestAPI: all tasks stopped")
         if not self._data_received:  # nothing answered: resolve host again next time
             forget_hostname(self._cfg["url_host"], self._cfg["url_port"])
         # Reset when finished
-        reset_to_default(self._dataset, self._active_tasks)
+        reset_to_default(self._dataset, state.active_tasks)
         self._reset_status("idle")
 
-    def sort_taskset(self, http: HttpSetup, active_task: dict, taskset: tuple[RestAPITask, ...]):
+    def sort_taskset(self, http: HttpSetup, state: TaskState, taskset: tuple[RestAPITask, ...]):
         """Sort task set into dictionary, key - uri_path, value - output_set"""
         for task in taskset:
             if self._cfg.get(task.condition, True):
-                active_task[task.path] = task.outputs
+                state.active_tasks[task.path] = task.outputs
                 self._set_status(task.path, "waiting", "")
                 update_interval = max(task.interval, self._active_interval)
-                yield asyncio.create_task(self.fetch(http, task, update_interval))
+                yield asyncio.create_task(self.fetch(http, task, state, update_interval))
             else:
                 self._set_status(task.path, "disabled", "")
 
-    async def task_init(self, event: threading.Event):
+    async def task_init(self, event: threading.Event, state: TaskState):
         """Resolve host, then run tasks until leaving track or stopped"""
         cfg = self._cfg
         # Resolving probes connections for up to 3s: cancelled at once on stop
         host = await self.until_stopped(event, resolve_hostname_async(cfg["url_host"], cfg["url_port"]))
-        if host is None:
+        if host is None:  # cancelled (stopped or brief leave of track): run again while on track
+            state.cancel = True
             return
         sim_http = HttpSetup(
             host=host,
@@ -348,10 +355,10 @@ class RestAPIConnector:
             retry=min(max(int(cfg["connection_retry"]), 0), 10),
             retry_delay=min(max(cfg["connection_retry_delay"], 0), 60),
         )
-        task_group = tuple(self.sort_taskset(sim_http, self._active_tasks, self._taskset))
+        task_group = tuple(self.sort_taskset(sim_http, state, self._taskset))
         logger.info("RestAPI: all tasks started")
         # Task control
-        await asyncio.create_task(self.task_control(event, task_group))
+        await asyncio.create_task(self.task_control(event, state, task_group))
         # Collect tasks (unexpected errors are logged by each task)
         for task in task_group:
             with suppress(asyncio.CancelledError):
@@ -370,31 +377,32 @@ class RestAPIConnector:
         except asyncio.CancelledError:
             return None
 
-    async def task_control(self, event: threading.Event, task_group: tuple[asyncio.Task, ...]):
+    async def task_control(self, event: threading.Event, state: TaskState, task_group: tuple[asyncio.Task, ...]):
         """Control task running state"""
         _event_is_set = event.is_set
         while not _event_is_set() and realtime_state.active:
             await asyncio.sleep(0.1)  # check every 100ms
         # Set cancel state to exit loop in case failed to cancel
-        self._task_cancel = True
+        state.cancel = True
         # Cancel all running tasks
         for task in task_group:
             task.cancel()
 
-    async def fetch(self, http: HttpSetup, task: RestAPITask, min_interval: float = 0.01):
+    async def fetch(self, http: HttpSetup, task: RestAPITask, state: TaskState, min_interval: float = 0.01):
         """Fetch data until available, then keep updating if repeated task"""
         uri_path = task.path
         connection = HttpConnection(http.host, http.port, http.timeout)
         request = set_header_get(uri_path, http.host)
         try:
-            if not await self.update_until_available(connection, request, http, uri_path, task.outputs):
+            if not await self.update_until_available(connection, request, http, uri_path, task.outputs, state):
                 return
             if not task.repeated:
                 logger.info("RestAPI: ACTIVE: %s (one time)", uri_path)
                 return
             logger.info("RestAPI: ACTIVE: %s (%sms)", uri_path, int(min_interval * 1000))
             await self.update_repeat(
-                connection, request, uri_path, task.outputs, min_interval, max(task.max_interval, min_interval))
+                connection, request, uri_path, task.outputs, state,
+                min_interval, max(task.max_interval, min_interval))
         except asyncio.CancelledError:
             raise
         except Exception:  # never hide unexpected error, other tasks keep running
@@ -405,10 +413,10 @@ class RestAPIConnector:
 
     async def update_until_available(
         self, connection: HttpConnection, request: bytes, http: HttpSetup, uri_path: str,
-        output_set: tuple[ResOutput, ...]) -> bool:
+        output_set: tuple[ResOutput, ...], state: TaskState) -> bool:
         """Request resource until data available (game answers null around session changes)"""
         attempt = 0
-        while not self._task_cancel:
+        while not state.cancel:
             if await self.update_once(connection, request, uri_path, output_set):
                 return True
             if attempt == 0:
@@ -434,11 +442,11 @@ class RestAPIConnector:
 
     async def update_repeat(
         self, connection: HttpConnection, request: bytes, uri_path: str, output_set: tuple[ResOutput, ...],
-        min_interval: float, max_interval: float = MAX_UPDATE_INTERVAL):
+        state: TaskState, min_interval: float, max_interval: float = MAX_UPDATE_INTERVAL):
         """Update repeat"""
         interval = min_interval
         last_hash = new_hash = -1
-        while not self._task_cancel:  # use task control to cancel & exit loop
+        while not state.cancel:  # use task control to cancel & exit loop
             new_hash = await self.output_resource(connection, request, uri_path, output_set, last_hash)
             if last_hash != new_hash:
                 last_hash = new_hash

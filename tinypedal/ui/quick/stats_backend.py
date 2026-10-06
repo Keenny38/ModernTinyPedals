@@ -26,7 +26,8 @@ lap times (userfile.lap_reference), personal best progression & sessions list (u
 
 Edits (delete track, remove vehicle, reset lap time, restore backup) are applied to stats file read again
 under STATS_LOCK (stats module saves meanwhile kept), after an automatic backup; undo merges stats
-recorded since. Stats & history files saved by stats module are reloaded at once (page shown), history
+recorded since. The page never waits for STATS_LOCK: while stats module saves, reloads & edits wait in
+order and are tried again shortly (see run_locked). Stats & history files saved by stats module are reloaded at once (page shown), history
 only when its file changed (stats file is saved every lap while driving).
 
 All Tracks also shows driving activity of each day (last weeks) & recent sessions. Table rows of the same
@@ -123,6 +124,8 @@ logger = logging.getLogger(__name__)
 REFERENCE_MAX_AGE = 24 * 3600  # seconds before cached lap time reference is downloaded again
 REFERENCE_KEYS = ("gap", "level")  # table columns from lap time reference, after personal best
 WATCH_DELAY = 800  # milliseconds after stats or history file changed before reloading
+LAPS_DELAY = 150  # milliseconds after selection changed before recorded laps are read (arrow keys: one read)
+LOCK_RETRY_MS = 25  # stats files busy (stats module saving): reload or edit tried again after this time
 MAX_UNDO = 50
 MAX_SESSIONS = 200  # sessions listed for selected vehicle, newest first
 ALL_TRACKS = ""  # selected track key of All Tracks (first entry of track list)
@@ -457,7 +460,7 @@ class DriverStatsBackend(QObject):
     lapsChanged = Signal()  # stints & consistency of selected vehicle (recorded laps read)
     friendChanged = Signal()  # friend's stats compared (loaded, removed, own stats changed)
     reference_loaded = Signal(str, str)  # sheet CSV text (empty if failed), error
-    laps_loaded = Signal(str, object)  # recorded laps folder & vehicle, stints report
+    laps_loaded = Signal(str, int, object)  # recorded laps folder & vehicle, read generation, stints report
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -510,6 +513,13 @@ class DriverStatsBackend(QObject):
         self._stints: dict = {}
         self._laps_key = ""  # recorded laps folder & vehicle shown in stints
         self._lap_infos: dict[str, tuple[float, dict]] = {}  # lap path: file time, lap info (read once)
+        self._laps_generation = 0  # latest read asked: older reads (same key, stale laps) ignored
+        self._laps_job: tuple | None = None  # read waiting for debounce or running read: key, folder, vehicle, generation
+        self._laps_running = 0  # generation of read running in background (0: none), one at a time
+        self.laps_timer = QTimer(self)
+        self.laps_timer.setSingleShot(True)
+        self.laps_timer.setInterval(LAPS_DELAY)
+        self.laps_timer.timeout.connect(self.start_laps_read)
         self.laps_loaded.connect(self.stints_loaded)
         notifier().changed.connect(self.pictures_changed)
         self._friend: dict | None = None
@@ -524,6 +534,12 @@ class DriverStatsBackend(QObject):
         self.watch_timer.setSingleShot(True)
         self.watch_timer.setInterval(WATCH_DELAY)
         self.watch_timer.timeout.connect(self.reload_if_changed)
+        # Reloads & edits waiting for stats files (STATS_LOCK held by stats module): run in order once free
+        self._locked_jobs: list[Callable[[], Callable[[], Any] | None]] = []
+        self.lock_timer = QTimer(self)
+        self.lock_timer.setSingleShot(True)
+        self.lock_timer.setInterval(LOCK_RETRY_MS)
+        self.lock_timer.timeout.connect(self.run_locked_jobs)
         # Level colors depend on light or dark theme: table, tiles & charts colored again when theme changes
         self._backups: list[dict] | None = None  # automatic backups (listed again once one is made)
         self._palette_connected = False
@@ -607,7 +623,10 @@ class DriverStatsBackend(QObject):
         self._downloading = False
         self.reference_error = error
         if text:
-            lap_reference.save_cache(cfg.path.config, text)
+            try:
+                lap_reference.save_cache(cfg.path.config, text)
+            except OSError:  # cache not written (disk full, read only): downloaded reference still used
+                logger.exception("STATS: unable to save lap time reference cache")
             self.references = lap_reference.parse_lap_references(text)
         self.referenceChanged.emit()
         self.refresh_table()
@@ -730,6 +749,10 @@ class DriverStatsBackend(QObject):
     def release(self):
         """Page closed: stop watching files & theme"""
         self.watch_timer.stop()
+        self.laps_timer.stop()
+        self.lock_timer.stop()
+        self._locked_jobs.clear()
+        self._laps_job = None
         paths = self.watcher.files() + self.watcher.directories()
         if paths:
             self.watcher.removePaths(paths)
@@ -742,22 +765,56 @@ class DriverStatsBackend(QObject):
     def reload(self):
         self.reload_stats()
 
+    # Stats files lock: page (GUI thread) never waits for stats module saving
+    def run_locked(self, job: Callable[[], Callable[[], Any] | None]) -> bool:
+        """Run job holding STATS_LOCK: now if free & no job waiting, else in order once free (tried again
+        every LOCK_RETRY_MS), so the page never waits while stats module saves. Job returns what to do
+        once lock released (page update, messages), or None.
+
+        Returns:
+            True if job ran now.
+        """
+        self._locked_jobs.append(job)
+        return self.run_locked_jobs()
+
+    @Slot()
+    def run_locked_jobs(self) -> bool:
+        """Run waiting jobs in order while STATS_LOCK is free, True if none left"""
+        while self._locked_jobs:
+            if not STATS_LOCK.acquire(blocking=False):
+                self.lock_timer.start()
+                return False
+            try:
+                after = self._locked_jobs.pop(0)()
+            finally:
+                STATS_LOCK.release()
+            if after is not None:
+                after()
+        return True
+
     def reload_stats(self, select: str | None = None):
         """Reload stats & history files: selected track kept (current track at first load)
 
         Args:
             select: track key to select, else selected one (neighbor track if removed).
         """
-        with STATS_LOCK:
-            stats_user = load_stats_json_file(filepath=cfg.path.config)
-            stamp = self.history_stamp()
-            if stamp != self._history_stamp:  # stats saved every lap, history at end of each stint only
-                self.history = load_history(cfg.path.config)
-                self._history_stamp = self.history_stamp()  # file rewritten if over limit
-                self.history_index = index_history(self.history)
-                self.classes = vehicle_classes(self.history)
-                self.vehicle_last_driven = last_driven(self.history)
-                self.track_last_driven = track_last_driven(self.history)
+        self.run_locked(lambda: self.read_stats_files(select))
+
+    def read_stats_files(self, select: str | None) -> Callable[[], None]:
+        """Read stats & history files (STATS_LOCK held), page updated once lock released"""
+        stats_user = load_stats_json_file(filepath=cfg.path.config)
+        stamp = self.history_stamp()
+        if stamp != self._history_stamp:  # stats saved every lap, history at end of each stint only
+            self.history = load_history(cfg.path.config)
+            self._history_stamp = self.history_stamp()  # file rewritten if over limit
+            self.history_index = index_history(self.history)
+            self.classes = vehicle_classes(self.history)
+            self.vehicle_last_driven = last_driven(self.history)
+            self.track_last_driven = track_last_driven(self.history)
+        return lambda: self.stats_read(stats_user, select)
+
+    def stats_read(self, stats_user: dict | None, select: str | None):
+        """Page updated with stats file read"""
         self._file_times = self.file_times()
         if stats_user is None:  # invalid file: stats shown kept
             self.refresh_table()
@@ -1466,6 +1523,10 @@ class DriverStatsBackend(QObject):
         vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
         folder = self.lap_folder(vehicle) if vehicle else ""
         key = f"{folder}|{vehicle}"
+        if not vehicle or not folder:
+            self._laps_generation += 1  # running or waiting read ignored
+            self._laps_job = None
+            self.laps_timer.stop()
         if not vehicle:
             self._laps_key, self._stints = key, {}
             self.lapsChanged.emit()
@@ -1481,26 +1542,41 @@ class DriverStatsBackend(QObject):
         self._laps_key = key
         self._stints = {"visible": True, "busy": True, "note": tr("Reading recorded laps...")}
         self.lapsChanged.emit()
+        self._laps_generation += 1
+        job = (key, folder, vehicle, self._laps_generation)
+        if not background:
+            self.read_stints(*job)
+            return
+        self._laps_job = job
+        self.laps_timer.start()  # selection changing quickly (arrow keys): read once it settles
+
+    @Slot()
+    def start_laps_read(self):
+        """Debounced read started in background, once the running read (if any) has finished"""
+        if self._laps_running or self._laps_job is None:
+            return  # started when running read is loaded
+        job, self._laps_job = self._laps_job, None
+        self._laps_running = job[3]
+        threading.Thread(target=self.read_stints, args=job, daemon=True, name="Driver stats laps").start()
+
+    def read_stints(self, key: str, folder: str, vehicle: str, generation: int):
         path = os.path.join(cfg.path.telemetry, folder)
-        cache = self._lap_infos
+        try:
+            report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), self._lap_infos))
+        except Exception:  # unreadable folder: nothing shown, page goes on
+            logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
+            report = None
+        with suppress(RuntimeError):  # page closed meanwhile
+            self.laps_loaded.emit(key, generation, report)
 
-        def reading():
-            try:
-                report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), cache))
-            except Exception:  # unreadable folder: nothing shown, page goes on
-                logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
-                report = None
-            with suppress(RuntimeError):  # page closed meanwhile
-                self.laps_loaded.emit(key, report)
-
-        if background:
-            threading.Thread(target=reading, daemon=True, name="Driver stats laps").start()
-        else:
-            reading()
-
-    def stints_loaded(self, key: str, report):
-        """Recorded laps read: stints & consistency shown if still selected"""
-        if key != self._laps_key:
+    def stints_loaded(self, key: str, generation: int, report):
+        """Recorded laps read: stints & consistency shown if still selected & latest read (an older read of
+        same laps finishing later never overwrites newer laps)"""
+        if generation == self._laps_running:
+            self._laps_running = 0
+            if self._laps_job is not None and not self.laps_timer.isActive():
+                self.start_laps_read()  # read asked while this one was running
+        if key != self._laps_key or generation != self._laps_generation:
             return
         self._stints = self.stints_data(report) if isinstance(report, dict) else {
             "visible": True, "busy": False, "note": tr("Unable to read recorded laps.")}
@@ -1867,25 +1943,39 @@ class DriverStatsBackend(QObject):
     def warning(self, text: str):
         QMessageBox.warning(self._window, tr("Error"), text)
 
-    def load_fresh_stats(self) -> dict | None:
+    @staticmethod
+    def load_fresh_stats() -> dict | None:
         """Stats file as saved now (stats module may have saved since loaded), None if invalid"""
         stats_user = load_stats_json_file(filepath=cfg.path.config)
         if stats_user is None:
-            self.warning(tr("Unable to read stats file."))
             return None
         return validate_stats_file(stats_user)
+
+    def stats_unreadable(self):
+        self.warning(tr("Unable to read stats file."))
 
     def edit_stats(self, path: tuple[str, ...], value: Any,
                    history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None = None) -> bool:
         """Set stats at path (None removes it, empty path: whole file), history changed, undo recorded
 
+        Done once stats module is not saving (see run_locked).
+
         Args:
             history_change: history records -> (records removed, records added).
+
+        Returns:
+            True if done now.
         """
-        with STATS_LOCK:
+        return self.run_locked(lambda: self.write_edit(path, value, history_change))
+
+    def write_edit(self, path: tuple[str, ...], value: Any,
+                   history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None,
+                   ) -> Callable[[], None]:
+        """Edit applied to stats file read again (STATS_LOCK held), see edit_stats"""
+        with STATS_LOCK:  # held already (run_locked), reentrant
             stats_user = self.load_fresh_stats()
             if stats_user is None:
-                return False
+                return self.stats_unreadable
             backup_stats_file(cfg.path.config)
             self._backups = None  # listed again
             before = stats_entry(stats_user, path) if path else copy.deepcopy(stats_user)
@@ -1900,14 +1990,20 @@ class DriverStatsBackend(QObject):
                 removed_list, added_list = history_change(load_history(cfg.path.config))
                 removed, added = tuple(removed_list), tuple(added_list)
                 replace_records(cfg.path.config, removed, added)
-        self._edits_undo.append(StatsEdit(path, before, copy.deepcopy(value), removed, added))
+        return lambda: self.edit_done(StatsEdit(path, before, copy.deepcopy(value), removed, added))
+
+    def edit_done(self, edit: StatsEdit):
+        """Edit saved: undo recorded, page reloaded"""
+        self._edits_undo.append(edit)
         del self._edits_undo[:-MAX_UNDO]
         self._edits_redo.clear()
         self.reload_stats()
-        return True
 
     def apply_edit(self, edit: StatsEdit, undo: bool) -> bool:
-        """Apply edit again (redo) or its reverse (undo, stats recorded since kept) on stats file read again"""
+        """Apply edit again (redo) or its reverse (undo, stats recorded since kept) on stats file read again
+
+        Called with STATS_LOCK held (see run_locked), False if stats file unreadable.
+        """
         with STATS_LOCK:
             stats_user = self.load_fresh_stats()
             if stats_user is None:
@@ -1932,11 +2028,20 @@ class DriverStatsBackend(QObject):
         if not self._edits_undo:
             return
         edit = self._edits_undo.pop()
-        if self.apply_edit(edit, undo=True):
-            self._edits_redo.append(edit)
-        else:
-            self._edits_undo.append(edit)
-        self.reload_stats(select=edit.path[0] if edit.path else None)
+
+        def job() -> Callable[[], None]:
+            done = self.apply_edit(edit, undo=True)
+
+            def after():
+                if done:
+                    self._edits_redo.append(edit)
+                else:
+                    self._edits_undo.append(edit)
+                    self.stats_unreadable()
+                self.reload_stats(select=edit.path[0] if edit.path else None)
+            return after
+
+        self.run_locked(job)
 
     @Slot()
     def redo(self):
@@ -1944,11 +2049,20 @@ class DriverStatsBackend(QObject):
         if not self._edits_redo:
             return
         edit = self._edits_redo.pop()
-        if self.apply_edit(edit, undo=False):
-            self._edits_undo.append(edit)
-        else:
-            self._edits_redo.append(edit)
-        self.reload_stats(select=edit.path[0] if len(edit.path) > 1 else None)
+
+        def job() -> Callable[[], None]:
+            done = self.apply_edit(edit, undo=False)
+
+            def after():
+                if done:
+                    self._edits_undo.append(edit)
+                else:
+                    self._edits_redo.append(edit)
+                    self.stats_unreadable()
+                self.reload_stats(select=edit.path[0] if len(edit.path) > 1 else None)
+            return after
+
+        self.run_locked(job)
 
     @Property(bool, notify=editsChanged)
     def canUndo(self) -> bool:

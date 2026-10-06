@@ -62,6 +62,15 @@ def _validate_style(dict_user: dict[str, dict], dict_def: Mapping[str, dict], in
             continue
         # Reset invalid value or add missing
         for key, default_value in info_def.items():
+            # Accept int typed in float field (not bool)
+            if (
+                key in data
+                and isinstance(default_value, float)
+                and isinstance(data[key], int)
+                and not isinstance(data[key], bool)
+            ):
+                data[key] = float(data[key])
+                save_change = True
             if key not in data or not isinstance(data[key], type(default_value)):
                 if name in dict_def:
                     data[key] = dict_def[name][key]
@@ -203,6 +212,8 @@ class ValueValidator:
             return False
         if not isinstance(dict_user[key], int) or isinstance(dict_user[key], bool):
             dict_user.pop(key)
+        elif key.endswith("_port") and not 0 <= dict_user[key] <= 65535:
+            dict_user.pop(key)  # out of range port raises OverflowError at bind
         return True
 
     @staticmethod
@@ -233,8 +244,10 @@ class PresetValidator:
             if key not in dict_def:  # check in default list
                 dict_user.pop(key)
                 continue
-            # Skip sub_level dict
+            # Skip sub_level dict, remove dict set in place of a value (default restored later)
             if isinstance(dict_user[key], dict):
+                if not isinstance(dict_def[key], dict):
+                    dict_user.pop(key)
                 continue
             # Validate values
             for _validator in cls._value_validators:

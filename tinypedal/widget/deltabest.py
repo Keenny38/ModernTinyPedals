@@ -53,6 +53,7 @@ class Realtime(Overlay):
         # Config variable
         self.laptime_source = f"lapTime{self.wcfg['deltabest_source']}"
         self.delta_source = f"delta{self.wcfg['deltabest_source']}"
+        self.bar_range = max(float(self.wcfg["delta_bar_display_range"]), 0.001)  # 0 = division by zero
         bar_gap = self.wcfg["bar_gap"]
         padx = round(font_m.width * self.wcfg["bar_padding_horizontal"])
         pady = round(font_m.capital * self.wcfg["bar_padding_vertical"])
@@ -129,7 +130,7 @@ class Realtime(Overlay):
         painter = QPainter(self)
         delta = 0.0 if self.delta_best is None else self.delta_best
         delta_pos = self.delta_position(
-            self.wcfg["delta_bar_display_range"],
+            self.bar_range,
             delta,
             self.dbar_length)
         highlight_color = NO_DELTA_COLOR if self.delta_best is None else self.delta_color[delta > 0]

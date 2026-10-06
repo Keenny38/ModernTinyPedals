@@ -156,9 +156,11 @@ Item {
                 source: previewTip.visible ? row.preview : ""
                 width: Math.round(row.previewWidth * previewTip.fit)
                 height: Math.round(row.previewHeight * previewTip.fit)
-                cache: false
+                asynchronous: true
+                retainWhileLoading: true
+                cache: true
+                sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
                 smooth: true
-                mipmap: true
             }
             background: Rectangle {
                 radius: theme.em * 0.5

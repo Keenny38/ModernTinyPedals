@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from typing import NamedTuple
 
 from PySide6.QtCore import QFile, QUrl
@@ -89,9 +90,15 @@ def copy_replays(sources: Sequence[str], folder: str, progress: Callable[[float]
                  cancelled: threading.Event | None = None) -> CopyResult:
     """Copy replay files to folder (in background), names already used get a number, nothing copied
     if disk has not enough free space. Cancelled: file being copied removed, next ones left out."""
-    sources = [source for source in sources if is_replay_file(source)
-               and not same_file(os.path.dirname(source), folder)]
-    total = sum(os.path.getsize(source) for source in sources)
+    sizes: dict[str, int] = {}
+    for source in sources:
+        if is_replay_file(source) and not same_file(os.path.dirname(source), folder):
+            try:
+                sizes[source] = os.stat(source).st_size
+            except OSError:  # file gone meanwhile
+                continue
+    sources = list(sizes)
+    total = sum(sizes.values())
     free = free_space(folder)
     if sources and 0 <= free < total + FREE_MARGIN:
         return CopyResult([], [f"{folder}: not enough free space ({free >> 20} MB free, {total >> 20} MB needed)"])
@@ -118,7 +125,7 @@ def copy_replays(sources: Sequence[str], folder: str, progress: Callable[[float]
             added.append(name)
         except OSError as error:
             errors.append(f"{os.path.basename(source)}: {error.strerror or error}")
-            if os.path.exists(part):
+            with suppress(OSError):
                 os.remove(part)
     return CopyResult(added, errors)
 

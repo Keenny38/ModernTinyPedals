@@ -21,7 +21,7 @@ Open the `Preset` page. The loaded preset is shown on top, with the `Auto Load P
 | Import a preset package or a share code | `Import` > `Preset Package (.zip)...` or `Share Code...` |
 | Load a preset automatically | `Auto Load Primary Preset`, see [Auto load](#auto-load-per-class-or-track) |
 
-Right-click a preset (or its `...` button) for more actions: `Duplicate...`, `Rename...` (`F2`), `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Copy Share Code`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag` and `Delete` (`Del`). A renamed preset keeps its backups, layout profiles, primary tags and preset hotkeys. Locked and loaded presets cannot be deleted, a locked preset cannot be renamed.
+Right-click a preset (or its `...` button) for more actions: `Duplicate...`, `Rename...` (`F2`), `Lock Preset` / `Unlock Preset`, `Backup Preset`, `Export Package...`, `Copy Share Code`, `Compare with Loaded Preset`, `Set Primary for Class`, `Set Primary for Track`, `Clear Primary Tag` and `Delete` (`Del`). A renamed preset keeps its backups, layout profiles, primary tags and preset hotkeys. Locked and loaded presets cannot be deleted, a locked preset cannot be renamed. Names reserved by Windows (`CON`, `NUL`, `AUX`, `PRN`, `COM1`...`LPT9`) are refused.
 
 Overlay positions, overlays turned on or off and the lock state are saved automatically; options are saved with `Apply` or `Save` on their page. Hotkeys can load a given preset, or the next and previous preset: see [Getting Started](Getting-Started.md#hotkeys).
 

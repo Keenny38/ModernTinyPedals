@@ -84,21 +84,16 @@ def validate_hotkey(
     key_modifier: Mapping[str, int] = KEYMAP_MODIFIER,
     delimiter: str = "+",
 ) -> str:
-    """Validate hotkey from string - ex. 'ctrl+alt+space' is valid"""
+    """Validate hotkey from string - ex. 'ctrl+alt+space' is valid
+
+    Modifiers sorted in key_modifier order (same as detected key combo), duplicates removed.
+    """
     if not key_string:
         return key_string
-    key_split = key_string.split(delimiter)
-    max_index = len(key_split) - 1
-    output_combo = []
-    for idx, key in enumerate(key_split):
-        if idx < max_index:  # get modifier (optional)
-            if key not in key_modifier:
-                continue
-        else:  # get general key (invalid if not found)
-            if key not in key_general:
-                return ""
-        output_combo.append(key)
-    return "+".join(output_combo)
+    *modifiers, key = key_string.split(delimiter)
+    if key not in key_general:  # get general key (invalid if not found)
+        return ""
+    return "+".join((*sort_modifiers(modifiers, key_modifier), key))
 
 
 def load_hotkey(
@@ -107,23 +102,23 @@ def load_hotkey(
     key_modifier: Mapping[str, int] = KEYMAP_MODIFIER,
     delimiter: str = "+",
 ) -> tuple[int, ...]:
-    """Load hotkey string and export as key code sequence"""
+    """Load hotkey string and export as key code sequence
+
+    Modifiers sorted in key_modifier order (same as detected key combo), duplicates removed.
+    """
     if not key_string:
         return ()
-    key_split = key_string.split(delimiter)
-    max_index = len(key_split) - 1
-    output_combo = []
-    for idx, key in enumerate(key_split):
-        if idx < max_index:
-            code = key_modifier.get(key)
-            if code is None:
-                continue
-        else:
-            code = key_general.get(key)
-            if code is None:  # invalid combo
-                return ()
-        output_combo.append(code)
-    return tuple(output_combo)
+    *modifiers, key = key_string.split(delimiter)
+    code = key_general.get(key)
+    if code is None:  # invalid combo
+        return ()
+    return (*(key_modifier[_mod] for _mod in sort_modifiers(modifiers, key_modifier)), code)
+
+
+def sort_modifiers(modifiers: Iterable[str], key_modifier: Mapping[str, int] = KEYMAP_MODIFIER) -> list[str]:
+    """Valid modifier names in key_modifier order, without duplicates (invalid names dropped)"""
+    names = set(modifiers)
+    return [_mod for _mod in key_modifier if _mod in names]
 
 
 def set_hotkey_win(

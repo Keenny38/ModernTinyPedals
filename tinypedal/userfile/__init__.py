@@ -25,6 +25,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from typing import IO, TextIO
@@ -40,7 +41,7 @@ def set_user_data_path(filepath: str) -> str:
         logger.info("%s folder does not exist, attempt to create", filepath)
         try:
             os.mkdir(filepath)
-        except (PermissionError, FileExistsError, FileNotFoundError):
+        except OSError:  # also invalid path (Windows "<" in name: WinError 123)
             logger.error("failed to create %s folder", filepath)
             return ""
     return filepath
@@ -50,6 +51,11 @@ def flush_to_disk(file: IO) -> None:
     """Flush file data to disk (not only to OS cache), so a power loss never leaves it empty"""
     file.flush()
     os.fsync(file.fileno())
+
+
+def temp_file_name(filename: str) -> str:
+    """Temporary file name of target file, unique per process & thread (writers never share one)"""
+    return f"{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
 
 
 @contextmanager
@@ -64,7 +70,7 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
         newline: newline mode of file.
         raise_error: raise OSError (after logging) instead of discarding data.
     """
-    temp_filename = f"{filename}.tmp"
+    temp_filename = temp_file_name(filename)
     try:
         file = open(temp_filename, "w", newline=newline, encoding="utf-8")  # noqa: SIM115, closed below
     except OSError as error:
@@ -92,7 +98,7 @@ def atomic_write(filename: str, newline: str | None = None, raise_error: bool = 
 
 def write_text_file(filename: str, text: str) -> bool:
     """Write text file atomically, returns True if saved"""
-    temp_filename = f"{filename}.tmp"
+    temp_filename = temp_file_name(filename)
     try:
         with open(temp_filename, "w", newline="", encoding="utf-8") as file:
             file.write(text)

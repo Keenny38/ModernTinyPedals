@@ -59,6 +59,7 @@ class Realtime(DataModule):
         setting_relative = self.cfg.user.setting["relative"]
         setting_standings = self.cfg.user.setting["standings"]
         last_version_update = None
+        slot_ids = [-1] * MAX_VEHICLES  # vehicle slot id per index, of relative delta data
 
         gen_one_second_timer = state_timer(1.0)
 
@@ -68,6 +69,9 @@ class Realtime(DataModule):
                 if not reset:
                     reset = True
                     update_interval = self.active_interval
+                    # New session or reload: relative delta of vehicles from scratch
+                    reset_relative_delta(
+                        slot_ids, output.relativeDeltaAhead, output.relativeDeltaBehind)
 
                 # Check setting
                 if last_version_update != self.cfg.version_update:
@@ -95,7 +99,7 @@ class Realtime(DataModule):
                 (relative_ahead, relative_behind, classes_list, draw_order_list, is_multi_class,
                  ) = get_vehicles_info(
                     veh_total, plr_index, show_in_garage, next(gen_one_second_timer),
-                    output.relativeDeltaAhead, output.relativeDeltaBehind)
+                    output.relativeDeltaAhead, output.relativeDeltaBehind, slot_ids)
 
                 # Update vehicle class position info
                 plr_class_name, plr_class_place = update_position_in_class(classes_list, plr_index)
@@ -127,11 +131,26 @@ class Realtime(DataModule):
                     create_reference_place.cache_clear()
 
 
+def reset_relative_delta(
+    slot_ids: list[int], relative_delta_ahead: tuple, relative_delta_behind: tuple,
+):
+    """Reset relative delta data of all vehicles"""
+    slot_ids[:] = [-1] * len(slot_ids)
+    for delta_ahead in relative_delta_ahead:
+        delta_ahead.reset()
+    for delta_behind in relative_delta_behind:
+        delta_behind.reset()
+
+
 def get_vehicles_info(
     veh_total: int, plr_index: int, show_in_garage: bool, update_relative_delta: bool,
-    relative_delta_ahead: tuple, relative_delta_behind: tuple,
+    relative_delta_ahead: tuple, relative_delta_behind: tuple, slot_ids: list[int] | None = None,
 ):
-    """Get vehicles info: relative time gap, classes, places, laptime"""
+    """Get vehicles info: relative time gap, classes, places, laptime
+
+    Args:
+        slot_ids: vehicle slot id per index of relative delta data, reset on other vehicle in index.
+    """
     laptime_est = api.read.timing.estimated_laptime()
     plr_time = api.read.timing.estimated_time_into()
     last_class_name = None
@@ -166,6 +185,13 @@ def get_vehicles_info(
             recorded_index += 1
 
             if update_relative_delta:  # update at 1 sec interval
+                # Other vehicle took index (joined, left): delta of previous one not kept
+                if slot_ids is not None:
+                    slot_id = api.read.vehicle.slot_id(index)
+                    if slot_ids[index] != slot_id:
+                        slot_ids[index] = slot_id
+                        relative_delta_ahead[index].reset()
+                        relative_delta_behind[index].reset()
                 relative_delta_ahead[index].update(diff_time_ahead)
                 relative_delta_behind[index].update(-diff_time_behind)
 

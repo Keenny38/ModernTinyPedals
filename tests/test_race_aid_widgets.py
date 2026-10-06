@@ -157,6 +157,8 @@ def test_delta_graph_draws_lap(field, monkeypatch, modern):
     progress = {"value": 0.0}
     set_reader(monkeypatch, "lap", "progress", lambda *args, **kwargs: progress["value"])
     set_reader(monkeypatch, "lap", "completed_laps", 3)
+    # Lap time follows progress (progress past half lap with lap time under 0.5 s: read as lap start)
+    set_reader(monkeypatch, "timing", "current_laptime", lambda *args, **kwargs: progress["value"] * 90.0)
     monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
     monkeypatch.setattr(minfo.delta, "lapTimeBest", 90.0)
     widget = make("delta_graph", modern)

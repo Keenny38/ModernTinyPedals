@@ -31,6 +31,7 @@ from PySide6.QtGui import QPainter, QPen, QPixmap, QRadialGradient
 
 from ... import calculation as calc
 from ...module_info import minfo
+from .._painter import layer_fits
 from ..navigation import NavigationMixin
 from .base import CENTER, ModernOverlay
 from .cars import car_colors, chevron, status_color
@@ -119,7 +120,7 @@ class Realtime(NavigationMixin, ModernOverlay):
     def paint(self, painter: QPainter):
         ratio = self.devicePixelRatioF()
         layer = self.layer
-        if layer is None or layer.devicePixelRatio() != ratio or layer.deviceIndependentSize() != self.size():
+        if layer is None or not layer_fits(layer, self.width(), self.height(), ratio):
             layer = self.layer = QPixmap(max(round(self.width() * ratio), 1), max(round(self.height() * ratio), 1))
             layer.setDevicePixelRatio(ratio)
         layer.fill(Qt.GlobalColor.transparent)

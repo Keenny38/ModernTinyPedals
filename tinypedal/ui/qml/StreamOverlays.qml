@@ -75,8 +75,10 @@ TpPage {
             radius: width / 2
             color: theme.loss
             SequentialAnimation on opacity {
-                running: liveDot.visible
-                loops: Animation.Infinite
+                // A few pulses when state starts or page shows again, then still: no endless redraw
+                running: liveDot.visible && pageState.active
+                loops: 3
+                onRunningChanged: if (!running) liveDot.opacity = 1
                 NumberAnimation { to: 0.3; duration: 700; easing.type: Easing.InOutSine }
                 NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
             }
@@ -138,8 +140,9 @@ TpPage {
                     radius: width / 2
                     color: statusPill.tone
                     SequentialAnimation on opacity {
-                        running: backend.watchingCount > 0
-                        loops: Animation.Infinite
+                        // A few pulses when state starts or page shows again, then still: no endless redraw
+                        running: backend.watchingCount > 0 && pageState.active
+                        loops: 3
                         onRunningChanged: if (!running) statusDot.opacity = 1
                         NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
                         NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }

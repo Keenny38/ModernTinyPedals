@@ -42,6 +42,66 @@ logger = logging.getLogger(__name__)
 _stamp_lock = threading.Lock()
 _last_stamp_us = 0  # last backup timestamp (microseconds), see set_backup_timestamp
 
+# Files that could not be read at load (locked by antivirus or cloud sync, not corrupted):
+# defaults are used, and the file is never saved over this session (user data kept)
+_unreadable_files: set[str] = set()
+_notified_files: set[str] = set()  # unreadable files user was told about (once per file)
+
+
+def _file_key(filename_source: str) -> str:
+    """Normalized file path for unreadable file set"""
+    return os.path.normcase(os.path.abspath(filename_source))
+
+
+def _notify_save_skipped(filename: str, filepath: str) -> None:
+    """Notify user once that changes of an unreadable file are not saved
+
+    Notified at first skipped save, not at load: global config is loaded before main window
+    exists (message would be lost).
+    """
+    key = _file_key(f"{filepath}{filename}")
+    if key in _notified_files:
+        return
+    _notified_files.add(key)
+    _show_notice(
+        f"{filename} could not be read at load (locked by another program?): default settings are used "
+        "and changes are not saved this session to keep your file. Restart the app to load it."
+    )
+
+
+_notice_lock = threading.Lock()
+_notices_ready = False  # main window shows error messages
+_pending_notices: list[str] = []  # messages sent before main window was ready
+
+
+def _show_notice(message: str) -> None:
+    """Show error message, kept until main window is ready (first save runs right after start)"""
+    with _notice_lock:
+        if not _notices_ready:
+            _pending_notices.append(message)
+            return
+    from .. import app_signal  # lazy, userfile is imported early
+
+    app_signal.error.emit(message)
+
+
+def notices_ready() -> None:
+    """Main window shows error messages: send messages kept until now"""
+    global _notices_ready
+    with _notice_lock:
+        _notices_ready = True
+        pending = tuple(_pending_notices)
+        _pending_notices.clear()
+    from .. import app_signal
+
+    for message in pending:
+        app_signal.error.emit(message)
+
+
+def is_unreadable_file(filename: str, filepath: str) -> bool:
+    """Check if file could not be read at load, so must not be saved over"""
+    return _file_key(f"{filepath}{filename}") in _unreadable_files
+
 
 def set_backup_timestamp(prefix: str = FileExt.BACKUP, timestamp: bool = True) -> str:
     """Set backup timestamp, unique in this process
@@ -74,23 +134,39 @@ def copy_setting(dict_user: dict) -> dict:
 def load_setting_json_file(
     filename: str, filepath: str, dict_def: dict, file_info: str = "user preset",
     validator: Callable[[dict, dict], dict] = PresetValidator.user_preset, max_attempts: int = 5,
+    access_timeout: float = 2.0,
 ) -> dict:
-    """Load setting json file & verify"""
+    """Load setting json file & verify
+
+    A file that cannot be accessed (locked, no permission) is retried up to access_timeout
+    seconds, then defaults are used without saving them over the file this session.
+    """
     filename_source = f"{filepath}{filename}"
     # Start loading attempts
     attempts = max_attempts
+    access_deadline = monotonic() + access_timeout
     while attempts > 0:
         try:
             with open(filename_source, encoding="utf-8") as jsonfile:
                 setting_user = json.load(jsonfile)
             # Verify & assign setting
             setting_user = validator(setting_user, dict_def)
+            _unreadable_files.discard(_file_key(filename_source))
+            _notified_files.discard(_file_key(filename_source))
             break
         except FileNotFoundError:
             logger.info("USERDATA: %s not found, fall back to default", filename)
             setting_user = copy_setting(dict_def)
             break
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError):
+        except OSError:  # locked, not corrupted: retry longer, never overwrite
+            if monotonic() < access_deadline:
+                sleep(0.05)
+                continue
+            logger.error("USERDATA: %s not accessible, fall back to default (file kept, not saved)", filename, exc_info=True)
+            _unreadable_files.add(_file_key(filename_source))
+            setting_user = copy_setting(dict_def)
+            break
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
             logger.error("USERDATA: %s failed loading, %s attempt(s) left", filename, attempts - 1, exc_info=(attempts <= 1))
         attempts -= 1
         sleep(0.05)
@@ -106,16 +182,20 @@ def load_setting_json_file(
 def load_style_json_file(
     filename: str, filepath: str, dict_def: dict, file_info: str = "style preset",
     validator: Callable[[dict], bool] | None = None, max_attempts: int = 5,
+    access_timeout: float = 2.0,
 ) -> dict:
-    """Load style json file & verify (optional)"""
+    """Load style json file & verify (optional), see load_setting_json_file for locked file"""
     filename_source = f"{filepath}{filename}"
     msg_text = "loaded"
     # Start loading attempts
     attempts = max_attempts
+    access_deadline = monotonic() + access_timeout
     while attempts > 0:
         try:
             with open(filename_source, encoding="utf-8") as jsonfile:
                 style_user = json.load(jsonfile)
+            _unreadable_files.discard(_file_key(filename_source))
+            _notified_files.discard(_file_key(filename_source))
             # Whether to validate style
             if validator is not None and validator(style_user):
                 create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True)
@@ -126,7 +206,16 @@ def load_style_json_file(
             style_user = copy_setting(dict_def)
             msg_text = "updated"
             break
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError, OSError):
+        except OSError:  # locked, not corrupted: retry longer, never overwrite
+            if monotonic() < access_deadline:
+                sleep(0.05)
+                continue
+            logger.error("USERDATA: %s not accessible, fall back to default (file kept, not saved)", filename, exc_info=True)
+            _unreadable_files.add(_file_key(filename_source))
+            style_user = copy_setting(dict_def)
+            msg_text = "fall back to default"
+            break
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
             logger.error("USERDATA: %s failed loading, %s attempt(s) left", filename, attempts - 1, exc_info=(attempts <= 1))
         attempts -= 1
         sleep(0.05)
@@ -278,6 +367,12 @@ def save_and_verify_json_file(
     compact_json: bool = False,
 ) -> None:
     """Save and verify json file, backup or restore if saving failed"""
+    if is_unreadable_file(filename, filepath):
+        # Never retry & save here: defaults (in memory since load) would overwrite user data
+        # of a file readable again, only tell user that session changes are not saved
+        logger.info("USERDATA: %s was not accessible at load, saving skipped (file kept)", filename)
+        _notify_save_skipped(filename, filepath)
+        return
     file_found = os.path.exists(f"{filepath}{filename}")
     backup_extension = set_backup_timestamp()
     # Create backup: abort saving if backup failed; skip backup and create new if not exist

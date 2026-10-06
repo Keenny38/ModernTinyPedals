@@ -95,7 +95,7 @@ OPTION_TYPES = {
 }
 LIST_HEADER_SETTING = (
     "Select Setting", "Select all settings from list?", "Deselect all settings from list?")
-INVALID_NAME_CHARACTERS = re.compile(r'[\\/:*?"<>|]')  # not allowed in file names
+INVALID_NAME_CHARACTERS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')  # not allowed in file names (control too)
 LIST_HEADER_OPTION_TYPE = (
     "Select Option Type", "Select all option types from list?", "Deselect all option types from list?")
 
@@ -264,6 +264,9 @@ def apply_preset_name(name: str, mode: str = "", source_filename: str = "") -> s
     source_name = source_filename[:-len(FileExt.JSON)]
     filepath = cfg.path.settings
     new_filename = f"{entered_filename}{FileExt.JSON}"
+    source_loaded = mode in ("duplicate", "rename") and cfg.is_loaded(source_filename)
+    if source_loaded:  # queued save of loaded preset written first: not resurrected, nor missed by copy
+        cfg.flush()
     try:
         # Duplicate preset
         if mode == "duplicate":
@@ -279,8 +282,10 @@ def apply_preset_name(name: str, mode: str = "", source_filename: str = "") -> s
         with suppress(OSError):  # layout profiles of screen setups, if any
             os.replace(profile_filename(filepath, source_filename), profile_filename(filepath, new_filename))
         update_preset_references(source_name, entered_filename)
-        # Reload if renamed file was loaded
-        if cfg.is_loaded(source_filename):
+        # Reload if renamed file was loaded. Loaded name follows the file now: if reload is refused
+        # (config page with unsaved changes), next saves go to renamed file, not a re-created old one
+        if source_loaded:
+            cfg.filename.setting = new_filename
             cfg.set_next_to_load(new_filename)
             app_signal.reload.emit(True)
             return ""
@@ -600,7 +605,7 @@ class PresetTransfer(BaseEditor):
 
         # Label
         self.loaded_preset = cfg.filename.setting[:-5]
-        label_loaded = QLabel(trm(f"From: <b>{self.loaded_preset}</b>"))
+        self.label_loaded = label_loaded = QLabel(trm(f"From: <b>{self.loaded_preset}</b>"))
 
         # Setting list
         self.listbox_setting = QListWidget(self)
@@ -682,6 +687,7 @@ class PresetTransfer(BaseEditor):
             msg_text = "No destination preset selected or found."
             QMessageBox.warning(self, tr("Error"), trm(msg_text))
             return
+        self.refresh_loaded_preset()
         loaded_preset_name = f"{self.loaded_preset}.json"
         dest_preset_name = f"{self.dest_selector.currentText()}.json"
         setting_selection = tuple(self.get_setting_selection(self.listbox_setting))
@@ -700,6 +706,8 @@ class PresetTransfer(BaseEditor):
             "This cannot be undone!"
         )
         if not self.confirm_operation(message=msg_text):
+            return
+        if not self.is_destination_allowed(dest_preset_name):
             return
         # Load preset dict
         dest_dict = load_setting_json_file(
@@ -721,6 +729,26 @@ class PresetTransfer(BaseEditor):
             f" to <b>{dest_preset_name}</b>."
         )
         show_toast(self, trm(msg_text))
+
+    def refresh_loaded_preset(self):
+        """Source (loaded) preset name, it may be another preset since page was opened (auto-load)"""
+        self.loaded_preset = cfg.filename.setting[:-len(FileExt.JSON)]
+        self.label_loaded.setText(trm(f"From: <b>{self.loaded_preset}</b>"))
+
+    def is_destination_allowed(self, dest_preset_name: str) -> bool:
+        """Destination still neither loaded nor locked (preset loaded or locked since list was made)
+
+        Writing to loaded preset would be overwritten by its next save, a locked preset must not change.
+        If refused, loaded preset & destination list are refreshed and why is shown.
+        """
+        if (os.path.normcase(dest_preset_name) != os.path.normcase(cfg.filename.setting)
+                and dest_preset_name not in cfg.user.filelock):
+            return True
+        self.refresh_loaded_preset()
+        self.dest_selector.clear()
+        self.dest_selector.addItems(self.set_selector_list())
+        QMessageBox.warning(self, tr("Error"), tr("Destination preset is now loaded or locked, choose another preset."))
+        return False
 
     def copy_setting(self, dest_dict: dict, setting_selection: tuple[str, ...], options_selection: tuple[str, ...]):
         """Copy setting"""

@@ -491,7 +491,7 @@ def test_preview_renders_unsaved_values(options):
     options.selectOverlay("speedometer")
     options.set_active(True)
     options.render_preview()
-    assert options.previewState == 2 and options.previewUrl.startswith("data:image/png") and options.previewWidth > 0
+    assert options.previewState == 2 and options.previewUrl.startswith("image://overlaypreview/") and options.previewWidth > 0
     options.setText("speedometer/font_color_speed", "bad")
     options.render_preview()
     assert options.previewState == 4  # kept, marked invalid
@@ -589,6 +589,32 @@ def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
     page.close()
     flush()
     assert not option_pages(window) and cfg.user.setting["speedometer"]["opacity"] == 0.5
+
+
+@pytest.mark.filterwarnings("ignore:libpyside. Failed to disconnect:RuntimeWarning")  # closed twice
+def test_page_closed_again_while_asking_to_save(window, monkeypatch):
+    """Close event delivered again during save question (nested event loop): no error"""
+    from PySide6.QtGui import QCloseEvent
+
+    from tinypedal.ui.overlay_options import open_overlay_options
+
+    page = open_overlay_options(window, "speedometer")
+    page.backend.setNumber("speedometer/opacity", 0.7)
+    nested = []
+
+    def question(*args, **kwargs):
+        if not nested:
+            nested.append(True)
+            page.closeEvent(QCloseEvent())  # second close while first one asks
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
+    event = QCloseEvent()
+    page.closeEvent(event)
+    assert nested and event.isAccepted() and page.view is None
+    page.close()
+    flush()
+    assert not option_pages(window)
 
 
 def test_page_kept_open_when_preset_loads_unless_edited(window):

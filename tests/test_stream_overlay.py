@@ -343,6 +343,26 @@ def test_server_settings_change(server):
     assert not server.running
 
 
+def test_disable_closes_open_connections(server):
+    """Keep-alive client (OBS) stops receiving frames once server is stopped"""
+    import http.client
+    from urllib.parse import urlsplit
+
+    url = urlsplit(server.url("/api/frames", "view=gear&seq=0"))
+    connection = http.client.HTTPConnection("127.0.0.1", server.port(), timeout=5)
+    try:
+        connection.request("GET", f"{url.path}?{url.query}")
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 200 and not response.will_close  # connection kept open
+        server.disable()
+        with pytest.raises((OSError, http.client.HTTPException)):
+            connection.request("GET", "/layout")
+            connection.getresponse().read()
+    finally:
+        connection.close()
+
+
 def test_port_unavailable(ui_env, monkeypatch):
     from tinypedal import app_signal
     from tinypedal.setting import cfg
@@ -458,3 +478,21 @@ def test_server_game_pictures(server):
     assert get(server.url("/pictures/brand/..%2F..%2Fconfig.json"))[0] == 404
     status, body, _ = get(server.url("/results"))
     assert b"/pictures/" not in body and b'id="tlogo"' in body  # logos given by results data
+
+
+def test_port_out_of_range_reported(ui_env):
+    """OverflowError at bind reported like a busy port, never crashes app start"""
+    from tinypedal import app_signal
+    from tinypedal.setting import cfg
+
+    errors = []
+    app_signal.error.connect(errors.append)
+    try:
+        cfg.user.config["stream_overlay"].update({"enable_stream_overlay": True, "stream_overlay_port": 70000})
+        control = stream_overlay.StreamOverlay()
+        control.enable()
+        assert not control.running
+        assert errors and "port 70000 unavailable" in errors[0]
+        control.disable()
+    finally:
+        app_signal.error.disconnect(errors.append)

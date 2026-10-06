@@ -70,6 +70,47 @@ def test_vehicle_data_from_field(field):
     assert field.dataSetVersion == 0
 
 
+def test_vehicle_history_reset_when_another_car_takes_index(field, monkeypatch):
+    """Multiplayer: car leaves, game compacts vehicle array, next car takes its index"""
+    monkeypatch.setattr(module_vehicles, "_index_slot_ids", {})
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, True, 600.0, True)
+    for car in field.dataSet[2:4]:
+        car.lapTimeHistory[4] = 95.0
+        car.fuelHistory.used = 2.5
+        car.pitTimer.laps = 7
+    timers = [(car.speedTrap, car.licoTimer) for car in field.dataSet[2:4]]
+    from tinypedal.api_control import api
+    api._api._shmmapi._shmm.data.scoring.vehScoringInfo[3].mID = 42  # another car now at index 3
+    module_vehicles.update_vehicle_data(field, 1.0, 1.0, True, 600.1, True)
+    kept, replaced = field.dataSet[2], field.dataSet[3]
+    assert kept.lapTimeHistory[4] == 95.0 and kept.fuelHistory.used == 2.5
+    assert (kept.speedTrap, kept.licoTimer) == timers[0]
+    assert replaced.lapTimeHistory[4] == 0.0 and replaced.fuelHistory.used == 0.0
+    assert replaced.pitTimer.laps == 0
+    # Speed trap & lift and coast timer of new car, stint laps recalculated
+    assert replaced.speedTrap is not timers[1][0] and replaced.licoTimer is not timers[1][1]
+    assert replaced.currentStintLaps == 0
+
+
+def test_slot_ids_forgotten_when_module_resets(field, monkeypatch):
+    """New session (module reset): slot ids of previous session never reset history of new one"""
+    from tinypedal import realtime_state
+    from tinypedal.setting import cfg
+
+    monkeypatch.setattr(module_vehicles, "_index_slot_ids", {0: 99, 7: 5})
+    monkeypatch.setattr(realtime_state, "paused", False)
+    module = module_vehicles.Realtime(cfg, "module_vehicles")
+    waits = iter((True,))
+    module._event.wait = lambda interval: next(waits, True)  # stop at once: reset branch not reached
+    module.update_data()
+    assert module_vehicles._index_slot_ids == {0: 99, 7: 5}
+    waits = iter((False, True))
+    module._event.wait = lambda interval: next(waits, True)  # one update then stop
+    module.update_data()
+    assert 7 not in module_vehicles._index_slot_ids  # cleared at reset, then filled from game
+    assert module_vehicles._index_slot_ids.get(0, 0) == 0
+
+
 def test_vehicle_data_high_priority_only(field):
     """Fast update: positions & pit state only, names & laps left for low priority update"""
     module_vehicles.update_vehicle_data(field, 1.0, 1.0, False, 600.0, True)

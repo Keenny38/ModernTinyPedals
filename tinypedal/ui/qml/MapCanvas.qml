@@ -36,12 +36,33 @@ Item {
     readonly property real centerY: (minY + maxY) / 2
     readonly property real baseScale: Math.max(Math.min((width - margin * 2) / Math.max(maxX - minX, 1),
                                                         (height - margin * 2) / Math.max(maxY - minY, 1)), 1e-6)
-    readonly property real mapScale: baseScale * zoom
+    // Shown view [zoom, panX, panY] set at once (applyView): matrix, scale, offsets & items placed with screenX /
+    // screenY depend on it alone, so they update once per eased frame (not once per zoom, panX & panY change).
+    // zoom, panX & panY stay plain properties (read & writable), kept in step with it
+    property var viewState: [1, 0, 0]
+    property bool applyingView: false
+    onZoomChanged: if (!applyingView) viewState = [zoom, viewState[1], viewState[2]]
+    onPanXChanged: if (!applyingView) viewState = [viewState[0], panX, viewState[2]]
+    onPanYChanged: if (!applyingView) viewState = [viewState[0], viewState[1], panY]
+    function applyView(nextZoom, nextPanX, nextPanY) {
+        applyingView = true
+        zoom = nextZoom
+        panX = nextPanX
+        panY = nextPanY
+        applyingView = false
+        viewState = [nextZoom, nextPanX, nextPanY]
+    }
+    readonly property real mapScale: baseScale * viewState[0]
     readonly property real ySign: flipY ? -1 : 1
-    readonly property real tx: width / 2 - centerX * mapScale + panX
-    readonly property real ty: height / 2 - ySign * centerY * mapScale + panY
+    readonly property real tx: width / 2 - centerX * (baseScale * viewState[0]) + viewState[1]
+    readonly property real ty: height / 2 - ySign * centerY * (baseScale * viewState[0]) + viewState[2]
     readonly property real metersPerPixel: 1 / mapScale
-    readonly property var matrix: Qt.matrix4x4(mapScale, 0, 0, tx, 0, ySign * mapScale, 0, ty, 0, 0, 1, 0, 0, 0, 0, 1)
+    readonly property var matrix: {
+        var view = viewState
+        var scale = baseScale * view[0]
+        return Qt.matrix4x4(scale, 0, 0, width / 2 - centerX * scale + view[1],
+                            0, ySign * scale, 0, height / 2 - ySign * centerY * scale + view[2], 0, 0, 1, 0, 0, 0, 0, 1)
+    }
 
     signal clicked(real x, real y)
     signal hovered(real x, real y)
@@ -71,21 +92,24 @@ Item {
                 nextPanY = (cy + (tcy - cy) * ease) * scale
             }
             if (done && Math.abs(nextPanX - canvas.targetPanX) < 0.5 && Math.abs(nextPanY - canvas.targetPanY) < 0.5) {
-                canvas.zoom = canvas.targetZoom
-                canvas.panX = canvas.targetPanX
-                canvas.panY = canvas.targetPanY
+                canvas.applyView(canvas.targetZoom, canvas.targetPanX, canvas.targetPanY)
                 canvas.anchor = null
                 stop()
                 return
             }
-            canvas.zoom = next
-            canvas.panX = nextPanX
-            canvas.panY = nextPanY
+            canvas.applyView(next, nextPanX, nextPanY)
         }
     }
 
-    function screenX(x) { return x * mapScale + tx }
-    function screenY(y) { return ySign * y * mapScale + ty }
+    // Read from viewState once (not mapScale & tx): bindings using them update once per frame
+    function screenX(x) {
+        var view = viewState, scale = baseScale * view[0]
+        return x * scale + (width / 2 - centerX * scale + view[1])
+    }
+    function screenY(y) {
+        var view = viewState, scale = baseScale * view[0]
+        return ySign * y * scale + (height / 2 - ySign * centerY * scale + view[2])
+    }
     function worldX(px) { return (px - tx) / mapScale }
     function worldY(py) { return (py - ty) / (ySign * mapScale) }
     // World point at screen point in view being eased to
@@ -105,9 +129,7 @@ Item {
             return
         }
         easing.stop()
-        zoom = nextZoom
-        panX = nextPanX
-        panY = nextPanY
+        applyView(nextZoom, nextPanX, nextPanY)
     }
     // Wheel steps add up on target zoom: fast wheel zooms as far as wheel turned, shown view catches up
     function zoomAt(factor, px, py) {

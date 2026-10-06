@@ -192,14 +192,17 @@ class GameRequest(QObject):
     received = Signal(object)
     failed = Signal()
 
-    def __init__(self, parent: QObject, resources: Sequence[str], callback: Callable[[Any], None]):
+    def __init__(self, parent: QObject, resources: Sequence[str], callback: Callable[[Any], None],
+                 on_failed: Callable[[], None] | None = None):
         super().__init__(parent)
         self.resources = tuple(resources)
         self.busy = False
         # Method of page held weakly: no reference cycle, so a page without parent is freed at once, in UI
         # thread (freed by garbage collector on any thread, its file watcher left a dangling socket notifier)
-        self._callback: Callable[[], Callable[[Any], None] | None] = (
-            weakref.WeakMethod(callback) if inspect.ismethod(callback) else lambda: callback)
+        self._callback: Callable[[], Callable[[Any], None] | None] = self._weak(callback)
+        # Work raised an exception: called instead of callback (page leaves its waiting state)
+        self._on_failed: Callable[[], Callable[[], None] | None] | None = (
+            None if on_failed is None else self._weak(on_failed))
         self._jobs: queue.SimpleQueue | None = None
         self.received.connect(self._done)
         self.failed.connect(self._failed)
@@ -229,3 +232,10 @@ class GameRequest(QObject):
 
     def _failed(self):
         self.busy = False
+        callback = None if self._on_failed is None else self._on_failed()
+        if callback is not None:
+            callback()
+
+    @staticmethod
+    def _weak(callback: Callable) -> Callable[[], Any]:
+        return weakref.WeakMethod(callback) if inspect.ismethod(callback) else lambda: callback

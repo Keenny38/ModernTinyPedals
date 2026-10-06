@@ -10,6 +10,7 @@ Item {
     id: root
 
     readonly property bool searching: searchField.activeFocus
+    readonly property var folderInfo: backend.folderInfo  // read once per change (sizes of every file)
     readonly property var sorts: [
         { "key": "date", "text": i18n.tr("Newest First") },
         { "key": "size", "text": i18n.tr("Largest First") },
@@ -87,14 +88,14 @@ Item {
             onTriggered: backend.keepLatest()
         }
         Action {
-            text: i18n.tr("Delete Temporary Files (%1, %2)").arg(backend.folderInfo.temp).arg(backend.folderInfo.tempSize)
-            enabled: backend.replayFolder !== "" && backend.folderInfo.temp > 0
+            text: i18n.tr("Delete Temporary Files (%1, %2)").arg(root.folderInfo.temp).arg(root.folderInfo.tempSize)
+            enabled: backend.replayFolder !== "" && root.folderInfo.temp > 0
             onTriggered: backend.deleteTempFiles()
         }
         MenuSeparator {}
         Action {
-            text: i18n.tr("%1 replays, %2, %3 protected").arg(backend.folderInfo.replays).arg(backend.folderInfo.size)
-                  .arg(backend.folderInfo.protected)
+            text: i18n.tr("%1 replays, %2, %3 protected").arg(root.folderInfo.replays).arg(root.folderInfo.size)
+                  .arg(root.folderInfo.protected)
             enabled: false
         }
     }
@@ -529,7 +530,7 @@ Item {
                     size: theme.em * 2.6
                     color: theme.dimText
                     RotationAnimation on rotation {  // asking game: refresh icon turns
-                        running: backend.loading && backend.replayCount === 0
+                        running: backend.loading && backend.replayCount === 0 && pageState.active
                         from: 0; to: 360; duration: 1000; loops: Animation.Infinite
                         onRunningChanged: if (!running) emptyIcon.rotation = 0
                     }

@@ -630,7 +630,7 @@ class RaceResultsBackend(QObject):
         self._classification_model = DictListModel(CLASSIFICATION_ROLES, self)
         self._lap_model = DictListModel(LAP_ROLES, self)
         self._event_model = DictListModel(EVENT_ROLES, self)
-        self.request = GameRequest(self, (), self.received)
+        self.request = GameRequest(self, (), self.received, self.load_failed)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self.folder_changed)
         self._reload_timer = QTimer(self)
@@ -697,6 +697,11 @@ class RaceResultsBackend(QObject):
     def folder_changed(self, _path: str):
         if self._shown:
             self._reload_timer.start()  # game writes file in several steps
+
+    def load_failed(self):
+        """Reading ended by an unexpected error (logged): page stops waiting"""
+        self.loading = False
+        self.loadingChanged.emit()
 
     def received(self, loaded: Loaded):
         newest_selected = bool(self.sessions) and self.selected_key == self.sessions[0].path

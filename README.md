@@ -35,6 +35,8 @@ Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/Tin
 
 > [!NOTE]
 > **New in 0.22.0**: ten more overlays get their own **modern design**, drawn for it instead of the classic drawing in modern colors: **radar** (round, fading at its edge, glow toward the car alongside), **track map** (checkered start line, cars as numbered dots in class or race status colors), **navigation** (road with edge lines, view fading at its edge), **friction circle** (G rings, fading trace, peaks), **heading** (compass ring), **steering wheel**, **instrument** and **weather forecast** (icons drawn as shapes in the theme colors), **trailing** (soft areas under throttle and brake) and **track notes**, then **black box**, **chat**, **elevation**, **flag**, **steering meter**, **race notifications** and **RPM LED**: every overlay has a modern design now. The **spotter** flashes green once the car alongside is gone and warns of a car coming up behind on a side. Placing overlays on the game screen is now an **edit mode** with a toolbar (snapping, grid, guides, undo), arrow keys and a richer right-click menu. **Real car brand and circuit logos, car and circuit pictures** taken from Le Mans Ultimate itself (kept on your computer, nothing shipped with the app) in the overlays, the app pages and the stream overlay of race results. All the details, with screenshots, in the [changelog](CHANGELOG.md).
+>
+> **0.22.2** uses less CPU while driving: data modules skip work when the game sends no new data, map overlays only redraw when cars moved, VR and stream capture only copy changed overlays, and hidden app pages stop their timers and animations. A full code review fixed about 90 issues: the stream overlay access token and web dashboard access code are kept across restarts (OBS sources no longer break at each start), a language pack language is kept, a settings file locked by another program at start is never overwritten, and cut laps or out laps no longer spoil delta best, best sectors and the fuel pace.
 
 ---
 
@@ -258,6 +260,8 @@ python run.py
 ```
 
 The shared memory libraries (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) are included in the repository: no submodule to fetch. For exact tested versions, use `requirements-lock.txt`.
+
+On Windows, `Download And Install` of an update found while running from source installs the Windows app (your installed copy is updated, then started); update the source folder itself with `git pull`.
 
 On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `TinyPedal` command in `/usr/local/`. Settings are in `$HOME/.config/TinyPedal/` and data in `$HOME/.local/share/TinyPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
 

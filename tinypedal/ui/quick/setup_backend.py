@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import threading
+import weakref
 from collections import deque
 from contextlib import suppress
 from typing import NamedTuple
@@ -51,7 +52,8 @@ from ...validator import is_allowed_filename
 from ..setup_wizard import DEFAULT_STARTER, STARTER_WIDGETS, UNIT_SYSTEMS, UNITS_KEEP, SetupChoices
 from . import Translator
 from .models import DictListModel
-from .overlay_backend import CATEGORY_COLORS, image_url, widget_category
+from .overlay_backend import CATEGORY_COLORS, widget_category
+from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +284,8 @@ class SetupBackend(QObject):
         self._names = [name for name in STARTER_WIDGETS if name in wctrl.names]
         # Overlay previews
         self._previews: dict[tuple, Preview] = {}  # (style, preset, overlay) -> picture
+        self._store_prefix = STORE.new_prefix("setup")  # pictures served to QML by preview_provider
+        weakref.finalize(self, STORE.release, self._store_prefix)
         self._shown: dict[str, Preview] = {}  # tile picture shown until the one of new style is ready
         self._queue: deque[tuple] = deque()
         self._queued: set[tuple] = set()
@@ -776,7 +780,8 @@ class SetupBackend(QObject):
             preview = Preview("", 0, 0)
         else:
             ratio = image.devicePixelRatio() or 1
-            preview = Preview(image_url(image), round(image.width() / ratio), round(image.height() / ratio))
+            url = STORE.put(self._store_prefix + "/".join(map(str, key)), image)
+            preview = Preview(url, round(image.width() / ratio), round(image.height() / ratio))
         self._previews[key] = preview
         if style_key == self.style_key() and filename == self.preset_file():
             self.tiles.update_rows(lambda row: self.tile_preview(name) if row["key"] == name else {})

@@ -26,6 +26,7 @@ import csv
 import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
+from math import isfinite
 from operator import itemgetter
 from typing import Any
 
@@ -150,7 +151,7 @@ def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
             if not metadata_checked:
                 for meta_key in meta_info:
                     if meta_key in note_line:
-                        meta_info[meta_key] = note_line.lstrip(f";{meta_key}:").strip()
+                        meta_info[meta_key] = note_line.strip().removeprefix(f";{meta_key}:").strip()
                         continue
             continue
         # Parse notes
@@ -161,6 +162,8 @@ def parse_gpl_notes(notes_file: Iterable[str], table_header: tuple[str, ...]):
                 metadata_checked = True
             split_string = split_line[-1].split(";", 1)
             distance = float(split_string[0].strip())
+            if not isfinite(distance):
+                continue
             if len(split_string) > 1:
                 comment = split_string[1].strip()
             else:
@@ -286,7 +289,10 @@ def save_notes_file(
 def verify_notes(note_line: dict, column_key: str) -> bool:
     """Verify first column value (must be float) from notes"""
     try:
-        note_line[column_key] = float(note_line[column_key])
+        value = float(note_line[column_key])
+        if not isfinite(value):
+            return False
+        note_line[column_key] = value
         return True
-    except (KeyError, ValueError):
+    except (KeyError, TypeError, ValueError):
         return False

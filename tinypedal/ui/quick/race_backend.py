@@ -284,8 +284,9 @@ class RaceBackend(QObject):
         self.team_capacity = 0.0  # tank capacity of car (fuel unit), 0 if unknown
         self.team_selection: set[int] = set()
         self.team_status = ""
-        self.team_request = GameRequest(self, USAGE_RESOURCES, self.received_team)
-        self.tyre_request = GameRequest(self, TYRE_SCREEN, self.received_allocation)
+        # Bound methods (held weakly): busy state left on failure too
+        self.team_request = GameRequest(self, USAGE_RESOURCES, self.received_team, self.team_request_failed)
+        self.tyre_request = GameRequest(self, TYRE_SCREEN, self.received_allocation, self.allocation_request_failed)
 
         # Live race
         self.stop_counter = StopCounter()
@@ -1734,6 +1735,12 @@ class RaceBackend(QObject):
         self.tyresChanged.emit()
         self.host.toast(trm(f"Tyre allocation from game: {allocation.maximum} tyre(s), {allocation.new_left} new left"))
 
+    def allocation_request_failed(self):
+        """Game request raised an error: busy indicator cleared"""
+        self.tyre_request.busy = False
+        self.tyresChanged.emit()
+        self.host.toast(tr("No tyre allocation from game: LMU not running or not in a session"))
+
     # Undo & redo: inputs & tyre plan
     def capture_state(self) -> dict:
         return {"tyres": self.tyres.capture_state(), "inputs": self.input_values(), "measured": self.measured_index}
@@ -1786,6 +1793,12 @@ class RaceBackend(QObject):
         capacity = tank_capacity(refuel)
         self.show_team_stints(stint_usage(parse_usage(usage)), self.unit_fuel(capacity) if capacity else 0.0)
         self.team_status = trm(f"Updated from game at {time.strftime('%H:%M:%S')}")
+        self.teamChanged.emit()
+
+    def team_request_failed(self):
+        """Game request raised an error: busy indicator cleared (asked again by team timer)"""
+        self.team_request.busy = False
+        self.team_status = tr("No data from game: LMU not running or not in a session")
         self.teamChanged.emit()
 
     def car_capacity(self) -> float:

@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import struct
+import sys
 import urllib.error
 import urllib.request
 
@@ -206,3 +207,68 @@ def test_stream_subscription_message(server, monkeypatch):
                 break
         else:
             pytest.fail("subscription not updated")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="SO_EXCLUSIVEADDRUSE is Windows only")
+def test_port_held_exclusively():
+    """Second server on a port in use refused (SO_REUSEADDR alone allows it on Windows)"""
+    from http.server import BaseHTTPRequestHandler
+
+    first = command_server.LocalHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    try:
+        with pytest.raises(OSError):
+            command_server.LocalHTTPServer(("127.0.0.1", first.server_address[1]), BaseHTTPRequestHandler)
+    finally:
+        first.server_close()
+
+
+def test_idle_client_disconnected(server, monkeypatch):
+    """Client sending nothing never holds a handler thread (socket timeout)"""
+    import time
+
+    assert command_server.CommandHandler.timeout == 15
+    monkeypatch.setattr(command_server.CommandHandler, "timeout", 0.5)
+    with socket.create_connection(("127.0.0.1", PORT), timeout=5) as client:
+        start = time.monotonic()
+        assert client.recv(1024) == b""  # closed by server, no request sent
+        assert time.monotonic() - start < 4
+
+
+def test_stream_to_stalled_client_ends(server, monkeypatch, caplog):
+    """Client not reading: send times out, stream thread ends (disable can stop it)"""
+    import logging
+    import time
+
+    monkeypatch.setattr(command_server.CommandHandler, "stream_timeout", 0.3)
+    monkeypatch.setattr(command_server.CommandHandler, "snapshot", staticmethod(lambda: {"x": "a" * 1_000_000}))
+    caplog.set_level(logging.INFO, logger=command_server.logger.name)
+    sock, _, response = ws_connect()
+    with sock:
+        assert response.startswith("HTTP/1.1 101")
+        deadline = time.monotonic() + 10
+        while "stream client disconnected" not in caplog.text and time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert "stream client disconnected" in caplog.text
+
+
+@pytest.mark.parametrize("port", [70000, -1])
+def test_port_out_of_range_reported(port, monkeypatch):
+    """OverflowError at bind reported like a busy port, never crashes app start"""
+    cfg.default.set_default()
+    config = copy_setting(cfg.default.config)
+    config["remote_control"].update(enable_remote_control=True, remote_control_port=port)
+    monkeypatch.setattr(cfg.user, "config", config, raising=False)
+    errors = []
+    app_signal.error.connect(errors.append)
+    try:
+        control = CommandServer()
+        control.enable()
+        assert not control.running
+        assert errors and f"port {port} unavailable" in errors[0]
+    finally:
+        app_signal.error.disconnect(errors.append)
+
+
+def test_bind_error_text():
+    assert command_server.bind_error_text(OSError(98, "Address in use")) == "Address in use"
+    assert command_server.bind_error_text(OverflowError("port must be 0-65535.")) == "port must be 0-65535."

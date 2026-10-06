@@ -3,14 +3,31 @@ import QtQuick.Controls.Basic
 
 // Search field: magnifier icon & clear button. Esc clears the text, then leaves the field (exitField signal),
 // Down leaves it too (focus the results). Esc is always taken: never closes the page hosting it.
+// Typing is debounced (searchDelay): one search per pause in typing, not per key; Enter, clear & Esc
+// apply the search at once (Enter before the page's own Enter handler runs, see Keys.onShortcutOverride).
 TextField {
     id: field
-    signal searchChanged(string text)  // typed or cleared
+    signal searchChanged(string text)  // typed (after a pause) or cleared
     signal exitField()
+    property int searchDelay: 120  // ms
 
     function clearSearch() {
+        debounce.stop()
         clear()
         searchChanged("")
+    }
+    // Pending typed search applied now (pages call it before reading results)
+    function flushSearch() {
+        if (debounce.running) {
+            debounce.stop()
+            searchChanged(text)
+        }
+    }
+
+    Timer {
+        id: debounce
+        interval: field.searchDelay
+        onTriggered: field.searchChanged(field.text)
     }
 
     implicitHeight: Math.round(theme.em * 2.3)
@@ -52,7 +69,20 @@ TextField {
         onClicked: { field.clearSearch(); field.forceActiveFocus() }
     }
 
-    onTextEdited: searchChanged(text)
+    onTextEdited: {
+        if (searchDelay > 0 && text !== "")
+            debounce.restart()
+        else {
+            debounce.stop()
+            searchChanged(text)  // emptied: everything shown again at once
+        }
+    }
+    // Sent before the key press reaches any Keys handler (also the page's specific Enter handlers)
+    Keys.onShortcutOverride: function(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+            flushSearch()
+    }
+    onActiveFocusChanged: if (!activeFocus) flushSearch()
     // Generic handler: pages may handle Down themselves (specific key handlers run first)
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape) {

@@ -203,15 +203,20 @@ class TracePainter:
         wcfg = self.wcfg
         tick = max(self.unit * 0.12, 2)
         width = max(rect.width() / max(len(samples), 1), 1)
+        # Colors parsed once per frame, not once per sample (hundreds while ABS or TC active)
+        abs_color = QColor(wcfg["abs_active_color"])
+        tc_color = QColor(wcfg["tc_active_color"])
+        lock_color = QColor(wcfg["wheel_lock_color"])
+        spin_color = QColor(wcfg["wheel_spin_color"])
         for sample in samples:
             x = x_at(sample.time)
             if sample.abs_active:
-                painter.fillRect(QRectF(x, rect.top(), width, tick), QColor(wcfg["abs_active_color"]))
+                painter.fillRect(QRectF(x, rect.top(), width, tick), abs_color)
             if sample.tc_active:
-                painter.fillRect(QRectF(x, rect.top() + tick, width, tick), QColor(wcfg["tc_active_color"]))
+                painter.fillRect(QRectF(x, rect.top() + tick, width, tick), tc_color)
             if sample.slip:
-                color = wcfg["wheel_lock_color" if sample.slip == "lock" else "wheel_spin_color"]
-                painter.fillRect(QRectF(x, rect.bottom() - tick, width, tick), QColor(color))
+                color = lock_color if sample.slip == "lock" else spin_color
+                painter.fillRect(QRectF(x, rect.bottom() - tick, width, tick), color)
 
     def draw_trace_caption(self, painter: QPainter, rect: QRectF, incident):
         """Incident summary (frozen) or recording mark (live), with incident count"""

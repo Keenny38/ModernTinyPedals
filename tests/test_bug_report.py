@@ -14,6 +14,8 @@ def test_redact():
     data = redact_setting({"web_dashboard": {"access_code": "SECRET12"}, "application": {"update_repository": "me/fork"}})
     assert data["web_dashboard"]["access_code"] == "<removed>"
     assert data["application"]["update_repository"] == "<removed>"
+    data = redact_setting({"stream_overlay": {"access_token": "TOKEN123", "port": 1}})
+    assert data["stream_overlay"] == {"access_token": "<removed>", "port": 1}
 
 
 def test_create_report(ui_env, tmp_path):

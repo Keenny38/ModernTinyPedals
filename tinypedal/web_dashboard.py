@@ -48,10 +48,11 @@ import threading
 import time
 from html import escape
 from http.cookies import CookieError, SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import app_signal, units
+from .command_server import LocalHTTPServer, bind_error_text
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
@@ -75,8 +76,34 @@ def generate_access_code(length: int = 8) -> str:
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(length))
 
 
-def local_addresses() -> list[str]:
-    """LAN IPv4 addresses of this computer"""
+ADDRESS_CACHE_SECONDS = 30.0  # LAN addresses asked again after this time (pages refresh every second)
+_address_lock = threading.Lock()
+_address_cache: tuple[float, list[str]] | None = None  # monotonic time, addresses
+
+
+def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS) -> list[str]:
+    """LAN IPv4 addresses of this computer (cached for max_age seconds: host name lookup can be slow)"""
+    global _address_cache
+    now = time.monotonic()
+    with _address_lock:
+        cached = _address_cache
+        if cached is not None and now - cached[0] < max_age:
+            return list(cached[1])
+    addresses = lookup_local_addresses()
+    with _address_lock:
+        _address_cache = (now, addresses)
+    return list(addresses)
+
+
+def clear_address_cache():
+    """Next local_addresses() looks up addresses again"""
+    global _address_cache
+    with _address_lock:
+        _address_cache = None
+
+
+def lookup_local_addresses() -> list[str]:
+    """LAN IPv4 addresses of this computer (lookup now)"""
     addresses: set[str] = set()
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
@@ -216,6 +243,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     """Dashboard request handler"""
 
     server_version = "TinyPedal"
+    timeout = 15  # idle client never holds a handler thread (socket timeout, no streaming endpoint)
     access_code = ""
     failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
     sessions: dict[str, list[float]] = {}  # session token: [created time, last used time]
@@ -374,7 +402,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         logger.debug("WEB DASHBOARD: %s", format % args)
 
 
-class DashboardServer(ThreadingHTTPServer):
+class DashboardServer(LocalHTTPServer):
     """Dashboard HTTP server, client errors (failed TLS handshake, dropped connection) only logged"""
 
     def handle_error(self, request, client_address):
@@ -387,7 +415,7 @@ class WebDashboard:
     __slots__ = ("_server", "_thread")
 
     def __init__(self):
-        self._server: ThreadingHTTPServer | None = None
+        self._server: DashboardServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -434,15 +462,15 @@ class WebDashboard:
         host, port = self.host(), self.port()
         try:
             self._server = DashboardServer((host, port), DashboardHandler)
-        except OSError as error:
+        except (OSError, OverflowError) as error:  # OverflowError: port out of range
             logger.error("WEB DASHBOARD: unable to listen on %s:%s (%s)", host, port, error)
-            app_signal.error.emit(f"Web dashboard: port {port} unavailable ({error.strerror}).")
+            app_signal.error.emit(f"Web dashboard: port {port} unavailable ({bind_error_text(error)}).")
             return
         self._server.daemon_threads = True
         DashboardHandler.secure = self.use_https()
         if DashboardHandler.secure:
             try:
-                addresses = local_addresses() if host != "127.0.0.1" else []
+                addresses = local_addresses(max_age=0) if host != "127.0.0.1" else []
                 context = server_context(cfg.path.config, addresses)
             except (OSError, ValueError, ImportError) as error:
                 logger.error("WEB DASHBOARD: unable to set up HTTPS (%s)", error)

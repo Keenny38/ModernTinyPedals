@@ -36,6 +36,7 @@ simple mode, color themes and display profile (options set by profile are locked
 from __future__ import annotations
 
 import logging
+import weakref
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -73,7 +74,7 @@ from .option_kinds import (
     parse_number,
     parse_path,
 )
-from .overlay_backend import CATEGORY_COLORS, CATEGORY_ORDER, image_url, widget_category
+from .overlay_backend import CATEGORY_COLORS, CATEGORY_ORDER, widget_category
 from .overlay_sections import (
     ITEM_PREFIX,
     SECTION_ORDER,
@@ -84,6 +85,7 @@ from .overlay_sections import (
     order_keys,
     section_dependencies,
 )
+from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,7 @@ ROW_HEADER = "header"
 ROW_ORDER = "order"
 MAX_ROWS = 400  # options shown at once (search in every overlay): more asks for a narrower search
 PREVIEW_DELAY_MS = 250  # preview rendered once edits pause
+INFO_DELAY_MS = 100  # header of selected overlay (customized count) told once edits pause
 WARM_INTERVAL_MS = 0  # options of other overlays read one per event loop tick
 # Options always different from default (moved, switched on): not counted as customized
 NOT_CUSTOMIZED = frozenset(("enable", "position_x", "position_y"))
@@ -110,6 +113,7 @@ PREVIEW_LOADING = 1
 PREVIEW_READY = 2
 PREVIEW_UNAVAILABLE = 3
 PREVIEW_INVALID = 4
+_MISSING = object()
 
 
 class OverlayOptionsHost(Protocol):
@@ -199,6 +203,8 @@ class OverlayOptionsBackend(QObject):
     """
 
     overlayChanged = Signal()
+    infoChanged = Signal()  # overlayInfo: with overlayChanged, and once edits pause
+    namesChanged = Signal()  # overlay list (choice list of narrow page): names or language changed
     stateChanged = Signal()  # pending edits, errors, undo & redo
     filterChanged = Signal()
     highlightChanged = Signal()
@@ -208,11 +214,15 @@ class OverlayOptionsBackend(QObject):
         super().__init__(parent)
         self._host = host
         self._control = control
+        self._preview_key = STORE.new_prefix("options") + "preview"
+        weakref.finalize(self, STORE.release, self._preview_key)
         self.rows = DictListModel(ROW_ROLES, self)
         self.nav = DictListModel(NAV_ROLES, self)
         self._names: list[str] = [name for name in control.names if name in cfg.user.setting]
         self._overlay = self._names[0] if self._names else ""
         self._layouts: dict[str, OverlayLayout] = {}
+        self._sorted_names: list[str] = []
+        self._row_overrides: dict[str, Mapping[str, bool]] = {}  # overlay: profile overrides its rows were built with
         self._kinds: dict[str, OptionKind] = {}  # option key: kind (same for every overlay)
         self._search_texts: dict[str, str] = {}
         self._pending: dict[str, Any] = {}  # option id: valid value not saved yet
@@ -250,6 +260,12 @@ class OverlayOptionsBackend(QObject):
         self._warm_timer = QTimer(self)
         self._warm_timer.setInterval(WARM_INTERVAL_MS)
         self._warm_timer.timeout.connect(self._warm_next)
+        self._info_timer = QTimer(self)
+        self._info_timer.setSingleShot(True)
+        self._info_timer.setInterval(INFO_DELAY_MS)
+        self._info_timer.timeout.connect(self.infoChanged)
+        self.overlayChanged.connect(self.infoChanged)
+        self._sort_names()
         self._count_shared()
         self.update_all()
         self._warm_queue = [name for name in self._names if name != self._overlay]
@@ -311,7 +327,7 @@ class OverlayOptionsBackend(QObject):
             if name in self._layouts or name not in cfg.user.setting:
                 continue
             self.layout(name)
-            self.update_nav()
+            self._update_nav_row(name)  # customized count of this overlay only
             return
         self._warm_timer.stop()
 
@@ -359,6 +375,7 @@ class OverlayOptionsBackend(QObject):
         self._match_count = 0
         self._truncated = 0
         self._helped = set()
+        self._row_overrides = {}
         if self.filtering and self._scope_all:
             for name in self._names:
                 self._overlay_rows(name, rows, with_name=True)
@@ -368,17 +385,13 @@ class OverlayOptionsBackend(QObject):
             row["last"] = number == len(rows) - 1 or rows[number + 1]["row"] == ROW_HEADER
         # Mostly other rows (overlay, search or filter changed): new list at once, else changed rows only
         # (editors keep focus & typed text, section folded without moving the list)
-        shown = {row["key"] for row in self.rows.rows}
-        kept = sum(row["key"] in shown for row in rows)
-        if kept * 2 < max(len(rows), len(shown)):
-            self.rows.reset([dict(row) for row in rows])
-        else:
-            self.rows.sync(rows)
+        self.rows.sync(rows, reset_if_mostly_new=True)
 
     def _overlay_rows(self, name: str, rows: list[dict], with_name: bool):
         layout = self.layout(name)
         values = self.values(name)
         overrides = self._overrides(layout, values)
+        self._row_overrides[name] = overrides
         collapsed = self._collapsed.get(name, set()) if not self.filtering else set()
         for section in layout.sections:
             shown = [key for key in section.keys
@@ -569,6 +582,8 @@ class OverlayOptionsBackend(QObject):
 
     def update_nav(self):
         """Overlay list: filtered by name & state, counts of unsaved edits & search matches"""
+        self._info_timer.stop()
+        self.infoChanged.emit()  # customized count of selected overlay
         changed: dict[str, int] = {}
         errors: dict[str, int] = {}
         for oid in self._pending.keys() | self._invalid.keys():
@@ -612,11 +627,65 @@ class OverlayOptionsBackend(QObject):
             return all(word in text for word in self._nav_words)
         return True
 
-    def changed(self):
-        """Pending edits changed: rows, counts, page marker & preview"""
-        self.update_all()
+    def _update_nav_row(self, name: str):
+        """Counts of one overlay in overlay list (unsaved edits, errors, customized options)"""
+        number = self.nav.index_of(name)
+        if number < 0:
+            return
+        prefix = f"{name}/"
+        layout = self._layouts.get(name)
+        self.nav.update_row(number, {
+            "changed": sum(oid.startswith(prefix) for oid in self._pending.keys() | self._invalid.keys()),
+            "errors": sum(oid.startswith(prefix) for oid in self._invalid),
+            "customized": -1 if layout is None else sum(self.is_customized(name, key) for key in layout.keys),
+        })
+
+    def _update_edited(self, oid: str) -> bool:
+        """Rows of one edited option updated alone (its row, its section header, its overlay in list),
+        False if more rows follow it (on/off option others depend on, display profile, design switch,
+        display order, "Modified" filter): every row updated then"""
+        name, key = split_id(oid)
+        if self._modified_only or key == "enable_classic_layout" or name not in self._names:
+            return False
+        layout = self.layout(name)
+        section = layout.section_of.get(key)
+        if section is None or section.key == SECTION_ORDER or key == section.toggle:
+            return False
+        if key in layout.dependencies.values():
+            return False
+        ui = layout.option_ui
+        if ui is not None and (key == ui.override_source or key in ui.order_toggles.values()):
+            return False
+        values = self.values(name)
+        overrides = self._overrides(layout, values)
+        if overrides != self._row_overrides.get(name, overrides):
+            return False
+        number = self.rows.index_of(oid)
+        if number >= 0:
+            shown = self.rows.rows[number]
+            row = self._option_row(name, key, layout, values, overrides)
+            row["help"] = shown["help"]  # shown once in results of every overlay
+            row["last"] = shown["last"]
+            self.rows.update_row(number, row)
+        number = self.rows.index_of(section_id(name, section.key))
+        if number >= 0:
+            self.rows.update_row(number, {
+                "changedCount": sum(self.is_changed(name, other) for other in section.keys),
+                "customizedCount": sum(self.is_customized(name, other) for other in section.keys),
+            })
+        self._update_nav_row(name)
+        self._info_timer.start()  # customized count of header, once edits pause
+        return True
+
+    def changed(self, edited: set[str] | None = None):
+        """Pending edits changed: rows, counts, page marker & preview
+
+        Args:
+            edited: option ids whose pending value changed (one: its rows updated alone), None if unknown.
+        """
+        if edited is None or len(edited) > 1 or (edited and not self._update_edited(next(iter(edited)))):
+            self.update_all()
         self.stateChanged.emit()
-        self.overlayChanged.emit()  # customized count of header
         self.schedule_preview()
 
     # Properties
@@ -632,7 +701,7 @@ class OverlayOptionsBackend(QObject):
     def overlay(self) -> str:
         return self._overlay
 
-    @Property(dict, notify=overlayChanged)
+    @Property(dict, notify=infoChanged)
     def overlayInfo(self) -> dict:
         """Header of selected overlay: name, category, state, design, tools it has"""
         name = self._overlay
@@ -899,27 +968,30 @@ class OverlayOptionsBackend(QObject):
     @Slot(str, result=int)
     def navIndex(self, name: str) -> int:
         """Index of overlay in overlay list, -1 if filtered out"""
-        return next((number for number, row in enumerate(self.nav.rows) if row["key"] == name), -1)
+        return self.nav.index_of(name)
 
     @Slot(str, result=int)
     def rowIndex(self, key: str) -> int:
         """Index of row (option id or section header key), -1 if not shown"""
-        return next((number for number, row in enumerate(self.rows.rows) if row["key"] == key), -1)
+        return self.rows.index_of(key)
 
     def sorted_names(self) -> list[str]:
         """Every overlay, in list order: by category, then label"""
+        return list(self._sorted_names)
+
+    def _sort_names(self):
         order = {category: index for index, category in enumerate(CATEGORY_ORDER)}
-        return sorted(self._names, key=lambda name: (
+        self._sorted_names = sorted(self._names, key=lambda name: (
             order.get(widget_category(name), len(order)), sort_key(module_label(name))))
 
-    @Property(list, notify=overlayChanged)
+    @Property(list, notify=namesChanged)
     def overlayKeys(self) -> list[str]:
         """Choice list of narrow page"""
-        return self.sorted_names()
+        return list(self._sorted_names)
 
-    @Property(list, notify=overlayChanged)
+    @Property(list, notify=namesChanged)
     def overlayLabels(self) -> list[str]:
-        return [module_label(name) for name in self.sorted_names()]
+        return [module_label(name) for name in self._sorted_names]
 
     @Slot(str)
     def copyText(self, text: str):
@@ -945,13 +1017,14 @@ class OverlayOptionsBackend(QObject):
             self._step_depth -= 1
             if self._step_depth == 0:
                 before, self._step_before = self._step_before, None
-                if before is not None and self._snapshot() != before:
+                after = self._snapshot()
+                if before is not None and after != before:
                     self._undo.append(before)
                     del self._undo[:-100]
                     self._redo.clear()
                     if not self._preset:
                         self._preset = cfg.filename.setting
-                self.changed()
+                self.changed(edited_ids(before, after) if before is not None else None)
 
     def _set(self, oid: str, value: Any = None, text: str | None = None):
         """Set pending value (dropped if same as saved), invalid typed text marked"""
@@ -1236,6 +1309,8 @@ class OverlayOptionsBackend(QObject):
         self._layouts.clear()
         self._search_texts.clear()
         self._count_shared()
+        self._sort_names()  # names or language changed
+        self.namesChanged.emit()
         self._preview_values = None
         self.update_all()
         self.overlayChanged.emit()
@@ -1341,13 +1416,22 @@ class OverlayOptionsBackend(QObject):
         else:
             ratio = image.devicePixelRatio() or 1
             self._preview_state = PREVIEW_READY
-            self._preview_url = image_url(image)
+            self._preview_url = STORE.put(self._preview_key, image)
             self._preview_size = (round(image.width() / ratio), round(image.height() / ratio))
         self.previewChanged.emit()
 
     def close(self):
         self._preview_timer.stop()
         self._warm_timer.stop()
+        self._info_timer.stop()
+
+
+def edited_ids(before: tuple[dict, dict], after: tuple[dict, dict]) -> set[str]:
+    """Option ids whose pending value or invalid text changed between two snapshots"""
+    edited: set[str] = set()
+    for old, new in zip(before, after):
+        edited.update(oid for oid in old.keys() | new.keys() if old.get(oid, _MISSING) != new.get(oid, _MISSING))
+    return edited
 
 
 def render_overlay(name: str, values: dict):

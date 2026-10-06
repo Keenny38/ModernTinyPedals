@@ -25,6 +25,8 @@ def lmu_api() -> tuple[api_connector.SimLMU, lmu_data.LMUObjectOut]:
     info._sync.player_scor = data.scoring.vehScoringInfo[0]
     info._sync.player_tele = data.telemetry.telemInfo[0]
     info._sync.player_scor_index = 0
+    # Telemetry matched by slot id as update thread would do (tests set same id & index)
+    info._sync._tele_indexes = {index: index for index in range(128)}
     return sim, data
 
 
@@ -40,6 +42,8 @@ def rf2_api() -> tuple[api_connector.SimRF2, typing.Any]:
     info._sync.player_scor = info._scor.data.mVehicles[0]
     info._sync.player_tele = info._tele.data.mVehicles[0]
     info._sync.player_scor_index = 0
+    # Telemetry matched by slot id as update thread would do (tests set same id & index)
+    info._sync._tele_indexes = {index: index for index in range(128)}
     return sim, info
 
 
@@ -153,6 +157,12 @@ def test_lmu_nan_values_sanitized():
     assert all_numbers_finite(reader.brake.bias_front())
     assert all_numbers_finite(reader.brake.temperature())
     assert all_numbers_finite(reader.brake.pressure())
+    tele.mVirtualEnergy = float("nan")
+    assert reader.engine.virtual_energy() == 0.0
+    tele.mVirtualEnergy = float("inf")
+    assert reader.engine.virtual_energy() == 0.0
+    tele.mVirtualEnergy = 0.42
+    assert reader.engine.virtual_energy() == pytest.approx(0.42)
 
 
 def test_lmu_unit_conversion():

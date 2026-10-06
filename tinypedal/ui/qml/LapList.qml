@@ -177,6 +177,7 @@ Card {
             clip: true
             model: backend.laps  // lap rows of expanded sessions only, rows changed in place (scroll position kept)
             boundsBehavior: Flickable.StopAtBounds
+            reuseItems: true  // rows scrolled out fed again with other laps (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             // Session laps fade in & out as session is expanded or collapsed, rows below slide
@@ -243,6 +244,10 @@ Card {
                 required property string logo  // session: car brand logo of game
 
                 readonly property bool isSession: kind === "session"
+                // Reused row (ListView.reuseItems): fed other lap values at once, no animation from the old lap
+                property bool live: true
+                ListView.onPooled: { live = false; opacity = 1 }  // remove transition may have faded it out
+                ListView.onReused: live = true
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: isSession ? Math.round(theme.em * 2.6) : Math.round(theme.em * 3.1)
 
@@ -255,7 +260,7 @@ Card {
                         anchors.topMargin: row.index > 0 ? theme.em * 0.35 : 0
                         radius: theme.em * 0.45
                         color: headerArea.containsMouse ? theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: 100 } }
+                        Behavior on color { enabled: row.live; ColorAnimation { duration: 100 } }
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: theme.em * 0.3
@@ -266,7 +271,7 @@ Card {
                                 size: theme.em * 0.75
                                 color: theme.dimText
                                 rotation: row.open ? 90 : 0
-                                Behavior on rotation { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                                Behavior on rotation { enabled: row.live; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                             }
                             Text {
                                 text: row.title
@@ -333,9 +338,10 @@ Card {
                     radius: theme.em * 0.45
                     color: row.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, lapArea.containsMouse ? 0.16 : 0.10)
                          : lapArea.containsMouse ? theme.hover : "transparent"
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { enabled: row.live; ColorAnimation { duration: 120 } }
                     ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.hint !== "" || row.error)
-                    ToolTip.text: row.error ? i18n.tr("Unable to read this lap file") : [row.hint, row.tip].filter(Boolean).join("\n")
+                    ToolTip.text: !lapArea.containsMouse ? ""  // text made when hovered only
+                        : row.error ? i18n.tr("Unable to read this lap file") : [row.hint, row.tip].filter(Boolean).join("\n")
                     ToolTip.delay: 700
 
                     // Lap color bar when shown in charts
@@ -348,7 +354,7 @@ Card {
                         anchors.margins: theme.em * 0.4
                         color: row.color || "transparent"
                         scale: row.color ? 1 : 0
-                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
+                        Behavior on scale { enabled: row.live; NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
                     }
 
                     MouseArea {
@@ -387,14 +393,14 @@ Card {
                             color: row.error ? theme.warning : row.checked ? (row.color || theme.accent) : "transparent"
                             border.width: row.checked || row.error ? 0 : 1.5
                             border.color: theme.dimText
-                            Behavior on color { ColorAnimation { duration: 150 } }
+                            Behavior on color { enabled: row.live; ColorAnimation { duration: 150 } }
                             Icon {
                                 anchors.centerIn: parent
                                 glyph: row.error ? "" : ""  // warning, check mark
                                 size: theme.em * 0.75
                                 color: "white"
                                 opacity: row.checked || row.error ? 1 : 0
-                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                                Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
                             }
                         }
 
@@ -440,29 +446,13 @@ Card {
                             }
                             RowLayout {
                                 spacing: theme.em * 0.6
-                                Repeater {
-                                    model: [[row.s1, row.best1], [row.s2, row.best2], [row.s3, row.best3]]
-                                    Text {
-                                        text: modelData[0]
-                                        color: sectorArea.containsMouse ? theme.accent : modelData[1] ? theme.purple : theme.dimText
-                                        font.pointSize: theme.fontPoint * 0.85
-                                        font.features: { "tnum": 1 }
-                                        font.weight: modelData[1] ? Font.DemiBold : Font.Normal
-                                        MouseArea {
-                                            id: sectorArea
-                                            anchors.fill: parent
-                                            enabled: modelData[0] !== "-" && root.chart !== undefined
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.chart.zoomSector(index + 1)
-                                            ToolTip.visible: containsMouse
-                                            ToolTip.text: i18n.tr("Zoom charts on this sector")
-                                            ToolTip.delay: 600
-                                        }
-                                    }
-                                }
+                                // Three sectors: fixed texts (no array & Repeater per row)
+                                SectorText { value: row.s1; best: row.best1; sector: 1; chart: root.chart }
+                                SectorText { value: row.s2; best: row.best2; sector: 2; chart: root.chart }
+                                SectorText { value: row.s3; best: row.best3; sector: 3; chart: root.chart }
                                 Text {
-                                    text: [row.info, row.note ? "“" + row.note + "”" : ""].filter(Boolean).join(" · ")
+                                    text: row.note === "" ? row.info
+                                        : (row.info !== "" ? row.info + " · " : "") + "“" + row.note + "”"
                                     color: theme.dimText
                                     font.pointSize: theme.fontPoint * 0.85
                                     elide: Text.ElideRight
@@ -479,7 +469,7 @@ Card {
                             tip: i18n.tr("Set as Reference")
                             opacity: row.reference ? 1 : (lapArea.containsMouse || hovered ? 0.8 : 0)
                             checked: row.reference
-                            Behavior on opacity { NumberAnimation { duration: 120 } }
+                            Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
                             onClicked: backend.setReference(row.path)
                         }
                     }
@@ -493,6 +483,31 @@ Card {
             color: theme.purple
             font.weight: Font.DemiBold
             Layout.leftMargin: theme.em * 0.3
+        }
+    }
+
+    // Sector time of a lap row: best sector in purple, click zooms charts on the sector
+    component SectorText: Text {
+        id: sectorText
+        property string value
+        property bool best
+        property int sector
+        property var chart
+        text: value
+        color: sectorArea.containsMouse ? theme.accent : best ? theme.purple : theme.dimText
+        font.pointSize: theme.fontPoint * 0.85
+        font.features: { "tnum": 1 }
+        font.weight: best ? Font.DemiBold : Font.Normal
+        MouseArea {
+            id: sectorArea
+            anchors.fill: parent
+            enabled: sectorText.value !== "-" && sectorText.chart !== undefined
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: sectorText.chart.zoomSector(sectorText.sector)
+            ToolTip.visible: containsMouse
+            ToolTip.text: containsMouse ? i18n.tr("Zoom charts on this sector") : ""  // made when hovered only
+            ToolTip.delay: 600
         }
     }
 }

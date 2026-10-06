@@ -139,6 +139,7 @@ class BackendBase:
         _map_shown: int
         _map_slip: bool
         _map_view: tuple[float, float, float]
+        _trail_state: tuple[dict, float, list[float]] | None
         _math: list[MathChannel]
         _mini_busy: bool
         _mini_times: dict[str, tuple[float, tuple, list[float]]]

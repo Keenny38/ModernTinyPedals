@@ -331,7 +331,8 @@ class Realtime(Overlay):
                 target.text = f"{data:.{self.decimals_cons}f}"
             rate = data / self.max_fuel_rate if self.max_fuel_rate else 0
             target.input_color = self.consbar_color[rate >= self.wcfg["high_consumption_threshold"]]
-            target.update_input(rate ** self.cons_exp)
+            # Negative while refuelling: clamp (negative ** fractional exponent is complex)
+            target.update_input(min(max(rate, 0.0), 1.0) ** self.cons_exp)
 
     def update_limiter(self, target, data):
         """Limiter"""

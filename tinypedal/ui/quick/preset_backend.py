@@ -37,6 +37,7 @@ from PySide6.QtCore import Property, QDateTime, QLocale, QObject, Signal, Slot
 from ... import app_signal
 from ...const_app import VERSION
 from ...const_file import ConfigType, FileExt
+from ...formatter import strip_filename_extension
 from ...i18n import current_language, tr, trm
 from ...i18n.options import module_label
 from ...module_control import mctrl, wctrl
@@ -387,7 +388,7 @@ class PresetBackend(QObject):
     @Slot(str, str, str, result=str)
     def nameError(self, mode: str, filename: str, name: str) -> str:
         """Why name cannot be used (translated), "" if it can (or rename keeps same name)"""
-        if mode == MODE_RENAME and name.strip() == filename[:-len(FileExt.JSON)]:
+        if mode == MODE_RENAME and strip_filename_extension(name.strip(), FileExt.JSON) == filename[:-len(FileExt.JSON)]:
             return ""
         return check_preset_name(name, mode, filename) if name.strip() else ""
 
@@ -410,14 +411,15 @@ class PresetBackend(QObject):
             return tr("Preset not found, it may have been renamed or deleted.")
         if mode == MODE_RENAME and filename in cfg.user.filelock:
             return tr("Unlock the preset to rename it.")
-        if mode == MODE_RENAME and name.strip() == filename[:-len(FileExt.JSON)]:
+        entered_name = strip_filename_extension(name.strip(), FileExt.JSON)  # "Race.json" is "Race"
+        if mode == MODE_RENAME and entered_name == filename[:-len(FileExt.JSON)]:
             return ""
         error = apply_preset_name(name.strip(), mode, filename)
         if not error:
-            self._selected = f"{name.strip()}{FileExt.JSON}"
+            self._selected = f"{entered_name}{FileExt.JSON}"
             self.refresh()
             verb = {MODE_NEW: "Preset created", MODE_DUPLICATE: "Preset duplicated", MODE_RENAME: "Preset renamed"}[mode]
-            self._host.toast(trm(f"{verb}: <b>{name.strip()}</b>"))
+            self._host.toast(trm(f"{verb}: <b>{entered_name}</b>"))
         return error
 
     @Slot(str)

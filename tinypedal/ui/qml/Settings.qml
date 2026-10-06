@@ -14,16 +14,18 @@ TpPage {
     readonly property var web: backend.webDashboard
     readonly property var remote: backend.remoteControl
     readonly property var previews: backend.previews
+    readonly property var categories: backend.categories  // read once per change (navigation, choice list)
 
     function scrollToKey(key) {
-        for (var i = 0; i < rows.count; i++) {
-            var item = rows.itemAt(i)
-            if (item && item.key === key) {
-                var y = item.mapToItem(optionsColumn, 0, 0).y
-                flick.contentY = Math.max(0, Math.min(y - theme.em * 2, flick.contentHeight - flick.height))
-                item.flash()
-                return
-            }
+        var index = backend.optionIndex(key)
+        if (index < 0)
+            return
+        flick.positionViewAtIndex(index, ListView.Beginning)  // row created if it was not
+        var item = flick.itemAtIndex(index)
+        if (item) {
+            flick.contentY = Math.max(flick.originY, Math.min(item.y - theme.em * 2,
+                                                              flick.originY + flick.contentHeight - flick.height))
+            item.flash()
         }
     }
     // Field being edited committed (Apply, Ctrl+S: buttons & shortcuts take no focus): focus left
@@ -49,7 +51,7 @@ TpPage {
             if (backend.highlightKey !== "")
                 highlightTimer.restart()  // rows of new category laid out first
         }
-        function onCategoryChanged() { flick.contentY = 0 }
+        function onCategoryChanged() { flick.positionViewAtBeginning() }
         function onFilterChanged() {
             if (search.text !== backend.searchText)
                 search.text = backend.searchText
@@ -98,13 +100,13 @@ TpPage {
                     spacing: 2
                     interactive: contentHeight > height
                     boundsBehavior: Flickable.StopAtBounds
-                    model: backend.categories
+                    model: page.categories
                     activeFocusOnTab: true
                     currentIndex: -1
                     Keys.onUpPressed: navStep(-1)
                     Keys.onDownPressed: navStep(1)
                     function navStep(offset) {
-                        var keys = backend.categories.map(function(entry) { return entry.key })
+                        var keys = page.categories.map(function(entry) { return entry.key })
                         var index = keys.indexOf(backend.category)
                         backend.selectCategory(keys[Math.max(0, Math.min(keys.length - 1, index + offset))])
                     }
@@ -271,9 +273,9 @@ TpPage {
                 spacing: theme.em * 0.5
                 TpCombo {
                     Layout.preferredWidth: theme.em * 13
-                    model: backend.categories.map(function(entry) { return entry.label })
-                    currentIndex: backend.categories.map(function(entry) { return entry.key }).indexOf(backend.category)
-                    onActivated: function(index) { backend.selectCategory(backend.categories[index].key) }
+                    model: page.categories.map(function(entry) { return entry.label })
+                    currentIndex: page.categories.map(function(entry) { return entry.key }).indexOf(backend.category)
+                    onActivated: function(index) { backend.selectCategory(page.categories[index].key) }
                 }
                 TpSearchField {
                     id: narrowSearch
@@ -349,22 +351,25 @@ TpPage {
                 }
             }
 
-            // Options
-            Flickable {
+            // Options: rows made for the part shown, pooled & fed again when category or search changes
+            // (no row of every option kept), status cards above the rows, settings file below
+            ListView {
                 id: flick
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                contentWidth: width
-                contentHeight: optionsColumn.implicitHeight + theme.em * 1.2
                 boundsBehavior: Flickable.StopAtBounds
                 activeFocusOnTab: true
+                keyNavigationEnabled: false  // Up & Down scroll (no current row)
+                reuseItems: true
+                cacheBuffer: Math.round(theme.em * 40)
+                model: backend.options
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                Keys.onUpPressed: flick.contentY = Math.max(0, flick.contentY - theme.em * 3)
-                Keys.onDownPressed: flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + theme.em * 3))
+                readonly property real lastY: originY + contentHeight - height
+                Keys.onUpPressed: flick.contentY = Math.max(flick.originY, flick.contentY - theme.em * 3)
+                Keys.onDownPressed: flick.contentY = Math.max(flick.originY, Math.min(flick.lastY, flick.contentY + theme.em * 3))
 
-                Column {
-                    id: optionsColumn
+                header: Column {
                     x: theme.em * 1.0
                     width: flick.width - theme.em * 2.0
                     spacing: 0
@@ -540,19 +545,22 @@ TpPage {
                     }
 
                     Item { width: 1; height: theme.em * 0.2; visible: !backend.searching && (backend.category === "web_dashboard" || backend.category === "remote_control") }
+                }
 
-                    Repeater {
-                        id: rows
-                        model: backend.options
-                        SettingRow {
-                            width: optionsColumn.width
-                            preview: backend.category === "notification" && !backend.searching ? (page.previews[group] || null) : null
-                        }
-                    }
+                delegate: SettingRow {
+                    x: theme.em * 1.0
+                    width: flick.width - theme.em * 2.0
+                    preview: backend.category === "notification" && !backend.searching ? (page.previews[group] || null) : null
+                }
+
+                footer: Column {
+                    x: theme.em * 1.0
+                    width: flick.width - theme.em * 2.0
+                    spacing: 0
 
                     EmptyState {
-                        visible: rows.count === 0
-                        width: optionsColumn.width
+                        visible: flick.count === 0
+                        width: parent.width
                         topPadding: theme.em * 3
                         glyph: ""  // search
                         title: i18n.tr("No setting found")
@@ -586,6 +594,7 @@ TpPage {
                             }
                         }
                     }
+                    Item { width: 1; height: theme.em * 1.2 }  // room below last row
                 }
             }
 

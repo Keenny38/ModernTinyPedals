@@ -41,6 +41,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QStat
 
 from ...const_file import FontFile
 from .._base import Overlay
+from .._painter import layer_fits
 from .draw import drawable
 from .theme import Theme, build_theme
 
@@ -292,7 +293,7 @@ class ModernOverlay(Overlay):
         """Background drawn once per size & screen scale"""
         ratio = self.devicePixelRatioF()
         layer = self._static_layer
-        if layer is not None and layer.devicePixelRatio() == ratio and layer.deviceIndependentSize() == self.size():
+        if layer is not None and layer_fits(layer, self.width(), self.height(), ratio):
             return layer
         layer = QPixmap(max(round(self.width() * ratio), 1), max(round(self.height() * ratio), 1))
         layer.setDevicePixelRatio(ratio)

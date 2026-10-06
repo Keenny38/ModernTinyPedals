@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from time import monotonic, sleep
 
 from . import app_signal
@@ -45,15 +45,41 @@ def wait_stopped(is_stopped: Callable[[], bool], name: str, timeout: float | Non
     Returns:
         True if stopped within timeout, False if gave up (error logged).
     """
+    return wait_all_stopped(((name, is_stopped, None),), timeout)
+
+
+def wait_all_stopped(
+    targets: Iterable[tuple[str, Callable[[], bool], Callable[[float], object] | None]],
+    timeout: float | None = None,
+) -> bool:
+    """Wait (bounded) until every thread reports stopped, against one shared deadline
+
+    Signal stop to every thread first, then wait them all here, so threads stop in parallel.
+
+    Args:
+        targets: (display name, is_stopped, wait) per thread. wait(seconds) blocks until
+            thread stopped or seconds elapsed (Event.wait, Thread.join), None to poll is_stopped.
+        timeout: maximum wait (seconds) for all threads, default STOP_TIMEOUT.
+
+    Returns:
+        True if all stopped within timeout, False if gave up on any (error logged for each).
+    """
     if timeout is None:
         timeout = STOP_TIMEOUT
     deadline = monotonic() + timeout
-    while not is_stopped():
-        if monotonic() >= deadline:
-            logger.error("ERROR: %s not stopped after %ss, continue anyway", name, timeout)
-            return False
-        sleep(0.01)
-    return True
+    all_stopped = True
+    for name, is_stopped, wait in targets:
+        while not is_stopped():
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                logger.error("ERROR: %s not stopped after %ss, continue anyway", name, timeout)
+                all_stopped = False
+                break
+            if wait is None:
+                sleep(min(remaining, 0.01))
+            elif wait(remaining) and not is_stopped():
+                sleep(min(remaining, 0.01))  # waited object done but state not yet set, never spin
+    return all_stopped
 
 
 def run_supervised(

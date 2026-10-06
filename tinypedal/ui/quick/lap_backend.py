@@ -189,6 +189,7 @@ TRASH_FOLDER = ".trash"  # deleted laps, in telemetry folder (hidden: not a trac
 TRASH_DAYS = 30  # deleted laps kept in trash folder
 INFO_FOLDER = "info"  # in lap cache folder: lap infos of each track (first line of lap files), see track_infos
 INFO_READERS = 8  # threads reading infos of new lap files (first open of a file waits for antivirus scan)
+INFO_BACKGROUND = 24  # more lap infos to read from files than this: read in background (track shown once read)
 WORKER_IDLE = 60_000  # ms without job before worker process stops (its memory given back)
 USE_WORKER_PROCESS = True  # heavy jobs (track limits, session values) in a worker process, else in threads
 XY_DOT = 0.007  # scatter dot size, share of plot
@@ -517,6 +518,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         notifier().changed.connect(self.pictures_changed)
         for part in (self.panelsChanged, self.cornersChanged, self.mapDataChanged):
             self.chartChanged.connect(part)
+        # Lists rebuilt only when charts change, not on every QML read (connected first: dropped before QML reads)
+        self._chart_lists: dict[str, tuple[tuple, list[dict]]] = {}
+        self.chartChanged.connect(self._chart_lists.clear)
         self.folder = folder
         self.prefix = f"lap_viewer_{id(self)}|"  # vertex store keys of this page
         self.data = TraceData()
@@ -617,6 +621,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._limits_timer.setInterval(100)
         self._limits_timer.timeout.connect(self.check_limits_job)
         self._trail_revision = 0
+        self._trail_state: tuple[dict, float, list[float]] | None = None  # map, scale, lap ends of trails built
         self._selected_corner = -1
         self._map_range = (-1.0, -1.0)  # chart markers A & B (reference distances), shown on map
         self._map_shown = 0  # track maps shown (trails built only if any)
@@ -648,6 +653,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._loaded: dict[str, LapData | None] = {}
         self._load_total = 0
         self._load_message = ""  # status before loading started
+        self._infos_track = ""  # track whose lap infos are read in background (shown once read)
+        self._infos_generation = 0  # latest track load: infos read for an older one ignored
         self._load_timer = QTimer(self)
         self._load_timer.setInterval(30)
         self._load_timer.timeout.connect(self.check_background_load)
@@ -852,7 +859,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         return self._track
 
     def _track_set(self, track: str):
-        if track != self._track:
+        if self._infos_track and track == self._infos_track:
+            return  # its lap infos being read
+        if track != self._track or self._infos_track:  # shown track picked again: pending track dropped
             self.load_track(track)
 
     tracks = Property(list, _tracks_get, notify=tracksChanged)
@@ -943,12 +952,20 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def timeAxis(self) -> bool:
         return self.data.time_axis
 
+    def chart_list(self, name: str, key: tuple, build: Callable[[], list[dict]]) -> list[dict]:
+        """List property computed once until charts change (chartChanged) or its key does"""
+        cached = self._chart_lists.get(name)
+        if cached is None or cached[0] != key:
+            cached = (key, build())
+            self._chart_lists[name] = cached
+        return cached[1]
+
     @Property(list, notify=chartChanged)
     def sectorLines(self) -> list[dict]:
-        return [
-            {"x": self.data.x_at_distance(distance), "label": f"S{index + 2}", "index": index + 1}
-            for index, distance in enumerate(self.data.sector_lines)
-        ]
+        return self.chart_list(
+            "sectorLines", (tuple(self.data.sector_lines), self.data.time_axis, id(self.data.reference)),
+            lambda: [{"x": self.data.x_at_distance(distance), "label": f"S{index + 2}", "index": index + 1}
+                     for index, distance in enumerate(self.data.sector_lines)])
 
     @Property(list, notify=cornersChanged)
     def cornerMarks(self) -> list[dict]:
@@ -976,8 +993,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     @Property(list, notify=chartChanged)
     def comparedLaps(self) -> list[dict]:
         """Laps that can be compared with reference (corner table, gain map): key, label, color"""
-        return [{"key": lap.key, "label": self.short_label(lap.key), "color": lap.color.name()}
-                for lap in self.data.compared()]
+        laps = self.data.compared()
+        return self.chart_list(
+            "comparedLaps", tuple((lap.key, lap.color.rgba()) for lap in laps),
+            lambda: [{"key": lap.key, "label": self.short_label(lap.key), "color": lap.color.name()} for lap in laps])
 
     @Property(str, notify=cornersChanged)
     def compareKey(self) -> str:
@@ -1268,13 +1287,20 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 self._lap_cache.pop(path, None)
                 self._cache_mtime.pop(path, None)
 
-    def load_track(self, track: str, new_lap: LapFile | None = None):
-        """Laps of track listed, laps shown last time on it shown (new_lap: lap just recorded compared, live mode)"""
+    def load_track(self, track: str, new_lap: LapFile | None = None, background: bool = True):
+        """Laps of track listed, laps shown last time on it shown (new_lap: lap just recorded compared, live mode),
+        many new lap files: their infos read in background first (unless not background)"""
+        laps = list_laps(self.folder, track) if track else []
+        self._infos_generation += 1  # infos read for a former load ignored
+        self._infos_track = ""
+        indexed = self.indexed_infos(track, laps)
+        if background and len(indexed[3]) > INFO_BACKGROUND:  # hundreds of new lap files (seconds): page not frozen
+            self.read_track_infos(track, new_lap, [lap.path for lap in indexed[3]])
+            return
         changed = track != self._track
         self._track = track
         self.tracksChanged.emit()
-        laps = list_laps(self.folder, track) if track else []
-        self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(track, laps))]
+        self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(track, laps, indexed))]
         adopted = self.adopt_external()
         if changed:  # analysis of former track laps not carried over (distances & laps of another circuit)
             self._align_apex = -1.0  # laps aligned on a corner
@@ -1296,6 +1322,37 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.load_laps()
         if self._side_tab == 4:  # session tab shown (page opened on it, track changed): its laps read
             self.start_session_job()
+
+    def read_track_infos(self, track: str, new_lap: LapFile | None, paths: list[str]):
+        """Lap infos of track read in background, track shown once read (shown track kept meanwhile), unless another
+        track was loaded since"""
+        generation = self._infos_generation
+        self._infos_track = track
+        self.set_status(tr("Reading laps..."), False)
+
+        def read(path: str) -> tuple[str, float, dict] | None:
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:  # removed meanwhile
+                return None
+            return path, mtime, read_lap_info(path)
+
+        def reading() -> list:
+            with concurrent.futures.ThreadPoolExecutor(INFO_READERS, "Lap viewer infos") as pool:
+                return list(pool.map(read, paths))
+
+        def done(result):
+            for item in result if isinstance(result, list) else []:
+                if item is not None:  # kept even if another track is shown: read once
+                    self._info_cache[item[0]] = (item[1], item[2])
+            if generation != self._infos_generation:
+                return  # another track loaded meanwhile
+            self._infos_track = ""
+            if self._status == tr("Reading laps..."):
+                self.set_status("", False)
+            self.load_track(track, new_lap, False)  # infos known now (laps failed or added meanwhile: read here)
+
+        self.run_job("lap infos", reading, done)
 
     def track_selection(self, track: str, laps: list[LapFile], adopted: set[str]) -> tuple[set[str], str]:
         """Laps shown on track & reference: laps shown last time (saved reference, else fastest of them), else fastest
@@ -1466,7 +1523,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         try:
             with open(cache, encoding="utf-8") as file:
                 saved = json.load(file)
-            if (saved.get("laps") == names and "sectors" in saved and saved.get("base", "lap") == base_key
+            if (isinstance(saved, dict) and saved.get("laps") == names and "sectors" in saved  # damaged: not a dict
+                    and saved.get("base", "lap") == base_key
                     and saved.get("version") == lap_map.LIMITS_VERSION):  # older algorithm: computed again
                 if saved.get("left"):
                     self._limits = lap_map.TrackLimits(*(
@@ -1674,12 +1732,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def info_index_path(self, track: str) -> str:
         return os.path.join(self.folder, CACHE_FOLDER, INFO_FOLDER, f"{track}.json")
 
-    def track_infos(self, track: str, laps: list[LapFile]) -> list[dict]:
-        """Infos of track laps: from memory, else from track index (lap file size & time unchanged), else read from
-        lap files (index saved again): opening hundreds of new files takes seconds (antivirus scan)"""
-        if not laps:
-            return []
+    def indexed_infos(self, track: str, laps: list[LapFile]) -> tuple[dict, dict, dict, list[LapFile]]:
+        """Lap file stamps, saved track index, infos known (memory or index) & laps whose info must be read from file"""
         stamps: dict[str, tuple[int, int, float]] = {}
+        if not laps:
+            return stamps, {}, {}, []
         with suppress(OSError), os.scandir(os.path.join(self.folder, track)) as found:  # no file opened
             for item in found:
                 stat = item.stat()
@@ -1704,6 +1761,17 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 known[lap.filename] = indexed[2]
             else:
                 missing.append(lap)
+        return stamps, saved, known, missing
+
+    def track_infos(self, track: str, laps: list[LapFile],
+                    indexed: tuple[dict, dict, dict, list[LapFile]] | None = None) -> list[dict]:
+        """Infos of track laps: from memory, else from track index (lap file size & time unchanged), else read from
+        lap files (index saved again): opening hundreds of new files takes seconds (antivirus scan, see
+        read_track_infos)"""
+        if not laps:
+            return []
+        stamps, saved, known, missing = indexed if indexed is not None else self.indexed_infos(track, laps)
+        path = self.info_index_path(track)
         paths = [lap.path for lap in missing]
         if len(paths) > 2:  # new files read together: each one is scanned by antivirus on first open
             with concurrent.futures.ThreadPoolExecutor(INFO_READERS, "Lap viewer infos") as pool:
@@ -3044,10 +3112,15 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     @Slot(float, result=dict)
     def cursorState(self, x: float) -> dict:
-        """Everything shown at cursor in one call: title, chart values, map & G circle positions"""
+        """Everything shown at cursor in one call: title, chart values, map & G circle positions
+
+        Map & G circle positions only while shown (empty otherwise, asked again once shown: optionsChanged,
+        setMapShown): a hidden side tab costs nothing per cursor move.
+        """
         self.build_trails(x)
-        return {"title": self.cursorTitle(x), "values": self.cursorValues(x), "map": self.mapCursor(x),
-                "g": self.gCursor(x)}
+        return {"title": self.cursorTitle(x), "values": self.cursorValues(x),
+                "map": self.mapCursor(x) if self._map_shown else [],
+                "g": self.gCursor(x) if self._side_tab == 1 else []}
 
     @Slot(float)
     def copyValues(self, x: float):

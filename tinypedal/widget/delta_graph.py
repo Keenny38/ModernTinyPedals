@@ -157,7 +157,9 @@ class DeltaGraphMixin:
     def read_graph(self) -> tuple:
         """Sample delta, chart geometry if trace changed; state: (trace version, mark x, mark y, delta)"""
         delta = getattr(minfo.delta, self.delta_source) if delta_shown(self.source) else nan
-        progress = api.read.lap.progress()
+        # Lap counter may go up while progress still reads end of lap: start of lap then, else lap
+        # completed twice (counter, then progress going back) and previous lap trace lost
+        progress = calc.lap_progress_correction(api.read.lap.progress(), api.read.timing.current_laptime())
         trace = self.trace
         trace.update(api.read.lap.completed_laps(), progress, delta)
         if self.shapes_version != trace.version:

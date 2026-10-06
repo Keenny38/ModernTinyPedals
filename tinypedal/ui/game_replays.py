@@ -24,6 +24,7 @@ Qt Quick page (ui/qml/GameReplays.qml), state & game requests in quick/replays_b
 Everything goes through the game Rest API (see game_rest), the game must be running.
 """
 
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QVBoxLayout
 
 from ..i18n import tr
@@ -57,5 +58,7 @@ class GameReplays(BaseDialog):
         super().hideEvent(event)
 
     def closeEvent(self, event):
+        # QML bindings never read a released backend (see qml page pitfalls: view goes first)
+        self.view.setSource(QUrl())
         self.backend.release()
         super().closeEvent(event)

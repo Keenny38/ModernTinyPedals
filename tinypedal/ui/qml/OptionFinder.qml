@@ -10,6 +10,7 @@ TpPage {
     id: page
 
     function openCurrent() {
+        results.forceLayout()  // search just flushed by Enter: rows not laid out yet
         if (results.currentItem)
             backend.openOption(results.currentItem.key)
     }

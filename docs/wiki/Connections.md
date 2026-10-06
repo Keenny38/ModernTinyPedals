@@ -46,7 +46,7 @@ The web dashboard shows live data in a browser, for example on a phone or tablet
 
 Security:
 
-- An **access code** is always required (`access_code`, a random code is generated if empty). After 10 wrong codes, the device is blocked for 60 seconds. The code is exchanged for a session cookie, so it does not stay in the page address.
+- An **access code** is always required (`access_code`, a random code is generated if empty, then kept when the app restarts). After 10 wrong codes, the device is blocked for 60 seconds. The code is exchanged for a session cookie, so it does not stay in the page address.
 - Without HTTPS, traffic is plain HTTP: only enable LAN access on a network you trust.
 - `enable_https` serves the dashboard over HTTPS with a self-signed certificate created in the config folder. The browser warns once about it: check the SHA-256 fingerprint shown by `Web Dashboard Address...` before accepting it.
 
@@ -78,7 +78,7 @@ Good to know:
 
 - Overlay images are only captured while a source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change, up to `Images per second` (15, 30 or 60).
 - Overlays hidden by auto hide (no session) are hidden on stream too.
-- Every address contains an **access token**. If an address was shown on stream by mistake, click `New Access Token`: addresses copied before stop working, copy them again.
+- Every address contains an **access token**. If an address was shown on stream by mistake, click `New Access Token`: addresses copied before stop working, copy them again. The token is kept when the app restarts (up to 0.22.1 a new one was made at each start: copy the addresses once more after updating).
 - `Another computer (LAN)` lets a streaming PC on your local network show the sources (dual PC setup): the page then lists the addresses to use from that PC. Windows Firewall may ask you to allow the app the first time.
 - `Sources Page` opens every source in your browser, to test them.
 

@@ -279,7 +279,8 @@ class Realtime(ModernOverlay):
                 rate = self.unit_fuel(minfo.fuel.rateOfConsumption)
             self.ema_fuel_rate = self.ema_rate(self.ema_fuel_rate, rate)
             self.max_fuel_rate = max(self.max_fuel_rate, self.ema_fuel_rate)
-            level = rate / self.max_fuel_rate if self.max_fuel_rate else 0.0
+            # Negative while refuelling: clamp (negative ** fractional exponent is complex)
+            level = min(max(rate / self.max_fuel_rate, 0.0), 1.0) if self.max_fuel_rate > 0 else 0.0
             consumption = (round(level ** self.cons_exp, 3), level >= wcfg["high_consumption_threshold"])
             consumption_text = self.reading_text("consumption", rate)
         self.refresh((

@@ -138,8 +138,9 @@ TpPage {
                     radius: width / 2
                     color: statePill.tone
                     SequentialAnimation on opacity {  // replay open: pulse
-                        running: page.gameState === "replay"
-                        loops: Animation.Infinite
+                        // A few pulses when state starts or page shows again, then still: no endless redraw
+                        running: page.gameState === "replay" && pageState.active
+                        loops: 3
                         onRunningChanged: if (!running) stateDot.opacity = 1
                         NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
                         NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
@@ -168,8 +169,8 @@ TpPage {
             TpButton {
                 glyph: ""  // open folder
                 text: page.wide ? i18n.tr("Open Folder") : ""
-                tip: backend.folder !== "" ? backend.folder : i18n.tr("Replay folder of the game, known once the game lists its replays")
-                enabled: backend.folder !== ""
+                tip: backend.replayFolder !== "" ? backend.replayFolder : i18n.tr("Replay folder of the game, known once the game lists its replays")
+                enabled: backend.replayFolder !== ""
                 onClicked: backend.openFolder()
             }
             TpButton {
@@ -246,14 +247,17 @@ TpPage {
                                 spacing: theme.em * 0.4
                                 property real now: backend.liveTime
                                 Rectangle {
+                                    id: liveClockDot
                                     width: theme.em * 0.55
                                     height: width
                                     radius: width / 2
                                     color: theme.loss
                                     anchors.verticalCenter: parent.verticalCenter
                                     SequentialAnimation on opacity {
-                                        running: liveClock.visible
-                                        loops: Animation.Infinite
+                                        // A few pulses when state starts or page shows again, then still: no endless redraw
+                                        running: liveClock.visible && pageState.active
+                                        loops: 3
+                                        onRunningChanged: if (!running) liveClockDot.opacity = 1
                                         NumberAnimation { to: 0.3; duration: 800 }
                                         NumberAnimation { to: 1; duration: 800 }
                                     }
@@ -276,7 +280,8 @@ TpPage {
                                 Timer {
                                     interval: 500
                                     repeat: true
-                                    running: liveClock.visible
+                                    running: liveClock.visible && pageState.active  // stopped while page hidden
+                                    triggeredOnStart: true
                                     onTriggered: liveClock.now = backend.liveTime
                                                  + Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 10)
                                 }
@@ -297,7 +302,8 @@ TpPage {
                                 Timer {
                                     interval: 250
                                     repeat: true
-                                    running: replayClock.visible && backend.replayRate !== 0
+                                    running: replayClock.visible && backend.replayRate !== 0 && pageState.active
+                                    triggeredOnStart: true
                                     onTriggered: replayClock.now = backend.replayTime + backend.replayRate
                                                  * Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 3)
                                 }

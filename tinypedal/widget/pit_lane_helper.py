@@ -134,8 +134,10 @@ class PitLaneMixin:
         position = api.read.lap.distance()
         track_length = api.read.lap.track_length()
         in_lane = api.read.vehicle.in_paddock() == 1
-        visible = in_lane or self.show_always or self.approaching(position, track_length, in_lane)
-        if not visible:
+        # Box approach tracked only in lane or approaching it, also when shown always (else never reset)
+        active = in_lane or self.approaching(position, track_length, in_lane)
+        visible = active or self.show_always
+        if not active:
             self.box_reference = 0.0
             self.box_passed = False
         speed = api.read.vehicle.speed()
@@ -153,7 +155,7 @@ class PitLaneMixin:
             limiter, limiter_state = tr("On"), OK
         else:
             limiter, limiter_state = tr("Off"), DANGER if in_lane and speed > 1 else WARNING
-        box, fraction = self.read_box(position, track_length, visible)
+        box, fraction = self.read_box(position, track_length, active)
         return PitReading(
             visible=visible,
             speed=speed_text,
@@ -168,12 +170,13 @@ class PitLaneMixin:
             repair=seconds_text(api.read.vehicle.repair_time()),
         )
 
-    def read_box(self, position: float, track_length: float, visible: bool) -> tuple[str, float]:
-        """Distance to pit box & approach fraction (bar fills up to box)"""
+    def read_box(self, position: float, track_length: float, active: bool) -> tuple[str, float]:
+        """Distance to pit box & approach fraction (bar fills up to box), tracked while active
+        (in lane or approaching it)"""
         distance = box_distance(position, api.read.lap.pit_box_distance(), track_length)
         if distance < 0:
             return DASH, -1.0
-        if visible and not self.box_passed:
+        if active and not self.box_passed:
             if self.box_reference and distance > self.box_reference + BOX_PASSED:
                 self.box_passed = True  # stopped at box, or drove past it
             else:

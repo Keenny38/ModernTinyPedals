@@ -40,7 +40,7 @@ from .setting import cfg
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEYS = ("access_code", "update_repository")
+SECRET_KEYS = ("access_code", "access_token", "update_repository")
 MAX_LOG_SIZE = 5 * 1024 * 1024
 
 

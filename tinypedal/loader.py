@@ -160,12 +160,21 @@ def restart():
     # 2 set restart env for skipping single instance check
     os.environ["TINYPEDAL_RESTART"] = "TRUE"
     command = restart_command()
-    if sys.platform == "win32":
-        # os.execl does not quote arguments on Windows, which breaks path with spaces
-        subprocess.Popen(command, close_fds=True)
-        logging.shutdown()
-        os._exit(0)
-    os.execv(command[0], command)
+    try:
+        if sys.platform == "win32":
+            # os.execl does not quote arguments on Windows, which breaks path with spaces
+            subprocess.Popen(command, close_fds=True)
+            logging.shutdown()
+            os._exit(0)
+        logging.shutdown()  # flush log files, execv replaces process without cleanup
+        os.execv(command[0], command)
+    except OSError as error:
+        # exe moved or blocked: keep running, reload what close() unloaded
+        logger.error("RESTARTING: failed, %s", error)
+        os.environ.pop("TINYPEDAL_RESTART", None)
+        api.connect()
+        api.start()
+        load_modules()
 
 
 def restart_command() -> list[str]:

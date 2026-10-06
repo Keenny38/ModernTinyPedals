@@ -84,6 +84,61 @@ def test_language_pack(tmp_path):
         regex_pattern.LANGUAGE_NAMES[:] = list(LANGUAGES)
 
 
+def test_language_pack_bad_replacement_skipped(tmp_path):
+    """Bad replacement only raises at sub(): skipped at read, never on each trm() call"""
+    import json
+
+    from tinypedal.i18n import LANGUAGE_PACK_FORMAT, read_language_pack
+
+    pack = {
+        "format": LANGUAGE_PACK_FORMAT, "code": "xx", "name": "Testish",
+        "messages": [["^Saved", r"\9"], ["^Saved", r"\g<x>"], ["^(Saved)", r"\1!"]],
+    }
+    (tmp_path / "xx.json").write_text(json.dumps(pack), encoding="utf-8")
+    assert read_language_pack(str(tmp_path / "xx.json"))["messages"] == (("^(Saved)", r"\1!"),)
+
+
+def test_pack_language_kept_at_launch(tmp_path, monkeypatch):
+    """Language packs registered before global config validates the language name"""
+    import json
+    from types import SimpleNamespace
+
+    from tinypedal import main, regex_pattern
+    from tinypedal.i18n import LANGUAGE_PACK_FOLDER, LANGUAGE_PACK_FORMAT, LANGUAGES
+    from tinypedal.setting import cfg
+    from tinypedal.setting_validator import PresetValidator
+
+    folder = tmp_path / LANGUAGE_PACK_FOLDER
+    folder.mkdir()
+    pack = {"format": LANGUAGE_PACK_FORMAT, "code": "xx", "name": "Testish"}
+    (folder / "xx.json").write_text(json.dumps(pack), encoding="utf-8")
+    monkeypatch.setattr(cfg.path, "config", f"{tmp_path}/")
+    validated = []
+
+    def load_global(self):
+        user = {"application": {"language": "Testish"}}
+        PresetValidator.remove_invalid_key(user["application"], {"language": "English"})
+        validated.append(user["application"].get("language"))
+
+    monkeypatch.setattr(type(cfg), "load_global", load_global)
+    monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
+    for name in ("single_instance_check", "unset_environment", "set_logging_level", "get_version",
+                 "set_environment", "check_safe_mode"):
+        monkeypatch.setattr(main, name, lambda *args: None)
+    monkeypatch.setattr(main, "init_gui", lambda: SimpleNamespace(exec=lambda: 0))
+    from tinypedal import loader
+
+    monkeypatch.setattr(loader, "start", lambda: None)
+    try:
+        with pytest.raises(SystemExit):
+            main.start_app(SimpleNamespace(single_instance=1, log_level=1, safe_mode=False))
+        assert validated == ["Testish"]
+    finally:
+        i18n._LANGUAGES.pop("Testish", None)
+        i18n._packs.pop("xx", None)
+        regex_pattern.LANGUAGE_NAMES[:] = list(LANGUAGES)
+
+
 def test_language_template_covers_french():
     import sys
 

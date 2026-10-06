@@ -3,6 +3,73 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.22.2 (2026-10-06)
+
+### Fixes
+
+- **Update installed by the app also when run from source**: on Windows, `Download And Install` (or `Install Now`) of a copy run from source opened the download in the browser, and the setup ZIP had to be extracted and run by hand. It now downloads, checks and runs the installer like the installed app does: your installed copy is updated, or installed if there is none, then started. Its folder comes from the installer registry entry, else from the Start menu shortcut.
+- The installed app now always updates its own folder.
+- `Open Folder` of the `Replays` page showed no tooltip and stayed enabled without a replay folder.
+- Closing the `Track Map Viewer` no longer logs a QML error.
+- Settings saved from several threads at once (car brand names learned while driving) could stop the save of another settings file.
+
+### Reliability
+
+A full review of the code found and fixed about 90 issues, most of them rare.
+
+- **Stream overlay access token and web dashboard access code kept across restarts**: they were reset at each start, so OBS browser sources stopped working after every restart of the app. Copy the source addresses once more after this update. Calculator collapsed sections, hidden Driver Stats columns and their widths were also forgotten at each start.
+- **A language installed with a language pack** went back to English at each start.
+- **Settings file held by another program at start** (antivirus, OneDrive): it was replaced with default settings and its backup deleted. The app now waits for it, and if it stays locked, uses default settings without ever saving over your file, and tells you so.
+- **Recorded data no longer wrong after a pit stop or a cut lap**: a lap invalidated by the game (track limits) can no longer become your delta best or your best sector 1 and 2; the out lap no longer raises the reference pace used by the fuel module; a lap through the pit lane is not recorded as the track map; brake failure thickness is no longer saved under the next car; fuel and energy use is only recorded from the lap time of the lap just finished.
+- **Online sessions**: when a driver leaves, the car taking their place in the game list no longer inherits their pit stops, stint laps, lap times, fuel use, speed trap or gap trend. A car whose telemetry is unknown shows no data instead of another car's.
+- **Fuel module** with no known lap time (first laps on a new car and track): no more absurd laps and minutes remaining in time races.
+- **Overlays**:
+  - Modern overlays at 125 %, 150 % or 175 % Windows scaling redrew their whole background at every frame.
+  - The impact cone of `Damage` stayed shown in the next session.
+  - `Gear` froze during refuelling with a progressive consumption bar.
+  - `Steering Meter` showed an angle of 0 with scale marks hidden.
+  - `Pit Lane Helper` with `show_always` showed "–" for the distance to the pit box after the first stop.
+  - `Elevation` showed the whole lap as driven at the start line.
+  - `Delta Graph` could lose the previous lap trace at the line.
+  - `Lap Time History` showed a wrong delta on its oldest lap.
+  - `Race Notifications` could announce an old lap as fastest lap when a driver came back.
+  - The classic `Delta Best` crashed with a bar range of 0.
+  - `Black Box` no longer hides the "module off" notice when it could not start a required module.
+  - Car brand logos: missing logos are no longer looked for on disk at every row change, and logos recolored for dark backgrounds are prepared about 50 times faster, no longer freezing overlays.
+- **Car and circuit pictures from the game**: a car name with accents blocked every download for a minute, a server error marked a picture as missing for 7 days, and an empty catalog outside sessions was never read again.
+- **Saved files**: one damaged line of the consumption history no longer drops the whole file, damaged driver stats values no longer stop the stats module, delta files of 10 to 12 lines are read again, track notes with invalid distances are skipped, and compressed telemetry laps are flushed to disk.
+- **Presets**: renaming the loaded preset while a page had unsaved changes could create a second preset, renaming or duplicating right after a change could miss it, `Transfer` checks again that the destination is not loaded or locked, a name typed with `.json` is handled, and names reserved by Windows (`CON`, `NUL`...) are refused.
+- **Connections**:
+  - On Windows, a port already used by another program is now reported, instead of two programs sharing it.
+  - Turning off the stream overlay or its LAN access now also disconnects browsers already connected.
+  - A port out of range no longer stops the app from starting.
+  - Idle web dashboard and remote control clients are disconnected after 15 seconds.
+- **Updates**: an unsigned installer is only accepted from the official repository, checked against the repository where the update was found.
+- **Plugins**: a damaged plugin `.zip` shows an error instead of failing silently, no half-installed plugin is left behind, and a plugin trusted after review is refused if its code changed meanwhile.
+- **App**: closing the app after a failed restart works again, no more tray icon left after a restart, a locked `pid.log` or an invalid user path no longer stops the app from starting, the VR mirror keeps updating when SteamVR fails, pages reading from the game no longer stay busy after an error, `Replays` copies no longer stay stuck at "copying", Driver Stats reads its laps once when moving through the list, and the `Telemetry Viewer` reads the laps of a large track in the background.
+- **Shortcuts** with modifiers typed in another order (`shift+ctrl+f1`) work, and the stream overlay access token is removed from bug reports.
+
+### Performance
+
+Less CPU used while driving, and smoother app pages.
+
+- **Data modules** (delta, force, fuel, hybrid, mapping, notes, sectors, vehicles, wheels) skip their work when the game sent no new data since the last update, instead of computing again 100 times per second. Smoothing (G force, delta, average suspension position) now counts game samples as its option says: before, repeated samples made it react faster than set.
+- **Map overlays** (track map, radar, navigation, spotter) only redraw when cars moved. Place numbers on the classic track map are drawn from a cache.
+- **Stopping modules** (preset reload, quit, spectating another driver) asks every module to stop at once, then waits for all of them together.
+- **VR overlay** and **stream overlay** capture only copy the overlays that changed since the last frame, and the VR overlay no longer draws every overlay twice.
+- **Home page**: the last session is read from the end of the driver history instead of the whole file.
+- **Stream page**: no network address lookup every second (addresses kept 30 seconds).
+- **Driver Stats**: the page no longer waits while the stats file is being saved by a module.
+- **App pages** stop their timers and animations while hidden behind another page, in the tray or minimized: replay map, race calculator, stream overlays, track map viewer playback, incident timeline. Status dots pulse three times instead of forever, and cars on the replay map glide between two game answers then rest.
+- **Telemetry Viewer**: zooming, panning and playback do less work per frame (one view update per frame, cached lists, cursor values computed once, corner labels placed again only when the zoom changes), hidden side tabs no longer follow the cursor, and charts and maps are built 3 to 6 times faster.
+- **Overlay pictures** of the `Overlays`, `Overlay Options` and setup pages are loaded in the background and only reloaded when they changed.
+- **Overlay Options**: changing an option updates only its row instead of the whole page.
+- **Search fields** search 120 ms after the last key instead of on every key (Enter searches at once).
+- **Settings** and the lap list of the `Telemetry Viewer` reuse their rows while scrolling.
+- **Race Results** positions chart and **Driver Stats** chart only redraw the highlighted lines on hover.
+- **Replays page**: folder sizes computed once instead of on every copy progress step, and the incident timeline, standings and laps only updated when they changed.
+- Lists sorted again (stats, replays, spectate) update in one step instead of moving rows one by one.
+
 ## 0.22.1 (2026-10-06)
 
 ### Fixes

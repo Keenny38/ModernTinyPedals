@@ -31,7 +31,7 @@ from . import module, widget
 from .const_file import ConfigType
 from .plugin_loader import PLUGIN_ERRORS, PLUGIN_PREFIX
 from .setting import cfg
-from .thread_guard import wait_stopped
+from .thread_guard import wait_all_stopped
 from .widget._modern import modern_module, uses_modern_design
 
 logger = logging.getLogger(__name__)
@@ -172,25 +172,39 @@ class ModuleControl:
             PLUGIN_ERRORS[name] = f"{type(error).__name__}: {error}"
 
     def __close_enabled(self, discard: bool = False):
-        """Close all enabled module"""
+        """Close all enabled module, stop all first then wait (bounded, shared deadline) until closed"""
+        stopping = []
         for _name in tuple(self._active_modules):
-            self.__close_selected(_name, discard)
+            target = self.__stop_selected(_name, discard)
+            if target is not None:
+                stopping.append(target)
+        wait_all_stopped(stopping)  # wait finish
 
     def __close_selected(self, name: str, discard: bool = False):
         """Close selected module, wait (bounded) until closed"""
-        if name in self._active_modules:
-            _module = self._active_modules[name]  # get instance
-            self._active_modules.pop(name)  # remove active reference
-            try:
-                if discard and self.type_id == ConfigType.MODULE:
-                    _module.stop(discard=True)  # close module without saving data
-                else:
-                    _module.stop()  # close module
-            except Exception:  # widget failed half-way to start
-                logger.exception("ERROR: unable to close %s", name)
-                return
-            wait_stopped(lambda: _module.closed, name)  # wait finish
-            _module = None  # remove final reference
+        target = self.__stop_selected(name, discard)
+        if target is not None:
+            wait_all_stopped((target,))  # wait finish
+
+    def __stop_selected(self, name: str, discard: bool = False) -> tuple | None:
+        """Signal selected module to stop, without waiting
+
+        Returns:
+            (name, is_stopped, wait) for wait_all_stopped, None if not active or failed to stop.
+        """
+        if name not in self._active_modules:
+            return None
+        _module = self._active_modules.pop(name)  # remove active reference
+        try:
+            if discard and self.type_id == ConfigType.MODULE:
+                _module.stop(discard=True)  # close module without saving data
+            else:
+                _module.stop()  # close module
+        except Exception:  # widget failed half-way to start
+            logger.exception("ERROR: unable to close %s", name)
+            return None
+        # Data module waits on its thread finished event, widget (closed in UI thread) polls
+        return name, lambda: _module.closed, getattr(_module, "wait_closed", None)
 
     def module_of(self, name: str) -> Any:
         """Module code of name, imported on first use (disabled overlays never loaded)"""

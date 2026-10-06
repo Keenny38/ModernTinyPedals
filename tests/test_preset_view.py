@@ -175,6 +175,16 @@ def test_names_checked_while_typing_and_applied(page):
     assert backend.applyName("rename", "gone.json", "x") == "Preset not found, it may have been renamed or deleted."
 
 
+def test_name_typed_with_json_extension_used_once(page):
+    backend = page.backend
+    assert backend.nameError("rename", "race.json", "race.json") == ""  # same name
+    assert backend.applyName("rename", "race.json", "race.json") == ""  # nothing to do
+    assert os.path.exists(f"{cfg.path.settings}race.json")
+    assert backend.applyName("", "", "Endurance.json") == ""
+    assert backend.selectedKey == "Endurance.json"  # not "Endurance.json.json"
+    assert "Endurance" in rows(page) and not os.path.exists(f"{cfg.path.settings}Endurance.json.json")
+
+
 def test_host_actions(page, monkeypatch):
     calls = []
     for name in ("export_package", "copy_share_code", "import_package", "import_share_code", "open_page"):

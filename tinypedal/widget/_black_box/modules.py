@@ -117,6 +117,11 @@ def enable_modules(names, settings, save) -> list[str]:
             mctrl.start(name)
         except Exception:  # module failing to start must never take the widget down
             logger.exception("BLACK BOX: unable to start %s", name)
+        # Module control logs start errors itself: check it really runs, else keep it off
+        # so "module off" notice stays visible and a broken module isn't saved as enabled
+        if name not in mctrl.active_modules:
+            module["enable"] = False
+            logger.error("BLACK BOX: %s module failed to start, left off", name)
             continue
         started.append(name)
     if started:

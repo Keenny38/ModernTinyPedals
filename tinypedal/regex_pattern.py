@@ -60,7 +60,7 @@ CFG_BOOL = (
     "^save_invalid_laps$|"
     "^vr_compatibility$|"
     # Partial match
-    "^column_|"
+    "^column_(?!widths$)|"  # column_widths is a string (driver stats viewer)
     "^notify_|"
     "align_center|"
     "enable|"
@@ -97,7 +97,12 @@ CFG_USER_PATH = "_path"
 CFG_USER_IMAGE = "_image_file"
 CFG_STRING = (
     # Exact match
+    "^access_code$|"
+    "^access_token$|"
     "^bind$|"
+    "^collapsed_sections$|"
+    "^column_widths$|"
+    "^hidden_columns$|"
     "^input_driver_table$|"
     "^preset$|"
     "^process_id$|"
@@ -140,6 +145,7 @@ CFG_INTEGER = (
     "^position_y$|"
     "^remote_control_port$|"
     "^stream_overlay_port$|"
+    "^web_dashboard_port$|"
     "^frame_rate$|"
     "^snap_distance$|"
     "^snap_gap$|"
@@ -196,7 +202,10 @@ CFG_INVALID_FILENAME = (
     "^heatmap$|"
     "^shortcuts$|"
     "^tracks$|"
+    # Windows reserved device names, also with extension ("nul.json") or trailing spaces
+    "^(con|prn|aux|nul|com[1-9]|lpt[1-9])\\s*(\\..*)?$|"
     # Partial match
+    "[\\x00-\\x1f]|"  # control characters
     "backup"
 )
 

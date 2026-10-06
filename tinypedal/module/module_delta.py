@@ -38,7 +38,7 @@ from ..validator import (
     valid_delta_raw,
     vehicle_position_sync,
 )
-from ._base import DataModule, round6
+from ._base import DataModule, data_stamp, round6
 
 
 class Realtime(DataModule):
@@ -54,6 +54,7 @@ class Realtime(DataModule):
         _event_wait = self._event.wait
         reset = False
         update_interval = self.idle_interval
+        last_stamp: tuple = ()  # game data stamp of last update
 
         gen_delta_distance = calc_delta_distance(
             output=minfo.delta,
@@ -74,6 +75,13 @@ class Realtime(DataModule):
                 if not reset:
                     reset = True
                     update_interval = self.active_interval
+                    last_stamp = ()  # never skip first tick
+
+                # Skip while game data not updated since last tick
+                stamp = data_stamp()
+                if last_stamp == stamp:
+                    continue
+                last_stamp = stamp
 
                 # Run calculation
                 gen_delta_distance.send(vehicle_resets)
@@ -188,6 +196,8 @@ def calc_delta_time(
             # Lap started in pit lane or garage (back to garage starts a new lap): out lap
             is_out_lap = bool(api.read.vehicle.in_pits())
             last_lap_comparable = False  # last lap recorded without pit lane
+            is_invalid_lap = False  # lap in progress invalidated by game (track limits...)
+            last_lap_clean = False  # last lap not invalidated by game
 
             combo_name = api.read.session.combo_name()
             session_id = session_token(api.read.session.identifier())
@@ -259,6 +269,8 @@ def calc_delta_time(
                 last_lap_comparable = not is_pit_lap
             else:
                 last_lap_comparable = False
+            last_lap_clean = not is_invalid_lap  # latch state of lap just completed
+            is_invalid_lap = False
             delta_array_raw[:] = DELTA_DEFAULT
             pos_last = pos_recorded = pos_curr
             recording = laptime_curr < 1
@@ -269,6 +281,10 @@ def calc_delta_time(
             if is_same_session(last_session_id, session_id):
                 last_session_id = session_id
         last_lap_stime = lap_stime  # reset
+
+        # Track limits of lap in progress (flag of lap just completed may stay a moment)
+        if laptime_curr > 1:
+            is_invalid_lap |= api.read.lap.invalidated()
 
         # 1 sec position distance check after new lap begins
         # Reset to 0 if higher than normal distance
@@ -290,8 +306,9 @@ def calc_delta_time(
             elif (timer > 1 and  # compare current time
                 laptime_valid > 0 and  # is valid laptime
                 abs(laptime_valid - laptime_last) < 0.001):  # is matched laptime
-                # Update laptime pace
-                if not is_pit_lap:
+                # Update laptime pace: lap just completed (not the new lap) without pit lane
+                # (no out lap or pit in lap), not invalidated by game (track limits)
+                if last_lap_comparable and last_lap_clean:
                     # Set initial laptime if invalid, or align to faster laptime
                     if not 0 < laptime_pace < MAX_SECONDS or laptime_valid < laptime_pace:
                         laptime_pace = laptime_valid
@@ -300,27 +317,30 @@ def calc_delta_time(
                             calc_ema_laptime(laptime_pace, laptime_valid),
                             laptime_pace + laptime_pace_margin,
                         )
-                # Update delta best list
-                if laptime_best > laptime_last:
-                    laptime_best = laptime_last
-                    output.deltaBestData = delta_array_best = delta_array_last
-                    save_delta_best_file(
-                        filepath=filepath,
-                        filename=combo_name,
-                        dataset=delta_array_best,
-                    )
-                # Update delta session & stint best list, kept in file for module restarts
-                if laptime_session_best > laptime_last or laptime_stint_best > laptime_last:
-                    if laptime_session_best > laptime_last:
-                        laptime_session_best = laptime_last
-                        delta_array_session = delta_array_last
-                    if laptime_stint_best > laptime_last:
-                        laptime_stint_best = laptime_last
-                        delta_array_stint = delta_array_last
-                    save_delta_session_file(
-                        filepath, combo_name, last_session_id, api.read.vehicle.number_pitstops(),
-                        delta_array_session, delta_array_stint,
-                    )
+                # Invalidated lap (track limits): never delta best, session or stint best
+                if last_lap_clean:
+                    # Update delta best list
+                    if laptime_best > laptime_last:
+                        laptime_best = laptime_last
+                        output.deltaBestData = delta_array_best = delta_array_last
+                        save_delta_best_file(
+                            filepath=filepath,
+                            filename=combo_name,
+                            dataset=delta_array_best,
+                        )
+                    # Update delta session & stint best list, kept in file for module restarts
+                    if laptime_session_best > laptime_last or laptime_stint_best > laptime_last:
+                        if laptime_session_best > laptime_last:
+                            laptime_session_best = laptime_last
+                            delta_array_session = delta_array_last
+                        if laptime_stint_best > laptime_last:
+                            laptime_stint_best = laptime_last
+                            delta_array_stint = delta_array_last
+                        save_delta_session_file(
+                            filepath, combo_name, last_session_id,
+                            api.read.vehicle.number_pitstops(),
+                            delta_array_session, delta_array_stint,
+                        )
                 validating = 0
 
         # Calc delta

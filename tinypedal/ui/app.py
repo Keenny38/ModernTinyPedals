@@ -1267,6 +1267,8 @@ class StatusButtonBar(QStatusBar):
         app_signal.refresh.connect(self.refresh)
         app_signal.saving.connect(self.label_saving.setVisible)
         app_signal.error.connect(self.show_error)
+        from ..userfile.json_setting import notices_ready
+        notices_ready()  # messages sent before window was ready (settings file locked at start)
 
     @Slot(str)  # type: ignore[operator]
     def show_error(self, message: str):
@@ -1518,6 +1520,10 @@ class AppWindow(QMainWindow):
                 tab_index = tab_view._return_index
             open_pages, kept, shown = tab_view.detach_pages()
         self.setStatusBar(StatusButtonBar(self))  # old widgets are deleted by Qt
+        for action in self.menuBar().actions():  # clear() keeps menus parented to window: delete them
+            old_menu = action.menu()
+            if old_menu is not None:
+                old_menu.deleteLater()
         self.menuBar().clear()
         self.set_menu_bar()
         tab_view = TabView(self)
@@ -1791,7 +1797,12 @@ class AppWindow(QMainWindow):
         """Restart app, tool pages left open reopened, False if cancelled (unsaved changes)"""
         if not self.close_pages_for_quit():
             return False
-        loader.restart()
+        tray_icon = self.findChild(QSystemTrayIcon)
+        if tray_icon is not None:
+            tray_icon.hide()  # no ghost tray icon left by exited process
+        loader.restart()  # only returns if relaunch failed (app reloaded & kept running)
+        if tray_icon is not None:
+            tray_icon.show()
         return True
 
     def quit_app(self) -> bool:

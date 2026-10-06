@@ -115,6 +115,22 @@ def test_brake_failure_thickness_saved(tele):
     assert output.failureBrakeThickness[0] == pytest.approx(12.3)
 
 
+def test_brake_failure_record_reset_on_vehicle_change(tele):
+    from tinypedal.setting import cfg
+
+    output = WheelsInfo()
+    gen = calc_brake_wear(output, min_delta_distance=50)
+    tele.update({"timing.start": 0.0, "timing.current_laptime": 5.0, "lap.distance": 100.0,
+                 "brake.wear": (0.0123, 0.03, 0.03, 0.03)})
+    gen.send(0)
+    # Vehicle change: new car, brakes reported missing (0) at first update
+    tele.update({"vehicle.class_name": "LMP2", "vehicle.vehicle_name": "Car #2",
+                 "brake.wear": (0.0, 0.03, 0.03, 0.03)})
+    gen.send(1)
+    saved = [data["failure_thickness"] for name, data in cfg.user.brakes.items() if "LMP2" in name]
+    assert pytest.approx(12.3) not in saved  # previous car's thickness not saved under new car
+
+
 def test_brake_wear_unavailable_skipped(tele):
     output = WheelsInfo()
     gen = calc_brake_wear(output, min_delta_distance=50)

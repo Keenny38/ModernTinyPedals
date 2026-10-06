@@ -386,6 +386,20 @@ def test_game_replays_page(replays_page):
     assert [mode["command"] for mode in backend.playbackModes][-1] == "VCRCOMMAND_FORWARDSCANFAST"
 
 
+def test_game_replays_incident_markers_canvas(replays_page):
+    """Markers canvas data property never named "data" (shadows Item.data): markers given"""
+    from PySide6.QtQuick import QQuickItem
+
+    answered(replays_page, GAME_ANSWERS)
+    QCoreApplication.processEvents()
+    view = replays_page.view
+    assert not view.errors(), [error.toString() for error in view.errors()]
+    canvases = [item for item in view.rootObject().findChildren(QQuickItem)
+                if item.metaObject().indexOfProperty("markerData") >= 0]
+    assert canvases
+    assert len(canvases[0].property("markerData")["markers"]) == 2
+
+
 def test_game_replays_replay_time_from_standings(replays_page):
     from tinypedal.process import game_info as info
 
@@ -1169,6 +1183,70 @@ def test_game_request_page_freed_at_once(ui_env):
         assert freed() is None  # no cycle: freed without garbage collector
     finally:
         gc.enable()
+
+
+def test_game_request_failed_callback(ui_env):
+    """Work raising an exception: on_failed called in UI thread (page leaves its waiting state)"""
+    import threading
+
+    from PySide6.QtCore import QObject
+
+    from tinypedal.ui import game_rest
+
+    parent = QObject()
+    results: list = []
+    failures: list = []
+    request = game_rest.GameRequest(parent, (), results.append,
+                                    lambda: failures.append(threading.current_thread().ident))
+    request.start(lambda: 1 / 0)
+    wait_requests(request)
+    assert failures == [threading.current_thread().ident] and results == []
+    request.start(lambda: "ok")
+    wait_requests(request)
+    assert results == ["ok"] and len(failures) == 1
+    parent.deleteLater()
+
+
+def test_replay_files_copy_robust(tmp_path, monkeypatch):
+    """Source gone before copy skipped, part file that cannot be removed: error told, copy goes on"""
+    from tinypedal.ui.quick import replay_files
+
+    folder, source = tmp_path / "Replays", tmp_path / "Downloads"
+    folder.mkdir()
+    source.mkdir()
+    (source / "Spa R1 1.Vcr").write_bytes(b"x" * 100)
+    (source / "Fuji P1 2.Vcr").write_bytes(b"y" * 100)
+    real_stat = replay_files.os.stat
+    monkeypatch.setattr(replay_files.os, "stat", lambda path, *args, **kwargs: (
+        (_ for _ in ()).throw(FileNotFoundError(2, "gone")) if str(path).endswith("Spa R1 1.Vcr")
+        else real_stat(path, *args, **kwargs)))
+    result = replay_files.copy_replays([str(path) for path in source.iterdir()], str(folder), lambda _: None)
+    assert result.added == ["Fuji P1 2"] and result.errors == []
+    monkeypatch.undo()
+    monkeypatch.setattr(replay_files.shutil, "copystat", lambda *args: (_ for _ in ()).throw(OSError(5, "denied")))
+    monkeypatch.setattr(replay_files.os, "remove", lambda path: (_ for _ in ()).throw(OSError(5, "locked")))
+    result = replay_files.copy_replays([str(source / "Spa R1 1.Vcr")], str(folder), lambda _: None)
+    assert result.added == [] and result.errors == ["Spa R1 1.Vcr: denied"]
+
+
+def test_game_replays_request_failures(replays_page, monkeypatch, tmp_path):
+    """Copy or state request ended by an unexpected error: copy ends with an error notice, refresh goes on"""
+    from tinypedal.ui.quick import replay_files, replays_backend
+
+    backend = answered(replays_page, GAME_ANSWERS)
+    monkeypatch.setattr(replay_files, "copy_replays", lambda *args: 1 / 0)
+    backend.start_copy([str(tmp_path / "a.Vcr")], str(tmp_path), "add")
+    assert backend.copying
+    wait_requests(backend.request_copy)
+    assert not backend.copying and backend.copyProgress == 0.0
+    assert backend.noticeError and backend.noticeText.startswith("Unable to copy")
+    backend._shown = True
+    backend._timer.stop()
+    monkeypatch.setattr(replays_backend, "ask_state", lambda *args: 1 / 0)
+    backend.refresh_state()
+    wait_requests(backend.request_state)
+    assert backend._timer.isActive()  # next state request scheduled anyway
+    backend.page_hidden()
 
 
 def test_game_replays_text_helpers(ui_env):

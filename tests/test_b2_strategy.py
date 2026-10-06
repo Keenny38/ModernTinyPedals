@@ -102,6 +102,27 @@ def test_median_falls_back_to_last_lap(flag_sim, tmp_path):
     assert output.estimatedConsumption == pytest.approx(3.2, abs=0.05)
 
 
+def test_lap_validated_only_by_its_own_laptime(flag_sim, tmp_path):
+    """Scoring lags: last lap time of previous lap shown a moment after line never validates
+    the lap just completed (last lap rejected by game: never validated)"""
+    sim = FlagLapSim([90.0, 91.0, 92.0, 93.0], fuel_per_lap=[3.0, 3.0, 3.0, 4.5])
+    flag_sim(sim)
+    rejected = {3}
+
+    def lagging_last_laptime(index=None):
+        if sim.lap_index >= 2 and sim.elapsed - sim.lap_start < 1.0:  # previous lap still shown
+            return sim.lap_times[sim.lap_index - 2]
+        if sim.lap_index - 1 in rejected:
+            return -1.0
+        return sim.last_laptime
+
+    api.read.timing.last_laptime = lagging_last_laptime
+    output = run_laps(sim, tmp_path, 0)
+    assert output.lastLapConsumption == pytest.approx(4.5, abs=0.05)  # driven
+    assert output.consumptionMethod == module_fuel.METHOD_LAST_LAP
+    assert output.estimatedConsumption == pytest.approx(3.0, abs=0.05)  # last validated lap
+
+
 def test_green_flag_median_needs_minimum_laps():
     from collections import deque
 
@@ -157,6 +178,21 @@ def test_fuel_laps_left_count_leader_finishing_first(time_race, tmp_path):
     assert needed_fuel(tmp_path) == pytest.approx(33.0)  # one lap more after timer
     minfo.vehicles.finishLapOffset = -1.0  # final pit stop part never counted (from fuel module itself)
     assert needed_fuel(tmp_path) == pytest.approx(33.0)
+
+
+def test_fuel_time_race_without_known_laptime(time_race, tmp_path):
+    """No lap time known (pace MAX_SECONDS from reference lap time): no laps left or minutes"""
+    from tinypedal.const_common import MAX_SECONDS
+
+    minfo.delta.lapTimePace = MAX_SECONDS
+    output = FuelInfo()
+    gen = module_fuel.calc_consumption(output, False, f"{tmp_path}/", ".fuel", 10.0, 0.0)
+    gen.send(0)
+    assert output.neededAbsolute == 0.0 and output.estimatedMinutes == 0.0
+    assert output.estimatedLaps == pytest.approx(20.0)  # 60 L at 3 L per lap, laps still known
+    minfo.delta.lapTimePace = 100.0
+    gen.send(1)
+    assert output.estimatedMinutes == pytest.approx(20 * 100 / 60)
 
 
 def test_vehicles_module_leader_part_of_offset(ui_env, monkeypatch):

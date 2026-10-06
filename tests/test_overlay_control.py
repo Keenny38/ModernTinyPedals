@@ -49,8 +49,7 @@ def overlay(ui_env, monkeypatch):
 
 
 def run_loop(control: OverlayControl, runs: int = 1):
-    control._event = StopAfter(runs)
-    control._OverlayControl__update_loop()
+    control._OverlayControl__update_loop(StopAfter(runs))
 
 
 def test_state_read_from_game(overlay):
@@ -62,7 +61,6 @@ def test_state_read_from_game(overlay):
     assert (realtime_state.active, realtime_state.paused, realtime_state.resets) == (True, False, 3)
     assert (realtime_state.session_type, realtime_state.in_pits) == (4, False)
     assert ("hidden", False) in calls and ("context",) in calls and ("paused", False) in calls
-    assert control._stopped
     # Back to menu: hidden, overlay timer paused, no session
     calls.clear()
     game["active"] = False
@@ -143,14 +141,38 @@ def test_enable_and_disable_thread(overlay, monkeypatch):
     control, _game, _calls = overlay
     monkeypatch.setattr(overlay_control, "run_supervised", lambda target, name, event: event.wait(5))
     control.enable()
-    assert not control._stopped
+    assert not control._stopped()
     control.disable()  # stops thread
-    assert control._stopped
+    assert control._stopped()
 
 
 def test_disable_gives_up_on_stuck_thread(overlay, monkeypatch, caplog):
     control, _game, _calls = overlay
     monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
-    control._stopped = False  # thread never reports stopped
+    control._thread = SimpleNamespace(is_alive=lambda: True)  # thread never stops
     control.disable()  # returns anyway
     assert "not stopped" in caplog.text
+
+
+def test_enable_after_stuck_thread_starts_new_thread(overlay, monkeypatch):
+    """Thread outliving disable(): enable() starts a new one, old one keeps its own (set) stop event"""
+    import threading
+
+    control, _game, _calls = overlay
+    release = threading.Event()
+    monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
+    monkeypatch.setattr(overlay_control, "run_supervised", lambda target, name, event: release.wait(5))
+    control.enable()
+    old_thread, old_event = control._thread, control._event
+    control.disable()  # gives up, thread still running
+    assert old_thread.is_alive()
+    control.enable()
+    assert control._thread is not old_thread and control._thread.is_alive()
+    assert old_event.is_set() and not control._event.is_set()
+    new_thread = control._thread
+    control.enable()  # already running: no other thread
+    assert control._thread is new_thread
+    release.set()
+    old_thread.join(5)
+    control._thread.join(5)
+    assert control._stopped()

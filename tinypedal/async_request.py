@@ -129,9 +129,22 @@ def parse_status_line(line: bytes) -> tuple[bytes, int]:
         return parts[0], 0
 
 
+async def read_line(reader: StreamReader, separator: bytes) -> bytes:
+    """Read until separator (included)
+
+    Raises:
+        ValueError: line longer than reader limit (64 KiB), handled as other invalid response.
+        asyncio.IncompleteReadError (EOFError): connection closed before separator.
+    """
+    try:
+        return await reader.readuntil(separator)
+    except asyncio.LimitOverrunError as error:
+        raise ValueError(f"response line too long: {error}") from error
+
+
 async def read_response(reader: StreamReader) -> HttpResponse:
     """Read complete response (status line, headers, body)"""
-    header_bytes = await reader.readuntil(b"\r\n\r\n")
+    header_bytes = await read_line(reader, b"\r\n\r\n")
     lines = header_bytes[:-4].split(b"\r\n")
     version, status = parse_status_line(lines[0])
     headers = {}
@@ -164,13 +177,13 @@ async def read_chunked(reader: StreamReader) -> bytes:
     """Read chunked body: "size(hex)\r\n" + data + "\r\n", ends with zero size chunk & optional trailers"""
     temp_bytes = bytearray()
     while True:
-        size_line = await reader.readuntil(b"\r\n")
+        size_line = await read_line(reader, b"\r\n")
         chunk_size = int(size_line[:-2].split(b";")[0], 16)  # ignore chunk extension
         if chunk_size <= 0:
             break
         temp_bytes.extend(await reader.readexactly(chunk_size))
         await reader.readexactly(2)  # CRLF after chunk data
-    while await reader.readuntil(b"\r\n") != b"\r\n":  # trailers, until empty line
+    while await read_line(reader, b"\r\n") != b"\r\n":  # trailers, until empty line
         pass
     return bytes(temp_bytes)
 

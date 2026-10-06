@@ -22,7 +22,7 @@ Driver stats viewer: stats of each track & vehicle, community lap time levels, p
 Qt Quick page (ui/qml/DriverStats.qml), state & actions in quick/stats_backend.py.
 """
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, QUrl
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
@@ -41,7 +41,8 @@ class DriverStatsViewer(BaseDialog):
         self.set_utility_title(tr("Driver Stats Viewer"))
         self.setMinimumSize(UIScaler.size(60), UIScaler.size(30))
         self.backend = DriverStatsBackend(self)
-        self.view = create_quick_view(self, "DriverStats.qml", {"backend": self.backend})
+        self.view = create_quick_view(
+            self, "DriverStats.qml", {"backend": self.backend}, samples=0)  # no GpuShape: no MSAA
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
@@ -67,5 +68,7 @@ class DriverStatsViewer(BaseDialog):
         super().hideEvent(event)
 
     def closeEvent(self, event):
+        # QML bindings never read a released backend (see qml page pitfalls: view goes first)
+        self.view.setSource(QUrl())
         self.backend.release()
         super().closeEvent(event)

@@ -26,7 +26,7 @@ from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_NOLAPTIME, TEXT_PLACEHOLDER
 from ..formatter import random_color_class, shorten_driver_name
 from ..module_info import minfo
-from ..userfile.custom_image import load_brand_logo_image
+from ..userfile.custom_image import cached_brand_logo
 from ..userfile.heatmap import select_compound_color, select_compound_symbol
 from ._base import Overlay
 from ._painter import DeltaLapTime, MultiCompounds
@@ -955,15 +955,13 @@ class Realtime(Overlay):
 
     def set_brand_logo(self, brand_name: str):
         """Set brand logo"""
-        logo = self.pixmap_brandlogo.get(brand_name)
-        if logo is None or logo.isNull():  # load & cache logo (none yet: looked for again, game logo may come)
-            self.pixmap_brandlogo[brand_name] = load_brand_logo_image(
-                filepath=self.cfg.path.brand_logo,
-                filename=brand_name,
-                max_width=self.brd_width,
-                max_height=self.brd_height,
-            )
-        return self.pixmap_brandlogo[brand_name]
+        return cached_brand_logo(
+            self.pixmap_brandlogo,
+            filepath=self.cfg.path.brand_logo,
+            filename=brand_name,
+            max_width=self.brd_width,
+            max_height=self.brd_height,
+        )
 
     def set_class_style(self, class_name: str):
         """Compare vehicle class name with user defined dictionary"""

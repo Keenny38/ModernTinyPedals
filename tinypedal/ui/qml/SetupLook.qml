@@ -181,8 +181,11 @@ SetupStep {
                         visible: sampleItem.previewState === 1
                         source: sampleItem.preview
                         fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        retainWhileLoading: true
+                        cache: true
+                        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                         smooth: true
-                        mipmap: true
                     }
                     Rectangle {
                         anchors.fill: parent
@@ -190,7 +193,7 @@ SetupStep {
                         radius: theme.em * 0.3
                         color: Qt.rgba(1, 1, 1, 0.1)
                         SequentialAnimation on opacity {
-                            running: sampleItem.previewState === 0
+                            running: sampleItem.previewState === 0 && pageState.active
                             loops: Animation.Infinite
                             NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
                             NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }

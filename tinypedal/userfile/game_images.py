@@ -40,6 +40,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from urllib.parse import quote
 
 from ..process import game_images as gi
 from ..setting import cfg
@@ -80,6 +81,7 @@ class GameImages:
         self._loaded_folder = ""
         self._catalog_read = False  # game lists read from game during this run
         self._game_retry = 0.0  # time game may be asked again (did not answer)
+        self._catalog_retry = 0.0  # time game lists may be asked again (empty outside a session)
         self.vehicles: dict[str, gi.VehicleInfo] = {}  # vehicle name (lower case) -> car
         self.brands: dict[str, str] = {}  # brand (normalized) -> brand as game names it
         self.tracks: dict[str, str] = {}  # circuit name (lower case) -> circuit picture name
@@ -268,7 +270,7 @@ class GameImages:
             except queue.Empty:
                 job = None
             try:
-                if not self._catalog_read and time.time() >= self._game_retry:
+                if not self._catalog_read and time.time() >= max(self._game_retry, self._catalog_retry):
                     self.read_game_lists()
                 if job is not None:
                     self.fetch_picture(*job)
@@ -305,9 +307,10 @@ class GameImages:
                 tracks.update(gi.parse_tracks(data))
             else:
                 vehicles.extend(gi.parse_vehicles(data))
-        self._catalog_read = True
-        if not vehicles and not tracks:
+        if not vehicles and not tracks:  # lists empty (null outside a session): read again later
+            self._catalog_retry = time.time() + RETRY_GAME
             return False
+        self._catalog_read = True
         with self._lock:
             self.set_vehicles(vehicles)
             self.tracks.update(tracks)
@@ -329,13 +332,17 @@ class GameImages:
         if os.path.isfile(target):
             return False
         resource = gi.image_path(kind, key)
-        status, body = fetch_from_game(resource.replace(" ", "%20"))
+        # Percent-encoded (spaces, accented names): a non-ASCII path cannot be sent as is
+        status, body = fetch_from_game(quote(resource, safe="/="))
         if not self.game_answered(status):
             return False
         if status != 200 or not body or len(body) > MAX_PICTURE_BYTES or not body.startswith(PICTURE_SIGNATURES):
-            with self._lock:
-                self.missing[resource] = time.time()
-            self.save_catalog()
+            # Game has no such picture (not found, or not a picture): not asked again for a while;
+            # server error or empty answer: asked again next time
+            if status == 404 or (status == 200 and body):
+                with self._lock:
+                    self.missing[resource] = time.time()
+                self.save_catalog()
             return False
         try:
             os.makedirs(os.path.dirname(target), exist_ok=True)

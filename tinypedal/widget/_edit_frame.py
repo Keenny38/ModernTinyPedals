@@ -164,6 +164,7 @@ class ResizeHandle(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.close_ghost()  # release of a previous drag lost: its ghost must not stay on screen
             self._press = event.globalPosition().toPoint()
             self._ghost = ResizeGhost()
             self.update_ghost(QPoint())
@@ -180,14 +181,24 @@ class ResizeHandle(QWidget):
             return
         factor = drag_factor(self.parent_size(), event.globalPosition().toPoint() - self._press)
         self._press = None
-        if self._ghost is not None:
-            self._ghost.close()
-            self._ghost.deleteLater()
-            self._ghost = None
+        self.close_ghost()
         event.accept()
         self.on_released()
         if abs(factor - 1) >= 0.02:
             self.on_resized(factor)
+
+    def hideEvent(self, event):
+        """Handle hidden (overlay locked or closed) during a drag: drag dropped, ghost closed"""
+        self._press = None
+        self.close_ghost()
+        super().hideEvent(event)
+
+    def close_ghost(self):
+        """Close size preview window, if any (top-most window: never left on screen)"""
+        if self._ghost is not None:
+            self._ghost.close()
+            self._ghost.deleteLater()
+            self._ghost = None
 
     def parent_size(self) -> tuple[int, int]:
         return self.target.width(), self.target.height()

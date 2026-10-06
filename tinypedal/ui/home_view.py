@@ -54,7 +54,7 @@ from ..overlay_control import octrl
 from ..setting import cfg
 from ..update import changelog_sections, localized_changelog_name, update_checker
 from ..userfile.custom_image import brand_logo_file, load_picture, logo_for_background
-from ..userfile.driver_history import SessionRecord, read_records
+from ..userfile.driver_history import SessionRecord, last_record
 from ..userfile.game_images import images
 from . import app_icon_file, status_color
 from ._common import UIScaler
@@ -227,12 +227,11 @@ def session_text() -> str:
 
 
 def last_session() -> SessionRecord | None:
-    """Last driven session (driver stats history), None if none"""
+    """Last driven session (driver stats history, end of file read), None if none"""
     try:
-        records = read_records(cfg.path.config)
+        return last_record(cfg.path.config)
     except OSError:
         return None
-    return records[-1] if records else None
 
 
 def game_logos(track: str, vehicle_name: str = "", brand: str = "") -> tuple[str, ...]:
@@ -711,7 +710,9 @@ class HomeView(QWidget):
         self.button_update.style().polish(self.button_update)
 
     def refresh_last_session(self):
-        """Last driven session from driver stats, card hidden if none"""
+        """Last driven session from driver stats, card hidden if none (refreshed when page shown)"""
+        if not self.isVisible():  # hidden page or window: refreshed by showEvent
+            return
         record = last_session()
         hidden = record is None
         if record is not None:

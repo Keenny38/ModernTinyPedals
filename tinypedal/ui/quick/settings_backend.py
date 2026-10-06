@@ -35,7 +35,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
 from ...const_file import ConfigType
-from ...i18n import tr, trm
+from ...i18n import current_language, tr, trm
 from ...i18n.options import option_help_specific, option_label
 from ...setting import cfg
 from ..config import HIDDEN_OPTIONS
@@ -227,6 +227,9 @@ class SettingsBackend(QObject):
         self._search = ""
         self._words: tuple[str, ...] = ()
         self._highlight = ""
+        # Navigation entries (read several times per change by the page): made again once state changes
+        self._categories: tuple[str, list[dict]] | None = None  # (language, entries)
+        self.stateChanged.connect(self._drop_categories)  # before page bindings: connected first
         self.load_options()
 
     # Options
@@ -333,9 +336,19 @@ class SettingsBackend(QObject):
     def options(self) -> QObject:
         return self.model
 
+    @Slot()
+    def _drop_categories(self):
+        self._categories = None
+
     @Property(list, notify=stateChanged)
     def categories(self) -> list[dict]:
-        """Navigation entries: pending edits, invalid values & search matches of each category"""
+        """Navigation entries: pending edits, invalid values & search matches of each category
+
+        Kept until state changes (edits, search, category, refresh: stateChanged) or language changes.
+        """
+        language = current_language()
+        if self._categories is not None and self._categories[0] == language:
+            return self._categories[1]
         entries = []
         for category in CATEGORIES:
             infos = [info for info in self._infos.values() if info.section == category.key]
@@ -347,6 +360,7 @@ class SettingsBackend(QObject):
                 "errors": sum(info.id in self._invalid for info in infos),
                 "matches": sum(self.matches(info) for info in infos) if self._words else 0,
             })
+        self._categories = (language, entries)
         return entries
 
     @Property(str, notify=categoryChanged)
@@ -496,6 +510,11 @@ class SettingsBackend(QObject):
             self._highlight = option_id
             self.highlightChanged.emit()
 
+    @Slot(str, result=int)
+    def optionIndex(self, option_id: str) -> int:
+        """Row of option shown, -1 if not shown"""
+        return next((number for number, row in enumerate(self.model.rows) if row["key"] == option_id), -1)
+
     @Slot()
     def clearHighlight(self):
         self._highlight = ""
@@ -613,6 +632,7 @@ class SettingsBackend(QObject):
                 self._pending[info.id] = default
         if self._snapshot() != before:
             self._undo.append(before)
+            del self._undo[:-100]
             self._redo.clear()
         self.changed()
 
@@ -639,6 +659,7 @@ class SettingsBackend(QObject):
         """Drop every pending edit"""
         if self._pending or self._invalid:
             self._undo.append(self._snapshot())
+            del self._undo[:-100]
             self._redo.clear()
             self._pending.clear()
             self._invalid.clear()

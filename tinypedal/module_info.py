@@ -150,6 +150,10 @@ class DeltaTimeInterval:
     )
 
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Reset delta time interval (new session, other vehicle in slot)"""
         self.last = 0.0
         self.long = 0.0
         self.normal = 0.0

@@ -244,3 +244,48 @@ def test_chunked_trailer_consumed():
         return body, await reader.read()
 
     assert asyncio.run(main()) == (b"ok", b"NEXT")
+
+
+def test_header_over_reader_limit_is_invalid_response():
+    """Header or chunk size line over StreamReader limit (64 KiB): ValueError like other invalid
+    response (caught by callers), not asyncio.LimitOverrunError"""
+    import pytest
+
+    from tinypedal.async_request import HttpConnection, get_response
+
+    huge = b"X-Big: " + b"a" * (70 * 1024) + b"\r\n"
+    with pytest.raises(ValueError, match="too long"):
+        run_parse(b"HTTP/1.1 200 OK\r\n" + huge + b"Content-Length: 2\r\n\r\nok")
+    with pytest.raises(ValueError, match="too long"):
+        run_parse(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + b"0" * (70 * 1024) + b"1\r\nx\r\n")
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    port = server.getsockname()[1]
+
+    def answer():
+        for _ in range(2):
+            client, _ = server.accept()
+            with client:
+                client.recv(4096)
+                client.sendall(b"HTTP/1.1 200 OK\r\n" + huge + b"Content-Length: 2\r\n\r\nok")
+
+    thread = threading.Thread(target=answer, daemon=True)
+    thread.start()
+    request = set_header_get("/", "127.0.0.1")
+
+    async def main():
+        connection = HttpConnection("127.0.0.1", port, 3)
+        try:
+            with pytest.raises(ValueError):
+                await connection.get(request)
+        finally:
+            connection.close()
+        return await get_response(request, "127.0.0.1", port, 3)
+
+    try:
+        assert asyncio.run(main()) == b""
+    finally:
+        thread.join(5)
+        server.close()

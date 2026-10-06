@@ -118,3 +118,29 @@ def test_mirror_window(ui_env, monkeypatch):
         control.disable()
         cfg.user.config["vr_overlay"] = saved
         QCoreApplication.processEvents()
+
+
+class BrokenVR(FakeVR):
+    def setOverlayRaw(self, *args):
+        raise RuntimeError("SteamVR closed")
+
+
+def test_steamvr_failure_keeps_mirror_updating(ui_env, monkeypatch):
+    """SteamVR closed: VR overlay stopped, mirror window (same timer) not frozen"""
+    saved = copy_setting(cfg.user.config["vr_overlay"])
+    cfg.user.config["vr_overlay"].update(enable_vr_overlay=False, enable_vr_mirror_window=True)
+    control = VROverlay()
+    widget = make_widget(10, 10, 80, 40)
+    try:
+        control.enable()
+        control._overlay, control._handle, control._visible = BrokenVR(), 1, True
+        monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget]))
+        control.update_overlay()
+        assert control._overlay is None and control._mirror is not None
+        assert control._timer.isActive()  # mirror still updated
+    finally:
+        widget.close()
+        control.disable(close_mirror=True)
+        cfg.user.config["vr_overlay"] = saved
+        QCoreApplication.processEvents()
+    assert not control._timer.isActive()

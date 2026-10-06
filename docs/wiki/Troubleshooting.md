@@ -56,6 +56,10 @@ tinypedal.exe --safe-mode
 python run.py --safe-mode
 ```
 
+### Settings file locked at start
+
+If another program (antivirus, OneDrive or another sync tool, a backup tool) holds a settings file while the app starts, the app waits up to 2 seconds for it. If the file is still locked, the app starts with default settings for that file and **never saves over it** during this session: a notice says so, and changes made in this session to that file are not kept. Restart the app once the other program released the file to get your settings back. A file that is really damaged (not valid JSON) is still backed up with a date and replaced with default settings.
+
 ## Logs
 
 - `Help` > `Show Log` shows the log of the running app: `Save`, `Copy`, `Clear`, `Refresh`, `Auto Refresh`.
@@ -72,7 +76,7 @@ python run.py --safe-mode
 
 ## Report a bug
 
-1. `Help` > `Create Bug Report...`, describe what you did, what happened and what you expected, then `Save Report...`. The ZIP contains logs, settings and system info; your user folder name, access codes and repository names are removed.
+1. `Help` > `Create Bug Report...`, describe what you did, what happened and what you expected, then `Save Report...`. The ZIP contains logs, settings and system info; your user folder name, access codes, stream overlay access token and repository names are removed.
 2. Open an [issue](https://github.com/Keenny38/ModernTinyPedals/issues/new): one problem per issue, with the app version (`Help` > `About`), the game, your system, the steps, and the report attached.
 
 Many problems come from other apps or plugins: turn them off to rule them out first. Security problems must be reported privately: see [Updates and Security](Updates-and-Security.md#reporting-a-vulnerability).
@@ -85,7 +89,7 @@ Many problems come from other apps or plugins: turn them off to rule them out fi
 - `App & modules`: CPU and memory of the app, its modules and the game connection;
 - `Game data`: game data freshness.
 
-To lower CPU use, turn off overlays and modules you do not use, or raise the `update_interval` of an overlay (in milliseconds). Hidden overlays are not updated.
+To lower CPU use, turn off overlays and modules you do not use, or raise the `update_interval` of an overlay (in milliseconds). Hidden overlays are not updated. Data modules skip their work while the game sends no new data (paused replay, menus), and map overlays only redraw when cars moved. App pages hidden behind another page, in the tray or minimized stop their timers and animations.
 
 Memory: overlays turned off and pages you have not opened take no memory (their code and widgets are loaded when used). Once the main window stays hidden in the tray (or minimized) for a minute, its pages are released and, in the tray, its graphics resources freed: everything is built again when you open the window. Keep the window in the tray while racing for the lowest memory use.
 

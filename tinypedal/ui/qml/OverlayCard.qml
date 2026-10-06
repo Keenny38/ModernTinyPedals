@@ -81,9 +81,13 @@ Item {
                 height: Math.round(card.previewHeight * fit)
                 source: card.preview
                 visible: card.previewState === 1
-                cache: false
+                // image://overlaypreview URL changes only with the picture: cached, decoded off the UI thread,
+                // old picture kept until the new one is ready, scaled once by the provider (32 px steps on resize)
+                asynchronous: true
+                retainWhileLoading: true
+                cache: true
+                sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                 smooth: true
-                mipmap: true
                 opacity: card.active ? 1 : 0.5
                 scale: area.containsMouse ? 1.03 : 1
                 Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -100,7 +104,7 @@ Item {
                 color: "#FFFFFF"
                 opacity: 0.05
                 SequentialAnimation on opacity {
-                    running: card.previewState === 0 && card.visible
+                    running: card.previewState === 0 && card.visible && pageState.active  // QML visible stays true while page hidden
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.12; duration: 650; easing.type: Easing.InOutQuad }
                     NumberAnimation { to: 0.05; duration: 650; easing.type: Easing.InOutQuad }

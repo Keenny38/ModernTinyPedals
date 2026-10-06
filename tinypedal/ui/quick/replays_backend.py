@@ -180,6 +180,14 @@ def size_text(size: float) -> str:
     return f"{localized(f'{megabytes:.1f}') if 0 < megabytes < 10 else f'{megabytes:.0f}'} {tr('MB')}"
 
 
+def file_size(path: str) -> int:
+    """File size, 0 if missing or removed meanwhile (temporary files deleted by game while listed)"""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
 def day_text(timestamp: float, today: QDate) -> str:
     """Day of a replay: Today, Yesterday, or long date in app language ("Samedi 3 octobre 2026")"""
     if timestamp <= 0:
@@ -427,6 +435,7 @@ class GameReplaysBackend(QObject):
     lapsChanged = Signal()
     settingsChanged = Signal()
     filesChanged = Signal()
+    copyProgressChanged = Signal()  # progress of copy alone (often), filesChanged when copy starts & ends
     noticeChanged = Signal()
     mapChanged = Signal()
     revisionChanged = Signal()
@@ -484,6 +493,12 @@ class GameReplaysBackend(QObject):
         self.selected_incident = ""
         self.selected_car = ""  # slot of standings row
         self.copy_progress = -1.0  # replays being copied: 0 to 1, -1 if none
+        self._folder_info: tuple[tuple, dict] | None = None  # (replays, temp, protected) it was made from, info
+        self._incident_revision = 0  # incident rows changed (timeline markers made again)
+        self._incident_view: tuple | None = None  # what incidentsChanged last told (emitted only when it changes)
+        self._timeline: tuple[tuple, list[dict], float] | None = None  # (made from, markers, last incident time)
+        self._standing_view: tuple | None = None  # what standingsChanged last told
+        self._lap_view: tuple | None = None  # what lapsChanged last told
         self.copy_kind = "add"  # add (to game folder) or export
         self.copy_cancel = threading.Event()
         self.notice = ""
@@ -510,9 +525,9 @@ class GameReplaysBackend(QObject):
         self.logos = LogoCache()
         notifier().changed.connect(self.pictures_changed)
         self.request_replays = GameRequest(self, (), self.received_replays)
-        self.request_state = GameRequest(self, (), self.received_state)
-        self.request_command = GameRequest(self, (), self.command_done)
-        self.request_copy = GameRequest(self, (), self.copy_done)
+        self.request_state = GameRequest(self, (), self.received_state, self.schedule_state)
+        self.request_command = GameRequest(self, (), self.command_done, self.command_failed)
+        self.request_copy = GameRequest(self, (), self.copy_done, self.copy_failed)
         self.command_queue: list[tuple[Command, ...]] = []  # commands waiting for the one sent
         self.copyProgressed.connect(self.set_copy_progress)
         self._timer = QTimer(self)
@@ -681,7 +696,7 @@ class GameReplaysBackend(QObject):
             self.looked_up.clear()
             if not self.rewatching:  # replay of live session: same laps
                 self.lap_starts.clear()
-                self.lapsChanged.emit()
+                self.laps_changed()
         if state != REPLAY:
             self.last_command = ""
             self.rewatching = False
@@ -719,6 +734,10 @@ class GameReplaysBackend(QObject):
         elif self._shown:
             self._timer.stop()
             self.refresh_state()
+
+    def command_failed(self):
+        """Command job raised (error logged): same as refused, queued commands still sent"""
+        self.command_done(False)
 
     def send(self, *commands: Command):
         """Commands to game in background, in order (stops at first refused), after commands sent before"""
@@ -990,7 +1009,7 @@ class GameReplaysBackend(QObject):
     def copying(self) -> bool:
         return self.request_copy.busy
 
-    @Property(float, notify=filesChanged)
+    @Property(float, notify=copyProgressChanged)
     def copyProgress(self) -> float:
         """Replays being copied: 0 to 1"""
         return max(self.copy_progress, 0.0)
@@ -1002,19 +1021,27 @@ class GameReplaysBackend(QObject):
 
     @Property(dict, notify=filesChanged)
     def folderInfo(self) -> dict:
-        """Replays & temporary files of game folder: counts, sizes (texts)"""
-        return {
+        """Replays & temporary files of game folder: counts, sizes (texts), made again only once replays,
+        temporary files or protected replays changed (lists are replaced, never changed in place)"""
+        sources = (self.replays, self.temp, self.protected)
+        cached = self._folder_info
+        if cached is not None and all(new is old for new, old in zip(sources, cached[0])):
+            return cached[1]
+        info = {
             "replays": len(self.replays), "size": size_text(sum(replay.size for replay in self.replays)),
             "temp": len(self.temp), "tempSize": self.temp_size(), "protected": len(self.protected & {
                 replay.name for replay in self.replays}),
         }
+        self._folder_info = (sources, info)
+        return info
 
     def temp_size(self) -> str:
-        return size_text(sum(os.path.getsize(path) for path in self.temp if os.path.exists(path)))
+        return size_text(sum(file_size(path) for path in self.temp))
 
     def set_copy_progress(self, progress: float):
-        self.copy_progress = progress
-        self.filesChanged.emit()
+        if progress != self.copy_progress:
+            self.copy_progress = progress
+            self.copyProgressChanged.emit()
 
     def update_files(self):
         """Temporary files of replay folder looked up again"""
@@ -1059,6 +1086,7 @@ class GameReplaysBackend(QObject):
         progress = self.copyProgressed.emit
         self.request_copy.start(lambda: replay_files.copy_replays(sources, folder, progress, cancelled))
         self.filesChanged.emit()
+        self.copyProgressChanged.emit()
 
     @Slot()
     def cancelCopy(self):
@@ -1067,6 +1095,7 @@ class GameReplaysBackend(QObject):
     def copy_done(self, result: replay_files.CopyResult):
         self.copy_progress = -1.0
         self.filesChanged.emit()
+        self.copyProgressChanged.emit()
         count = len(result.added)
         if result.cancelled:
             self.notify(trm(f"Copy cancelled, {count} replay(s) copied"), True)
@@ -1080,6 +1109,10 @@ class GameReplaysBackend(QObject):
             self.notify(tr("These replays are already in the game replay folder."))
         if result.added and self.copy_kind == "add":
             self.refresh_files(added=result.added)
+
+    def copy_failed(self):
+        """Copy ended by an unexpected error (logged): progress bar hidden, buttons enabled again"""
+        self.copy_done(replay_files.CopyResult([], ["unexpected error, see log file"]))
 
     @Slot(str)
     def exportReplays(self, key: str):
@@ -1436,20 +1469,26 @@ class GameReplaysBackend(QObject):
 
     @Property(dict, notify=incidentsChanged)
     def timeline(self) -> dict:
-        """Session time span (session length if known) & incident markers: key, time, wall, mine, shown, label"""
+        """Session time span (session length if known) & incident markers: key, time, wall, mine, shown, label
+
+        Markers made again only once incidents, incident rows (filters) or player changed.
+        """
         player = self.player_name()
-        shown = {row["key"] for row in self._incidents_model.rows}
-        end = max([incident.time for incident in self.incidents] + [self.replay_time, self.session_end / 1.02, 60.0])
-        return {
-            "end": end * 1.02,
-            "markers": [{
+        made_from = (self.incidents, player, self._incident_revision)
+        cached = self._timeline
+        if cached is None or cached[0][0] is not self.incidents or cached[0][1:] != made_from[1:]:
+            shown = {row["key"] for row in self._incidents_model.rows}
+            markers = [{
                 "key": incident_key(incident), "time": incident.time, "wall": incident.other == IMMOVABLE,
                 "mine": bool(player) and player in (incident.driver, incident.other),
                 "shown": incident_key(incident) in shown,
                 "label": f"{clock_text(incident.time)}  {incident.driver} ↔ "
                          f"{tr('Wall') if incident.other == IMMOVABLE else incident.other}",
-            } for incident in self.incidents],
-        }
+            } for incident in self.incidents]
+            last = max((incident.time for incident in self.incidents), default=0.0)
+            cached = self._timeline = (made_from, markers, last)
+        end = max(cached[2], self.replay_time, self.session_end / 1.02, 60.0)
+        return {"end": end * 1.02, "markers": cached[1]}
 
     @Property(int, notify=filterChanged)
     def incidentFilter(self) -> int:
@@ -1653,10 +1692,15 @@ class GameReplaysBackend(QObject):
                 "focused": "driver" if focused and focused == incident.driver
                 else "other" if focused and focused == incident.other else "",
             })
-        self._incidents_model.sync(rows)
+        rows_changed = self._incidents_model.sync(rows)
+        if rows_changed:
+            self._incident_revision += 1
         if self.selected_incident and self.selected_incident not in {row["key"] for row in rows}:
             self.selectIncident("")
-        self.incidentsChanged.emit()
+        view = (self.incidents, player, focused, self.drivers, self.counts)
+        if rows_changed or view != self._incident_view:  # counts, chips, timeline & names: only when changed
+            self._incident_view = view
+            self.incidentsChanged.emit()
 
     # Standings
     @Property(QObject, constant=True)
@@ -1727,6 +1771,15 @@ class GameReplaysBackend(QObject):
                     starts[lap] = car.lap_start
                     changed = True
         if changed:
+            self.laps_changed()
+
+    def laps_changed(self):
+        """lapsChanged emitted only when lap marks or lap of car followed by camera changed
+        (lap starts of other cars are not shown)"""
+        slot = self.focused_slot()
+        view = (slot, self.camera_lap(), tuple(sorted(self.lap_starts.get(slot, {}).items())))
+        if view != self._lap_view:
+            self._lap_view = view
             self.lapsChanged.emit()
 
     @Property(list, notify=lapsChanged)
@@ -1822,11 +1875,14 @@ class GameReplaysBackend(QObject):
                 "incidents": incidents.get(car.driver, 0),
                 "brandLogo": self.logos.brand(car.vehicle),
             })
-        self._standings_model.sync(rows)
+        rows_changed = self._standings_model.sync(rows)
         if self.selected_car and self.selected_car not in {row["key"] for row in rows}:
             self.selected_car = ""
-        self.standingsChanged.emit()
-        self.lapsChanged.emit()  # car followed by camera may have changed
+        view = (len(self.standings), self.hasEnergy, self.class_filter, self.selected_car)
+        if rows_changed or view != self._standing_view:
+            self._standing_view = view
+            self.standingsChanged.emit()
+        self.laps_changed()  # car followed by camera may have changed
         self.update_map_cars()
 
     # Track map

@@ -130,9 +130,11 @@ class Realtime(Overlay):
                 self.last_impact_expired = False
                 update_later = True
 
-            if (not self.last_impact_expired and
-                api.read.timing.elapsed() - self.last_impact_time
-                > self.wcfg["last_impact_cone_duration"]):
+            # Impact time not reset on a new session while elapsed restarts: negative age = old impact
+            impact_age = api.read.timing.elapsed() - self.last_impact_time
+            if not self.last_impact_expired and (
+                not self.last_impact_time
+                or not 0 <= impact_age <= self.wcfg["last_impact_cone_duration"]):
                 self.last_impact_expired = True
                 update_later = True
 

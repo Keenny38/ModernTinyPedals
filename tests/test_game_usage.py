@@ -263,6 +263,33 @@ def test_team_stints_game_not_running(page, monkeypatch):
     assert not team["rows"] and not team["canFill"] and team["status"]
 
 
+def test_game_request_errors_clear_busy_state(page, monkeypatch):
+    """Request raised an error: busy indicators refreshed (signal emitted), status/toast shown"""
+    from tinypedal.ui import game_rest
+
+    def broken(resource):
+        raise ValueError("unexpected answer")
+
+    monkeypatch.setattr(game_rest, "request_game", broken)
+    backend = page.backend
+    team_changes, tyre_changes = [], []
+    connections = [
+        backend.teamChanged.connect(lambda: team_changes.append(backend.team_request.busy)),
+        backend.tyresChanged.connect(lambda: tyre_changes.append(backend.askingGame)),
+    ]
+    backend.refreshTeam()
+    wait_request(backend.team_request)
+    QCoreApplication.processEvents()
+    assert team_changes[0] and team_changes[-1] is False  # busy shown, then cleared
+    assert backend.team["status"]
+    backend.tyreAllocationFromGame()
+    wait_request(backend.tyre_request)
+    QCoreApplication.processEvents()
+    assert tyre_changes[0] and tyre_changes[-1] is False and not backend.askingGame
+    for connection in connections:  # no lambda holding the backend left connected
+        backend.disconnect(connection)
+
+
 def test_fill_in_game_estimate_without_valid_lap(page, monkeypatch):
     backend = page.backend
     monkeypatch.setattr(api.read.engine, "expected_fuel_consumption", lambda: 2.78)

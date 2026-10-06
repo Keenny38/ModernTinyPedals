@@ -123,6 +123,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             dataset = load_consumption_history_file(
                 filepath=filepath,
                 filename=combo_name,
+                backup=True,  # own history file, replaced by next save
             )
             # New data set (copy on write), as GUI may be iterating current one
             output.consumptionDataSet = deque(dataset, output.consumptionDataSet.maxlen)

@@ -36,7 +36,7 @@ Rectangle {
         radius: height / 2
         color: Qt.rgba(1, 1, 1, 0.12)
         SequentialAnimation on opacity {
-            running: backdrop.loading
+            running: backdrop.loading && pageState.active
             loops: Animation.Infinite
             NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
             NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutQuad }

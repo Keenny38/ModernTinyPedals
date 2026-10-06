@@ -341,6 +341,47 @@ def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
     assert not settings_pages(window) and cfg.application["snap_gap"] == 4
 
 
+@pytest.mark.filterwarnings("ignore:libpyside. Failed to disconnect:RuntimeWarning")  # closed twice
+def test_page_closed_again_while_asking_to_save(window, monkeypatch):
+    """Close event delivered again during save question (nested event loop): no error"""
+    from PySide6.QtGui import QCloseEvent
+
+    from tinypedal.ui.menu import open_config_application
+
+    page = open_config_application(window)
+    page.backend.setNumber("application/snap_gap", 6)
+    nested = []
+
+    def question(*args, **kwargs):
+        if not nested:
+            nested.append(True)
+            page.closeEvent(QCloseEvent())  # second close while first one asks
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
+    event = QCloseEvent()
+    page.closeEvent(event)
+    assert nested and event.isAccepted() and page.view is None
+    page.close()
+    flush()
+    assert not settings_pages(window)
+
+
+def test_undo_history_capped(settings):
+    """Category reset & discard keep at most 100 undo steps, like single edits"""
+    cfg.application["snap_gap"] = 5
+    settings.refresh()
+    settings.host.answer = True
+    for step in range(120):
+        settings.setNumber("application/snap_distance", 10 + step % 2)
+        settings.discard()
+    assert len(settings._undo) <= 100
+    settings._undo[:] = [settings._snapshot()] * 150
+    settings.resetCategory()
+    assert len(settings._undo) <= 100
+    settings.discard()
+
+
 def test_page_rebuilt_in_new_language(window):
     from tinypedal import i18n
     from tinypedal.ui.menu import open_config_application
@@ -398,6 +439,8 @@ def test_number_typed_in_page_applied_without_enter(window):
 
     page = open_config_application(window, "application")
     page.view.setFocus()
+    page.backend.focus_option("application", "snap_distance")  # rows made for the part shown: scrolled to it
+    QTest.qWait(150)
     for _ in range(10):
         QCoreApplication.processEvents()
     label = option_label("snap_distance")

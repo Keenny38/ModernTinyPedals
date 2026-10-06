@@ -77,6 +77,7 @@ class OverlayOptions(BaseDialog):
     def __init__(self, parent, module_control: ModuleControl = wctrl):
         from .quick import create_quick_view
         from .quick.overlay_options_backend import OverlayOptionsBackend
+        from .quick.preview_provider import install_provider as install_preview_provider
 
         super().__init__(parent)
         self.set_utility_title(tr(TITLE))
@@ -89,6 +90,7 @@ class OverlayOptions(BaseDialog):
         self._shown_once = False  # values read when built: read again when shown again
         self.view: QQuickWidget = create_quick_view(
             self, "OverlayOptions.qml", {"backend": self.backend}, samples=0)
+        install_preview_provider(self.view.engine())  # overlay pictures (image://overlaypreview)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
@@ -176,7 +178,8 @@ class OverlayOptions(BaseDialog):
             app_signal.refresh.disconnect(self.refresh)
         self.backend.close()
         view, self.view = self.view, None  # type: ignore[assignment]
-        view.setSource(QUrl())  # QML gone before the backend it binds to
+        if view is not None:  # closed twice (nested event loop while asking to save)
+            view.setSource(QUrl())  # QML gone before the backend it binds to
 
     def reject(self):
         """Esc: close, asking to save pending changes"""

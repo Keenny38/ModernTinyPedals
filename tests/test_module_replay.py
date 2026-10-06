@@ -406,6 +406,21 @@ def test_wait_lap_saver():
     assert module_recorder.wait_lap_saver(5)
 
 
+def test_background_lap_save_error_logged(caplog):
+    """Unexpected error while saving lap in background is logged, not lost with discarded future"""
+    from tinypedal.module import module_recorder
+
+    class BrokenLap:
+        def save(self, options, valid):
+            raise KeyError("broken")
+
+    with caplog.at_level("ERROR", logger=module_recorder.__name__):
+        module_recorder.save_lap_background(BrokenLap(), None, True)
+        assert module_recorder.wait_lap_saver(5)
+    records = [record for record in caplog.records if "failed saving lap" in record.getMessage()]
+    assert records and records[0].exc_info is not None
+
+
 def test_remove_old_laps_skips_locked_file(tmp_path, monkeypatch):
     """A lap open in lap viewer (Windows: PermissionError) must not stop rotation"""
     import os

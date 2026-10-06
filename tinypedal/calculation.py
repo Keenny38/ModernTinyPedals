@@ -432,15 +432,18 @@ def sec2countdown(seconds: float) -> str:
 
 
 def sec2laptime(seconds: float) -> str:
-    """Lap time (min:sec.ms)"""
-    if seconds > 60:
-        return f"{seconds // 60:.0f}:{seconds % 60:06.3f}"
+    """Lap time (min:sec.ms), rounded to ms before split (no 1:60.000)"""
+    seconds = round(seconds, 3)
+    if seconds >= 60:
+        minutes, sec = divmod(seconds, 60)
+        return f"{minutes:.0f}:{sec:06.3f}"
     return f"{seconds % 60:.3f}"
 
 
 def sec2laptime_full(seconds: float) -> str:
-    """Lap time full (min:sec.ms)"""
-    return f"{seconds // 60:.0f}:{seconds % 60:06.3f}"
+    """Lap time full (min:sec.ms), rounded to ms before split (no 1:60.000)"""
+    minutes, sec = divmod(round(seconds, 3) + 0.0, 60)  # + 0.0: no "-0" minutes
+    return f"{minutes:.0f}:{sec:06.3f}"
 
 
 def sec2stinttime(seconds: float) -> str:

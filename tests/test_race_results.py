@@ -517,6 +517,20 @@ def test_backend_reads_new_file(backend, results_folder):
     assert backend.selectedKey.endswith(newer)  # newest was shown: new one shown
 
 
+def test_backend_load_failed(backend, monkeypatch):
+    """Reading ended by an unexpected error: page stops waiting"""
+    from tinypedal.ui.quick import results_backend
+
+    def broken(*args):
+        raise RuntimeError("broken")
+
+    monkeypatch.setattr(results_backend, "load_results", broken)
+    backend.reload()
+    assert backend.loading
+    assert wait_until(lambda: not backend.loading)
+    assert not backend.request.busy and backend.sessionCount == 3
+
+
 def test_backend_without_folder(ui_env, monkeypatch, tmp_path):
     from tinypedal.ui.quick.results_backend import RaceResultsBackend
 

@@ -194,7 +194,8 @@ Item {
             Timer {  // playhead moves between game answers at measured rate
                 interval: 100
                 repeat: true
-                running: timeline.visible && backend.replayActive && backend.replayRate !== 0
+                running: timeline.visible && backend.replayActive && backend.replayRate !== 0 && pageState.active
+                triggeredOnStart: true
                 onTriggered: timeline.now = backend.replayTime + backend.replayRate
                              * Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 3)
             }
@@ -254,13 +255,13 @@ Item {
             Canvas {  // incident markers
                 id: markersCanvas
                 anchors.fill: parent
-                property var data: root.timelineData
+                property var markerData: root.timelineData  // never "data": shadows Item.data (children)
                 property string selected: backend.selectedIncident
                 property string hover: timeline.hoverKey
                 property real start: timeline.viewStart
                 property real end: timeline.viewEnd
                 property bool dark: theme.dark
-                onDataChanged: requestPaint()
+                onMarkerDataChanged: requestPaint()
                 onSelectedChanged: requestPaint()
                 onHoverChanged: requestPaint()
                 onStartChanged: requestPaint()
@@ -270,7 +271,7 @@ Item {
                 onPaint: {
                     var ctx = getContext("2d")
                     ctx.reset()
-                    var markers = (data && data.markers) || []
+                    var markers = (markerData && markerData.markers) || []
                     var order = [[], [], []]  // dim & others, my car, selected or hovered: drawn on top
                     for (var i = 0; i < markers.length; i++) {
                         var marker = markers[i]

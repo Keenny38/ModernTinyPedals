@@ -1,5 +1,6 @@
 """rF2 shared memory connector on in-memory data: player sync, index override, resets, pause & resume, info"""
 
+import threading
 import time
 
 import pytest
@@ -216,7 +217,7 @@ def test_gave_up_after_errors_hides_overlays(game, monkeypatch):
     info._sync.paused = False
     info._sync.synced = True
     monkeypatch.setattr(rf2_connector, "run_supervised", lambda *args: False)
-    info._sync._SyncData__update()
+    info._sync._SyncData__update(threading.Event())
     assert info._sync.paused and not info._sync.synced and not info.isActive
 
 
@@ -226,7 +227,7 @@ def test_lmu_gave_up_after_errors_hides_overlays(monkeypatch):
     sync = lmu_connector.SyncData()
     sync.synced = True
     monkeypatch.setattr(lmu_connector, "run_supervised", lambda *args: False)
-    sync._SyncData__update()
+    sync._SyncData__update(threading.Event())
     assert sync.paused and not sync.synced
 
 
@@ -251,7 +252,54 @@ def test_telemetry_slots_forgotten_on_session_change(game):
     assert wait_until(lambda: info._sync._tele_indexes.get(42) == 0)
     tele.mVehicles[0].mID = 5
     scor.mScoringInfo.mCurrentET = 1.0  # new session
-    assert wait_until(lambda: info._sync._tele_indexes.get(42) == 42)  # back to default, not old slot
+    assert wait_until(lambda: 42 not in info._sync._tele_indexes)  # old slot forgotten
+    assert info._sync._tele_indexes.get(5) == 0
+
+
+def test_unknown_slot_never_reads_other_car_telemetry():
+    """Slot id without telemetry match: zeroed telemetry, not another car (same index) or last entry"""
+    from pyLMUSharedMemory import lmu_data
+    from tinypedal.adapter import lmu_connector, rf2_connector
+
+    assert rf2_connector.default_tele_indexes() == {} == lmu_connector.default_tele_indexes()
+    # rF2
+    info = rf2_connector.RF2Info()
+    dataset = MemoryDataSet()
+    info._sync.dataset = dataset
+    info.setReplay(None)
+    scor, tele = dataset.scor.data, dataset.tele.data
+    scor.mScoringInfo.mNumVehicles = tele.mNumVehicles = 2
+    scor.mVehicles[0].mID, scor.mVehicles[1].mID = 0, 1  # car 1 telemetry not received yet
+    tele.mVehicles[0].mID, tele.mVehicles[1].mID = 0, 9
+    tele.mVehicles[1].mEngineRPM = tele.mVehicles[-1].mEngineRPM = 8000.0
+    sync = info._sync
+    sync._SyncData__update_tele_indexes(1, tele, sync._tele_indexes)
+    sync._SyncData__update_tele_map()
+    assert info.rf2TeleVeh(1) is rf2_connector.EMPTY_TELE and info.rf2TeleVeh(1).mEngineRPM == 0.0
+    sync.tele_map = rf2_connector.NO_TELE_MAP  # not mapped: matched on demand, same result
+    assert info.rf2TeleVeh(1).mEngineRPM == 0.0
+    # Player without telemetry index: zeroed, not last entry
+    sync._SyncData__sync_player_tele(-1)
+    assert sync.player_tele is rf2_connector.EMPTY_TELE
+    # LMU
+    from types import SimpleNamespace
+
+    lmu = lmu_connector.LMUInfo()
+    data = lmu_data.LMUObjectOut()
+    zone = SimpleNamespace(data=data)
+    lmu._sync.dataset.shmm = zone  # type: ignore[assignment]
+    lmu._shmm = zone  # type: ignore[assignment]
+    data.scoring.scoringInfo.mNumVehicles = 2
+    data.telemetry.activeVehicles = 1
+    data.scoring.vehScoringInfo[1].mID = 1
+    data.telemetry.telemInfo[1].mEngineRPM = data.telemetry.telemInfo[-1].mEngineRPM = 8000.0
+    lmu_sync = lmu._sync
+    lmu_sync._SyncData__update_tele_indexes(data.telemetry, lmu_sync._tele_indexes)
+    lmu_sync._SyncData__update_tele_map()
+    assert lmu.lmuTeleVeh(1) is lmu_connector.EMPTY_TELE
+    assert lmu.lmuTeleVeh(0).mEngineRPM == 0.0 and lmu.lmuTeleVeh(0) is not lmu_connector.EMPTY_TELE
+    lmu_sync._SyncData__sync_player_tele(-1)
+    assert lmu_sync.player_tele is lmu_connector.EMPTY_TELE
 
 
 def test_rf2_replay_paused_state():
@@ -261,3 +309,86 @@ def test_rf2_replay_paused_state():
     assert not dataset.replay_paused()  # live data never treated as replay
     dataset.replaying = True
     assert dataset.replay_paused()
+
+
+# --- Audit fixes (thread & player index)
+class StuckThread:
+    """Update thread outliving stop() join"""
+
+    def join(self, timeout=None):
+        pass
+
+    def is_alive(self):
+        return True
+
+
+def test_stop_warns_on_thread_outliving_join_and_restart_uses_new_event(game, caplog):
+    info, scor, _, _ = game
+    sync: SyncData = info._sync
+    info.start()
+    old_thread, old_event = sync._update_thread, sync._event
+    sync._update_thread = StuckThread()
+    info.stop()
+    assert "still stopping" in caplog.text
+    info.start()  # restart never clears stop event of a thread still stopping
+    assert old_event.is_set() and sync._event is not old_event and not sync._event.is_set()
+    old_thread.join(5)
+    assert not old_thread.is_alive()
+    scor.mScoringInfo.mCurrentET = 1.0
+    assert wait_until(lambda: not info.isPaused)  # new thread updating
+
+
+def test_player_index_bound_by_vehicle_count(game):
+    info, scor, _, _ = game
+    scor.mVehicles[2].mIsPlayer = False
+    scor.mVehicles[5].mIsPlayer = True  # stale slot beyond vehicle count
+    scor.mVehicles[5].mID = 7
+    info.start()
+    assert info.playerIndex == INVALID_INDEX
+    info.stop()
+    scor.mScoringInfo.mNumVehicles = 6
+    info.start()
+    assert info.playerIndex == 5
+
+
+def test_scoring_index_helpers_bound_by_vehicle_count():
+    from pyLMUSharedMemory import lmu_data
+    from tinypedal.adapter import lmu_connector
+
+    vehicles = (rF2data.rF2VehicleScoring * 5)()
+    vehicles[3].mIsPlayer = True
+    vehicles[3].mID = 9
+    assert rf2_connector.local_scoring_index(vehicles, 3) == INVALID_INDEX
+    assert rf2_connector.local_scoring_index(vehicles, 4) == 3
+    assert rf2_connector.local_scoring_index_by_id(9, vehicles, 3) == INVALID_INDEX
+    assert rf2_connector.local_scoring_index_by_id(9, vehicles, 4) == 3
+    lmu_vehicles = (lmu_data.LMUVehicleScoring * 5)()
+    lmu_vehicles[3].mIsPlayer = True
+    lmu_vehicles[3].mID = 9
+    assert lmu_connector.local_scoring_index(lmu_vehicles, 2) == INVALID_INDEX
+    assert lmu_connector.local_scoring_index(lmu_vehicles, 10**6) == 3  # clamped to maximum
+    assert lmu_connector.local_scoring_index_by_id(9, lmu_vehicles, 2) == INVALID_INDEX
+    assert lmu_connector.local_scoring_index_by_id(9, lmu_vehicles, 4) == 3
+
+
+def test_lmu_restart_uses_new_event(monkeypatch, caplog):
+    from tinypedal.adapter import lmu_connector
+
+    class MemoryShmm(Zone):
+        def __init__(self):
+            super().__init__(lmu_connector.lmu_struct.LMUObjectOut())
+
+    info = lmu_connector.LMUInfo()
+    info._sync.dataset.shmm = MemoryShmm()
+    info._shmm = info._sync.dataset.shmm
+    sync = info._sync
+    info.start()
+    old_thread, old_event = sync._update_thread, sync._event
+    sync._update_thread = StuckThread()
+    info.stop()
+    assert "still stopping" in caplog.text
+    info.start()
+    assert old_event.is_set() and sync._event is not old_event and not sync._event.is_set()
+    old_thread.join(5)
+    assert not old_thread.is_alive()
+    info.stop()

@@ -4,6 +4,7 @@
 import hashlib
 import io
 import json
+import os
 import sys
 import threading
 import time
@@ -43,9 +44,12 @@ def test_portable_copy_is_not_auto_updated(frozen_exe):
     assert update.can_auto_update() and not update.is_portable_copy()
 
 
-def test_source_run_is_neither(monkeypatch):
+def test_source_run_installs_on_windows_only(monkeypatch):
     monkeypatch.delattr(sys, "frozen", raising=False)
+    monkeypatch.setattr(update.sys, "platform", "linux")
     assert not update.can_auto_update() and not update.is_portable_copy()
+    monkeypatch.setattr(update.sys, "platform", "win32")  # installer updates the installed app
+    assert update.can_auto_update() and not update.is_portable_copy()
 
 
 def test_portable_notes_open_release_page(ui_env, monkeypatch):
@@ -131,6 +135,7 @@ def test_download_replaces_previous_file(monkeypatch, tmp_path):
 ])
 def test_run_installer_checks_signature(monkeypatch, signature, started):
     runs = []
+    monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
     monkeypatch.setattr(update, "installer_signature", lambda path: signature)
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
     if started:
@@ -142,14 +147,133 @@ def test_run_installer_checks_signature(monkeypatch, signature, started):
         assert not runs
 
 
+@pytest.mark.parametrize("repo, signature, started", [
+    ("Keenny38/ModernTinyPedals", update.SIGNATURE_UNSIGNED, True),  # official releases unsigned
+    ("keenny38/moderntinypedals", update.SIGNATURE_UNSIGNED, True),
+    ("Keenny38/overlays", update.SIGNATURE_UNSIGNED, True),  # renamed official repository
+    ("someone/fork", update.SIGNATURE_UNSIGNED, False),  # other repository: signature required
+    ("", update.SIGNATURE_UNSIGNED, False),
+    ("someone/fork", update.SIGNATURE_VALID, True),
+    ("someone/fork", update.SIGNATURE_UNKNOWN, True),  # not checked (not Windows)
+    ("someone/fork", update.SIGNATURE_INVALID, False),
+])
+def test_run_installer_custom_repository_requires_signature(ui_env, monkeypatch, repo, signature, started):
+    runs = []
+    monkeypatch.setitem(cfg.application, "update_repository", repo)
+    monkeypatch.setattr(update, "installer_signature", lambda path: signature)
+    monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
+    if started:
+        update.run_installer("Setup.exe", "")
+        assert runs and "/SILENT" in runs[0]
+    else:
+        with pytest.raises(ValueError):
+            update.run_installer("Setup.exe", "")
+        assert not runs
+
+
 def test_run_installer_start_error_raised(monkeypatch):
     def refused(args, **kwargs):
         raise PermissionError(13, "blocked")
 
     monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
     monkeypatch.setattr(update.subprocess, "Popen", refused)
     with pytest.raises(OSError):
         update.run_installer("Setup.exe")
+
+
+def test_run_installer_install_folder(monkeypatch):
+    runs = []
+    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
+    monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
+    monkeypatch.setattr(update, "install_folder", lambda: "E:/Modern Tiny Pedals/")
+    update.run_installer("Setup.exe")  # folder of install_folder by default
+    update.run_installer("Setup.exe", "")  # installer picks it
+    assert runs[0][-1] == f"/DIR={os.path.normpath('E:/Modern Tiny Pedals')}"
+    assert not any(arg.startswith("/DIR") for arg in runs[1])
+
+
+def shortcut_bytes(base: str, suffix: str = "", unicode: bool = True) -> bytes:
+    """Minimal Windows shortcut: header, target ID list, link info with local path (MS-SHLLINK)"""
+    header_size = 0x24 if unicode else 0x1C
+    volume_id = (16).to_bytes(4, "little") + bytes(12)
+    ansi_base = (b"" if unicode else base.encode("ascii")) + b"\x00"
+    ansi_suffix = (b"" if unicode else suffix.encode("ascii")) + b"\x00"
+    strings = volume_id + ansi_base + ansi_suffix
+    offsets = [header_size, header_size + len(volume_id), 0, header_size + len(volume_id) + len(ansi_base)]
+    unicode_part = b""
+    if unicode:
+        unicode_base = base.encode("utf-16-le") + b"\x00\x00"
+        unicode_part = unicode_base + suffix.encode("utf-16-le") + b"\x00\x00"
+        offsets += [header_size + len(strings), header_size + len(strings) + len(unicode_base)]
+    size = header_size + len(strings) + len(unicode_part)
+    info = b"".join(value.to_bytes(4, "little") for value in [size, header_size, 0x01, *offsets])
+    header = bytearray(76)
+    header[0:4] = (0x4C).to_bytes(4, "little")
+    header[20:24] = (0x03).to_bytes(4, "little")  # HasLinkTargetIDList, HasLinkInfo
+    id_list = (4).to_bytes(2, "little") + bytes(4)
+    return bytes(header) + id_list + info + strings + unicode_part
+
+
+@pytest.mark.parametrize("unicode", [True, False])
+def test_shortcut_target(tmp_path, unicode):
+    link = tmp_path / "app.lnk"
+    link.write_bytes(shortcut_bytes("E:\\Modern Tiny Pedals\\", "tinypedal.exe", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\Modern Tiny Pedals\\tinypedal.exe"
+    link.write_bytes(shortcut_bytes("E:\\Modern Tiny Pedals\\tinypedal.exe", "", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\Modern Tiny Pedals\\tinypedal.exe"
+
+
+def test_shortcut_target_unreadable(tmp_path):
+    link = tmp_path / "app.lnk"
+    assert update.shortcut_target(str(link)) == ""  # missing
+    link.write_bytes(b"not a shortcut")
+    assert update.shortcut_target(str(link)) == ""
+    data = bytearray(shortcut_bytes("E:\\app\\tinypedal.exe"))
+    data[20:24] = (0x01).to_bytes(4, "little")  # no link info
+    link.write_bytes(bytes(data))
+    assert update.shortcut_target(str(link)) == ""
+    link.write_bytes(shortcut_bytes("E:\\app\\tinypedal.exe")[:100])  # truncated
+    assert update.shortcut_target(str(link)) == ""
+
+
+def make_install(folder):
+    folder.mkdir(parents=True)
+    (folder / update.APP_EXECUTABLE).write_bytes(b"")
+    (folder / update.UNINSTALLER_NAME).write_bytes(b"")
+    return str(folder)
+
+
+def test_installed_app_folder(monkeypatch, tmp_path):
+    installed = make_install(tmp_path / "installed")
+    stale = tmp_path / "old"  # left by an earlier install: no uninstaller
+    stale.mkdir()
+    (stale / update.APP_EXECUTABLE).write_bytes(b"")
+    appdata = tmp_path / "appdata"
+    link = appdata / update.START_MENU_SHORTCUT
+    link.parent.mkdir(parents=True)
+    link.write_bytes(shortcut_bytes(os.path.join(installed, update.APP_EXECUTABLE)))
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr(update, "registry_install_folder", lambda: str(stale))
+    assert update.installed_app_folder() == os.path.normpath(installed)  # stale registry: shortcut
+    other = make_install(tmp_path / "other")
+    monkeypatch.setattr(update, "registry_install_folder", lambda: other)
+    assert update.installed_app_folder() == os.path.normpath(other)  # registry first
+    link.unlink()
+    monkeypatch.setattr(update, "registry_install_folder", lambda: "")
+    assert update.installed_app_folder() == ""
+
+
+def test_install_folder(monkeypatch, frozen_exe):
+    monkeypatch.setattr(update, "installed_app_folder", lambda: "E:\\Modern Tiny Pedals")
+    assert update.install_folder() == ""  # portable copy: never installed
+    (frozen_exe / update.UNINSTALLER_NAME).write_bytes(b"")
+    assert update.install_folder() == str(frozen_exe)  # installed copy: itself
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert update.install_folder() == "E:\\Modern Tiny Pedals"  # run from source: installed app
+    monkeypatch.setattr(update.sys, "platform", "linux")
+    assert update.install_folder() == ""
 
 
 def test_signature_check_errors_are_unknown(monkeypatch):
@@ -289,12 +413,12 @@ def test_install_only_after_pages_closed(updates, monkeypatch, messages):
     from tinypedal.ui import notification
 
     order = []
-    monkeypatch.setattr(notification, "run_installer", lambda path: order.append("installer"))
+    monkeypatch.setattr(notification, "run_installer", lambda path, **kwargs: order.append("installer"))
     window = FakeWindow(can_quit=False)
     assert not notification.install_update(window, "Setup.exe")  # unsaved changes kept
     assert window.calls == ["close pages"] and not order
     window = FakeWindow()
-    monkeypatch.setattr(notification, "run_installer", lambda path: window.calls.append("installer"))
+    monkeypatch.setattr(notification, "run_installer", lambda path, **kwargs: window.calls.append("installer"))
     assert notification.install_update(window, "Setup.exe")
     assert window.calls == ["close pages", "installer", "quit"]
 
@@ -302,7 +426,7 @@ def test_install_only_after_pages_closed(updates, monkeypatch, messages):
 def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_path):
     from tinypedal.ui import notification
 
-    def blocked(path):
+    def blocked(path, **kwargs):
         raise PermissionError(13, "blocked by antivirus")
 
     window = FakeWindow()
@@ -310,7 +434,7 @@ def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_p
     assert not notification.install_update(window, "Setup.exe")
     assert window.calls == ["close pages", "cancel"] and "Unable to install update" in messages["warnings"][0]
 
-    def bad_signature(path):
+    def bad_signature(path, **kwargs):
         raise ValueError("installer signature is not valid")
 
     installer = tmp_path / "Setup.exe"
@@ -319,6 +443,75 @@ def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_p
     assert not notification.install_update(window, str(installer))
     assert not installer.exists()  # never kept
     assert "signature" in messages["warnings"][1]
+
+
+def test_unsigned_installer_of_custom_repository_refused(updates, monkeypatch, messages, tmp_path):
+    from tinypedal.ui import notification
+
+    runs = []
+    monkeypatch.setitem(cfg.application, "update_repository", "someone/fork")
+    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
+    installer = tmp_path / "Setup.exe"
+    installer.write_bytes(b"MZ")
+    window = FakeWindow()
+    assert not notification.install_update(window, str(installer))
+    assert not runs and not installer.exists()
+    assert window.calls == ["close pages", "cancel"]
+    assert "custom update repository is not signed" in messages["warnings"][0]  # not "signature not valid"
+
+
+def test_installer_checked_against_repository_found_at_check(updates, monkeypatch, messages, tmp_path):
+    """Update repository blanked or changed between check & install: repository of release checked"""
+    from tinypedal.ui import notification
+
+    runs = []
+    monkeypatch.setitem(cfg.application, "update_repository", "")  # blanked after check
+    monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
+    monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
+    monkeypatch.setattr(update, "install_folder", lambda: "")
+    window = FakeWindow()
+    assert notification.install_update(window, "Setup.exe", update.FORK_REPO_NAME)  # official release
+    assert runs and window.calls == ["close pages", "quit"]
+    monkeypatch.setitem(cfg.application, "update_repository", update.FORK_REPO_NAME)  # set back after check
+    installer = tmp_path / "Setup.exe"
+    installer.write_bytes(b"MZ")
+    window = FakeWindow()
+    assert not notification.install_update(window, str(installer), "someone/fork")  # found in a fork
+    assert len(runs) == 1 and not installer.exists()
+    assert "custom update repository is not signed" in messages["warnings"][0]
+
+
+def test_installer_keeps_repository_of_check(monkeypatch):
+    raw = b'{"assets": [{"name": "A-1.0.0-setup.zip", "browser_download_url": "https://github.com/a/A-1.0.0-setup.zip", ' \
+        b'"digest": "sha256:' + b"b" * 64 + b'"}]}'
+    asset = update.parse_installer(raw, "someone/fork")
+    assert asset is not None and asset.repository == "someone/fork"
+    assert update.parse_installer(raw).repository == ""  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("repo, official", [
+    (update.FORK_REPO_NAME, True), ("keenny38/moderntinypedals/", True), ("Keenny38/overlays", True),
+    ("someone/fork", False), ("", False),
+])
+def test_is_official_repository(repo, official):
+    assert update.is_official_repository(repo) is official
+
+
+def test_download_keeps_repository_of_check(updates, monkeypatch, messages):
+    """Installer installed with repository it was found in, even if a later check replaced it"""
+    from tinypedal.ui import notification
+
+    installs = []
+    monkeypatch.setattr(update.update_checker, "installer", ASSET._replace(repository="someone/fork"))
+    monkeypatch.setattr(notification, "download_installer", lambda asset, **kwargs: "Setup.exe")
+    monkeypatch.setattr(
+        notification, "install_update", lambda window, path, repository=None: installs.append((path, repository)))
+    monkeypatch.setattr(notification, "main_window", lambda: None)
+    assert updates.download(auto_install=True)
+    monkeypatch.setattr(update.update_checker, "installer", ASSET._replace(repository=update.FORK_REPO_NAME))
+    assert wait_for(lambda: not updates.busy)
+    assert installs == [("Setup.exe", "someone/fork")]
 
 
 def test_download_runs_once(updates, monkeypatch, messages):
@@ -334,9 +527,9 @@ def test_download_runs_once(updates, monkeypatch, messages):
 
     installs = []
     monkeypatch.setattr(notification, "download_installer", download)
-    monkeypatch.setattr(notification, "install_update", lambda window, path: installs.append(path))
+    monkeypatch.setattr(notification, "install_update", lambda window, path, repository=None: installs.append(path))
     monkeypatch.setattr(notification, "main_window", lambda: None)
-    button = notification.UpdatesNotifyButton("")
+    button =notification.UpdatesNotifyButton("")
     button.install_update.setVisible(True)  # app can install (hidden action is always disabled)
     try:
         assert updates.download(auto_install=True)
@@ -370,7 +563,7 @@ def test_downloaded_update_asks_first(updates, monkeypatch, messages):
     from tinypedal.ui import notification
 
     installs = []
-    monkeypatch.setattr(notification, "install_update", lambda window, path: installs.append(path))
+    monkeypatch.setattr(notification, "install_update", lambda window, path, repository=None: installs.append(path))
     monkeypatch.setattr(notification, "main_window", lambda: None)
     messages["reply"] = QMessageBox.StandardButton.No
     updates.install_downloaded("Setup.exe", "")

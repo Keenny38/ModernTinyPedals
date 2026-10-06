@@ -41,7 +41,8 @@ class RaceResultsViewer(BaseDialog):
         self.set_utility_title(tr("Race Results"))
         self.setMinimumSize(UIScaler.size(60), UIScaler.size(30))
         self.backend = RaceResultsBackend(self)
-        self.view = create_quick_view(self, "RaceResults.qml", {"backend": self.backend})
+        self.view = create_quick_view(
+            self, "RaceResults.qml", {"backend": self.backend}, samples=0)  # no GpuShape: no MSAA
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)

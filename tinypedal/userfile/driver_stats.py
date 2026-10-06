@@ -33,6 +33,7 @@ import threading
 from collections.abc import KeysView, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from time import sleep
 from typing import Any, get_type_hints
 
@@ -265,9 +266,18 @@ def load_driver_stats(
         if not isinstance(temp_dict, dict):  # not exist, set to default
             return DriverStats()
         loaded_dict = temp_dict
-    # Add data to DriverStats
+    # Add data to DriverStats, value of wrong type (null, text, bool) converted or reverted to default
+    default_dict = DriverStats.__dict__
+    default_type = get_type_hints(DriverStats)
     try:
-        return DriverStats(**purge_data_key(loaded_dict, DriverStats.keys()))
+        stats = purge_data_key(loaded_dict, DriverStats.keys())
+        for key, value in stats.items():
+            if isinstance(value, bool) or not isinstance(value, default_type[key]):
+                value = stats[key] = convert_value_type(value, default_dict[key], default_type[key])
+            # "nan", "inf" text or NaN/Infinity literal: a best (nan) never improved, default
+            if isinstance(value, float) and not isfinite(value):
+                stats[key] = default_dict[key]
+        return DriverStats(**stats)
     except (AttributeError, TypeError, KeyError, ValueError):
         return DriverStats()
 
@@ -278,31 +288,37 @@ def save_driver_stats(
     """Save driver stats"""
     if not key_list or not all(key_list):  # ignore invalid key name
         return
-    with STATS_LOCK:  # viewer edit not saved between load & save
-        add_driver_stats(key_list, stats_update, filepath, filename)
-
-
-def add_driver_stats(key_list: tuple[str, str], stats_update: DriverStats, filepath: str, filename: str) -> None:
-    """Add stats to saved stats (best lap times kept), see save_driver_stats"""
-    # Load stats with limited attempts
+    # Load stats with limited attempts, STATS_LOCK held from load to save (viewer edit not saved between)
+    # but released while waiting to try again (viewer page never waits long)
     load_attempts = 10
     while load_attempts > 0:
-        stats_user = load_stats_json_file(
-            filepath=filepath,
-            filename=filename,
-            show_log=False,
-        )
-        if stats_user is not None:
-            break
+        with STATS_LOCK:
+            stats_user = load_stats_json_file(
+                filepath=filepath,
+                filename=filename,
+                show_log=False,
+            )
+            if stats_user is not None:
+                add_driver_stats(stats_user, key_list, stats_update, filepath, filename)
+                return
         load_attempts -= 1
         logger.info("USERDATA: unable to load %s%s, %s attempt(s) left", filename, FileExt.STATS, load_attempts)
         sleep(0.05)
     # Create backup if failed to load stats
-    if stats_user is None:
-        logger.info("USERDATA: unable to load %s%s, creating backup", filename, FileExt.STATS)
-        if not create_backup_file(f"{filename}{FileExt.STATS}", filepath, set_backup_timestamp(), show_log=True):
-            return  # abort saving if failed to create backup
-        stats_user = {}  # reset stats
+    with STATS_LOCK:
+        stats_user = load_stats_json_file(filepath=filepath, filename=filename, show_log=False)
+        if stats_user is None:  # still invalid (not saved by viewer meanwhile)
+            logger.info("USERDATA: unable to load %s%s, creating backup", filename, FileExt.STATS)
+            if not create_backup_file(f"{filename}{FileExt.STATS}", filepath, set_backup_timestamp(), show_log=True):
+                return  # abort saving if failed to create backup
+            stats_user = {}  # reset stats
+        add_driver_stats(stats_user, key_list, stats_update, filepath, filename)
+
+
+def add_driver_stats(
+    stats_user: dict, key_list: tuple[str, str], stats_update: DriverStats, filepath: str, filename: str
+) -> None:
+    """Add stats to saved stats loaded (best lap times kept) & save, STATS_LOCK held, see save_driver_stats"""
     # Get data from matching key
     loaded_dict = stats_user
     for key in key_list:
