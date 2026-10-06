@@ -3,6 +3,14 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.22.1 (2026-10-06)
+
+### Fixes
+
+- **Session best delta kept during the session**: restarting the app, reloading a preset (also the automatic preset of the car class), saving a global setting or changing screen setup no longer forgets the session best and stint best laps; the session delta then became the same as the stint delta. Both laps are saved next to the delta best file of the track and class (`.session`) and loaded again in the same session.
+- **No delta on out laps**: in Le Mans Ultimate, going back to the garage starts a new lap whose time counts the time spent there, and the lap distance is negative in the garage and in the pit lane before the start line. Delta overlays showed `+0.000` everywhere, then a huge delta once on track. On an out lap and in the pit lane before the line, `Deltabest`, `Deltabest Extended`, `Delta Graph`, `Lap Time History`, `Black Box` and the web dashboard now show a dash (line interrupted on the graph), and the estimated lap time is left empty. A stint best not set yet, and a last lap with a pit stop, show a dash instead of `+0.000` too.
+- A new session also starts a new stint: the stint best of the previous session was kept until the first pit stop.
+
 ## 0.22.0 (2026-10-06)
 
 ### Overlay edit mode

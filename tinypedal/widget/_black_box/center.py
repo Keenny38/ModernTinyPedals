@@ -42,6 +42,7 @@ class CenterPainter:
     center_order: Any
     clutch: Any
     delta_best: Any
+    delta_shown: Any
     depth_effects: Any
     draw_fit_text: Any
     draw_info_row: Any
@@ -199,7 +200,9 @@ class CenterPainter:
             # Delta source initial after the label, unless the default best lap delta
             source = wcfg["deltabest_source"]
             label = self.text["delta"] if source == "Best" else f"{self.text['delta']} {source[0]}"
-            self.draw_info_row(painter, rect, label, f"{self.delta_best:+.3f}" if self.use_delta else "-", color)
+            shown = self.use_delta and self.delta_shown  # no reference lap, or out lap: no delta
+            self.draw_info_row(painter, rect, label, f"{self.delta_best:+.3f}" if shown else "-",
+                               color if shown else "")
         elif name == "laptime":
             self.draw_info_row(painter, rect, self.text["laptime"],
                                calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-")

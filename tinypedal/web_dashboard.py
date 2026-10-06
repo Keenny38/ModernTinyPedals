@@ -152,6 +152,13 @@ def display_values(speed: float, tyre_temp: list[float], brake_temp: list[float]
     }
 
 
+def delta_available() -> bool:
+    """Delta best can be shown: best lap exists, current lap comparable (not an out lap)"""
+    from .widget._common import delta_shown
+
+    return delta_shown("Best")
+
+
 def official_delta(read) -> float | None:
     """Delta to best lap computed by game (LMU), None when not available"""
     from .api_control import api
@@ -187,6 +194,7 @@ def telemetry_snapshot() -> dict:
         "vehicles": _safe(read.vehicle.total_vehicles, 0),
         "lap": _safe(read.lap.number, 0),
         "delta_best": round(delta.deltaBest, 3),
+        "delta_available": delta_available(),
         "lap_current": round(delta.lapTimeCurrent, 3),
         "lap_last": round(delta.lapTimeLast, 3),
         "lap_best": round(delta.lapTimeBest, 3),
@@ -587,7 +595,7 @@ $("status").textContent=d.active?(d.track||T.on_track):T.waiting;
 $("gear").textContent=d.gear>0?d.gear:(d.gear<0?"R":"N");$("speed").textContent=Math.round(v.speed||0);
 $("speedunit").textContent=v.speed_unit||"";
 $("rpmbar").style.width=(d.rpm_max>0?Math.min(d.rpm/d.rpm_max,1)*100:0)+"%";
-const dl=d.delta_best||0;$("delta").textContent=signed(dl);$("delta").className="value "+(dl>0?"neg":"pos");
+const dl=d.delta_best||0;const shown=d.delta_available!==false;$("delta").textContent=shown?signed(dl):"\u2013";$("delta").className="value "+(shown?(dl>0?"neg":"pos"):"");
 const off=d.delta_official;const official=typeof off==="number";
 $("officialcard").style.display=official?"":"none";
 if(official){$("official").textContent=signed(off);$("official").className="value "+(off>0?"neg":"pos")}

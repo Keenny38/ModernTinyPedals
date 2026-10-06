@@ -25,7 +25,12 @@ from .. import realtime_state
 from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import DeltaInfo, minfo
-from ..userfile.delta_best import load_delta_best_file, save_delta_best_file
+from ..userfile.delta_best import (
+    load_delta_best_file,
+    load_delta_session_file,
+    save_delta_best_file,
+    save_delta_session_file,
+)
 from ..validator import (
     generator_init,
     is_same_session,
@@ -180,14 +185,23 @@ def calc_delta_time(
             recording = False
             validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
+            # Lap started in pit lane or garage (back to garage starts a new lap): out lap
+            is_out_lap = bool(api.read.vehicle.in_pits())
+            last_lap_comparable = False  # last lap recorded without pit lane
 
             combo_name = api.read.session.combo_name()
             session_id = session_token(api.read.session.identifier())
 
-            # Reset delta session best if not same session, car, track combo
+            # New session, car, track combo, or module (re)started: session & stint best laps of
+            # same session saved before (app restarted, preset reloaded...), else none
             if combo_name != last_combo_name or not is_same_session(last_session_id, session_id):
-                delta_array_session = DELTA_DEFAULT
-                laptime_session_best = MAX_SECONDS
+                (delta_array_session, laptime_session_best,
+                 delta_array_stint, laptime_stint_best) = load_delta_session_file(
+                    filepath=filepath,
+                    filename=combo_name,
+                    session_id=session_id,
+                    pitstops=api.read.vehicle.number_pitstops(),
+                )
             last_combo_name = combo_name
             last_session_id = session_id
 
@@ -227,6 +241,10 @@ def calc_delta_time(
         if in_pits and laptime_stint_best != MAX_SECONDS and api.read.vehicle.speed() < 0.1:
             delta_array_stint = DELTA_DEFAULT
             laptime_stint_best = MAX_SECONDS
+            save_delta_session_file(
+                filepath, combo_name, last_session_id, api.read.vehicle.number_pitstops(),
+                delta_array_session, delta_array_stint,
+            )
 
         # Lap start & finish detection
         if lap_stime > last_lap_stime:
@@ -238,10 +256,14 @@ def calc_delta_time(
                 ))
                 delta_array_last = tuple(delta_array_raw)
                 validating = api.read.timing.elapsed()
+                last_lap_comparable = not is_pit_lap
+            else:
+                last_lap_comparable = False
             delta_array_raw[:] = DELTA_DEFAULT
             pos_last = pos_recorded = pos_curr
             recording = laptime_curr < 1
-            is_pit_lap = 0
+            is_pit_lap = in_pits
+            is_out_lap = bool(in_pits)
             # Keep session token recent, so a game pause is not taken as new session
             session_id = session_token(api.read.session.identifier())
             if is_same_session(last_session_id, session_id):
@@ -287,14 +309,18 @@ def calc_delta_time(
                         filename=combo_name,
                         dataset=delta_array_best,
                     )
-                # Update delta session best list
-                if laptime_session_best > laptime_last:
-                    laptime_session_best = laptime_last
-                    delta_array_session = delta_array_last
-                # Update delta stint best list
-                if laptime_stint_best > laptime_last:
-                    laptime_stint_best = laptime_last
-                    delta_array_stint = delta_array_last
+                # Update delta session & stint best list, kept in file for module restarts
+                if laptime_session_best > laptime_last or laptime_stint_best > laptime_last:
+                    if laptime_session_best > laptime_last:
+                        laptime_session_best = laptime_last
+                        delta_array_session = delta_array_last
+                    if laptime_stint_best > laptime_last:
+                        laptime_stint_best = laptime_last
+                        delta_array_stint = delta_array_last
+                    save_delta_session_file(
+                        filepath, combo_name, last_session_id, api.read.vehicle.number_pitstops(),
+                        delta_array_session, delta_array_stint,
+                    )
                 validating = 0
 
         # Calc delta
@@ -339,7 +365,8 @@ def calc_delta_time(
                 ),
             )
 
-        # Estimated laptime
+        # Estimated laptime (none on out lap or before start line in pit lane: delta not comparable)
+        delta_available = not is_out_lap and pos_synced >= 0  # negative: pit lane before line
         laptime_est = laptime_stint_best + delta_ema_stint  # from stint
         if not 0 < laptime_est < MAX_SECONDS:
             laptime_est = laptime_session_best + delta_ema_session  # fallback to session
@@ -347,12 +374,16 @@ def calc_delta_time(
                 laptime_est = laptime_best + delta_ema_best  # fallback to best
                 if not 0 < laptime_est < MAX_SECONDS:
                     laptime_est = 0
+        if not delta_available:
+            laptime_est = 0
 
         # Output delta time data
         output.deltaBest = delta_ema_best
         output.deltaLast = delta_ema_last
         output.deltaSession = delta_ema_session
         output.deltaStint = delta_ema_stint
+        output.isDeltaAvailable = delta_available
+        output.hasLastLap = last_lap_comparable
         output.isValidLap = laptime_valid > 0
         output.lapTimeCurrent = laptime_curr
         output.lapTimeLast = laptime_last

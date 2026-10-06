@@ -589,6 +589,8 @@ class DeltaInfo:
         "deltaLast",
         "deltaSession",
         "deltaStint",
+        "isDeltaAvailable",
+        "hasLastLap",
         "isValidLap",
         "lapTimeCurrent",
         "lapTimeLast",
@@ -606,6 +608,10 @@ class DeltaInfo:
         self.deltaLast: float = 0.0
         self.deltaSession: float = 0.0
         self.deltaStint: float = 0.0
+        # Current lap comparable to reference laps: not an out lap (started in pit lane or garage,
+        # time spent there counted), car not before start line in pit lane (negative lap distance)
+        self.isDeltaAvailable: bool = False
+        self.hasLastLap: bool = False  # last lap recorded & comparable (no pit lane: not in or out lap)
         self.isValidLap: bool = False
         self.lapTimeCurrent: float = 0.0
         self.lapTimeLast: float = 0.0

@@ -71,6 +71,7 @@ class FileExt:
     ENERGY = ".energy"
     FUEL = ".fuel"
     SECTOR = ".sector"
+    DELTA_SESSION = ".session"
     TPPN = ".tppn"
     TPTN = ".tptn"
     STATS = ".stats"

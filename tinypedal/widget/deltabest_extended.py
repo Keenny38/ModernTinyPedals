@@ -23,7 +23,7 @@ Deltabest extended Widget
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import game_deltabest
+from ._common import delta_shown, game_deltabest, lap_delta_shown
 
 
 class Realtime(Overlay):
@@ -141,11 +141,13 @@ class Realtime(Overlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        alltime_best: float | None
+        session_best: float | None
+        stint_best: float | None
+        delta_last: float | None
         if minfo.delta.lapTimeCurrent < self.freeze_duration:
-            alltime_best = minfo.delta.lapTimeLast - self.last_laptimes[0]
-            session_best = minfo.delta.lapTimeLast - self.last_laptimes[1]
-            stint_best = minfo.delta.lapTimeLast - self.last_laptimes[2]
-            delta_last = minfo.delta.lapTimeLast - self.last_laptimes[3]
+            alltime_best, session_best, stint_best, delta_last = (
+                minfo.delta.lapTimeLast - last if lap_delta_shown(last) else None for last in self.last_laptimes)
             self.new_lap = True
         else:
             if self.new_lap:
@@ -161,6 +163,12 @@ class Realtime(Overlay):
             delta_last = minfo.delta.deltaLast
             if self.wcfg["show_game_deltabest_if_available"]:  # game delta: to session best lap
                 session_best = game_deltabest(session_best)
+            # No reference lap, or out lap: no delta
+            alltime_best, session_best, stint_best, delta_last = (
+                value if delta_shown(source) else None
+                for value, source in zip((alltime_best, session_best, stint_best, delta_last),
+                                         ("Best", "Session", "Stint", "Last"))
+            )
 
         # All time deltabest
         if self.wcfg["show_all_time_deltabest"]:
@@ -183,6 +191,9 @@ class Realtime(Overlay):
         """Update deltabest"""
         if target.last != data:
             target.last = data
-            text = f"{calc.sym_max(data, self.delta_display_range):>+{self.max_padding}.{self.decimals}f}"
+            if data is None:  # no reference lap, or out lap
+                text = f"{'-':>{self.max_padding}}"
+            else:
+                text = f"{calc.sym_max(data, self.delta_display_range):>+{self.max_padding}.{self.decimals}f}"
             target.text = f"{prefix}{text:.{self.max_padding}}"
             target.update()

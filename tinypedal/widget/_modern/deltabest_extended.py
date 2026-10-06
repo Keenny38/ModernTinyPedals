@@ -19,7 +19,9 @@
 """
 Deltabest extended Widget, modern design
 
-Delta to all time best, session best, stint best and last lap, colored by gain or loss.
+Delta to all time best, session best, stint best and last lap, colored by gain or loss. A dash
+while there is no reference lap yet (stint best before first lap of stint) or no delta to show
+(out lap from pit lane or garage, in pit lane before start line).
 """
 
 from __future__ import annotations
@@ -28,8 +30,8 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...module_info import minfo
-from .._common import game_deltabest
-from .base import ModernOverlay
+from .._common import delta_shown, game_deltabest, lap_delta_shown
+from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
 
 
@@ -75,20 +77,27 @@ class Realtime(StatsMixin, ModernOverlay):
     def timerEvent(self, event):
         """Update when vehicle on track"""
         delta = minfo.delta
-        if delta.lapTimeCurrent < self.freeze_duration:
-            deltas = tuple(delta.lapTimeLast - last for last in self.last_laptimes)
+        if delta.lapTimeCurrent < self.freeze_duration:  # lap just completed against references
+            deltas = tuple(delta.lapTimeLast - last if lap_delta_shown(last) else None for last in self.last_laptimes)
             self.new_lap = True
         else:
             if self.new_lap:
                 self.last_laptimes = [delta.lapTimeBest, delta.lapTimeSession, delta.lapTimeStint, delta.lapTimeLast]
                 self.new_lap = False
             session = game_deltabest(delta.deltaSession) if self.game_delta else delta.deltaSession
-            deltas = (delta.deltaBest, session, delta.deltaStint, delta.deltaLast)
+            deltas = tuple(
+                value if delta_shown(source) else None
+                for value, source in zip((delta.deltaBest, session, delta.deltaStint, delta.deltaLast),
+                                         ("Best", "Session", "Stint", "Last"))
+            )
         theme = self.theme
         by_key = dict(zip(("all_time_deltabest", "session_deltabest", "stint_deltabest", "deltalast"), deltas))
         values = []
         for key in self.keys:
             value = by_key[key]
+            if value is None:  # no reference lap, or no delta on this lap
+                values.append(Value(DASH, theme.text_dim))
+                continue
             text = f"{calc.sym_max(value, self.delta_range):+.{self.decimals}f}"
             values.append(Value(text, theme.negative if value > 0 else theme.positive))
         self.refresh(tuple(values))

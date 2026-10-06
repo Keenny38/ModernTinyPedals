@@ -3,6 +3,14 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.22.1 (2026-10-06)
+
+### Corrections
+
+- **Delta au meilleur tour de la session conservé pendant la session** : redémarrer l'app, recharger un preset (y compris le preset automatique de la catégorie de voiture), enregistrer un réglage global ou changer de configuration d'écran n'efface plus le meilleur tour de la session ni celui du relais ; le delta de la session devenait alors le même que celui du relais. Les deux tours sont enregistrés à côté du fichier delta best du circuit et de la catégorie (`.session`) et rechargés dans la même session.
+- **Plus de delta sur les tours de sortie** : dans Le Mans Ultimate, le retour au garage commence un nouveau tour dont le temps compte le temps passé au garage, et la position dans le tour est négative au garage et dans la voie des stands avant la ligne. Les overlays de delta affichaient `+0.000` partout, puis un delta énorme une fois en piste. Sur un tour de sortie et dans la voie des stands avant la ligne, `Delta best`, `Delta best étendu`, `Graphique de delta`, `Historique des temps au tour`, `Black box` et le tableau de bord web affichent maintenant un tiret (ligne interrompue sur le graphique), et le temps estimé reste vide. Un meilleur tour du relais pas encore établi, et un dernier tour avec un passage aux stands, affichent aussi un tiret au lieu de `+0.000`.
+- Une nouvelle session commence aussi un nouveau relais : le meilleur tour du relais de la session précédente était gardé jusqu'au premier arrêt.
+
 ## 0.22.0 (2026-10-06)
 
 ### Mode édition des overlays

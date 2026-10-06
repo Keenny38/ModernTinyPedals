@@ -529,6 +529,7 @@ class Realtime(
         self.brake_migration = 0.0  # percent
         self.motor_map_level = -1  # engine/motor map, -1 if car has none
         self.delta_best = 0.0  # seconds, negative is faster
+        self.delta_shown = False  # reference lap exists & current lap comparable (see delta_available)
         self.laptime_current = 0.0  # seconds
         self.in_pits = False
         self.limiter = False

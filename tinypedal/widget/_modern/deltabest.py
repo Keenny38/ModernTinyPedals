@@ -21,7 +21,8 @@ Deltabest Widget, modern design
 
 Delta to reference lap: large signed number in gain or loss color, on a pill that slides
 along a center bar (time gain fills right, loss fills left). Pill outlined in loss color while
-game invalidated current lap (track limits).
+game invalidated current lap (track limits). A dash while there is no reference lap or no
+delta to show (out lap from pit lane or garage, in pit lane before start line).
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ from PySide6.QtGui import QPainter, QPen
 from ... import calculation as calc
 from ...api_control import api
 from ...module_info import minfo
-from .._common import game_deltabest
-from .base import CENTER, ModernOverlay
+from .._common import delta_shown, game_deltabest, lap_delta_shown
+from .base import CENTER, DASH, ModernOverlay
 from .draw import panel, readable_on, rounded
 
 
@@ -53,6 +54,7 @@ class Realtime(ModernOverlay):
         wcfg = self.wcfg
         unit = self.unit
         self.add_font("delta", 1.45, "bold")
+        self.source = wcfg["deltabest_source"]
         self.laptime_source = f"lapTime{wcfg['deltabest_source']}"
         self.delta_source = f"delta{wcfg['deltabest_source']}"
         self.decimals = max(int(wcfg["decimal_places"]), 1)
@@ -83,18 +85,23 @@ class Realtime(ModernOverlay):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        if minfo.delta.lapTimeCurrent < self.freeze_duration:
-            delta = minfo.delta.lapTimeLast - self.last_laptime
+        info = minfo.delta
+        delta: float | None
+        if info.lapTimeCurrent < self.freeze_duration:  # lap just completed against reference
+            last = self.last_laptime
+            delta = info.lapTimeLast - last if lap_delta_shown(last) else None
             self.new_lap = True
         else:
             if self.new_lap:
-                self.last_laptime = getattr(minfo.delta, self.laptime_source)
+                self.last_laptime = getattr(info, self.laptime_source)
                 self.new_lap = False
-            delta = getattr(minfo.delta, self.delta_source)
-            if self.game_delta:
+            delta = getattr(info, self.delta_source) if delta_shown(self.source) else None
+            if delta is not None and self.game_delta:
                 delta = game_deltabest(delta)
         invalid = self.show_invalid and api.read.lap.invalidated()
-        self.refresh((round(delta, self.decimals + 1) if isfinite(delta) else 0.0, invalid))
+        if delta is not None:
+            delta = round(delta, self.decimals + 1) if isfinite(delta) else 0.0
+        self.refresh((delta, invalid))
 
     def paint_static(self, painter: QPainter):
         theme = self.theme
@@ -105,6 +112,16 @@ class Realtime(ModernOverlay):
     def paint(self, painter: QPainter):
         theme = self.theme
         delta, invalid = self.state
+        if delta is None:  # no reference lap, or no delta on this lap
+            pill = self.rect_pill
+            rounded(painter, pill, self.radius(0.4), theme.tint(theme.text_dim, 30))
+            self.draw_text(painter, pill, DASH, "delta", theme.text_dim, CENTER, elide=False)
+            if self.rect_bar.height():
+                center = self.rect_bar.center().x()
+                bar = self.rect_bar
+                painter.fillRect(QRectF(center - 1, bar.top() - bar.height() * 0.35, 2, bar.height() * 1.7),
+                                 theme.text_dim)
+            return
         color = theme.negative if delta > 0 else theme.positive
         bar = self.rect_bar
         fraction = calc.sym_max(delta, self.bar_range) / self.bar_range  # -1 to 1, gain < 0

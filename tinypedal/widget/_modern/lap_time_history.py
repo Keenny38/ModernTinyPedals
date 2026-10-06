@@ -34,6 +34,7 @@ from ... import calculation as calc
 from ... import units
 from ...api_control import api
 from ...module_info import ConsumptionDataSet, minfo
+from .._common import delta_shown
 from .base import DASH, ModernOverlay, display_order_options
 from .draw import panel
 from .table import RIGHT, TEXT, Cell, Column, Row, TableMixin
@@ -105,7 +106,8 @@ class Realtime(TableMixin, ModernOverlay):
         else:
             fuel, sign = self.unit_fuel(minfo.fuel.estimatedConsumption), self.sign_fuel
         current = self.lap_row(
-            api.read.lap.number() + 1, minfo.delta.lapTimeEstimated, True, minfo.delta.deltaLast,
+            api.read.lap.number() + 1, minfo.delta.lapTimeEstimated, True,
+            minfo.delta.deltaLast if delta_shown("Last") else None,
             fuel, sign, minfo.hybrid.fuelEnergyRatio, calc.mean(minfo.wheels.estimatedTreadWear), current=True,
         )
         if self.last_data_version != minfo.history.consumptionDataVersion or self.last_energy_type != energy_type:

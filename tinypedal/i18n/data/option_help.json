@@ -512,8 +512,8 @@
             "show_all_time_deltabest": "Show deltabest against personal all time best lap time.",
             "show_deltalast": "Show delta against personal last lap time (deltalast). Note: deltalast will be reset upon ESC.",
             "show_game_deltabest_if_available": "Show delta to best lap computed by game (LMU) instead of delta computed by APP, when game provides it. Game delta (best lap as defined by game) replaces session deltabest reading. Delta computed by APP is used when game delta is unavailable (RF2). Default is disabled.",
-            "show_session_deltabest": "Show deltabest against current personal session best lap time. Note: session deltabest will be reset upon changing session, or reload preset/restart APP.",
-            "show_stint_deltabest": "Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane."
+            "show_session_deltabest": "Show deltabest against current personal session best lap time. Session best lap is kept when Modern Tiny Pedals restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.",
+            "show_stint_deltabest": "Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane (pit stop, or back to garage), or when a new session starts."
         },
         "differential": {
             "coast_locking_reset_cooldown": "Set cooldown duration (seconds) before resetting minimum power or coast locking percent value if value hasn't changed during cooldown period. Default is 5 seconds.",

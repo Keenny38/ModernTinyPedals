@@ -20,14 +20,18 @@
 Deltabest Widget
 """
 
+from __future__ import annotations
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
 from .. import calculation as calc
 from ..module_info import minfo
 from ._base import Overlay
-from ._common import game_deltabest
+from ._common import delta_shown, game_deltabest, lap_delta_shown
 from ._painter import fill_rect
+
+NO_DELTA_COLOR = "#888888"  # dash while no delta (no reference lap, or out lap)
 
 
 class Realtime(Overlay):
@@ -93,23 +97,27 @@ class Realtime(Overlay):
         self.pen_text = QPen()
 
         # Last data
-        self.delta_best = 0.0
+        self.delta_best: float | None = 0.0  # None: no delta (no reference lap, or out lap)
         self.last_laptime = 0
         self.new_lap = True
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        temp_best: float | None
         if minfo.delta.lapTimeCurrent < self.freeze_duration:
-            temp_best = minfo.delta.lapTimeLast - self.last_laptime
+            temp_best = minfo.delta.lapTimeLast - self.last_laptime if lap_delta_shown(self.last_laptime) else None
             self.new_lap = True
         else:
             if self.new_lap:
                 self.last_laptime = getattr(minfo.delta, self.laptime_source)
                 self.new_lap = False
 
-            temp_best = getattr(minfo.delta, self.delta_source)
-            if self.wcfg["show_game_deltabest_if_available"]:
-                temp_best = game_deltabest(temp_best)
+            if delta_shown(self.wcfg["deltabest_source"]):  # else no reference lap, or out lap
+                temp_best = getattr(minfo.delta, self.delta_source)
+                if self.wcfg["show_game_deltabest_if_available"]:
+                    temp_best = game_deltabest(temp_best)
+            else:
+                temp_best = None
 
         if self.delta_best != temp_best:
             self.delta_best = temp_best
@@ -119,11 +127,12 @@ class Realtime(Overlay):
     def paintEvent(self, event):
         """Draw"""
         painter = QPainter(self)
+        delta = 0.0 if self.delta_best is None else self.delta_best
         delta_pos = self.delta_position(
             self.wcfg["delta_bar_display_range"],
-            self.delta_best,
+            delta,
             self.dbar_length)
-        highlight_color = self.delta_color[self.delta_best > 0]
+        highlight_color = NO_DELTA_COLOR if self.delta_best is None else self.delta_color[delta > 0]
 
         # Draw deltabar
         if self.wcfg["show_delta_bar"]:
@@ -149,11 +158,11 @@ class Realtime(Overlay):
 
         fill_rect(painter, self.rect_delta, bg_color)
         painter.setPen(self.pen_text)
-        painter.drawText(
-            self.rect_text_delta,
-            Qt.AlignmentFlag.AlignCenter,
-            f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
-        )
+        if self.delta_best is None:
+            text = "-"
+        else:
+            text = f"{calc.sym_max(self.delta_best, self.delta_display_range):+.{self.decimals}f}"[:self.max_padding]
+        painter.drawText(self.rect_text_delta, Qt.AlignmentFlag.AlignCenter, text)
 
     # Additional methods
     def delta_position(self, rng, delta, length):

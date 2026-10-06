@@ -42,7 +42,7 @@ from ...userfile.heatmap import (
     select_tyre_heatmap_name,
     set_predefined_brake_name,
 )
-from .._common import tyre_punctured
+from .._common import delta_shown, tyre_punctured
 from .common import REAR_MAX_STEER
 from .recorder import EXPORT_QUEUE, IncidentBrowse, RaceReadings, Sample, index_of, log_race_events
 from .sizing import Presence
@@ -446,6 +446,7 @@ class DataReader:
             self.motor_map_level = api.read.switch.motor_map_level()
         if self.need_delta and self.use_delta:
             self.delta_best = self.read_delta()
+            self.delta_shown = delta_shown(self.wcfg["deltabest_source"])
         if self.need_laptime and self.use_delta:
             self.laptime_current = minfo.delta.lapTimeCurrent
         self.in_pits = bool(in_pits)
@@ -818,7 +819,8 @@ class DataReader:
             self.body_damage, self.abs_active, self.tc_active, self.abs_level, self.tc_level,
             self.tc_cut_level, self.tc_slip_level, self.abs_seen, self.tc_seen,
             rounded(self.brake_bias, 4), rounded(self.locking_front, 0), rounded(self.locking_rear, 0),
-            rounded(self.brake_migration, 1), self.motor_map_level, rounded(self.delta_best, 3), rounded(self.laptime_current, 2),
+            rounded(self.brake_migration, 1), self.motor_map_level, rounded(self.delta_best, 3), self.delta_shown,
+            rounded(self.laptime_current, 2),
             self.in_pits, self.limiter, self.headlights, self.ignition,
             rounded(self.oil_temp, 0), rounded(self.water_temp, 0), self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
             rounded(self.throttle, 3), rounded(self.brake, 3), rounded(self.clutch, 3),

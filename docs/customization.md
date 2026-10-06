@@ -281,6 +281,8 @@ Data recording is handled by [Stats Module](#stats-module).
 ## Delta best
 Delta best data is stored as `CSV` format (.csv extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
+Session best and stint best laps of last session are stored as `JSON` format (.session extension) in the same folder, so they are kept when Modern Tiny Pedals restarts or preset is reloaded during the session.
+
 Data recording is handled by [Delta Module](#delta-module).
 
 [**`Back to Top`**](#)
@@ -1783,6 +1785,8 @@ Modules provide important data that updated in real-time for other widgets. Widg
 ## Delta module
 **This module provides deltabest and timing data.**
 
+On an out lap (lap started in pit lane or garage: back to garage starts a new lap, and time spent there counts) and while in pit lane before start line, delta is not comparable to reference laps: delta overlays (Deltabest, Deltabest extended, Black box, web dashboard) show a dash, Delta graph line is interrupted, estimated lap time (Timing, Lap time history) is left empty, and delta to last lap of Lap time history shows a dash until a lap without pit lane is completed.
+
     module_delta
 Enable delta module.
 
@@ -2467,6 +2471,8 @@ Show current position along the lap as a vertical line, with a dot at current de
 ## Deltabest
 **This widget displays deltabest info.**
 
+No delta is shown (a dash) on an out lap, that is a lap started in pit lane or garage (back to garage starts a new lap, time spent there counts), while in pit lane before start line, or while the reference lap does not exist yet (stint best before first lap of stint, last lap after an out lap). See [Delta module](#delta-module).
+
     layout
 2 layouts are available: `0` = delta bar above deltabest text, `1` = delta bar below deltabest text.
 
@@ -2506,14 +2512,16 @@ Modern design: outline deltabest in loss color while game invalidated current la
 ## Deltabest extended
 **This widget displays deltabest info against multiple lap time sources.**
 
+No delta is shown (a dash) on an out lap, that is a lap started in pit lane or garage (back to garage starts a new lap, time spent there counts), while in pit lane before start line, or while the reference lap does not exist yet (stint best before first lap of stint, last lap after an out lap). See [Delta module](#delta-module).
+
     show_all_time_deltabest
 Show deltabest against personal all time best lap time.
 
     show_session_deltabest
-Show deltabest against current personal session best lap time. Note: session deltabest will be reset upon changing session, or reload preset/restart APP.
+Show deltabest against current personal session best lap time. Session best lap is kept when Modern Tiny Pedals restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.
 
     show_stint_deltabest
-Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane.
+Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane (pit stop, or back to garage), or when a new session starts.
 
     show_deltalast
 Show delta against personal last lap time (deltalast). Note: deltalast will be reset upon ESC.

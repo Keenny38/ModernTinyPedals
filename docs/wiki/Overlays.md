@@ -87,8 +87,8 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Overlay | Shows |
 |---|---|
 | Delta Graph | Delta along the current lap, as a graph (race aid) |
-| Deltabest | Delta to your best lap; optional official delta of LMU |
-| Deltabest Extended | Delta against several lap time sources |
+| Deltabest | Delta to your best lap; optional official delta of LMU; a dash on out laps (pit lane, back to garage) |
+| Deltabest Extended | Delta against several lap time sources; session best kept when the app restarts in the same session |
 | Gap Trend | Gap to cars ahead and behind, lap after lap (race aid) |
 | Laps And Position | Lap number, overall position, position in class |
 | Lap Time History | Recent lap times |

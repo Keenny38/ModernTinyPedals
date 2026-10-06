@@ -1184,17 +1184,21 @@ def test_delta_row_colors_gain_and_loss(ui_env, monkeypatch):
         colors = []
         monkeypatch.setattr(
             instance, "draw_info_row",
-            lambda painter, rect, label, value, color="": colors.append(color),
+            lambda painter, rect, label, value, color="": colors.append((value, color)),
         )
         image = QImage(200, 200, QImage.Format.Format_ARGB32)
         painter = QPainter(image)
         rect = QRectF(0, 0, 80, 20)
+        instance.use_delta = instance.delta_shown = True
         instance.delta_best = -0.5
         instance.draw_center_item(painter, "delta", rect)
         instance.delta_best = 0.5
         instance.draw_center_item(painter, "delta", rect)
+        instance.delta_shown = False  # out lap, or no reference lap: dash in default color
+        instance.draw_center_item(painter, "delta", rect)
         painter.end()
-        assert colors == [instance.wcfg["delta_gain_color"], instance.wcfg["delta_loss_color"]]
+        assert colors == [("-0.500", instance.wcfg["delta_gain_color"]), ("+0.500", instance.wcfg["delta_loss_color"]),
+                          ("-", "")]
     finally:
         instance.deleteLater()
 

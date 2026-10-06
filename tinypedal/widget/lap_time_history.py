@@ -26,6 +26,7 @@ from ..api_control import api
 from ..const_common import TEXT_NOLAPTIME
 from ..module_info import ConsumptionDataSet, minfo
 from ._base import Overlay
+from ._common import delta_shown
 
 
 class Realtime(Overlay):
@@ -312,7 +313,7 @@ class Realtime(Overlay):
         if self.wcfg["show_time"]:
             self.update_time(self.bars_time[0], minfo.delta.lapTimeEstimated)
         if self.wcfg["show_delta"]:
-            self.update_delta(self.bars_delta[0], minfo.delta.deltaLast)
+            self.update_delta(self.bars_delta[0], minfo.delta.deltaLast if delta_shown("Last") else None)
         if self.wcfg["show_fuel"]:
             if energy_type:
                 fuel = minfo.energy.estimatedConsumption
@@ -353,10 +354,13 @@ class Realtime(Overlay):
             target.update()
 
     def update_delta(self, target, data):
-        """Delta data"""
+        """Delta data (None: no last lap to compare, or out lap)"""
         if target.last != data:
             target.last = data
-            target.text = f"{calc.sym_max(data, 99.9):+.{self.width_delta}f}"[:self.width_delta].strip(".")
+            if data is None:
+                target.text = "-"
+            else:
+                target.text = f"{calc.sym_max(data, 99.9):+.{self.width_delta}f}"[:self.width_delta].strip(".")
             target.update()
 
     def update_fuel(self, target, data, sign):

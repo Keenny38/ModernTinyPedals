@@ -37,6 +37,7 @@ from ..api_control import api
 from ..i18n import tr_overlay as tr
 from ..module_info import minfo
 from ._base import Overlay
+from ._common import delta_shown
 from ._race_aids import LEFT, RIGHT, ClassicCells, finite, line_polygons, option_colors, sample_runs, scale_y
 
 SAMPLE_SPACING = 2  # chart pixels per sample along lap
@@ -143,6 +144,7 @@ class DeltaGraphMixin:
         """Chart area, options"""
         wcfg = self.wcfg
         self.chart = chart
+        self.source = wcfg["deltabest_source"]
         self.delta_source = f"delta{wcfg['deltabest_source']}"
         self.delta_range = max(float(wcfg["delta_display_range"]), 0.05)
         self.decimals = min(max(int(wcfg["decimal_places"]), 0), 3)
@@ -154,7 +156,7 @@ class DeltaGraphMixin:
 
     def read_graph(self) -> tuple:
         """Sample delta, chart geometry if trace changed; state: (trace version, mark x, mark y, delta)"""
-        delta = getattr(minfo.delta, self.delta_source)
+        delta = getattr(minfo.delta, self.delta_source) if delta_shown(self.source) else nan
         progress = api.read.lap.progress()
         trace = self.trace
         trace.update(api.read.lap.completed_laps(), progress, delta)

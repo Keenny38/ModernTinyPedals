@@ -73,6 +73,8 @@ def test_deltabest_extended_deltalast_option(widgets, monkeypatch, deltalast, st
     widget = widgets("deltabest_extended", modern=False, show_deltalast=deltalast, show_stint_deltabest=stint)
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 100.0)
     monkeypatch.setattr(minfo.delta, "deltaLast", 0.5)
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
+    monkeypatch.setattr(minfo.delta, "hasLastLap", True)
     widget.timerEvent(None)  # deltalast off & stint on: AttributeError before
     if deltalast:
         assert "0.50" in widget.bar_labest.text  # stayed --.--- with stint off before

@@ -30,6 +30,8 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ..api_control import api
+from ..const_common import MAX_SECONDS
+from ..module_info import minfo
 from ..validator import generator_init
 from ._snapping import constrain_axis, grid_value, snap_position
 
@@ -159,6 +161,24 @@ class MousePosition:
             pos = constrain_axis(self._start, pos)  # type: ignore[arg-type]
         self.snapped = (snapped_x, snapped_y)
         return pos
+
+
+def delta_shown(source: str) -> bool:
+    """Delta to reference lap of source ("Best", "Session", "Stint", "Last") can be shown: reference
+    lap exists, current lap comparable (not an out lap from pit lane or garage, whose time counts,
+    not in pit lane before start line)"""
+    delta = minfo.delta
+    if not delta.isDeltaAvailable:
+        return False
+    if source == "Last":
+        return delta.hasLastLap
+    return 0 < getattr(delta, f"lapTime{source}", 0.0) < MAX_SECONDS
+
+
+def lap_delta_shown(reference_laptime: float) -> bool:
+    """Lap time difference of lap just completed can be shown (shown a few seconds after line, see
+    freeze_duration): completed lap comparable, reference lap existed when it started"""
+    return minfo.delta.hasLastLap and 0 < reference_laptime < MAX_SECONDS
 
 
 def game_deltabest(app_delta: float) -> float:

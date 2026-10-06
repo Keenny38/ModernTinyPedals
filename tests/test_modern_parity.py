@@ -365,6 +365,8 @@ def test_session_custom_names(widgets, monkeypatch):
 # --- Deltabest: swap style, game delta, invalid lap
 def test_deltabest_swap_style_game_delta_and_invalid_lap(widgets, monkeypatch):
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 50.0)
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
+    monkeypatch.setattr(minfo.delta, "lapTimeBest", 90.0)
     monkeypatch.setattr(minfo.delta, "deltaBest", 0.4)
     reader(monkeypatch, "timing", "delta_best", -0.25)
     widget = widgets("deltabest", swap_style=True)
@@ -384,6 +386,9 @@ def test_deltabest_swap_style_game_delta_and_invalid_lap(widgets, monkeypatch):
 
 def test_classic_deltabest_game_delta(widgets, monkeypatch):
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 50.0)
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
+    monkeypatch.setattr(minfo.delta, "lapTimeBest", 90.0)
+    monkeypatch.setattr(minfo.delta, "lapTimeSession", 91.0)
     monkeypatch.setattr(minfo.delta, "deltaBest", 0.4)
     monkeypatch.setattr(minfo.delta, "deltaSession", 0.3)
     reader(monkeypatch, "timing", "delta_best", -0.25)
@@ -397,6 +402,8 @@ def test_classic_deltabest_game_delta(widgets, monkeypatch):
 
 def test_deltabest_extended_game_delta(widgets, monkeypatch):
     monkeypatch.setattr(minfo.delta, "lapTimeCurrent", 50.0)
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
+    monkeypatch.setattr(minfo.delta, "lapTimeSession", 91.0)
     monkeypatch.setattr(minfo.delta, "deltaSession", 0.3)
     reader(monkeypatch, "timing", "delta_best", -0.25)
     widget = widgets("deltabest_extended", show_session_deltabest=True, show_game_deltabest_if_available=True)

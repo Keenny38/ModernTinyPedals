@@ -157,6 +157,8 @@ def test_delta_graph_draws_lap(field, monkeypatch, modern):
     progress = {"value": 0.0}
     set_reader(monkeypatch, "lap", "progress", lambda *args, **kwargs: progress["value"])
     set_reader(monkeypatch, "lap", "completed_laps", 3)
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", True)
+    monkeypatch.setattr(minfo.delta, "lapTimeBest", 90.0)
     widget = make("delta_graph", modern)
     for step in range(60):
         progress["value"] = step / 60
@@ -167,6 +169,9 @@ def test_delta_graph_draws_lap(field, monkeypatch, modern):
     assert version > 0 and widget.chart.left() < mark_x < widget.chart.right()
     assert widget.delta_text(delta).startswith(("+", "-"))
     assert widget.delta_text(math.nan) == "-.--"
+    monkeypatch.setattr(minfo.delta, "isDeltaAvailable", False)  # out lap: no sample, no reading
+    widget.timerEvent(None)
+    assert widget.state[3] is None
     assert not is_blank(grab(widget))
 
 
