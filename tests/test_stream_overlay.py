@@ -162,7 +162,8 @@ def test_capture(monkeypatch):
         assert entries["fuel"]["opacity"] == 0.8  # stream only: overlay opacity, window transparent on screen
         pixels = zlib.decompress(payloads[list(entries).index("fuel")])
         assert len(pixels) == entries["fuel"]["w"] * entries["fuel"]["h"] * 4
-        assert tuple(pixels[:4]) == (255, 128, 0, 192)
+        # Painted premultiplied: back to straight alpha, 128 * 192 / 255 rounds to 127 or 128 by Qt version
+        assert tuple(pixels[:4]) == pytest.approx((255, 128, 0, 192), abs=1)
         # Unchanged images not sent again
         seq = store.seq
         capture.capture()
