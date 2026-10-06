@@ -3,6 +3,18 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.21.0 (2026-10-06)
+
+### Mémoire réduite
+
+L'app utilise environ un tiers de mémoire en moins : environ 77 Mo au lieu de 115 Mo une fois lancée avec le preset par défaut, et 119 Mo au lieu de 200 Mo quand la fenêtre attend dans la zone de notification après avoir ouvert la page Overlays.
+
+- **Seul ce que vous utilisez est chargé** : les overlays désactivés ne chargent plus leur code, et les pages de la fenêtre principale sont construites à leur première ouverture. Le lecteur audio des pace notes n'est créé que pendant que la lecture est activée.
+- **Fenêtre dans la zone de notification pendant la course** : quand la fenêtre principale reste cachée dans la zone de notification (ou réduite) pendant une minute, ses pages sont libérées, et dans la zone de notification ses ressources graphiques aussi. Tout est reconstruit à l'ouverture de la fenêtre (la page affichée met un instant à apparaître).
+- **Courses longues** : les overlays modernes gardent en cache un nombre de textes proportionnel à ce qu'ils dessinent : leur mémoire n'augmente plus à chaque nouveau temps au tour, écart ou température.
+- **Page Overlays** : les images des overlays dessinés avec le design moderne ne chargent plus le code classique de ces overlays.
+- La police de la fenêtre principale est réglée sur la police de l'app au lieu de la feuille de style : les icônes des cartes de l'accueil ne parcourent plus toutes les polices installées (environ 20 Mo), et les cartes sont un peu plus compactes.
+
 ## 0.20.2 (2026-10-06)
 
 ### Corrections

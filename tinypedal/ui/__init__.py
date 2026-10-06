@@ -605,10 +605,7 @@ def set_style_window(base_font_pt: int) -> str:
             background: none;
         }}
 
-        /* Main window (app only, overlay widgets keep their own fonts) */
-        AppWindow, AppWindow QWidget, AppWindow QMenu {{
-            font-family: "Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans", sans-serif;
-        }}
+        /* Main window (font family: app font, see main.set_app_font) */
         AppWindow QMenuBar {{
             border-bottom: none;
             padding: 0.25em 0.3em;

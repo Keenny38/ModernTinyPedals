@@ -38,6 +38,7 @@ from .log_handler import BoundedLogStream, set_logging_level
 from .setting import cfg
 
 logger = logging.getLogger(__package__)
+UI_FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans")  # app UI, not overlays
 log_stream = BoundedLogStream()  # latest log text only (log dialog, bug report), see getvalue()
 
 
@@ -155,9 +156,12 @@ def load_bundled_fonts():
 
 
 def set_app_font(root: QApplication):
-    """Set APP default font"""
+    """Set APP default font: modern UI font family if installed, else system UI font
+
+    Family is set on app font, not by style sheet "font-family" (about 20 MB more memory).
+    """
     font = root.font()
-    # Keep system UI font family (Segoe UI on Windows), only normalize size
+    font.setFamilies([*UI_FONT_FAMILIES, font.family()])
     font.setPointSize(10)
     font.setStyleHint(QFont.StyleHint.SansSerif)
     root.setFont(font)

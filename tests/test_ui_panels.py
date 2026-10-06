@@ -117,7 +117,7 @@ def test_pace_notes_player_ticks_in_background(ui_env):
     """Audio player is not a page: it keeps queueing notes while no window shows (no visibility check)"""
     from tinypedal.module_info import minfo
     from tinypedal.setting import cfg
-    from tinypedal.ui.pace_notes_view import PaceNotesPlayer
+    from tinypedal.ui.pace_notes_player import PaceNotesPlayer
 
     player = PaceNotesPlayer(None, cfg.user.setting["pace_notes_playback"])
     try:

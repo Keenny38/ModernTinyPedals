@@ -3,6 +3,18 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.21.0 (2026-10-06)
+
+### Lower memory use
+
+The app uses about a third less memory: about 77 MB instead of 115 MB once started with the default preset, and 119 MB instead of 200 MB while the window waits in the tray after the Overlays page was opened.
+
+- **Only what you use is loaded**: overlays turned off no longer load their code, and the pages of the main window are built the first time you open them. The pace notes audio player is only created while playback is on.
+- **Window in the tray while racing**: once the main window stays hidden in the tray (or minimized) for a minute, its pages are released, and in the tray its graphics resources are freed too. Everything is built again when you open the window (the page shown takes a moment to appear).
+- **Long races**: modern overlays keep cached texts in proportion to what they draw, so their memory no longer grows with every new lap time, gap or temperature.
+- **Overlays page**: pictures of overlays drawn with the modern design no longer load the classic code of these overlays.
+- The main window font is set on the app font instead of the style sheet: the icons of the Home page cards no longer search every installed font (about 20 MB), and the cards are slightly more compact.
+
 ## 0.20.2 (2026-10-06)
 
 ### Fixes

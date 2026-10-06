@@ -18,16 +18,26 @@
 
 """
 Widget modules
+
+Built-in widget modules are imported when first used (widget started, preview drawn):
+disabled overlays never load their code. Plugin widgets are loaded here (trust checked once).
 """
+
+from importlib import import_module
+from types import ModuleType
 
 from ..plugin_loader import PLUGIN_PREFIX, load_plugin_widget
 from ..template.setting_widget import WIDGET_FILENAME
 
 __all__ = WIDGET_FILENAME
 
-# Load plugin widgets as submodules before importing all widgets
 for _plugin_name in WIDGET_FILENAME:
     if _plugin_name.startswith(PLUGIN_PREFIX):
         globals()[_plugin_name] = load_plugin_widget(__name__, _plugin_name)
 
-from . import *
+
+def __getattr__(name: str) -> ModuleType:
+    """Widget module imported on first access (tinypedal.widget.<name>)"""
+    if name in WIDGET_FILENAME:
+        return import_module(f"{__name__}.{name}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

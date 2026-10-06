@@ -34,7 +34,7 @@
 Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same solid base, with a new design, a redesigned interface, new tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.20.0**: a full audit of the app with more than 150 fixes, 7 new overlays (delta graph, gap trend, pit lane helper, stint timer, spotter, race notifications, tyre temperature trend), the modern design on par with the classic one, official delta, punctures, sector flags and wind from Le Mans Ultimate, math channels and corner report in the telemetry viewer, redesigned pages for the race calculator (stints limited by tyre life), driver stats (level scale, activity calendar, recent sessions), overlays (cards with live previews) and game replays (camera, standings, track map, incident timeline), preset trash, safe mode, release notes in the app language and a [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki). All the details, with screenshots, in the [changelog](CHANGELOG.md).
+> **New in 0.21.0**: about a third less memory used (overlays and pages loaded when used, freed while the window waits in the tray). All the details in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -174,6 +174,7 @@ Your numbers per track and per car, compared with the LMU community times (sheet
 - Windows installer and **updates from the app**, with a check of the downloaded file (SHA-256, and signature when the installer is signed).
 - Automatic backups of presets and stats, atomic file writes, automatic restart of crashed threads.
 - Overlay plugins with a manager, one-click bug report, performance monitor with the game data status.
+- **Light on memory**: overlays turned off and pages not opened are never loaded, and the main window frees its pages and graphics while it waits in the tray.
 - **Safe mode** offered after a crash at launch (no plugins nor overlays).
 - **More than 2,300 automated tests** (91% of the code covered), type checking and lint in continuous integration, the executable is started in test mode before each release.
 

@@ -59,7 +59,10 @@ def check_modules() -> str:
     from .ui.tools_view import TOOL_SECTIONS
     from .widget._modern import modern_module
 
-    count = len(widget.__all__) + len(module.__all__)
+    count = len(module.__all__)
+    for name in widget.__all__:  # imported when first used, not with package
+        getattr(widget, name)
+        count += 1
     for name in sorted(MODERN_DESIGNS):
         modern_module(name)
         count += 1

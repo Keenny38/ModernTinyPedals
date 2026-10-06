@@ -56,7 +56,11 @@ DEFAULT_CORNER_SCALE = 0.05  # global corner_radius_scale default, = radius unit
 # Unit = font_size option x this: design font is lighter & narrower than classic monospace
 # fonts, same font_size option reads about as large
 DESIGN_SCALE = 1.12
-TEXT_CACHE_SIZE = 2048
+# Cached text layouts (about 0.8 KB each) & widths, in proportion to texts drawn per paint: labels
+# & names drawn every update stay cached, changing values (times, gaps) make way
+TEXT_CACHE_SIZE = 2048  # at most (tables of many drivers)
+TEXT_CACHE_MIN = 128  # at least
+TEXT_CACHE_PER_DRAW = 4  # per text drawn in last paint
 WEIGHTS = {
     "regular": QFont.Weight.Normal,
     "medium": QFont.Weight.Medium,
@@ -111,6 +115,8 @@ class ModernOverlay(Overlay):
         self._text_cache: OrderedDict[tuple, QStaticText] = OrderedDict()
         self._elide_cache: dict[tuple, str] = {}
         self._width_cache: dict[tuple, float] = {}
+        self._texts_drawn = 0  # in current paint
+        self._last_texts_drawn = 0  # in last paint, sets cache size
         self._caps_roles: set[str] = set()
         self._static_layer: QPixmap | None = None
         self.state: Any = None
@@ -202,7 +208,7 @@ class ModernOverlay(Overlay):
         key = (role, text)
         width = self._width_cache.get(key)
         if width is None:
-            if len(self._width_cache) > TEXT_CACHE_SIZE:
+            if len(self._width_cache) > self.text_cache_size():
                 self._width_cache.clear()
             width = self.metrics[role].horizontalAdvance(text)
             self._width_cache[key] = width
@@ -212,9 +218,14 @@ class ModernOverlay(Overlay):
         """Width of one digit (tabular figures)"""
         return self.metrics[role].horizontalAdvance("0")
 
+    def text_cache_size(self) -> int:
+        """Number of cached texts: in proportion to texts drawn in last paint (memory of long races)"""
+        return min(TEXT_CACHE_SIZE, max(TEXT_CACHE_MIN, self._last_texts_drawn * TEXT_CACHE_PER_DRAW))
+
     def static_text(self, role: str, text: str) -> QStaticText:
         """Cached text layout, least recently drawn dropped first (names & labels drawn every
         update stay cached in long races, changing values make way)"""
+        self._texts_drawn += 1
         key = (role, text)
         cache = self._text_cache
         static = cache.get(key)
@@ -224,7 +235,8 @@ class ModernOverlay(Overlay):
             static.setPerformanceHint(QStaticText.PerformanceHint.AggressiveCaching)
             static.prepare(font=self.fonts[role])
             cache[key] = static
-            if len(cache) > TEXT_CACHE_SIZE:
+            size = self.text_cache_size()
+            while len(cache) > size:
                 cache.popitem(last=False)
         else:
             cache.move_to_end(key)
@@ -235,7 +247,7 @@ class ModernOverlay(Overlay):
         key = (role, text, int(width))
         result = self._elide_cache.get(key)
         if result is None:
-            if len(self._elide_cache) > TEXT_CACHE_SIZE:
+            if len(self._elide_cache) > self.text_cache_size():
                 self._elide_cache.clear()
             result = self.metrics[role].elidedText(text, Qt.TextElideMode.ElideRight, width)
             self._elide_cache[key] = result
@@ -296,12 +308,14 @@ class ModernOverlay(Overlay):
 
     def paintEvent(self, event):
         """Draw cached background, then current state"""
+        self._texts_drawn = 0
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         painter.drawPixmap(0, 0, self.static_layer())
         if self.state is not None:
             self.paint(painter)
+        self._last_texts_drawn = self._texts_drawn
 
     def paint_static(self, painter: QPainter):
         """Draw parts that never change (override)"""

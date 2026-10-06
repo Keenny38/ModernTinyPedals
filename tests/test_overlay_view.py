@@ -433,10 +433,18 @@ def test_refresh_slot(page):
 
 
 def test_main_window_uses_overlay_page(ui_env):
+    from PySide6.QtWidgets import QWidget
+
     from tinypedal.ui import app as app_module
     from tinypedal.ui.overlay_view import OverlayView
 
-    assert app_module.OverlayView is OverlayView
+    host = QWidget()
+    try:
+        page = app_module.build_page("widget", host, view=None, window=host, icon_family="")  # type: ignore[arg-type]
+        assert isinstance(page, OverlayView)
+    finally:
+        host.deleteLater()
+        flush()
 
 
 def test_qml_imports_bundled_modules():

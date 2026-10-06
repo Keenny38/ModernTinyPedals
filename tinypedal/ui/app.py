@@ -22,7 +22,8 @@ Main application window
 
 import logging
 from collections.abc import Callable
-from typing import cast
+from functools import partial
+from typing import TYPE_CHECKING, cast
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal, Slot
@@ -79,19 +80,17 @@ from . import (
     system_dark_mode,
 )
 from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler
-from .home_view import HomeView
-from .hotkey_view import HotkeyList
+from .lazy_page import LazyPage, PageRelease
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
-from .module_view import ModuleList
 from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
 from .notification import NotifyBar
 from .ordered_picker import icon_font_family
-from .overlay_view import OverlayView
-from .pace_notes_view import PaceNotesControl
-from .preset_view import PresetList
-from .spectate_view import SpectateList
+from .pace_notes_view import PaceNotesControl, PaceNotesPlayback
 from .toast import show_toast
 from .tools_view import RENAMED_TOOLS, TOOL_SECTIONS, ToolsView, open_tool
+
+if TYPE_CHECKING:
+    from .preset_view import PresetList
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +101,37 @@ RAIL_TOGGLES = (
     ("auto_hide", "Auto Hide", "\ue7b3", "H"),  # red eye
     ("vr_compatibility", "VR Compatibility", "\ue7f4", "V"),  # tv monitor
 )
+
+
+def build_page(key: str, host: QWidget, view: "TabView", window: QWidget, icon_family: str) -> QWidget:
+    """Main window page of navigation key, its module imported on first use (see LazyPage)"""
+    if key == "home":
+        from .home_view import HomeView
+
+        return HomeView(host, window, lambda name: view.select_page(PAGE_INDEX[name]), icon_family)
+    if key == "widget":
+        from .overlay_view import OverlayView
+
+        return OverlayView(host, wctrl)
+    if key == "module":
+        from .module_view import ModuleList
+
+        return ModuleList(host, mctrl)
+    if key == "preset":
+        from .preset_view import PresetList
+
+        return PresetList(host)
+    if key == "spectate":
+        from .spectate_view import SpectateList
+
+        return SpectateList(host)
+    if key == "pacenotes":
+        return PaceNotesControl(host, view.pace_notes)
+    if key == "hotkey":
+        from .hotkey_view import HotkeyList
+
+        return HotkeyList(host)
+    return ToolsView(host, icon_family, window)
 
 
 def safe_mode_enabled() -> bool:
@@ -405,21 +435,18 @@ class TabView(QWidget):
         notify_bar.pacenotes.clicked.connect(self.select_pacenotes_tab)
         notify_bar.hotkey.clicked.connect(self.select_hotkey_tab)
 
-        # Pages
+        # Pages: each built when first shown or selected (memory, startup time)
         icon_family = icon_font_family()
-        home_tab = HomeView(self, parent, lambda key: self.select_page(PAGE_INDEX[key]), icon_family)
-        widget_tab = OverlayView(self, wctrl)
-        module_tab = ModuleList(self, mctrl)
-        preset_tab = PresetList(self)
-        spectate_tab = SpectateList(self)
-        pacenotes_tab = PaceNotesControl(self)
-        hotkey_tab = HotkeyList(self)
-        tools_tab = ToolsView(self, icon_family, parent)
-        self.preset_tab = preset_tab
+        self.pace_notes = PaceNotesPlayback(self)  # pace notes audio plays while its page is not built
+        self._lazy_pages = {
+            key: LazyPage(self, partial(build_page, key, view=self, window=parent, icon_family=icon_family))
+            for key, *_ in NAV_PAGES
+        }
         self._pages = QStackedWidget(self)
         self._pages.setObjectName("pageStack")
-        for page in (home_tab, widget_tab, module_tab, preset_tab, spectate_tab, pacenotes_tab, hotkey_tab, tools_tab):
+        for page in self._lazy_pages.values():
             self._pages.addWidget(page)
+        self._page_release = PageRelease(self, self._lazy_pages.values())  # window hidden: pages freed
 
         # Navigation rail
         rail = QWidget(self)
@@ -534,14 +561,15 @@ class TabView(QWidget):
         notify_bar.updates.restore()  # view rebuilt (language change): update notice kept
         app_signal.refresh.connect(notify_bar.refresh)
 
-        app_signal.refresh.connect(home_tab.refresh)
-        app_signal.refresh.connect(widget_tab.refresh)
-        app_signal.refresh.connect(module_tab.refresh)
-        app_signal.refresh.connect(preset_tab.refresh)
-        app_signal.refresh.connect(spectate_tab.refresh)
-        app_signal.refresh.connect(pacenotes_tab.refresh)
-        app_signal.refresh.connect(hotkey_tab.refresh)
+        app_signal.refresh.connect(self.pace_notes.refresh)
+        for page in self._lazy_pages.values():
+            app_signal.refresh.connect(page.refresh)
         app_signal.refresh.connect(self.refresh_rail)
+
+    @property
+    def preset_tab(self) -> "PresetList":
+        """Preset page (built if not shown yet)"""
+        return cast("PresetList", self._lazy_pages["preset"].ensure_page())
 
     def build_rail_items(self):
         """(Re)create rail entries from setting, Ctrl+1..9 open the first 9 entries"""
@@ -1046,6 +1074,9 @@ class TabView(QWidget):
 
     def set_current_index(self, index: int):
         """Select page by index"""
+        page = self._pages.widget(index)
+        if isinstance(page, LazyPage):
+            page.ensure_page()  # built even while window hidden: page state readable once selected
         self.remember_shown(self._pages.currentWidget(), self._pages.widget(index))
         self._pages.setCurrentIndex(index)
         self.sync_rail_selection()

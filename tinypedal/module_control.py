@@ -32,21 +32,21 @@ from .const_file import ConfigType
 from .plugin_loader import PLUGIN_ERRORS, PLUGIN_PREFIX
 from .setting import cfg
 from .thread_guard import wait_stopped
-from .widget._modern import create_widget
+from .widget._modern import modern_module, uses_modern_design
 
 logger = logging.getLogger(__name__)
 
 
 def create_module_pack(target: Any) -> dict:
-    """Create module reference pack as dictionary
+    """Create module reference pack as dictionary, modules imported when first started
 
     Args:
         target: module.
 
     Returns:
-        Dictionary, key = module name. value = imported module.
+        Dictionary, key = module name. value = imported module, None until first used.
     """
-    return {name: getattr(target, name) for name in target.__all__}
+    return dict.fromkeys(target.__all__)
 
 
 class ModuleControl:
@@ -61,6 +61,7 @@ class ModuleControl:
     """
 
     __slots__ = (
+        "_target",
         "_module_pack",
         "_imported_modules",
         "_active_modules",
@@ -69,6 +70,7 @@ class ModuleControl:
     )
 
     def __init__(self, target: Any, type_id: str):
+        self._target = target
         self._module_pack = create_module_pack(target)
         self._imported_modules = MappingProxyType(self._module_pack)
         self._active_modules: dict = {}
@@ -147,12 +149,12 @@ class ModuleControl:
         """Start selected module, a module failing to start is skipped (error logged)"""
         if cfg.user.setting[name]["enable"] and name not in self._active_modules:
             # Create module instance and add to dict
-            target = self._imported_modules[name]
             try:
-                if self.type_id == ConfigType.WIDGET:
-                    instance = create_widget(target, cfg, name)  # modern design or classic
+                if self.type_id == ConfigType.WIDGET and uses_modern_design(cfg, name):
+                    target = modern_module(name)  # classic widget code not loaded
                 else:
-                    instance = target.Realtime(cfg, name)
+                    target = self.module_of(name)
+                instance = target.Realtime(cfg, name)
             except Exception as error:  # plugin or invalid option must not stop app
                 self.__start_failed(name, error)
                 return
@@ -189,6 +191,13 @@ class ModuleControl:
                 return
             wait_stopped(lambda: _module.closed, name)  # wait finish
             _module = None  # remove final reference
+
+    def module_of(self, name: str) -> Any:
+        """Module code of name, imported on first use (disabled overlays never loaded)"""
+        loaded = self._module_pack[name]
+        if loaded is None:
+            loaded = self._module_pack[name] = getattr(self._target, name)
+        return loaded
 
     @property
     def number_active(self) -> int:

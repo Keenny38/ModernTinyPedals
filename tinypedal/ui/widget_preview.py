@@ -64,10 +64,14 @@ class PreviewSetting:
 
 def render_widget(config: Setting, widget_name: str, widget_setting: dict) -> QPixmap:
     """Render widget with edited setting to pixmap"""
-    from ..widget._modern import create_widget
+    from ..widget._modern import modern_module, uses_modern_design
 
-    module = import_module(f"tinypedal.widget.{widget_name}")
-    widget = create_widget(module, PreviewSetting(config, widget_name, widget_setting), widget_name)
+    preview_config = PreviewSetting(config, widget_name, widget_setting)
+    if uses_modern_design(preview_config, widget_name):
+        module = modern_module(widget_name)  # classic widget code not loaded
+    else:
+        module = import_module(f"tinypedal.widget.{widget_name}")
+    widget = module.Realtime(preview_config, widget_name)
     try:
         widget.adjustSize()
         return widget.grab()

@@ -86,6 +86,8 @@ Many problems come from other apps or plugins: turn them off to rule them out fi
 
 To lower CPU use, turn off overlays and modules you do not use, or raise the `update_interval` of an overlay (in milliseconds). Hidden overlays are not updated.
 
+Memory: overlays turned off and pages you have not opened take no memory (their code and widgets are loaded when used). Once the main window stays hidden in the tray (or minimized) for a minute, its pages are released and, in the tray, its graphics resources freed: everything is built again when you open the window. Keep the window in the tray while racing for the lowest memory use.
+
 ## Size and scaling
 
 - Overlays and the window follow the Windows display scale (`enable_high_dpi_scaling`, `Scale` button of the status bar, restart needed).
