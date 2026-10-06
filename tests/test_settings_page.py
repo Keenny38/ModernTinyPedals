@@ -275,9 +275,14 @@ def test_status_cards(settings):
 # Page in app
 @pytest.fixture
 def window(ui_env, monkeypatch):
+    from tinypedal import loader
     from tinypedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    # Applied settings restart overlays, modules & servers: not in tests (overlay control thread
+    # left running would auto hide the overlays of later tests)
+    monkeypatch.setattr(loader, "reload", lambda **kwargs: None)
+    monkeypatch.setattr(loader, "restart", lambda *args, **kwargs: None)
     cfg.application["show_setup_wizard_at_startup"] = False
     main = app_module.AppWindow()
     yield main
