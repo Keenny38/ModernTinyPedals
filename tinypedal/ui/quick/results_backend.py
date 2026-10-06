@@ -60,6 +60,7 @@ from ...setting import cfg
 from ...userfile import atomic_write
 from ..game_rest import GameRequest
 from ..lap_viewer import localized
+from .game_pictures import brand_logo_url, car_picture_url, notifier, track_logo_url, track_picture_url
 from .models import DictListModel
 from .replays_backend import clock_minutes, day_text
 
@@ -74,12 +75,12 @@ RELOAD_DELAY_MS = 1500  # folder changed: read again once game has written whole
 
 SESSION_ROLES = (
     "key", "title", "course", "code", "kindText", "day", "clock", "cars", "online", "resultText",
-    "resultTone", "detailText", "newest",
+    "resultTone", "detailText", "newest", "trackLogo",
 )
 CLASSIFICATION_ROLES = (
     "key", "posText", "gridDelta", "classText", "classPosText", "classColor", "number", "driver", "team",
     "drivers", "car", "laps", "gapText", "gapTone", "reasonText", "bestText", "bestTone", "pits", "contacts",
-    "penalties", "player", "selected",
+    "penalties", "player", "selected", "brandLogo",
 )
 LAP_ROLES = (
     "key", "lap", "posText", "timeText", "timeTone", "deltaText", "s1", "s2", "s3", "s1Tone", "s2Tone",
@@ -225,6 +226,7 @@ def session_row(result: SessionResult, today: QDate, newest: bool = False) -> di
         "resultTone": tone,
         "detailText": detail,
         "newest": newest,
+        "trackLogo": track_logo_url(result.track, result.venue, result.course),
     }
 
 
@@ -296,6 +298,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str)
             "penalties": sum(penalties.get(name, 0) for name in names),
             "player": entry.player,
             "selected": str(index) == selected,
+            "brandLogo": brand_logo_url(entry.vehicle, entry.car),
         })
     return rows
 
@@ -396,6 +399,8 @@ def session_header(result: SessionResult) -> dict[str, Any]:
         "partial": rf.race_unfinished(result),
         "file": os.path.basename(result.path),
         "game": result.game,
+        "trackLogo": track_logo_url(result.track, result.venue, result.course),
+        "trackPicture": track_picture_url(result.track, result.venue, result.course, large=True),
     }
 
 
@@ -632,6 +637,7 @@ class RaceResultsBackend(QObject):
         self._reload_timer.setSingleShot(True)
         self._reload_timer.setInterval(RELOAD_DELAY_MS)
         self._reload_timer.timeout.connect(self.reload)
+        notifier().changed.connect(self.pictures_changed)
 
     @staticmethod
     def _index(value: Any, count: int) -> int:
@@ -664,6 +670,17 @@ class RaceResultsBackend(QObject):
             self._watcher.removePaths(sorted(watched - wanted))
         if wanted - watched:
             self._watcher.addPaths(sorted(wanted - watched))
+
+    @Slot()
+    def pictures_changed(self):
+        """Logos & pictures fetched from game meanwhile: rows built again"""
+        if self.sessions:
+            self.refresh_list()
+        if self.result is not None:
+            self.header = session_header(self.result)
+            self.selectionChanged.emit()
+            self.refresh_classification()
+            self.driverChanged.emit()
 
     # Reading
     @Slot()
@@ -927,6 +944,8 @@ class RaceResultsBackend(QObject):
             "drivers": ", ".join(names) if len(names) > 1 else "",
             "player": entry.player,
             "aids": entry.aids,
+            "brandLogo": brand_logo_url(entry.vehicle, entry.car),
+            "carPicture": car_picture_url(entry.vehicle),
         }
 
     @Property(list, notify=driverChanged)

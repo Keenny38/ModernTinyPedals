@@ -106,6 +106,14 @@ def offline_track_geometry(monkeypatch):
     monkeypatch.setattr(track_geometry, "rest_get", lambda *args, **kwargs: None)
 
 
+@pytest.fixture(autouse=True)
+def offline_game_images(monkeypatch):
+    """Car brand & circuit pictures never asked to a running game in tests"""
+    from tinypedal.userfile import game_images
+
+    monkeypatch.setattr(game_images, "fetch_from_game", lambda *args, **kwargs: (0, b""))
+
+
 @pytest.fixture
 def ui_env(monkeypatch, tmp_path):
     """Isolated setting for UI tests: default presets, data paths in tmp folder, saving disabled"""

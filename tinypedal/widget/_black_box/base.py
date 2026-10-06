@@ -83,7 +83,7 @@ class PaintBase:
             fill_rect(painter, QRectF(0, 0, self.width(), self.height()), wcfg["background_color"])
         self.apply_fit(painter)
         if wcfg["show_background"] and not fitted:  # main area & damage panel tab, nothing above panel
-            painter.fillPath(self.path_bg, QColor(wcfg["background_color"]))
+            self.fill_background(painter)
         if not self.rect_caption.isEmpty():
             fill_rect(painter, self.rect_caption, wcfg["background_color_caption"])
             painter.setPen(self.pen_caption)
@@ -93,6 +93,10 @@ class PaintBase:
         painter.end()
         self.static_layer = layer
         return layer
+
+    def fill_background(self, painter: QPainter):
+        """Background shape: main card & damage panel card"""
+        painter.fillPath(self.path_bg, QColor(self.wcfg["background_color"]))
 
     def draw_module_warning(self, painter: QPainter):
         """Which data module is off, at the bottom of the car view, on its own chip"""

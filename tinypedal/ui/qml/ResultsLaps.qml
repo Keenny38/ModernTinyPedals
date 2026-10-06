@@ -75,12 +75,23 @@ Item {
                 radius: width / 2
                 color: laps.info.color || "transparent"
             }
+            GameLogo {  // car brand logo of game
+                source: laps.info.brandLogo || ""
+                boxWidth: theme.em * 2.4
+                boxHeight: theme.em * 1.4
+            }
             Text {
                 Layout.fillWidth: true
                 text: [laps.info.team || "", laps.info.car || "", laps.info.drivers ? i18n.tr("Drivers") + ": " + laps.info.drivers : ""]
                       .filter(function(part) { return part !== "" }).join(" · ")
                 color: theme.dimText
                 elide: Text.ElideRight
+            }
+            GamePicture {  // car picture of game
+                source: laps.info.carPicture || ""
+                boxHeight: theme.em * 2.4
+                aspect: 1.6
+                crop: false
             }
         }
 

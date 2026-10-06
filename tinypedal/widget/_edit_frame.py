@@ -19,7 +19,9 @@
 """
 Visual edit mode of unlocked overlay: outline & name of each widget, corner handle to resize it
 
-Resizing scales pixel size options of widget (font size, bar size...), see _style.SCALED_OPTION.
+Outline shown under the mouse while unlocked, on every overlay in edit mode (see _edit_mode),
+solid on the selected overlay. Resizing scales pixel size options of widget (font size, bar
+size...), see _style.SCALED_OPTION.
 """
 
 from __future__ import annotations
@@ -30,11 +32,15 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from ..i18n import tr
 from ._style import is_scaled_option
 
 EDIT_COLOR = QColor("#2F8CFF")
 HANDLE_SIZE = 14
 SCALE_RANGE = (0.3, 4.0)
+FILL_EDITING = 16  # tint alpha over overlay in edit mode: area shown, grabbable even if overlay draws nothing
+FILL_SELECTED = 30
+OUTLINE_HOVER, OUTLINE_EDITING, OUTLINE_SELECTED = range(3)
 
 
 def scale_widget_setting(setting: dict, factor: float, widget_name: str = "") -> dict:
@@ -61,20 +67,37 @@ def drag_factor(size: tuple[int, int], offset: QPoint) -> float:
 
 
 class EditOutline(QWidget):
-    """Dashed outline & widget name, drawn over widget, ignores mouse"""
+    """Outline & widget name, drawn over widget, ignores mouse
+
+    Dashed under the mouse, dashed & tinted in edit mode (empty overlay area visible), solid on
+    selected overlay.
+    """
 
     def __init__(self, parent: QWidget, title: str):
         super().__init__(parent)
         self.title = title
+        self.mode = OUTLINE_HOVER
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
+    def set_mode(self, mode: int):
+        if self.mode != mode:
+            self.mode = mode
+            self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        pen = QPen(EDIT_COLOR, 1, Qt.PenStyle.DashLine)
-        painter.setPen(pen)
-        painter.drawRect(rect)
+        mode = self.mode
+        if mode != OUTLINE_HOVER:
+            tint = QColor(EDIT_COLOR)
+            tint.setAlpha(FILL_SELECTED if mode == OUTLINE_SELECTED else FILL_EDITING)
+            painter.fillRect(self.rect(), tint)
+        if mode == OUTLINE_SELECTED:
+            painter.setPen(QPen(EDIT_COLOR, 2))
+            painter.drawRect(QRectF(self.rect()).adjusted(1, 1, -1, -1))
+        else:
+            painter.setPen(QPen(EDIT_COLOR, 1, Qt.PenStyle.DashLine))
+            painter.drawRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5))
         if self.height() < 30:  # name would hide content of thin widget, shown as tooltip instead
             return
         font = QFont(self.font())
@@ -122,7 +145,7 @@ class ResizeHandle(QWidget):
         self.on_resized = on_resized
         self.setCursor(Qt.CursorShape.SizeFDiagCursor)
         self.setFixedSize(HANDLE_SIZE, HANDLE_SIZE)
-        self.setToolTip(f"{parent.windowTitle()}: drag to resize")
+        self.setToolTip(tr("Drag to resize"))
         self._press: QPoint | None = None
         self._ghost: ResizeGhost | None = None
         self.on_released: Callable[[], None] = lambda: None
@@ -184,21 +207,31 @@ class ResizeHandle(QWidget):
 class EditFrame(QObject):
     """Outline & resize handle attached to widget, follows widget size
 
-    Shown only while overlay is unlocked and mouse is over widget, so it never stays on screen
-    while driving with an unlocked overlay.
+    While unlocked, shown when mouse is over widget, so it never stays on screen while driving with
+    an unlocked overlay; in edit mode, outline always shown (handle under the mouse), solid while
+    selected. Parts are created on first unlock, and widget events are only watched while
+    unlocked: no Python call for each update & paint event of a locked overlay.
     """
 
     def __init__(self, widget: QWidget, title: str, on_resized: Callable[[float], None]):
         super().__init__(widget)
         self.widget = widget
+        self.title = title
+        self.on_resized = on_resized
         self.enabled = False  # overlay unlocked
+        self.editing = False  # edit mode: outline always shown
+        self.selected = False
         self.hovered = False
-        self.outline = EditOutline(widget, title)
-        self.handle = ResizeHandle(widget, on_resized)
-        self.handle.on_released = self.refresh
-        widget.installEventFilter(self)
-        self.place()
-        self.refresh()
+        self.outline: EditOutline | None = None
+        self.handle: ResizeHandle | None = None
+
+    def _create_parts(self):
+        if self.handle is None:
+            self.outline = EditOutline(self.widget, self.title)
+            self.outline.hide()
+            self.handle = ResizeHandle(self.widget, self.on_resized)
+            self.handle.on_released = self.refresh
+            self.handle.hide()
 
     def eventFilter(self, watched, event):
         widget = getattr(self, "widget", None)  # attribute gone while widget is being deleted
@@ -216,6 +249,8 @@ class EditFrame(QObject):
         return False
 
     def place(self):
+        if self.outline is None or self.handle is None:
+            return
         widget = self.widget
         self.outline.setGeometry(widget.rect())
         self.handle.move(widget.width() - HANDLE_SIZE, widget.height() - HANDLE_SIZE)
@@ -224,17 +259,45 @@ class EditFrame(QObject):
 
     def set_visible(self, enabled: bool):
         """Enable edit mode (overlay unlocked), frame is shown on mouse hover"""
-        self.enabled = enabled
-        if not enabled:
-            self.hovered = False
+        if enabled != self.enabled:
+            self.enabled = enabled
+            if enabled:
+                self._create_parts()
+                self.widget.installEventFilter(self)
+                self.hovered = self.widget.underMouse()
+                self.place()
+            else:
+                self.widget.removeEventFilter(self)
+                self.hovered = False
+                self.selected = False
+        self.refresh()
+
+    def set_editing(self, editing: bool):
+        """Edit mode on: outline shown without hover"""
+        self.editing = editing
+        self.refresh()
+
+    def set_selected(self, selected: bool):
+        """Selected overlay: solid outline & handle shown"""
+        self.selected = selected and self.enabled
         self.refresh()
 
     def refresh(self):
-        """Show frame while editable & hovered, or while resizing"""
-        visible = self.enabled and (self.hovered or self.handle.dragging)
-        if visible == self.outline.isVisibleTo(self.widget) == self.handle.isVisibleTo(self.widget):
+        """Show frame while editable & hovered, selected, in edit mode, or while resizing"""
+        outline, handle = self.outline, self.handle
+        if outline is None or handle is None:
             return
-        self.outline.setVisible(visible)
-        self.handle.setVisible(visible)
-        if visible:
+        active = self.enabled and (self.hovered or self.selected or handle.dragging)
+        outline_shown = active or (self.enabled and self.editing)
+        if self.selected:
+            outline.set_mode(OUTLINE_SELECTED)
+        elif self.editing and not active:
+            outline.set_mode(OUTLINE_EDITING)
+        else:
+            outline.set_mode(OUTLINE_HOVER)
+        if outline_shown == outline.isVisibleTo(self.widget) and active == handle.isVisibleTo(self.widget):
+            return
+        outline.setVisible(outline_shown)
+        handle.setVisible(active)
+        if outline_shown:
             self.place()

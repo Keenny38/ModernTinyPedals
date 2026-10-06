@@ -255,8 +255,10 @@ FocusScope {
                     readonly property real columnWidth: table.widthOf(index)
                     readonly property real columnX: table.edges[index] || 0
                     readonly property real extra: decoration.active && !decoration.pill ? theme.em * 1.6 : 0  // badge
-                    x: alignedLeft ? columnX + theme.em * 0.7 : columnX + Math.max((columnWidth - width - extra) / 2, theme.em * 0.3)
-                    width: Math.max(0, Math.min(implicitWidth, columnWidth - theme.em * (decoration.pill ? 1.8 : 1.2) - extra))
+                    readonly property real logoRoom: logo.shown ? theme.em * 2.6 : 0  // game logo before text
+                    x: alignedLeft ? columnX + theme.em * 0.7 + logoRoom
+                       : columnX + Math.max((columnWidth - width - extra + logoRoom) / 2, theme.em * 0.3)
+                    width: Math.max(0, Math.min(implicitWidth, columnWidth - theme.em * (decoration.pill ? 1.8 : 1.2) - extra - logoRoom))
                     height: rowItem.height
                     verticalAlignment: Text.AlignVCenter
                     text: cell.text || ""
@@ -264,6 +266,14 @@ FocusScope {
                     font.weight: cell.bold ? Font.DemiBold : Font.Normal
                     font.features: { "tnum": 1 }
                     elide: Text.ElideRight
+                    GameLogo {  // car brand or circuit logo of game
+                        id: logo
+                        source: cellText.cell.logo || ""
+                        boxWidth: theme.em * 2.2
+                        boxHeight: theme.em * 1.25
+                        x: -cellText.logoRoom + (theme.em * 2.2 - width) / 2
+                        y: (cellText.height - height) / 2
+                    }
                     Loader {
                         id: decoration
                         readonly property bool pill: cellText.cell.pill === true

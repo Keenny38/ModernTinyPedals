@@ -25,6 +25,7 @@ Car ahead and car behind in player class, with interval to player.
 from __future__ import annotations
 
 from ...module_info import minfo
+from ...template.widget.drivers_ui import RIVALS_COLUMNS
 from .drivers import DRIVER_OPTIONS, Context, DriverTable
 from .rows import laptime_text
 from .table import DELTAS, RIGHT, TEXT, Cell, Column
@@ -33,12 +34,7 @@ from .table import DELTAS, RIGHT, TEXT, Cell, Column
 class Realtime(DriverTable):
     """Draw widget"""
 
-    COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
-        "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
-        "time_interval",
-    )
+    COLUMNS = RIVALS_COLUMNS
     options = (
         *DRIVER_OPTIONS,
         "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
@@ -85,8 +81,13 @@ class Realtime(DriverTable):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        ctx = self.context()
-        data_set = minfo.vehicles.dataSet
+        self.show_rows(minfo.vehicles.dataSet, self.context())
+
+    def show_field(self, field, ctx: Context):
+        self.show_rows(field.vehicles, ctx)
+
+    def show_rows(self, data_set, ctx: Context):
+        """Car ahead & car behind in player class"""
         rows = []
         if ctx.player is not None:
             for index in (ctx.player.classAheadIndex, ctx.player.classBehindIndex):

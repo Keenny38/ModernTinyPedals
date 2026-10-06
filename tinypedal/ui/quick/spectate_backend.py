@@ -40,6 +40,7 @@ from ...i18n import tr
 from ...module_control import mctrl
 from ...setting import cfg
 from ..module_view import sort_key
+from .game_pictures import LogoCache, car_picture_url, notifier
 from .models import DictListModel
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ NO_DRIVER = -1  # player_index: no driver spectated
 DATA_MODULES = ("module_delta", "module_fuel", "module_mapping", "module_sectors", "module_stint")
 ROLES = (
     "key", "slot", "place", "name", "vehicle", "carClass", "classColor",
-    "bestLap", "lastLap", "status", "player", "spectated",
+    "bestLap", "lastLap", "status", "player", "spectated", "brandLogo",
 )
 STATUS_GARAGE = "garage"
 STATUS_PIT = "pit"
@@ -125,6 +126,8 @@ class SpectateBackend(QObject):
         self._timer = QTimer(self)  # deleted with backend: never fires on a deleted model
         self._timer.setInterval(POLL_MS)
         self._timer.timeout.connect(self.poll)
+        self.logos = LogoCache()
+        notifier().changed.connect(self.pictures_changed)
 
     # Reading
     def set_active(self, active: bool):
@@ -146,9 +149,17 @@ class SpectateBackend(QObject):
         except (AttributeError, TypeError, ValueError, IndexError) as error:  # API restarting
             logger.debug("Spectate: drivers not read: %s", error)
             return
+        for row in drivers:
+            row["brandLogo"] = self.logos.brand(row["vehicle"])
         self.set_drivers(drivers)
         if self._enabled:
             self.follow_changed()
+
+    @Slot()
+    def pictures_changed(self):
+        """Logos & pictures fetched from game meanwhile"""
+        if self._drivers:
+            self.set_drivers([{**row, "brandLogo": self.logos.brand(row["vehicle"])} for row in self._drivers])
 
     def set_drivers(self, drivers: list[dict]):
         """Drivers of session, rows updated in place"""
@@ -215,7 +226,7 @@ class SpectateBackend(QObject):
         row = next((row for row in self._drivers if row["slot"] == slot), None) if self._enabled else None
         if row is None:
             return {"found": False, "slot": slot if self._enabled else NO_DRIVER}
-        return {"found": True, **row}
+        return {"found": True, **row, "carPicture": car_picture_url(row["vehicle"], large=True)}
 
     @Property(int, notify=driversChanged)
     def driverCount(self) -> int:

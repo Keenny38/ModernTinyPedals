@@ -19,13 +19,14 @@ Item {
     readonly property real wDelta: race ? theme.em * 2.6 : 0
     readonly property real wClass: multiclass ? theme.em * 6.6 : 0
     readonly property real wNum: theme.em * 3.0
+    readonly property real wLogo: theme.em * 2.6  // car brand logo of game
     readonly property real wCar: showCar ? theme.em * 10.5 : 0
     readonly property real wLaps: theme.em * 3.2
     readonly property real wGap: theme.em * 7.4
     readonly property real wBest: theme.em * 6.6
     readonly property real wPits: race ? theme.em * 4.6 : 0
     readonly property real wInc: theme.em * 3.4
-    readonly property real wDriver: Math.max(width - pad * 2 - scrollWidth - wPos - wDelta - wClass - wNum - wCar
+    readonly property real wDriver: Math.max(width - pad * 2 - scrollWidth - wPos - wDelta - wClass - wNum - wLogo - wCar
                                              - wLaps - wGap - wBest - wPits - wInc, theme.em * 8)
     readonly property real scrollWidth: list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0
 
@@ -69,6 +70,7 @@ Item {
             HeaderText { cellWidth: table.wDelta; text: "" }
             HeaderText { cellWidth: table.wClass; text: i18n.tr("Class") }
             HeaderText { cellWidth: table.wNum; text: "#" }
+            HeaderText { cellWidth: table.wLogo; text: "" }
             HeaderText { cellWidth: table.wDriver; text: i18n.tr("Driver") }
             HeaderText { cellWidth: table.wCar; text: i18n.tr("Car") }
             HeaderText { cellWidth: table.wLaps; text: i18n.tr("Laps"); alignRight: true }
@@ -114,6 +116,7 @@ Item {
                 required property int penalties
                 required property bool player
                 required property bool selected
+                required property string brandLogo
 
                 width: ListView.view.width - table.scrollWidth
                 height: Math.round(theme.em * 3.0)
@@ -188,6 +191,16 @@ Item {
                         cellWidth: table.wNum
                         text: row.number !== "" ? "#" + row.number : ""
                         color: theme.dimText
+                    }
+                    Item {  // car brand logo of game
+                        width: table.wLogo
+                        height: parent.height
+                        GameLogo {
+                            anchors.verticalCenter: parent.verticalCenter
+                            source: row.brandLogo
+                            boxWidth: theme.em * 2.1
+                            boxHeight: theme.em * 1.35
+                        }
                     }
                     Column {
                         width: table.wDriver

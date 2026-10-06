@@ -27,6 +27,7 @@ from .black_box_ui import BLACK_BOX_UI
 from .brakes import WIDGET_BRAKES
 from .chassis import WIDGET_CHASSIS
 from .driver import WIDGET_DRIVER
+from .drivers_ui import RELATIVE_UI, RIVALS_UI, STANDINGS_UI
 from .engine import WIDGET_ENGINE
 from .fuel import WIDGET_FUEL
 from .race_aids import WIDGET_RACE_AIDS
@@ -52,6 +53,9 @@ WIDGET_CATEGORIES = (
 # profile overrides (see black_box_ui.OptionUI)
 WIDGET_OPTION_UI = {
     "black_box": BLACK_BOX_UI,
+    "relative": RELATIVE_UI,
+    "standings": STANDINGS_UI,
+    "rivals": RIVALS_UI,
 }
 # Config dialog sections per widget: {widget: {first option of section: section title}}
 WIDGET_OPTION_SECTIONS = {name: ui.sections for name, ui in WIDGET_OPTION_UI.items()}

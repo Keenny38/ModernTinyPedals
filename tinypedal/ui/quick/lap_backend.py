@@ -133,6 +133,7 @@ from ..lap_viewer import (
     signed,
 )
 from . import lap_map
+from .game_pictures import brand_logo_url, notifier, track_logo_url
 from .lap_base import COLOR_GAIN, COLOR_LOSS, format_diff, keys_match  # noqa: F401  (re-exported)
 from .lap_charts import ChartTools
 from .lap_conditions import SIMILAR_TOLERANCE, SIMILAR_TOLERANCES, LapConditions
@@ -171,7 +172,7 @@ LEGEND_ROLES = ("key", "label", "full", "color", "reference", "clean", "tip", "e
 MAP_LAP_ROLES = ("lap", "key", "highlight", "trail", "color", "reference", "shapes", "brakeZones", "throttleZones")
 LAP_ROLES = (
     "kind", "session", "path", "title", "time", "s1", "s2", "s3", "best1", "best2", "best3", "info", "note",
-    "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip", "open", "hint",
+    "checked", "reference", "color", "dim", "fastest", "count", "error", "gap", "tip", "open", "hint", "logo",
 )
 STATUS_DURATION = 8000  # ms, transient status messages shown
 WATCH_DELAY = 1500  # ms after a lap file appears before list is refreshed (file fully written)
@@ -507,10 +508,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     panelsChanged = Signal()
     cornersChanged = Signal()
     mapDataChanged = Signal()
+    picturesChanged = Signal()  # car brand & circuit logos fetched from game
 
     def __init__(self, parent: QWidget, folder: str):
         super().__init__(parent)
         self._window = parent
+        self._picture_version = 0
+        notifier().changed.connect(self.pictures_changed)
         for part in (self.panelsChanged, self.cornersChanged, self.mapDataChanged):
             self.chartChanged.connect(part)
         self.folder = folder
@@ -853,6 +857,23 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     tracks = Property(list, _tracks_get, notify=tracksChanged)
     currentTrack = Property(str, _track_get, _track_set, notify=tracksChanged)
+
+    @Property(int, notify=picturesChanged)
+    def pictureVersion(self) -> int:
+        """Grows when game logos arrive (bindings calling trackLogo depend on it)"""
+        return self._picture_version
+
+    @Slot(str, result=str)
+    def trackLogo(self, folder: str) -> str:
+        """Circuit logo of game for a track folder ("Track - Class")"""
+        return track_logo_url(folder.rsplit(" - ", 1)[0], folder) if folder else ""
+
+    @Slot()
+    def pictures_changed(self):
+        self._picture_version += 1
+        self.picturesChanged.emit()
+        if self.entries or self.external:
+            self.fill_list()
 
     @Property(QObject, constant=True)
     def laps(self) -> QObject:
@@ -1970,7 +1991,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             "time": format_laptime(best), "s1": "", "s2": "", "s3": "", "best1": False, "best2": False, "best3": False,
             "info": ", ".join(details), "note": "", "count": len(group), "checked": False, "reference": False,
             "color": "", "dim": False, "fastest": False, "error": False, "gap": "", "tip": "", "open": False,
-            "hint": "",
+            "hint": "", "logo": brand_logo_url(vehicle) if vehicle and not is_added else "",
         }
 
     def lap_row(self, session: str, entry: LapEntry, best_sectors: list[float], vehicle: str,
@@ -1996,7 +2017,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             "checked": path in self.checked, "reference": path == self.reference_key,
             "color": color, "dim": not entry.file.valid or entry.info.get("kind") in ("out", "in"),
             "fastest": is_fastest, "count": 0, "error": path in self._failed and path in self.checked, "gap": gap,
-            "tip": self.entry_conditions(entry), "open": True, "hint": "",
+            "tip": self.entry_conditions(entry), "open": True, "hint": "", "logo": "",
         }
 
     def mark_values(self, entry: LapEntry, vehicle: str) -> dict:

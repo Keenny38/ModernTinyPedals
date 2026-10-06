@@ -179,7 +179,15 @@ TpPage {
                 }
                 contentItem: RowLayout {
                     spacing: theme.em * 0.5
-                    Icon { glyph: ""; color: theme.accent; Layout.leftMargin: theme.em * 0.6 }  // map pin
+                    GameLogo {  // circuit logo of game
+                        id: trackLogo
+                        source: backend.pictureVersion, backend.trackLogo(backend.currentTrack)
+                        boxWidth: theme.em * 2.8
+                        boxHeight: theme.em * 1.6
+                        Layout.leftMargin: theme.em * 0.6
+                    }
+                    Icon {
+                        visible: !trackLogo.shown; glyph:""; color: theme.accent; Layout.leftMargin: theme.em * 0.6 }  // map pin
                     Text {
                         text: trackBox.displayText || i18n.tr("No recorded lap")
                         color: theme.text
@@ -223,12 +231,26 @@ TpPage {
                     width: trackBox.width - 8
                     height: theme.em * 2.2
                     highlighted: trackBox.highlightedIndex === index
-                    contentItem: Text {
-                        text: trackItem.modelData
-                        color: theme.text
-                        font.weight: trackBox.currentIndex === trackItem.index ? Font.DemiBold : Font.Normal
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
+                    contentItem: RowLayout {
+                        spacing: theme.em * 0.5
+                        Item {  // circuit logo of game, same room on every row
+                            implicitWidth: theme.em * 2.4
+                            implicitHeight: theme.em * 1.3
+                            GameLogo {
+                                anchors.centerIn: parent
+                                source: backend.pictureVersion, backend.trackLogo(trackItem.modelData)
+                                boxWidth: theme.em * 2.4
+                                boxHeight: theme.em * 1.3
+                            }
+                        }
+                        Text {
+                            text: trackItem.modelData
+                            color: theme.text
+                            font.weight: trackBox.currentIndex === trackItem.index ? Font.DemiBold : Font.Normal
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
                     }
                     background: Rectangle {
                         radius: theme.em * 0.4

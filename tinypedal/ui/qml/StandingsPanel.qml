@@ -174,6 +174,7 @@ Item {
                 required property int incidents
                 required property string energy
                 required property real energyLevel
+                required property string brandLogo
                 readonly property bool selected: key === backend.selectedCar
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
@@ -281,6 +282,11 @@ Item {
                                     font.pointSize: theme.fontPoint * 0.72
                                     font.weight: Font.DemiBold
                                 }
+                            }
+                            GameLogo {  // car brand logo of game
+                                source: row.brandLogo
+                                boxWidth: theme.em * 1.8
+                                boxHeight: theme.em * 0.95
                             }
                             Text {
                                 Layout.fillWidth: true

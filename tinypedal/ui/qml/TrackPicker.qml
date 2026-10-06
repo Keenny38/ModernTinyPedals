@@ -48,6 +48,14 @@ AbstractButton {
             color: theme.accent
             size: theme.em * 1.25
             Layout.leftMargin: theme.em * 0.5
+            visible: !currentLogo.shown  // circuit logo of game shown instead
+        }
+        GameLogo {  // circuit logo of game
+            id: currentLogo
+            source: backend.currentLogo
+            boxWidth: theme.em * 3.2
+            boxHeight: theme.em * 1.9
+            Layout.leftMargin: theme.em * 0.5
         }
         Text {
             text: backend.currentLabel
@@ -131,6 +139,16 @@ AbstractButton {
                     onClicked: picker.choose(modelData)
                     contentItem: RowLayout {
                         spacing: theme.em * 0.5
+                        Item {  // circuit logo of game, same room on every row
+                            implicitWidth: theme.em * 2.4
+                            implicitHeight: theme.em * 1.3
+                            GameLogo {
+                                anchors.centerIn: parent
+                                source: entryItem.modelData.logo || ""
+                                boxWidth: theme.em * 2.4
+                                boxHeight: theme.em * 1.3
+                            }
+                        }
                         Text {
                             text: entryItem.modelData.label
                             color: theme.text

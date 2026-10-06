@@ -80,6 +80,8 @@ from .overlay_sections import (
     Section,
     auto_sections,
     declared_sections,
+    listed_sections,
+    order_keys,
     section_dependencies,
 )
 
@@ -162,7 +164,7 @@ def default_keys(name: str) -> list[str]:
 
 def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     """Shown options & sections of overlay, for design given by values (unsaved design switch)"""
-    from ...widget._modern import design_option_keys
+    from ...widget._modern import design_option_keys, uses_modern_design
 
     keys = default_keys(name)
     design_config = SimpleNamespace(user=SimpleNamespace(config=cfg.user.config, setting={name: values}))
@@ -171,9 +173,14 @@ def build_layout(name: str, values: Mapping[str, Any]) -> OverlayLayout:
     except Exception as error:  # broken modern module: every option shown
         logger.debug("Overlay options: design of %s: %s", name, error, exc_info=True)
     option_ui = WIDGET_OPTION_UI.get(name)
-    if option_ui is not None:
-        sections = declared_sections(keys, option_ui.sections)
+    if option_ui is not None and option_ui.modern_only and not uses_modern_design(design_config, name):
+        option_ui = None  # classic layout: automatic sections
+    if option_ui is not None and option_ui.layout:
+        sections = listed_sections(keys, option_ui.layout, option_ui.order_title, option_ui.order_toggles.values())
         dependencies: Mapping[str, str] = option_ui.dependencies
+    elif option_ui is not None:
+        sections = declared_sections(keys, option_ui.sections)
+        dependencies = option_ui.dependencies
     else:
         sections = auto_sections(keys, values)
         dependencies = section_dependencies(sections)
@@ -337,7 +344,7 @@ class OverlayOptionsBackend(QObject):
     def shown_in_mode(self, layout: OverlayLayout, key: str) -> bool:
         """Simple mode (overlays with many options): on/off & choice options, and the common ones"""
         ui = layout.option_ui
-        if ui is None or self._advanced or self.filtering:
+        if ui is None or not ui.simple_mode or self._advanced or self.filtering:
             return True
         return self.kind(key).kind in (KIND_BOOL, KIND_CHOICE) or key in ui.basic
 
@@ -384,7 +391,8 @@ class OverlayOptionsBackend(QObject):
                     self._truncated += len(shown)
                     continue
                 self._match_count += len(shown)
-                rows.append(self._header_row(name, section, overrides, len(section.keys), False, with_name))
+                rows.append(self._header_row(name, section, overrides, len(order_keys(section)), False,
+                                             with_name))
                 rows.append(self._order_row(name, section))
                 continue
             if not shown and not toggle_match:
@@ -432,15 +440,41 @@ class OverlayOptionsBackend(QObject):
 
     def _order_row(self, name: str, section: Section) -> dict:
         row = self._blank_row(section_id(name, section.key) + "/list", name, ROW_ORDER)
-        keys = sorted(section.keys, key=lambda key: (self._order_value(name, key), section.keys.index(key)))
+        ui = self.layout(name).option_ui
+        toggles = {key: toggle for key, toggle in (ui.order_toggles if ui is not None else {}).items()
+                   if toggle in section.keys}
+        labels = ui.order_labels if ui is not None else {}
+        orders = []
+        for key in self._ordered(name, section):
+            toggle = toggles.get(key, "")
+            orders.append({
+                "key": key,
+                "label": tr(labels[key]) if key in labels else option_label(key.removeprefix("display_order_")),
+                "changed": self.is_changed(name, key) or (bool(toggle) and self.is_changed(name, toggle)),
+                "toggle": option_id(name, toggle) if toggle else "",
+                "checked": bool(self.value(name, toggle)) if toggle else True,
+            })
         row.update(
             kind=ROW_ORDER,
-            orders=[{"key": key, "label": option_label(key.removeprefix("display_order_")),
-                     "changed": self.is_changed(name, key)} for key in keys],
-            modified=any(self.is_customized(name, key) for key in section.keys),
+            help=tr("Columns from left to right: switch them on or off, drag them or use the arrows.")
+            if toggles else "",
+            orders=orders,
+            modified=any(self.is_customized(name, key) for key in order_keys(section)),
             changed=any(self.is_changed(name, key) for key in section.keys),
         )
         return row
+
+    def _ordered(self, name: str, section: Section) -> list[str]:
+        """Items of display order list as shown by overlay: design order while no display order was
+        changed (modern design), else by display order value (same value: design or template order)"""
+        keys = list(order_keys(section))
+        ui = self.layout(name).option_ui
+        if ui is not None and ui.design_order:
+            rank = {key: index for index, key in enumerate(ui.design_order)}
+            keys.sort(key=lambda key: rank.get(key, len(rank)))
+            if all(self.value(name, key) == self.default(name, key) for key in keys):
+                return keys
+        return sorted(keys, key=lambda key: self._order_value(name, key))  # stable: same value keeps order
 
     def _order_value(self, name: str, key: str) -> float:
         value = self.value(name, key)
@@ -625,7 +659,7 @@ class OverlayOptionsBackend(QObject):
             "design": design,
             "optionCount": len(layout.keys),
             "customized": sum(self.is_customized(name, key) for key in layout.keys),
-            "simpleMode": ui is not None,
+            "simpleMode": ui is not None and ui.simple_mode,
             "themes": [{"name": theme, "label": tr(theme)} for theme in ui.color_themes] if ui is not None else [],
             "preset": cfg.filename.setting.removesuffix(".json"),
         }
@@ -1056,9 +1090,9 @@ class OverlayOptionsBackend(QObject):
     def moveOrder(self, name: str, key: str, offset: int):
         """Move item of display order list up (-1) or down (+1)"""
         section = self._order_section(name)
-        if section is None or key not in section.keys:
+        if section is None or key not in order_keys(section):
             return
-        keys = sorted(section.keys, key=lambda item: (self._order_value(name, item), section.keys.index(item)))
+        keys = self._ordered(name, section)
         index = keys.index(key)
         target = max(0, min(len(keys) - 1, index + offset))
         if target == index:
@@ -1070,9 +1104,9 @@ class OverlayOptionsBackend(QObject):
     def placeOrder(self, name: str, key: str, position: int):
         """Item of display order list moved to position (dragged)"""
         section = self._order_section(name)
-        if section is None or key not in section.keys:
+        if section is None or key not in order_keys(section):
             return
-        keys = sorted(section.keys, key=lambda item: (self._order_value(name, item), section.keys.index(item)))
+        keys = self._ordered(name, section)
         keys.remove(key)
         keys.insert(max(0, min(len(keys), position)), key)
         self._set_orders(name, keys)
@@ -1082,7 +1116,7 @@ class OverlayOptionsBackend(QObject):
         section = self._order_section(name)
         if section is not None:
             with self._step():
-                self._reset_keys(name, section.keys)
+                self._reset_keys(name, order_keys(section))
 
     def _order_section(self, name: str) -> Section | None:
         if name not in self._names:

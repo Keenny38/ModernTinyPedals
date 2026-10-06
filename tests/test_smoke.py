@@ -33,7 +33,7 @@ def test_window_style(theme):
     assert "QPushButton" in style
 
 
-def test_about_dialog():
+def test_about_dialog(ui_env):
     """About dialog can be created"""
     from tinypedal.ui.about import About
 

@@ -42,9 +42,12 @@ class OverlayToggle:
         overlay_signal.iconify.emit(cfg.overlay["vr_compatibility"])
 
     def lock(self):
-        """Toggle lock state"""
+        """Toggle lock state, unlocked: overlay edit mode (toolbar), see widget._edit_mode"""
         self.__toggle_option("fixed_position")
         overlay_signal.locked.emit(cfg.overlay["fixed_position"])
+        from .widget._edit_mode import follow_lock
+
+        follow_lock(cfg.overlay["fixed_position"])
 
     def hide(self):
         """Toggle hide state"""

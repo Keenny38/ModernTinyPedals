@@ -154,6 +154,19 @@ TpPage {
                         }
                     }
                 }
+                GameLogo {  // car brand logo of game
+                    visible: shown && page.spectated.found === true
+                    source: page.spectated.brandLogo || ""
+                    boxWidth: theme.em * 3.2
+                    boxHeight: theme.em * 2.0
+                }
+                GamePicture {  // car picture of game
+                    visible: shown && page.spectated.found === true && !page.compact
+                    source: page.spectated.carPicture || ""
+                    boxHeight: theme.em * 3.6
+                    aspect: 1.6
+                    crop: false
+                }
                 Row {
                     Layout.alignment: Qt.AlignVCenter
                     spacing: theme.em * 0.3

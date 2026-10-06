@@ -649,7 +649,63 @@ def pack(sizes: dict[str, tuple[int, int]], width: int) -> tuple[dict[str, tuple
     return positions, max(y + sizes[name][1] for name, (_, y) in positions.items())
 
 
-def render_widgets() -> dict[str, QPixmap]:
+HISTORY_WIDGETS = ("friction_circle", "trailing")  # draw recent inputs: fed a corner before rendering
+HISTORY_FRAMES = 150
+
+
+def corner_inputs(phase: float) -> tuple[float, float, float, float, float]:
+    """Inputs of a corner at phase (0 to 1): straight, braking, turn in, exit up to the preview
+    state (throttle, brake, steering, longitudinal G, lateral G)"""
+    def ease(start: float, end: float, low: float, high: float) -> float:
+        fraction = min(max((phase - start) / (end - start), 0.0), 1.0)
+        return low + (high - low) * (0.5 - 0.5 * math.cos(math.pi * fraction))
+
+    if phase < 0.25:  # straight, full throttle
+        return 1.0, 0.0, 0.0, -0.45, ease(0.0, 0.25, 0.1, 0.0)
+    if phase < 0.45:  # hard braking
+        return 0.0, ease(0.25, 0.3, 0.0, 0.95), 0.0, ease(0.25, 0.3, -0.45, 1.85), 0.0
+    if phase < 0.7:  # trail braking, turn in
+        return (0.0, ease(0.45, 0.7, 0.95, 0.0), ease(0.45, 0.6, 0.0, -0.2),
+                ease(0.45, 0.7, 1.85, 0.1), ease(0.45, 0.65, 0.0, 1.95))
+    # Exit: throttle up, to preview state
+    return (ease(0.7, 1.0, 0.25, 0.92), 0.0, ease(0.7, 1.0, -0.2, -0.11),
+            ease(0.7, 1.0, 0.1, -0.35), ease(0.7, 1.0, 1.95, 1.21))
+
+
+def replay_history(widget, data):
+    """Feed a widget drawing input history (trace, trailing plot) a corner, ending at the preview
+    state; telemetry & G force put back after"""
+    tele = data.telemetry.telemInfo[PLAYER]
+    force = minfo.force
+    saved = (tele.mElapsedTime, tele.mUnfilteredThrottle, tele.mFilteredThrottle, tele.mUnfilteredBrake,
+             tele.mFilteredBrake, tele.mUnfilteredSteering, tele.mFilteredSteering,
+             force.lgtGForceRaw, force.latGForceRaw)
+    for frame in range(HISTORY_FRAMES):
+        throttle, brake, steering, lgt, lat = corner_inputs(frame / (HISTORY_FRAMES - 1))
+        tele.mElapsedTime = ELAPSED - (HISTORY_FRAMES - frame) * 0.02
+        tele.mUnfilteredThrottle = tele.mFilteredThrottle = throttle
+        tele.mUnfilteredBrake = tele.mFilteredBrake = brake
+        tele.mUnfilteredSteering = tele.mFilteredSteering = steering
+        force.lgtGForceRaw, force.latGForceRaw = lgt, lat
+        widget.timerEvent(QTimerEvent(0))
+    (tele.mElapsedTime, tele.mUnfilteredThrottle, tele.mFilteredThrottle, tele.mUnfilteredBrake,
+     tele.mFilteredBrake, tele.mUnfilteredSteering, tele.mFilteredSteering,
+     force.lgtGForceRaw, force.latGForceRaw) = saved
+
+
+def without_game_pictures():
+    """No car brand logo nor picture of the game (trademarks never published in repo images): empty
+    brand logo & game picture folders (user's own logos left out), never fetched from a running game"""
+    import tempfile
+
+    from tinypedal.userfile import game_images
+
+    cfg.path.game_image = tempfile.mkdtemp(prefix="preview_pictures_")
+    cfg.path.brand_logo = tempfile.mkdtemp(prefix="preview_logos_") + os.sep
+    game_images.fetch_from_game = lambda *args, **kwargs: (0, b"")
+
+
+def render_widgets(data) -> dict[str, QPixmap]:
     names = sorted(
         module.name
         for module in pkgutil.iter_modules(import_module("tinypedal.widget").__path__)
@@ -659,6 +715,8 @@ def render_widgets() -> dict[str, QPixmap]:
     for name in names:
         widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
         widget.adjustSize()
+        if name in HISTORY_WIDGETS:
+            replay_history(widget, data)
         for _ in range(3):  # a few updates, so smoothed values settle
             widget.timerEvent(QTimerEvent(0))
         widget.adjustSize()  # rows shown on update (standings, relative) change the size
@@ -676,13 +734,14 @@ def main():
     cfg.default.set_default()
     for name in cfg.user.__slots__:
         setattr(cfg.user, name, copy_setting(getattr(cfg.default, name)))
+    without_game_pictures()
     sim, data = lmu_api()
     api._api, api.read = sim, sim.reader()
     set_telemetry(sim, data)
     set_vehicles()
     set_modules()
 
-    pixmaps = render_widgets()
+    pixmaps = render_widgets(data)
     sizes = {name: (pixmap.width() + SPACING, pixmap.height() + SPACING) for name, pixmap in pixmaps.items()}
     positions, height = pack(sizes, WIDTH - MARGIN * 2 + SPACING)
 

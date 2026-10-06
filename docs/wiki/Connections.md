@@ -70,7 +70,7 @@ Sources:
 
 **Where each overlay is shown**: for each overlay of the page, `Screen & Stream` (default), `Stream Only` (shown to your viewers but not on your screen, for example standings or the track map for the stream only), or `Screen Only` (never on stream, for example your fuel or delta). A stream only overlay is fully transparent on your screen while overlays are locked; unlock overlays to see and move it. This is also the `stream_visibility` option of each overlay.
 
-**Race results source**: the classification of the last race from the game results files (see [Race Results](Race-Results.md)), refreshed when a new file is written. Options on the page (saved in the address): session (`Race`, `Qualifying` or `Any`), `All Classes` or `Class by class`, cars per page, time per page. In the address: `&class=<class name>` for one class only, `&animate=0` without animation.
+**Race results source**: the classification of the last race from the game results files (see [Race Results](Race-Results.md)), refreshed when a new file is written, with the circuit logo and car brand logos of Le Mans Ultimate when the app has them. Options on the page (saved in the address): session (`Race`, `Qualifying` or `Any`), `All Classes` or `Class by class`, cars per page, time per page. In the address: `&class=<class name>` for one class only, `&animate=0` without animation.
 
 ![Race results source](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.21.0-stream-race-results.png)
 

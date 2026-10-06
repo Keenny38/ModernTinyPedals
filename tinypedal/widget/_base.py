@@ -25,26 +25,41 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, overload
 
-from PySide6.QtCore import QBasicTimer, QPropertyAnimation, QRect, Qt, QTimer, Slot
-from PySide6.QtGui import QFont, QFontMetrics, QPalette, QPixmap
+from PySide6.QtCore import QBasicTimer, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, Slot
+from PySide6.QtGui import QActionGroup, QFont, QFontMetrics, QGuiApplication, QPalette, QPixmap
 from PySide6.QtWidgets import QGridLayout, QLayout, QMenu, QWidget
 
 from .. import app_signal, overlay_signal, realtime_state
 from ..const_app import APP_NAME
-from ..formatter import format_module_name
-from ..i18n import tr, untr
+from ..i18n import tr
+from ..i18n.options import module_label
 from ..perf_monitor import timed_event
-from ..regex_pattern import FONT_WEIGHT_MAP
+from ..regex_pattern import CHOICE_COMMON, FONT_WEIGHT_MAP
 from ..setting import Setting
 from ._common import FontMetrics, MousePosition
 from ._edit_frame import EditFrame, scale_widget_setting
-from ._layout_guide import layout_guide
+from ._edit_mode import apply_values, edit_mode, forget_overlay, step_text, sync_edit_mode
+from ._layout_guide import end_layout_guide, layout_guide
 from ._painter import OverlayStyle, RawImage, RawText
+from ._snapping import centered, fit_on_screens, step_on_grid
+from ._snapping import move_to_screen as place_on_screen
 from ._style import StyledConfig, overlay_theme, scale_overrides, theme_overrides
 
 logger = logging.getLogger(__name__)
 mousepos = MousePosition()  # single instance shared by all widgets
 FADE_MS = 250
+ARROW_KEYS = {
+    Qt.Key.Key_Left: (-1, 0),
+    Qt.Key.Key_Right: (1, 0),
+    Qt.Key.Key_Up: (0, -1),
+    Qt.Key.Key_Down: (0, 1),
+}
+OPACITY_STEPS = (100, 90, 80, 70, 60, 50, 40)  # percent, context menu
+
+
+def position_values(pos: QPoint) -> dict:
+    """Position options of overlay at pos"""
+    return {"position_x": pos.x(), "position_y": pos.y()}
 
 
 def store_screen_layout(config: Setting):
@@ -132,6 +147,9 @@ class Base(QWidget):
             self.cfg.application["minimum_update_interval"],
         )
 
+        # Position when grabbed with mouse (undo history)
+        self._drag_start: QPoint | None = None
+
     def design_overrides(self, style: dict) -> dict:
         """Option overrides of design (override), applied before overlay scale"""
         return {}
@@ -140,13 +158,16 @@ class Base(QWidget):
         """Set initial widget state in orders, and start update"""
         self.__connect_signal()
         self.__set_window_attributes()  # 1
-        self._edit_frame = EditFrame(self, format_module_name(self.widget_name), self.__resize_by_handle)
+        self._edit_frame = EditFrame(self, module_label(self.widget_name), self.__resize_by_handle)
         self.__set_window_flags()  # 2
         self.__toggle_timer(not realtime_state.active)
+        self.__keep_on_screen()
+        sync_edit_mode()
 
     def stop(self):
         """Stop and close widget"""
         widget_name = self.widget_name
+        forget_overlay(widget_name)
         self._fade.stop()
         self.__toggle_timer(True)
         self.__break_signal()
@@ -198,8 +219,12 @@ class Base(QWidget):
         palette.setColor(QPalette.ColorRole.Window, self.cfg.compatibility["background_color_global"])
         self.setPalette(palette)
 
-    def __save_position(self):
-        """Save widget position"""
+    def __save_position(self, store_now: bool = True):
+        """Save widget position
+
+        Args:
+            store_now: write screen layout profile now, else once moves stop (arrow keys).
+        """
         save_changes = False
         x_pos = self.x()
         y_pos = self.y()
@@ -211,15 +236,63 @@ class Base(QWidget):
             save_changes = True
         if save_changes:
             self.cfg.save()
-            store_screen_layout(self.cfg)
+            if store_now:
+                store_screen_layout(self.cfg)
+            else:
+                edit_mode().store_layout_soon()
+
+    def __keep_on_screen(self):
+        """Overlay outside of every screen (monitor gone, preset made on another computer)
+        brought back on nearest screen, position not saved (back in place once screen is back)"""
+        if (
+            not self.cfg.compatibility.get("enable_window_position_correction", True)
+            or self.cfg.user.config.get("vr_overlay", {}).get("enable_vr_overlay", False)  # drawn in headset
+            or QGuiApplication.platformName() == "offscreen"  # no real screen (tests, self test)
+        ):
+            return
+        pos = fit_on_screens(self.geometry(), [screen.geometry() for screen in QGuiApplication.screens()])
+        if pos is not None:
+            logger.info("OVERLAY: %s outside of screens, shown at %d, %d", self.widget_name, pos.x(), pos.y())
+            self.move(pos)
+
+    def __set_input_transparent(self, transparent: bool) -> bool:
+        """Clicks go through overlay (locked) or not, returns whether window was hidden by change
+
+        Window shown: native window flag changed in place, no hide & show (no flicker of every
+        overlay on lock & unlock). Not created yet: widget flag set, window created with it.
+        """
+        flag = Qt.WindowType.WindowTransparentForInput
+        flags = self.windowFlags()
+        if bool(flags & flag) == transparent:
+            return False
+        handle = self.windowHandle()
+        if handle is not None and self.isVisible():
+            new_flags = flags | flag if transparent else flags ^ flag
+            self.overrideWindowFlags(new_flags)
+            handle.setFlags(new_flags)
+            return False
+        self.setWindowFlag(flag, transparent)  # hides window
+        return True
 
     @Slot(bool)  # type: ignore[operator]
     def __toggle_lock(self, locked: bool):
         """Toggle widget lock state"""
-        self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, locked)
+        hidden = self.__set_input_transparent(locked)
         # Visual edit mode while unlocked
         self._edit_frame.set_visible(not locked)
-        # Need re-check after lock/unlock (setting window flag hides window)
+        self._edit_frame.set_editing(realtime_state.editing and not locked)
+        # Need re-check after lock/unlock (shown while unlocked, visibility context while locked)
+        self.__refresh_visibility(animate=not hidden)
+
+    @Slot(bool)  # type: ignore[operator]
+    def __set_editing(self, editing: bool):
+        """Edit mode started or ended: outline always shown, overlay shown even if hidden"""
+        self._edit_frame.set_editing(editing and not self.cfg.overlay["fixed_position"])
+        self.__refresh_visibility()
+
+    def apply_placement(self):
+        """Position, opacity or visibility options changed (undo, context menu): applied at once"""
+        self.move(self.wcfg["position_x"], self.wcfg["position_y"])
         self.__refresh_visibility(animate=False)
 
     @Slot(bool)  # type: ignore[operator]
@@ -241,12 +314,17 @@ class Base(QWidget):
     def __resize_by_handle(self, factor: float):
         """Scale widget pixel sizes (saved to preset), then reload widget"""
         setting = self.cfg.user.setting[self.widget_name]
-        if scale_widget_setting(setting, factor, self.widget_name):
+        before = dict(setting)
+        changed = scale_widget_setting(setting, factor, self.widget_name)
+        if changed:
+            edit_mode().record(self.widget_name, "Resize", {key: before[key] for key in changed}, changed)
             self.cfg.save()
             QTimer.singleShot(0, lambda name=self.widget_name: reload_widget(name))
 
     def should_hide(self) -> bool:
-        """Hidden by auto hide, hotkey, or visibility context"""
+        """Hidden by auto hide, hotkey, or visibility context, always shown in edit mode"""
+        if realtime_state.editing:
+            return False
         if realtime_state.hidden:
             return True
         if not self.cfg.overlay["fixed_position"]:
@@ -301,6 +379,7 @@ class Base(QWidget):
         overlay_signal.context.connect(self.__context_changed)
         overlay_signal.paused.connect(self.__toggle_timer)
         overlay_signal.iconify.connect(self.__toggle_vr_compat)
+        overlay_signal.editing.connect(self.__set_editing)
 
     def __break_signal(self):
         """Disconnect overlay lock and hide signal"""
@@ -309,15 +388,13 @@ class Base(QWidget):
         overlay_signal.context.disconnect(self.__context_changed)
         overlay_signal.paused.disconnect(self.__toggle_timer)
         overlay_signal.iconify.disconnect(self.__toggle_vr_compat)
+        overlay_signal.editing.disconnect(self.__set_editing)
 
     def mouseMoveEvent(self, event):
         """Update widget position"""
         if mousepos.valid() and event.buttons() == Qt.MouseButton.LeftButton:
-            # Snapping to reference grid if Ctrl is pressed
-            if (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-                self.move(mousepos.snapping(self, event.globalPosition().toPoint()))
-            else:
-                self.move(mousepos.moving(event.globalPosition().toPoint()))
+            # Magnetic snapping (Ctrl: free move), grid, Shift: one axis, see _common.MousePosition
+            self.move(mousepos.position(self, event.globalPosition().toPoint(), event.modifiers()))
             # Show layout guide while dragging
             if self.cfg.application["show_layout_guides"]:
                 guide = layout_guide()
@@ -326,71 +403,183 @@ class Base(QWidget):
                 else:
                     grid_size = self.cfg.application["grid_move_size"] if self.cfg.overlay["enable_grid_move"] else 0
                     guide.begin(self, grid_size)
+            edit_mode().placement_changed(self.widget_name)
 
     def mousePressEvent(self, event):
-        """Set offset position & press state"""
+        """Set offset position & press state, select widget"""
         # Certain situation or platform can bypass "WindowTransparentForInput" flag
         # Make sure overlay cannot be dragged while "fixed_position" enabled
-        if not self.cfg.overlay["fixed_position"] and event.buttons() == Qt.MouseButton.LeftButton:
+        if self.cfg.overlay["fixed_position"]:
+            return
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self._drag_start = self.pos()
             mousepos.config(
                 event.position().toPoint(),
                 self.cfg.overlay["enable_grid_move"],
                 self.cfg.application["grid_move_size"],
                 self.cfg.application["snap_gap"],
                 self.cfg.application["snap_distance"],
+                magnetic=self.cfg.application.get("enable_magnetic_snap", True),
+                start=self.pos(),
             )
+        edit_mode().select(self.widget_name)
 
     def mouseReleaseEvent(self, event):
         """Save position on release"""
+        dragged = mousepos.valid()
         mousepos.reset()
-        layout_guide().end()
+        end_layout_guide()
+        start, self._drag_start = self._drag_start, None
+        if dragged and start is not None and start != self.pos():
+            edit_mode().record(self.widget_name, "Move", position_values(start), position_values(self.pos()))
         self.__save_position()
+
+    def keyPressEvent(self, event):
+        """Unlocked overlay (clicked one has keyboard focus): arrow keys move it, undo & redo"""
+        if self.cfg.overlay["fixed_position"]:
+            super().keyPressEvent(event)
+            return
+        key = event.key()
+        modifiers = event.modifiers()
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        editor = edit_mode()
+        if key in ARROW_KEYS and not ctrl:
+            self.nudge_position(*ARROW_KEYS[key], 10 if shift else 1)
+        elif ctrl and key == Qt.Key.Key_Z:
+            editor.redo() if shift else editor.undo()
+        elif ctrl and key == Qt.Key.Key_Y:
+            editor.redo()
+        elif key == Qt.Key.Key_Escape:
+            editor.deselect(self.widget_name)
+        elif key == Qt.Key.Key_Delete:
+            self.disable_overlay()
+        else:
+            super().keyPressEvent(event)
+
+    def changeEvent(self, event):
+        """Overlay no longer active window (game or app clicked): not selected"""
+        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+            name = self.__dict__.get("widget_name")  # gone once widget stopped
+            if name:
+                edit_mode().deselect(name)
+        super().changeEvent(event)
+
+    def nudge_position(self, step_x: int, step_y: int, count: int = 1):
+        """Move by one pixel (or grid step) per count, presses in a row are one undo step"""
+        grid = self.cfg.application["grid_move_size"] if self.cfg.overlay["enable_grid_move"] else 1
+        pos = QPoint(
+            step_on_grid(self.x(), step_x, grid, count) if step_x else self.x(),
+            step_on_grid(self.y(), step_y, grid, count) if step_y else self.y(),
+        )
+        self.move_overlay(pos, "Move", merge=True)
+
+    def move_overlay(self, pos: QPoint, action: str, merge: bool = False):
+        """Move to position (keyboard, menu), saved & undoable
+
+        Args:
+            pos: new position.
+            action: name of undo step.
+            merge: merge with previous step (arrow key presses), screen layout saved once they stop.
+        """
+        before = position_values(self.pos())
+        self.move(pos)
+        edit_mode().record(self.widget_name, action, before, position_values(self.pos()), merge)
+        self.__save_position(store_now=not merge)
+        edit_mode().placement_changed(self.widget_name)
+
+    def center_on_screen(self, horizontal: bool):
+        """Center on its screen (centering rect of widget), horizontally or vertically"""
+        pos = centered(self.centering_rect(), self.screen().geometry(), horizontal, self.pos())
+        self.move_overlay(pos, "Centering")
+
+    def move_to_screen(self, screen: Any):
+        """Same relative place on another screen"""
+        pos = place_on_screen(self.geometry(), self.screen().geometry(), screen.geometry())
+        self.move_overlay(pos, "Move to Screen")
+
+    def change_options(self, action: str, values: dict):
+        """Change options from context menu, saved & undoable"""
+        before = {key: self.wcfg.get(key) for key in values}
+        edit_mode().record(self.widget_name, action, before, values)
+        apply_values(self.widget_name, values)
+
+    def disable_overlay(self):
+        """Turn overlay off, undoable"""
+        name = self.widget_name
+        edit_mode().record(name, "Disable", {"enable": True}, {"enable": False})
+        disable_widget(name)
 
     def contextMenuEvent(self, event):
         """Widget context menu"""
+        name = self.widget_name
+        editor = edit_mode()
+        editor.select(name)
         menu = QMenu()
+        actions = {}
 
-        show_name = menu.addAction(format_module_name(self.widget_name))
+        def add(menu_: QMenu, text: str, callback, checked: bool | None = None):
+            action = menu_.addAction(text)
+            if checked is not None:
+                action.setCheckable(True)
+                action.setChecked(checked)
+            actions[action] = callback
+            return action
+
+        show_name = menu.addAction(module_label(name))
         show_name_font = show_name.font()
         show_name_font.setBold(True)
         show_name.setFont(show_name_font)
         menu.addSeparator()
 
-        menu.addAction(tr("Config"))
+        add(menu, tr("Config"), lambda: config_widget(name))
         menu.addSeparator()
-        menu.addAction(tr("Center Horizontally"))
-        menu.addAction(tr("Center Vertically"))
+        add(menu, tr("Center Horizontally"), lambda: self.center_on_screen(horizontal=True))
+        add(menu, tr("Center Vertically"), lambda: self.center_on_screen(horizontal=False))
+        screens = QGuiApplication.screens()
+        if len(screens) > 1:
+            menu_screen = menu.addMenu(tr("Move to Screen"))
+            primary = QGuiApplication.primaryScreen()
+            for index, screen in enumerate(screens, 1):
+                size = screen.geometry()
+                text = f"{tr('Screen')} {index}   {size.width()} \u00D7 {size.height()}"
+                if screen is primary:
+                    text = f"{text}   ({tr('Primary')})"
+                add(menu_screen, text, lambda screen=screen: self.move_to_screen(screen), screen is self.screen())
         menu.addSeparator()
-        menu.addAction(tr("Reload"))
-        menu.addAction(tr("Disable"))
-        extra_actions = dict(self.menu_actions())
+
+        menu_visibility = menu.addMenu(tr("Visibility"))
+        group = QActionGroup(menu_visibility)
+        current = self.wcfg.get("visibility_context", "Always")
+        for choice in CHOICE_COMMON["^visibility_context$"]:
+            group.addAction(add(menu_visibility, tr(choice), lambda choice=choice: self.change_options(
+                "Visibility", {"visibility_context": choice}), choice == current))
+        menu_opacity = menu.addMenu(tr("Opacity"))
+        group = QActionGroup(menu_opacity)
+        current_opacity = round(self.wcfg["opacity"] * 100)
+        for percent in OPACITY_STEPS:
+            group.addAction(add(menu_opacity, f"{percent}%", lambda percent=percent: self.change_options(
+                "Opacity", {"opacity": percent / 100}), percent == current_opacity))
+        menu.addSeparator()
+
+        step = editor.history.peek_undo()
+        if step is not None:
+            add(menu, f"{tr('Undo')}{step_text(step)}", editor.undo)
+        add(menu, tr("Reload"), lambda: reload_widget(name))
+        add(menu, tr("Disable"), self.disable_overlay)
+        extra_actions = tuple(self.menu_actions())
         if extra_actions:
             menu.addSeparator()
-            for name in extra_actions:
-                menu.addAction(tr(name))
+            for text, callback in extra_actions:
+                add(menu, tr(text), callback)
+        menu.addSeparator()
+        if not realtime_state.editing:
+            add(menu, tr("Edit Mode"), editor.enter)
+        add(menu, tr("Lock Overlay"), lock_overlay)
 
-        selected_action = menu.exec(event.globalPos())
-        if not selected_action:
-            return
-
-        action = untr(selected_action.text())
-        if action in extra_actions:
-            extra_actions[action]()
-            return
-        if action == "Center Horizontally":
-            area = self.centering_rect()
-            self.move((self.screen().geometry().width() - area.width()) // 2 - area.x(), self.y())
-            self.__save_position()
-        elif action == "Center Vertically":
-            area = self.centering_rect()
-            self.move(self.x(), (self.screen().geometry().height() - area.height()) // 2 - area.y())
-            self.__save_position()
-        elif action == "Config":
-            config_widget(self.widget_name)
-        elif action == "Reload":
-            reload_widget(self.widget_name)
-        elif action == "Disable":
-            disable_widget(self.widget_name)
+        callback = actions.get(exec_menu(menu, event.globalPos()))
+        if callback is not None:
+            callback()
 
     def menu_actions(self):
         """Widget specific context menu entries: (name, callback) pairs, shown after the common ones"""
@@ -790,6 +979,18 @@ def validate_option(config: dict) -> dict:
                 config[key] += 1
             column_set.append(config[key])
     return config
+
+
+def exec_menu(menu: QMenu, pos: QPoint):
+    """Show context menu, returns chosen action (replaced in tests)"""
+    return menu.exec(pos)
+
+
+def lock_overlay():
+    """Lock overlay (leaves edit mode)"""
+    from ..overlay_control import octrl
+
+    octrl.toggle.lock()
 
 
 def disable_widget(widget_name: str):

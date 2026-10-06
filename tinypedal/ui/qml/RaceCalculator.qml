@@ -34,6 +34,11 @@ TpPage {
             Layout.fillWidth: true
             spacing: theme.em * 0.5
 
+            GameLogo {  // circuit logo of game
+                source: page.header.trackLogo || ""
+                boxWidth: theme.em * 3.0
+                boxHeight: theme.em * 1.8
+            }
             Rectangle {  // source chip
                 implicitHeight: Math.round(theme.em * 2)
                 implicitWidth: Math.min(sourceDot.width + sourceText.implicitWidth + theme.em * 1.6, theme.em * 24)

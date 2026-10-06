@@ -20,7 +20,8 @@
 RPM LED Widget, modern design
 
 Capsule LEDs lighting up progressively (green, yellow, red), all flashing blue at critical RPM
-and purple when over-revving, green flash with speed limiter. Lit LEDs have a soft glow.
+and purple when over-revving, green flash with speed limiter. Unlit LEDs keep a faint tint of
+their zone color (zones readable before they light up), lit LEDs glow with a light top shine.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from .draw import panel, rounded
 
 OFF, LOW, SAFE, REDLINE, CRITICAL, OVER_REV, LIMITER = range(7)
 GLOW_ALPHA = 60  # soft glow around lit LED
+ZONE_ALPHA = 46  # zone color tint of unlit LED
 SHINE = QColor(255, 255, 255, 45)  # highlight on top of lit LED
 
 
@@ -66,6 +68,8 @@ class Realtime(ModernOverlay):
             theme.accent, theme.best, theme.positive,
         )
         self.glows = tuple(theme.tint(color, GLOW_ALPHA) for color in self.colors)
+        self.zone_tints = tuple(theme.tint(color, ZONE_ALPHA) for color in self.colors)
+        self.zones: tuple[int, ...] = ()  # color of each LED once lit, set with car max RPM
         side_w = led_w * self.max_led + gap * (self.max_led - 1)
         self.leds = [QRectF(pad + (led_w + gap) * index, pad, led_w, led_h) for index in range(self.max_led)]
         width = pad * 2 + side_w
@@ -86,8 +90,13 @@ class Realtime(ModernOverlay):
         theme = self.theme
         if self.wcfg["show_background"]:
             panel(painter, QRectF(self.rect()), theme, self.radius(0.5), self.depth_effects)
-        for rect in self.leds:
-            rounded(painter, rect, min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0), self.colors[OFF])
+        zones = self.zones
+        for index, rect in enumerate(self.leds):
+            radius = min(rect.width(), rect.height()) / 2 * min(self.corner, 1.0)
+            rounded(painter, rect, radius, self.colors[OFF])
+            zone = zones[index % self.max_led] if zones else OFF
+            if zone != OFF:
+                rounded(painter, rect, radius, self.zone_tints[zone])
 
     def paint(self, painter: QPainter):
         states = self.state
@@ -117,6 +126,10 @@ class Realtime(ModernOverlay):
             self.rpm_overrev = rpm_max * wcfg["rpm_multiplier_over_rev"] - self.rpm_low
             self.rpm_scale = self.max_led / max(self.rpm_critical, 0.0000001)
             self.gear_max = engine.gear_max()
+            zones = tuple(self.led_state(index / self.rpm_scale) for index in range(self.max_led))
+            if zones != self.zones:
+                self.zones = zones
+                self.redraw_static()
         rpm = engine.rpm() - self.rpm_low
         warn_flash = self.warn_flash
         limiter = warn_flash is not None and bool(api.read.switch.speed_limiter())

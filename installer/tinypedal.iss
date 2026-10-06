@@ -53,6 +53,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Program files of previous version: lib is rebuilt by each release (Python, Qt & QML modules change),
 ; stale files would pile up. User data (presets, telemetry...) is next to the executable, not in lib.
 Type: filesandordirs; Name: "{app}\lib"
+; Example speed plugin, shipped until 0.21: removed from the app (plugins added by user are kept)
+Type: filesandordirs; Name: "{app}\plugins\example_speed"
 
 [Files]
 Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

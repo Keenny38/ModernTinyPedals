@@ -29,9 +29,10 @@ import html
 from collections.abc import Callable
 from typing import NamedTuple
 
-from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer, Slot
-from PySide6.QtGui import QFont, QPalette, QPixmap
+from PySide6.QtCore import QDateTime, QLocale, QPointF, Qt, QTimer, Slot
+from PySide6.QtGui import QFont, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -52,11 +53,14 @@ from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
 from ..update import changelog_sections, localized_changelog_name, update_checker
+from ..userfile.custom_image import brand_logo_file, load_picture, logo_for_background
 from ..userfile.driver_history import SessionRecord, read_records
+from ..userfile.game_images import images
 from . import app_icon_file, status_color
 from ._common import UIScaler
 from .nav_rail import RailEditor
 from .ordered_picker import PickerEntry
+from .quick.game_pictures import notifier
 
 CHANGELOG_FILE = "CHANGELOG.md"  # next to app (release build) or project root (source)
 SESSION_NAMES = ("Test day", "Practice", "Qualify", "Warmup", "Race")  # game session type index
@@ -231,6 +235,34 @@ def last_session() -> SessionRecord | None:
     return records[-1] if records else None
 
 
+def game_logos(track: str, vehicle_name: str = "", brand: str = "") -> tuple[str, ...]:
+    """Circuit & car brand logo files of game (own brand logo first), those cached only"""
+    light = QApplication.palette().color(QPalette.ColorRole.Window).lightness() > 128
+    track_logo = logo_for_background(images.track_logo(track), light) if track else ""
+    brand_logo = brand_logo_file(cfg.path.brand_logo, images.brand(vehicle_name, brand), light, vehicle_name)         if vehicle_name or brand else ""
+    return tuple(path for path in (track_logo, brand_logo) if path)
+
+
+def live_logos() -> tuple[str, ...]:
+    """Logos of current track & player car, none if not on track"""
+    read = api.read
+    try:
+        if not read.state.active():
+            return ()
+        return game_logos(read.session.track_name(), read.vehicle.vehicle_name())
+    except (AttributeError, TypeError, ValueError, IndexError):
+        return ()
+
+
+def record_logos(record: SessionRecord) -> tuple[str, ...]:
+    """Logos of track & car brand of a session record (vehicle key "Class - Brand", or vehicle name)"""
+    if " - " in record.vehicle:
+        return game_logos(record.track, brand=record.vehicle.split(" - ", 1)[1].strip())
+    if record.vehicle and record.vehicle != record.vehicle_class:
+        return game_logos(record.track, record.vehicle)
+    return game_logos(record.track)
+
+
 def session_record_text(record: SessionRecord) -> tuple[str, str]:
     """Value & detail of a session record: track, then vehicle, session, best lap, result, date"""
     when = QDateTime.fromSecsSinceEpoch(int(record.time))
@@ -274,10 +306,14 @@ class HomeCard(QFrame):
         self.set_glyph(glyph)
         self.label_title = QLabel(tr(title), self)
         self.label_title.setObjectName("homeCardTitle")
+        self.label_logos = QLabel(self)  # circuit & car brand logos of game
+        self.label_logos.hide()
+        self.logos: tuple[str, ...] = ()
         layout_title = QHBoxLayout()
         layout_title.setSpacing(UIScaler.pixel(6))
         layout_title.addWidget(self.label_glyph)
         layout_title.addWidget(self.label_title, stretch=1)
+        layout_title.addWidget(self.label_logos)
 
         self.label_value = QLabel("", self)
         self.label_value.setObjectName("homeValue")
@@ -303,6 +339,33 @@ class HomeCard(QFrame):
         text = glyph[0] if self.icon_family else glyph[1]
         if self.label_glyph.text() != text:
             self.label_glyph.setText(text)
+
+    def set_logos(self, paths: tuple[str, ...]):
+        """Logos side by side next to title (hidden if none)"""
+        if paths == self.logos:
+            return
+        self.logos = paths
+        height = UIScaler.pixel(22)
+        ratio = self.devicePixelRatioF()
+        pictures = [load_picture(path, height * 3, height, ratio) for path in paths]
+        pictures = [picture for picture in pictures if not picture.isNull()]
+        if not pictures:
+            self.label_logos.hide()
+            return
+        gap = UIScaler.pixel(8)
+        width = sum(picture.width() / ratio for picture in pictures) + gap * (len(pictures) - 1)
+        row = QPixmap(max(round(width * ratio), 1), round(height * ratio))
+        row.setDevicePixelRatio(ratio)
+        row.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(row)
+        left = 0.0
+        for picture in pictures:
+            top = (height - picture.height() / ratio) / 2
+            painter.drawPixmap(QPointF(left, top), picture)
+            left += picture.width() / ratio + gap
+        painter.end()
+        self.label_logos.setPixmap(row)
+        self.label_logos.show()
 
     def add_action(self, text: str, action: Callable[[], object], primary: bool = False) -> QPushButton:
         """Button at bottom of card"""
@@ -462,6 +525,7 @@ class HomeView(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh_live)
         self._timer.start(1000)
+        notifier().changed.connect(self.refresh_last_session)  # logos fetched from game meanwhile
         self.refresh()
 
     # Quick access
@@ -652,6 +716,7 @@ class HomeView(QWidget):
         hidden = record is None
         if record is not None:
             self.card_last.set_text(*session_record_text(record))
+            self.card_last.set_logos(record_logos(record))
         if self.card_last.isHidden() != hidden:
             self.card_last.setHidden(hidden)
             self.rearrange()
@@ -670,6 +735,7 @@ class HomeView(QWidget):
         else:
             detail = tr("Not running") if state == "not running" else tr(state)
         self.card_game.set_text(f"<span style='color:{dot}'>●</span> <b>{html.escape(api.name)}</b>", detail)
+        self.card_game.set_logos(live_logos() if session else ())
         if self.card_start.isHidden() != running:  # game setup reminder while game not running
             self.card_start.setHidden(running)
             self.rearrange()

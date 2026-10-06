@@ -3,6 +3,83 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.22.0 (2026-10-06)
+
+### Overlay edit mode
+
+Placing the overlays on the game screen is now a real **edit mode**. Unlock the overlay (`Unlock Overlay` on the Home page, tray menu, command palette or `overlay_lock` hotkey) and a toolbar shows up at the top of the game screen.
+
+- **Every overlay shows its outline and name**, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or by their visibility context: each one can be found and moved, even from the game menus.
+- **Toolbar**: `Snap`, `Grid` and `Guides` toggles, `Undo` / `Redo`, the active overlays (uncheck one to turn it off) and `Done` to lock the overlay. Drag it by its grip; the `✕` hides it and leaves the overlay unlocked.
+- **Magnetic snapping**: a dragged overlay snaps to screen edges, screen center and the edges and centers of the other overlays (new `enable_magnetic_snap` option, on by default). Hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. The guides show the aligned lines and the position of the overlay.
+- **Keyboard**: click an overlay to select it (solid outline), then arrow keys move it by one pixel (`Shift`: 10 pixels, one grid step with `Grid Move`), `Ctrl+Z` / `Ctrl+Y` undo and redo, `Delete` turns it off, `Esc` unselects it.
+- **Undo** for moves, arrow keys, centering, resizing with the corner handle, opacity, visibility and turning an overlay off, until the overlay is locked.
+- **Right-click menu**: `Move to Screen` (same place on another monitor), `Visibility` (Always, Race, Qualifying & Race, Practice & Qualifying, On Track, In Pits), `Opacity`, `Undo`, `Edit Mode` and `Lock Overlay`, next to `Config`, centering, `Reload` and `Disable`.
+
+An overlay already unlocked at startup does not start edit mode: as before, its outline only shows under the mouse, so nothing stays on screen while driving with an unlocked overlay.
+
+![Overlay edit mode: toolbar, selected overlay, alignment guide and position](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
+
+#### Fixes and performance
+
+- `Center Horizontally` and `Center Vertically` center the overlay on its own screen: on a second monitor it was moved to the first one.
+- An overlay left outside every screen (monitor unplugged, preset made on another computer) is shown on the nearest screen at startup, its saved position kept (`enable_window_position_correction`, off with the VR overlay).
+- Locking and unlocking no longer hides and shows every overlay window: no flicker.
+- Locked overlays no longer send each update and paint event through the edit outline (less work while driving), and the outline is only created the first time the overlay is unlocked.
+- The alignment guides only redraw what changes on each mouse move instead of the whole screen, and free their screen-sized image once the drag ends.
+
+### Modern design for every overlay
+
+The ten graphic overlays get their own modern design, drawn for it instead of the classic drawing in modern colors. They read the game data the same way as the classic layout, so both show the same values.
+
+- **Radar**: round, fading at its edge, with an amber then red glow toward a car alongside.
+- **Track map**: cars as numbered dots in their class colors (or race status colors), checkered start line.
+- **Navigation**: road with edge lines, view fading at its edge.
+- **Friction circle**: G rings, a trace fading with age and the recent peaks.
+- **Heading**: compass ring with yaw and front slip angle.
+- **Steering wheel**, **instrument** and **weather forecast**: wheel and icons drawn as shapes in the theme colors.
+- **Trailing**: soft areas under the throttle and brake lines.
+- **Track notes**: note on a card.
+
+![Radar, track map and navigation, before and after](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-map-overlays-design.png)
+
+**Black box**, **chat**, **elevation**, **flag**, **steering meter**, **race notifications** and **RPM LED** get a new modern design too: every overlay has one now (`enable_classic_layout` or a Legacy theme bring the classic look back).
+
+- **Black box**: same layout and options, drawn in the Barlow font with capital labels, theme colors (colors left at their default value follow the overlay theme and the colorblind option, your own colors are kept), cards with soft shading and a hairline border, capsule RPM LEDs.
+- **Flag**: one chip per active item in its flag color (yellow, blue, green, red...), caption above the value: pit time, fuel left, speed with the limiter on, distance to the yellow flag, class and time of the blue flag, traffic gap, pit window, repair time, sectors under yellow, full course yellow phase. Inactive items take no room; `*_text` options you changed replace the captions.
+- **Chat**: one card growing with the messages, each sender in its own color, new messages highlighted with an accent edge, messages fading out at the end of their display time.
+- **Elevation**: elevation profile on a chart, the part of the lap already driven in accent color, the car as a dot on the profile, current elevation and scale above the chart.
+- **Steering meter**: bar growing from the center toward the steering side with a thumb, scale marks, angle written on the other half.
+- **Race notifications**: an icon for each message (arrow, flag, stopwatch, penalty, invalid lap), title above detail, a thin bar shrinking with the time left.
+- **RPM LED**: unlit LEDs keep a faint tint of their color zone, so the green, yellow and red zones show before they light up.
+- On the `Overlays` page, flag, chat, race notifications and spotter show a sample instead of an empty picture.
+
+### Spotter
+
+- **Clear signal**: a side bar flashes green once the car alongside is gone, like a spotter calling "clear" (`show_clear_signal`, `clear_signal_duration`; `bar_color_clear` in classic layout).
+- **Car coming up behind**: the bottom of a side bar lights up while a car comes up behind on that side, brighter as it gets closer (`show_approaching_cars`, `approaching_distance`). A car right behind you in your lane is left out.
+- Modern design: rounded bars glowing toward the screen center, going from amber to red as the car alongside gets closer sideways.
+
+### Real logos and pictures from the game
+
+With Le Mans Ultimate, the app shows the real **car brand logos**, **circuit logos**, **car pictures** and **circuit pictures** of the game menus. They are taken from the game running on your computer (`enable_restapi_access`, on by default) and kept in the new `gameimage` folder: nothing is shipped with the app, and they show up once the game was open with the app.
+
+- **Overlays**: brand logo column of Relative, Standings and Rivals (`column_brand_logo`), now on by default and turned on once in existing presets, a bit wider. While a brand has no logo, its first letters are shown.
+- **Pages**: circuit and brand logos, car and circuit pictures on the Home page and the Race Results, Driver Stats, Spectate, Replays, Race Calculator, Telemetry and Track Map Viewer pages.
+- **Stream overlay**: the race results source shows the circuit logo and the car brand logos.
+- A PNG logo of your own in the `brandlogo` folder still comes first (a word of the brand is enough: `Corvette.png` for "Chevrolet Corvette"). Logos get a readable copy on dark and light backgrounds and their empty margins trimmed. With rFactor 2, your own files are the only logos.
+
+![Brand logo column on by default](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-brand-logo-column.png)
+
+### Overlay Options
+
+- **Relative, Standings and Rivals** list their columns in one `Columns` list, from left to right as the overlay draws them: switch each column on or off, drag it or use the arrows to move it. Sections follow for the rows, the classes and number of cars, then the options of each column, dimmed while the column is hidden.
+- Their live preview shows a sample race with fictional drivers.
+
+### Removed
+
+- The **example speed plugin** is no longer shipped, and the installer removes the copy of earlier versions. Overlay plugins still work: [Widget plugins](docs/customization.md#widget-plugins) has a short example.
+
 ## 0.21.0 (2026-10-06)
 
 ### Race results

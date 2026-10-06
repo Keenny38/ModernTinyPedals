@@ -68,6 +68,9 @@ def render_widget(config: Setting, widget_name: str, widget_setting: dict) -> QP
         module = import_module(f"tinypedal.widget.{widget_name}")
     widget = module.Realtime(preview_config, widget_name)
     try:
+        show_sample = getattr(widget, "show_sample", None)
+        if show_sample is not None:  # driver lists: sample race instead of empty rows
+            show_sample()
         widget.adjustSize()
         return widget.grab()
     finally:

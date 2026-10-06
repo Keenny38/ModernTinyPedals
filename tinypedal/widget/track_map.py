@@ -20,6 +20,8 @@
 Track map Widget
 """
 
+from typing import Any
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QPainter, QPainterPath, QPen, QPixmap
 
@@ -32,71 +34,18 @@ from ._base import Overlay
 from ._painter import fill_pixmap, fill_rect
 
 
-class Realtime(Overlay):
-    """Draw widget"""
+class TrackMapMixin:
+    """Map geometry, car, safety car & pit out prediction positions, for classic & modern widget"""
 
-    def __init__(self, config, widget_name):
-        # Assign base setting
-        super().__init__(config, widget_name)
+    wcfg: Any
 
-        # Config font
-        font = self.config_font(
-            self.wcfg["font_name"],
-            self.wcfg["font_size"],
-            self.wcfg["font_weight"],
-        )
-        self.setFont(font)
-        font_m = self.get_font_metrics(font)
-
-        # Config variable
+    def setup_map(self, area_size: int, area_margin: int):
+        """Map area & options, last data"""
         self.show_position_in_class = self.wcfg["enable_multi_class_styling"] and self.wcfg["show_position_in_class"]
         self.display_detail_level = max(self.wcfg["display_detail_level"], 0)
-
-        # Config canvas
-        self.area_size = max(self.wcfg["area_size"], 100)
-        self.area_margin = min(max(self.wcfg["area_margin"], 0), int(self.area_size/4))
+        self.area_size = area_size
+        self.area_margin = area_margin
         self.temp_map_size = self.area_size - self.area_margin * 2
-
-        self.resize(self.area_size, self.area_size)
-        self.pixmap_map = QPixmap(self.area_size, self.area_size)
-
-        self.pen_text = {
-            "opponent": QPen(self.wcfg["font_color"]),
-            "player": QPen(self.wcfg["font_color_player"]),
-            "safety_car": QPen(self.wcfg["font_color_safety_car"]),
-            "pitstop_duration": QPen(self.wcfg["font_color_pitstop_duration"]),
-        }
-        self.pen_outline = {
-            "opponent": self.set_pen_style(self.wcfg["vehicle_outline_color"], self.wcfg["vehicle_outline_width"]),
-            "laps_ahead": self.set_pen_style(self.wcfg["vehicle_outline_color_laps_ahead"], self.wcfg["vehicle_outline_width_laps_ahead"]),
-            "laps_behind": self.set_pen_style(self.wcfg["vehicle_outline_color_laps_behind"], self.wcfg["vehicle_outline_width_laps_behind"]),
-            "player": self.set_pen_style(self.wcfg["vehicle_outline_color_player"], self.wcfg["vehicle_outline_width_player"]),
-            "safety_car": self.set_pen_style(self.wcfg["vehicle_outline_color_safety_car"], self.wcfg["vehicle_outline_width_safety_car"]),
-            "prediction": self.set_pen_style(self.wcfg["prediction_outline_color"], self.wcfg["prediction_outline_width"]),
-            "auto_prediction": self.set_pen_style(self.wcfg["auto_prediction_outline_color"], self.wcfg["auto_prediction_outline_width"]),
-            "proximity": self.set_pen_style(self.wcfg["proximity_circle_color"], self.wcfg["proximity_circle_width"]),
-        }
-        self.brush_classes = {}
-        self.brush_overall = {
-            "player": self.set_brush_style(self.wcfg["vehicle_color_player"]),
-            "leader": self.set_brush_style(self.wcfg["vehicle_color_leader"]),
-            "in_pit": self.set_brush_style(self.wcfg["vehicle_color_in_pit"]),
-            "yellow": self.set_brush_style(self.wcfg["vehicle_color_yellow"]),
-            "laps_ahead": self.set_brush_style(self.wcfg["vehicle_color_laps_ahead"]),
-            "laps_behind": self.set_brush_style(self.wcfg["vehicle_color_laps_behind"]),
-            "same_lap": self.set_brush_style(self.wcfg["vehicle_color_same_lap"]),
-            "safety_car": self.set_brush_style(self.wcfg["vehicle_color_safety_car"]),
-        }
-
-        veh_size_base = self.wcfg["font_size"] + round(font_m.width * self.wcfg["bar_padding"])
-        veh_size_opt = veh_size_base * max(self.wcfg["vehicle_scale"], 1.0)
-        veh_size_plr = veh_size_base * max(self.wcfg["vehicle_scale_player"], 1.0)
-        veh_size_sc = veh_size_base * max(self.wcfg["vehicle_scale_safety_car"], 1.0)
-
-        self.veh_shape = QRectF(-veh_size_opt * 0.5, -veh_size_opt * 0.5, veh_size_opt, veh_size_opt)
-        self.veh_shape_player = QRectF(-veh_size_plr * 0.5, -veh_size_plr * 0.5, veh_size_plr, veh_size_plr)
-        self.veh_shape_safetycar = QRectF(-veh_size_sc * 0.5, -veh_size_sc * 0.5, veh_size_sc, veh_size_sc)
-        self.veh_text_shape = QRectF(-veh_size_base * 0.5, -veh_size_base * 0.5 + font_m.voffset, veh_size_base, veh_size_base)
 
         if self.wcfg["show_pitout_prediction"]:
             self.show_while_requested = self.wcfg["show_pitout_prediction_while_requested_pitstop"]
@@ -107,76 +56,19 @@ class Realtime(Overlay):
             self.auto_pit_time = -1
             if self.wcfg["enable_fixed_pitout_prediction"]:
                 self.fixed_pit_times = tuple(sorted(set(self.set_fixed_pit_time())))
-            self.pit_text_shape = QRectF(
-                -veh_size_base * 0.5 - 2,
-                font_m.voffset - veh_size_opt * 0.5 - veh_size_base - 3,
-                veh_size_base + 4,
-                veh_size_base,
-            )
-
-        if self.wcfg["show_proximity_circle"]:
-            self.rect_proximity = QRectF()
 
         if self.wcfg["show_safety_car"]:
             self.gen_position_interp = vehicle_position_interp()
 
         # Last data
         self.last_modified = 0
-        self.last_veh_data_version = None
+        self.last_veh_data_version: int | None = None
         self.circular_map = True
-        self.map_scaled = None
+        self.map_scaled: Any = None  # scaled coordinates of recorded map, None for temporary circle map
         self.map_range = (0, 10, 0, 10)
         self.map_scale = 1.0
         self.map_offset = (0, 0)
         self.map_orient = 0.0  # radians
-
-        self.update_map(-1)
-
-    def timerEvent(self, event):
-        """Update when vehicle on track"""
-        # Map
-        modified = minfo.mapping.lastModified
-        self.update_map(modified)
-
-        # Vehicles
-        veh_data_version = minfo.vehicles.dataSetVersion
-        if self.last_veh_data_version != veh_data_version:
-            self.last_veh_data_version = veh_data_version
-            self.update()
-
-    # GUI update methods
-    def update_map(self, data):
-        """Map update"""
-        if self.last_modified != data:
-            self.last_modified = data
-            raw_data = minfo.mapping.coordinates if data != -1 else None
-            map_sector_paths, map_full_path = self.create_map_path(raw_data)
-            self.draw_map_image(map_sector_paths, map_full_path, self.circular_map)
-            if self.wcfg["show_proximity_circle"]:
-                self.update_proximity_rect()
-
-    def paintEvent(self, event):
-        """Draw"""
-        painter = QPainter(self)
-        painter.drawPixmap(0, 0, self.pixmap_map)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        if self.map_scaled:
-            self.draw_vehicle_on_map(
-                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
-            )
-            if self.wcfg["show_safety_car"] and api.read.lap.safety_car_active():
-                self.draw_safetycar_on_map(painter, self.map_scaled)
-        else:
-            self.draw_vehicle_on_circle(
-                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
-            )
-        if self.wcfg["show_pitout_prediction"]:
-            self.draw_pitout_prediction(
-                painter,
-                self.map_scaled,
-                minfo.vehicles.dataSet[minfo.vehicles.playerIndex],
-            )
 
     def create_map_path(self, raw_coords=None):
         """Create map path"""
@@ -253,6 +145,295 @@ class Realtime(Overlay):
             )
         return map_sector_paths, map_full_path
 
+    def map_line(self, index: int, length: float) -> tuple[float, float, float, float]:
+        """Line across recorded map at node index (start or sector line): x1, y1, x2, y2"""
+        return calc.line_intersect_coords(
+            self.map_scaled[index],  # point a
+            self.map_scaled[index + 1],  # point b
+            1.57079633,  # 90 degree rotation
+            length
+        )
+
+    def map_position(self, veh_info) -> tuple[float, float]:
+        """Car position on recorded map"""
+        # Position = coords * scale - (min_range * scale - offset)
+        x_offset = self.map_range[0] * self.map_scale - self.map_offset[0]  # min range x, offset x
+        y_offset = self.map_range[2] * self.map_scale - self.map_offset[1]  # min range y, offset y
+        if self.map_orient:
+            rot_x, rot_y = calc.rotate_coordinate(self.map_orient, veh_info.worldPositionX, veh_info.worldPositionY)
+            return rot_x * self.map_scale - x_offset, rot_y * self.map_scale - y_offset
+        return veh_info.worldPositionX * self.map_scale - x_offset, veh_info.worldPositionY * self.map_scale - y_offset
+
+    def circle_position(self, veh_info, inpit_offset: float) -> tuple[float, float]:
+        """Car position on temporary circle map, cars in pit moved inside circle by offset"""
+        offset = self.area_size * 0.5
+        pos_x, pos_y = calc.rotate_coordinate(
+            6.2831853 * veh_info.currentLapProgress,
+            self.temp_map_size / -2 + inpit_offset * veh_info.inPit,  # x pos
+            0,  # y pos
+        )
+        return offset + pos_x, offset + pos_y
+
+    def place_number(self, veh_info) -> int:
+        """Overall or class position of car"""
+        if self.show_position_in_class:
+            return veh_info.positionInClass
+        return veh_info.positionOverall
+
+    def safetycar_position(self, map_data) -> tuple[float, float] | None:
+        """Safety car position on recorded map, None without map or lap distance data"""
+        # Verify data set
+        if not map_data:  # x, y coords
+            return None
+        dist_data = minfo.mapping.elevations
+        if not dist_data:  # distance, z coords
+            return None
+        dist_end_index = min(len(dist_data), len(map_data)) - 1
+        # Interpolate safety car distance
+        safetycar_dist = self.gen_position_interp.send((api.read.timing.elapsed(), api.read.lap.safety_car_distance()))
+        # Interpolate safety car coordinates
+        index_higher = calc.binary_search_higher_column(
+            dist_data, safetycar_dist, 0, dist_end_index)
+        if index_higher > 0:
+            index_lower = index_higher - 1
+            return calc.distance_interp_coordinate(
+                map_data[index_higher][0],
+                map_data[index_lower][0],
+                map_data[index_higher][1],
+                map_data[index_lower][1],
+                dist_data[index_higher][0],
+                dist_data[index_lower][0],
+                safetycar_dist,
+            )
+        return map_data[0]
+
+    def pitout_predictions(self, map_data, plr_veh_info):
+        """Pit out prediction positions on recorded map: (x, y, pit time, auto estimated)"""
+        # Skip drawing
+        if not plr_veh_info.inPit:
+            if not self.show_while_requested:  # if not in pit
+                return
+            if not plr_veh_info.pitRequested:  # not requested pit
+                return
+
+        # Verify data set
+        if not map_data:  # x, y coords
+            return
+        dist_data = minfo.mapping.elevations
+        if not dist_data:  # distance, z coords
+            return
+        deltabest_data = minfo.delta.deltaBestData  # distance, seconds
+        deltabest_max_index = len(deltabest_data) - 1
+        if deltabest_max_index < 2:
+            return
+        laptime_best = deltabest_data[-1][1]
+        laptime_pace = minfo.delta.lapTimePace
+        if laptime_best < 1 or laptime_pace < 1:
+            return
+
+        laptime_scale = laptime_best / laptime_pace
+        dist_end_index = min(len(dist_data), len(map_data)) - 1
+
+        # Calculate pit timer & target time
+        if plr_veh_info.pitRequested and not plr_veh_info.inPit:  # out pit lane
+            pitin_time = target_node_time(minfo.mapping.pitEntryPosition, deltabest_data, deltabest_max_index, laptime_scale)
+            pos_curr_time = target_node_time(api.read.lap.distance(), deltabest_data, deltabest_max_index, laptime_scale)
+            pit_timer = pos_curr_time - pitin_time
+            target_pit_time = self.min_pit_time
+        else:  # in pit lane
+            pit_timer = plr_veh_info.pitTimer.elapsed
+            target_pit_time = target_pitstop_duration(pit_timer, self.min_pit_time, self.pit_time_increment)
+
+        # Find time_into from deltabest_data, scale to match laptime_pace
+        pitout_time = target_node_time(minfo.mapping.pitExitPosition, deltabest_data, deltabest_max_index, laptime_scale)
+        pitout_time_extend = pit_timer + pitout_time
+
+        for pit_time, auto_prediction in self.get_target_pit_time(target_pit_time, pit_timer, plr_veh_info.inPit):
+            # Calc estimated pitout_time_into based on laptime_pace
+            offset_time_into = pitout_time_extend - pit_time
+            pitout_time_into = (offset_time_into - offset_time_into // laptime_pace * laptime_pace) * laptime_scale
+            # Find estimated distance from deltabest_data
+            index_higher = calc.binary_search_higher_column(
+                deltabest_data, pitout_time_into, 0, deltabest_max_index, 1)
+            if index_higher > 0:
+                index_lower = index_higher - 1
+                estimate_dist = calc.linear_interp(
+                    pitout_time_into,
+                    deltabest_data[index_lower][1],
+                    deltabest_data[index_lower][0],
+                    deltabest_data[index_higher][1],
+                    deltabest_data[index_higher][0],
+                )
+            else:
+                estimate_dist = 0
+
+            dist_node_index = calc.binary_search_higher_column(dist_data, estimate_dist, 0, dist_end_index)
+            pos_x, pos_y = map_data[dist_node_index]
+            yield pos_x, pos_y, pit_time, auto_prediction
+
+    def pitstop_duration_text(self, pit_time: float) -> str:
+        """Pit stop duration of prediction"""
+        return f"{min(pit_time - self.pitout_time_offset, 999):.0f}"
+
+    def get_target_pit_time(self, target_pit_time: float, pit_timer: float, in_pit: bool):
+        """Generate target pit time"""
+        max_prediction = self.prediction_count
+        pass_time = minfo.mapping.pitPassTime
+
+        # Fixed time
+        if self.wcfg["enable_fixed_pitout_prediction"]:
+            valid_count = 0
+            for fixed_time in self.fixed_pit_times:
+                if valid_count >= max_prediction:
+                    break
+                fixed_time += pass_time
+                if fixed_time > pit_timer:
+                    valid_count += 1
+                    yield fixed_time, False
+        # Auto incremented time
+        else:
+            increment = self.pit_time_increment
+            for idx in range(max_prediction):
+                yield target_pit_time + increment * idx, False
+
+        # Auto estimated time
+        if self.wcfg["enable_auto_pitout_prediction"]:
+            if in_pit != 1:
+                est_stop_time = api.read.vehicle.pit_stop_time()
+                if est_stop_time > 0:
+                    est_stop_time += max(self.wcfg["auto_prediction_additional_pitstop_time"], 0)
+                self.auto_pit_time = est_stop_time + pass_time + self.pitout_time_offset
+            if self.auto_pit_time > pit_timer:
+                yield self.auto_pit_time, True
+
+    def set_fixed_pit_time(self):
+        """Set fixed target pit time"""
+        for idx in range(1, 11):
+            fixed_time = self.wcfg[f"fixed_pitstop_duration_{idx}"]
+            if fixed_time >= 0:
+                yield fixed_time + self.pitout_time_offset
+
+
+class Realtime(TrackMapMixin, Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+
+        # Config font
+        font = self.config_font(
+            self.wcfg["font_name"],
+            self.wcfg["font_size"],
+            self.wcfg["font_weight"],
+        )
+        self.setFont(font)
+        font_m = self.get_font_metrics(font)
+
+        # Config canvas
+        area_size = max(self.wcfg["area_size"], 100)
+        self.setup_map(area_size, min(max(self.wcfg["area_margin"], 0), int(area_size/4)))
+
+        self.resize(self.area_size, self.area_size)
+        self.pixmap_map = QPixmap(self.area_size, self.area_size)
+
+        self.pen_text = {
+            "opponent": QPen(self.wcfg["font_color"]),
+            "player": QPen(self.wcfg["font_color_player"]),
+            "safety_car": QPen(self.wcfg["font_color_safety_car"]),
+            "pitstop_duration": QPen(self.wcfg["font_color_pitstop_duration"]),
+        }
+        self.pen_outline = {
+            "opponent": self.set_pen_style(self.wcfg["vehicle_outline_color"], self.wcfg["vehicle_outline_width"]),
+            "laps_ahead": self.set_pen_style(self.wcfg["vehicle_outline_color_laps_ahead"], self.wcfg["vehicle_outline_width_laps_ahead"]),
+            "laps_behind": self.set_pen_style(self.wcfg["vehicle_outline_color_laps_behind"], self.wcfg["vehicle_outline_width_laps_behind"]),
+            "player": self.set_pen_style(self.wcfg["vehicle_outline_color_player"], self.wcfg["vehicle_outline_width_player"]),
+            "safety_car": self.set_pen_style(self.wcfg["vehicle_outline_color_safety_car"], self.wcfg["vehicle_outline_width_safety_car"]),
+            "prediction": self.set_pen_style(self.wcfg["prediction_outline_color"], self.wcfg["prediction_outline_width"]),
+            "auto_prediction": self.set_pen_style(self.wcfg["auto_prediction_outline_color"], self.wcfg["auto_prediction_outline_width"]),
+            "proximity": self.set_pen_style(self.wcfg["proximity_circle_color"], self.wcfg["proximity_circle_width"]),
+        }
+        self.brush_classes = {}
+        self.brush_overall = {
+            "player": self.set_brush_style(self.wcfg["vehicle_color_player"]),
+            "leader": self.set_brush_style(self.wcfg["vehicle_color_leader"]),
+            "in_pit": self.set_brush_style(self.wcfg["vehicle_color_in_pit"]),
+            "yellow": self.set_brush_style(self.wcfg["vehicle_color_yellow"]),
+            "laps_ahead": self.set_brush_style(self.wcfg["vehicle_color_laps_ahead"]),
+            "laps_behind": self.set_brush_style(self.wcfg["vehicle_color_laps_behind"]),
+            "same_lap": self.set_brush_style(self.wcfg["vehicle_color_same_lap"]),
+            "safety_car": self.set_brush_style(self.wcfg["vehicle_color_safety_car"]),
+        }
+
+        veh_size_base = self.wcfg["font_size"] + round(font_m.width * self.wcfg["bar_padding"])
+        veh_size_opt = veh_size_base * max(self.wcfg["vehicle_scale"], 1.0)
+        veh_size_plr = veh_size_base * max(self.wcfg["vehicle_scale_player"], 1.0)
+        veh_size_sc = veh_size_base * max(self.wcfg["vehicle_scale_safety_car"], 1.0)
+
+        self.veh_shape = QRectF(-veh_size_opt * 0.5, -veh_size_opt * 0.5, veh_size_opt, veh_size_opt)
+        self.veh_shape_player = QRectF(-veh_size_plr * 0.5, -veh_size_plr * 0.5, veh_size_plr, veh_size_plr)
+        self.veh_shape_safetycar = QRectF(-veh_size_sc * 0.5, -veh_size_sc * 0.5, veh_size_sc, veh_size_sc)
+        self.veh_text_shape = QRectF(-veh_size_base * 0.5, -veh_size_base * 0.5 + font_m.voffset, veh_size_base, veh_size_base)
+
+        if self.wcfg["show_pitout_prediction"]:
+            self.pit_text_shape = QRectF(
+                -veh_size_base * 0.5 - 2,
+                font_m.voffset - veh_size_opt * 0.5 - veh_size_base - 3,
+                veh_size_base + 4,
+                veh_size_base,
+            )
+
+        if self.wcfg["show_proximity_circle"]:
+            self.rect_proximity = QRectF()
+
+        self.update_map(-1)
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        # Map
+        modified = minfo.mapping.lastModified
+        self.update_map(modified)
+
+        # Vehicles
+        veh_data_version = minfo.vehicles.dataSetVersion
+        if self.last_veh_data_version != veh_data_version:
+            self.last_veh_data_version = veh_data_version
+            self.update()
+
+    # GUI update methods
+    def update_map(self, data):
+        """Map update"""
+        if self.last_modified != data:
+            self.last_modified = data
+            raw_data = minfo.mapping.coordinates if data != -1 else None
+            map_sector_paths, map_full_path = self.create_map_path(raw_data)
+            self.draw_map_image(map_sector_paths, map_full_path, self.circular_map)
+            if self.wcfg["show_proximity_circle"]:
+                self.update_proximity_rect()
+
+    def paintEvent(self, event):
+        """Draw"""
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self.pixmap_map)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self.map_scaled:
+            self.draw_vehicle_on_map(
+                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
+            )
+            if self.wcfg["show_safety_car"] and api.read.lap.safety_car_active():
+                self.draw_safetycar_on_map(painter, self.map_scaled)
+        else:
+            self.draw_vehicle_on_circle(
+                painter, minfo.vehicles.dataSet, minfo.relative.drawOrder
+            )
+        if self.wcfg["show_pitout_prediction"]:
+            self.draw_pitout_prediction(
+                painter,
+                self.map_scaled,
+                minfo.vehicles.dataSet[minfo.vehicles.playerIndex],
+            )
+
     def draw_map_image(self, map_sector_paths: list, map_full_path, circular_map=True):
         """Draw map image separately"""
         if self.wcfg["show_background"]:
@@ -303,13 +484,8 @@ class Realtime(Overlay):
                 pen.setWidth(self.wcfg["start_line_width"])
                 pen.setColor(self.wcfg["start_line_color"])
                 painter.setPen(pen)
-                pos_x1, pos_y1, pos_x2, pos_y2 = calc.line_intersect_coords(
-                    self.map_scaled[0],  # point a
-                    self.map_scaled[1],  # point b
-                    1.57079633,  # 90 degree rotation
-                    self.wcfg["start_line_length"]
-                )
-                painter.drawLine(pos_x1, pos_y1, pos_x2, pos_y2)
+                pos_x1, pos_y1, pos_x2, pos_y2 = self.map_line(0, self.wcfg["start_line_length"])
+                painter.drawLine(int(pos_x1), int(pos_y1), int(pos_x2), int(pos_y2))
 
             # Sector lines
             sectors_index = minfo.mapping.sectors
@@ -319,13 +495,8 @@ class Realtime(Overlay):
                 painter.setPen(pen)
 
                 for index in sectors_index:
-                    pos_x1, pos_y1, pos_x2, pos_y2 = calc.line_intersect_coords(
-                        self.map_scaled[index],  # point a
-                        self.map_scaled[index + 1],  # point b
-                        1.57079633,  # 90 degree rotation
-                        self.wcfg["sector_line_length"]
-                    )
-                    painter.drawLine(pos_x1, pos_y1, pos_x2, pos_y2)
+                    pos_x1, pos_y1, pos_x2, pos_y2 = self.map_line(index, self.wcfg["sector_line_length"])
+                    painter.drawLine(int(pos_x1), int(pos_y1), int(pos_x2), int(pos_y2))
         else:
             # SF line
             if self.wcfg["show_start_line"]:
@@ -333,26 +504,17 @@ class Realtime(Overlay):
                 pen.setColor(self.wcfg["start_line_color"])
                 painter.setPen(pen)
                 painter.drawLine(
-                    self.area_margin - self.wcfg["start_line_length"],
-                    self.area_size * 0.5,
-                    self.area_margin + self.wcfg["start_line_length"],
-                    self.area_size * 0.5
+                    int(self.area_margin - self.wcfg["start_line_length"]),
+                    int(self.area_size * 0.5),
+                    int(self.area_margin + self.wcfg["start_line_length"]),
+                    int(self.area_size * 0.5),
                 )
 
     def draw_vehicle_on_circle(self, painter, veh_info, veh_draw_order):
         """Draw vehicles on temporary circle map"""
-        offset = self.area_size * 0.5
-
         for index in veh_draw_order:
             data = veh_info[index]
-
-            inpit_offset = self.wcfg["font_size"] * data.inPit
-            pos_x, pos_y = calc.rotate_coordinate(
-                6.2831853 * data.currentLapProgress,
-                self.temp_map_size / -2 + inpit_offset,  # x pos
-                0,  # y pos
-            )
-            painter.translate(offset + pos_x, offset + pos_y)
+            painter.translate(*self.circle_position(data, self.wcfg["font_size"]))
 
             painter.setPen(self.outline_vehicle(data))
             painter.setBrush(self.color_vehicle(data))
@@ -364,34 +526,18 @@ class Realtime(Overlay):
 
             # Draw text standings
             if self.wcfg["show_vehicle_class_standings"]:
-                if self.show_position_in_class:
-                    place_veh = data.positionInClass
-                else:
-                    place_veh = data.positionOverall
                 if data.isPlayer:
                     painter.setPen(self.pen_text["player"])
                 else:
                     painter.setPen(self.pen_text["opponent"])
-                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{place_veh}")
+                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{self.place_number(data)}")
             painter.resetTransform()
 
     def draw_vehicle_on_map(self, painter, veh_info, veh_draw_order):
         """Draw vehicles on track map"""
-        # Position = coords * scale - (min_range * scale - offset)
-        x_offset = self.map_range[0] * self.map_scale - self.map_offset[0]  # min range x, offset x
-        y_offset = self.map_range[2] * self.map_scale - self.map_offset[1]  # min range y, offset y
-
         for index in veh_draw_order:
             data = veh_info[index]
-
-            if self.map_orient:
-                rot_x, rot_y = calc.rotate_coordinate(self.map_orient, data.worldPositionX, data.worldPositionY)
-                pos_x = rot_x * self.map_scale - x_offset
-                pos_y = rot_y * self.map_scale - y_offset
-            else:
-                pos_x = data.worldPositionX * self.map_scale - x_offset
-                pos_y = data.worldPositionY * self.map_scale - y_offset
-            painter.translate(pos_x, pos_y)
+            painter.translate(*self.map_position(data))
 
             painter.setPen(self.outline_vehicle(data))
             painter.setBrush(self.color_vehicle(data))
@@ -407,46 +553,19 @@ class Realtime(Overlay):
 
             # Draw text standings
             if self.wcfg["show_vehicle_class_standings"]:
-                if self.show_position_in_class:
-                    place_veh = data.positionInClass
-                else:
-                    place_veh = data.positionOverall
                 if data.isPlayer:
                     painter.setPen(self.pen_text["player"])
                 else:
                     painter.setPen(self.pen_text["opponent"])
-                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{place_veh}")
+                painter.drawText(self.veh_text_shape, Qt.AlignmentFlag.AlignCenter, f"{self.place_number(data)}")
             painter.resetTransform()
 
     def draw_safetycar_on_map(self, painter, map_data):
         """Draw safety car on map"""
-        # Verify data set
-        if not map_data:  # x, y coords
+        position = self.safetycar_position(map_data)
+        if position is None:
             return
-        dist_data = minfo.mapping.elevations
-        if not dist_data:  # distance, z coords
-            return
-        dist_end_index = min(len(dist_data), len(map_data)) - 1
-        # Interpolate safety car distance
-        safetycar_dist = self.gen_position_interp.send((api.read.timing.elapsed(), api.read.lap.safety_car_distance()))
-        # Interpolate safety car coordinates
-        index_higher = calc.binary_search_higher_column(
-            dist_data, safetycar_dist, 0, dist_end_index)
-        if index_higher > 0:
-            index_lower = index_higher - 1
-            pos_x, pos_y = calc.distance_interp_coordinate(
-                map_data[index_higher][0],
-                map_data[index_lower][0],
-                map_data[index_higher][1],
-                map_data[index_lower][1],
-                dist_data[index_higher][0],
-                dist_data[index_lower][0],
-                safetycar_dist,
-            )
-        else:
-            pos_x, pos_y = map_data[0]
-
-        painter.translate(pos_x, pos_y)
+        painter.translate(*position)
         painter.setPen(self.pen_outline["safety_car"])
         painter.setBrush(self.brush_overall["safety_car"])
         painter.drawEllipse(self.veh_shape_safetycar)
@@ -456,68 +575,9 @@ class Realtime(Overlay):
 
     def draw_pitout_prediction(self, painter, map_data, plr_veh_info):
         """Draw pitout prediction circles"""
-        # Skip drawing
-        if not plr_veh_info.inPit:
-            if not self.show_while_requested:  # if not in pit
-                return
-            if not plr_veh_info.pitRequested:  # not requested pit
-                return
-
-        # Verify data set
-        if not map_data:  # x, y coords
-            return
-        dist_data = minfo.mapping.elevations
-        if not dist_data:  # distance, z coords
-            return
-        deltabest_data = minfo.delta.deltaBestData  # distance, seconds
-        deltabest_max_index = len(deltabest_data) - 1
-        if deltabest_max_index < 2:
-            return
-        laptime_best = deltabest_data[-1][1]
-        laptime_pace = minfo.delta.lapTimePace
-        if laptime_best < 1 or laptime_pace < 1:
-            return
-
-        laptime_scale = laptime_best / laptime_pace
-        dist_end_index = min(len(dist_data), len(map_data)) - 1
-
-        # Calculate pit timer & target time
-        if plr_veh_info.pitRequested and not plr_veh_info.inPit:  # out pit lane
-            pitin_time = target_node_time(minfo.mapping.pitEntryPosition, deltabest_data, deltabest_max_index, laptime_scale)
-            pos_curr_time = target_node_time(api.read.lap.distance(), deltabest_data, deltabest_max_index, laptime_scale)
-            pit_timer = pos_curr_time - pitin_time
-            target_pit_time = self.min_pit_time
-        else:  # in pit lane
-            pit_timer = plr_veh_info.pitTimer.elapsed
-            target_pit_time = target_pitstop_duration(pit_timer, self.min_pit_time, self.pit_time_increment)
-
-        # Find time_into from deltabest_data, scale to match laptime_pace
-        pitout_time = target_node_time(minfo.mapping.pitExitPosition, deltabest_data, deltabest_max_index, laptime_scale)
-        pitout_time_extend = pit_timer + pitout_time
-
         painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        for pit_time, auto_prediction in self.get_target_pit_time(target_pit_time, pit_timer, plr_veh_info.inPit):
-            # Calc estimated pitout_time_into based on laptime_pace
-            offset_time_into = pitout_time_extend - pit_time
-            pitout_time_into = (offset_time_into - offset_time_into // laptime_pace * laptime_pace) * laptime_scale
-            # Find estimated distance from deltabest_data
-            index_higher = calc.binary_search_higher_column(
-                deltabest_data, pitout_time_into, 0, deltabest_max_index, 1)
-            if index_higher > 0:
-                index_lower = index_higher - 1
-                estimate_dist = calc.linear_interp(
-                    pitout_time_into,
-                    deltabest_data[index_lower][1],
-                    deltabest_data[index_lower][0],
-                    deltabest_data[index_higher][1],
-                    deltabest_data[index_higher][0],
-                )
-            else:
-                estimate_dist = 0
-
-            dist_node_index = calc.binary_search_higher_column(dist_data, estimate_dist, 0, dist_end_index)
-            painter.translate(*map_data[dist_node_index])
+        for pos_x, pos_y, pit_time, auto_prediction in self.pitout_predictions(map_data, plr_veh_info):
+            painter.translate(pos_x, pos_y)
             painter.setPen(self.pen_outline["auto_prediction" if auto_prediction else "prediction"])
             painter.drawEllipse(self.veh_shape)
 
@@ -525,41 +585,9 @@ class Realtime(Overlay):
             if self.wcfg["show_pitstop_duration"]:
                 fill_rect(painter, self.pit_text_shape, self.wcfg["background_color_pitstop_duration"])
                 painter.setPen(self.pen_text["pitstop_duration"])
-                text_time = f"{min(pit_time - self.pitout_time_offset, 999):.0f}"
-                painter.drawText(self.pit_text_shape, Qt.AlignmentFlag.AlignCenter, text_time)
+                painter.drawText(self.pit_text_shape, Qt.AlignmentFlag.AlignCenter, self.pitstop_duration_text(pit_time))
 
             painter.resetTransform()
-
-    def get_target_pit_time(self, target_pit_time: float, pit_timer: float, in_pit: bool):
-        """Generate target pit time"""
-        max_prediction = self.prediction_count
-        pass_time = minfo.mapping.pitPassTime
-
-        # Fixed time
-        if self.wcfg["enable_fixed_pitout_prediction"]:
-            valid_count = 0
-            for fixed_time in self.fixed_pit_times:
-                if valid_count >= max_prediction:
-                    break
-                fixed_time += pass_time
-                if fixed_time > pit_timer:
-                    valid_count += 1
-                    yield fixed_time, False
-        # Auto incremented time
-        else:
-            increment = self.pit_time_increment
-            for idx in range(max_prediction):
-                yield target_pit_time + increment * idx, False
-
-        # Auto estimated time
-        if self.wcfg["enable_auto_pitout_prediction"]:
-            if in_pit != 1:
-                est_stop_time = api.read.vehicle.pit_stop_time()
-                if est_stop_time > 0:
-                    est_stop_time += max(self.wcfg["auto_prediction_additional_pitstop_time"], 0)
-                self.auto_pit_time = est_stop_time + pass_time + self.pitout_time_offset
-            if self.auto_pit_time > pit_timer:
-                yield self.auto_pit_time, True
 
     def classes_style(self, class_name: str) -> QBrush:
         """Get vehicle class style from brush cache"""
@@ -628,13 +656,6 @@ class Realtime(Overlay):
     def set_brush_style(self, color: str):
         """Set brush style"""
         return QBrush(color, Qt.BrushStyle.SolidPattern)
-
-    def set_fixed_pit_time(self):
-        """Set fixed target pit time"""
-        for idx in range(1, 11):
-            fixed_time = self.wcfg[f"fixed_pitstop_duration_{idx}"]
-            if fixed_time >= 0:
-                yield fixed_time + self.pitout_time_offset
 
 
 def target_pitstop_duration(pit_timer: float, min_pit_time: float, pit_time_increment: float) -> float:

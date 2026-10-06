@@ -21,7 +21,7 @@ Radar Widget
 """
 
 from itertools import islice
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
@@ -61,14 +61,13 @@ class DistanceRect(NamedTuple):
     side: float = 0
 
 
-class Realtime(Overlay):
-    """Draw widget"""
+class RadarMixin:
+    """Radar scale, ranges, auto hide & fade, collision course, for classic & modern widget"""
 
-    def __init__(self, config, widget_name):
-        # Assign base setting
-        super().__init__(config, widget_name)
+    wcfg: Any
 
-        # Config variable
+    def setup_radar(self):
+        """Radar scale & ranges, auto hide state"""
         self.radar_radius = max(self.wcfg["radar_radius"], 5)
         self.area_center = round(  # limit minimum global scale relative to radar radius
             self.radar_radius * max(self.wcfg["global_scale"], 5 / self.radar_radius)
@@ -78,6 +77,148 @@ class Realtime(Overlay):
 
         self.veh_width = max(self.wcfg["vehicle_width"], 0.01)
         self.veh_length = max(self.wcfg["vehicle_length"], 0.01)
+        self.straight_range = self.radar_radius * 1.5
+        self.visible_range = self.set_range_dimension("vehicle_maximum_visible_distance")
+        self.radar_hide_range = self.set_range_dimension("auto_hide_minimum_distance")
+        self.radar_fade_factor = self.set_radar_fade_factor(self.radar_radius)
+
+        # Overlap indicator
+        self.indicator_dimension = self.calc_indicator_dimension(self.veh_width, self.veh_length)
+
+        # Collision indicator
+        if self.wcfg["show_collision_course"]:
+            self.coll_range_critical = self.veh_width * max(self.wcfg["collision_course_critical_range_multiplier"], 0.1)
+            self.coll_range_nearby = self.veh_width * max(self.wcfg["collision_course_nearby_range_multiplier"], 0.1)
+            self.coll_min_speed = max(self.wcfg["collision_course_minimum_speed_difference"], 0.1)
+            self.coll_add_speed = max(self.wcfg["collision_course_speed_increment_per_meter"], 0.1)
+
+        # Last data
+        self.last_veh_data_version = None
+        self.autohide_timer_start = 1.0
+        self.show_radar = True
+        self.always_show = True
+
+    def radar_alpha(self) -> float:
+        """Radar opacity while fading with nearest car distance (1 = fully shown)"""
+        if not self.wcfg["enable_radar_fade"] or self.always_show:
+            return 1.0
+        alpha = self.radar_fade_factor * (self.radar_radius - minfo.vehicles.nearestLine)
+        return min(max(alpha, 0.0), 1.0)
+
+    def collision_level(self, veh_info) -> int:
+        """Collision course of opponent: 0 none, 1 nearby, 2 critical"""
+        intercept_x, intercept_y = calc.rotate_coordinate(
+            veh_info.relativeOrientationRadians,
+            veh_info.relativeRotatedPositionX,
+            veh_info.relativeRotatedPositionY,
+        )
+        if intercept_y <= 0:
+            return 0
+        abs_intercept_x = abs(intercept_x)
+        if abs_intercept_x > self.coll_range_nearby:
+            return 0
+        player_speed = minfo.vehicles.dataSet[minfo.vehicles.playerIndex].speed
+        relative_speed = veh_info.speed - player_speed
+        min_speed = max(self.coll_min_speed, self.coll_add_speed * veh_info.relativeStraightDistance)
+        if relative_speed > min_speed or veh_info.isYellow:
+            return 2 if abs_intercept_x <= self.coll_range_critical else 1
+        return 0
+
+    def is_radar_visible(self) -> bool:
+        """Set radar visibility"""
+        self.always_show = not self.wcfg["enable_auto_hide"] or api.read.vehicle.in_garage()
+        if self.always_show:
+            return True
+        # Hide in private qualifying
+        if (self.wcfg["enable_auto_hide_in_private_qualifying"] and
+            api.read.session.private_qualifying() == 1 and
+            api.read.session.session_type() == 2):
+            return False
+        # Bypass auto hide timer if radar fade enabled
+        is_nearby = self.is_nearby(self.radar_hide_range)
+        if self.wcfg["enable_radar_fade"]:
+            return is_nearby
+        # Start auto hide timer
+        lap_etime = api.read.timing.elapsed()
+        if is_nearby:
+            self.autohide_timer_start = lap_etime
+            return True
+        # Update auto hide timer
+        if not self.autohide_timer_start:
+            return False
+        if self.autohide_timer_start > lap_etime:
+            self.autohide_timer_start = lap_etime
+        if lap_etime - self.autohide_timer_start > self.wcfg["auto_hide_time_threshold"]:
+            self.autohide_timer_start = 0.0
+            return False
+        return True
+
+    def is_nearby(self, hide_range: DistanceRect):
+        """Check nearby vehicles"""
+        # Quick check straight range vehicles
+        if minfo.vehicles.nearestLine > self.straight_range:
+            return False
+        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
+            # -x = left, +x = right, -y = ahead, +y = behind
+            if (not veh_info.isPlayer and
+                hide_range.behind > veh_info.relativeRotatedPositionY > -hide_range.ahead and
+                -hide_range.side < veh_info.relativeRotatedPositionX < hide_range.side):
+                return True
+        return False
+
+    def calc_indicator_dimension(self, veh_width, veh_length):
+        """Calculate indicator dimension
+
+        Range between player & opponents to show indicator.
+        x is left to right range.
+        y is forward to backward range.
+        """
+        min_range_x = veh_width * 0.9  # slightly overlapped
+        max_range_x = veh_width * (max(self.wcfg["overlap_nearby_range_multiplier"], 0) + 0.9)
+        max_range_y = veh_length * 1.2  # safe range for ahead & behind opponents
+        crit_range = veh_width * (max(self.wcfg["overlap_critical_range_multiplier"], 0) + 0.9)
+        width = veh_width * max(self.wcfg["indicator_size_multiplier"], 0.01) * self.global_scale
+        edge = max((width - 3) / width, 0.001)  # for antialiasing
+        offset = veh_width * self.global_scale * 0.5
+        return IndicatorDimension(min_range_x, max_range_x, max_range_y, crit_range, width, edge, offset)
+
+    def set_range_dimension(self, prefix):
+        """Set range dimension for radar & autohide"""
+        if self.wcfg[f"{prefix}_ahead"] < 0:
+            min_ahead = self.radar_radius
+        else:
+            min_ahead = self.wcfg[f"{prefix}_ahead"]
+
+        if self.wcfg[f"{prefix}_behind"] < 0:
+            min_behind = self.radar_radius
+        else:
+            min_behind = self.wcfg[f"{prefix}_behind"]
+
+        if self.wcfg[f"{prefix}_side"] < 0:
+            min_side = self.radar_radius
+        else:
+            min_side = self.wcfg[f"{prefix}_side"]
+        return DistanceRect(min_ahead, min_behind, min_side)
+
+    def set_radar_fade_factor(self, radar_radius):
+        """Set radar fade factor"""
+        range_fade_out = min(max(self.wcfg["radar_fade_out_radius"], 0.5), 1)
+        range_fade_in = min(max(self.wcfg["radar_fade_in_radius"], 0.1),
+                            range_fade_out - 0.01)  # make sure not exceed fade out range
+        range_diff = range_fade_out - range_fade_in
+        range_scale = range_fade_out / range_diff
+        return range_scale / radar_radius
+
+
+class Realtime(RadarMixin, Overlay):
+    """Draw widget"""
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+
+        # Config variable
+        self.setup_radar()
         self.veh_radius = max(self.wcfg["vehicle_border_radius"], 0.0)
         self.veh_shape = QRectF(
             -self.veh_width * self.global_scale * 0.5,
@@ -85,14 +226,7 @@ class Realtime(Overlay):
             self.veh_width * self.global_scale,
             self.veh_length * self.global_scale,
         )
-        self.straight_range = self.radar_radius * 1.5
-        self.visible_range = self.set_range_dimension("vehicle_maximum_visible_distance")
-        self.radar_hide_range = self.set_range_dimension("auto_hide_minimum_distance")
-        self.radar_fade_factor = self.set_radar_fade_factor(self.radar_radius)
         self.radar_fade_color = QColor(0, 0, 0)
-
-        # Overlap indicator
-        self.indicator_dimension = self.calc_indicator_dimension(self.veh_width, self.veh_length)
 
         indicator_color_nearby = QColor(self.wcfg["indicator_color_nearby"])
         indicator_color_critical = QColor(self.wcfg["indicator_color_critical"])
@@ -127,10 +261,6 @@ class Realtime(Overlay):
 
         # Collision indicator
         if self.wcfg["show_collision_course"]:
-            self.coll_range_critical = self.veh_width * max(self.wcfg["collision_course_critical_range_multiplier"], 0.1)
-            self.coll_range_nearby = self.veh_width * max(self.wcfg["collision_course_nearby_range_multiplier"], 0.1)
-            self.coll_min_speed = max(self.wcfg["collision_course_minimum_speed_difference"], 0.1)
-            self.coll_add_speed = max(self.wcfg["collision_course_speed_increment_per_meter"], 0.1)
             self.coll_shape = self.veh_shape.adjusted(0, -self.area_size * 1.5, 0, 0)
 
         # Config canvas
@@ -153,12 +283,6 @@ class Realtime(Overlay):
 
         self.draw_radar_marks(self.area_center)
         self.draw_radar_mask()
-
-        # Last data
-        self.last_veh_data_version = None
-        self.autohide_timer_start = 1.0
-        self.show_radar = True
-        self.always_show = True
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
@@ -192,15 +316,11 @@ class Realtime(Overlay):
                 painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOver)
                 fill_rect(painter, self.rect_radar, self.wcfg["background_color"])
             # Apply radar fade mask
-            if self.wcfg["enable_radar_fade"] and not self.always_show:
-                radar_alpha = self.radar_fade_factor * (
-                    self.radar_radius - minfo.vehicles.nearestLine)
-                if radar_alpha < 1:
-                    if radar_alpha < 0:
-                        radar_alpha = 0
-                    self.radar_fade_color.setAlphaF(radar_alpha)
-                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                    fill_rect(painter, self.rect_radar, self.radar_fade_color)
+            radar_alpha = self.radar_alpha()
+            if radar_alpha < 1:
+                self.radar_fade_color.setAlphaF(radar_alpha)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+                fill_rect(painter, self.rect_radar, self.radar_fade_color)
 
     def draw_radar_mask(self):
         """Draw radar mask"""
@@ -386,21 +506,9 @@ class Realtime(Overlay):
 
     def draw_collision_course(self, painter, veh_info):
         """Draw collision course"""
-        intercept_x, intercept_y = calc.rotate_coordinate(
-            veh_info.relativeOrientationRadians,
-            veh_info.relativeRotatedPositionX,
-            veh_info.relativeRotatedPositionY,
-        )
-        if intercept_y <= 0:
-            return
-        abs_intercept_x = abs(intercept_x)
-        if abs_intercept_x > self.coll_range_nearby:
-            return
-        player_speed = minfo.vehicles.dataSet[minfo.vehicles.playerIndex].speed
-        relative_speed = veh_info.speed - player_speed
-        min_speed = max(self.coll_min_speed, self.coll_add_speed * veh_info.relativeStraightDistance)
-        if relative_speed > min_speed or veh_info.isYellow:
-            if abs_intercept_x <= self.coll_range_critical:
+        level = self.collision_level(veh_info)
+        if level:
+            if level == 2:
                 coll_color = self.wcfg["collision_course_critical_color"]
             else:
                 coll_color = self.wcfg["collision_course_nearby_color"]
@@ -420,91 +528,6 @@ class Realtime(Overlay):
         if veh_info.isLapped < 0:
             return self.brush_veh["laps_behind"]
         return self.brush_veh["same_lap"]
-
-    def is_radar_visible(self) -> bool:
-        """Set radar visibility"""
-        self.always_show = not self.wcfg["enable_auto_hide"] or api.read.vehicle.in_garage()
-        if self.always_show:
-            return True
-        # Hide in private qualifying
-        if (self.wcfg["enable_auto_hide_in_private_qualifying"] and
-            api.read.session.private_qualifying() == 1 and
-            api.read.session.session_type() == 2):
-            return False
-        # Bypass auto hide timer if radar fade enabled
-        is_nearby = self.is_nearby(self.radar_hide_range)
-        if self.wcfg["enable_radar_fade"]:
-            return is_nearby
-        # Start auto hide timer
-        lap_etime = api.read.timing.elapsed()
-        if is_nearby:
-            self.autohide_timer_start = lap_etime
-            return True
-        # Update auto hide timer
-        if not self.autohide_timer_start:
-            return False
-        if self.autohide_timer_start > lap_etime:
-            self.autohide_timer_start = lap_etime
-        if lap_etime - self.autohide_timer_start > self.wcfg["auto_hide_time_threshold"]:
-            self.autohide_timer_start = 0.0
-            return False
-        return True
-
-    def is_nearby(self, hide_range: DistanceRect):
-        """Check nearby vehicles"""
-        # Quick check straight range vehicles
-        if minfo.vehicles.nearestLine > self.straight_range:
-            return False
-        for veh_info in islice(minfo.vehicles.dataSet, minfo.vehicles.totalVehicles):
-            # -x = left, +x = right, -y = ahead, +y = behind
-            if (not veh_info.isPlayer and
-                hide_range.behind > veh_info.relativeRotatedPositionY > -hide_range.ahead and
-                -hide_range.side < veh_info.relativeRotatedPositionX < hide_range.side):
-                return True
-        return False
-
-    def calc_indicator_dimension(self, veh_width, veh_length):
-        """Calculate indicator dimension
-
-        Range between player & opponents to show indicator.
-        x is left to right range.
-        y is forward to backward range.
-        """
-        min_range_x = veh_width * 0.9  # slightly overlapped
-        max_range_x = veh_width * (max(self.wcfg["overlap_nearby_range_multiplier"], 0) + 0.9)
-        max_range_y = veh_length * 1.2  # safe range for ahead & behind opponents
-        crit_range = veh_width * (max(self.wcfg["overlap_critical_range_multiplier"], 0) + 0.9)
-        width = veh_width * max(self.wcfg["indicator_size_multiplier"], 0.01) * self.global_scale
-        edge = max((width - 3) / width, 0.001)  # for antialiasing
-        offset = veh_width * self.global_scale * 0.5
-        return IndicatorDimension(min_range_x, max_range_x, max_range_y, crit_range, width, edge, offset)
-
-    def set_range_dimension(self, prefix):
-        """Set range dimension for radar & autohide"""
-        if self.wcfg[f"{prefix}_ahead"] < 0:
-            min_ahead = self.radar_radius
-        else:
-            min_ahead = self.wcfg[f"{prefix}_ahead"]
-
-        if self.wcfg[f"{prefix}_behind"] < 0:
-            min_behind = self.radar_radius
-        else:
-            min_behind = self.wcfg[f"{prefix}_behind"]
-
-        if self.wcfg[f"{prefix}_side"] < 0:
-            min_side = self.radar_radius
-        else:
-            min_side = self.wcfg[f"{prefix}_side"]
-        return DistanceRect(min_ahead, min_behind, min_side)
-
-    def set_radar_fade_factor(self, radar_radius):
-        """Set radar fade factor"""
-        range_fade_out = min(max(self.wcfg["radar_fade_out_radius"], 0.5), 1)
-        range_fade_in = min(max(self.wcfg["radar_fade_in_radius"], 0.1),
-                            range_fade_out - 0.01)  # make sure not exceed fade out range
-        range_diff = range_fade_out - range_fade_in
-        range_scale = range_fade_out / range_diff
-        return range_scale / radar_radius
 
     def set_pen_style(self, color: str, width: int):
         """Set pen style"""

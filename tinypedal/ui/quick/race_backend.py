@@ -83,6 +83,7 @@ from ...userfile.tyre_strategy import (
 )
 from ..game_rest import GameRequest
 from . import race_results as results
+from .game_pictures import notifier, track_logo_url
 from .race_model import DRIVER_SPECS as DRIVER_INPUT_SPECS
 from .race_model import (
     INPUT_SPECS,
@@ -228,6 +229,7 @@ class RaceBackend(QObject):
     def __init__(self, parent: QObject, host: RaceHost):
         super().__init__(parent)
         self.host = host
+        notifier().changed.connect(self.headerChanged)  # circuit logo fetched from game meanwhile
         config = cfg.user.config["fuel_calculator"]
         # Fuel unit of the page (frozen while open)
         self.is_gallon = cfg.units["fuel_unit"] == "Gallon"
@@ -454,6 +456,7 @@ class RaceBackend(QObject):
             "showHistory": bool(config.get("show_consumption_history", True)),
             "collapsed": self.collapsed_sections(),
             "tab": self.tab, "combo": self.combo_name(),
+            "trackLogo": track_logo_url(self.source_name.split(" - ", 1)[0]) if self.source_name else "",
         }
 
     @Property(dict, notify=historyChanged)

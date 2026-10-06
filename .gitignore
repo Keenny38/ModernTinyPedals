@@ -12,6 +12,7 @@ __pycache__/
 /tracknotes/
 /carsetups/
 /telemetry/
+/gameimage/
 
 # pipenv stuff
 Pipfile

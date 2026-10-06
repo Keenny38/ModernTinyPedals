@@ -29,6 +29,7 @@ from math import ceil
 
 from ...i18n import tr_overlay
 from ...module_info import minfo
+from ...template.widget.drivers_ui import STANDINGS_COLUMNS
 from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text
 from .rows import DASH
 from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, Column
@@ -37,12 +38,7 @@ from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, Column
 class Realtime(DriverTable):
     """Draw widget"""
 
-    COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "delta_laptime",
-        "energy_remaining", "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time",
-        "time_interval", "time_gap",
-    )
+    COLUMNS = STANDINGS_COLUMNS
     options = (
         *DRIVER_OPTIONS,
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
@@ -138,10 +134,17 @@ class Realtime(DriverTable):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        data_set = minfo.vehicles.dataSet
-        ctx = self.context()
+        self.show_rows(minfo.vehicles.dataSet, minfo.relative.standings, self.context())
+
+    def show_field(self, field, ctx: Context):
+        from .sample_field import sample_standings
+
+        self.show_rows(field.vehicles, sample_standings(field, self.wcfg), ctx)
+
+    def show_rows(self, data_set, standings: list[int], ctx: Context):
+        """Rows of cars in standings order (-1: space between classes), widget height follows"""
         rows: list = []
-        for index in minfo.relative.standings[:self.max_rows]:
+        for index in standings[:self.max_rows]:
             if index == -1:
                 if rows and rows[-1] is not SEPARATOR:
                     rows.append(SEPARATOR)

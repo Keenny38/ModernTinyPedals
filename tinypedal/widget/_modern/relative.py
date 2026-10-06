@@ -25,6 +25,7 @@ Cars around player on track: one row per car, player row highlighted, class colo
 from __future__ import annotations
 
 from ...module_info import minfo
+from ...template.widget.drivers_ui import RELATIVE_COLUMNS
 from ..relative import relative_data
 from .drivers import DRIVER_OPTIONS, Context, DriverTable
 from .table import RIGHT, TEXT, Cell, Column, Row
@@ -33,11 +34,7 @@ from .table import RIGHT, TEXT, Cell, Column, Row
 class Realtime(DriverTable):
     """Draw widget"""
 
-    COLUMNS = (
-        "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
-        "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "energy_remaining",
-        "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time", "time_gap",
-    )
+    COLUMNS = RELATIVE_COLUMNS
     options = (
         *DRIVER_OPTIONS,
         "show_vehicle_in_garage",  # read by relative module
@@ -73,13 +70,16 @@ class Realtime(DriverTable):
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        data_set = minfo.vehicles.dataSet
-        ctx = self.context()
+        self.show_rows(minfo.vehicles.dataSet, minfo.relative.relativeAhead, minfo.relative.relativeBehind,
+                       minfo.vehicles.playerIndex, self.context())
+
+    def show_field(self, field, ctx: Context):
+        self.show_rows(field.vehicles, field.relative_ahead, field.relative_behind, field.player_index, ctx)
+
+    def show_rows(self, data_set, ahead: list, behind: list, player_index: int, ctx: Context):
+        """Rows of cars ahead, player & cars behind (empty rows if fewer cars)"""
         rows: list[Row | None] = []
-        for gap, index in relative_data(
-            minfo.relative.relativeAhead, minfo.relative.relativeBehind,
-            minfo.vehicles.playerIndex, self.max_front, self.max_behind,
-        ):
+        for gap, index in relative_data(ahead, behind, player_index, self.max_front, self.max_behind):
             if 0 <= index < len(data_set):
                 rows.append(self.driver_row(data_set[index], ctx, gap=gap))
             else:

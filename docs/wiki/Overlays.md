@@ -4,16 +4,21 @@ Modern Tiny Pedals has **87 overlays** (called widgets in the settings files). T
 
 ![Standings, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
 
+![Radar, track map and navigation, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-map-overlays-design.png)
+
 ## Modern design and classic layout
 
-Every overlay except the Black box has a **modern design**:
+Every overlay has a **modern design**:
 
 - one rounded panel per overlay, the bundled **Barlow** font, short labels above the values, translated into the app language;
 - values colored by meaning: gain, loss, warning, best time;
 - standings as rows with a position badge, class pill and position in class, with selectable columns (`column_*` options of Relative, Standings and Rivals);
 - fuel and energy with a gauge and markers, tyres and brakes as tiles in heatmap colors, LEDs as glowing dots.
+- graphic overlays drawn for the design: round **radar** fading at its edge (amber, then red glow toward a car alongside), **track map** with cars as numbered dots in class colors (or race status colors) and a checkered start line, **navigation** view with road edge lines, **friction circle** with G rings, a trace fading with age and recent peaks, **heading** compass ring with yaw and front slip angle, drawn **steering wheel**, **instrument** and **weather forecast** icons drawn as shapes, **trailing** inputs with soft areas under throttle and brake, **track notes** card.
+- **flag** items as chips in flag colors (caption above value, only while active), **chat** feed with a color per sender and new messages highlighted, **elevation** profile with the driven part in accent color and the car as a dot, **race notifications** with an icon per message and a bar shrinking with the time left, **steering meter** growing from center with a thumb, **RPM LEDs** keeping a faint tint of their color zone while unlit, **spotter** bars glowing toward the screen center.
+- **Black box** keeping its layout and options, in the Barlow font, theme colors and cards with a hairline border.
 
-The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them.
+The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them. In the Overlay Options page, Relative, Standings and Rivals list their columns in one `Columns` list, from left to right as the overlay draws them: switch each column on or off there, drag it or use the arrows to move it. Sections follow for the rows, the classes and number of cars (Standings), then the options of each column, dimmed while the column is hidden. The live preview shows a sample race with fictional drivers.
 
 The **classic layout** is still available:
 
@@ -57,7 +62,7 @@ Seven overlays added in 0.20.0 help during a race. They are off by default: turn
 | **Gap Trend** | Gap to the car ahead and behind over the last laps, and what you gain or lose per lap. All classes or your class. |
 | **Pit Lane Helper** | Speed against the pit limit, speed limiter (warning if it is off), distance to your pit box and planned services. Shown only near and in the pit lane. |
 | **Stint Timer** | Stint time and laps, countdown to the maximum stint, driving time of each driver against the fair share or the required minimum. |
-| **Spotter** | Bars on the edges of the screen while a car is alongside, brighter when it is very close. |
+| **Spotter** | Bars on the edges of the screen while a car is alongside, brighter when it is very close. A side flashes green ("clear") once the car is gone, and the bottom of a bar lights up while a car comes up behind on that side (`show_clear_signal`, `show_approaching_cars`). |
 | **Race Notifications** | Short messages: places gained or lost (overall and class), penalty, class fastest lap, blue flag, full course yellow, invalid lap. Each type can be turned off. |
 | **Tyre Temp Trend** | Surface temperature of each tyre over the last seconds or per lap, with the optimal temperature given by LMU. |
 
@@ -204,11 +209,11 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Onboard Setting | ABS and TC levels (LMU) |
 | System Performance | CPU and memory usage of the system and of the app |
 
-Track Map, Navigation and Elevation need at least one complete, valid lap on the track: the Mapping module records the map. Brand logos (column `column_brand_logo` of standings) need PNG files named after each brand in the `brandlogo` folder.
+Track Map, Navigation and Elevation need at least one complete, valid lap on the track: the Mapping module records the map. Brand logos (column `column_brand_logo` of Relative, Standings and Rivals, on by default and turned on once in existing presets) are the real logos of Le Mans Ultimate: the app takes them from the game running on your computer (Rest API access of `Config` > `Le Mans Ultimate API` on, the default) and keeps them in the `gameimage` folder, so they show up after the game was open once with the app. A PNG file of your own named after a brand in the `brandlogo` folder is shown instead; with rFactor 2, own files are the only logos. While a brand has no logo, its first letters are shown.
 
 ## Black box
 
-The **Black box** is an all-in-one view of the four wheels and the car, with its own design (it has no separate modern or classic layout):
+The **Black box** is an all-in-one view of the four wheels and the car. Its modern design keeps the same layout and options, drawn in the Barlow font and the theme colors (`enable_classic_layout` brings the classic look back):
 
 - tyres at each corner seen from above, with temperatures, pressures, wear, wheel lock and spin outlines, steering and suspension movement, without overlaps even at full lock;
 - brakes, suspension, damage panel, fuel and energy gauges, battery, RPM LEDs, gear and speed;
@@ -219,7 +224,7 @@ In the Overlay Options page its options are in its own sections (profile, size a
 
 ## Widget plugins
 
-You can add your own overlays as plugins: a folder in `plugins` (next to the app) with a `setting.json` and a `widget.py`. `Tools` > `Plugin Manager` shows their state, enables or disables them, reloads their code and installs plugins from a `.zip`. See `plugins/example_speed` and [Widget plugins](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widget-plugins).
+You can add your own overlays as plugins: a folder in `plugins` (next to the app) with a `setting.json` and a `widget.py`. `Tools` > `Plugin Manager` shows their state, enables or disables them, reloads their code and installs plugins from a `.zip`. See [Widget plugins](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widget-plugins).
 
 > [!WARNING]
 > Plugins are normal Python code with full access to your computer. Only install plugins from sources you trust.

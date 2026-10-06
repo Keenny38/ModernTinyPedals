@@ -25,7 +25,7 @@ Newest first, grouped by day, with the session kind (`R`, `Q`, `P`, `W`), track,
 
 ## Session
 
-The header shows the track and layout, date, online server or single player, session length (minutes or laps), number of cars and track length. Below it, your key figures:
+The header shows the track and layout, date, online server or single player, session length (minutes or laps), number of cars and track length, with the circuit logo and picture of Le Mans Ultimate (taken from the game once it ran with the app open, kept in the `gameimage` folder). Below it, your key figures:
 
 - **Position** (with your class position and the number of cars of your class), **Grid** with places gained or lost,
 - **Best lap** with its rank in your class (purple when fastest), **Laps** and pit stops,
@@ -36,7 +36,7 @@ Class chips (multiclass sessions) show one class: positions and gaps become clas
 
 ### Classification
 
-Position (with places gained or lost from the grid in races), class and class position, car number, driver and team (all drivers of a team car in the tooltip), car, laps, race time of the winner then gap (time, or laps behind; in practice and qualifying, gap to the best lap), best lap (fastest in purple), pit stops and contacts (a warning sign marks penalties). Your row is tinted. Click a car to pick it, double-click to see its laps.
+Position (with places gained or lost from the grid in races), class and class position, car number, car brand logo, driver and team (all drivers of a team car in the tooltip), car, laps, race time of the winner then gap (time, or laps behind; in practice and qualifying, gap to the best lap), best lap (fastest in purple), pit stops and contacts (a warning sign marks penalties). Your row is tinted. Click a car to pick it, double-click to see its laps.
 
 ### Positions (races)
 

@@ -61,11 +61,18 @@ Overlays appear when your car is on track and hide when you are in menus or not 
 
 While the overlay is unlocked you can move overlays with the mouse; once locked, they stay in place and clicks go through to the game. The lock state is kept between starts.
 
-1. **Unlock** if needed: tray icon menu > uncheck `Lock Overlay`, or `Unlock Overlay` on the Home page. Unlocked overlays show an outline, their name and a corner handle.
-2. **Drag** an overlay to move it. Hold `Ctrl` to snap to screen edges and other overlays. Alignment guides appear while dragging. `Grid Move` (tray or `Overlay` menu) moves overlays on a grid.
-3. **Resize** an overlay with its corner handle: its size options (font size, bar size...) are scaled.
-4. Right-click an overlay for `Config`, `Center Horizontally`, `Center Vertically`, `Reload` and `Disable`.
-5. **Lock** again when done.
+1. **Unlock**: `Unlock Overlay` on the Home page, tray icon menu > uncheck `Lock Overlay`, the command palette or the `overlay_lock` hotkey. This starts the **edit mode**: a toolbar shows up at the top of the game screen, and every overlay shows its outline and name, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or their visibility context (so you can place them from the game menus too).
+2. **Drag** an overlay to move it. It snaps to screen edges, screen center and the edges and centers of the other overlays; hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. Alignment guides and the position of the overlay show while dragging. `Grid Move` moves overlays on a grid.
+3. **Fine-tune with the keyboard**: click an overlay to select it (solid outline), then arrow keys move it by one pixel (`Shift`: 10 pixels, one grid step with `Grid Move`). `Ctrl+Z` / `Ctrl+Y` undo and redo, `Delete` turns the overlay off, `Esc` unselects it.
+4. **Resize** an overlay with its corner handle: its size options (font size, bar size...) are scaled.
+5. Right-click an overlay for `Config`, `Center Horizontally`, `Center Vertically`, `Move to Screen` (same place on another monitor), `Visibility`, `Opacity`, `Undo`, `Reload` and `Disable`.
+6. **Lock** again when done: `Done` on the toolbar (or `Lock Overlay` in the right-click menu, tray menu or Home page).
+
+The toolbar has `Snap` (option `enable_magnetic_snap`), `Grid` and `Guides` toggles, `Undo` / `Redo`, `Overlays` (active overlays, uncheck one to turn it off, or open the Overlays page) and `Done`. Drag it by its grip. Its `✕` hides it and leaves the overlay unlocked; right-click an overlay > `Edit Mode` brings it back. Everything done while unlocked can be undone until the overlay is locked.
+
+An overlay already unlocked when the app starts does not start the edit mode: its outline and corner handle only show under the mouse, so nothing stays on screen if you drive with the overlay unlocked.
+
+![Overlay edit mode](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
 
 Positions are saved in the preset, and remembered per screen setup (screens plugged, resolution). To make every overlay bigger or smaller at once, set `overlay_scale` in `Config` > `Overlay Style`.
 
@@ -93,7 +100,7 @@ Keyboard: type anywhere on the page to search, `/` jumps to the search box, arro
 
 One page holds the options of every overlay: the overlays on the left (by category, a filled dot when the overlay is on), the options of the selected one in the middle, and a live preview on the right (on wide windows) drawn with the values you have not applied yet. It also opens from a right-click on an overlay on screen, `Find Option` and the command palette (`Ctrl+K`).
 
-- **Sections**: `General`, `Position & Layout`, `Font`, then one section per item the overlay shows (Speed, Time Gap, Fuel Level Bar...). The on/off switch of an item is in the title of its section; while it is off, its options are dimmed. Click a section title to fold it (`Collapse All` / `Expand All` at top), its `Reset` button puts its options back to default. `Display Order` is a list moved with the arrows.
+- **Sections**: `General`, `Position & Layout`, `Font`, then one section per item the overlay shows (Speed, Time Gap, Fuel Level Bar...). The on/off switch of an item is in the title of its section; while it is off, its options are dimmed. Click a section title to fold it (`Collapse All` / `Expand All` at top), its `Reset` button puts its options back to default. `Display Order` is a list moved with the arrows. Relative, Standings and Rivals have a `Columns` list instead: the columns from left to right, each one with its on/off switch, moved by drag or arrows, and their live preview shows a sample race.
 - **Only the options of the design in use** are shown: switch `Enable Classic Layout` and the options of the classic layout show up at once.
 - **Search** (`Ctrl+F`): in `This overlay` or in `Every overlay`, for example `opacity` to set it for all overlays in one list. `Changed only` lists the options changed from their default (in one overlay or in all of them); the overlay list shows how many options each overlay has changed.
 - **`...` button of an option**: `Reset to Default`, `Apply to All Overlays` (the value goes to every overlay having this option: font, opacity, update interval, theme...), `Copy Option Name`.

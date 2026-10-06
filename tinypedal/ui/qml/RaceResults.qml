@@ -57,6 +57,11 @@ TpPage {
                         code: page.header.code || ""
                         implicitWidth: Math.round(theme.em * 2.6)
                     }
+                    GameLogo {  // circuit logo of game
+                        source: page.header.trackLogo || ""
+                        boxWidth: theme.em * 3.4
+                        boxHeight: theme.em * 2.3
+                    }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 0
@@ -115,6 +120,10 @@ TpPage {
                             ToolTip.delay: 700
                             MouseArea { id: headerArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                         }
+                    }
+                    GamePicture {  // circuit picture of game
+                        source: page.header.trackPicture || ""
+                        boxHeight: theme.em * 3.0
                     }
                 }
 

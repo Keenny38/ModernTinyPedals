@@ -26,6 +26,7 @@ def old_preset() -> dict:
         "brake_temperature": {"inner_gap": 3},
         "wheel_status": {"enable_smooth_transition": False, "show_refuel": True},
         "module_recorder": {"enable": False},
+        "standings": {"column_brand_logo": False},
     }
 
 
@@ -56,6 +57,17 @@ def test_full_migration_from_old_version():
     box = preset["black_box"]
     assert box["smooth_transition_duration"] == 0 and box["show_fuel_gauge"] is True
     assert preset["module_recorder"]["enable"] is True
+    assert preset["standings"]["column_brand_logo"] is True
+    assert "rivals" not in preset  # widget not in preset: left out
+
+
+def test_brand_logo_column_shown_once():
+    preset = {"relative": {"column_brand_logo": False}, "rivals": {"column_brand_logo": False}}
+    preupdate_user_setting((2, 50, 4), preset)
+    assert preset["relative"]["column_brand_logo"] is True and preset["rivals"]["column_brand_logo"] is True
+    preset["relative"]["column_brand_logo"] = False  # turned off again by user
+    preupdate_user_setting((2, 50, 5), preset)
+    assert preset["relative"]["column_brand_logo"] is False
 
 
 def test_wheel_toe_renamed_options():
@@ -65,7 +77,7 @@ def test_wheel_toe_renamed_options():
 
 
 @pytest.mark.parametrize(("version", "applied"), [
-    ((2, 50, 2), False),  # current: nothing changed
+    ((2, 50, 5), False),  # current: nothing changed
     ((2, 50, 1), True),  # only newer updates applied
 ])
 def test_only_newer_updates_applied(version, applied):

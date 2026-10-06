@@ -358,6 +358,18 @@ class OptionUI(NamedTuple):
     overrides: Callable[[Mapping], Mapping[str, bool]] | None = None  # options set by a profile
     override_source: str = ""  # option whose value causes the overrides, named in tooltips
     dependencies: Mapping[str, str] = {}  # option: on/off option it depends on
+    # Sections in page order (title, options), instead of first options of sections; ORDER_LIST among
+    # options places the display order list (others: after the last section)
+    layout: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    order_title: str = ""  # title of display order list (default: "Display Order")
+    order_toggles: Mapping[str, str] = {}  # display order option: on/off option of item, switched in the list
+    design_order: tuple[str, ...] = ()  # display order options in modern design order (while none changed)
+    order_labels: Mapping[str, str] = {}  # display order option: English label of item in the list
+    simple_mode: bool = True  # simple mode switch (basic options only)
+    modern_only: bool = False  # declared sections for modern design only (classic: automatic sections)
+
+
+ORDER_LIST = "display_order_*"  # layout option standing for the display order list
 
 
 BLACK_BOX_UI = OptionUI(

@@ -20,6 +20,8 @@
 Trailing Widget
 """
 
+from typing import Any
+
 from PySide6.QtCore import QPointF, QRect, Qt
 from PySide6.QtGui import QPainter, QPen, QPixmap
 
@@ -28,36 +30,30 @@ from ..module_info import minfo
 from ._base import Overlay
 from ._painter import fill_pixmap
 
+PLOT_NAMES = (
+    "tc_activation",
+    "abs_activation",
+    "throttle",
+    "brake",
+    "clutch",
+    "ffb",
+    "steering",
+    "speed",
+    "wheel_lock",
+    "wheel_slip",
+    "slip_angle_difference",
+)
+HIDDEN = -999.0  # plot value of mark not shown (wheel lock, slip, TC & ABS activation)
 
-class Realtime(Overlay):
-    """Draw widget"""
 
-    update_while_hidden = True  # input history keeps recording
+class TrailingMixin:
+    """Input sampling & time scale, for classic & modern widget"""
 
-    def __init__(self, config, widget_name):
-        # Assign base setting
-        super().__init__(config, widget_name)
+    wcfg: Any
+    cfg: Any
 
-        # Config variable
-        plot_names = (
-            "tc_activation",
-            "abs_activation",
-            "throttle",
-            "brake",
-            "clutch",
-            "ffb",
-            "steering",
-            "speed",
-            "wheel_lock",
-            "wheel_slip",
-            "slip_angle_difference",
-        )
-
-        self.margin = max(int(self.wcfg["display_margin"]), 0)
-        self.display_height = max(int(self.wcfg["display_height"]), 2)
-        self.area_width = max(int(self.wcfg["display_width"]), 2)
-        self.area_height = self.display_height + self.margin * 2
-
+    def setup_trailing(self):
+        """Shown plots, plot step per update (pixels), update interval of time scale"""
         time_scale = max(self.wcfg["time_scale"], 0.01)
         if time_scale == 1:
             time_factor = self.wcfg["update_interval"] / 20
@@ -68,12 +64,100 @@ class Realtime(Overlay):
                 self.cfg.application["minimum_update_interval"],
             )
         self.display_scale = max(int(time_factor * self.wcfg["display_scale"]), 1)
-
-        max_line_width = int(max(1, *(self.wcfg[f"{plot_name}_line_width"] for plot_name in plot_names)))
-        max_samples = 3 + max_line_width  # 3 offset + max line width
-        self.samples_offset = max_samples - 2
         self.max_slip_angle = max(self.wcfg["maximum_slip_angle_difference"], 1) * 2
         self.max_paused_frames = max(self.wcfg["maximum_paused_frames"], 0)
+        self.plot_names = tuple(name for name in PLOT_NAMES if self.wcfg[f"show_{name}"])
+        self.max_speed = 0.0
+        # Last data
+        self.last_lap_etime = -1.0
+        self.update_plot = 0
+
+    def plot_paused(self) -> bool:
+        """Whether plot stops: elapsed time unchanged (game paused) for more than max paused frames"""
+        # Use elapsed time to determine whether data paused
+        # Add 1 extra update compensation
+        lap_etime = api.read.timing.elapsed()
+        if self.last_lap_etime != lap_etime:
+            self.last_lap_etime = lap_etime
+            self.update_plot = self.max_paused_frames
+        if self.update_plot >= 0:
+            self.update_plot -= 1
+            return False
+        return True
+
+    def read_inputs(self) -> list[float]:
+        """Values of shown plots (plot_names order): 0 to 1, below 0 for marks not shown"""
+        wcfg = self.wcfg
+        inputs = api.read.inputs
+        throttle_raw = inputs.throttle_raw()
+        brake_raw = inputs.brake_raw()
+        throttle = throttle_raw if wcfg["show_raw_throttle"] else inputs.throttle()
+        brake = brake_raw if wcfg["show_raw_brake"] else inputs.brake()
+        values = []
+        for plot_name in self.plot_names:
+            if plot_name == "tc_activation":
+                values.append(throttle if api.read.switch.tc_active() else -1.0)
+            elif plot_name == "abs_activation":
+                values.append(brake if api.read.switch.abs_active() else -1.0)
+            elif plot_name == "throttle":
+                values.append(throttle)
+            elif plot_name == "brake":
+                values.append(brake)
+            elif plot_name == "clutch":
+                values.append(inputs.clutch_raw() if wcfg["show_raw_clutch"] else inputs.clutch())
+            elif plot_name == "ffb":
+                if wcfg["show_absolute_ffb"]:
+                    values.append(abs(inputs.force_feedback()))
+                else:
+                    values.append((inputs.force_feedback() + 1) / 2)
+            elif plot_name == "steering":
+                steering = (inputs.steering() + 1) / 2
+                values.append(1 - steering if wcfg["show_inverted_steering"] else steering)
+            elif plot_name == "speed":
+                speed = api.read.vehicle.speed()
+                if self.max_speed < speed:
+                    self.max_speed = speed
+                if speed < 0.1:  # reset if stopped
+                    self.max_speed = 0
+                elif self.max_speed > 0:
+                    speed /= self.max_speed
+                else:
+                    speed = 0
+                values.append(speed)
+            elif plot_name == "wheel_lock":
+                wheel_lock = min(abs(min(minfo.wheels.slipRatio)), 1)
+                if wheel_lock < wcfg["wheel_lock_threshold"] or brake_raw <= 0.02:
+                    wheel_lock = HIDDEN
+                values.append(wheel_lock)
+            elif plot_name == "wheel_slip":
+                wheel_slip = min(max(minfo.wheels.slipRatio), 1)
+                if wheel_slip < wcfg["wheel_slip_threshold"] or throttle_raw <= 0.02:
+                    wheel_slip = HIDDEN
+                values.append(wheel_slip)
+            elif plot_name == "slip_angle_difference":
+                values.append(minfo.wheels.slipAngleDifference / self.max_slip_angle + 0.5)
+        return values
+
+
+class Realtime(TrailingMixin, Overlay):
+    """Draw widget"""
+
+    update_while_hidden = True  # input history keeps recording
+
+    def __init__(self, config, widget_name):
+        # Assign base setting
+        super().__init__(config, widget_name)
+
+        # Config variable
+        self.setup_trailing()
+        self.margin = max(int(self.wcfg["display_margin"]), 0)
+        self.display_height = max(int(self.wcfg["display_height"]), 2)
+        self.area_width = max(int(self.wcfg["display_width"]), 2)
+        self.area_height = self.display_height + self.margin * 2
+
+        max_line_width = int(max(1, *(self.wcfg[f"{plot_name}_line_width"] for plot_name in PLOT_NAMES)))
+        max_samples = 3 + max_line_width  # 3 offset + max line width
+        self.samples_offset = max_samples - 2
 
         # Config canvas
         self.resize(self.area_width, self.area_height)
@@ -85,136 +169,22 @@ class Realtime(Overlay):
         self.pixmap_plot_section = QPixmap(self.display_scale * 3, self.area_height)
         self.pixmap_plot_section.fill(Qt.GlobalColor.transparent)
 
-        if self.wcfg["show_tc_activation"]:
-            self.data_tc_activation = self.create_data_samples(max_samples)
-        if self.wcfg["show_abs_activation"]:
-            self.data_abs_activation = self.create_data_samples(max_samples)
-        if self.wcfg["show_throttle"]:
-            self.data_throttle = self.create_data_samples(max_samples)
-        if self.wcfg["show_brake"]:
-            self.data_brake = self.create_data_samples(max_samples)
-        if self.wcfg["show_clutch"]:
-            self.data_clutch = self.create_data_samples(max_samples)
-        if self.wcfg["show_ffb"]:
-            self.data_ffb = self.create_data_samples(max_samples)
-        if self.wcfg["show_steering"]:
-            self.data_steering = self.create_data_samples(max_samples)
-        if self.wcfg["show_speed"]:
-            self.data_speed = self.create_data_samples(max_samples)
-            self.max_speed = 0.0
-        if self.wcfg["show_wheel_lock"]:
-            self.data_wheel_lock = self.create_data_samples(max_samples)
-        if self.wcfg["show_wheel_slip"]:
-            self.data_wheel_slip = self.create_data_samples(max_samples)
-        if self.wcfg["show_slip_angle_difference"]:
-            self.data_slip_angle_difference = self.create_data_samples(max_samples)
+        for plot_name in self.plot_names:
+            setattr(self, f"data_{plot_name}", self.create_data_samples(max_samples))
 
-        self.draw_queue = tuple(d[1:] for d in sorted(self.config_display_order(plot_names), reverse=True))
+        self.draw_queue = tuple(d[1:] for d in sorted(self.config_display_order(PLOT_NAMES), reverse=True))
         self.draw_background()
-
-        # Last data
-        self.last_lap_etime = -1.0
-        self.update_plot = 0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        # Use elapsed time to determine whether data paused
-        # Add 1 extra update compensation
-        lap_etime = api.read.timing.elapsed()
-        if self.last_lap_etime != lap_etime:
-            self.last_lap_etime = lap_etime
-            self.update_plot = self.max_paused_frames
-
-        if self.update_plot >= 0:
-            self.update_plot -= 1
-
-            throttle_raw = api.read.inputs.throttle_raw()
-            brake_raw = api.read.inputs.brake_raw()
-
-            if self.wcfg["show_raw_throttle"]:
-                throttle = throttle_raw
-            else:
-                throttle = api.read.inputs.throttle()
-
-            if self.wcfg["show_raw_brake"]:
-                brake = brake_raw
-            else:
-                brake = api.read.inputs.brake()
-
-            # Update sample
-            if self.wcfg["show_tc_activation"]:
-                if api.read.switch.tc_active():
-                    tc_active = throttle
-                else:
-                    tc_active = -1.0
-                self.update_sample(self.data_tc_activation, tc_active)
-
-            if self.wcfg["show_abs_activation"]:
-                if api.read.switch.abs_active():
-                    abs_active = brake
-                else:
-                    abs_active = -1.0
-                self.update_sample(self.data_abs_activation, abs_active)
-
-            if self.wcfg["show_throttle"]:
-                self.update_sample(self.data_throttle, throttle)
-
-            if self.wcfg["show_brake"]:
-                self.update_sample(self.data_brake, brake)
-
-            if self.wcfg["show_clutch"]:
-                if self.wcfg["show_raw_clutch"]:
-                    clutch = api.read.inputs.clutch_raw()
-                else:
-                    clutch = api.read.inputs.clutch()
-                self.update_sample(self.data_clutch, clutch)
-
-            if self.wcfg["show_ffb"]:
-                if self.wcfg["show_absolute_ffb"]:
-                    ffb = abs(api.read.inputs.force_feedback())
-                else:
-                    ffb = (api.read.inputs.force_feedback() + 1) / 2
-                self.update_sample(self.data_ffb, ffb)
-
-            if self.wcfg["show_steering"]:
-                if self.wcfg["show_inverted_steering"]:
-                    steering = 1 - (api.read.inputs.steering() + 1) / 2
-                else:
-                    steering = (api.read.inputs.steering() + 1) / 2
-                self.update_sample(self.data_steering, steering)
-
-            if self.wcfg["show_speed"]:
-                speed = api.read.vehicle.speed()
-                if self.max_speed < speed:
-                    self.max_speed = speed
-                if speed < 0.1:  # reset if stopped
-                    self.max_speed = 0
-                elif self.max_speed > 0:
-                    speed /= self.max_speed
-                else:
-                    speed = 0
-                self.update_sample(self.data_speed, speed)
-
-            if self.wcfg["show_wheel_lock"]:
-                wheel_lock = min(abs(min(minfo.wheels.slipRatio)), 1)
-                if wheel_lock < self.wcfg["wheel_lock_threshold"] or brake_raw <= 0.02:
-                    wheel_lock = -999
-                self.update_sample(self.data_wheel_lock, wheel_lock)
-
-            if self.wcfg["show_wheel_slip"]:
-                wheel_slip = min(max(minfo.wheels.slipRatio), 1)
-                if wheel_slip < self.wcfg["wheel_slip_threshold"] or throttle_raw <= 0.02:
-                    wheel_slip = -999
-                self.update_sample(self.data_wheel_slip, wheel_slip)
-
-            if self.wcfg["show_slip_angle_difference"]:
-                diff_slip_angle = minfo.wheels.slipAngleDifference / self.max_slip_angle + 0.5
-                self.update_sample(self.data_slip_angle_difference, diff_slip_angle)
-
-            # Update after all pedal data set
-            self.draw_plot_section()
-            self.draw_plot()
-            self.update()  # trigger paint event
+        if self.plot_paused():
+            return
+        for plot_name, value in zip(self.plot_names, self.read_inputs()):
+            self.update_sample(getattr(self, f"data_{plot_name}"), value)
+        # Update after all pedal data set
+        self.draw_plot_section()
+        self.draw_plot()
+        self.update()  # trigger paint event
 
     # GUI update methods
     def paintEvent(self, event):

@@ -45,6 +45,7 @@ GLOBAL_DEFAULT = {
         "update_repository": "Keenny38/ModernTinyPedals",
         'snap_distance': 10,
         "snap_gap": 0,
+        "enable_magnetic_snap": True,  # overlays snap while dragged (Ctrl: free move), else snap with Ctrl
         "show_layout_guides": True,
         "grid_move_size": 8,
         "minimum_update_interval": 10,
@@ -149,6 +150,7 @@ GLOBAL_DEFAULT = {
         "track_notes_path": set_default_config_path("tracknotes/"),
         "car_setups_path": set_default_data_path("carsetups/"),
         "telemetry_path": set_default_data_path("telemetry/"),
+        "game_image_path": set_default_data_path("gameimage/"),
     },
     "notification": {
         "notify_locked_preset": True,

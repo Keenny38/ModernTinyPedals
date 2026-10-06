@@ -239,9 +239,9 @@ def test_modern_driver_list_options_shown():
 
 
 def test_restyled_options_keep_switches_named_color():
-    from tinypedal.widget._modern import modern_module
+    from tinypedal.widget._modern.restyle import restyled_options
 
-    options = modern_module("track_map").Realtime.options
+    options = restyled_options("track_map", {"background_color_map": "surface_alt"})
     assert "show_custom_player_color_in_multi_class" in options
     # Colors set by design hidden, other colors stay customizable
     assert "background_color" not in options and "background_color_map" not in options

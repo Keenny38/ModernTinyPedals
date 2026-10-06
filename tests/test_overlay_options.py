@@ -129,11 +129,11 @@ def test_item_sections_follow_their_on_off_option(ui_env):
 
 def test_modern_design_sections(ui_env):
     from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.ui.quick.overlay_sections import SECTION_COLUMNS, SECTION_SHOWN
+    from tinypedal.ui.quick.overlay_sections import SECTION_SHOWN
 
-    set_classic("standings", False)
+    set_classic("standings")
     layout = build_layout("standings", cfg.user.setting["standings"])
-    assert layout.section_of["column_time_gap"].key == SECTION_COLUMNS
+    assert layout.section_of["show_time_gap"].toggle == "show_time_gap"  # classic: automatic sections
     set_classic("speedometer", False)
     layout = build_layout("speedometer", cfg.user.setting["speedometer"])
     shown = layout.section_of["show_speed"]
@@ -370,6 +370,91 @@ def test_black_box_sections_order_list_and_dependency_chain(options):
     options.setBool("black_box/show_tyre_pressure", False)  # grand parent off: whole chain dimmed
     minimum = row(options, "black_box/tyre_pressure_target_minimum")
     assert minimum["dimmed"] and minimum["note"].endswith("Show Tyre Pressure")
+
+
+def test_listed_sections():
+    from tinypedal.template.widget.black_box_ui import ORDER_LIST
+    from tinypedal.ui.quick.overlay_sections import SECTION_OPTIONS, SECTION_ORDER, listed_sections, order_keys
+
+    keys = ["enable", "font_size", "show_a", "column_a", "column_b", "display_order_a", "display_order_b", "other"]
+    layout = (("Size", ("font_size", "missing")), ("Items", (ORDER_LIST,)), ("A", ("show_a",)))
+    sections = listed_sections(keys, layout, "Items", ("column_a", "column_b"))
+    assert [(section.key, section.title) for section in sections] == [
+        ("general", "General"), ("declared:font_size", "Size"), (SECTION_ORDER, "Items"), ("declared:show_a", "A"),
+        (SECTION_OPTIONS, "Options")]  # options listed nowhere last
+    assert sections[2].keys == ("display_order_a", "display_order_b", "column_a", "column_b")
+    assert order_keys(sections[2]) == ("display_order_a", "display_order_b")
+    sections = listed_sections(keys, (("A", ("show_a",)),))  # no place given: list last, own title
+    assert sections[-1].key == SECTION_ORDER and sections[-1].title == "Display Order"
+    assert "column_a" in sections[-2].keys  # not switched in the list: option row
+
+
+def test_driver_list_sections_and_column_list(options):
+    """Modern relative, standings & rivals: sections in page order, columns switched & moved in one list,
+    listed as the overlay shows them"""
+    from tinypedal.template.widget.drivers_ui import RELATIVE_COLUMNS, STANDINGS_COLUMNS, order_option
+    from tinypedal.ui.quick.overlay_options_backend import build_layout
+    from tinypedal.ui.quick.overlay_sections import SECTION_ORDER
+
+    set_classic("standings", False)
+    layout = build_layout("standings", cfg.user.setting["standings"])
+    titles = [section.title for section in layout.sections]
+    assert titles[:5] == ["General", "Position & Layout", "Rows", "Classes & Number of Cars", "Columns"]
+    assert titles[5:7] == ["Position Change", "Driver Name"] and "Options" not in titles
+    columns = layout.section_of["column_time_gap"]
+    assert columns.key == SECTION_ORDER and "display_order_time_gap" in columns.keys
+    assert layout.dependencies["brand_logo_width"] == "column_brand_logo"
+    assert layout.dependencies["maximum_vehicles_exclusive_mode"] == "enable_single_class_exclusive_mode"
+    relative = build_layout("relative", cfg.user.setting["relative"])
+    assert "additional_players_front" in relative.section_of["show_vehicle_in_garage"].keys
+    options.selectOverlay("standings")
+    assert not options.overlayInfo["simpleMode"]
+    order = rows(options, "order")[0]
+    keys = [item["key"] for item in order["orders"]]
+    assert keys == [order_option(column) for column in STANDINGS_COLUMNS]  # design order, not option values
+    assert order["help"].startswith("Columns from left to right")
+    logo = next(item for item in order["orders"] if item["key"] == "display_order_brand_logo")
+    assert logo["label"] == "Brand Logo" and logo["toggle"] == "standings/column_brand_logo" and logo["checked"]
+    options.setBool(logo["toggle"], False)
+    logo = next(item for item in rows(options, "order")[0]["orders"] if item["key"] == "display_order_brand_logo")
+    assert not logo["checked"] and logo["changed"]
+    assert row(options, "standings/brand_logo_width")["dimmed"]
+    # Moving one column keeps the others where the overlay shows them
+    options.moveOrder("standings", keys[3], -1)
+    moved = [item["key"] for item in rows(options, "order")[0]["orders"]]
+    assert moved == [*keys[:2], keys[3], keys[2], *keys[4:]]
+    assert [options.value("standings", key) for key in moved] == list(range(1, len(moved) + 1))
+    options.resetOrder("standings")
+    assert [item["key"] for item in rows(options, "order")[0]["orders"]] == keys
+    assert options.value("standings", "column_brand_logo") is False  # columns shown left as set
+    options.selectOverlay("relative")
+    assert len(rows(options, "order")[0]["orders"]) == len(RELATIVE_COLUMNS)
+    set_classic("standings")
+    assert build_layout("standings", cfg.user.setting["standings"]).option_ui is None
+
+
+def test_driver_list_preview_shows_sample_race(ui_env, bundled_fonts):
+    from tinypedal.ui.widget_preview import render_widget
+    from tinypedal.widget._modern.sample_field import FIELD, PLAYER, sample_field, sample_standings
+
+    field = sample_field()
+    setting = dict(cfg.user.setting["standings"])
+    assert setting["enable_multi_class_split_mode"]
+    split = sample_standings(field, setting)
+    assert split.count(-1) == 3 and PLAYER in split  # three classes, space after each
+    setting["enable_multi_class_split_mode"] = False
+    combined = sample_standings(field, setting)
+    assert combined[-1] == -1 and -1 not in combined[:-1] and PLAYER in combined
+    setting["enable_single_class_exclusive_mode"] = True
+    exclusive = sample_standings(field, setting)
+    assert {FIELD[index][3] for index in exclusive if index >= 0} == {FIELD[PLAYER][3]}
+    heights = {}
+    for name in ("standings", "relative", "rivals"):
+        set_classic(name, False)
+        heights[name] = render_widget(cfg, name, dict(cfg.user.setting[name])).height()
+    assert heights["standings"] > heights["relative"] > heights["rivals"] > 0
+    setting = dict(cfg.user.setting["standings"], maximum_vehicles_per_split_player=3)
+    assert render_widget(cfg, "standings", setting).height() < heights["standings"]  # options shown live
 
 
 def test_unit_hint_in_display_unit(options):

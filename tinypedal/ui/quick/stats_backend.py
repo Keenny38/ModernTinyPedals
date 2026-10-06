@@ -43,7 +43,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from datetime import date, timedelta
 from statistics import median_low
@@ -106,6 +106,7 @@ from ...userfile.sector_best import load_theoretical_best
 from .. import UIScaler
 from ..lap_viewer import number_text, signed
 from ..track_map_viewer import TrackMapViewer
+from .game_pictures import brand_logo_url, notifier, track_logo_url
 from .models import DictListModel
 from .stint_analysis import (
     compare_friend,
@@ -167,6 +168,7 @@ MAX_STINTS = 12  # stints & sessions listed with their consistency, newest first
 ACTIVITY_WEEKS = 53  # weeks of daily driving activity (All Tracks), page shows the last ones that fit
 ACTIVITY_STEPS = (1800, 3600, 7200)  # driving time (seconds) of activity levels 1 to 4 (above last)
 RECENT_SESSIONS = 8  # latest sessions of every track (All Tracks)
+LOGO_EM = 2.6  # room of game logo before cell text (em)
 HISTORY_COLUMNS = (  # session history CSV export
     "Date", "Track", "Vehicle", "Class", "Session", "Best Lap (s)", "Valid Laps", "Invalid Laps", "Distance (m)",
     "Driving Time (s)", "Position", "Finish",
@@ -370,6 +372,16 @@ def class_prefix(vehicle: str) -> str:
     return vehicle.split(" - ", 1)[0].strip()
 
 
+def vehicle_logo(vehicle: str, classes: Iterable[str] = ()) -> str:
+    """Brand logo of a driver stats vehicle key: brand of "Class - Brand", or of vehicle name (none
+    for a class key)"""
+    if " - " in vehicle:
+        return brand_logo_url(brand=vehicle.split(" - ", 1)[1].strip())
+    if vehicle in classes:
+        return ""
+    return brand_logo_url(vehicle_name=vehicle)
+
+
 def combo_name(track: str, vehicle_class: str) -> str:
     """Track & class name of sector best & recorded laps files"""
     return strip_invalid_char(f"{track} - {vehicle_class}")
@@ -414,6 +426,7 @@ class Cell(NamedTuple):
     tip: str = ""
     badge: str = ""  # level letter
     pill: bool = False  # shown as a pill of its color (level)
+    logo: str = ""  # game logo URL before text (car brand, circuit)
 
 
 class StatsEdit(NamedTuple):
@@ -498,6 +511,7 @@ class DriverStatsBackend(QObject):
         self._laps_key = ""  # recorded laps folder & vehicle shown in stints
         self._lap_infos: dict[str, tuple[float, dict]] = {}  # lap path: file time, lap info (read once)
         self.laps_loaded.connect(self.stints_loaded)
+        notifier().changed.connect(self.pictures_changed)
         self._friend: dict | None = None
         self._friend_view: dict = {"visible": False}
         self.load_friend(str(self.viewer_config().get("friend_file", "")), quiet=True)
@@ -761,9 +775,9 @@ class DriverStatsBackend(QObject):
         self._loaded = True
         keys = self.sorted_tracks()
         current = api.read.session.track_name() if api.read is not None else ""
-        self._tracks = [{"key": ALL_TRACKS, "label": tr("All Tracks"), "date": "", "current": False}] + [
+        self._tracks = [{"key": ALL_TRACKS, "label": tr("All Tracks"), "date": "", "current": False, "logo": ""}] + [
             {"key": key, "label": key, "date": format_date(self.track_last_driven.get(key, 0.0)),
-             "current": key == current}
+             "current": key == current, "logo": track_logo_url(key)}
             for key in keys
         ]
         if wanted and wanted not in self.stats_temp:  # removed meanwhile: neighbor track
@@ -804,6 +818,11 @@ class DriverStatsBackend(QObject):
     def allTracks(self) -> bool:
         return not self.selected_stats_key
 
+    @Property(str, notify=tracksChanged)
+    def currentLogo(self) -> str:
+        """Circuit logo of selected track (game)"""
+        return track_logo_url(self.selected_stats_key) if self.selected_stats_key else ""
+
     @Slot(str)
     def selectTrack(self, key: str):
         if key == self.selected_stats_key and self._loaded:
@@ -840,6 +859,17 @@ class DriverStatsBackend(QObject):
         self.refresh_table()
 
     # Table
+    @Slot()
+    def pictures_changed(self):
+        """Logos fetched from game meanwhile: track list & table shown again"""
+        if not self._loaded:
+            return
+        for entry in self._tracks[1:]:
+            entry["logo"] = track_logo_url(entry["key"])
+        self._tracks = list(self._tracks)
+        self.tracksChanged.emit()
+        self.refresh_table()
+
     def refresh_table(self):
         """Table of vehicles (or tracks), sort, selection & tiles kept"""
         if self.selected_stats_key:
@@ -879,7 +909,8 @@ class DriverStatsBackend(QObject):
         reference = self.reference_for(track, vehicle)
         best = valid_laptime(data.get("pb", 0))
         theory = self.theory_of(track, vehicle)
-        cells: dict[str, Cell] = {"vehicle": Cell(vehicle, vehicle.lower(), vehicle)}
+        cells: dict[str, Cell] = {"vehicle": Cell(vehicle, vehicle.lower(), vehicle,
+                                                  logo=vehicle_logo(vehicle, self.classes.values()))}
         percent = reference.percent(best) if reference else 0.0
         cells["gap"] = Cell(f"{percent:.2f} %" if percent else "-", percent or None, round(percent, 3) if percent else None)
         level = reference.level(best) if reference else -1
@@ -917,7 +948,7 @@ class DriverStatsBackend(QObject):
         unrated = 0
         rows = []
         for track, vehicles in tracks.items():
-            cells: dict[str, Cell] = {"track": Cell(track, track.lower(), track)}
+            cells: dict[str, Cell] = {"track": Cell(track, track.lower(), track, logo=track_logo_url(track))}
             bests: dict[str, tuple[float, str]] = {}
             for vehicle, data in vehicles.items():
                 best = valid_laptime(data.get("pb", 0)) if isinstance(data, dict) else 0.0
@@ -1052,6 +1083,8 @@ class DriverStatsBackend(QObject):
                 cell = cells.get(key)
                 if cell is not None:
                     margins = 3.3 if cell.badge else 2.4 if cell.pill else 1.6  # badge, pill & cell margins
+                    if cell.logo:
+                        margins += LOGO_EM  # logo before text (StatsTable.qml)
                     width = max(width, text_width(cell.text, cell.bold) * 1.05 + em * margins)
             if key in user_widths:
                 width = max(user_widths[key] * em, em * 2)
@@ -1075,9 +1108,10 @@ class DriverStatsBackend(QObject):
     def cell_data(cell: Cell | None) -> dict:
         """Cell of page: text, look, tooltip; unknown value dimmed"""
         if cell is None:
-            return {"text": "", "color": "", "bold": False, "tip": "", "badge": "", "pill": False, "dim": False}
+            return {"text": "", "color": "", "bold": False, "tip": "", "badge": "", "pill": False, "dim": False,
+                    "logo": ""}
         return {"text": cell.text, "color": cell.color, "bold": cell.bold, "tip": cell.tip, "badge": cell.badge,
-                "pill": cell.pill, "dim": cell.value is None and not cell.color}
+                "pill": cell.pill, "dim": cell.value is None and not cell.color, "logo": cell.logo}
 
     @Property(QObject, constant=True)
     def rows(self) -> QObject:
@@ -1325,6 +1359,7 @@ class DriverStatsBackend(QObject):
             laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
             rows.append({
                 "track": record.track, "vehicle": record.vehicle, "date": format_date(record.time),
+                "trackLogo": track_logo_url(record.track),
                 "session": session_name(record.session), "kind": session_kind(record.session),
                 "best": calc.sec2laptime_full(laptime) if laptime else "-",
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005), "result": race_result(record),

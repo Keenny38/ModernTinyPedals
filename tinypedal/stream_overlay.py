@@ -57,7 +57,7 @@ import zlib
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, NamedTuple
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTimer
 from PySide6.QtGui import QGuiApplication, QImage
@@ -69,6 +69,8 @@ from .i18n import current_language, tr
 from .process import results_file as rf
 from .process import results_text as rt
 from .setting import cfg
+from .userfile.custom_image import brand_logo_file
+from .userfile.game_images import images
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,10 @@ MAX_VIEWS = 256  # views remembered as watched (bounded)
 CODECS = ("zraw", "png")
 VIEW_NAME = re.compile(r"^[a-z0-9_]{1,64}$")
 FONT_NAME = re.compile(r"^[A-Za-z0-9-]{1,64}\.ttf$")
+# Game picture (car brand & circuit logos cached from game, own brand logos): /pictures/<kind>/<file>
+PICTURE_PATH = re.compile(r"^(own|[a-z_]{1,32})/[A-Za-z0-9 ._=-]{1,96}\.(svg|png|webp)$")
+PICTURE_TYPES = {"svg": "image/svg+xml", "png": "image/png", "webp": "image/webp"}
+OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
 TOKEN_BYTES = 18  # access token: 24 url-safe characters
@@ -396,6 +402,38 @@ RESULTS_LABELS = {
 }
 
 
+def picture_link(path: str) -> str:
+    """Address of a game picture (or own brand logo) on stream server, empty if not servable"""
+    if not path:
+        return ""
+    path = os.path.abspath(path)
+    for base, prefix in ((images.folder, ""), (cfg.path.brand_logo, f"{OWN_LOGOS}/")):
+        base = os.path.abspath(base)
+        if path.startswith(base + os.sep):
+            link = prefix + os.path.relpath(path, base).replace(os.sep, "/")
+            return f"/pictures/{quote(link)}" if PICTURE_PATH.match(link) else ""
+    return ""
+
+
+def picture_file(link: str) -> str:
+    """File of picture address part after /pictures/, empty if invalid or missing"""
+    link = unquote(link)
+    if not PICTURE_PATH.match(link) or ".." in link:
+        return ""
+    folder, name = link.split("/", 1)
+    base = os.path.abspath(cfg.path.brand_logo if folder == OWN_LOGOS else images.folder)
+    path = os.path.abspath(os.path.join(base, name) if folder == OWN_LOGOS else os.path.join(base, folder, name))
+    if not path.startswith(base + os.sep) or not os.path.isfile(path):
+        return ""
+    return path
+
+
+def brand_picture(entry: rf.Entry) -> str:
+    """Logo address of car brand of results entry (game logo for dark page background)"""
+    return picture_link(brand_logo_file(cfg.path.brand_logo, images.brand(entry.vehicle, entry.car), False,
+                                        entry.vehicle))
+
+
 def results_snapshot(cache: ResultsCache, kind: str) -> dict[str, Any]:
     """Last session results for results page (texts in app language)"""
     labels = {key: tr(text) for key, text in RESULTS_LABELS.items()}
@@ -435,12 +473,14 @@ def results_snapshot(cache: ResultsCache, kind: str) -> dict[str, Any]:
             "classFastest": entry.best_lap > 0 and entry.best_lap == fastest.get(entry.car_class),
             "pits": entry.pitstops,
             "player": entry.player,
+            "logo": brand_picture(entry),
         })
     subtitle = next((name for name in (result.course, result.venue) if name and name != result.track), "")
     return {
         "available": True,
-        "id": f"{os.path.basename(result.path)}:{len(entries)}:{result.most_laps}",
+        "id": f"{os.path.basename(result.path)}:{len(entries)}:{result.most_laps}:{images.version}",
         "title": result.track,
+        "trackLogo": picture_link(images.track_logo(result.track, result.venue, result.course)),
         "subtitle": subtitle,
         "kind": rt.kind_text(result.kind),
         "race": result.kind == "Race",
@@ -507,6 +547,8 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.store.touch(view)
             body = self.store.bundle(view, after, codec if codec in CODECS else CODECS[0])
             self.send_body(200, body, "application/octet-stream")
+        elif path.startswith("/pictures/"):
+            self.send_picture(path[10:])
         elif path == "/api/results":
             kind = query.get("session", ["race"])[0]
             data = results_snapshot(self.results, kind if kind in RESULT_KINDS else "race")
@@ -525,6 +567,15 @@ class StreamHandler(BaseHTTPRequestHandler):
         with open(path, "rb") as file:
             data = file.read()
         self.send_body(200, data, "font/ttf", cache=True)
+
+    def send_picture(self, link: str):
+        path = picture_file(link)
+        if not path:
+            self.send_body(404, b"not found", "text/plain")
+            return
+        with open(path, "rb") as file:
+            data = file.read()
+        self.send_body(200, data, PICTURE_TYPES[path.rsplit(".", 1)[-1].lower()], cache=True)
 
     def send_html(self, page: str):
         self.send_body(200, page.encode("utf-8"), "text/html; charset=utf-8")
@@ -828,6 +879,9 @@ transition:opacity .35s ease,transform .35s ease}
 .num{color:var(--dim)}
 .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
 .team{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}
+.car{display:flex;align-items:center;gap:1vh;min-width:0}
+.logo{height:58%;width:5.2vh;object-fit:contain;flex:none}
+#tlogo{height:calc(var(--row)*1.45);max-width:16vh;object-fit:contain;display:none}
 .r{text-align:right}.dim{color:var(--dim)}.loss{color:var(--loss)}
 .best.fast{color:var(--purple);font-weight:700}
 footer{display:flex;align-items:center;justify-content:space-between;padding:1vh 2.4vh;color:var(--dim);
@@ -836,7 +890,7 @@ font-size:calc(var(--row)*.4);letter-spacing:.1em;text-transform:uppercase}
 #wait{position:absolute;left:5vw;top:6vh;color:var(--dim);font-size:3vh;display:none}
 .still #panel,.still .row,.still #progress{transition:none!important}
 </style></head><body>
-<div id="panel"><header><div><div id="kind"></div><div id="title"></div><div id="sub"></div></div>
+<div id="panel"><header><img id="tlogo" alt=""><div><div id="kind"></div><div id="title"></div><div id="sub"></div></div>
 <div id="flag"></div><div id="cls"></div></header>
 <div class="grid head"><div class="r" id="lpos"></div><div></div><div>#</div><div id="ldriver"></div>
 <div id="lcar"></div><div class="r" id="llaps"></div><div class="r" id="lgap"></div><div class="r" id="lbest"></div>
@@ -858,6 +912,11 @@ document.documentElement.style.setProperty("--row",Math.min(78/(perPage+3.2),6)+
 let data=null,views=[],viewIndex=0,timer=0;
 const text=value=>String(value==null?"":value);
 function cell(className,value){const div=document.createElement("div");div.className=className;div.textContent=text(value);return div}
+const picture=link=>link?link+"?token="+encodeURIComponent(token):"";
+function carCell(row){
+  const box=document.createElement("div");box.className="car";
+  if(row.logo){const logo=document.createElement("img");logo.className="logo";logo.alt="";logo.src=picture(row.logo);box.append(logo)}
+  box.append(cell("team",row.team||row.car));return box}
 function buildViews(){
   views=[];
   if(!data||!data.available)return;
@@ -887,7 +946,7 @@ function show(){
     const driver=document.createElement("div");driver.style.minWidth="0";
     driver.append(cell("name",row.driver));
     line.append(cell("pos",byClass?row.classPos:row.pos),bar,cell("num",row.number?"#"+row.number:""),driver,
-      cell("team",row.team||row.car),cell("r",row.laps),
+      carCell(row),cell("r",row.laps),
       cell("r "+(byClass?row.classGapTone:row.gapTone),byClass?row.classGap:row.gap),
       cell("r best"+((byClass?row.classFastest:row.fastest)?" fast":""),row.best),cell("r dim",data.race?row.pits:""));
     rows.append(line);
@@ -916,6 +975,7 @@ async function load(){
         data=next;
         if(data.available){
           $("kind").textContent=data.kind;$("title").textContent=data.title;$("sub").textContent=data.subtitle;
+          $("tlogo").style.display=data.trackLogo?"block":"none";if(data.trackLogo)$("tlogo").src=picture(data.trackLogo);
           $("flag").textContent=labels.unfinished||"";$("flag").style.display=data.partial?"block":"none";
         }
         buildViews();viewIndex=0;show();

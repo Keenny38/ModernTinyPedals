@@ -39,6 +39,7 @@ class RealtimeState:
         paused: whether data stopped updating.
         resets: number of player vehicle resets.
         hidden: whether overlay is hidden.
+        editing: whether overlay edit mode is on (toolbar & outlines shown, see widget._edit_mode).
         session_type: session type of player, for widget visibility context.
         in_pits: whether player is in pit lane or garage.
         overriding: whether is state override mode enabled.
@@ -51,6 +52,7 @@ class RealtimeState:
         "paused",
         "resets",
         "hidden",
+        "editing",
         "session_type",
         "in_pits",
         "overriding",
@@ -63,6 +65,7 @@ class RealtimeState:
         self.paused: bool = True
         self.resets: int = 0
         self.hidden: bool = False
+        self.editing: bool = False
         self.session_type: int = -1  # 0 testday, 1 practice, 2 qualify, 3 warmup, 4 race, -1 unknown
         self.in_pits: bool = False  # player in pit lane or garage
         self.overriding: bool = False
@@ -79,6 +82,7 @@ class OverlaySignal(QObject):
         paused: signal for pausing and resuming overlay timer.
         iconify: signal for toggling taskbar icon visibility state (for VR compatibility).
         context: signal for session type or pit state changed (widget visibility context).
+        editing: signal for overlay edit mode started or ended.
     """
 
     hidden = Signal(bool)
@@ -86,6 +90,7 @@ class OverlaySignal(QObject):
     locked = Signal(bool)
     paused = Signal(bool)
     iconify = Signal(bool)
+    editing = Signal(bool)
     __slots__ = ()
 
 

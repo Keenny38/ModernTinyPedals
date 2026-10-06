@@ -160,7 +160,8 @@ Item {
             spacing: 2
             Text {
                 Layout.fillWidth: true
-                text: i18n.tr("Order of shown items, top first: drag them, or use the arrows.")
+                text: row.model.help !== "" ? row.model.help
+                                            : i18n.tr("Order of shown items, top first: drag them, or use the arrows.")
                 color: theme.dimText
                 font.pointSize: theme.fontPoint * 0.85
                 wrapMode: Text.WordWrap
@@ -221,10 +222,21 @@ Item {
                             color: theme.accent
                             opacity: orderItem.modelData.changed ? 1 : 0
                         }
+                        TpSwitch {  // item shown or hidden (column of driver lists)
+                            visible: orderItem.modelData.toggle !== ""
+                            checkable: false  // follows backend
+                            checked: orderItem.modelData.checked
+                            implicitHeight: Math.round(theme.em * 1.8)
+                            tip: i18n.tr("Show or hide this column")
+                            onClicked: backend.setBool(orderItem.modelData.toggle, !orderItem.modelData.checked)
+                            Accessible.role: Accessible.CheckBox
+                            Accessible.name: orderItem.modelData.label
+                            Accessible.checked: orderItem.modelData.checked
+                        }
                         Text {
                             Layout.fillWidth: true
                             text: orderItem.modelData.label
-                            color: theme.text
+                            color: orderItem.modelData.checked ? theme.text : theme.dimText
                             elide: Text.ElideRight
                         }
                         TpButton {

@@ -323,9 +323,14 @@ def test_french_preset_and_plugin_messages(french, message, expected):
     assert i18n.trm(message) == expected
 
 
-def test_french_plugin_trust_prompt(ui_env, monkeypatch, french):
+def test_french_plugin_trust_prompt(ui_env, monkeypatch, french, tmp_path):
     from tinypedal.ui.plugin_manager import PluginManager
 
+    monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
+    plugin = tmp_path / "plugins" / "gauge"
+    plugin.mkdir(parents=True)
+    (plugin / "setting.json").write_text("{}", encoding="utf-8")
+    (plugin / "widget.py").write_text("Realtime = object\n", encoding="utf-8")
     asked = []
 
     def question(*args, **kwargs):
@@ -337,7 +342,7 @@ def test_french_plugin_trust_prompt(ui_env, monkeypatch, french):
     flush()
     manager = PluginManager(None)
     try:
-        manager.table.selectRow(0)  # bundled example plugin
+        manager.table.selectRow(0)  # plugin of this test
         manager.trust_selected()
         title, message = asked[0]
         assert title == "Faire confiance..."

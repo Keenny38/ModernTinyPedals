@@ -17,6 +17,7 @@ Item {
     required property string status
     required property bool player
     required property bool spectated
+    required property string brandLogo
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
     readonly property bool wide: width > theme.em * 34
     signal picked(int slot)
@@ -72,9 +73,23 @@ Item {
             font.weight: Font.DemiBold
             font.features: { "tnum": 1 }
         }
-        Column {
+        Item {  // car brand logo of game, same room on every row
+            id: logoBox
             anchors.left: placeText.right
-            anchors.leftMargin: theme.em * 0.8
+            anchors.leftMargin: theme.em * 0.6
+            anchors.verticalCenter: parent.verticalCenter
+            width: theme.em * 2.4
+            height: theme.em * 1.4
+            GameLogo {
+                anchors.centerIn: parent
+                source: row.brandLogo
+                boxWidth: theme.em * 2.4
+                boxHeight: theme.em * 1.4
+            }
+        }
+        Column {
+            anchors.left: logoBox.right
+            anchors.leftMargin: theme.em * 0.6
             anchors.right: details.left
             anchors.rightMargin: theme.em * 0.6
             anchors.verticalCenter: parent.verticalCenter

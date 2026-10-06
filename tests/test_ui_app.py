@@ -206,7 +206,7 @@ def test_command_palette(ui_env, monkeypatch):
         assert match_commands(palette.commands, "stratégie pneus")[0].title == "Race Calculator"
         palette.edit_search.setText("hotkey")
         assert palette.list_results.count() >= 1
-        palette.edit_search.setText("font color speed")  # options found too
+        palette.edit_search.setText("font size speed")  # options found too
         assert any("\u2192" in palette.list_results.item(row).text() for row in range(palette.list_results.count()))
         palette.edit_search.setText("Tools")
         palette.run_selected()  # first match is the page

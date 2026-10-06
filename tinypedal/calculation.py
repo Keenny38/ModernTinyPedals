@@ -616,7 +616,7 @@ def scale_map(coords: Sequence[tuple[float, float]], area_size: int, margin: int
     return tuple(zip(x_range_scaled, y_range_scaled)), map_range, map_scale, map_offset
 
 
-def scale_elevation(coords: Sequence[tuple[float, float]], area_width: int, area_height: int):
+def scale_elevation(coords: Sequence[tuple[float, float]], area_width: float, area_height: float):
     """Scale elevation data"""
     # Separate X & Y coordinates
     x_range, y_range = tuple(zip(*coords))

@@ -1045,6 +1045,11 @@ TpPage {
                             x: theme.em * 0.35
                             width: parent.width - theme.em * 0.7
                             spacing: theme.em * 0.45
+                            GameLogo {  // circuit logo of game
+                                source: recentItem.modelData.trackLogo || ""
+                                boxWidth: theme.em * 2.6
+                                boxHeight: theme.em * 1.6
+                            }
                             ColumnLayout {
                                 spacing: 0
                                 Layout.fillWidth: true

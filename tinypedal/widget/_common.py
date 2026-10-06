@@ -26,11 +26,12 @@ from math import isfinite
 from time import monotonic
 from typing import Any, NamedTuple
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ..api_control import api
 from ..validator import generator_init
+from ._snapping import constrain_axis, grid_value, snap_position
 
 
 class FontMetrics(NamedTuple):
@@ -45,23 +46,25 @@ class FontMetrics(NamedTuple):
 
 
 class MousePosition:
-    """Mouse position & snapping"""
+    """Overlay drag: grab offset, magnetic snapping, grid, axis lock
+
+    Magnetic snapping (edges & centers of screen and other overlays) is on by default
+    (`enable_magnetic_snap`): hold Ctrl to move freely. With magnetic snapping off, Ctrl snaps
+    (former behavior). Shift keeps the move on one axis. Grid move rounds the axes not snapped.
+    """
 
     __slots__ = (
         "_init_pos",
-        "_grid_x",
-        "_grid_y",
-        "_center_x",
-        "_center_y",
-        "_delta_x",
-        "_delta_y",
-        "_last_x",
-        "_last_y",
+        "_start",
         "_screen_name",
+        "_others",
+        "_screens",
         "_grid_move",
         "_grid_size",
         "_snap_gap",
         "_snap_distance",
+        "_magnetic",
+        "snapped",
     )
 
     def __init__(self):
@@ -70,53 +73,58 @@ class MousePosition:
     def reset(self):
         """Reset"""
         self._init_pos: Any = None
-        self._grid_x: list[int] = []
-        self._grid_y: list[int] = []
-        self._center_x: list[float] = []
-        self._center_y: list[float] = []
-        self._delta_x = 0
-        self._delta_y = 0
-        self._last_x = 0
-        self._last_y = 0
-        self._screen_name = None
+        self._start: QPoint | None = None
+        self._screen_name: str | None = None
+        self._others: list[QRect] = []
+        self._screens: list[QRect] = []
         self._grid_move = False
         self._grid_size = 1
         self._snap_gap = 0
         self._snap_distance = 0
+        self._magnetic = False
+        self.snapped = (False, False)
 
     def valid(self) -> bool:
         """Is initial position valid"""
         return isinstance(self._init_pos, QPoint)
 
-    def config(self, init_pos: QPoint, grid_move: bool, grid_size: int, snap_gap: int, snap_distance: int):
-        """Config mouse move"""
+    def config(
+        self, init_pos: QPoint, grid_move: bool, grid_size: int, snap_gap: int, snap_distance: int,
+        magnetic: bool = False, start: QPoint | None = None,
+    ):
+        """Config mouse move
+
+        Args:
+            init_pos: grab position in widget.
+            grid_move: round position to grid.
+            grid_size: grid size in pixels.
+            snap_gap: space kept between snapped overlays (and from screen edges).
+            snap_distance: snapping distance in pixels.
+            magnetic: snap without Ctrl held.
+            start: widget position when grabbed, for Shift axis lock.
+        """
         self._init_pos = init_pos
+        self._start = start
+        self._screen_name = None
         self._grid_move = grid_move
         self._grid_size = max(grid_size, 1)
         self._snap_gap = max(0, snap_gap)
         self._snap_distance = max(snap_gap, snap_distance)
+        self._magnetic = magnetic
+        self.snapped = (False, False)
 
     def update_grid(self, widget: QWidget):
-        """Update widget snap position grid"""
-        # Update grid if active screen name changed
+        """Update snapping references (screen & other overlays) when widget changes screen
+
+        Other overlays do not move while one is dragged: read once per screen.
+        """
         screen = widget.screen()
         if self._screen_name == screen.name():
             return
         self._screen_name = screen.name()
-        # Restricted screen area (excludes task bar, system menu, etc)
-        scr = screen.availableGeometry()
-        scr_x, scr_y, scr_width, scr_height = scr.x(), scr.y(), scr.width(), scr.height()
-        # Full screen area
-        scrfull = screen.geometry()
-        scrfull_x, scrfull_y = scrfull.x(), scrfull.y()
-        scrfull_width, scrfull_height = scrfull.width(), scrfull.height()
-        # Update grid set (avoid duplicates)
-        x_grid = {scr_x, scr_x + scr_width, scrfull_x, scrfull_x + scrfull_width}
-        y_grid = {scr_y, scr_y + scr_height, scrfull_y, scrfull_y + scrfull_height}
-        # Center lines (screen & other widgets), for center alignment
-        x_center = {scr_x + scr_width / 2}
-        y_center = {scr_y + scr_height / 2}
-        # Add widget x, y coords
+        # Full screen area & restricted area (excludes task bar, system menu, etc)
+        self._screens = [screen.geometry(), screen.availableGeometry()]
+        self._others = []
         try:
             for other_widget in QApplication.topLevelWidgets():
                 if (
@@ -126,78 +134,30 @@ class MousePosition:
                     or screen is not other_widget.screen()
                 ):
                     continue
-                other = other_widget.geometry()
-                other_x, other_y, other_width, other_height = other.x(), other.y(), other.width(), other.height()
-                x_grid.add(other_x)
-                x_grid.add(other_x + other_width)
-                y_grid.add(other_y)
-                y_grid.add(other_y + other_height)
-                x_center.add(other_x + other_width / 2)
-                y_center.add(other_y + other_height / 2)
+                self._others.append(other_widget.geometry())
         except (RuntimeError, AttributeError, TypeError, ValueError):
             pass
-        # Sort grid (necessary to avoid snapping jumping)
-        self._grid_x = sorted(x_grid)
-        self._grid_y = sorted(y_grid)
-        self._center_x = sorted(x_center)
-        self._center_y = sorted(y_center)
 
-    def moving(self, global_pos: QPoint) -> QPoint:
-        """Moving position"""
+    def position(self, widget: QWidget, global_pos: QPoint, modifiers: Qt.KeyboardModifier) -> QPoint:
+        """New widget position for mouse position"""
         pos = global_pos - self._init_pos
-        if self._grid_move:
-            return pos / self._grid_size * self._grid_size
-        return pos
-
-    def snapping(self, widget: QWidget, global_pos: QPoint) -> QPoint:
-        """Snapping to reference grid"""
-        self.update_grid(widget)
-        # Update delta since last pos
-        pos = global_pos - self._init_pos
-        new_x = pos.x()
-        new_y = pos.y()
-        widget_width = widget.width()
-        widget_height = widget.height()
-        self._delta_x = min(max(new_x - self._last_x + self._delta_x, -5), 5)
-        self._delta_y = min(max(new_y - self._last_y + self._delta_y, -5), 5)
-        self._last_x = new_x
-        self._last_y = new_y
-        # Horizontal snap
-        if self._delta_x < 0:  # moving left
-            x_left = new_x
-            for x_pos_other in self._grid_x:
-                if abs(x_left - x_pos_other) < self._snap_distance:
-                    new_x = x_pos_other + self._snap_gap
-        elif self._delta_x > 0:  # moving right
-            x_right = new_x + widget_width
-            for x_pos_other in self._grid_x:
-                if abs(x_right - x_pos_other) < self._snap_distance:
-                    new_x = x_pos_other - widget_width - self._snap_gap
-        # Vertical snap
-        if self._delta_y < 0:  # moving up
-            y_top = new_y
-            for y_pos_other in self._grid_y:
-                if abs(y_top - y_pos_other) < self._snap_distance:
-                    new_y = y_pos_other + self._snap_gap
-        elif self._delta_y > 0:  # moving down
-            y_bottom = new_y + widget_height
-            for y_pos_other in self._grid_y:
-                if abs(y_bottom - y_pos_other) < self._snap_distance:
-                    new_y = y_pos_other - widget_height - self._snap_gap
-        # Center snap (if not snapped to edge)
-        if new_x == pos.x():
-            center_x = new_x + widget_width / 2
-            for x_center in self._center_x:
-                if abs(center_x - x_center) < self._snap_distance:
-                    new_x = round(x_center - widget_width / 2)
-        if new_y == pos.y():
-            center_y = new_y + widget_height / 2
-            for y_center in self._center_y:
-                if abs(center_y - y_center) < self._snap_distance:
-                    new_y = round(y_center - widget_height / 2)
-        # Update pos
-        pos.setX(new_x)
-        pos.setY(new_y)
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier) and self._start is not None
+        if shift:
+            pos = constrain_axis(self._start, pos)  # type: ignore[arg-type]
+        snapped_x = snapped_y = False
+        if self._magnetic != ctrl:  # Ctrl inverts magnetic snapping
+            self.update_grid(widget)
+            pos, snapped_x, snapped_y = snap_position(
+                QRect(pos, widget.size()), self._others, self._screens, self._snap_distance, self._snap_gap)
+        if self._grid_move and not (self._magnetic and ctrl):  # free move: Ctrl with magnetic snapping
+            if not snapped_x:
+                pos.setX(grid_value(pos.x(), self._grid_size))
+            if not snapped_y:
+                pos.setY(grid_value(pos.y(), self._grid_size))
+        if shift:  # snapping or grid never leaves locked axis
+            pos = constrain_axis(self._start, pos)  # type: ignore[arg-type]
+        self.snapped = (snapped_x, snapped_y)
         return pos
 
 

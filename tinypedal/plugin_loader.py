@@ -80,10 +80,8 @@ WINDOWS_DEVICE_NAMES = frozenset((
 TRUST_FILE = "plugin_trust.json"
 UNTRUSTED_ERROR = "Not trusted: review plugin code, then trust it in Plugin Manager"
 SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart Modern Tiny Pedals to load it"
-# Plugins shipped with TinyPedal: widget name: plugin digest
-BUNDLED_PLUGINS = MappingProxyType({
-    "plugin_example_speed": "599d71d9f3644b7e02fe0efb2722d802a70eecd45a2d7c25a407bbb12a67c36f",
-})
+# Plugins shipped with TinyPedal: widget name: plugin digest (none since example speed plugin was removed)
+BUNDLED_PLUGINS: MappingProxyType[str, str] = MappingProxyType({})
 
 
 def discover_plugins(folder: str = PLUGIN_FOLDER) -> dict[str, str]:

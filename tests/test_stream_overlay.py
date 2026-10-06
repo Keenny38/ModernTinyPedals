@@ -441,3 +441,20 @@ def test_page_loads(page_backend):
     finally:
         qInstallMessageHandler(previous)
     assert not [text for text in messages if ".qml" in text], messages
+
+
+def test_server_game_pictures(server):
+    from tinypedal.setting import cfg
+
+    folder = os.path.join(cfg.path.game_image, "brand")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "Aston Martin.svg"), "wb") as file:
+        file.write(b'<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"/>')
+    base = server.base_urls()[0]
+    assert get(f"{base}/pictures/brand/Aston%20Martin.svg")[0] == 403  # token needed
+    status, body, headers = get(server.url("/pictures/brand/Aston%20Martin.svg"))
+    assert status == 200 and headers["Content-Type"] == "image/svg+xml" and body.startswith(b"<svg")
+    assert get(server.url("/pictures/brand/Missing.svg"))[0] == 404
+    assert get(server.url("/pictures/brand/..%2F..%2Fconfig.json"))[0] == 404
+    status, body, _ = get(server.url("/results"))
+    assert b"/pictures/" not in body and b'id="tlogo"' in body  # logos given by results data

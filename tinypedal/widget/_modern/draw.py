@@ -144,6 +144,28 @@ def panel(painter: QPainter, rect: QRectF, theme: Theme, radius: float, depth: b
     painter.restore()
 
 
+def disc(painter: QPainter, rect: QRectF, theme: Theme, depth: bool = True, color: QColor | None = None) -> None:
+    """Round card background (dials, circular views): surface fill, soft vertical shading,
+    hairline border"""
+    if not drawable(rect):
+        return
+    path = QPainterPath()
+    path.addEllipse(rect)
+    painter.fillPath(path, theme.surface if color is None else color)
+    if depth:
+        shade = QLinearGradient(0, rect.top(), 0, rect.bottom())
+        shade.setColorAt(0.0, _DEPTH_TOP)
+        shade.setColorAt(1.0, _DEPTH_BOTTOM)
+        painter.fillPath(path, QBrush(shade))
+    pen = QPen(theme.border, 1)
+    pen.setCosmetic(True)
+    painter.save()
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+    painter.restore()
+
+
 def accent_edge(painter: QPainter, rect: QRectF, color: QColor, width: float, radius: float) -> None:
     """Vertical colored bar on left side of rect (row marker, class color)"""
     edge = QRectF(rect.left(), rect.top(), width, rect.height())

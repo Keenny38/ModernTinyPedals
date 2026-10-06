@@ -34,7 +34,7 @@
 Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same solid base, with a new design, a redesigned interface, new tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.21.0**: a **race results** page for every session you played (classification, positions lap by lap, laps of each car, contacts and penalties), **stream overlays** for OBS Studio, Streamlabs, XSplit and vMix (overlays as browser sources, on stream only if you want, and the last race results for your viewers), the **Telemetry Compare** overlay (the reference lap of the telemetry viewer while you drive) and telemetry viewer fixes (only laps of the same circuit compared, track edges, MoTeC imports, faster opening), an **Overlay Options** page with the options of every overlay (sections, search in every overlay, changes to several overlays applied at once, live preview), a Config page with every global option, redesigned Find Option, Presets, Spectate and Modules pages (what each module computes and the overlays needing it), a redesigned setup wizard (units, theme previews, overlays picked from pictures), four themes for the app and the overlays (Modern or Legacy, dark or light) with a colorblind variant, and a main window that remembers its size and stays on screen, and about a third less memory used (pages and overlays loaded when used, freed while the window waits in the tray). All the details, with screenshots, in the [changelog](CHANGELOG.md).
+> **New in 0.22.0**: ten more overlays get their own **modern design**, drawn for it instead of the classic drawing in modern colors: **radar** (round, fading at its edge, glow toward the car alongside), **track map** (checkered start line, cars as numbered dots in class or race status colors), **navigation** (road with edge lines, view fading at its edge), **friction circle** (G rings, fading trace, peaks), **heading** (compass ring), **steering wheel**, **instrument** and **weather forecast** (icons drawn as shapes in the theme colors), **trailing** (soft areas under throttle and brake) and **track notes**, then **black box**, **chat**, **elevation**, **flag**, **steering meter**, **race notifications** and **RPM LED**: every overlay has a modern design now. The **spotter** flashes green once the car alongside is gone and warns of a car coming up behind on a side. Placing overlays on the game screen is now an **edit mode** with a toolbar (snapping, grid, guides, undo), arrow keys and a richer right-click menu. **Real car brand and circuit logos, car and circuit pictures** taken from Le Mans Ultimate itself (kept on your computer, nothing shipped with the app) in the overlays, the app pages and the stream overlay of race results. All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -47,7 +47,7 @@ Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/Tin
 
 Then:
 
-- **Move the overlays**: unlock the overlay (notification area icon menu > `Lock Overlay`) and drag them, or use `Tools > Layout Editor` on a screenshot of the game.
+- **Move the overlays**: unlock the overlay (`Unlock Overlay` on the Home page, or notification area icon menu > `Lock Overlay`): an edit mode toolbar shows up, dragged overlays snap to the screen and to each other, arrow keys move the selected one and `Ctrl+Z` undoes. Or use `Tools > Layout Editor` on a screenshot of the game.
 - **Configure an overlay**: gear of its card in the `Overlays` tab (or right-click the overlay) opens the Overlay Options page, where every overlay is one click away. `Ctrl+F` searches for an option by name.
 - **Updates**: the app tells you about a new version, shows its release notes in your language and can download and install it (`Download And Install`).
 
@@ -62,7 +62,7 @@ Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-s
 
 For rFactor 2: copy `rFactor2SharedMemoryMapPlugin64.dll` into `rFactor 2\Bin64\Plugins` (create the folder if it is missing), enable it in `Settings > Gameplay > Plugins`, then restart the game. If the plugin does not show up, install the `Visual C++ 2013` runtime found in the game's `Support\Runtimes` folder.
 
-With Le Mans Ultimate, the app also reads the game's local REST API (nothing to set up): chat, contacts, replays, team stints, fuel consumption estimate, official track layouts.
+With Le Mans Ultimate, the app also reads the game's local REST API (nothing to set up): chat, contacts, replays, team stints, fuel consumption estimate, official track layouts, and the real car brand logos, circuit logos, car pictures and circuit pictures of the game menus.
 
 ---
 
@@ -76,6 +76,9 @@ With Le Mans Ultimate, the app also reads the game's local REST API (nothing to 
 - **Values colored by meaning**: gain, loss, warning, best time.
 - **Standings** as rows with position badge, class pill and position in class, columns of your choice.
 - **Fuel and energy** with gauge and marks, **tyres and brakes** as tiles in the heatmap colors, **LEDs** as glowing dots.
+- **Real logos & pictures of the game** (Le Mans Ultimate): car brand logos in Relative, Standings and Rivals, circuit and brand logos, car and circuit pictures on the Home, Race Results, Driver Stats, Spectate, Replays, Race Calculator and Telemetry pages and in the stream overlay of race results. They are taken from the game running on your computer and kept in the `gameimage` folder (your own logos in `brandlogo` come first).
+- **Graphic overlays drawn for the design**: round radar fading at its edge, track map with numbered car dots and a checkered start line, navigation view, friction circle with a fading trace, compass heading, steering wheel, instrument and weather icons drawn as shapes in the theme colors.
+- **Flags as colored chips** (caption above value, only while active), **chat** feed with sender colors, **elevation** profile with the driven part highlighted, **race notifications** with icons and a time bar, **steering meter** growing from center, **RPM LEDs** showing their color zones before they light up.
 - **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay (Legacy themes) or just one.
 - **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (original TinyPedal look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable.
 - **Visibility by session** (practice, qualifying, race) and pit lane, with fade.
@@ -83,9 +86,11 @@ With Le Mans Ultimate, the app also reads the game's local REST API (nothing to 
 
 ![New standings design, before and after](docs/changes/2026-10-05-design-classements.png)
 
+![Radar, track map and navigation, before and after](docs/changes/2026-10-06-map-overlays-design.png)
+
 ![Overlay themes: Modern Dark, Modern Light, Legacy Dark, Legacy Light](docs/changes/2026-10-06-overlay-themes.png)
 
-**Black box**: tyres, brakes, suspension, damage, fuel and energy gauges, incident log (contacts with the other driver's name, penalties, track limits) and ABS, TC, brake bias and engine map chips, with no overlap even when the wheels turn.
+**Black box**: tyres, brakes, suspension, damage, fuel and energy gauges, incident log (contacts with the other driver's name, penalties, track limits) and ABS, TC, brake bias and engine map chips, with no overlap even when the wheels turn. In the modern design it keeps its layout and all its options, drawn in the Barlow font and the theme colors.
 
 ### Telemetry viewer
 
@@ -174,13 +179,14 @@ Every session you played, online or single player, read from the results files o
 - **Modules page**: what each data module computes, its state, the enabled overlays and modules using its data (a module turned off that they need is flagged), reset of its saved data.
 - **Everything opens inside the app window**: tools, editors and settings are pages, with back navigation (`Alt+←` or the mouse back button). A page you leave closes by itself (unless it has unsaved changes), so pages never pile up. Navigation bar tools stay as you left them and come back on next start, even after a crash.
 - **Window size handled for you**: comfortable size centered on screen at first launch, size, position and maximized state remembered (even after a crash), wide pages grow the window only while open and keep it on screen, window brought back on screen when a monitor is unplugged, never shrunk below the size where pages show correctly (more for the telemetry viewer and driver stats), `Window` > `Reset Window Size and Position`.
-- **Overlay Options page**: the options of every overlay in one page, overlays listed by category. Options in sections (general, position and layout, font, then one per item shown with its on/off switch, display order as a list), options of an item that is off dimmed, only the options of the design in use. Search this overlay or every overlay, `Changed only`, `Apply to All Overlays` for a shared option (font, opacity...), live preview with the unsaved values, changes to several overlays kept pending with undo and applied at once (only the edited overlays restart).
+- **Overlay Options page**: the options of every overlay in one page, overlays listed by category. Options in sections (general, position and layout, font, then one per item shown with its on/off switch, display order as a list), options of an item that is off dimmed, only the options of the design in use. Search this overlay or every overlay, `Changed only`, `Apply to All Overlays` for a shared option (font, opacity...), live preview with the unsaved values (sample race for Relative, Standings and Rivals, whose columns are one list to switch on or off and reorder), changes to several overlays kept pending with undo and applied at once (only the edited overlays restart).
 - **Config page** (navigation bar, `Ctrl+,`): every global option in one page by category (Application, Overlay Style, Notification, Compatibility, Remote Control, Web Dashboard, Stream Overlay, VR Overlay, User Path), with descriptions, a search through every category, changes kept pending with undo, discard and apply, notice previews, the web dashboard address and access code.
 - **Find Option** (`Ctrl+F`): best matches first with the current value of each option, options changed from default marked (`Changed only` lists them all), on / off options switched right in the list.
 - **Presets page**: loaded preset and auto load on top, every preset with its last change, the overlays and modules it turns on, its car class and track tags and hotkeys, details of the selected preset, name checked as you type for new, duplicate and rename.
 - **Spectate page**: drivers of the session with place, class, car and best lap; click a driver to follow it, previous / next by place.
 - **Setup wizard** (first launch, `Help` > `Setup Wizard`): six steps that switch language at once, running game detected, metric or imperial units, window and overlay themes previewed with real overlays, new or existing preset with overlays picked from pictures, summary before anything is applied.
 - **Customizable navigation bar**, live overlay preview, undo / redo in editors.
+- **Overlay edit mode** on the game screen: toolbar (snapping, grid, guides, undo / redo, active overlays), every overlay outlined even when empty or auto hidden, magnetic snapping with alignment guides and position, arrow keys, right-click menu to move to another screen or set visibility and opacity, overlays outside every screen brought back.
 - **Layout editor** with alignment guides and snapping, global scale, positions remembered per screen setup.
 - **Preset share code**: copy a preset as text, import it with a preview. **Preset trash** with undo.
 - **Unsaved changes** flagged on each page, `Ctrl+S` to save, values checked as you type.

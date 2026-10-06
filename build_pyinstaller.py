@@ -38,7 +38,6 @@ DATA_FILES = {
     "docs": ["docs/customization.md", "docs/contributors.md"],
     "docs/licenses": glob("docs/licenses/*"),
     "fonts": [*glob("fonts/*.ttf"), *glob("fonts/OFL*.txt")],
-    "plugins/example_speed": ["plugins/example_speed/setting.json", "plugins/example_speed/widget.py"],
     "images": [
         "images/CC-BY-SA-4.0.txt",
         "images/icon_compass.png",

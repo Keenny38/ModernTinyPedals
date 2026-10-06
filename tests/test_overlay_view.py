@@ -114,7 +114,7 @@ def test_categories():
     assert widget_category("plugin_xyz") == CATEGORY_OTHER
     assert widget_category("onboard_setting") == "Driver Inputs"  # TC, ABS, brake bias...
     others = {name for name in WIDGET_FILENAME if widget_category(name) == CATEGORY_OTHER}
-    assert others <= {"system_performance", "plugin_example_speed"}  # new built-in overlays get a category
+    assert others <= {"system_performance"}  # new built-in overlays get a category
     assert set(CATEGORY_COLORS) == {category for category, _ in WIDGET_CATEGORIES} | {CATEGORY_OTHER}
 
 

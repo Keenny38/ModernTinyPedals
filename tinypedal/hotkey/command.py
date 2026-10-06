@@ -58,10 +58,13 @@ def hotkey_overlay_visibility():
 
 
 def hotkey_overlay_lock():
-    """Command - overlay lock"""
+    """Command - overlay lock, unlocked: overlay edit mode (toolbar)"""
     cfg.overlay["fixed_position"] = not cfg.overlay["fixed_position"]
     cfg.save()
     overlay_signal.locked.emit(cfg.overlay["fixed_position"])
+    from ..widget._edit_mode import follow_lock
+
+    follow_lock(cfg.overlay["fixed_position"])
 
 
 def hotkey_overlay_auto_hide():

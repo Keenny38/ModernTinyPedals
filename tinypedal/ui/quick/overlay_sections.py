@@ -19,8 +19,8 @@
 """
 Sections of overlay options (Overlay Options page): every overlay gets its options in sections
 
-Plain data & pure functions (no Qt). Overlays declaring their own sections (Black box, see
-template.widget.WIDGET_OPTION_UI) keep them. Others are cut from option order of their template:
+Plain data & pure functions (no Qt). Overlays declaring their own sections (Black box, driver
+lists, see template.widget.WIDGET_OPTION_UI) keep them. Others are cut from option order of their template:
 
     General             on/off, design, update rate, visibility, theme
     Position & Layout   position, opacity, layout, gaps & paddings
@@ -38,8 +38,10 @@ Options of a section led by an on/off option depend on it: shown dimmed while it
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import NamedTuple
+
+from ...template.widget.black_box_ui import ORDER_LIST
 
 SECTION_GENERAL = "general"
 SECTION_LAYOUT = "layout"
@@ -337,6 +339,48 @@ def declared_sections(keys: Sequence[str], titles: Mapping[str, str]) -> list[Se
     if orders:
         sections.append(Section(SECTION_ORDER, tuple(orders), "", order_title))
     return sections
+
+
+def listed_sections(keys: Sequence[str], layout: Sequence[tuple[str, Sequence[str]]], order_title: str = "",
+                    in_order_list: Collection[str] = ()) -> list[Section]:
+    """Sections listed by overlay in page order: (title, options), options not shown by current design
+    left out. ORDER_LIST among options places the display order list; options listed nowhere go to an
+    Options section after the last one (General keeps common options).
+
+    Args:
+        in_order_list: on/off options switched in the display order list (no row of their own).
+    """
+    present = set(keys)
+    general = [key for key in keys if key in GENERAL_KEYS]
+    orders = [key for key in keys if _rex_order.match(key)]
+    if len(orders) < 2:  # one item: nothing to order
+        orders = []
+    # Display order list: display order options, then on/off options switched in it
+    order_section = Section(SECTION_ORDER, (*orders, *(key for key in keys if key in in_order_list)) if orders else (),
+                            "", order_title or FIXED_TITLES[SECTION_ORDER])
+    used = {*general, *order_section.keys}
+    sections: list[Section] = [Section(SECTION_GENERAL, tuple(general), "", FIXED_TITLES[SECTION_GENERAL])]
+    order_placed = False
+    for title, options in layout:
+        if ORDER_LIST in options:
+            sections.append(order_section)
+            order_placed = True
+            continue
+        shown = [key for key in options if key in present and key not in used]
+        if shown:
+            sections.append(Section(f"declared:{shown[0]}", tuple(shown), "", title))
+            used.update(shown)
+    rest = [key for key in keys if key not in used]
+    if rest:
+        sections.append(Section(SECTION_OPTIONS, tuple(rest), "", FIXED_TITLES[SECTION_OPTIONS]))
+    if not order_placed:
+        sections.append(order_section)
+    return [section for section in sections if section.keys]
+
+
+def order_keys(section: Section) -> tuple[str, ...]:
+    """Display order options of display order list (without on/off options switched in it)"""
+    return tuple(key for key in section.keys if _rex_order.match(key))
 
 
 def section_dependencies(sections: Sequence[Section]) -> dict[str, str]:

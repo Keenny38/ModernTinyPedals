@@ -165,7 +165,10 @@ def test_chat_widget(ui_env, monkeypatch, modern):
     widget = create_widget(import_module("tinypedal.widget.chat"), cfg, "chat")
     widget.max_duration = 0  # sample messages are old
     widget.timerEvent(None)
-    shown = [bar.text.strip() for bar in widget.bars if not bar.isHidden()]
+    if modern:  # sender & message apart
+        shown = [f"{line.name}: {line.text}" for line in widget.state]
+    else:
+        shown = [bar.text.strip() for bar in widget.bars if not bar.isHidden()]
     assert shown == ["M Toit: Go Left", "M Toit: Leaving pits"]
     widget.deleteLater()
 

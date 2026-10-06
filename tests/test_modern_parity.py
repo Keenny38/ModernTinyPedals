@@ -221,7 +221,8 @@ def test_driver_columns_brand_logo_average_speed_trap_lico(widgets, field, monke
     assert cells["average_laptime"].text == "1:41.500"
     assert cells["speed_trap"].text == "288.0"
     assert cells["lift_and_coast_time"].text == "2.5s" and cells["lift_and_coast_time"].color == widget.theme.warning
-    assert not widget.brand_logo("Brand", 20, 10).isNull()
+    assert cells["brand_logo"].extra.startswith("Car ")  # vehicle name: brand of game car list
+    assert not widget.brand_logo("Brand", "", 20, 10).isNull()  # own logo of brand logo folder
     logo_column = widget.table.columns[keys.index("brand_logo")]
     x = round(widget.table.x[keys.index("brand_logo")] + logo_column.width / 2)
     y = round(widget.table.row_rect(0).center().y())
@@ -278,13 +279,11 @@ def test_driver_list_class_styled_position(widgets, field):
 def test_restyled_widgets_show_unmapped_colors():
     from tinypedal.widget._modern import modern_module
 
-    radar = modern_module("radar").Realtime.options
-    assert "background_color" not in radar and "background_color_circle" not in radar
-    assert any("color" in key for key in radar)
-    instrument = modern_module("instrument").Realtime.options
-    assert "background_color_ignition" not in instrument and "warning_color_stalling" in instrument
-    flag = modern_module("flag").Realtime.options
-    assert "background_color_yellow_flag" in flag and "background_color" not in flag
+    black_box = modern_module("black_box").Realtime.options
+    assert "background_color" not in black_box and "font_color_temperature" in black_box
+    assert "throttle_color" not in black_box and "font_name" not in black_box
+    pace_notes = modern_module("pace_notes").Realtime.options
+    assert "background_color" not in pace_notes and "font_name" not in pace_notes
 
 
 # --- Gauges: third spring & brake input marks
@@ -494,12 +493,11 @@ def test_battery_state_of_charge(widgets, monkeypatch):
     assert "soc" not in widgets("battery", show_state_of_charge=False).keys
 
 
-# --- Flag: sector yellow flags & full course yellow (classic drawing, modern restyle)
-@pytest.mark.parametrize("modern", [True, False])
-def test_flag_sector_yellow_and_full_course_yellow(widgets, monkeypatch, modern):
+# --- Flag: sector yellow flags & full course yellow (classic layout, modern design: test_modern_overlays_more)
+def test_flag_sector_yellow_and_full_course_yellow(widgets, monkeypatch):
     reader(monkeypatch, "session", "sector_yellow_flags", (True, False, True))
     reader(monkeypatch, "session", "yellow_flag_state", 4)
-    widget = widgets("flag", modern=modern)
+    widget = widgets("flag", modern=False)
     widget.show()
     update(widget)
     assert widget.bar_sector_yellow.text == "SEC 1-3" and not widget.bar_sector_yellow.isHidden()

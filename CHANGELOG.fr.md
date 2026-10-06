@@ -3,6 +3,83 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.22.0 (2026-10-06)
+
+### Mode édition des overlays
+
+Placer les overlays sur l'écran de jeu se fait maintenant dans un vrai **mode édition**. Déverrouille l'overlay (`Déverrouiller l'overlay` sur la page d'accueil, menu de l'icône de notification, palette de commandes ou raccourci `overlay_lock`) : une barre d'outils apparaît en haut de l'écran de jeu.
+
+- **Chaque overlay montre son contour et son nom**, même ceux qui n'affichent encore rien et ceux masqués par le `Masquage automatique` ou leur contexte de visibilité : tu peux tous les retrouver et les déplacer, même depuis les menus du jeu.
+- **Barre d'outils** : boutons `Magnétisme`, `Grille` et `Guides`, `Annuler` / `Rétablir`, les overlays actifs (décoche-en un pour le désactiver) et `Valider` pour verrouiller l'overlay. Elle se déplace par sa poignée ; le `✕` la masque en laissant l'overlay déverrouillé.
+- **Aimantation** : un overlay déplacé s'aimante aux bords et au centre de l'écran et aux bords et centres des autres overlays (nouvelle option `enable_magnetic_snap`, activée par défaut). Maintiens `Ctrl` pour le déplacer librement, `Maj` pour garder le déplacement horizontal ou vertical. Les guides montrent les lignes alignées et la position de l'overlay.
+- **Clavier** : clique sur un overlay pour le sélectionner (contour plein), puis les flèches le déplacent d'un pixel (`Maj` : 10 pixels, un pas de grille avec le `Déplacement sur grille`), `Ctrl+Z` / `Ctrl+Y` annulent et rétablissent, `Suppr` le désactive, `Échap` le désélectionne.
+- **Annuler** fonctionne pour les déplacements, les flèches, le centrage, le redimensionnement par la poignée du coin, l'opacité, la visibilité et la désactivation d'un overlay, jusqu'au verrouillage.
+- **Menu du clic droit** : `Déplacer vers l'écran` (même place sur un autre écran), `Visibilité` (Toujours, Course, Qualifications et course, Essais et qualifications, En piste, Aux stands), `Opacité`, `Annuler`, `Mode édition` et `Verrouiller l'overlay`, en plus de `Réglages`, du centrage, de `Recharger` et `Désactiver`.
+
+Un overlay déjà déverrouillé au démarrage ne lance pas le mode édition : comme avant, son contour n'apparaît que sous la souris, donc rien ne reste à l'écran si tu roules avec l'overlay déverrouillé.
+
+![Mode édition des overlays : barre d'outils, overlay sélectionné, guide d'alignement et position](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
+
+#### Corrections et performances
+
+- `Centrer horizontalement` et `Centrer verticalement` centrent l'overlay sur son propre écran : sur un deuxième écran, il était déplacé sur le premier.
+- Un overlay resté en dehors de tous les écrans (écran débranché, preset fait sur un autre ordinateur) s'affiche sur l'écran le plus proche au démarrage, sa position enregistrée étant conservée (`enable_window_position_correction`, désactivé avec l'overlay VR).
+- Verrouiller et déverrouiller ne masquent plus puis réaffichent chaque fenêtre d'overlay : plus de clignotement.
+- Les overlays verrouillés ne font plus passer chaque mise à jour et chaque dessin par le contour d'édition (moins de travail pendant que tu roules), et ce contour n'est créé qu'au premier déverrouillage.
+- Les guides d'alignement ne redessinent que ce qui change à chaque mouvement de souris au lieu de tout l'écran, et libèrent leur image de la taille de l'écran à la fin du déplacement.
+
+### Design moderne pour tous les overlays
+
+Les dix overlays graphiques ont leur propre design moderne, dessiné pour lui au lieu du dessin classique aux couleurs modernes. Ils lisent les données du jeu comme la disposition classique, donc les deux affichent les mêmes valeurs.
+
+- **Radar** : rond, qui s'estompe sur son bord, avec un halo orange puis rouge vers une voiture à côté.
+- **Carte du circuit** : voitures en points numérotés aux couleurs de leur catégorie (ou de leur état en course), ligne de départ en damier.
+- **Navigation** : route avec ses lignes de bord, vue qui s'estompe sur son bord.
+- **Cercle de friction** : anneaux de G, trace qui s'estompe avec le temps et pics récents.
+- **Cap** : boussole avec le lacet et l'angle de dérive avant.
+- **Volant**, **instruments** et **prévisions météo** : volant et icônes dessinés en formes aux couleurs du thème.
+- **Trailing** : zones douces sous les courbes d'accélérateur et de frein.
+- **Notes de piste** : note sur une carte.
+
+![Radar, carte du circuit et navigation, avant et après](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-map-overlays-design.png)
+
+**Black box**, **chat**, **altitude**, **drapeau**, **jauge de direction**, **notifications de course** et **LED RPM** ont aussi un nouveau design moderne : tous les overlays en ont un maintenant (`enable_classic_layout` ou un thème Legacy ramènent l'aspect classique).
+
+- **Black box** : même disposition et mêmes options, dessinée avec la police Barlow et des libellés en capitales, aux couleurs du thème (les couleurs laissées à leur valeur par défaut suivent le thème des overlays et l'option daltonien, tes propres couleurs sont gardées), cartes avec un léger dégradé et un fin contour, LED RPM en capsules.
+- **Drapeau** : une pastille par élément actif dans la couleur de son drapeau (jaune, bleu, vert, rouge...), libellé au-dessus de la valeur : temps aux stands, carburant restant, vitesse avec le limiteur, distance du drapeau jaune, catégorie et temps du drapeau bleu, écart du trafic, fenêtre d'arrêt, temps de réparation, secteurs sous drapeau jaune, phase de neutralisation. Les éléments inactifs ne prennent pas de place ; les options `*_text` que tu as modifiées remplacent les libellés.
+- **Chat** : une carte qui grandit avec les messages, chaque expéditeur dans sa couleur, nouveaux messages mis en avant par un bord coloré, messages qui s'estompent à la fin de leur durée d'affichage.
+- **Altitude** : profil d'altitude sur un graphique, partie du tour déjà parcourue en couleur d'accent, la voiture en point sur le profil, altitude actuelle et échelle au-dessus du graphique.
+- **Jauge de direction** : barre qui part du centre vers le côté braqué avec un curseur, graduations, angle écrit sur l'autre moitié.
+- **Notifications de course** : une icône par message (flèche, drapeau, chronomètre, pénalité, tour invalidé), titre au-dessus du détail, fine barre qui raccourcit avec le temps restant.
+- **LED RPM** : les LED éteintes gardent une légère teinte de leur zone, les zones verte, jaune et rouge se voient avant de s'allumer.
+- Sur la page `Overlays`, drapeau, chat, notifications de course et spotter affichent un exemple au lieu d'une image vide.
+
+### Spotter
+
+- **Signal voie libre** : une barre latérale clignote en vert une fois la voiture à côté partie, comme un spotter qui annonce « clear » (`show_clear_signal`, `clear_signal_duration` ; `bar_color_clear` en disposition classique).
+- **Voiture qui arrive derrière** : le bas d'une barre latérale s'allume quand une voiture arrive derrière de ce côté, plus vif à mesure qu'elle se rapproche (`show_approaching_cars`, `approaching_distance`). Une voiture juste derrière toi dans ta voie n'est pas comptée.
+- Design moderne : barres arrondies avec un halo vers le centre de l'écran, qui passent de l'orange au rouge à mesure que la voiture à côté se rapproche latéralement.
+
+### Vrais logos et photos du jeu
+
+Avec Le Mans Ultimate, l'app affiche les vrais **logos des marques**, **logos des circuits**, **photos des voitures** et **photos des circuits** des menus du jeu. Ils sont pris dans le jeu lancé sur ton ordinateur (`enable_restapi_access`, activé par défaut) et gardés dans le nouveau dossier `gameimage` : rien n'est fourni avec l'app, et ils apparaissent une fois que le jeu a été ouvert avec l'app.
+
+- **Overlays** : colonne du logo de marque du Relatif, du Classement et des Rivaux (`column_brand_logo`), maintenant activée par défaut et activée une fois dans les presets existants, un peu plus large. Tant qu'une marque n'a pas de logo, ses premières lettres sont affichées.
+- **Pages** : logos du circuit et des marques, photos des voitures et du circuit sur la page d'accueil et les pages Résultats de course, Statistiques pilote, Spectateur, Rejeux, Calculateur de course, Télémétrie et Visionneuse de carte.
+- **Overlay de stream** : la source des résultats de course affiche le logo du circuit et les logos des marques.
+- Un logo PNG à toi dans le dossier `brandlogo` passe toujours en premier (un mot de la marque suffit : `Corvette.png` pour « Chevrolet Corvette »). Les logos ont une copie lisible sur fond sombre et sur fond clair, et leurs marges vides sont rognées. Avec rFactor 2, tes propres fichiers sont les seuls logos.
+
+![Colonne du logo de marque activée par défaut](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-06-brand-logo-column.png)
+
+### Options des overlays
+
+- **Relatif, Classement et Rivaux** regroupent leurs colonnes dans une seule liste `Colonnes`, de gauche à droite comme l'overlay les dessine : active ou désactive chaque colonne, déplace-la en la glissant ou avec les flèches. Viennent ensuite les sections des lignes, des catégories et du nombre de voitures, puis les options de chaque colonne, grisées tant que la colonne est masquée.
+- Leur aperçu en direct montre une course d'exemple avec des pilotes fictifs.
+
+### Retiré
+
+- Le **plugin d'exemple vitesse** n'est plus fourni, et l'installateur supprime la copie des versions précédentes. Les plugins d'overlay fonctionnent toujours : [Widget plugins](docs/customization.md#widget-plugins) donne un court exemple.
+
 ## 0.21.0 (2026-10-06)
 
 ### Résultats de course

@@ -379,6 +379,7 @@ Item {
                 required property string tip
                 required property bool checked
                 required property bool isProtected
+                required property string trackLogo
                 readonly property bool selected: key === backend.selectedReplay
                 readonly property color tone: root.sessionColor(session)
                 readonly property bool hot: (selected && backend.checkedCount <= 1) || rowArea.containsMouse || watchButton.hovered
@@ -460,6 +461,11 @@ Item {
                             font.weight: Font.Bold
                             font.pointSize: theme.fontPoint * 0.95
                         }
+                    }
+                    GameLogo {  // circuit logo of game
+                        source: row.trackLogo
+                        boxWidth: theme.em * 2.6
+                        boxHeight: theme.em * 1.7
                     }
                     ColumnLayout {
                         Layout.fillWidth: true

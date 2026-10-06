@@ -240,6 +240,7 @@ Card {
                 required property string tip
                 required property bool open  // session expanded
                 required property string hint  // lap of another circuit than reference lap: never compared
+                required property string logo  // session: car brand logo of game
 
                 readonly property bool isSession: kind === "session"
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
@@ -271,6 +272,11 @@ Card {
                                 text: row.title
                                 color: theme.text
                                 font.weight: Font.DemiBold
+                            }
+                            GameLogo {  // car brand logo of game
+                                source: row.isSession ? row.logo : ""
+                                boxWidth: theme.em * 2.0
+                                boxHeight: theme.em * 1.1
                             }
                             Text {
                                 text: row.info

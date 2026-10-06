@@ -31,7 +31,56 @@ from ._base import Overlay
 from ._painter import fill_pixmap
 
 
-class Realtime(Overlay):
+class HeadingMixin:
+    """Car heading, direction of travel & front slip angle, for classic & modern widget"""
+
+    def setup_heading(self):
+        """Last data"""
+        self.last_pos: tuple[float, float] = (0.0, 0.0)
+        self.yaw_angle = 0.0
+        self.slip_angle = 0.0
+
+    def read_heading(self) -> float:
+        """Car heading (compass rotation, degrees), sets yaw angle (direction of travel to car
+        heading) & slip angle (front tyres average)"""
+        # Read speed, position data
+        speed = api.read.vehicle.speed()
+        pos_curr = (
+            api.read.vehicle.position_longitudinal(),
+            api.read.vehicle.position_lateral(),
+        )
+
+        # Vehicle orientation yaw
+        veh_ori_yaw = calc.degrees(api.read.vehicle.orientation_yaw_radians()) + 180
+
+        # Direction of travel yaw angle
+        if self.last_pos != pos_curr and speed > 1:
+            self.yaw_angle = veh_ori_yaw - calc.degrees(calc.oriyaw(
+                pos_curr[0] - self.last_pos[0], pos_curr[1] - self.last_pos[1])) + 180
+            self.last_pos = pos_curr
+        elif speed <= 1:
+            self.yaw_angle = 0
+            self.last_pos = pos_curr
+
+        # Slip angle
+        if speed > 1:
+            self.slip_angle = minfo.wheels.averageFrontSlipAngle
+        else:
+            self.slip_angle = 0
+        return veh_ori_yaw
+
+    def display_yaw_angle(self, angle):
+        """Set yaw angle display range"""
+        if angle < -180:
+            angle = 360 + angle
+        elif angle > 180:
+            angle = 360 - angle
+        if abs(angle) > 180:
+            angle = 360 - abs(angle)
+        return angle
+
+
+class Realtime(HeadingMixin, Overlay):
     """Draw widget"""
 
     def __init__(self, config, widget_name):
@@ -110,37 +159,11 @@ class Realtime(Overlay):
 
         # Last data
         self.veh_ori_yaw = 0.0
-        self.last_pos: tuple[float, float] = (0.0, 0.0)
-        self.yaw_angle = 0.0
-        self.slip_angle = 0.0
+        self.setup_heading()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        # Read speed, position data
-        speed = api.read.vehicle.speed()
-        pos_curr = (
-            api.read.vehicle.position_longitudinal(),
-            api.read.vehicle.position_lateral(),
-        )
-
-        # Vehicle orientation yaw
-        temp_veh_ori_yaw = calc.degrees(api.read.vehicle.orientation_yaw_radians()) + 180
-
-        # Direction of travel yaw angle
-        if self.last_pos != pos_curr and speed > 1:
-            self.yaw_angle = temp_veh_ori_yaw - calc.degrees(calc.oriyaw(
-                pos_curr[0] - self.last_pos[0], pos_curr[1] - self.last_pos[1])) + 180
-            self.last_pos = pos_curr
-        elif speed <= 1:
-            self.yaw_angle = 0
-            self.last_pos = pos_curr
-
-        # Slip angle
-        if speed > 1:
-            self.slip_angle = minfo.wheels.averageFrontSlipAngle
-        else:
-            self.slip_angle = 0
-
+        temp_veh_ori_yaw = self.read_heading()
         if self.veh_ori_yaw != temp_veh_ori_yaw:
             self.veh_ori_yaw = temp_veh_ori_yaw
             self.update()
@@ -251,16 +274,6 @@ class Realtime(Overlay):
         painter.drawEllipse(self.dot_size * 0.5, self.dot_size * 0.5, self.dot_size, self.dot_size)
 
     # Additional methods
-    def display_yaw_angle(self, angle):
-        """Set yaw angle display range"""
-        if angle < -180:
-            angle = 360 + angle
-        elif angle > 180:
-            angle = 360 - angle
-        if abs(angle) > 180:
-            angle = 360 - abs(angle)
-        return angle
-
     def format_angle(self, angle):
         """Format angle text"""
         if self.wcfg["show_degree_sign"]:

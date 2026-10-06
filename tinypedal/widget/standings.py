@@ -1207,7 +1207,8 @@ class Realtime(Overlay):
 
     def set_brand_logo(self, brand_name: str):
         """Set brand logo"""
-        if brand_name not in self.pixmap_brandlogo:  # load & cache logo
+        logo = self.pixmap_brandlogo.get(brand_name)
+        if logo is None or logo.isNull():  # load & cache logo (none yet: looked for again, game logo may come)
             self.pixmap_brandlogo[brand_name] = load_brand_logo_image(
                 filepath=self.cfg.path.brand_logo,
                 filename=brand_name,

@@ -361,13 +361,15 @@ To allow `auto notes loading` function to work, track notes file name must match
 ## Brand logo
 Modern Tiny Pedals supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
 
-Note: Modern Tiny Pedals does not provide brand logo image assets, it is up to user to prepare images. Maximum `PNG` file size is limited to `5MB`.
+With Le Mans Ultimate, real car brand logos, circuit logos, car pictures and circuit pictures are taken from the game itself: the app asks them to the game running on your computer (its local web server, same address as the [Le Mans Ultimate API](#le-mans-ultimate-api) Rest API access, which must be enabled) and keeps them in the `game_image_path` folder, so they are shown everywhere (brand logo column of Relative, Standings & Rivals, Home, Race Results, Driver Stats, Spectate, Replays, Race Calculator, Telemetry Viewer, Track Map Viewer and stream overlay of race results), also while the game is not running. Nothing is shipped with the app. A brand logo of your own in the brand logo folder is always shown first; its file name may be one word of a longer brand name (`Corvette.png` for `Chevrolet Corvette`, `Ford.png` for `Ford Mustang`). Logos too close to the background color are shown with a readable copy (kept in `game_image_path`): black logos get light on dark overlays and pages, white logos get dark on light themes, colored parts are kept.
+
+Note: Modern Tiny Pedals does not provide brand logo image assets, it is up to user to prepare images (or to run Le Mans Ultimate once with the app open, see above). Maximum `PNG` file size is limited to `5MB`.
 
 How to prepare brand logo image:
 1. Brand logo image should have all transparent borders cropped. For example, in `GIMP` this can be done by selecting `Image` > `Crop to Content`.
 2. Make sure image dimension is not too big, usually around 100 pixel width or height is good enough. Bigger dimension may consume more RAM or exceed maximum supported file size.
 3. Save image to `TinyPedal\brandlogo` folder, image filename must match corresponding `brand name` that defined in [Vehicle Brand Editor](#vehicle-brand-editor). For cross-platform compatibility, filename matching is set to be case-sensitive, make sure filename has the same upper or lower case as set in `brand name`.
-4. `Reload` preset to load newly added brand logo images for displaying in overlay.
+4. `Reload` preset to load newly added brand logo images for displaying in overlay (logos of the game show up by themselves once fetched).
 
 [**`Back to Top`**](#)
 
@@ -622,7 +624,7 @@ Set refresh rate for module while idling for conserving resources.
 Define widget position on screen in pixels. Those values will be auto updated and saved.
 
     enable_classic_layout
-Every widget except Black box has a modern design, used with `Modern Dark` and `Modern Light` overlay themes. Enable this option to keep classic layout of this widget (with modern colors) instead. Default is disabled.
+Every widget has a modern design, used with `Modern Dark` and `Modern Light` overlay themes. Enable this option to keep classic layout of this widget (with modern colors) instead. Default is disabled.
 
     opacity
 Set opacity for entire widget. By default, all widgets have a 90% opacity setting, which equals value `0.9`. Lower value adds more transparency to widget. Acceptable value range in `0.0` to `1.0`. Note, opacity can also be set by adjusting alpha value in `color` options for individual elements.
@@ -743,8 +745,11 @@ Show confirmation dialog for enabling or disabling all widgets or modules. This 
     show_overlay_previews
 Show overlays on `Overlays` page as cards with a preview of each overlay, or as a compact list with the preview in a tooltip if disabled. Also switched by the view buttons at top right of `Overlays` page. Previews are drawn only while the page is shown. This option is enabled by default.
 
+    enable_magnetic_snap
+Snap overlays while dragging them (`Snap` button of the edit mode toolbar): their edges and center line up with screen edges, screen center and other overlays. Hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. Disabled: overlays move freely, hold `Ctrl` to snap. Default is enabled.
+
     snap_distance
-The distance (in pixels) at which the widget will snap to screen edges or other widgets. Default `10`. Hold `Ctrl` to enable snapping.
+The distance (in pixels) at which the overlay snaps to screen edges, screen center and edges or centers of other overlays. Default `10`. See `enable_magnetic_snap`.
 
     snap_gap
 The gap (in pixels) to leave between the widget and the snapped widget edges. Default `0`.
@@ -809,7 +814,7 @@ Quick access buttons of home page, in order, separated by comma: tools (dialog m
 Reopen tool pages left open at quit or restart (navigation bar tools like race calculator or telemetry viewer, and tool page shown last, shown again) (saved as soon as it is shown, so a crash or a system shutdown keeps it too). Pages are reopened once main window is shown, so startup is not slowed down. Config dialogs are not reopened. Also in `Window` menu, `Reopen Pages at Startup`. Default is enabled.
 
     show_layout_guides
-Show alignment guides (grid, other widget edges and centers) while dragging a widget. Widgets also snap to centers while snapping is active. Default is enabled.
+Show alignment guides (grid, lines where edges or centers line up with other overlays or screen center) and the position of the overlay while dragging it (`Guides` button of the edit mode toolbar). Default is enabled.
 
 [**`Back to Top`**](#)
 
@@ -824,7 +829,7 @@ Set `true` to bypass window manager on Linux. This option does not affect window
 Set `false` to disable translucent background.
 
     enable_window_position_correction
-Set `true` to enable main application window position correction, which is used to correct window-off-screen issue with multi-screen. This option is enabled by default.
+Set `true` to enable main application window position correction, which is used to correct window-off-screen issue with multi-screen. Overlays left outside every screen (monitor unplugged, preset made on another computer) are also shown on the nearest screen at startup, their saved position kept (not done while VR overlay is enabled). This option is enabled by default.
 
     enable_x11_platform_plugin_override
 Set Qt platform plugin type to `X11` via environment variable on Linux. This option may help work around some issues with overlay dragging and position on `Wayland`. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default on Linux.
@@ -904,6 +909,8 @@ To share user path across multiple copies of Modern Tiny Pedals, user must set p
         pacenotes/
         tracknotes/
         carsetups/
+        telemetry/
+        gameimage/
 
 * On Linux, all user paths are set outside Modern Tiny Pedals root folder as absolute paths:
 
@@ -914,10 +921,16 @@ To share user path across multiple copies of Modern Tiny Pedals, user must set p
         home/username/.local/share/TinyPedal/deltabest/
         home/username/.local/share/TinyPedal/trackmap/
         home/username/.local/share/TinyPedal/carsetups/
+        home/username/.local/share/TinyPedal/telemetry/
+        home/username/.local/share/TinyPedal/gameimage/
 
 **Telemetry path**
 
 `telemetry_path` sets the folder where [Recorder module](#recorder-module) saves recorded laps (default `telemetry/`).
+
+**Game image path**
+
+`game_image_path` sets the folder where car brand logos, circuit logos, car pictures and circuit pictures taken from Le Mans Ultimate are kept (default `gameimage/`, see [Brand logo](#brand-logo)). Its `catalog.json` file lists the cars (with their brand) and circuits of the game. Deleting the folder is safe: pictures are fetched again from the game.
 
 [**`Back to Top`**](#)
 
@@ -2047,13 +2060,13 @@ This option may be used if weight cannot be automatically measured or inaccurate
 Each widget can be configured by accessing `Config` button from `Overlays` tab in main window.
 
 ## Modern design
-With `Modern Dark` or `Modern Light` overlay theme in [Overlay Style](#overlay-style), every widget except Black box uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` and `enable_colorblind_colors`.
+With `Modern Dark` or `Modern Light` overlay theme in [Overlay Style](#overlay-style), every widget uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` and `enable_colorblind_colors`.
 
 Modern design reads fewer options than classic layout: per cell colors, fonts and paddings are set by design, so Overlay Options page shows only the options the design reads. Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: select a `Legacy` overlay theme (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
 
 Display order options (`display_order_*`) apply where modern layout has the same rows, tiles, bars or columns: design order is kept while every display order option of a widget is at default value, and display order options set the order once one of them is changed. Fuel, virtual energy, pit stop estimate, acceleration, sectors and brake temperature keep design order (their modern layout has no matching rows). Classic text options (pit status texts, leader texts, session names, speed limiter text) replace design labels once changed from default value.
 
-Map, radar, circle and plot widgets keep their drawing with design font & theme colors; their options other than fonts and the colors set by design (background, circle or map background...) are shown, so other colors can still be customized.
+Black box and pace notes keep their own drawing with design font & theme colors; their options other than fonts and the colors set by design (background, colors left at default value) are shown, so other colors can still be customized.
 
 Widget context menu can be accessed by `Right-Click` on widget, which provides additional options:
 - Center horizontally: align widget to the center of active screen horizontally.
@@ -2288,6 +2301,8 @@ Set warning threshold for estimated brake lifespan in minutes. Default is `5` la
 
 ## Chat
 **This widget displays chat messages of the game (LMU, Rest API `enable_race_info` option), newest at bottom.** Long messages are wrapped on several lines, newest messages kept when lines run out.
+
+Modern design: one card growing with lines shown, sender name in its own color (same color for a sender all race), messages just sent highlighted with an accent edge, messages fading out at the end of `maximum_display_duration`. While overlay is unlocked, an empty card is shown so it can be placed.
 
     number_of_lines
 Set number of message lines. Value range in `1` to `20`. Default is `5`.
@@ -2589,6 +2604,8 @@ Show electric motor regeneration level.
 ## Elevation
 **This widget displays elevation plot. Note: elevation plot data is recorded together with track map. At least one complete and valid lap is required to generate elevation plot.**
 
+Modern design: elevation profile on a chart with a soft area under the line, part of lap already driven in accent color, car as a dot on the profile, faint start, sector and zero elevation lines, current elevation and chart scale above chart. Colors and text positions are set by design.
+
     display_detail_level
 Sets detail level for track map. Default value is `1`, which auto adjusts map detail according to display size. Higher value reduces map detail and RAM usage, and may also help reduce rough edges from large map. Set to `0` for full detail.
 
@@ -2708,6 +2725,8 @@ Show temperature net change per lap.
 
 ## Flag
 **This widget displays flags, pit state, warnings, start lights info.**
+
+Modern design: one chip per active item, in flag color (yellow, blue, green, red...), caption above value (pit time, fuel left, speed, distance to yellow flag, class & time of blue flag, traffic gap, pit window laps, repair time, sectors under yellow, full course yellow phase). Chips are packed in display order, inactive items take no room. Text options (`*_text`) replace design captions once changed from default value.
 
     layout
 2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
@@ -3721,6 +3740,8 @@ Show number of vehicles that requested for pit stop, and number of vehicles curr
 
 Messages: position gained or lost (overall and in class, once new position is held for 1 second), new penalty, new fastest lap in player class (driver name and lap time), blue flag, full course yellow start and end, lap invalidated by game (LMU, track limits). Position, fastest lap and full course yellow messages are shown in race only. Same message is not repeated while it is shown. Nothing is shown while there is no message, unless overlay is unlocked.
 
+Modern design: each message is a card with an icon in message color (arrow for positions, flag, stopwatch for fastest lap, penalty mark, cross for lap invalidated), title above detail, and a thin bar shrinking with the time left.
+
     layout
 2 layouts are available: `0` = newest message at top, `1` = newest message at bottom.
 
@@ -3940,7 +3961,7 @@ Show average front and rear ride height difference in millimeters.
 Modern design columns, shown in this order: overall position, class pill with position in class (class color also on row edge), places gained, driver name, vehicle name, tyre compounds, pit status (pit, garage, slow, finished), pit stops (green on pit request, `PEN` with penalty), last lap time (purple if class fastest), best lap time, virtual energy left, vehicle integrity, incident points, stint laps, relative time gap (highlighted when near).
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows `brand_logo_width`), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -3994,7 +4015,7 @@ Align vehicle name in the center when enabled. Default is left alignment when di
 Show user-defined brand logo if available.
 
     brand_logo_width
-Set maximum brand logo display width in pixels. Note, maximum brand logo display height is automatically adapted to `font_size`.
+Set maximum brand logo display width in pixels. Note, maximum brand logo display height is automatically adapted to `font_size`. Modern design: logo column width follows `font_size` too, 20 being the default width.
 
     show_time_gap
 Show relative time gap between player and opponents.
@@ -4248,7 +4269,7 @@ Note, most options are inherited from [Relative](#relative) and [Standings](#sta
 Modern design columns besides those of [Relative](#relative): lap time difference to player over recent laps, and interval to player (car ahead in green, car behind in orange).
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows `brand_logo_width`), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -4291,6 +4312,8 @@ Show roll angle ratio between front and rear. 50% indicates equal roll angle; le
 
 ## RPM LED
 **This widget displays RPM LED info.**
+
+Modern design: capsule LEDs with a soft glow when lit; unlit LEDs keep a faint tint of their color zone (green, yellow, red), so zones can be read before they light up.
 
     number_of_led
 Set number of LED to display. Minimum LED is limited to `3`.
@@ -4445,7 +4468,9 @@ Set cooldown duration (seconds) before resetting minimum or maximum speed value.
 ## Spotter
 **This widget displays two slim side bars, lit while a car is alongside.**
 
-Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Car positions come from `Vehicles module`, same as Radar widget. Nothing is shown while no car is alongside, unless overlay is unlocked, or `show_bar_background` is enabled.
+Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Once a side is free again, its bar flashes in clear color (green), like a spotter calling "clear". A car coming up behind on a side, not alongside yet, lights the bottom of the bar, brighter as it gets closer. Car positions come from `Vehicles module`, same as Radar widget. Nothing is shown while no car is alongside, unless overlay is unlocked, or `show_bar_background` is enabled.
+
+Modern design: bars with rounded ends glowing toward screen center, lit part going from warning to loss color as the car alongside gets closer sideways.
 
     bar_width, bar_height
 Set side bar width and height in pixels.
@@ -4462,6 +4487,15 @@ Set maximum side distance in meters (between car centers) for a car to be alongs
     critical_side_distance
 Set side distance in meters (between car centers) under which car alongside is shown in critical color. Default is `2.6` meters.
 
+    show_clear_signal, clear_signal_duration
+Flash side bar in clear color once the car alongside is gone, fading out over `clear_signal_duration` seconds. Default is enabled, `1` second.
+
+    show_approaching_cars, approaching_distance
+Light bottom of side bar while a car comes up behind on that side (not in player lane), brighter as it gets closer: from `approaching_distance` meters between its front and player car rear, up to overlapping. Default is enabled, `10` meters.
+
+    bar_color_clear
+Set side bar color of clear signal (classic layout).
+
     show_bar_background
 Always show side bar background, also while no car is alongside.
 
@@ -4477,7 +4511,7 @@ Note, most options are inherited from [Relative](#relative) widget, with some ad
 Modern design columns besides those of [Relative](#relative): lap time difference to player over recent laps (green if player was faster), and interval to car ahead. `column_time_gap` shows gap to leader (or to leader best lap outside race). Space separates class groups in multi-class split mode.
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
-Modern design columns, off by default: brand logo after vehicle name (logo file from brand logo folder, width follows `brand_logo_width`), average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -4522,7 +4556,7 @@ Show each driver's time gap behind overall leader in race session. In none race 
 Show time gap from same class leader instead of overall leader. This option only takes effect while `enable_multi_class_split_mode` is enabled.
 
     time_gap_leader_text
-Set text indicator for race leader in time gap column.
+Set text indicator for race leader in time gap column. Modern design shows its own label (Leader) while this text is left at default.
 
     show_time_interval
 Show time interval between each closest driver in order.
@@ -4531,7 +4565,7 @@ Show time interval between each closest driver in order.
 Show time interval from same class. This option only takes effect while `enable_multi_class_split_mode` is enabled.
 
     time_interval_leader_text
-Set text indicator for race leader in time interval column.
+Set text indicator for race leader in time interval column. Modern design shows a dash while this text is left at default.
 
     show_laptime
 Show driver's last lap time or pit stop duration if available. Invalid lap time is preceded by asterisk mark, such as *1:23.54.
@@ -4663,6 +4697,8 @@ Show turning radius affected by slip angle.
 
 ## Steering meter
 **This widget displays steering input info.**
+
+Modern design: track with a center mark, bar growing from center toward steering side with a bright thumb at wheel position, faint scale marks, steering angle written on the other half of the track.
 
     bar_width, bar_height
 Set steering meter bar width and height in pixels.
@@ -5688,6 +5724,8 @@ Set number of samples for reducing data fluctuation. Lower value may result more
 ## Black box
 **This widget displays an all-in-one view of the four wheels: tyre temperature, brake temperature, wheel lock & spin, ABS & TC activation, brake bias and pedals.**
 
+Modern design: same layout and options as classic, drawn with design font (labels in capitals), theme colors (colors left at default value follow `overlay_theme` and `enable_colorblind_colors`, customized colors are kept), cards with soft shading and a hairline border, and capsule RPM LEDs keeping a faint tint of their color zone while unlit. Enable `enable_classic_layout` to use classic look.
+
 Tyres are drawn at each corner (seen from above), with a thin brake bar next to each tyre and brake temperature written beside it, colored with heatmap (auto matched with tyre compound & brake type if enabled). A locked wheel gets a red outline, a spinning wheel gets a yellow outline. `Wheels module` must be enabled for lock & spin warning.
 
     layout
@@ -6093,7 +6131,33 @@ Each plugin is a folder in `plugins` folder (next to Modern Tiny Pedals), named 
     plugins/<name>/setting.json   default options of the widget
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 
-Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log. See `plugins/example_speed` for a complete example.
+Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log.
+
+Minimal example, a speed widget (`plugins/speed/setting.json` holds `{"enable": false, "font_color": "#FFFFFF", "background_color": "#222222"}`):
+
+    from tinypedal.api_control import api
+    from tinypedal.widget._base import Overlay
+
+
+    class Realtime(Overlay):
+        def __init__(self, config, widget_name):
+            super().__init__(config, widget_name)  # options of setting.json & preset in self.wcfg
+            layout = self.set_grid_layout()
+            self.set_primary_layout(layout=layout)
+            font = self.config_font(self.wcfg["font_name"], self.wcfg["font_size"], self.wcfg["font_weight"])
+            self.setFont(font)
+            font_m = self.get_font_metrics(font)
+            self.bar_speed = self.set_rawtext(
+                text="---", width=font_m.width * 7, fixed_height=font_m.height, offset_y=font_m.voffset,
+                fg_color=self.wcfg["font_color"], bg_color=self.wcfg["background_color"], last=-1)
+            layout.addWidget(self.bar_speed, 0, 0)
+
+        def timerEvent(self, event):  # every update_interval ms while on track
+            speed = round(api.read.vehicle.speed() * 3.6)  # m/s to km/h
+            if self.bar_speed.last != speed:  # repaint only on change
+                self.bar_speed.last = speed
+                self.bar_speed.text = f"{speed:3d} kph"
+                self.bar_speed.update()
 
 Important: plugins run as normal Python code with full access to your computer, only install plugins from trusted sources.
 

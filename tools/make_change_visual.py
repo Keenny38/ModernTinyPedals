@@ -56,6 +56,8 @@ for slot in preview.cfg.user.__slots__:
 for name, options in overrides.items():
     if name in preview.cfg.user.setting:  # widget new in after tree: not in older revision
         preview.cfg.user.setting[name].update(options)
+if hasattr(preview, "without_game_pictures"):  # no game logo in published images (older revisions: none)
+    preview.without_game_pictures()
 sim, data = preview.lmu_api()
 preview.api._api, preview.api.read = sim, sim.reader()
 preview.set_telemetry(sim, data)
@@ -73,6 +75,8 @@ for name in names:
     else:
         widget = create_widget(module, preview.cfg, name)
     widget.adjustSize()
+    if name in getattr(preview, "HISTORY_WIDGETS", ()):  # input history (older revisions: none)
+        preview.replay_history(widget, data)
     for _ in range(3):
         widget.timerEvent(QTimerEvent(0))
     widget.adjustSize()

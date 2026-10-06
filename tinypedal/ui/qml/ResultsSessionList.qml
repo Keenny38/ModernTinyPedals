@@ -206,6 +206,7 @@ Item {
                 required property string resultTone
                 required property string detailText
                 required property bool newest
+                required property string trackLogo
                 readonly property bool selected: key === backend.selectedKey
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
@@ -243,6 +244,11 @@ Item {
                     spacing: theme.em * 0.6
 
                     ResultsBadge { code: row.code }
+                    GameLogo {  // circuit logo of game
+                        source: row.trackLogo
+                        boxWidth: theme.em * 2.6
+                        boxHeight: theme.em * 1.7
+                    }
 
                     ColumnLayout {
                         Layout.fillWidth: true

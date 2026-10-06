@@ -72,6 +72,7 @@ from .. import game_rest
 from .._common import BaseDialog
 from ..game_rest import GameConnection, GameRequest
 from . import replay_files
+from .game_pictures import LogoCache, notifier
 from .lines import VertexStore, band
 from .models import DictListModel
 
@@ -496,16 +497,18 @@ class GameReplaysBackend(QObject):
         self._shown = False
         self._replays_model = DictListModel(
             ("key", "track", "code", "session", "sessionLabel", "event", "eventType", "section", "date",
-             "size", "tip", "checked", "isProtected"), self)
+             "size", "tip", "checked", "isProtected", "trackLogo"), self)
         self._incidents_model = DictListModel(
             ("key", "time", "timeText", "driver", "other", "wall", "mine", "count", "driverCar", "otherCar",
              "focused"), self)
         self._standings_model = DictListModel(
             ("key", "position", "classPosition", "number", "driver", "vehicle", "carClass", "classColor", "laps",
              "best", "last", "gap", "pits", "status", "statusTone", "penalties", "onCamera", "player", "fastest",
-             "incidents", "energy", "energyLevel"), self)
+             "incidents", "energy", "energyLevel", "brandLogo"), self)
         self._map_model = DictListModel(
             ("key", "mapX", "mapY", "color", "number", "driver", "position", "onCamera", "player", "inPit"), self)
+        self.logos = LogoCache()
+        notifier().changed.connect(self.pictures_changed)
         self.request_replays = GameRequest(self, (), self.received_replays)
         self.request_state = GameRequest(self, (), self.received_state)
         self.request_command = GameRequest(self, (), self.command_done)
@@ -938,6 +941,14 @@ class GameReplaysBackend(QObject):
                          event_type_text(replay.event_type))).lower()
         return all(word in text for word in self.search_words)
 
+    @Slot()
+    def pictures_changed(self):
+        """Logos fetched from game meanwhile"""
+        if self.replays:
+            self.update_replays()
+        if self.standings:
+            self.update_standings()
+
     def update_replays(self):
         """Replays rows: filtered, sorted, section of each (day, track)"""
         replays = [replay for replay in self.replays if self.matches(replay)]
@@ -964,6 +975,7 @@ class GameReplaysBackend(QObject):
                 "tip": f"{replay.name}\n{date_text(replay.time)}".strip(),
                 "checked": replay.name in self.checked,
                 "isProtected": replay.name in self.protected,
+                "trackLogo": self.logos.track(track, replay.track),
             })
         self._replays_model.sync(rows)
         shown = self.shown_keys()
@@ -1808,6 +1820,7 @@ class GameReplaysBackend(QObject):
                 "player": car.player,
                 "fastest": car.best > 0 and car.best == fastest.get(car.car_class),
                 "incidents": incidents.get(car.driver, 0),
+                "brandLogo": self.logos.brand(car.vehicle),
             })
         self._standings_model.sync(rows)
         if self.selected_car and self.selected_car not in {row["key"] for row in rows}:

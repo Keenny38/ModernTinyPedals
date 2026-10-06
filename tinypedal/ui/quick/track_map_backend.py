@@ -41,6 +41,7 @@ from ...userfile.track_corners import TrackCorner, track_corners
 from ...userfile.track_map import load_track_map_file
 from ..lap_viewer import distance_unit
 from ..track_map_geometry import config_grades, curve_at, curve_description, node_at
+from .game_pictures import notifier, track_logo_url
 from .lines import VertexStore, area, band, circle, colored_band, line_strip, merge_strips, segments
 
 logger = logging.getLogger(__name__)
@@ -68,12 +69,15 @@ class TrackMapBackend(QObject):
     """Track Map Viewer page state (QML context property "backend")"""
 
     mapChanged = Signal()
+    logoChanged = Signal()  # map loaded, or circuit logo fetched from game
     positionChanged = Signal()
     configChanged = Signal()
     revisionChanged = Signal()
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
+        notifier().changed.connect(self.logoChanged)
+        self.mapChanged.connect(self.logoChanged)
         self._window = parent
         self.prefix = f"track_map_{id(self)}|"
         self.raw_coords: list[tuple[float, float]] = []
@@ -113,6 +117,11 @@ class TrackMapBackend(QObject):
     @Property(str, notify=mapChanged)
     def mapName(self) -> str:
         return self.map_name
+
+    @Property(str, notify=logoChanged)
+    def trackLogo(self) -> str:
+        """Circuit logo of game for map name (track name)"""
+        return track_logo_url(self.map_name) if self.map_name else ""
 
     @Property(float, notify=mapChanged)
     def length(self) -> float:

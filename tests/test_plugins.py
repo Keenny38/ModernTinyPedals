@@ -58,32 +58,12 @@ def test_broken_widget_gets_placeholder(tmp_path):
     assert module.Realtime.__doc__ == "Plugin error"
 
 
-def test_example_plugin_renders():
-    """Bundled example plugin loads and renders"""
+def test_example_plugin_removed():
+    """Example speed plugin no longer shipped: no folder, no bundled trust"""
     import os
 
-    from tinypedal.setting import cfg
-    from tinypedal.userfile.json_setting import copy_setting
-    from tinypedal.widget import plugin_example_speed
-
-    cfg.default.set_default()
-    backup = {name: getattr(cfg.user, name, None) for name in cfg.user.__slots__}
-    for name in cfg.user.__slots__:
-        setattr(cfg.user, name, copy_setting(getattr(cfg.default, name)))
-    try:
-        from tinypedal.api_control import api
-        api.connect()
-        api.start()
-        widget = plugin_example_speed.Realtime(cfg, "plugin_example_speed")
-        widget.adjustSize()
-        assert widget.width() > 10
-        widget.deleteLater()
-        api.stop()
-    finally:
-        for name, value in backup.items():
-            if value is not None:
-                setattr(cfg.user, name, value)
-    assert os.path.exists("plugins/example_speed/widget.py")
+    assert not os.path.exists("plugins/example_speed")
+    assert "plugin_example_speed" not in BUNDLED_PLUGINS
 
 
 def test_plugin_error_recorded_and_cleared(tmp_path):
@@ -125,15 +105,20 @@ def test_install_plugin_package(tmp_path):
         install_plugin_package(str(bad), str(folder))
 
 
-def test_plugin_manager(ui_env):
+def test_plugin_manager(ui_env, tmp_path, monkeypatch):
     from tinypedal.module_control import wctrl
     from tinypedal.ui.plugin_manager import PluginManager, reload_plugin
 
+    monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
+    make_plugin(tmp_path / "plugins", "gauge", "from tinypedal.widget._base import Overlay\n\n\n"
+                "class Realtime(Overlay):\n    pass\n")
+    monkeypatch.setitem(wctrl._module_pack, "plugin_gauge", load_plugin_widget("tinypedal.widget", "plugin_gauge"))
     manager = PluginManager(None)
     try:
-        assert manager.table.rowCount() >= 1  # example plugin
+        assert manager.table.rowCount() == 1
         assert manager.table.item(0, 1).text() == "Loaded"
         name = manager.table.item(0, 0).data(0x0100)
+        assert name == "plugin_gauge"
         old_module = wctrl._module_pack[name]
         assert reload_plugin(name) == ""
         assert wctrl._module_pack[name] is not old_module  # code reloaded

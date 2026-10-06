@@ -20,6 +20,8 @@
 Instrument Widget
 """
 
+from typing import Any
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
@@ -30,7 +32,36 @@ from ..userfile.custom_image import split_pixmap_image
 from ._base import Overlay
 
 
-class Realtime(Overlay):
+class InstrumentMixin:
+    """Switch & wheel states, for classic & modern widget"""
+
+    wcfg: Any
+
+    def read_ignition(self) -> int:
+        """0 ignition & engine off, 1 ignition on & engine off, 2 ignition & engine on"""
+        return api.read.switch.ignition_starter() * (
+            1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"]))
+
+    def read_clutch(self) -> int:
+        """Auto clutch on adds 2, clutch pressed adds 1"""
+        return (api.read.switch.auto_clutch() << 1) + (api.read.inputs.clutch() > 0.01)
+
+    def wheel_locking(self) -> bool:
+        """Wheel locking while braking"""
+        return (
+            api.read.inputs.brake_raw() > 0 and
+            min(minfo.wheels.slipRatio) <= -self.wcfg["wheel_lock_threshold"]
+        )
+
+    def wheel_slipping(self) -> bool:
+        """Wheel spinning while accelerating"""
+        return (
+            api.read.inputs.throttle_raw() > 0 and
+            max(minfo.wheels.slipRatio) >= self.wcfg["wheel_slip_threshold"]
+        )
+
+
+class Realtime(InstrumentMixin, Overlay):
     """Draw widget"""
 
     def __init__(self, config, widget_name):
@@ -146,35 +177,20 @@ class Realtime(Overlay):
             self.update_headlights(self.bar_headlights, headlights)
 
         # Ignition
-        # 0 ignition & engine off, 1 ignition on & engine off, 2 ignition & engine on
         if self.wcfg["show_ignition"]:
-            ignition = api.read.switch.ignition_starter() * (
-                1 + (api.read.engine.rpm() > self.wcfg["stalling_rpm_threshold"]))
-            self.update_ignition(self.bar_ignition, ignition)
+            self.update_ignition(self.bar_ignition, self.read_ignition())
 
         # Clutch
-        # 2+ = auto clutch on, 1 or 3 = clutch activated
         if self.wcfg["show_clutch"]:
-            clutch = (api.read.switch.auto_clutch() << 1) + (api.read.inputs.clutch() > 0.01)
-            self.update_clutch(self.bar_clutch, clutch)
+            self.update_clutch(self.bar_clutch, self.read_clutch())
 
         # Wheel lock
         if self.wcfg["show_wheel_lock"]:
-            wlock = (
-                self.flicker and
-                api.read.inputs.brake_raw() > 0 and
-                min(minfo.wheels.slipRatio) <= -self.wcfg["wheel_lock_threshold"]
-            )
-            self.update_wlock(self.bar_wlock, wlock)
+            self.update_wlock(self.bar_wlock, self.flicker and self.wheel_locking())
 
         # Wheel slip
         if self.wcfg["show_wheel_slip"]:
-            wslip = (
-                self.flicker and
-                api.read.inputs.throttle_raw() > 0 and
-                max(minfo.wheels.slipRatio) >= self.wcfg["wheel_slip_threshold"]
-            )
-            self.update_wslip(self.bar_wslip, wslip)
+            self.update_wslip(self.bar_wslip, self.flicker and self.wheel_slipping())
 
     # GUI update methods
     def update_headlights(self, target, data):

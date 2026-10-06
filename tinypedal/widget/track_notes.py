@@ -20,6 +20,9 @@
 Track notes Widget
 """
 
+from collections.abc import Mapping
+from typing import Any
+
 from ..api_control import api
 from ..const_common import EMPTY_DICT, TEXT_NOTAVAILABLE
 from ..module_info import minfo
@@ -27,7 +30,65 @@ from ..userfile.track_notes import COLUMN_COMMENT, COLUMN_DISTANCE, COLUMN_TRACK
 from ._base import Overlay
 
 
-class Realtime(Overlay):
+class TrackNotesMixin:
+    """Current track note & auto hide, for classic & modern widget"""
+
+    wcfg: Any
+
+    def setup_notes(self):
+        """Last note & auto hide state"""
+        self.last_notes_index = None
+        self.notes_hidden = False
+        self.last_etime = 0.0
+
+    def read_notes(self) -> tuple[Mapping, Mapping, bool]:
+        """Current & next note (empty if not available), whether in pits; sets notes_hidden"""
+        in_pits = api.read.vehicle.in_pits()
+
+        if not in_pits:  # out pit
+            notes_current = minfo.tracknotes.out.currentNote
+            notes_next = minfo.tracknotes.out.nextNote
+            notes_index = minfo.tracknotes.out.currentIndex if notes_current else None
+        elif self.wcfg["show_pit_notes_while_in_pit"]:
+            notes_current = minfo.tracknotes.pit.currentNote
+            notes_next = minfo.tracknotes.pit.nextNote
+            notes_index = minfo.tracknotes.pit.currentIndex
+        else:  # not available
+            notes_current = EMPTY_DICT
+            notes_next = EMPTY_DICT
+            notes_index = None
+
+        if api.read.vehicle.in_garage():
+            self.notes_hidden = False
+        elif notes_index is not None:
+            if self.wcfg["maximum_display_duration"] <= 0:
+                self.notes_hidden = False
+            else:
+                etime = api.read.timing.elapsed()
+                if self.last_notes_index != notes_index:
+                    self.last_notes_index = notes_index
+                    self.last_etime = etime
+                if self.last_etime > etime:
+                    self.last_etime = etime
+                self.notes_hidden = etime - self.last_etime > self.wcfg["maximum_display_duration"]
+        elif self.wcfg["enable_auto_hide_if_not_available"]:
+            self.notes_hidden = True
+        return notes_current, notes_next, in_pits
+
+    def note_text(self, notes_current: Mapping, in_pits: bool) -> str:
+        """Track note text"""
+        if in_pits:
+            return notes_current.get(COLUMN_TRACKNOTE, self.wcfg["pit_notes_text"])
+        return notes_current.get(COLUMN_TRACKNOTE, TEXT_NOTAVAILABLE)
+
+    def comment_text(self, notes_current: Mapping, in_pits: bool) -> str:
+        """Comment text (line breaks written as \\n)"""
+        if in_pits:
+            return notes_current.get(COLUMN_COMMENT, self.wcfg["pit_comments_text"])
+        return notes_current.get(COLUMN_COMMENT, TEXT_NOTAVAILABLE)
+
+
+class Realtime(TrackNotesMixin, Overlay):
     """Draw widget"""
 
     def __init__(self, config, widget_name):
@@ -111,58 +172,21 @@ class Realtime(Overlay):
             )
 
         # Last data
-        self.last_notes_index = None
+        self.setup_notes()
         self.last_auto_hide = False
-        self.last_etime = 0.0
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        in_pits = api.read.vehicle.in_pits()
-
-        if not in_pits:  # out pit
-            notes_current = minfo.tracknotes.out.currentNote
-            notes_next = minfo.tracknotes.out.nextNote
-            notes_index = minfo.tracknotes.out.currentIndex if notes_current else None
-        elif self.wcfg["show_pit_notes_while_in_pit"]:
-            notes_current = minfo.tracknotes.pit.currentNote
-            notes_next = minfo.tracknotes.pit.nextNote
-            notes_index = minfo.tracknotes.pit.currentIndex
-        else:  # not available
-            notes_current = EMPTY_DICT
-            notes_next = EMPTY_DICT
-            notes_index = None
-
-        if api.read.vehicle.in_garage():
-            self.update_auto_hide(False)
-        elif notes_index is not None:
-            if self.wcfg["maximum_display_duration"] <= 0:
-                self.update_auto_hide(False)
-            else:
-                etime = api.read.timing.elapsed()
-                if self.last_notes_index != notes_index:
-                    self.last_notes_index = notes_index
-                    self.last_etime = etime
-                if self.last_etime > etime:
-                    self.last_etime = etime
-                self.update_auto_hide(
-                    etime - self.last_etime > self.wcfg["maximum_display_duration"])
-        elif self.wcfg["enable_auto_hide_if_not_available"]:
-            self.update_auto_hide(True)
+        notes_current, notes_next, in_pits = self.read_notes()
+        self.update_auto_hide(self.notes_hidden)
+        if self.notes_hidden:
             return
 
         if self.wcfg["show_track_notes"]:
-            if in_pits:
-                notes = notes_current.get(COLUMN_TRACKNOTE, self.wcfg["pit_notes_text"])
-            else:
-                notes = notes_current.get(COLUMN_TRACKNOTE, TEXT_NOTAVAILABLE)
-            self.update_notes(self.bar_notes, notes)
+            self.update_notes(self.bar_notes, self.note_text(notes_current, in_pits))
 
         if self.wcfg["show_comments"]:
-            if in_pits:
-                comments = notes_current.get(COLUMN_COMMENT, self.wcfg["pit_comments_text"])
-            else:
-                comments = notes_current.get(COLUMN_COMMENT, TEXT_NOTAVAILABLE)
-            self.update_comments(self.bar_comments, comments)
+            self.update_comments(self.bar_comments, self.comment_text(notes_current, in_pits))
 
         if self.wcfg["show_debugging"]:
             curr_distance = notes_current.get(COLUMN_DISTANCE, 0)

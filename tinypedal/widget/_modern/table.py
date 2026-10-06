@@ -42,7 +42,7 @@ CHANGE = 3  # position change: extra = signed number of places gained
 COMPOUND = 4  # tyre compounds: extra = ((symbol, color), ...)
 PILL = 5  # status pill (pit, garage, flag): text, color, fill
 DELTAS = 6  # lap time deltas to player: extra = (seconds, ...), MAX_SECONDS if unknown
-LOGO = 7  # brand logo image: text = brand name (logo file name)
+LOGO = 7  # brand logo image: text = brand name, extra = vehicle name (game car list)
 
 SEPARATOR = "separator"  # row list item: space between class groups
 CHANGE_ARROW = 0.42  # position change arrow size, in row height
@@ -220,7 +220,7 @@ class TableMixin:
         elif kind == DELTAS:
             self.draw_deltas(painter, rect, cell.extra)
         elif kind == LOGO:
-            self.draw_logo(painter, rect, cell.text)
+            self.draw_logo(painter, rect, cell.text, cell.extra or "")
         elif kind == PILL:
             if not cell.text:
                 return
@@ -309,12 +309,16 @@ class TableMixin:
             self.draw_text(painter, box, symbol, "label", readable_on(color), CENTER, elide=False)
             left += size + gap
 
-    def draw_logo(self: Any, painter: QPainter, rect: QRectF, brand: str):
-        """Brand logo centered in cell"""
-        if not brand:
+    def draw_logo(self: Any, painter: QPainter, rect: QRectF, brand: str, vehicle: str = ""):
+        """Brand logo centered in cell (own logo of brand logo folder, else game logo), brand
+        initials while no logo"""
+        if not brand and not vehicle:
             return
-        pixmap = self.brand_logo(brand, rect.width(), rect.height() * 0.72)
+        pixmap = self.brand_logo(brand, vehicle, rect.width() - self.unit * 0.2, rect.height() * 0.74)
         if pixmap.isNull():
+            initials = brand[:3]
+            if initials and self.text_width("label", initials) <= rect.width():
+                self.draw_text(painter, rect, initials, "label", self.theme.text_faint, CENTER)
             return
         ratio = pixmap.devicePixelRatio() or 1.0
         width = pixmap.width() / ratio
@@ -325,22 +329,23 @@ class TableMixin:
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
         painter.restore()
 
-    def brand_logo(self: Any, brand: str, width: float, height: float) -> QPixmap:
-        """Brand logo from brand logo folder scaled to fit cell, loaded once per brand (empty
-        pixmap if none)"""
-        from ...userfile.custom_image import load_brand_logo_image
+    def brand_logo(self: Any, brand: str, vehicle: str, width: float, height: float) -> QPixmap:
+        """Brand logo scaled to fit cell: logo file found once per car (again once game pictures change),
+        each logo file loaded once (cars of a brand share it)"""
+        from ...userfile.custom_image import brand_logo_file, load_picture
+        from ...userfile.game_images import images
 
-        cache = self.__dict__.setdefault("_logo_cache", {})
-        pixmap = cache.get(brand)
+        files = self.__dict__.setdefault("_logo_files", {})
+        found = files.get((brand, vehicle))
+        if found is None or (not found[0] and found[1] != images.version):
+            path = brand_logo_file(self.cfg.path.brand_logo, brand, self.theme.surface.lightness() > 128, vehicle)
+            found = files[(brand, vehicle)] = (path, images.version)
+        if not found[0]:
+            return QPixmap()
+        pixmaps = self.__dict__.setdefault("_logo_cache", {})
+        pixmap = pixmaps.get(found[0])
         if pixmap is None:
-            scale = 2.0  # sharp on high DPI screen
-            pixmap = load_brand_logo_image(
-                filepath=self.cfg.path.brand_logo, filename=brand,
-                max_width=max(round(width * scale), 1), max_height=max(round(height * scale), 1),
-            )
-            if not pixmap.isNull():
-                pixmap.setDevicePixelRatio(scale)
-            cache[brand] = pixmap
+            pixmap = pixmaps[found[0]] = load_picture(found[0], width, height, 2.0)  # sharp on high DPI screen
         return pixmap
 
 

@@ -33,6 +33,7 @@ from PySide6.QtGui import QPainter
 
 from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...i18n import tr_overlay as tr
+from ...template.widget.drivers_ui import DISPLAY_ORDER_NAMES
 from .base import ModernOverlay
 from .draw import panel
 from .rows import DASH, RowStyle, class_style, compound_cell, laptime_text, pit_cell
@@ -78,8 +79,6 @@ DRIVER_OPTIONS = (
     "display_order_incidents", "display_order_stint_laps", "display_order_speed_trap",
     "display_order_lift_and_coast_time",
 )
-# Column key -> display order option suffix, if different
-DISPLAY_ORDER_NAMES = {"driver_name": "driver", "vehicle_name": "vehicle"}
 
 
 class Context(NamedTuple):
@@ -122,8 +121,8 @@ class DriverTable(TableMixin, ModernOverlay):
             return Column(key, self.row_style.name_width(self.wcfg.get("driver_name_width", 10)))
         if key == "vehicle_name":
             return Column(key, self.row_style.name_width(self.wcfg.get("vehicle_name_width", 10), "dim"))
-        if key == "brand_logo":  # 20 pixels at font size 15 (classic default), follows widget size
-            return Column(key, max(unit * float(self.wcfg.get("brand_logo_width", 20)) / 15, unit * 0.5), CENTER)
+        if key == "brand_logo":  # 2.35 units at classic default (20): wordmark logos (AMG, McLaren) readable
+            return Column(key, max(unit * float(self.wcfg.get("brand_logo_width", 20)) / 8.5, unit * 0.5), CENTER)
         if key == "tyre_compound":
             return Column(key, compounds_width(unit, ROW_SCALE, 2))
         if key == "pit_status":
@@ -163,6 +162,17 @@ class DriverTable(TableMixin, ModernOverlay):
             player_pit_request=bool(player is not None and player.pitRequested),
         )
 
+    def show_sample(self):
+        """Rows of a sample race, without session (Overlay Options live preview)"""
+        from .sample_field import sample_field
+
+        field = sample_field()
+        self.show_field(field, Context(in_race=True, player=field.vehicles[field.player_index],
+                                       player_pit_request=False))
+
+    def show_field(self, field, ctx: Context):
+        """Rows of sample field (override)"""
+
     def driver_row(self, veh, ctx: Context, **extra) -> Row:
         """Cells of one car"""
         wcfg = self.wcfg
@@ -193,7 +203,7 @@ class DriverTable(TableMixin, ModernOverlay):
                 name = veh.vehicleBrand if wcfg.get("show_vehicle_brand_as_name", True) else veh.vehicleName
                 cells.append(Cell(TEXT, name, "dim", theme.text_dim))
             elif key == "brand_logo":
-                cells.append(Cell(LOGO, veh.vehicleBrand))
+                cells.append(Cell(LOGO, veh.vehicleBrand, extra=veh.vehicleName))
             elif key == "tyre_compound":
                 cells.append(compound_cell(veh.tireCompoundName, wcfg.get("show_compound_for_each_wheel", True)))
             elif key == "pit_status":

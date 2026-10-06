@@ -108,7 +108,8 @@ CATEGORIES = (
             "maximum_loading_attempts", "maximum_saving_attempts",
         )),
         ("Overlay Editing", (
-            "snap_distance", "snap_gap", "show_layout_guides", "grid_move_size", "enable_layout_per_screen_setup",
+            "enable_magnetic_snap", "snap_distance", "snap_gap", "show_layout_guides", "grid_move_size",
+            "enable_layout_per_screen_setup",
         )),
         ("Performance & Hotkeys", ("minimum_update_interval", "enable_global_hotkey")),
     )),

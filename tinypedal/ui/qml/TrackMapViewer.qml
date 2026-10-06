@@ -80,7 +80,15 @@ TpPage {
                     id: nameRow
                     anchors.centerIn: parent
                     spacing: theme.em * 0.5
-                    Icon { glyph: ""; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }  // map pin
+                    GameLogo {  // circuit logo of game
+                        id: mapLogo
+                        source: backend.trackLogo
+                        boxWidth: theme.em * 2.6
+                        boxHeight: theme.em * 1.5
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Icon {
+                        visible: !mapLogo.shown; glyph: ""; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }  // map pin
                     Text { text: backend.mapName; color: theme.text; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                 }
             }
