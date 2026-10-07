@@ -157,12 +157,13 @@ class EditMode(QObject):
 
     # Edit mode
     def follow_lock(self, locked: bool):
-        """Overlay locked or unlocked by user: leave or enter edit mode"""
+        """Overlay locked or unlocked by user: leave or enter edit mode (if enabled on unlock,
+        else overlays just movable, outline on hover, edit mode from right-click menu)"""
         if locked:
             self.leave()
             self.history.clear()
             self.select("")
-        else:
+        elif cfg.application.get("enable_edit_mode_on_unlock", False):
             self.enter()
 
     def enter(self) -> bool:

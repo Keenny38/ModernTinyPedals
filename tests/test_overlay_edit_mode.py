@@ -176,6 +176,7 @@ def test_unlock_enters_edit_mode_and_lock_leaves_it(editing):
     from tinypedal.setting import cfg
 
     start, _overlays, _saved = editing
+    cfg.application["enable_edit_mode_on_unlock"] = True
     cfg.overlay["fixed_position"] = True
     toggle = OverlayToggle()
     toggle.lock()  # unlocked, but no overlay to edit
@@ -194,6 +195,31 @@ def test_unlock_enters_edit_mode_and_lock_leaves_it(editing):
     assert not realtime_state.editing and not controller.toolbar.isVisible()
     assert widget.should_hide()
     assert not frame.outline.isVisibleTo(widget)
+
+
+def test_unlock_without_edit_mode_moves_on_hover(editing):
+    """Default: unlock only makes overlays movable, outline on hover, no toolbar, edit mode from menu"""
+    from tinypedal.overlay_control import OverlayToggle
+    from tinypedal.setting import cfg
+
+    start, _overlays, _saved = editing
+    assert not cfg.application["enable_edit_mode_on_unlock"]
+    cfg.overlay["fixed_position"] = True
+    toggle = OverlayToggle()
+    widget = start()
+    toggle.lock()  # unlocked
+    controller = _edit_mode.edit_mode()
+    frame = widget._edit_frame
+    assert not realtime_state.editing and controller.toolbar is None
+    assert not widget.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    assert frame.enabled and not frame.outline.isVisibleTo(widget)  # outline on hover only
+    QCoreApplication.sendEvent(widget, QEvent(QEvent.Type.Enter))
+    assert frame.outline.isVisibleTo(widget) and frame.handle.isVisibleTo(widget)
+    QCoreApplication.sendEvent(widget, QEvent(QEvent.Type.Leave))
+    assert controller.enter()  # right-click menu "Edit Mode"
+    assert realtime_state.editing and controller.toolbar.isVisible()
+    toggle.lock()
+    assert not realtime_state.editing and not controller.toolbar.isVisible()
 
 
 def test_lock_toggle_keeps_window_shown(editing):

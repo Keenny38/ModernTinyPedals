@@ -747,6 +747,9 @@ Show confirmation dialog for enabling or disabling all widgets or modules. This 
     show_overlay_previews
 Show overlays on `Overlays` page as cards with a preview of each overlay, or as a compact list with the preview in a tooltip if disabled. Also switched by the view buttons at top right of `Overlays` page. Previews are drawn only while the page is shown. This option is enabled by default.
 
+    enable_edit_mode_on_unlock
+Start the edit mode when overlays are unlocked: toolbar (snapping, grid, guides, undo, `Done` locks overlays again), every overlay outlined, auto hidden overlays shown. Disabled: unlocking only makes overlays movable, the outline and resize handle of an overlay show when the mouse is over it; drag it to move it, arrow keys and `Ctrl+Z` still work, and the edit mode can still be started from the right-click menu of an overlay (`Edit Mode`). Default is disabled.
+
     enable_magnetic_snap
 Snap overlays while dragging them (`Snap` button of the edit mode toolbar): their edges and center line up with screen edges, screen center and other overlays. Hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. Disabled: overlays move freely, hold `Ctrl` to snap. Default is enabled.
 

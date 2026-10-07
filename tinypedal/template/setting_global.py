@@ -47,6 +47,7 @@ GLOBAL_DEFAULT = {
         "snap_gap": 0,
         "enable_magnetic_snap": True,  # overlays snap while dragged (Ctrl: free move), else snap with Ctrl
         "show_layout_guides": True,
+        "enable_edit_mode_on_unlock": False,  # unlock shows edit toolbar, else overlays only movable on hover
         "grid_move_size": 8,
         "minimum_update_interval": 10,
         "maximum_loading_attempts": 5,

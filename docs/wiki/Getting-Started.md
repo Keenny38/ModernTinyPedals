@@ -61,16 +61,16 @@ Overlays appear when your car is on track and hide when you are in menus or not 
 
 While the overlay is unlocked you can move overlays with the mouse; once locked, they stay in place and clicks go through to the game. The lock state is kept between starts.
 
-1. **Unlock**: `Unlock Overlay` on the Home page, tray icon menu > uncheck `Lock Overlay`, the command palette or the `overlay_lock` hotkey. This starts the **edit mode**: a toolbar shows up at the top of the game screen, and every overlay shows its outline and name, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or their visibility context (so you can place them from the game menus too).
+1. **Unlock**: `Unlock Overlay` on the Home page, tray icon menu > uncheck `Lock Overlay`, the command palette or the `overlay_lock` hotkey. Overlays stay as they are: move the mouse over one to see its outline, name and corner handle. For the **edit mode**, right-click an overlay > `Edit Mode`: a toolbar shows up at the top of the game screen, and every overlay shows its outline and name, also the ones that draw nothing yet and the ones hidden by `Auto Hide` or their visibility context (so you can place them from the game menus too). To start the edit mode at each unlock, turn on `enable_edit_mode_on_unlock` (`Config` > `Application` > `Overlay Editing`).
 2. **Drag** an overlay to move it. It snaps to screen edges, screen center and the edges and centers of the other overlays; hold `Ctrl` to move freely, `Shift` to keep the move horizontal or vertical. Alignment guides and the position of the overlay show while dragging. `Grid Move` moves overlays on a grid.
 3. **Fine-tune with the keyboard**: click an overlay to select it (solid outline), then arrow keys move it by one pixel (`Shift`: 10 pixels, one grid step with `Grid Move`). `Ctrl+Z` / `Ctrl+Y` undo and redo, `Delete` turns the overlay off, `Esc` unselects it.
 4. **Resize** an overlay with its corner handle: its size options (font size, bar size...) are scaled.
 5. Right-click an overlay for `Config`, `Center Horizontally`, `Center Vertically`, `Move to Screen` (same place on another monitor), `Visibility`, `Opacity`, `Undo`, `Reload` and `Disable`.
-6. **Lock** again when done: `Done` on the toolbar (or `Lock Overlay` in the right-click menu, tray menu or Home page).
+6. **Lock** again when done: `Lock Overlay` in the right-click menu, tray menu or Home page (`Done` on the edit mode toolbar).
 
 The toolbar has `Snap` (option `enable_magnetic_snap`), `Grid` and `Guides` toggles, `Undo` / `Redo`, `Overlays` (active overlays, uncheck one to turn it off, or open the Overlays page) and `Done`. Drag it by its grip. Its `✕` hides it and leaves the overlay unlocked; right-click an overlay > `Edit Mode` brings it back. Everything done while unlocked can be undone until the overlay is locked.
 
-An overlay already unlocked when the app starts does not start the edit mode: its outline and corner handle only show under the mouse, so nothing stays on screen if you drive with the overlay unlocked.
+Without the edit mode (and for an overlay already unlocked when the app starts), the outline and corner handle only show under the mouse, so nothing stays on screen if you drive with the overlay unlocked.
 
 ![Overlay edit mode](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.22.0-overlay-edit-mode.png)
 

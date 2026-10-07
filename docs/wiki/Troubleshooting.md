@@ -7,7 +7,7 @@ Answers to common problems. If yours is not here, create a bug report (see [Repo
 Check, in this order:
 
 1. **Display mode**: the game must run in **Borderless** or **Windowed** mode. Exclusive fullscreen hides every overlay.
-2. **On track**: overlays appear only while your car is on track (`Auto Hide`, tray menu). Uncheck `Auto Hide` to see them in menus too. To place them, unlock the overlay: the edit mode shows every overlay, also in menus.
+2. **On track**: overlays appear only while your car is on track (`Auto Hide`, tray menu). Uncheck `Auto Hide` to see them in menus too. To place them, unlock the overlay, then right-click one > `Edit Mode`: the edit mode shows every overlay, also in menus.
 3. **Game connection**: the status bar of the main window must show your game as connected. If not, see [Game not detected](#game-not-detected).
 4. **Overlay turned on**: on the `Overlays` page, its switch must be on. Its `visibility_context` option may limit it to some sessions or to the pits.
 5. **Off screen**: an overlay left outside every screen (monitor unplugged, preset made on another computer) is shown on the nearest screen at startup, its saved position kept (`Config` > `Compatibility` > `enable_window_position_correction`). You can also use `Tools` > `Layout Editor`, or right-click an overlay > `Move to Screen`. Positions are remembered per screen setup.

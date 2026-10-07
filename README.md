@@ -49,7 +49,7 @@ Modern Tiny Pedals is a modernized version of [TinyPedal](https://github.com/Tin
 
 Then:
 
-- **Move the overlays**: unlock the overlay (`Unlock Overlay` on the Home page, or notification area icon menu > `Lock Overlay`): an edit mode toolbar shows up, dragged overlays snap to the screen and to each other, arrow keys move the selected one and `Ctrl+Z` undoes. Or use `Tools > Layout Editor` on a screenshot of the game.
+- **Move the overlays**: unlock the overlay (`Unlock Overlay` on the Home page, or notification area icon menu > `Lock Overlay`): move the mouse over an overlay and drag it: it snaps to the screen and to each other overlay, arrow keys move the selected one and `Ctrl+Z` undoes. The edit mode toolbar (snapping, grid, guides, undo) is in the right-click menu of an overlay (`Edit Mode`), or shown at each unlock with `Config > Application > Overlay Editing > enable_edit_mode_on_unlock`. Or use `Tools > Layout Editor` on a screenshot of the game.
 - **Configure an overlay**: gear of its card in the `Overlays` tab (or right-click the overlay) opens the Overlay Options page, where every overlay is one click away. `Ctrl+F` searches for an option by name.
 - **Updates**: the app tells you about a new version, shows its release notes in your language and can download and install it (`Download And Install`).
 

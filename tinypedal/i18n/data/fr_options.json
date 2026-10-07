@@ -1061,6 +1061,7 @@
     "enable_legacy_api_selection": "Activer sélection des anciennes API",
     "enable_live_race": "Course en direct",
     "enable_live_replan": "Replanifier en course",
+    "enable_edit_mode_on_unlock": "Mode édition au déverrouillage",
     "enable_magnetic_snap": "Aimantation pendant le déplacement",
     "enable_manual_file_selector": "Activer sélecteur fichier manuel",
     "enable_modern_font": "Police moderne",
