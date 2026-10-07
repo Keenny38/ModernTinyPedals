@@ -1,5 +1,6 @@
-"""Lap viewer: laps of another circuit never added nor compared with laps of shown track (file, library, MoTeC,
-reference), compared laps lined up with reference lap along distance, overlay reference lap wrapped at lap length"""
+"""Lap viewer: laps of another circuit never compared with laps of shown track (file, library, MoTeC, reference):
+opened alone, viewer switches to their circuit; compared laps lined up with reference lap along distance, overlay
+reference lap wrapped at lap length"""
 
 import os
 
@@ -38,31 +39,93 @@ def test_circuit_name():
     assert circuit_name({"track": "Monza venue", "track_length": 5800.0}, path) == ""  # imported log: venue name
 
 
-def test_lap_of_other_circuit_never_added(page, tmp_path):  # noqa: F811
-    """Lap of another track added from a file, the imported laps library (shown as reference) or a MoTeC import:
-    not listed, never drawn over laps of shown track nor made reference lap"""
-    before, reference = shown(page), page.reference_key
-    assert before
+def test_lap_of_other_circuit_shown_alone(page, tmp_path):  # noqa: F811
+    """Lap of another track added from a file: viewer switches to its circuit (lap shown alone, laps of former track
+    no longer listed nor compared), library lap of that circuit compared with it, game track picked again: its laps
+    back, lap of the other circuit never compared with them nor reference lap"""
+    before, reference, track = shown(page), page.reference_key, page.currentTrack
+    assert before and track
     other = other_lap(str(tmp_path / "other"))
     page.add_external([other])  # Add File...
     wait_loaded(page)
-    assert other not in listed(page) and shown(page) == before
-    assert "another circuit" in page.status and "not added" in page.status and "Monza" in page.status
-    page.add_from_library([other])  # library & MoTeC import: fastest added lap as reference
+    assert shown(page) == [other] and page.reference_key == other and listed(page) == {other}
+    assert page.status == "Showing Monza: lap from another circuit"
+    assert page.currentTrack == "" and page.trackLabel == "Monza"  # track picker: opened circuit
+    page.refresh()  # opened circuit kept
     wait_loaded(page)
-    assert other not in listed(page) and shown(page) == before and page.reference_key == reference
-    page.setReference(other)
+    assert shown(page) == [other] and listed(page) == {other}
+    second = other_lap(str(tmp_path / "other2"))
+    page.add_from_library([second])  # same circuit as shown lap now: compared with it
     wait_loaded(page)
-    assert page.reference_key == reference and shown(page) == before and "not usable" in page.status
+    assert sorted(shown(page)) == sorted([other, second]) and listed(page) == {other, second}
+    page.currentTrack = track  # way back: track picker
+    wait_loaded(page)
+    assert sorted(shown(page)) == sorted(before) and page.reference_key == reference and page.trackLabel == ""
+    assert other not in page.checked
+    page.setReference(other)  # still listed (dimmed): never reference lap of another circuit
+    wait_loaded(page)
+    assert page.reference_key == reference and sorted(shown(page)) == sorted(before) and "not usable" in page.status
 
 
-def test_older_lap_of_other_circuit_never_added(page, tmp_path):  # noqa: F811
+def test_older_lap_of_other_circuit_shown_alone(page, tmp_path):  # noqa: F811
     """Lap without lap info (older app): circuit of its track folder"""
-    before = shown(page)
     other = other_lap(str(tmp_path / "old"), info=False)
     page.add_external([other])
     wait_loaded(page)
-    assert other not in listed(page) and shown(page) == before and "Monza" in page.status
+    assert shown(page) == [other] and listed(page) == {other} and "Monza" in page.status
+
+
+def test_lap_of_other_track_folder_shows_that_track(page):  # noqa: F811
+    """Lap of another track folder of the app opened: that track shown (its laps listed to compare, picker on it),
+    opened lap alone shown, refresh keeps it"""
+    from tinypedal.setting import cfg
+
+    folder = cfg.path.telemetry.rstrip("/")
+    other = other_lap(folder)
+    older = os.path.normpath(os.path.join(folder, "Monza - Hyper", module_recorder.lap_filename(6, 52.0, True, BASE)))
+    rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
+    module_recorder.save_lap(f"{folder}/", "Monza - Hyper", 6, 52.0, rows, max_saved_laps=99,
+                             info={"kind": "lap", "track": "Monza", "combo": "Monza - Hyper", "track_length": 490.0},
+                             timestamp=BASE)
+    page.refresh()
+    wait_loaded(page)
+    page.add_from_library([other])
+    wait_loaded(page)
+    assert page.currentTrack == "Monza - Hyper" and page.trackLabel == ""
+    assert shown(page) == [other] and listed(page) == {other, older} and not page.external
+    assert "Showing Monza" in page.status
+
+
+def test_motec_lap_of_other_circuit_shown_alone(page, tmp_path):  # noqa: F811
+    """MoTeC log of another circuit imported: its laps shown on their own track length, former laps not compared"""
+    from tests.test_motec_import import logger_channels, write_logger_ld
+
+    before = shown(page)
+    log = tmp_path / "Monza run.ld"
+    write_logger_ld(str(log), logger_channels(track=1000.0), venue="Monza")
+    page.import_motec([str(log)], background=False)
+    wait_loaded(page)
+    keys = shown(page)
+    assert keys and not set(keys) & set(before) and not listed(page) & set(before)
+    assert page.data.max_x() == pytest.approx(1000.0, rel=0.02)  # Atlanta laps: 490 m
+    assert "Showing Monza" in page.status and page.trackLabel == "Monza"
+
+
+def test_laps_of_two_other_circuits_first_kept(page, tmp_path):  # noqa: F811
+    """Laps of two other circuits opened together: circuit of first lap (fastest lap given as reference) kept,
+    others refused, never shown together"""
+    monza = other_lap(str(tmp_path / "a"))
+    imola = other_lap(str(tmp_path / "b"), track="Imola", length=700.0)
+    page.add_external([monza, imola])
+    wait_loaded(page)
+    assert shown(page) == [monza] and listed(page) == {monza}
+    assert "Showing Monza" in page.status and "not added: Imola" in page.status
+    fast = other_lap(str(tmp_path / "c"), track="Spa", length=900.0)
+    os.rename(fast, fast := fast.replace("0m50.000s", "0m40.000s"))
+    page.add_from_library([imola, fast])  # fastest lap circuit kept
+    wait_loaded(page)
+    assert shown(page) == [fast] and listed(page) == {fast}
+    assert "Showing Spa" in page.status and "Imola" in page.status
 
 
 def test_lap_of_same_circuit_added(page, tmp_path):  # noqa: F811

@@ -392,6 +392,8 @@ MESSAGE_RULES = (
     (r"^Laps from another circuit, not compared with reference lap: (.+)$",
      r"Tours d'un autre circuit, non comparés au tour de référence : \1"),
     (r"^Laps from another circuit, not added: (.+)$", r"Tours d'un autre circuit, non ajoutés : \1"),
+    (r"^Showing (.+): lap from another circuit$", r"Affichage de \1 : tour d'un autre circuit"),
+    (r"^Showing (.+): laps from another circuit$", r"Affichage de \1 : tours d'un autre circuit"),
     (r"^Lap from another circuit, not usable as reference lap: (.+)$",
      r"Tour d'un autre circuit, inutilisable comme tour de référence : \1"),
     (r"^Importing MoTeC log: (.+)\.\.\.$", r"Import du log MoTeC : \1..."),

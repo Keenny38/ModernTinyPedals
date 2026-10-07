@@ -218,3 +218,28 @@ def test_consistency_job_aligns_imported_laps(ui_env, tmp_path):
     unaligned = mini_sector_job(*args)  # before: imported lap mini-sectors 120 m away
     assert max(abs(a - b) for a, b in zip(unaligned[imported_path], mini["times"][1])) > 0.1
     assert unaligned[recorded_path] == pytest.approx(found[recorded_path])  # recorded lap never shifted
+
+
+def test_imported_lap_of_other_circuit_alone_shown(track, tmp_path):
+    """Imported lap alike by lap info, found on another circuit from its telemetry once loaded: viewer switches to
+    it (map & distance of that lap, laps of shown track no longer listed nor compared), track picked again: its
+    laps back"""
+    from tests.test_lap_viewer import wait_loaded
+
+    backend, _ = track
+    before = sorted(lap.key for lap in backend.data.laps)
+    lap = make_lap(5, OTHER, turn=0.8, scale=1.04)
+    lap.columns["pos_y"] = list(lap.columns["pos_z"])  # map plane of track map
+    other = write_lap(str(tmp_path / "logs"), lap)
+    backend.add_external([other], [other])  # MoTeC import: lap infos alike (no game name), as reference
+    wait_loaded(backend)
+    assert [lap.key for lap in backend.data.laps] == [other] and backend.reference_key == other
+    assert {row["path"] for row in backend.lap_rows()} == {other}
+    backend.build_map()  # track map shown
+    assert [lap.key for _, lap in backend._map_lines] == [other] and backend._map  # map of that lap only
+    assert backend.data.max_x() == pytest.approx(LENGTH * 1.04, rel=0.01)  # its own driven distance
+    assert backend.currentTrack == "" and backend.trackLabel == "Spa"
+    assert "Showing Spa" in backend.status
+    backend.currentTrack = COMBO
+    wait_loaded(backend)
+    assert sorted(lap.key for lap in backend.data.laps) == before and other not in backend.checked

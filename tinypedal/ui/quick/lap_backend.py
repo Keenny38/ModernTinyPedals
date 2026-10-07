@@ -680,6 +680,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._hidden = False  # page in background: lap files recorded meanwhile listed & read once shown
         self._refresh_pending = False  # lap files changed while hidden
         self._chosen_reference = ""  # reference lap picked by user (kept by live mode while on same circuit)
+        # Laps of another circuit opened: track folder shown (empty: added laps only), laps checked & reference lap
+        # once that track is loaded (see switch_circuit)
+        self._switch_to: tuple[str, set[str], str] | None = None
+        # Laps just added (all, shown, reference lap): viewer switches to their circuit if every shown one is found
+        # driven on another circuit from its telemetry once loaded (see drop_other_shapes), switch asked meanwhile
+        self._added_batch: tuple[list[str], list[str], str] | None = None
+        self._pending_switch: tuple[list[str], list[str], str] | None = None
         self._release_timer = QTimer(self)
         self._release_timer.setSingleShot(True)
         self._release_timer.setInterval(lap_viewer.RELEASE_DELAY)
@@ -875,11 +882,22 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     def _track_set(self, track: str):
         if self._infos_track and track == self._infos_track:
             return  # its lap infos being read
+        self._switch_to = None  # track picked: its own laps shown (circuit switch still loading dropped)
         if track != self._track or self._infos_track:  # shown track picked again: pending track dropped
             self.load_track(track)
 
     tracks = Property(list, _tracks_get, notify=tracksChanged)
     currentTrack = Property(str, _track_get, _track_set, notify=tracksChanged)
+
+    @Property(str, notify=tracksChanged)
+    def trackLabel(self) -> str:
+        """Circuit shown without track folder (laps of another circuit opened from a log or another folder, see
+        switch_circuit): its name in track picker, empty if a track folder is shown"""
+        if self._track or not self.external:
+            return ""
+        infos = {entry.file.path: entry.info for entry in self.external}
+        key = self.reference_key if self.reference_key in infos else self.external[0].file.path
+        return ", ".join(self.circuit_names([key], infos))
 
     @Property(int, notify=picturesChanged)
     def pictureVersion(self) -> int:
@@ -1282,7 +1300,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             folder = self.folder
             self.run_job("lap cache", lambda: (prune_cache(folder), purge_trash(folder)), lambda _: None)
         self._tracks = list_tracks(self.folder)
-        track = self._track if self._track in self._tracks else (self._tracks[0] if self._tracks else "")
+        self._switch_to = None
+        # Laps of another circuit shown without track folder (see switch_circuit): kept
+        kept = self._track in self._tracks or (not self._track and bool(self.external))
+        track = self._track if kept else (self._tracks[0] if self._tracks else "")
         self.drop_changed_laps()
         self._marks.clear()
         self.load_track(track)
@@ -1311,21 +1332,21 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if background and len(indexed[3]) > INFO_BACKGROUND:  # hundreds of new lap files (seconds): page not frozen
             self.read_track_infos(track, new_lap, [lap.path for lap in indexed[3]])
             return
+        switch = self._switch_to if self._switch_to is not None and self._switch_to[0] == track else None
+        self._switch_to = None
         changed = track != self._track
         self._track = track
-        self.tracksChanged.emit()
         self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(track, laps, indexed))]
+        if switch is not None:  # laps opened (kept while track laps infos were read in background)
+            self.checked, self.reference_key = set(switch[1]), switch[2]
         adopted = self.adopt_external()
-        if changed:  # analysis of former track laps not carried over (distances & laps of another circuit)
-            self._align_apex = -1.0  # laps aligned on a corner
-            self._compare_key = ""
-            self._session_key = ""
-            self._map_range = (-1.0, -1.0)  # chart markers A & B
-            if self._selected_corner != -1:
-                self._selected_corner = -1
-                self.selectionChanged.emit()
+        self.tracksChanged.emit()
+        if changed or switch is not None:  # analysis of former circuit laps not carried over (distances)
+            self.reset_circuit_state()
         if new_lap is not None:
             self.compare_new_lap(laps, new_lap)
+        elif switch is not None:  # laps of another circuit opened: only them shown (track laps listed)
+            self.checked &= {entry.file.path for entry in self.all_entries()}  # adopted laps: track lap paths
         else:
             self.checked, self.reference_key = self.track_selection(track, laps, adopted)
         self._expanded = []
@@ -1336,6 +1357,17 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.load_laps()
         if self._side_tab == 4:  # session tab shown (page opened on it, track changed): its laps read
             self.start_session_job()
+
+    def reset_circuit_state(self):
+        """Analysis of former circuit laps not carried over: corner alignment, compared lap, session tab, chart
+        markers, selected corner (track or circuit changed)"""
+        self._align_apex = -1.0  # laps aligned on a corner
+        self._compare_key = ""
+        self._session_key = ""
+        self._map_range = (-1.0, -1.0)  # chart markers A & B
+        if self._selected_corner != -1:
+            self._selected_corner = -1
+            self.selectionChanged.emit()
 
     def read_track_infos(self, track: str, new_lap: LapFile | None, paths: list[str]):
         """Lap infos of track read in background, track shown once read (shown track kept meanwhile), unless another
@@ -1673,7 +1705,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self._tracks = tracks
             self.tracksChanged.emit()
         changed, self._new_lap_tracks = self._new_lap_tracks, set()
-        if not self._track and tracks:  # first lap ever recorded
+        if not self._track and tracks and not self.external:  # first lap ever recorded (laps of another circuit
+            # shown without track folder kept, see switch_circuit: live mode shows track of a new lap below)
             self.load_track(tracks[0])
             return
         if self._live:
@@ -2428,41 +2461,99 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                      checked: list[str] | None = None):
         """Show laps from other folders (checked laps only if given, else every lap given, listed before or not),
         fastest of reference_from laps set as reference; laps of another driver's folder marked foreign, laps of shown
-        track listed once (as track laps)"""
+        track listed once (as track laps)
+
+        Laps of one circuit only are ever shown: laps of shown circuit kept, others refused (told in status line).
+        Laps given all driven on another circuit: viewer switches to it (see switch_circuit), laps of the circuit of
+        the fastest reference_from lap (else first lap) kept.
+        """
         listed = {path_key(entry.file.path): entry.file.path for entry in self.all_entries()}
         main = self.main_circuit() if self.entries or self.reference_key in self.checked else None
-        added = []
-        rejected: dict[str, dict] = {}  # laps of another circuit than main lap: never listed nor compared
+        new: dict[str, dict] = {}  # lap infos of laps not listed yet
         for lap_path in lap_paths:
-            key = path_key(lap_path)
-            if key in listed:
-                continue
             path = os.path.normpath(lap_path)
+            if path_key(lap_path) not in listed and path not in new:
+                new[path] = self.lap_info(path)
+        kept = [path for path in new if main is None or not self.other_circuit(main, new[path], path)]
+        listed_given = any(path_key(path) in listed for path in lap_paths)  # laps of shown circuit given again
+        switching = main is not None and bool(new) and not kept and not listed_given
+        if new and (switching or main is None):  # laps of one circuit kept: circuit of lead lap
+            lead = self.lead_lap(list(new), reference_from, checked)
+            kept = [path for path in new if not self.other_circuit((new[lead], lead), new[path], path)]
+        rejected = {path: info for path, info in new.items() if path not in kept}
+        added = []
+        for path in kept:
             name = os.path.basename(path)
-            info = self.lap_info(path)
-            if main is not None and self.other_circuit(main, info, path):
-                rejected[path] = info
-                continue
             self.external.append(LapEntry(
-                LapFile(name, path, is_valid_name(name), lap_time_of(name)), info, external=True,
+                LapFile(name, path, is_valid_name(name), lap_time_of(name)), new[path], external=True,
                 foreign=is_foreign(path)))
-            listed[key] = path
+            listed[path_key(path)] = path
             added.append(path)
+        refused = ""
         if rejected:
-            self.set_status(trm(f"Laps from another circuit, not added: "
-                                f"{', '.join(self.circuit_names(list(rejected), rejected))}"))
+            refused = trm(f"Laps from another circuit, not added: "
+                          f"{', '.join(self.circuit_names(list(rejected), rejected))}")
+            self.set_status(refused)
             lap_paths = [path for path in lap_paths if os.path.normpath(path) not in rejected]
             reference_from = [path for path in reference_from or () if os.path.normpath(path) not in rejected]
             checked = None if checked is None else [path for path in checked if os.path.normpath(path) not in rejected]
         shown = [listed.get(path_key(path), "") for path in (lap_paths if checked is None else checked)]
-        shown = [path for path in shown if path and path not in self.checked]
-        self.checked.update(shown)
+        shown = [path for path in shown if path and (switching or path not in self.checked)]
+        reference = ""
         if reference_from:  # compare own laps with fastest imported lap
             fastest = min(reference_from, key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
-            self.reference_key = self._chosen_reference = listed.get(path_key(fastest), os.path.normpath(fastest))
+            reference = listed.get(path_key(fastest), os.path.normpath(fastest))
+        if switching:
+            self.switch_circuit(added, shown, reference or (shown or added)[0], refused)
+            return
+        self.checked.update(shown)
+        if reference:
+            self.reference_key = self._chosen_reference = reference
+        if main is not None and added:  # imported laps checked against shown circuit once loaded
+            self._added_batch = (added, [path for path in added if path in self.checked],
+                                 reference if reference in added else "")
         if added or shown or reference_from:
             self.fill_list()
             self.load_laps()
+
+    @staticmethod
+    def lead_lap(paths: list[str], reference_from: list[str] | None, checked: list[str] | None) -> str:
+        """Lap whose circuit is kept among added laps of several circuits: fastest reference_from lap, else first
+        checked lap, else first lap"""
+        fastest = sorted((os.path.normpath(path) for path in reference_from or ()
+                          if os.path.normpath(path) in paths),
+                         key=lambda path: lap_time_of(os.path.basename(path)) or float("inf"))
+        first = [os.path.normpath(path) for path in checked or () if os.path.normpath(path) in paths]
+        return (fastest or first or paths)[0]
+
+    def track_folder_of(self, path: str) -> str:
+        """Track folder of telemetry folder lap is in ("<track> - <class>"), empty if none (imported log, other
+        folder)"""
+        folder = os.path.dirname(path)
+        name = os.path.basename(folder)
+        if not name or name.startswith(".") or path_key(os.path.dirname(folder)) != path_key(self.folder):
+            return ""
+        if name not in self._tracks and os.path.isdir(folder):  # recorded since list was read
+            self._tracks = list_tracks(self.folder)
+        return name if name in self._tracks else ""
+
+    def switch_circuit(self, paths: list[str], shown: list[str], reference: str, refused: str = ""):
+        """Laps of another circuit opened (file, library, MoTeC log, folder): viewer shows that circuit instead,
+        laps of former circuit no longer listed nor compared. Track folder of reference lap shown if it is one (its
+        laps listed, notes, pins, track limits, official circuit), else opened laps alone; track picker goes back."""
+        keep = set(paths)
+        self.external = [entry for entry in self.external if entry.file.path in keep]
+        infos = {entry.file.path: entry.info for entry in self.external}
+        self.checked = (set(shown) | {reference}) & keep if reference else set(shown) & keep
+        self.reference_key = self._chosen_reference = reference
+        self._added_batch = self._pending_switch = None
+        track = self.track_folder_of(reference)
+        self._switch_to = (track, set(self.checked), reference)
+        plural = "s" if len(paths) > 1 else ""
+        message = trm(f"Showing {', '.join(self.circuit_names([reference], infos))}: "
+                      f"lap{plural} from another circuit")
+        self.set_status(f"{message} · {refused}" if refused else message)
+        self.load_track(track)
 
     @Slot()
     def openLibrary(self):
@@ -2615,6 +2706,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             return
         entries = {entry.file.path: entry for entry in self.all_entries()}
         loaded = self.drop_other_shapes([(path, self.read_lap(path)) for path in ordered])
+        if self._pending_switch is not None:  # laps just added all driven on another circuit: shown instead
+            switch, self._pending_switch = self._pending_switch, None
+            self.switch_circuit(*switch)
+            return
         paths = [path for path in paths if path in self.checked]
         self._failed = {path for path, lap_data in loaded if lap_data is None}
         if self.reference_key in self._failed:  # first lap read is reference (star, compared laps, exports, saved)
@@ -2657,7 +2752,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if entry is not None:
             return entry.info, entry.file.path
         infos = {entry.file.path: entry.info for entry in self.external}
-        return infos.get(self.reference_key, {}), self.reference_key
+        key = self.reference_key
+        if self._added_batch is not None and key in self._added_batch[0]:  # laps just added not checked yet:
+            # shown lap added before is main lap
+            key = next((entry.file.path for entry in self.external
+                        if entry.file.path in self.checked and entry.file.path not in self._added_batch[0]), key)
+        return infos.get(key, {}), key
 
     def other_circuit(self, main: tuple[dict, str], info: dict, path: str) -> bool:
         """Whether lap (lap info & path) was driven on another circuit than main lap: game track name & length (see
@@ -2679,7 +2779,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         (driven line, else speed trace, see same_imported_circuit): added laps no longer listed, laps of track
         unchecked (told in status line like laps of another circuit)"""
         main_path = self.main_circuit()[1]
-        main = dict(loaded).get(main_path) or self._lap_cache.get(main_path)
+        batch, self._added_batch = self._added_batch, None
+        main = dict(loaded).get(main_path) or self.read_lap(main_path)
         if main is None:
             return loaded
         checks = {key: value for key, value in self._shape_checks.items() if key[0] == main_path}
@@ -2695,6 +2796,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._shape_checks = checks
         if not others:
             return loaded
+        if batch is not None:  # every lap just added & shown driven on another circuit: viewer switches to it
+            opened = {path for path, lap_data in loaded if path in batch[1] and lap_data is not None}
+            if opened and opened <= set(others):
+                lead = batch[2] or next(path for path in batch[1] if path in opened)
+                self._pending_switch = (batch[0], batch[1], lead)
+                return loaded
         infos = {entry.file.path: entry.info for entry in self.all_entries()}
         names = ", ".join(self.circuit_names(others, infos))
         self.checked.difference_update(others)

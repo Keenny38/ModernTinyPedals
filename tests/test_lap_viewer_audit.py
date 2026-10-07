@@ -282,7 +282,7 @@ def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
         flush_deleted()
 
 
-# --- 8. Laps of another circuit
+# --- 8. Laps of another circuit (opened alone: viewer switches to it, never compared with laps of shown track)
 def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
@@ -312,11 +312,16 @@ def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
         wait_loaded(page)
         atlanta = [lap.key for lap in backend.data.laps]
         assert len(atlanta) == 2
-        backend.add_external([path])  # lap of another circuit: never listed, drawn nor compared
+        path = os.path.normpath(path)
+        backend.add_external([path])  # lap of another circuit: shown alone, laps of Atlanta no longer listed
         wait_loaded(page)
-        assert "another circuit" in backend.status and "not added" in backend.status and "Monza" in backend.status
-        assert [lap.key for lap in backend.data.laps] == atlanta and path not in backend.checked
-        assert not any(row["path"] == path for row in backend.lap_rows())
+        assert backend.status == "Showing Monza: lap from another circuit"
+        assert [lap.key for lap in backend.data.laps] == [path] and backend.reference_key == path
+        assert not any(row["path"] in atlanta for row in backend.lap_rows())
+        assert backend.currentTrack == "" and backend.trackLabel == "Monza"
+        backend.currentTrack = TRACK  # back to Atlanta: its laps, Monza lap never compared with them
+        wait_loaded(page)
+        assert sorted(lap.key for lap in backend.data.laps) == sorted(atlanta) and path not in backend.checked
         backend.setReference(path)  # never reference lap of laps of current track (other circuit telemetry)
         wait_loaded(page)
         assert "not usable as reference" in backend.status

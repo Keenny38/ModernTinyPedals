@@ -189,7 +189,8 @@ TpPage {
                     Icon {
                         visible: !trackLogo.shown; glyph:""; color: theme.accent; Layout.leftMargin: theme.em * 0.6 }  // map pin
                     Text {
-                        text: trackBox.displayText || i18n.tr("No recorded lap")
+                        // circuit of laps opened without track folder (another circuit, imported log)
+                        text: trackBox.displayText || backend.trackLabel || i18n.tr("No recorded lap")
                         color: theme.text
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight

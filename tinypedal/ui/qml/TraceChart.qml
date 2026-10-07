@@ -180,7 +180,7 @@ FocusScope {
         if (animate) { if (!viewEasing.running) viewEasing.start() }
         else { viewEasing.stop(); viewRange = [targetStart, targetEnd] }
     }
-    Component.onCompleted: { viewRange = [targetStart, targetEnd]; labelScale = viewScale; markerTrack = backend.currentTrack }
+    Component.onCompleted: { viewRange = [targetStart, targetEnd]; labelScale = viewScale; markerTrack = backend.currentTrack + "|" + backend.trackLabel }
 
     function setView(start, end, animated) {
         var span = end - start
@@ -472,8 +472,9 @@ FocusScope {
         function onViewRestored(start, end) { chart.setView(start, end, false) }
         function onPageHidden() { chart.playing = false }  // no cursor update every frame while page is hidden
         function onTracksChanged() {  // markers A & B are distances of one circuit: cleared for another track
-            if (backend.currentTrack === chart.markerTrack) return
-            chart.markerTrack = backend.currentTrack
+            var circuit = backend.currentTrack + "|" + backend.trackLabel  // label: circuit shown without track folder
+            if (circuit === chart.markerTrack) return
+            chart.markerTrack = circuit
             chart.clearMarkers()
         }
         function onPinChanged() { if (!chart.hasCursor || chart.cursorSource === "pin") chart.restoreCursor() }
