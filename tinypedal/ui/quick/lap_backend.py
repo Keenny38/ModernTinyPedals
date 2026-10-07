@@ -77,7 +77,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_boun
     session_values,
     track_limits_job,
 )
-from ...userfile.lap_library import is_foreign
+from ...userfile.lap_library import is_foreign, track_of_folder
 from ...userfile.lap_marks import load_marks, remove_mark, set_mark
 from ...userfile.telemetry_lap import (
     LapData,
@@ -479,6 +479,16 @@ def path_key(path: str) -> str:
     """Lap file path compared with others: listed laps use mixed slashes & relative telemetry folder, picked files
     absolute paths"""
     return os.path.normcase(os.path.abspath(path))
+
+
+def circuit_name(info: dict, path: str) -> str:
+    """Track name telling circuits apart: game track name of lap recorded by app, track of track folder
+    ("<track> - <class>") of lap without lap info, empty if unknown (imported log: venue name, not game name)"""
+    if "combo" in info:
+        return str(info.get("track", ""))
+    if not (info.get("track") or info.get("track_length")):
+        return track_of_folder(path)
+    return ""
 
 
 class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools, LapConditions, QObject):
@@ -2020,14 +2030,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         """Lap row change: lap driven on another circuit than reference lap dimmed with a hint (unchecked & never
         compared with it, see drop_other_circuits)"""
         infos = {entry.file.path: entry.info for entry in self.all_entries()}
-        reference = LapData("", {}, infos[self.reference_key]) if self.reference_key in infos else None
+        main = self.main_circuit() if self.entries or self.reference_key in infos else None
         text = tr("Another circuit than reference lap: not compared")
 
         def hint(row: dict) -> dict:
             if row["kind"] != "lap":
                 return {}
-            other = (reference is not None and row["path"] != self.reference_key
-                     and not same_circuit(reference, LapData("", {}, infos.get(row["path"], {}))))
+            other = main is not None and self.other_circuit(main, infos.get(row["path"], {}), row["path"])
             return {"hint": text if other else ""}
 
         return hint
@@ -2183,6 +2192,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
     @Slot(str)
     def setReference(self, path: str):
         if not path:  # session header
+            return
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        if self.entries and self.other_circuit(self.main_circuit(), infos.get(path, {}), path):
+            self.set_status(trm(f"Lap from another circuit, not usable as reference lap: "
+                                f"{', '.join(self.circuit_names([path], infos))}"))
             return
         self.reference_key = self._chosen_reference = path
         self.checked.add(path)
@@ -2412,18 +2426,30 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         fastest of reference_from laps set as reference; laps of another driver's folder marked foreign, laps of shown
         track listed once (as track laps)"""
         listed = {path_key(entry.file.path): entry.file.path for entry in self.all_entries()}
+        main = self.main_circuit() if self.entries or self.reference_key in self.checked else None
         added = []
+        rejected: dict[str, dict] = {}  # laps of another circuit than main lap: never listed nor compared
         for lap_path in lap_paths:
             key = path_key(lap_path)
             if key in listed:
                 continue
             path = os.path.normpath(lap_path)
             name = os.path.basename(path)
+            info = self.lap_info(path)
+            if main is not None and self.other_circuit(main, info, path):
+                rejected[path] = info
+                continue
             self.external.append(LapEntry(
-                LapFile(name, path, is_valid_name(name), lap_time_of(name)), self.lap_info(path), external=True,
+                LapFile(name, path, is_valid_name(name), lap_time_of(name)), info, external=True,
                 foreign=is_foreign(path)))
             listed[key] = path
             added.append(path)
+        if rejected:
+            self.set_status(trm(f"Laps from another circuit, not added: "
+                                f"{', '.join(self.circuit_names(list(rejected), rejected))}"))
+            lap_paths = [path for path in lap_paths if os.path.normpath(path) not in rejected]
+            reference_from = [path for path in reference_from or () if os.path.normpath(path) not in rejected]
+            checked = None if checked is None else [path for path in checked if os.path.normpath(path) not in rejected]
         shown = [listed.get(path_key(path), "") for path in (lap_paths if checked is None else checked)]
         shown = [path for path in shown if path and path not in self.checked]
         self.checked.update(shown)
@@ -2568,10 +2594,12 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
 
     def load_laps(self):
         paths = self.ordered_checked()
+        track_paths = {entry.file.path for entry in self.entries}
         if paths and self.reference_key not in paths:  # lap of current track first (added laps listed on top)
-            track_paths = {entry.file.path for entry in self.entries}
             self.reference_key = next((path for path in paths if path in track_paths), paths[0])
         paths = self.drop_other_circuits(paths)
+        if paths and self.reference_key not in paths:  # reference lap of another circuit than shown track
+            self.reference_key = next((path for path in paths if path in track_paths), paths[0])
         ordered = sorted(paths, key=lambda path: path != self.reference_key)  # reference first
         for path in ordered:  # unreadable lap checked again: read again (file may be readable now, antivirus lock)
             if path not in self._failed and path in self._lap_cache and self._lap_cache[path] is None:
@@ -2604,17 +2632,45 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self._restore_view = None
 
     def drop_other_circuits(self, paths: list[str]) -> list[str]:
-        """Checked laps driven on another circuit than reference lap unchecked (told in status line): never drawn
+        """Checked laps driven on another circuit than main lap unchecked (told in status line): never drawn
         nor compared with it (added lap of another track, laps kept checked when track changes)"""
         infos = {entry.file.path: entry.info for entry in self.all_entries()}
-        reference = LapData("", {}, infos.get(self.reference_key, {}))
-        others = [path for path in paths if not same_circuit(reference, LapData("", {}, infos.get(path, {})))]
+        main = self.main_circuit()
+        others = [path for path in paths if self.other_circuit(main, infos.get(path, {}), path)]
         if not others:
             return paths
         self.checked.difference_update(others)
-        names = sorted({str(infos[path].get("track") or os.path.basename(os.path.dirname(path))) for path in others})
-        self.set_status(trm(f"Laps from another circuit, not compared with reference lap: {', '.join(names)}"))
+        self.set_status(trm(f"Laps from another circuit, not compared with reference lap: "
+                            f"{', '.join(self.circuit_names(others, infos))}"))
         return [path for path in paths if path not in others]
+
+    def main_circuit(self) -> tuple[dict, str]:
+        """Lap info & path of main lap, every shown lap must be driven on its circuit: reference lap if a lap of shown
+        track, else newest lap of track, else reference lap (only added laps)"""
+        entries = {entry.file.path: entry for entry in self.entries}
+        entry = entries.get(self.reference_key) or (self.entries[0] if self.entries else None)
+        if entry is not None:
+            return entry.info, entry.file.path
+        infos = {entry.file.path: entry.info for entry in self.external}
+        return infos.get(self.reference_key, {}), self.reference_key
+
+    @staticmethod
+    def other_circuit(main: tuple[dict, str], info: dict, path: str) -> bool:
+        """Whether lap (lap info & path) was driven on another circuit than main lap: game track name & length (see
+        same_circuit), else track of track folder ("<track> - <class>") of laps without lap info"""
+        main_info, main_path = main
+        if path == main_path:
+            return False
+        if not same_circuit(LapData("", {}, main_info), LapData("", {}, info)):
+            return True
+        names = [circuit_name(main_info, main_path), circuit_name(info, path)]
+        return all(names) and names[0].casefold() != names[1].casefold()
+
+    @staticmethod
+    def circuit_names(paths: list[str], infos: dict[str, dict]) -> list[str]:
+        """Track names of laps (lap info, else track folder), each once"""
+        return sorted({str(infos.get(path, {}).get("track") or track_of_folder(path)
+                           or os.path.basename(os.path.dirname(path))) for path in paths})
 
     @staticmethod
     def laps_warning(laps: list[PlotLap]) -> str:

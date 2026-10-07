@@ -208,9 +208,16 @@ def test_lap_infos_index(sessions, monkeypatch):
 
 
 def test_other_circuit_lap_hint(page, sessions, tmp_path):
-    """J64: added lap of another circuit than reference lap dimmed with a lasting hint (unchecked, not compared)"""
+    """J64: added lap of another circuit than reference lap dimmed with a lasting hint (unchecked, not compared):
+    added on its own track, kept listed once another track is shown"""
+    save(2, 51.0, BASE, BASE, combo="Other - Hyper", track="Other")
     other = save(1, 50.0, BASE, BASE, folder=str(tmp_path / "other"), combo="Other - Hyper", track="Other")
+    page.refresh()
+    page.load_track("Other - Hyper", background=False)
+    wait_loaded(page)
     page.add_external([other])
+    wait_loaded(page)
+    page.load_track(TRACK, background=False)
     wait_loaded(page)
     rows = {row["path"]: row for row in page.lap_rows()}
     other = os.path.normpath(other)

@@ -312,23 +312,14 @@ def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
         wait_loaded(page)
         atlanta = [lap.key for lap in backend.data.laps]
         assert len(atlanta) == 2
-        backend.add_external([path])  # listed, never drawn nor compared with laps of current track
+        backend.add_external([path])  # lap of another circuit: never listed, drawn nor compared
         wait_loaded(page)
-        assert "another circuit" in backend.status and "Monza" in backend.status
+        assert "another circuit" in backend.status and "not added" in backend.status and "Monza" in backend.status
         assert [lap.key for lap in backend.data.laps] == atlanta and path not in backend.checked
-        assert any(row["path"] == path and not row["checked"] for row in backend.lap_rows())
-        backend.setLapChecked(path, True)
+        assert not any(row["path"] == path for row in backend.lap_rows())
+        backend.setReference(path)  # never reference lap of laps of current track (other circuit telemetry)
         wait_loaded(page)
-        assert [lap.key for lap in backend.data.laps] == atlanta and path not in backend.checked
-        backend.setReference(path)  # lap of another circuit as reference: laps of current track left out
-        wait_loaded(page)
-        assert [lap.key for lap in backend.data.laps] == [path] and backend.checked == {path}
-        assert "Atlanta" in backend.status and not backend.warning
-        backend.setLapChecked(atlanta[0], True)
-        wait_loaded(page)
-        assert [lap.key for lap in backend.data.laps] == [path]
-        backend.load_track(TRACK)  # track opened again: its own laps compared, added lap of another circuit dropped
-        wait_loaded(page)
+        assert "not usable as reference" in backend.status
         assert sorted(lap.key for lap in backend.data.laps) == sorted(atlanta) and path not in backend.checked
     finally:
         page.close()

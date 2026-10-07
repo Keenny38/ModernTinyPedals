@@ -152,7 +152,9 @@ def load_trace(filepath: str, lap: LapFile, step: float) -> ReferenceTrace:
     if not length > 0:
         raise ValueError("no lap distance")
     step = max(step, MIN_STEP, length / MAX_SAMPLES)
-    grid = [index * step for index in range(max(math.ceil(length / step), 2))]
+    count = max(int(length // step), 2)
+    step = length / count  # whole steps over lap: values wrapped around lap (next lap) stay at their distance
+    grid = [index * step for index in range(count)]
     channels: dict[str, array] = {}
     for name in CHANNELS:
         if name not in data.columns:

@@ -390,6 +390,9 @@ MESSAGE_RULES = (
     # Audit fixes (package E)
     (r"^Laps from another circuit, not compared with reference lap: (.+)$",
      r"Tours d'un autre circuit, non comparés au tour de référence : \1"),
+    (r"^Laps from another circuit, not added: (.+)$", r"Tours d'un autre circuit, non ajoutés : \1"),
+    (r"^Lap from another circuit, not usable as reference lap: (.+)$",
+     r"Tour d'un autre circuit, inutilisable comme tour de référence : \1"),
     (r"^Importing MoTeC log: (.+)\.\.\.$", r"Import du log MoTeC : \1..."),
     (r"^Brakes ([0-9]+ ft) earlier$", r"Freine \1 plus tôt"),
     (r"^Brakes ([0-9]+ ft) later, runs wide$", r"Freine \1 plus tard, élargit"),

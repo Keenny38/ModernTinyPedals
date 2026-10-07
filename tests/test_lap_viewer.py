@@ -304,14 +304,15 @@ def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, mo
     rows = [(i * 0.1, i * 0.1, i * 10.0, 100.0) + (0,) * (len(module_recorder.CSV_HEADER) - 4) for i in range(50)]
     module_recorder.save_lap(f"{folder}/", "Track - GT3", 1, 90.0, rows, 10, info=info)
     other = tmp_path / "other"
-    module_recorder.save_lap(f"{other}/", "Other - GT3", 1, 60.0, rows, 10, info={"sectors": [20.0, 20.0, 20.0]})
-    other_file = next((other / "Other - GT3").glob("*.csv"))
+    # Same track from another folder (teammate): a lap of another track is never added (other circuit)
+    module_recorder.save_lap(f"{other}/", "Track - GT3", 1, 60.0, rows, 10, info={"sectors": [20.0, 20.0, 20.0]})
+    other_file = next((other / "Track - GT3").glob("*.csv"))
     monkeypatch.setattr(lap_export.QFileDialog, "getOpenFileNames", lambda *args: ([str(other_file)], ""))
     backend = open_viewer().backend
     backend.addFiles()
     wait_loaded(backend)
     assert [row["kind"] for row in backend.lap_model.rows].count("session") == 2
-    assert "1:30.000" in backend.bestText  # other track sectors left out
+    assert "1:30.000" in backend.bestText  # added lap sectors left out
     assert len(backend.legend) == 2  # added lap shown
 
 
