@@ -206,7 +206,7 @@ def test_rf2_replay_reads_every_zone(tmp_path):
         writer.write_rest(0.0, {"timeScale": 4, "forecastRace": [[0.0, 2, 21.5, 0.3]]})
         writer.write(0.1, frame)
     replay = ReplayFile(filename)
-    assert replay.source == "rFactor 2" and len(replay) == 2 and len(replay.rest_data) == 1
+    assert replay.source == "rFactor 2" and len(replay) == 2 and len(replay.rest_times) == 1
     player = ReplayPlayer(replay)
     info.setReplay(player, rest)
     for zone in info._sync.dataset.zones():
@@ -321,7 +321,7 @@ def test_export_section(tmp_path):
     part = ReplayFile(section)
     assert len(part) == 21 and part.times[0] == 0.0
     assert [part.frame(index) for index in range(21)] == frames[110:131]  # first frame re-keyed
-    assert part.rest_data[0] == {"timeScale": 100}  # snapshot in effect at section start
+    assert part.rest(0) == {"timeScale": 100}  # snapshot in effect at section start
     assert part.markers[0].time == pytest.approx(1.0)
     assert part.header["trimmed_from"] == "full.tpreplay"
     part.close()

@@ -101,29 +101,40 @@ class AutoReplay:
     """Start recording when driving starts, stop after a while outside driving
 
     A recording started from replay window is left alone; one stopped from replay window
-    is not restarted until next driving.
+    is not restarted until next driving. One stopped by an error (disk full, drive lost)
+    is restarted after retry_delay while driving.
     """
 
-    def __init__(self, keep: int, stop_delay: float = 10.0):
+    def __init__(self, keep: int, stop_delay: float = 10.0, retry_delay: float = 30.0):
         self.keep = max(keep, 1)
         self.stop_delay = stop_delay
+        self.retry_delay = retry_delay
         self.started = False  # recording started by this
         self.user_stopped = False
         self.inactive_since: float | None = None
+        self.retry_at: float | None = None  # restart time after recording error
 
     def update(self, active: bool, now: float) -> None:
         """Update with driving state"""
         if replay.active or not api_supported():
             return
-        if self.started and not replay.recording:  # stopped from replay window
+        if self.started and not replay.recording:
             self.started = False
-            self.user_stopped = True
+            if replay.recording_error:  # stopped by error: retried later
+                self.retry_at = now + self.retry_delay
+                logger.warning(
+                    "RECORDER: automatic replay recording stopped by error, retry in %ss", self.retry_delay)
+            else:  # stopped from replay window
+                self.user_stopped = True
         if active:
             self.inactive_since = None
+            if self.retry_at is not None and now < self.retry_at:
+                return
             if not replay.recording and not self.user_stopped:
                 filename = start_api_recording(auto=True)
                 if filename:
                     self.started = True
+                    self.retry_at = None
                     logger.info("RECORDER: automatic replay recording %s", os.path.basename(filename))
                 elif not replay.recording:  # failed: not retried every update until next driving
                     self.user_stopped = True

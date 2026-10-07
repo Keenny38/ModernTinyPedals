@@ -438,7 +438,9 @@ class ReplayView(BaseDialog):
             )
         else:
             self.button_record.setText(tr("Start Recording"))
-            if not replay.recording_file:
+            if replay.recording_error:
+                self.label_record.setText(trm(f"Recording stopped: {replay.recording_error}"))
+            elif not replay.recording_file:
                 self.label_record.setText("")
         loading = self.loader.busy
         self.button_record.setEnabled(not replay.active and not loading)
@@ -547,14 +549,13 @@ class ReplayView(BaseDialog):
         """Load replay file in background, then switch API to it
 
         Replay being played goes on while loading, opening another file meanwhile replaces this one.
+        Recording goes on while loading too, stopped only once file is loaded (kept on error or cancel).
 
         Args:
             on_loaded: called once replay is loaded & played (not on error or if replaced).
         """
         if not self.check_lmu_api():
             return
-        if replay.recording:
-            replay.stop_recording()
         self._on_loaded = on_loaded
         self.loader.start(filename, api.name, api.replay_layout())
         self.refresh()
@@ -574,7 +575,7 @@ class ReplayView(BaseDialog):
             self.refresh()
             QMessageBox.warning(self, tr("Error"), message)
             return
-        if replay.recording:  # started meanwhile (recorder module)
+        if replay.recording:  # recording kept while loading, or started meanwhile (recorder module)
             replay.stop_recording()
         replay.activate(replay_file)
         restart_api()

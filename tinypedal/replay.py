@@ -27,7 +27,9 @@ File format (.tpreplay):
         source API, zone layout ([name, structure size], ...), info.
     frames: struct FRAME_HEADER (elapsed seconds, frame type, payload size, payload CRC32) + payload
     frame type 0 or 1 (keyframe): zlib of frame XOR previous frame, or of full frame (keyframe).
-    frame type 2: zlib of json Rest API data snapshot (weather forecast, damage...), written when changed.
+    frame type 2: zlib of json Rest API data snapshot (weather forecast, damage...), written when changed:
+        full snapshot every REST_KEY_INTERVAL snapshots, otherwise only changed top-level fields
+        with REST_DELTA key set (older files: full snapshots only).
     frame type 3: json marker {"kind": "lap" or "incident"..., "text": str}.
     frame type 4: json summary {"duration", "frames"}, written when recording ends,
         followed by trailer struct TRAILER (summary frame offset, b"TPIX").
@@ -56,6 +58,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import suppress
 from typing import Any, BinaryIO, NamedTuple
 
+from . import app_signal
 from .const_api import API_LMU_NAME, API_LMULEGACY_NAME, API_RF2_NAME
 
 logger = logging.getLogger(__name__)
@@ -73,6 +76,8 @@ REST_FRAME = 2  # frame type of Rest API data snapshot
 MARKER_FRAME = 3  # frame type of marker (lap, incident)
 SUMMARY_FRAME = 4  # frame type of summary, last frame of complete recording
 REST_INTERVAL = 1.0  # seconds between Rest API data checks
+REST_KEY_INTERVAL = 60  # Rest API snapshots between full snapshots, others are changed fields only
+REST_DELTA = "_delta"  # key of Rest API snapshot holding changed fields only
 DEFAULT_RATE = 30  # recorded frames per second
 MAX_GAP = 1.0  # seconds, longer gaps between recorded frames (inactive, paused) are removed
 SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
@@ -185,7 +190,8 @@ class ReplayWriter:
         self._file = file
         self._frame_size = frame_size
         self._last = b""
-        self._last_rest = b""
+        self._rest_fields: dict[str, str] = {}  # json of each field of last written Rest API snapshot
+        self._rest_count = 0
         self._count = 0
         self._elapsed = 0.0
         header = {"frame_size": frame_size, "rate": rate, "created": time.time(), **(header_extra or {})}
@@ -209,12 +215,24 @@ class ReplayWriter:
         self._elapsed = elapsed
 
     def write_rest(self, elapsed: float, data: dict) -> bool:
-        """Write Rest API data snapshot if changed since last one, returns True if written"""
-        encoded = json.dumps(data).encode("utf-8")
-        if encoded == self._last_rest:
+        """Write Rest API data snapshot if changed since last one, returns True if written
+
+        Only changed fields are written, with a full snapshot every REST_KEY_INTERVAL snapshots
+        (or when a field is gone), see ReplayFile.rest.
+        """
+        fields = {str(name): json.dumps(value) for name, value in data.items()}
+        if fields == self._rest_fields:
             return False
-        self._last_rest = encoded
-        self._write(elapsed, REST_FRAME, zlib.compress(encoded, 1))
+        if self._rest_count % REST_KEY_INTERVAL == 0 or not self._rest_fields.keys() <= fields.keys():
+            names = list(fields)
+            prefix = "{"
+        else:
+            names = [name for name, value in fields.items() if self._rest_fields.get(name) != value]
+            prefix = "{" + json.dumps(REST_DELTA) + ": 1, "
+        encoded = prefix + ", ".join(f"{json.dumps(name)}: {fields[name]}" for name in names) + "}"
+        self._rest_fields = fields
+        self._rest_count += 1
+        self._write(elapsed, REST_FRAME, zlib.compress(encoded.encode("utf-8"), 1))
         return True
 
     def write_marker(self, elapsed: float, kind: str, text: str = "") -> None:
@@ -415,6 +433,9 @@ class ReplayFile:
         self._frame = bytes(self.frame_size)  # zero frame until first good frame decoded
         self._broken = True  # previous frame unavailable: wait for keyframe
         self._corrupt: set[int] = set()
+        self._rest_lock = threading.Lock()  # Rest API snapshot cache
+        self._rest_cache: tuple[int, dict] = (-1, {})  # last decoded snapshot (index, data)
+        self._rest_corrupt: set[int] = set()
 
     def _scan(self, cancel: threading.Event | None, progress: Callable[[int, int], None] | None):
         file = self._file
@@ -440,8 +461,11 @@ class ReplayFile:
         self._offsets = array("q")
         self._sizes = array("q")
         self._crcs = array("I")  # payload CRC of each frame (format 2)
-        self.rest_times: list[float] = []
-        self.rest_data: list[dict] = []
+        # Rest API snapshots are decoded on demand (a long recording has thousands of large snapshots)
+        self.rest_times = array("d")
+        self._rest_offsets = array("q")
+        self._rest_sizes = array("q")
+        self._rest_crcs = array("I")
         self.markers: list[Marker] = []
         self.summary: dict = {}
         self.damaged = False  # file ends with damaged data (power loss, disk error)
@@ -485,6 +509,13 @@ class ReplayFile:
                 if has_crc:
                     self._crcs.append(fields[3])
                 file.seek(size, os.SEEK_CUR)
+            elif frame_type == REST_FRAME:  # checked & decoded on demand, see rest
+                self.rest_times.append(elapsed)
+                self._rest_offsets.append(position)
+                self._rest_sizes.append(size)
+                if has_crc:
+                    self._rest_crcs.append(fields[3])
+                file.seek(size, os.SEEK_CUR)
             else:
                 payload = file.read(size)
                 if has_crc and zlib.crc32(payload) != fields[3]:
@@ -503,12 +534,7 @@ class ReplayFile:
 
     def _read_extra(self, elapsed: float, frame_type: int, payload: bytes):
         try:
-            if frame_type == REST_FRAME:
-                data = json.loads(zlib.decompress(payload))
-                if isinstance(data, dict):
-                    self.rest_times.append(elapsed)
-                    self.rest_data.append(data)
-            elif frame_type == MARKER_FRAME:
+            if frame_type == MARKER_FRAME:
                 data = json.loads(payload)
                 if isinstance(data, dict):
                     self.markers.append(Marker(elapsed, str(data.get("kind", "")), str(data.get("text", ""))))
@@ -553,6 +579,71 @@ class ReplayFile:
     def rest_at(self, elapsed: float) -> int:
         """Index of last Rest API snapshot at elapsed time, -1 if none"""
         return bisect_right(self.rest_times, elapsed) - 1
+
+    def _rest_frame(self, index: int) -> dict | None:
+        """Decoded Rest API frame (full snapshot or changed fields), None if damaged"""
+        with self._lock:
+            self._file.seek(self._rest_offsets[index])
+            payload = self._file.read(self._rest_sizes[index])
+        data = None
+        if not self._rest_crcs or zlib.crc32(payload) == self._rest_crcs[index]:
+            with suppress(zlib.error, ValueError):
+                data = json.loads(zlib.decompress(payload))
+        if not isinstance(data, dict):
+            if index not in self._rest_corrupt:
+                self._rest_corrupt.add(index)
+                logger.warning("replay: %s: damaged data frame skipped", os.path.basename(self.filename))
+            return None
+        return data
+
+    def _rest_state(self, index: int, base_index: int = -1, base: dict | None = None) -> dict:
+        """Rest API snapshot at index, from frames after base snapshot (at base_index) or last full snapshot"""
+        chain = []
+        position = index
+        while position > base_index:
+            data = self._rest_frame(position)
+            if data is not None:
+                chain.append(data)
+                if REST_DELTA not in data:
+                    break  # full snapshot
+            position -= 1
+        state = dict(base) if position == base_index and base else {}
+        for data in reversed(chain):
+            state.update(data)
+        state.pop(REST_DELTA, None)
+        return state
+
+    def rest(self, index: int) -> dict | None:
+        """Rest API data snapshot (index of rest_times), None if out of range
+
+        Decoded on demand, last one cached (sequential access decodes one frame). Thread safe.
+        """
+        if not 0 <= index < len(self.rest_times):
+            return None
+        with self._rest_lock:
+            cached_index, cached = self._rest_cache
+            if index != cached_index:
+                if cached_index < index:
+                    cached = self._rest_state(index, cached_index, cached)
+                else:
+                    cached = self._rest_state(index)
+                self._rest_cache = (index, cached)
+            return cached
+
+    def iter_rest(self, first: int, last: int) -> Iterator[tuple[float, dict]]:
+        """Rest API data snapshots (time, data) of index range, independent of cache"""
+        first = max(first, 0)
+        if last < first:
+            return
+        state = self._rest_state(first)
+        yield self.rest_times[first], state
+        for index in range(first + 1, last + 1):
+            data = self._rest_frame(index)
+            if data is None:
+                continue
+            state = {**state, **data} if REST_DELTA in data else dict(data)
+            state.pop(REST_DELTA, None)
+            yield self.rest_times[index], state
 
     def markers_of(self, kind: str) -> list[Marker]:
         """Markers of kind, in time order"""
@@ -643,10 +734,9 @@ class ReplayFile:
         header["created"] = self.created + origin
         header["trimmed_from"] = os.path.basename(self.filename)
         header["layout"] = [list(zone) for zone in self.layout]  # format 1 LMU files had no layout
-        rest = [(t, data) for t, data in zip(self.rest_times, self.rest_data) if origin < t <= end_time]
-        initial_rest = self.rest_at(origin)
-        if initial_rest >= 0:
-            rest.insert(0, (origin, self.rest_data[initial_rest]))
+        # Snapshot in effect at origin (written at origin), then later ones
+        rest = self.iter_rest(self.rest_at(origin), self.rest_at(end_time))
+        next_rest = next(rest, None)
         markers = [marker for marker in self.markers if origin <= marker.time <= end_time]
         total = last - first + 1
         if same_file(filename, self.filename):
@@ -658,8 +748,9 @@ class ReplayFile:
                 writer = ReplayWriter(file, self.frame_size, self.rate, header)
                 for frame_time, frame in self.iter_frames(first, last):
                     writer.write(frame_time - origin, frame)
-                    while rest and rest[0][0] <= frame_time:
-                        writer.write_rest(rest[0][0] - origin, rest.pop(0)[1])
+                    while next_rest is not None and next_rest[0] <= frame_time:
+                        writer.write_rest(max(next_rest[0] - origin, 0.0), next_rest[1])
+                        next_rest = next(rest, None)
                     while markers and markers[0].time <= frame_time:
                         marker = markers.pop(0)
                         writer.write_marker(marker.time - origin, marker.kind, marker.text)
@@ -804,7 +895,9 @@ class ReplayMMap:
         if self._rest_target is not None:
             index = self._player.current_rest()
             if index != self._rest_index and index >= 0:
-                apply_rest_snapshot(self._rest_target, self._player.replay.rest_data[index])
+                data = self._player.replay.rest(index)
+                if data is not None:
+                    apply_rest_snapshot(self._rest_target, data)
             self._rest_index = index
 
 
@@ -836,6 +929,7 @@ class ReplayControl:
         self._markers: list[tuple[str, str, float]] = []
         self._markers_lock = threading.Lock()
         self.recording_file = ""
+        self.recording_error = ""  # why last recording stopped by itself (disk full...), empty if stopped on request
         self.recorded_frames = 0
         self.recording_elapsed = 0.0
 
@@ -936,6 +1030,7 @@ class ReplayControl:
             with self._markers_lock:
                 self._markers.clear()
             self.recording_file = filename
+            self.recording_error = ""
             self.recorded_frames = 0
             self.recording_elapsed = 0.0
             self._rec_thread = threading.Thread(
@@ -1004,8 +1099,12 @@ class ReplayControl:
                     if writer is not None:  # summary & trailer even after error: file stays complete
                         with suppress(OSError, ValueError):
                             writer.finish()
-        except Exception:  # never leave recorder thread with unexpected error unlogged
+        except Exception as error:  # disk full, drive lost, broken source: reported, never left unlogged
             logger.exception("replay: recording failed, %s", filename)
+            self.recording_error = str(error) or type(error).__name__
+            if self.recording_file == filename:  # not replaced by a later recording
+                self.recording_file = ""
+            app_signal.error.emit(f"Replay recording stopped: {self.recording_error}")
         logger.info("replay: recorded %s frames to %s", self.recorded_frames, filename)
         if writer is None:  # nothing recorded (game never active)
             with suppress(OSError):

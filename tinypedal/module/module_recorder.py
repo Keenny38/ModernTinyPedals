@@ -515,7 +515,7 @@ def record_telemetry(
                     pending_deadline = 0.0
                 pending = PendingLap(
                     combo_name=api.read.session.combo_name(),
-                    lap_number=api.read.lap.completed_laps(),
+                    lap_number=api.read.lap.completed_laps(),  # may lag, updated if lap validated
                     lap_time=lap_start - last_lap_start,
                     finish_time=lap_start,
                     rows=rows,
@@ -541,8 +541,18 @@ def confirmed_lap(pending: PendingLap) -> bool:
 
 
 def save_pending(pending: PendingLap, options: SaveOptions, saver, valid: bool):
-    """Add official sector times to valid lap, then save"""
+    """Add official sector times & lap number to valid lap, then save
+
+    Lap number read at line crossing may lag (scoring updates slower than telemetry): valid lap
+    is confirmed by scoring last lap time, so completed laps is up to date now.
+    """
     if valid:
+        try:
+            lap_number = int(api.read.lap.completed_laps())
+        except (AttributeError, TypeError, ValueError):
+            lap_number = -1
+        if pending.lap_number <= lap_number <= pending.lap_number + 1:  # ignore session change meanwhile
+            pending = pending._replace(lap_number=lap_number)
         sectors = official_sectors(pending.lap_time)
         if sectors:
             pending.info["sectors"] = [round(value, 3) for value in sectors]
