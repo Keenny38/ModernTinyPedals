@@ -1,6 +1,7 @@
 """Settings page (config.json): categories & groups, editors by option kind, pending edits checked while typing,
 undo & redo, reset, search through every category, apply (saved, app reloaded), status cards, page in app"""
 
+import time
 from contextlib import suppress
 
 import pytest
@@ -188,6 +189,38 @@ def test_options_read_at_startup_offer_restart(settings):
     settings.setBool("application/show_at_startup", not cfg.application["show_at_startup"])
     assert settings.apply()
     assert settings.host.restart == [["Enable High DPI Scaling"]]
+
+
+def test_overlay_style_applied_to_running_overlays(settings, bundled_fonts):
+    """Design & font options saved, then overlays restarted (as at reload) in new style without waiting:
+    a stopped overlay reports closed (its Hide event once stopped used to keep it "open" until timeout)"""
+    from tinypedal.module_control import wctrl
+    from tinypedal.thread_guard import STOP_TIMEOUT
+
+    cfg.user.setting["relative"]["enable"] = True
+    wctrl.start("relative")
+    try:
+        old = wctrl.active_modules["relative"]
+        assert old.theme.surface.name() == "#1b1f27" and old.corner == 1 and old.depth_effects
+        settings.selectCategory("overlay_style")
+        settings.setChoice("overlay_style/overlay_theme", row(settings, "overlay_style/overlay_theme")[
+            "choices"].index("Modern Light"))
+        settings.setBool("overlay_style/enable_depth_effects", False)
+        settings.setBool("overlay_style/enable_fade_animation", False)
+        settings.setNumber("overlay_style/corner_radius_scale", 0.1)
+        settings.setChoice("overlay_style/modern_design_font_name", 1)  # first family other than saved one
+        family = settings._pending["overlay_style/modern_design_font_name"]
+        assert settings.apply() and settings.host.applied_sections == [{"overlay_style"}]
+        start = time.monotonic()
+        wctrl.close("relative")
+        assert time.monotonic() - start < STOP_TIMEOUT / 2 and old.closed
+        wctrl.start("relative")
+        new = wctrl.active_modules["relative"]
+        assert new.theme.surface.name() == "#f4f6f9" and new.corner == 2 and not new.depth_effects
+        assert not new._fade_enabled and new.font_family == family != "Barlow Semi Condensed"
+    finally:
+        wctrl.close("relative")
+        flush()
 
 
 def test_reset_option_and_category(settings):

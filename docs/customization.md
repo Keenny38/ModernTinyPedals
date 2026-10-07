@@ -863,10 +863,10 @@ Light themes invert gray panels and text, keep colored backgrounds (flags, warni
 Colorblind safe variant of overlay theme (Okabe-Ito palette): red / green pairs become orange / blue, on every theme. Default is disabled.
 
     enable_modern_font
-Replace default widget font with `modern_font_name`. Width of text bar is calculated from digit width to avoid clipping numbers. Default is enabled.
+Classic layout only (widgets with `enable_classic_layout` enabled, while a `Modern` overlay theme is selected): replace default widget font with `modern_font_name`. Width of text bar is calculated from digit width to avoid clipping numbers. Modern design widgets use `modern_design_font_name` instead. Default is enabled.
 
     modern_font_name
-Set modern font name. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Ligatures are disabled.
+Set modern font name of classic layout widgets, see `enable_modern_font`. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Ligatures are disabled.
 
     modern_design_font_name
 Set font of modern design widgets (see [Modern design](#modern-design)). Default is `Barlow Semi Condensed`, which is bundled with Modern Tiny Pedals (`fonts` folder) along with `Barlow`. A proportional font with tabular digits keeps numbers aligned.
@@ -878,7 +878,7 @@ Set bar corner radius, relative to shorter side of each bar. Value range in `0.0
 Apply black box visual style to all widgets: lighter top, darker bottom and thin highlight edge on panels and bars, so they read as slightly raised. Elements smaller than 6 pixels stay flat. Default is enabled.
 
     minimum_bar_gap
-Set minimum gap between bars in pixels, only applies to widget `bar_gap` option that uses default value. Default is `2`.
+Set minimum gap between bars in pixels of classic layout widgets (modern design sets its own gaps), only applies to widget `bar_gap` option that uses default value. Default is `2`.
 
 [**`Back to Top`**](#)
 

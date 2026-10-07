@@ -472,7 +472,8 @@ class Base(QWidget):
     def event(self, event):
         """Count window repaints & moves (paint serial, see PaintCounter)"""
         result = super().event(event)
-        if event.type() in PAINT_EVENTS:
+        # Not once stopped: its Hide event would set an attribute again, never seen "closed" (reload waits)
+        if event.type() in PAINT_EVENTS and self.__dict__:
             PaintCounter.count += 1
             self.paint_serial = PaintCounter.count
         return result
