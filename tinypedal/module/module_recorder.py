@@ -643,8 +643,8 @@ def remove_old_laps(folder: str, max_saved_laps: int, keep_best: int = 0):
         laps = lap_files(folder)
         if len(laps) <= max_saved_laps:
             return
-        kept = kept_laps(folder)  # kept by user in lap viewer
-    except OSError as error:
+        kept = kept_laps(folder)  # kept by user in lap viewer, none removed if unknown (marks unreadable)
+    except (OSError, ValueError) as error:
         logger.error("RECORDER: unable to remove old laps: %s", error)
         return
     protected = {lap.path for lap in best_laps(laps, keep_best)} | {lap.path for lap in laps if lap.filename in kept}

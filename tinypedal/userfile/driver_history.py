@@ -93,10 +93,14 @@ def parse_record(data) -> SessionRecord | None:
     return SessionRecord(time=float(time_value), track=track, vehicle=vehicle, **values)
 
 
-def read_records(filepath: str) -> list[SessionRecord]:
+def read_records(filepath: str, strict: bool = False) -> list[SessionRecord]:
     """Session records of file, oldest first (invalid lines skipped, empty if no file)
 
     Bytes that are not UTF-8 replaced (line skipped if broken): a damaged file never stops the viewer.
+
+    Args:
+        strict: raise OSError if file exists but unreadable (locked...), instead of empty records:
+            file rewritten from records would lose all history.
     """
     records = []
     try:
@@ -112,6 +116,8 @@ def read_records(filepath: str) -> list[SessionRecord]:
         return []
     except OSError as error:
         logger.error("USERDATA: unable to read %s: %s", HISTORY_FILE, error)
+        if strict:
+            raise
         return []
     records.sort(key=lambda record: record.time)
     return records
@@ -166,10 +172,10 @@ def last_record(filepath: str) -> SessionRecord | None:
     return record
 
 
-def load_history(filepath: str) -> list[SessionRecord]:
-    """Session records, oldest first, oldest dropped from file if over MAX_RECORDS"""
+def load_history(filepath: str, strict: bool = False) -> list[SessionRecord]:
+    """Session records, oldest first, oldest dropped from file if over MAX_RECORDS (strict: see read_records)"""
     with STATS_LOCK:
-        records = read_records(filepath)
+        records = read_records(filepath, strict)
         if len(records) > MAX_RECORDS:
             records = records[-MAX_RECORDS:]
             write_records(filepath, records)
@@ -200,9 +206,9 @@ def append_record(filepath: str, record: SessionRecord) -> None:
             logger.error("USERDATA: unable to save %s: %s", HISTORY_FILE, error)
 
 
-def write_records(filepath: str, records: Iterable[SessionRecord]) -> None:
+def write_records(filepath: str, records: Iterable[SessionRecord], raise_error: bool = False) -> None:
     ordered = sorted(records, key=lambda record: record.time)[-MAX_RECORDS:]
-    with atomic_write(history_path(filepath)) as file:
+    with atomic_write(history_path(filepath), raise_error=raise_error) as file:
         file.writelines(record_line(record) for record in ordered)
 
 
@@ -213,25 +219,33 @@ def save_history(filepath: str, records: Iterable[SessionRecord]) -> None:
 
 
 def remove_records(filepath: str, match: Callable[[SessionRecord], bool]) -> list[SessionRecord]:
-    """Remove matching records from history file, removed records returned (to restore them)"""
+    """Remove matching records from history file, removed records returned (to restore them)
+
+    Raises:
+        OSError: history file unreadable or not saved (file kept as it was).
+    """
     with STATS_LOCK:
-        records = read_records(filepath)
+        records = read_records(filepath, strict=True)
         removed = [record for record in records if match(record)]
         if removed:
-            write_records(filepath, [record for record in records if not match(record)])
+            write_records(filepath, [record for record in records if not match(record)], raise_error=True)
     return removed
 
 
 def replace_records(filepath: str, removed: Iterable[SessionRecord], added: Iterable[SessionRecord]) -> None:
-    """Remove records & add others (undo, redo of an edit), records already there kept once"""
+    """Remove records & add others (undo, redo of an edit), records already there kept once
+
+    Raises:
+        OSError: history file unreadable or not saved (file kept as it was, never rewritten as empty).
+    """
     removed_set = set(removed)
     added = list(added)
     if not removed_set and not added:
         return
     with STATS_LOCK:
-        current = [record for record in read_records(filepath) if record not in removed_set]
+        current = [record for record in read_records(filepath, strict=True) if record not in removed_set]
         known = set(current)
-        write_records(filepath, current + [record for record in added if record not in known])
+        write_records(filepath, current + [record for record in added if record not in known], raise_error=True)
 
 
 def restore_records(filepath: str, records: list[SessionRecord]) -> None:

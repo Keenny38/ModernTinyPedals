@@ -143,3 +143,45 @@ def test_import_share_code_dialog(ui_env, monkeypatch):
     assert shown[0].startswith(SHARE_PREFIX)  # clipboard code proposed
     assert shown[1] == "Shared preset"
     view.deleteLater()
+
+
+def test_style_write_error_keeps_existing_file(tmp_path, source, monkeypatch):
+    """Write error (full disk) while importing styles: existing style file kept whole (was: truncated)"""
+    from tinypedal.userfile import preset_package
+
+    settings, _ = source
+    package = tmp_path / "race.zip"
+    export_preset_package(str(package), f"{settings}/", "race.json")
+    target = tmp_path / "dst"
+    target.mkdir()
+    (target / "classes.json").write_text(json.dumps({"Mine": {}}), encoding="utf-8")
+
+    def full_disk(file):
+        if "classes.json" in file.name:
+            file.write(b"{")  # partly written
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(preset_package, "flush_to_disk", full_disk, raising=False)
+    with pytest.raises(OSError):
+        import_preset_package(str(package), f"{target}/", overwrite_styles=True)
+    assert json.loads((target / "classes.json").read_text(encoding="utf-8")) == {"Mine": {}}
+    assert sorted(path.name for path in target.iterdir()) == ["classes.json", "race.json"]  # no temp file
+
+
+def test_imported_styles_loaded_in_memory(ui_env, tmp_path, source, monkeypatch):
+    """Styles imported: loaded in memory, so a later style save keeps them (was: old styles saved over)"""
+    from PySide6.QtWidgets import QMessageBox
+
+    from tinypedal.setting import cfg
+    from tinypedal.ui.preset_view import PresetList
+
+    settings, _ = source
+    package = tmp_path / "race.zip"
+    export_preset_package(str(package), f"{settings}/", "race.json")
+    cfg.user.classes = {"Old": {}}
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    view = PresetList(None)
+    view.import_package_file(str(package))
+    assert "Hypercar" in cfg.user.classes and "Old" not in cfg.user.classes
+    view.deleteLater()

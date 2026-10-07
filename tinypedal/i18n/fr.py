@@ -329,6 +329,7 @@ TRANSLATION = MappingProxyType({
     "Top level reached": "Niveau maximal atteint",
     "Tracks with stats": "Circuits avec statistiques",
     "Unable to read stats file.": "Impossible de lire le fichier de statistiques.",
+    "Unable to save stats file.": "Impossible d'enregistrer le fichier de statistiques.",
     "View": "Affichage",
     "Delete Track": "Supprimer le circuit",
     "Export Raw Values (CSV)...": "Exporter les valeurs brutes (CSV)...",

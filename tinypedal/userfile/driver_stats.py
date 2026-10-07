@@ -374,9 +374,9 @@ def load_stats_json_file(
 
 def save_stats_json_file(
     stats_user: dict, filepath: str, filename: str = StatsFile.DRIVER, extension: str = FileExt.STATS
-) -> None:
-    """Save stats to json file"""
-    save_and_verify_json_file(
+) -> bool:
+    """Save stats to json file, True if saved & verified"""
+    return save_and_verify_json_file(
         dict_user=stats_user,
         filename=f"{filename}{extension}",
         filepath=filepath,

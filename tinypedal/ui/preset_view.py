@@ -204,6 +204,8 @@ class PresetList(QWidget):
             buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             defaultButton=QMessageBox.StandardButton.No,
         ) == QMessageBox.StandardButton.Yes
+        if overwrite_styles:
+            cfg.flush()  # queued style saves written first, never over imported styles
         try:
             result = import_preset_package(
                 zip_filename,
@@ -212,8 +214,12 @@ class PresetList(QWidget):
                 notes_paths={"tracknotes": cfg.path.track_notes, "pacenotes": cfg.path.pace_notes},
             )
         except (ValueError, OSError, zipfile.BadZipFile) as error:
+            if overwrite_styles:  # styles imported before error
+                cfg.load_styles(discard_queued=True)
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to import package:<br>{error}"))
             return
+        if result.styles:  # styles in memory replaced: later style saves keep imported ones
+            cfg.load_styles(discard_queued=True)
         self.refresh()
         lines = [f"Presets: <b>{', '.join(name[:-5] for name in result.presets) or tr('none')}</b>"]
         if result.styles:

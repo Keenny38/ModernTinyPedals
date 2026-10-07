@@ -113,7 +113,7 @@ def test_save_multiple_files_in_one_thread(config):
     config.load_user()
     config.save(delay=5)
     config.save(delay=5, config_type=ConfigType.CLASSES)
-    config.save(delay=5)  # duplicate, ignored
+    config.save(delay=5)  # duplicate, queued once
     assert len(config._save_queue) == 2
     wait_saved(config)
     assert config.version_update == 1  # single saving thread
@@ -329,6 +329,35 @@ def test_change_made_while_saving_not_lost(config, monkeypatch):
     assert config.flush(timeout=5)
     wait_saved(config)
     assert read_json(f"{config.path.settings}default.json")["overlay"]["fixed_position"] is True
+
+
+def test_queued_save_uses_replaced_dict(config):
+    """Editor replaces whole dict while file already queued: new dict saved (was: old dict written)"""
+    config.load_user()
+    config.user.tracks = {"A": {"preset": ""}}
+    config.save(delay=500, config_type=ConfigType.TRACKS)  # background save queued with delay
+    config.user.tracks = {"A": {"preset": ""}, "B": {"preset": ""}}  # editor saves new dict
+    config.save(delay=0, config_type=ConfigType.TRACKS)
+    assert config.flush(timeout=5)
+    wait_saved(config)
+    filename = config.filename.tracks
+    assert read_json(f"{config.path.settings}{filename}") == config.user.tracks
+
+
+def test_load_styles_discards_queued_style_saves(config):
+    """Styles replaced on disk (package import): queued save of older styles in memory dropped"""
+    config.load_user()
+    config.user.classes = {"Old": {}}
+    config.save(delay=500, config_type=ConfigType.CLASSES)  # background save queued before import
+    config.save(delay=500)  # other files still saved
+    path = f"{config.path.settings}{config.filename.classes}"
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump({"Imported": {}}, file)
+    config.load_styles(discard_queued=True)
+    assert "Imported" in config.user.classes
+    assert list(config._save_queue) == [config.filename.setting]
+    assert config.flush(timeout=5)
+    assert "Imported" in read_json(path)
 
 
 def test_invalid_section_reset_alone(config):

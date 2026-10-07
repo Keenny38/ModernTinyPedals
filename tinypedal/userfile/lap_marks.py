@@ -35,14 +35,23 @@ logger = logging.getLogger(__name__)
 MARKS_FILE = ".lap_marks.json"
 
 
-def load_marks(folder: str) -> dict[str, dict]:
-    """Marks of laps in folder, empty if none"""
+def load_marks(folder: str, strict: bool = False) -> dict[str, dict]:
+    """Marks of laps in folder, empty if none
+
+    Args:
+        strict: raise OSError or ValueError if file exists but unreadable (locked, damaged), instead of empty
+            marks: kept laps would be removed, other marks erased by file saved again.
+    """
     try:
         with open(os.path.join(folder, MARKS_FILE), encoding="utf-8") as file:
             marks = json.load(file)
-    except (OSError, ValueError):
+        if not isinstance(marks, dict):
+            raise ValueError("not a JSON object")
+    except FileNotFoundError:
         return {}
-    if not isinstance(marks, dict):
+    except (OSError, ValueError):
+        if strict:
+            raise
         return {}
     return {name: mark for name, mark in marks.items() if isinstance(name, str) and isinstance(mark, dict)}
 
@@ -64,10 +73,21 @@ def save_marks(folder: str, marks: dict[str, dict]) -> bool:
         return False
 
 
+def load_marks_to_save(folder: str) -> dict[str, dict] | None:
+    """Marks of folder to change & save again, None if file unreadable (never saved over)"""
+    try:
+        return load_marks(folder, strict=True)
+    except (OSError, ValueError) as error:
+        logger.error("LAP MARKS: unable to read %s: %s", os.path.join(folder, MARKS_FILE), error)
+        return None
+
+
 def set_mark(path: str, kept: bool | None = None, note: str | None = None) -> bool:
-    """Set kept state and/or note of lap file"""
+    """Set kept state and/or note of lap file, False if not saved"""
     folder, name = os.path.split(path)
-    marks = load_marks(folder)
+    marks = load_marks_to_save(folder)
+    if marks is None:
+        return False
     mark = dict(marks.get(name, {}))
     if kept is not None:
         mark["kept"] = kept
@@ -78,14 +98,20 @@ def set_mark(path: str, kept: bool | None = None, note: str | None = None) -> bo
 
 
 def remove_mark(path: str) -> bool:
-    """Forget marks of lap file (deleted lap)"""
+    """Forget marks of lap file (deleted lap), False if not saved"""
     folder, name = os.path.split(path)
-    marks = load_marks(folder)
+    marks = load_marks_to_save(folder)
+    if marks is None:
+        return False
     if marks.pop(name, None) is None:
         return True
     return save_marks(folder, marks)
 
 
 def kept_laps(folder: str) -> set[str]:
-    """File names of kept laps in folder"""
-    return {name for name, mark in load_marks(folder).items() if mark.get("kept")}
+    """File names of kept laps in folder
+
+    Raises:
+        OSError, ValueError: marks file unreadable (kept laps unknown).
+    """
+    return {name for name, mark in load_marks(folder, strict=True).items() if mark.get("kept")}

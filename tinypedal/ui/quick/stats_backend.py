@@ -1954,6 +1954,26 @@ class DriverStatsBackend(QObject):
     def stats_unreadable(self):
         self.warning(tr("Unable to read stats file."))
 
+    def stats_unsaved(self):
+        self.warning(tr("Unable to save stats file."))
+
+    @staticmethod
+    def save_edit(stats_user: dict, removed: Iterable[SessionRecord], added: Iterable[SessionRecord]) -> bool:
+        """Save edited stats & history change (STATS_LOCK held), False if not saved (both files kept)
+
+        History changed first: a change (records removed or added once) undone safely if stats not saved.
+        """
+        removed, added = tuple(removed), tuple(added)
+        try:
+            replace_records(cfg.path.config, removed, added)
+        except OSError:  # history unreadable (never rewritten as empty) or not saved
+            return False
+        if save_stats_json_file(stats_user=stats_user, filepath=cfg.path.config):
+            return True
+        with suppress(OSError):
+            replace_records(cfg.path.config, added, removed)  # history change undone
+        return False
+
     def edit_stats(self, path: tuple[str, ...], value: Any,
                    history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None = None) -> bool:
         """Set stats at path (None removes it, empty path: whole file), history changed, undo recorded
@@ -1983,13 +2003,17 @@ class DriverStatsBackend(QObject):
                 set_stats_entry(stats_user, path, value)
             else:
                 stats_user = copy.deepcopy(value)
-            save_stats_json_file(stats_user=stats_user, filepath=cfg.path.config)
             removed: tuple = ()
             added: tuple = ()
             if history_change is not None:
-                removed_list, added_list = history_change(load_history(cfg.path.config))
+                try:
+                    history = load_history(cfg.path.config, strict=True)
+                except OSError:  # never rewritten from empty history
+                    return self.stats_unreadable
+                removed_list, added_list = history_change(history)
                 removed, added = tuple(removed_list), tuple(added_list)
-                replace_records(cfg.path.config, removed, added)
+            if not self.save_edit(stats_user, removed, added):  # not saved: no undo recorded
+                return self.stats_unsaved
         return lambda: self.edit_done(StatsEdit(path, before, copy.deepcopy(value), removed, added))
 
     def edit_done(self, edit: StatsEdit):
@@ -2002,7 +2026,7 @@ class DriverStatsBackend(QObject):
     def apply_edit(self, edit: StatsEdit, undo: bool) -> bool:
         """Apply edit again (redo) or its reverse (undo, stats recorded since kept) on stats file read again
 
-        Called with STATS_LOCK held (see run_locked), False if stats file unreadable.
+        Called with STATS_LOCK held (see run_locked), False if stats file unreadable or not saved.
         """
         with STATS_LOCK:
             stats_user = self.load_fresh_stats()
@@ -2015,12 +2039,9 @@ class DriverStatsBackend(QObject):
                 set_stats_entry(stats_user, edit.path, merge_stats_entry(current, edit.before, edit.path))
             else:
                 set_stats_entry(stats_user, edit.path, edit.after)
-            save_stats_json_file(stats_user=stats_user, filepath=cfg.path.config)
             if undo:
-                replace_records(cfg.path.config, edit.history_after, edit.history_before)
-            else:
-                replace_records(cfg.path.config, edit.history_before, edit.history_after)
-        return True
+                return self.save_edit(stats_user, edit.history_after, edit.history_before)
+            return self.save_edit(stats_user, edit.history_before, edit.history_after)
 
     @Slot()
     def undo(self):

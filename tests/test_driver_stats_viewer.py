@@ -496,6 +496,56 @@ def test_reference_cache_time(tmp_path):
     assert lap_reference.cache_time(folder) == pytest.approx(os.path.getmtime(tmp_path / lap_reference.CACHE_NAME))
 
 
+EDIT_HISTORY = [SessionRecord(1000.0, SPA, OREGA, 1, 123.0), SessionRecord(2000.0, SPA, OREGA, 1, 121.5),
+           SessionRecord(3000.0, SPA, "Hyper - Ferrari", 4, 119.0)]
+
+
+def lock_history(monkeypatch):
+    """History file locked by other program (sync client, antivirus): open raises PermissionError"""
+    def locked_open(file, *args, **kwargs):
+        if str(file).endswith(driver_history.HISTORY_FILE):
+            raise PermissionError(13, "locked", file)
+        return open(file, *args, **kwargs)
+    monkeypatch.setattr(driver_history, "open", locked_open, raising=False)
+
+
+def test_undo_with_unreadable_history_keeps_sessions(backend, dialogs, monkeypatch):
+    """History unreadable on undo: never rewritten with restored records only (was: all sessions lost)"""
+    driver_history.save_history(cfg.path.config, EDIT_HISTORY)
+    backend.reload_stats()
+    backend.resetLapTime(OREGA, "pb")
+    with monkeypatch.context() as patch:
+        lock_history(patch)
+        backend.undo()
+        assert dialogs and backend.canUndo  # undo kept to retry
+        assert load_stats()[SPA][OREGA]["pb"] > 9999  # stats not changed either
+    assert len(driver_history.read_records(cfg.path.config)) == 3
+    with monkeypatch.context() as patch:
+        lock_history(patch)
+        backend.selectRow("Hyper - Ferrari")
+        backend.removeVehicle()  # history unreadable: nothing removed, no undo
+        assert "Hyper - Ferrari" in load_stats()[SPA] and len(backend._edits_undo) == 1
+    backend.undo()
+    assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY
+    with pytest.raises(OSError), monkeypatch.context() as patch:
+        lock_history(patch)
+        driver_history.remove_records(cfg.path.config, lambda record: True)
+    assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY
+
+
+def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
+    """Stats file not saved (locked, disk full): history unchanged, no undo, warned (was: treated as saved)"""
+    from tinypedal.userfile import json_setting
+
+    driver_history.save_history(cfg.path.config, EDIT_HISTORY)
+    monkeypatch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
+    backend.selectRow("Hyper - Ferrari")
+    backend.removeVehicle()
+    assert "Hyper - Ferrari" in load_stats()[SPA]
+    assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY  # history change undone
+    assert not backend.canUndo and dialogs
+
+
 # --- Qt Quick page
 @pytest.fixture
 def page(dialogs, monkeypatch):

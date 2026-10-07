@@ -33,10 +33,12 @@ import json
 import logging
 import os
 import zipfile
+from contextlib import suppress
 from typing import NamedTuple
 
 from ..const_file import FileExt
 from ..validator import is_allowed_filename, load_json_strict
+from . import flush_to_disk, temp_file_name
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,14 @@ def is_json_dict(data: bytes) -> bool:
 
 
 def write_file(filename: str, data: bytes):
-    """Write file"""
-    with open(filename, "wb") as file:
-        file.write(data)
+    """Write file atomically (temporary file replaces target): existing file never left half-written"""
+    temp_filename = temp_file_name(filename)
+    try:
+        with open(temp_filename, "wb") as file:
+            file.write(data)
+            flush_to_disk(file)
+        os.replace(temp_filename, filename)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_filename)
+        raise

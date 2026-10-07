@@ -447,6 +447,50 @@ def test_remove_old_laps_skips_locked_file(tmp_path, monkeypatch):
     assert remaining == [paths[0], paths[3], paths[4]]  # locked kept, next oldest removed instead
 
 
+def test_unreadable_lap_marks_keep_kept_laps_and_marks(tmp_path, monkeypatch):
+    """Marks file locked or damaged: no lap removed, marks never saved over (was: kept lap removed, marks erased)"""
+    import json
+    import os
+
+    from tinypedal.module import module_recorder
+    from tinypedal.userfile import lap_marks
+
+    folder = tmp_path / "T - C"
+    for lap in range(4):
+        module_recorder.save_lap(f"{tmp_path}/", "T - C", lap, 90.0 + lap, [], max_saved_laps=99, timestamp=1000.0 + lap)
+    paths = sorted(folder.glob("*.csv"))
+    for index, path in enumerate(paths):
+        os.utime(path, (1000 + index, 1000 + index))
+    assert lap_marks.set_mark(str(paths[0]), kept=True)
+    assert lap_marks.set_mark(str(paths[1]), note="wet")
+    marks_path = folder / lap_marks.MARKS_FILE
+    saved = marks_path.read_text(encoding="utf-8")
+    # Locked by other program (sync client, antivirus)
+    with monkeypatch.context() as patch:
+        def locked_open(file, *args, **kwargs):
+            if str(file).endswith(lap_marks.MARKS_FILE):
+                raise PermissionError(13, "used by another process")
+            return open(file, *args, **kwargs)
+        patch.setattr(lap_marks, "open", locked_open, raising=False)
+        module_recorder.remove_old_laps(str(folder), 2)
+        assert sorted(folder.glob("*.csv")) == paths  # kept lap unknown: none removed
+        assert not lap_marks.set_mark(str(paths[2]), kept=True)
+        assert not lap_marks.remove_mark(str(paths[1]))
+    assert marks_path.read_text(encoding="utf-8") == saved
+    # Damaged file: same
+    marks_path.write_text('{"broken', encoding="utf-8")
+    module_recorder.remove_old_laps(str(folder), 2)
+    assert sorted(folder.glob("*.csv")) == paths
+    assert not lap_marks.set_mark(str(paths[2]), kept=True)
+    assert marks_path.read_text(encoding="utf-8") == '{"broken'
+    assert lap_marks.load_marks(str(folder)) == {}  # viewer still opens
+    # Readable again: oldest lap kept, next oldest removed
+    marks_path.write_text(saved, encoding="utf-8")
+    module_recorder.remove_old_laps(str(folder), 2)
+    assert sorted(folder.glob("*.csv")) == [paths[0], paths[3]]
+    assert json.loads(marks_path.read_text(encoding="utf-8"))[paths[0].name] == {"kept": True}
+
+
 def test_lap_folder_name_valid_on_windows(tmp_path):
     from tinypedal.module import module_recorder
 

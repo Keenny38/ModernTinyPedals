@@ -49,6 +49,15 @@ from .validator import is_allowed_filename
 
 logger = logging.getLogger(__name__)
 
+STYLE_TYPES = (
+    ConfigType.BRAKES,
+    ConfigType.BRANDS,
+    ConfigType.CLASSES,
+    ConfigType.COMPOUNDS,
+    ConfigType.HEATMAP,
+    ConfigType.TRACKS,
+)
+
 
 class FileName:
     """File name"""
@@ -341,7 +350,20 @@ class Setting:
             max_attempts=loading_attempts,
         )
         self.filename.setting = filename_setting_temp
-        # Load style JSON file
+        self.load_styles()
+
+    def load_styles(self, discard_queued: bool = False):
+        """Load style JSON files
+
+        Args:
+            discard_queued: drop queued saves of style files (styles replaced on disk, by import):
+                a queued save would write older styles in memory over loaded ones.
+        """
+        loading_attempts = self.max_loading_attempts
+        if discard_queued:
+            with self._save_lock:
+                for config_type in STYLE_TYPES:
+                    self._save_queue.pop(getattr(self.filename, config_type), None)
         self.user.brakes = load_style_json_file(
             filename=self.filename.brakes,
             filepath=self.path.settings,
@@ -515,7 +537,7 @@ class Setting:
         with self._save_lock:
             self._save_deadline = monotonic() + delay * 0.01  # delay refreshed by each call
             self._save_wake.set()  # waiting saving thread follows new deadline (also a shorter one)
-            if filename and filename not in self._save_queue:
+            if filename:  # always refresh dict reference, editors may replace whole dict while queued
                 self._save_queue[filename] = (filepath, getattr(self.user, config_type))
             if self._save_queue and not self.is_saving:
                 self.is_saving = True

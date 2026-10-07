@@ -365,14 +365,14 @@ def save_and_verify_json_file(
     filepath: str,
     max_attempts: int = 10,
     compact_json: bool = False,
-) -> None:
-    """Save and verify json file, backup or restore if saving failed"""
+) -> bool:
+    """Save and verify json file, backup or restore if saving failed, True if saved & verified"""
     if is_unreadable_file(filename, filepath):
         # Never retry & save here: defaults (in memory since load) would overwrite user data
         # of a file readable again, only tell user that session changes are not saved
         logger.info("USERDATA: %s was not accessible at load, saving skipped (file kept)", filename)
         _notify_save_skipped(filename, filepath)
-        return
+        return False
     file_found = os.path.exists(f"{filepath}{filename}")
     backup_extension = set_backup_timestamp()
     # Create backup: abort saving if backup failed; skip backup and create new if not exist
@@ -380,7 +380,7 @@ def save_and_verify_json_file(
         logger.info("USERDATA: %s not found, create new", filename)
     elif not create_backup_file(filename, filepath, backup_extension):
         logger.info("USERDATA: %s saving abort", filename)
-        return
+        return False
     # Start saving attempts
     attempts = max_attempts
     timer_start = monotonic()
@@ -402,7 +402,7 @@ def save_and_verify_json_file(
     else:
         if file_found and not restore_backup_file(filename, filepath, backup_extension):
             if not copy_and_rename_backup_file(filename, filepath, backup_extension):
-                return  # abort without delete backup
+                return False  # abort without delete backup
         state_text = "failed saving"
     if file_found:
         delete_backup_file(filename, filepath, backup_extension)
@@ -414,6 +414,7 @@ def save_and_verify_json_file(
         max_attempts - attempts,
         attempts,
     )
+    return attempts > 0
 
 
 def create_versioned_backup(
