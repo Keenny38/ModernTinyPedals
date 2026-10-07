@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import threading
 import zlib
 from collections.abc import Callable
 from typing import NamedTuple
 
 from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_signal, vr_shared
@@ -53,6 +54,7 @@ MAX_PIXELS = 1024 * 1024  # setOverlayRaw data size limit, image is scaled down 
 MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window capture apps
 STEAMVR_PROCESSES = ("vrserver.exe", "vrserver")  # SteamVR server (Windows, Linux)
 STEAMVR_RETRY_MS = 5000  # SteamVR started after app: overlay created within this delay
+OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per second (copied in game frame)
 
 
 class MirrorWindow(QWidget):
@@ -187,6 +189,37 @@ def compose_widgets(widgets: list) -> QImage | None:
     return image
 
 
+def _row_span(image: QImage) -> tuple[int, int] | None:
+    """First & last row of 8 bit image with a non zero byte, None if all zero"""
+    bits = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
+    stride, width, height = image.bytesPerLine(), image.width(), image.height()
+    zero = bytes(width)
+    first = 0
+    while first < height and bits[first * stride:first * stride + width] == zero:
+        first += 1
+    if first == height:
+        return None
+    last = height - 1
+    while bits[last * stride:last * stride + width] == zero:
+        last -= 1
+    return first, last
+
+
+def content_rect(image: QImage) -> QRect:
+    """Bounding rect of visible (not fully transparent) pixels, empty if none"""
+    alpha = image.convertToFormat(QImage.Format.Format_Alpha8)
+    rows = _row_span(alpha)
+    if rows is None:
+        return QRect()
+    top, bottom = rows
+    band = alpha.copy(0, top, alpha.width(), bottom - top + 1)
+    columns = _row_span(band.transformed(QTransform().rotate(90)))  # rows of rotated image: columns
+    if columns is None:
+        return QRect()
+    left, right = columns
+    return QRect(left, top, right - left + 1, bottom - top + 1)
+
+
 class ImageFrame(NamedTuple):
     """Raw RGBA frame for SteamVR"""
 
@@ -243,6 +276,21 @@ def steamvr_running() -> bool:
     return False
 
 
+class SteamVRCheck:
+    """steamvr_running() in a background thread (process scan takes tens of ms), result read on a later tick"""
+
+    def __init__(self):
+        self.running = False
+        self._thread = threading.Thread(target=self.__run, daemon=True, name="SteamVR check")
+        self._thread.start()
+
+    def __run(self):
+        self.running = steamvr_running()
+
+    def done(self) -> bool:
+        return not self._thread.is_alive()
+
+
 def placement_from(setting: dict) -> vr_shared.Placement:
     """Overlay placement from "vr_overlay" setting"""
     return vr_shared.Placement(
@@ -270,12 +318,16 @@ class VROverlay(QObject):
         self._visible = False
         self._has_image = False  # last composed image not empty (SteamVR overlay shown unless hidden for OpenXR)
         self._steamvr_wanted = False  # openvr available, waiting for SteamVR or running
-        self._steamvr_retry_at = 0  # tick (ms) of next SteamVR start attempt
+        self._steamvr_retry_at = 0  # tick (ms) of next SteamVR process check
+        self._steamvr_check: SteamVRCheck | None = None  # process check running in background
+        self._steamvr_report = False  # first check after enable: report problems as error
         self._steamvr_error_shown = False
         self._hidden_for_openxr = False  # SteamVR overlay hidden: OpenXR layer draws in headset
         # OpenXR layer
         self._xr: vr_shared.SharedFrameWriter | None = None
         self._xr_checksum: int | None = None
+        self._xr_pending: tuple[QImage, int | None] | None = None  # image waiting for next write slot
+        self._xr_written_at: int | None = None  # tick (ms) of last image written
         self._xr_drawing = False
         self._xr_state: tuple | None = None  # last layer state logged
         self._xr_frames: tuple[int, int] | None = None  # (pid, frames_shown) of layer at last tick
@@ -353,6 +405,7 @@ class VROverlay(QObject):
                 return False
             self._xr = writer
             self._xr_checksum = None
+            self._xr_pending = self._xr_written_at = None
             self._xr_state = None
             self._xr_frames = self._xr_shown_at = None
             logger.info("ENABLED: VR overlay (OpenXR layer %s)", manifest)
@@ -370,6 +423,7 @@ class VROverlay(QObject):
     def __close_openxr(self):
         writer, self._xr = self._xr, None
         self._xr_checksum = None
+        self._xr_pending = self._xr_written_at = None
         self._xr_drawing = False
         self._xr_frames = self._xr_shown_at = None
         if writer is not None:
@@ -402,24 +456,43 @@ class VROverlay(QObject):
                 logger.info("VR overlay: OpenXR game closed")
         self._xr_drawing = drawing
 
-    def __write_openxr(self, image: QImage | None, checksum: int | None):
+    def __write_openxr(self, image: QImage | None, checksum: int | None, now: int):
+        """Image for OpenXR layer: copied by the layer in the game's frame, so written at most every
+        OPENXR_MIN_INTERVAL_MS (newest image kept meanwhile), cropped to its visible pixels"""
         writer = self._xr
         if writer is None:
             return
+        self._xr_pending = None
         if image is None:
             writer.hide()
             self._xr_checksum = None
             return
         if checksum == self._xr_checksum:
             return
+        if self._xr_written_at is not None and 0 <= now - self._xr_written_at < OPENXR_MIN_INTERVAL_MS:
+            self._xr_pending = (image, checksum)
+            return
+        self._xr_written_at = now
+        self._xr_checksum = checksum
         image = fit_image(image, vr_shared.MAX_DIMENSION)
         if image.format() != QImage.Format.Format_RGBA8888:
             image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        rect = content_rect(image)
+        if rect.isEmpty():  # nothing visible
+            writer.hide()
+            return
+        canvas_width, canvas_height = image.width(), image.height()
+        width_meters = placement_from(cfg.user.config["vr_overlay"]).width_meters
+        if rect.width() * width_meters / canvas_width < 0.02:  # layer refuses quads under 1 cm wide
+            rect = image.rect()
+        if rect != image.rect():  # transparent margins not copied (layer copies image in game frame)
+            image = image.copy(rect)
         view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
         try:
-            writer.write_image(view, image.width(), image.height(), image.bytesPerLine())
-            self._xr_checksum = checksum
+            writer.write_image(view, image.width(), image.height(), image.bytesPerLine(),
+                               crop=(rect.x(), rect.y(), canvas_width, canvas_height))
         except (ValueError, TypeError, BufferError) as error:
+            self._xr_checksum = None
             logger.warning("VR overlay: OpenXR image not written: %s", error)
 
     # SteamVR (OpenVR)
@@ -447,7 +520,8 @@ class VROverlay(QObject):
         self._steamvr_wanted = True
         self._steamvr_error_shown = False
         self._steamvr_retry_at = 0
-        self.__start_steamvr(setting, report)
+        self._steamvr_report = report
+        self.__poll_steamvr(vr_shared.tick_ms())
         return True
 
     def __steamvr_unavailable(self, message: str, report: bool):
@@ -457,13 +531,25 @@ class VROverlay(QObject):
         else:
             logger.info("VR overlay: SteamVR overlay unavailable (%s)", message)
 
-    def __start_steamvr(self, setting: dict, report: bool = False):
-        """Start SteamVR overlay if SteamVR is running (never starts SteamVR)"""
-        self._steamvr_retry_at = vr_shared.tick_ms() + STEAMVR_RETRY_MS
-        if not steamvr_running():
-            if report and not self._steamvr_error_shown and self._xr is None:
-                logger.info("VR overlay: waiting for SteamVR")
+    def __poll_steamvr(self, now: int):
+        """SteamVR process checked in background every STEAMVR_RETRY_MS (not while the OpenXR layer draws:
+        SteamVR overlay would stay hidden), SteamVR overlay started once SteamVR runs (never starts SteamVR)"""
+        if self._steamvr_check is None and now >= self._steamvr_retry_at and not self._xr_drawing:
+            self._steamvr_retry_at = now + STEAMVR_RETRY_MS
+            self._steamvr_check = SteamVRCheck()
+        check = self._steamvr_check
+        if check is None or not check.done():
             return
+        self._steamvr_check = None
+        report, self._steamvr_report = self._steamvr_report, False
+        if check.running:
+            self.__start_steamvr(cfg.user.config["vr_overlay"], report)
+        elif report and not self._steamvr_error_shown and self._xr is None:
+            logger.info("VR overlay: waiting for SteamVR")
+
+    def __start_steamvr(self, setting: dict, report: bool = False):
+        """Start SteamVR overlay (SteamVR running)"""
+        self._steamvr_retry_at = vr_shared.tick_ms() + STEAMVR_RETRY_MS
         import openvr
 
         try:
@@ -547,8 +633,8 @@ class VROverlay(QObject):
         if self._xr is not None:
             self._xr.heartbeat(now)
             self.__update_openxr_status(now)
-        if self._steamvr_wanted and self._overlay is None and now >= self._steamvr_retry_at:
-            self.__start_steamvr(cfg.user.config["vr_overlay"])
+        if self._steamvr_wanted and self._overlay is None:
+            self.__poll_steamvr(now)
         overlay = self._overlay
         if overlay is not None:
             # OpenXR game drawn by the layer (also on SteamVR runtime): no second image from SteamVR overlay
@@ -562,6 +648,8 @@ class VROverlay(QObject):
                     overlay = None
                 else:
                     logger.info("VR overlay: SteamVR overlay %s", "hidden (OpenXR layer draws it)" if hide else "shown")
+        if self._xr_pending is not None:  # image held back by write rate limit
+            self.__write_openxr(*self._xr_pending, now)
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
         key = compose_key(widgets)
         if key is not None and key == self._compose_key:
@@ -573,7 +661,7 @@ class VROverlay(QObject):
             if checksum != self._mirror_checksum:
                 self._mirror_checksum = checksum
                 self._mirror.set_image(image)
-        self.__write_openxr(image, checksum)
+        self.__write_openxr(image, checksum, now)
         if overlay is None:
             return
         try:
@@ -628,6 +716,7 @@ class VROverlay(QObject):
         self._timer.stop()
         self._compose_key = None
         self._steamvr_wanted = False
+        self._steamvr_check = None  # background check result ignored
         self._has_image = False
         self.__release_steamvr()
         try:

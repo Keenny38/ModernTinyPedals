@@ -289,3 +289,49 @@ def test_header_over_reader_limit_is_invalid_response():
     finally:
         thread.join(5)
         server.close()
+
+
+def test_failed_retry_closes_kept_connection():
+    """Second try failing (timeout while reading response) must close the connection,
+    so next request is not sent on a socket with a pending late response"""
+    import pytest
+
+    from tinypedal.async_request import HttpConnection
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    port = server.getsockname()[1]
+    clients: list = []
+
+    def answer():
+        client, _ = server.accept()
+        clients.append(client)
+        client.recv(4096)
+        client.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        client.recv(4096)  # second request on kept connection: never answered
+        retry, _ = server.accept()
+        clients.append(retry)
+        retry.recv(4096)  # retry on new connection: never answered
+
+    thread = threading.Thread(target=answer, daemon=True)
+    thread.start()
+    request = set_header_get("/", "127.0.0.1")
+
+    async def main():
+        connection = HttpConnection("127.0.0.1", port, 0.5)
+        try:
+            assert await connection.get(request) == b"ok"
+            with pytest.raises(asyncio.TimeoutError):
+                await connection.get(request)
+            return connection._stream
+        finally:
+            connection.close()
+
+    try:
+        assert asyncio.run(main()) is None
+    finally:
+        thread.join(5)
+        for client in clients:
+            client.close()
+        server.close()

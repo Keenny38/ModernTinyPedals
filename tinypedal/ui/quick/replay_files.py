@@ -152,8 +152,17 @@ def temp_files(folder: str, now: float | None = None) -> list[str]:
         entries = list(os.scandir(folder))
     except OSError:
         return []
-    return [entry.path for entry in entries if entry.is_file() and entry.name.lower().startswith(TEMP_PATTERN[0])
-            and entry.name.lower().endswith(TEMP_PATTERN[1]) and now - entry.stat().st_mtime > TEMP_MIN_AGE]
+    paths = []
+    for entry in entries:
+        name = entry.name.lower()
+        if not (name.startswith(TEMP_PATTERN[0]) and name.endswith(TEMP_PATTERN[1])):
+            continue
+        try:  # file deleted by the game meanwhile (recording)
+            if entry.is_file() and now - entry.stat().st_mtime > TEMP_MIN_AGE:
+                paths.append(entry.path)
+        except OSError:
+            continue
+    return paths
 
 
 def trash_replays(paths: Sequence[str]) -> list[str]:

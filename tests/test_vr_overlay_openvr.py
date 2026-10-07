@@ -77,6 +77,14 @@ def fake_openvr(log):
 @pytest.fixture
 def vr_setting(ui_env, monkeypatch):
     monkeypatch.setattr(vr_overlay, "steamvr_running", lambda: True)  # overlay created at once
+
+    class SyncCheck:  # process check done at once (background thread in app)
+        running = True
+
+        def done(self):
+            return True
+
+    monkeypatch.setattr(vr_overlay, "SteamVRCheck", SyncCheck)
     setting = cfg.user.config["vr_overlay"]
     setting.update(enable_vr_overlay=True, enable_vr_mirror_window=False)
     errors = []

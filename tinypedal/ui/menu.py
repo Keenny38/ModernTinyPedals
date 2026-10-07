@@ -424,7 +424,7 @@ class ConfigMenu(QMenu):
                 tr("Web dashboard is disabled. Enable it from Config menu, Web Dashboard."),
             )
             return
-        links = "<br>".join(f"<a href='{url}'>{url}</a>" for url in webdashboard.urls())
+        links = "<br>".join(f"<a href='{url}'>{url}</a>" for url in webdashboard.urls(wait=True))
         message = QMessageBox(self._parent)
         message.setWindowTitle(tr("Web Dashboard"))
         message.setTextFormat(Qt.TextFormat.RichText)

@@ -305,6 +305,16 @@ def test_status_cards(settings):
     assert remote["stream"] == "ws://127.0.0.1:8337/stream" and "X-TinyPedal" in remote["command"]
 
 
+def test_status_card_updated_when_lan_addresses_found(settings):
+    """LAN addresses looked up in background: web dashboard card read again once found"""
+    from tinypedal import app_signal
+
+    changed = []
+    settings.infoChanged.connect(lambda: changed.append(1))
+    app_signal.addresses.emit()
+    assert changed == [1]
+
+
 # Page in app
 @pytest.fixture
 def window(ui_env, monkeypatch):

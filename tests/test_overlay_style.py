@@ -547,3 +547,25 @@ def test_raw_text_background_kept_while_unchanged():
         assert cell._bg_pixmap is not None  # kept for when style comes back, not used
     finally:
         _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
+
+
+def test_raw_text_background_redrawn_after_screen_scale_change(ui_env):
+    """Cell moved to a screen of another scale (no resize): background pixmap rendered again"""
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
+    _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
+    try:
+        cell = _painter.RawText(None, text="", bg_color="#336699")
+        cell.resize(60, 20)
+        cell.grab()
+        cell.grab()
+        pixmap = cell._bg_pixmap
+        assert pixmap is not None and pixmap.devicePixelRatio() == 1.0
+        cell.devicePixelRatioF = lambda: 1.5  # screen at 150 %
+        cell.grab()
+        assert cell._bg_pixmap is not pixmap  # new size in pixels: drawn by fill_rect first
+        cell.grab()
+        assert cell._bg_pixmap is not None and cell._bg_pixmap.devicePixelRatio() == 1.5
+    finally:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved

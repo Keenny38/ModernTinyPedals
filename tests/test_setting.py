@@ -379,3 +379,13 @@ def test_nan_and_infinity_values_rejected():
     user = json.loads('{"widget": {"opacity": NaN, "position_x": 1e999, "font_name": "Consolas"}}')
     result = setting_validator.PresetValidator._validate(user, default)  # validation without migration
     assert result["widget"] == {"opacity": 0.9, "position_x": 100, "font_name": "Consolas"}
+
+
+def test_boolean_validator_restores_default_for_non_bool_values():
+    """Hand edited preset: "false" must not become True (bool("false")), default restored"""
+    from tinypedal.setting_validator import PresetValidator
+
+    default = {"enable": True, "auto_hide": False, "show_a": True, "show_b": False}
+    user = {"enable": "false", "auto_hide": "true", "show_a": 0, "show_b": 1}
+    PresetValidator.validate_key_pair(user, default)
+    assert user == {"enable": True, "auto_hide": False, "show_a": False, "show_b": True}

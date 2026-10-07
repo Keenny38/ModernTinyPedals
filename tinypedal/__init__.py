@@ -105,6 +105,7 @@ class ApplicationSignal(QObject):
         hotkey: signal for run hotkey command from main thread.
         error: signal for notifying background error message (thread crash, save failure).
         saving: signal for saving state changes (True = started, False = finished).
+        addresses: signal for LAN addresses of this computer changed (looked up in background).
     """
 
     reload = Signal(bool)
@@ -114,6 +115,7 @@ class ApplicationSignal(QObject):
     hotkey = Signal(object)
     error = Signal(str)
     saving = Signal(bool)
+    addresses = Signal()
     __slots__ = ()
 
 

@@ -26,6 +26,15 @@ EXTREME_VALUES = {
 FUZZED_GROUPS = ("wheels", "hybrid", "fuel", "energy", "delta", "force", "stint")
 
 
+@pytest.fixture(autouse=True)
+def reference_loading():
+    """Background thread finding reference lap (telemetry comparison) ended after each test"""
+    yield
+    from tinypedal.userfile.reference_trace import stop_loading
+
+    stop_loading()
+
+
 def fill_module_output(monkeypatch, value):
     """Set every float output of the data modules to one extreme value"""
     for group_name in FUZZED_GROUPS:

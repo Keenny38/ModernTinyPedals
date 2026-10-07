@@ -80,6 +80,13 @@ class LazyPage(QWidget):
         self.setFocusProxy(None)  # type: ignore[arg-type]  # PySide6 stubs refuse None
         self._layout.removeWidget(page)
         page.hide()
+        # Qt Quick views go first: backend (created before view) is deleted first by Qt,
+        # QML bindings still active would then read a null backend
+        from PySide6.QtCore import QUrl
+        from PySide6.QtQuickWidgets import QQuickWidget
+
+        for view in page.findChildren(QQuickWidget):
+            view.setSource(QUrl())
         page.deleteLater()
         return True
 

@@ -79,19 +79,52 @@ def generate_access_code(length: int = 8) -> str:
 ADDRESS_CACHE_SECONDS = 30.0  # LAN addresses asked again after this time (pages refresh every second)
 _address_lock = threading.Lock()
 _address_cache: tuple[float, list[str]] | None = None  # monotonic time, addresses
+_address_refreshing = False  # background lookup running
 
 
-def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS) -> list[str]:
-    """LAN IPv4 addresses of this computer (cached for max_age seconds: host name lookup can be slow)"""
-    global _address_cache
+def local_addresses(max_age: float = ADDRESS_CACHE_SECONDS, wait: bool = False) -> list[str]:
+    """LAN IPv4 addresses of this computer
+
+    Host name lookup can be slow (VPN, slow DNS): addresses cached for max_age seconds, then
+    looked up again in background, last known addresses (none before first lookup) returned
+    meanwhile, app_signal.addresses emitted once changed addresses are found. GUI never blocked.
+
+    Args:
+        max_age: cached addresses older than this (seconds) looked up again.
+        wait: look up now and wait for result if cache is older than max_age.
+    """
+    global _address_refreshing
     now = time.monotonic()
     with _address_lock:
         cached = _address_cache
         if cached is not None and now - cached[0] < max_age:
             return list(cached[1])
-    addresses = lookup_local_addresses()
+        if not wait:
+            if not _address_refreshing:
+                _address_refreshing = True
+                threading.Thread(target=_refresh_addresses, daemon=True, name="LAN addresses").start()
+            return list(cached[1]) if cached is not None else []
+    return _store_addresses(lookup_local_addresses())
+
+
+def _refresh_addresses():
+    """Background lookup of LAN addresses"""
+    global _address_refreshing
+    try:
+        _store_addresses(lookup_local_addresses())
+    finally:
+        with _address_lock:
+            _address_refreshing = False
+
+
+def _store_addresses(addresses: list[str]) -> list[str]:
+    """Cache addresses looked up, signal if changed"""
+    global _address_cache
     with _address_lock:
-        _address_cache = (now, addresses)
+        changed = _address_cache is None or _address_cache[1] != addresses
+        _address_cache = (time.monotonic(), addresses)
+    if changed:
+        app_signal.addresses.emit()
     return list(addresses)
 
 
@@ -462,10 +495,10 @@ class WebDashboard:
     def port() -> int:
         return int(cfg.user.config["web_dashboard"]["web_dashboard_port"])
 
-    def urls(self) -> list[str]:
-        """Dashboard addresses with access code"""
+    def urls(self, wait: bool = False) -> list[str]:
+        """Dashboard addresses with access code (wait: LAN addresses looked up now if outdated)"""
         code = self.access_code()
-        hosts = local_addresses() if cfg.user.config["web_dashboard"]["enable_lan_access"] else []
+        hosts = local_addresses(wait=wait) if cfg.user.config["web_dashboard"]["enable_lan_access"] else []
         scheme = "https" if self.use_https() else "http"
         return [f"{scheme}://{host}:{self.port()}/?code={code}" for host in ("127.0.0.1", *hosts)]
 
@@ -490,7 +523,7 @@ class WebDashboard:
                 DashboardHandler.sessions = {}
         host, port, secure = self.host(), self.port(), self.use_https()
         # HTTPS certificate covers LAN addresses: made again (server started again) if they changed
-        addresses = local_addresses(max_age=0) if secure and host != "127.0.0.1" else []
+        addresses = local_addresses(max_age=0, wait=True) if secure and host != "127.0.0.1" else []
         key = (host, port, secure, tuple(addresses))
         if self._server is not None and self._key != key:
             self.disable()

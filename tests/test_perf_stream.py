@@ -21,21 +21,81 @@ def lookups(monkeypatch):
     web_dashboard.clear_address_cache()
 
 
+def wait_address_lookup(timeout: float = 5.0):
+    """Background LAN address lookup finished"""
+    import time
+
+    end = time.monotonic() + timeout
+    while web_dashboard._address_refreshing and time.monotonic() < end:
+        time.sleep(0.01)
+    assert not web_dashboard._address_refreshing
+
+
 # LAN addresses
 def test_local_addresses_cached(lookups, monkeypatch):
-    assert web_dashboard.local_addresses() == ["192.168.1.20"]
-    assert web_dashboard.local_addresses() == ["192.168.1.20"]
+    assert web_dashboard.local_addresses(wait=True) == ["192.168.1.20"]
+    assert web_dashboard.local_addresses(wait=True) == ["192.168.1.20"]
     assert len(lookups) == 1  # second call from cache
     web_dashboard.local_addresses().append("changed")  # copy returned, cache untouched
     assert web_dashboard.local_addresses() == ["192.168.1.20"]
-    assert web_dashboard.local_addresses(max_age=0) == ["192.168.1.20"] and len(lookups) == 2  # fresh lookup
+    assert web_dashboard.local_addresses(max_age=0, wait=True) == ["192.168.1.20"] and len(lookups) == 2  # fresh
     now = web_dashboard.time.monotonic()
     monkeypatch.setattr(web_dashboard.time, "monotonic", lambda: now + web_dashboard.ADDRESS_CACHE_SECONDS + 1)
-    web_dashboard.local_addresses()
+    web_dashboard.local_addresses(wait=True)
     assert len(lookups) == 3  # expired
     web_dashboard.clear_address_cache()
-    web_dashboard.local_addresses()
+    web_dashboard.local_addresses(wait=True)
     assert len(lookups) == 4
+
+
+def test_local_addresses_looked_up_in_background(monkeypatch):
+    """GUI thread never waits for host name lookup: last known addresses returned meanwhile,
+    signal emitted once changed addresses are found"""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    threads = []
+    found = [["192.168.1.20"]]
+
+    def slow_lookup():
+        threads.append(threading.current_thread())
+        started.set()
+        assert release.wait(5)
+        return found[0]
+
+    signaled = []
+
+    def on_addresses():
+        signaled.append(1)
+
+    monkeypatch.setattr(web_dashboard, "lookup_local_addresses", slow_lookup)
+    web_dashboard.app_signal.addresses.connect(on_addresses)
+    web_dashboard.clear_address_cache()
+    try:
+        assert web_dashboard.local_addresses() == []  # first lookup running: no address yet
+        assert started.wait(5) and threads[0] is not threading.main_thread()
+        assert web_dashboard.local_addresses() == []  # single lookup at a time
+        release.set()
+        wait_address_lookup()
+        QCoreApplication.processEvents()
+        assert web_dashboard.local_addresses() == ["192.168.1.20"] and len(threads) == 1
+        assert len(signaled) == 1
+        # Expired: old addresses returned while looked up again
+        release.clear()
+        started.clear()
+        found[0] = ["10.0.0.5"]
+        assert web_dashboard.local_addresses(max_age=0) == ["192.168.1.20"]
+        assert started.wait(5)
+        release.set()
+        wait_address_lookup()
+        QCoreApplication.processEvents()
+        assert web_dashboard.local_addresses() == ["10.0.0.5"] and len(signaled) == 2
+    finally:
+        release.set()
+        wait_address_lookup()
+        web_dashboard.app_signal.addresses.disconnect(on_addresses)
+        web_dashboard.clear_address_cache()
 
 
 def test_stream_url_without_address_lookup(server, lookups):  # noqa: F811
@@ -46,6 +106,7 @@ def test_stream_url_without_address_lookup(server, lookups):  # noqa: F811
         url = server.url("/layout")
         assert not lookups  # this computer address: no LAN lookup
         assert url.startswith(server.base_urls()[0] + "/layout?token=")
+        wait_address_lookup()  # looked up in background
         assert server.base_urls()[1:] == [f"http://192.168.1.20:{server.port()}"]
     finally:
         cfg.user.config["stream_overlay"]["enable_lan_access"] = False
@@ -66,15 +127,18 @@ def test_page_signals_server_state_only_when_changed(page_backend, server, looku
     backend.refresh()
     assert len(emitted) == 1
     cfg.user.config["stream_overlay"]["enable_lan_access"] = True  # changed elsewhere (other page)
+    backend.refresh()  # addresses looked up in background
+    wait_address_lookup()
+    backend.refresh()  # found by next refresh (every second) at the latest
+    count = len(emitted)
+    assert count in (2, 3) and "192.168.1.20" in backend.lanText
     backend.refresh()
-    assert len(emitted) == 2 and "192.168.1.20" in backend.lanText
-    backend.refresh()
-    assert len(emitted) == 2 and len(lookups) == 1  # addresses cached
+    assert len(emitted) == count and len(lookups) == 1  # addresses cached
     cfg.user.config["stream_overlay"]["enable_lan_access"] = False
     backend.page_shown()
-    assert len(emitted) == 3  # changed (signaled once)
+    assert len(emitted) == count + 1  # changed (signaled once)
     backend.page_shown()
-    assert len(emitted) == 4  # shown: always signaled
+    assert len(emitted) == count + 2  # shown: always signaled
 
 
 # Overlay window paint serial

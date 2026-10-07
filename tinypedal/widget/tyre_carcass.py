@@ -167,6 +167,17 @@ class Realtime(Overlay):
         self.last_rtemp: list[float] | None = None
         self.last_lap_etime = 0.0
 
+    def post_update(self):
+        """Rate of change restarts from next reading (no rate against stale temperature)"""
+        self.reset_rates()
+
+    def reset_rates(self):
+        """Clear rate of change & last temperature (new session or paused timer)"""
+        self.last_rtemp = None
+        if self.wcfg["show_rate_of_change"]:
+            for bar_rdiff in self.bars_rdiff:
+                self.update_rdiff(bar_rdiff, 0.0)
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         # Update compound while in pit (or switched pit state)
@@ -196,8 +207,9 @@ class Realtime(Overlay):
         if self.wcfg["show_rate_of_change"]:
             lap_etime = api.read.timing.elapsed()
 
-            if self.last_lap_etime > lap_etime:
+            if self.last_lap_etime > lap_etime:  # new session
                 self.last_lap_etime = lap_etime
+                self.reset_rates()
             elif lap_etime - self.last_lap_etime >= 0.1:
                 interval = self.rate_interval / (lap_etime - self.last_lap_etime)
                 self.last_lap_etime = lap_etime

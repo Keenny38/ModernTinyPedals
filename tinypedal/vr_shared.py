@@ -125,6 +125,24 @@ class LayerStatus(NamedTuple):
         return GRAPHICS_API_NAMES.get(self.graphics_api, "unknown")
 
 
+def cropped_placement(placement: Placement, crop: tuple[int, int, int, int] | None,
+                      width: int, height: int) -> Placement:
+    """Placement of width x height part at (x, y) of a canvas placed by placement (same scale & position)
+
+    Args:
+        crop: (x, y, canvas_width, canvas_height), None if image is the whole canvas.
+    """
+    if crop is None or crop[2] <= 0 or crop[3] <= 0:
+        return placement
+    x, y, canvas_width, canvas_height = crop
+    scale = placement.width_meters / canvas_width  # meters per pixel
+    return placement._replace(
+        width_meters=width * scale,
+        horizontal_offset_meters=placement.horizontal_offset_meters + (x + (width - canvas_width) / 2) * scale,
+        vertical_offset_meters=placement.vertical_offset_meters - (y + (height - canvas_height) / 2) * scale,
+    )
+
+
 def tick_ms() -> int:
     """Milliseconds since boot, same clock as the layer (GetTickCount64)"""
     if WINDOWS:
@@ -150,6 +168,7 @@ class SharedFrameWriter:
         self._flags = 0
         self._placement = Placement(0.8, 1.0, -0.2, 0.0, False)
         self._size = (0, 0, 0)  # width, height, stride of last image
+        self._crop: tuple[int, int, int, int] | None = None  # x, y, canvas width & height of last image
 
     @property
     def is_open(self) -> bool:
@@ -214,8 +233,14 @@ class SharedFrameWriter:
             if self._buffer is not None:
                 self.__write(None, visible=bool(self._flags & FLAG_VISIBLE))
 
-    def write_image(self, pixels: Any, width: int, height: int, stride: int):
+    def write_image(self, pixels: Any, width: int, height: int, stride: int,
+                    crop: tuple[int, int, int, int] | None = None):
         """Show new image: RGBA8 rows (straight alpha, sRGB colors), stride bytes per row
+
+        Args:
+            crop: image is the (x, y) part of a canvas_width x canvas_height image (transparent around):
+                (x, y, canvas_width, canvas_height). Placement (set for whole canvas) adjusted, so the
+                image is shown where it is on the canvas.
 
         Raises:
             ValueError: image too big for shared memory (caller scales it down first).
@@ -224,7 +249,7 @@ class SharedFrameWriter:
                 and stride * height <= MAX_IMAGE_BYTES):
             raise ValueError(f"VR overlay image too big for OpenXR layer: {width}x{height}")
         if self._buffer is not None:
-            self.__write((pixels, width, height, stride), visible=True)
+            self.__write((pixels, width, height, stride, crop), visible=True)
 
     def hide(self):
         """Nothing shown (all overlays hidden)"""
@@ -245,7 +270,7 @@ class SharedFrameWriter:
             sequence += 1
         struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 1)
         if image is not None:
-            pixels, width, height, stride = image
+            pixels, width, height, stride, crop = image
             view = memoryview(pixels).cast("B")
             size = stride * height
             if len(view) < size:
@@ -254,8 +279,9 @@ class SharedFrameWriter:
             buffer[DATA_OFFSET:DATA_OFFSET + size] = view[:size]
             self._serial = (self._serial + 1) & 0xFFFFFFFF
             self._size = (width, height, stride)
+            self._crop = crop
         width, height, stride = self._size
-        placement = self._placement
+        placement = cropped_placement(self._placement, self._crop, width, height)
         self._flags = (FLAG_VISIBLE if visible and width else 0) | (
             FLAG_ATTACH_TO_HEADSET if placement.attach_to_headset else 0)
         struct.pack_into(

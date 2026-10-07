@@ -66,6 +66,15 @@ class Realtime(QuadMixin, ModernOverlay):
         center = self.unit * 1.2 if self.show_compound else 0.0
         self.set_size(*self.build_quads([section], center_width=center, show_labels=False))
 
+    def post_update(self):
+        """Rate of change restarts from next reading (no rate against stale temperature)"""
+        self.reset_rates()
+
+    def reset_rates(self):
+        """Clear rate of change & last temperature (new session or paused timer)"""
+        self.rates = [0.0] * 4
+        self.last_temps = None
+
     def paint_static(self, painter: QPainter):
         self.paint_quads_static(painter)
 
@@ -82,8 +91,9 @@ class Realtime(QuadMixin, ModernOverlay):
         temps = api.read.tyre.carcass_temperature()
         if self.show_rate:
             elapsed = api.read.timing.elapsed()
-            if self.last_elapsed > elapsed:
+            if self.last_elapsed > elapsed:  # new session
                 self.last_elapsed = elapsed
+                self.reset_rates()
             elif elapsed - self.last_elapsed >= 0.1:
                 interval = self.rate_interval / (elapsed - self.last_elapsed)
                 self.last_elapsed = elapsed

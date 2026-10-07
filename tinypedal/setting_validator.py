@@ -145,8 +145,12 @@ class ValueValidator:
         """Value - Boolean"""
         if not re.search(rxp.CFG_BOOL, key):
             return False
-        if not isinstance(dict_user[key], bool):
-            dict_user[key] = bool(dict_user[key])
+        value = dict_user[key]
+        if not isinstance(value, bool):
+            if type(value) is int and value in (0, 1):
+                dict_user[key] = bool(value)
+            else:  # "false" etc: restore default (not bool("false") = True)
+                dict_user.pop(key)
         return True
 
     @staticmethod

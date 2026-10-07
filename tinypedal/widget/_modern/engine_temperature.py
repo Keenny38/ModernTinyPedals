@@ -68,6 +68,15 @@ class Realtime(StatsMixin, ModernOverlay):
         self.last_elapsed = 0.0
         self.last_lap_start = -1.0
 
+    def post_update(self):
+        """Rate of change restarts from next reading (no rate against stale temperature)"""
+        self.reset_rates()
+
+    def reset_rates(self):
+        """Clear rate of change & last temperature (new session or paused timer)"""
+        self.rates = {"oil": 0.0, "water": 0.0}
+        self.last_temps = {"oil": None, "water": None}
+
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
 
@@ -87,8 +96,9 @@ class Realtime(StatsMixin, ModernOverlay):
         lap_start = api.read.timing.start()
         elapsed = api.read.timing.elapsed()
         interval = 0.0
-        if self.last_elapsed > elapsed:
+        if self.last_elapsed > elapsed:  # new session
             self.last_elapsed = elapsed
+            self.reset_rates()
         elif elapsed - self.last_elapsed >= 0.1:
             interval = self.rate_interval / (elapsed - self.last_elapsed)
             self.last_elapsed = elapsed

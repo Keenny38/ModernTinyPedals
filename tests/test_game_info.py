@@ -696,6 +696,25 @@ def test_replay_files_copy(tmp_path, monkeypatch):
     assert [os.path.basename(path) for path in replay_files.temp_files(str(folder), now=4e9)] == ["_vcr123.tmp"]
 
 
+def test_replay_temp_file_deleted_during_scan(tmp_path, monkeypatch):
+    """Game deleting a _vcr*.tmp file between scandir & stat: file skipped, no FileNotFoundError"""
+    import os
+
+    from tinypedal.ui.quick import replay_files
+
+    (tmp_path / "_vcr1.tmp").write_bytes(b"t")
+    (tmp_path / "_vcr2.tmp").write_bytes(b"t")
+    real_scandir = os.scandir
+
+    def scandir_then_delete(path):
+        entries = list(real_scandir(path))
+        os.remove(tmp_path / "_vcr1.tmp")
+        return iter(entries)
+
+    monkeypatch.setattr(replay_files.os, "scandir", scandir_then_delete)
+    assert [os.path.basename(path) for path in replay_files.temp_files(str(tmp_path), now=4e9)] == ["_vcr2.tmp"]
+
+
 def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
     from types import SimpleNamespace
 

@@ -744,10 +744,11 @@ class RawText(QWidget):
         if not OverlayStyle.corner_scale and not OverlayStyle.depth_effects:  # flat style
             painter.fillRect(0, 0, self._width, self._height, bg)
             return
-        key = (bg, self._width, self._height, OverlayStyle.corner_scale, OverlayStyle.depth_effects)
+        ratio = self.devicePixelRatioF()  # changes when moved to a screen of another scale
+        key = (bg, self._width, self._height, OverlayStyle.corner_scale, OverlayStyle.depth_effects, ratio)
         if key != self._bg_key or self._bg_pixmap is None:
             self._bg_key = key
-            self._bg_pixmap = background_pixmap(self._width, self._height, bg, self.devicePixelRatioF())
+            self._bg_pixmap = background_pixmap(self._width, self._height, bg, ratio)
         if self._bg_pixmap is not None:
             painter.drawPixmap(0, 0, self._bg_pixmap)
         else:

@@ -6,6 +6,7 @@
 
 #include "shared_frame.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -226,35 +227,42 @@ struct LinearTable {
 void convert_pixels(const uint8_t* pixels, uint32_t width, uint32_t height, uint32_t out_width, uint32_t out_height,
                     bool bgra, bool linear, std::vector<uint8_t>& out) {
     static const LinearTable table;
-    out.assign(static_cast<size_t>(out_width) * out_height * 4u, 0);
-    if (pixels == nullptr || width > out_width || height > out_height) {
-        return;
-    }
+    // Buffer reused (no reallocation nor full zero fill on the game's render thread): image pixels
+    // overwritten, only the rest (transparent border) cleared
+    out.resize(static_cast<size_t>(out_width) * out_height * 4u);
     const size_t out_row = static_cast<size_t>(out_width) * 4u;
-    const size_t in_row = static_cast<size_t>(width) * 4u;
-    if (!bgra && !linear) {
-        for (uint32_t row = 0; row < height; ++row) {
-            std::memcpy(out.data() + out_row * row, pixels + in_row * row, in_row);
-        }
+    if (pixels == nullptr || width > out_width || height > out_height) {
+        std::fill(out.begin(), out.end(), static_cast<uint8_t>(0));
         return;
     }
+    const size_t in_row = static_cast<size_t>(width) * 4u;
     for (uint32_t row = 0; row < height; ++row) {
         const uint8_t* source = pixels + in_row * row;
         uint8_t* target = out.data() + out_row * row;
-        for (uint32_t column = 0; column < width; ++column, source += 4, target += 4) {
-            uint8_t red = source[0];
-            uint8_t green = source[1];
-            uint8_t blue = source[2];
-            if (linear) {
-                red = table.values[red];
-                green = table.values[green];
-                blue = table.values[blue];
+        if (!bgra && !linear) {
+            std::memcpy(target, source, in_row);
+        } else {
+            for (uint32_t column = 0; column < width; ++column, source += 4, target += 4) {
+                uint8_t red = source[0];
+                uint8_t green = source[1];
+                uint8_t blue = source[2];
+                if (linear) {
+                    red = table.values[red];
+                    green = table.values[green];
+                    blue = table.values[blue];
+                }
+                target[0] = bgra ? blue : red;
+                target[1] = green;
+                target[2] = bgra ? red : blue;
+                target[3] = source[3];
             }
-            target[0] = bgra ? blue : red;
-            target[1] = green;
-            target[2] = bgra ? red : blue;
-            target[3] = source[3];
         }
+        if (out_row > in_row) {
+            std::memset(out.data() + out_row * row + in_row, 0, out_row - in_row);  // right border
+        }
+    }
+    if (out_height > height) {
+        std::memset(out.data() + out_row * height, 0, out_row * (out_height - height));  // bottom border
     }
 }
 

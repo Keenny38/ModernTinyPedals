@@ -42,6 +42,15 @@ FIELD_ATTRIBUTES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def reference_loading():
+    """Background thread finding reference lap (telemetry comparison) ended after each test"""
+    yield
+    from tinypedal.userfile.reference_trace import stop_loading
+
+    stop_loading()
+
+
 @pytest.fixture
 def live(ui_env, bundled_fonts, monkeypatch):
     """API reader on in-memory shared memory, field of cars in data module output"""

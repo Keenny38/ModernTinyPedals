@@ -236,9 +236,14 @@ class HttpConnection:
         if self._stream is None:
             self._stream = await wait_for(open_connection(self.host, self.port), self.timeout)
         reader, writer = self._stream
-        writer.write(request)
-        await writer.drain()
-        response = await wait_for(read_response(reader), self.timeout)
+        try:
+            writer.write(request)
+            await writer.drain()
+            response = await wait_for(read_response(reader), self.timeout)
+        except BaseException:
+            # Never keep a connection with a pending or partially read response
+            self.close()
+            raise
         if not (self._reuse and response.keep_alive):
             self.close()
         return response.body

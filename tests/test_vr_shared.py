@@ -438,6 +438,19 @@ def fake_openvr(log):
     return module
 
 
+STEAMVR_CHECK = vr_overlay.SteamVRCheck
+
+
+class SyncSteamVRCheck:
+    """SteamVR process check done at once (background thread in app)"""
+
+    def __init__(self):
+        self.running = vr_overlay.steamvr_running()
+
+    def done(self):
+        return True
+
+
 class Env:
     """OpenXR layer available (Windows mocked), shared memory in a bytearray, fake clock"""
 
@@ -455,6 +468,7 @@ class Env:
         monkeypatch.setattr(vr_shared, "unregister_layer", lambda: self.unregistered.append(1) or 0)
         monkeypatch.setattr(vr_shared, "tick_ms", lambda: self.now)
         monkeypatch.setattr(vr_overlay, "steamvr_running", lambda: self.steamvr)
+        monkeypatch.setattr(vr_overlay, "SteamVRCheck", SyncSteamVRCheck)
 
     def frame(self):
         return frame_fields(self.buffer)
@@ -512,8 +526,14 @@ def test_openxr_layer_receives_frames(env, monkeypatch):
         env.now += 50
         control.update_overlay()
         width, height, stride, _format, flags, _serial, width_m, distance, vertical, horizontal = env.frame()[:10]
-        assert width >= 60 and height >= 30 and stride == width * 4 and flags & vr_shared.FLAG_VISIBLE
-        assert (width_m, distance, vertical, horizontal) == pytest.approx((0.8, 1.0, -0.2, 0.0))
+        assert (width, height) == (60, 30) and stride == width * 4 and flags & vr_shared.FLAG_VISIBLE  # widget only
+        canvas = vr_overlay.compose_widgets([widget])  # window frame size, transparent around widget
+        rect = vr_overlay.content_rect(canvas)
+        assert (rect.width(), rect.height()) == (60, 30) and canvas.width() > 60
+        expected = vr_shared.cropped_placement(vr_shared.Placement(0.8, 1.0, -0.2, 0.0, False),
+                                               (rect.x(), rect.y(), canvas.width(), canvas.height()), 60, 30)
+        assert expected.width_meters == pytest.approx(0.8 * 60 / canvas.width())  # same scale as canvas
+        assert (width_m, distance, vertical, horizontal) == pytest.approx(expected[:4])
         pixel = env.buffer[vr_shared.DATA_OFFSET + (15 * width + 30) * 4:][:4]  # inside the red widget
         assert pixel[0] == 255 and pixel[3] == 255
         assert struct.unpack_from("<Q", env.buffer, vr_shared.OFFSET_APP_HEARTBEAT)[0] == env.now
@@ -672,6 +692,128 @@ def test_steamvr_closed_then_restarted(env, monkeypatch):
     finally:
         widget.close()
         control.disable()
+
+
+def test_steamvr_process_checked_in_background(env, monkeypatch):
+    """Process scan (tens of ms) never on GUI thread, none while the OpenXR layer draws the overlay"""
+    import threading
+
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    monkeypatch.setattr(vr_overlay, "SteamVRCheck", STEAMVR_CHECK)  # background thread, as in app
+    threads = []
+    release = threading.Event()
+
+    def scan():
+        threads.append(threading.current_thread())
+        assert release.wait(5)
+        return env.steamvr
+
+    monkeypatch.setattr(vr_overlay, "steamvr_running", scan)
+    env.steamvr = True
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()  # check started, GUI thread not blocked
+        assert threads and threads[0] is not threading.main_thread()
+        control.update_overlay()
+        assert "init" not in log  # result not known yet
+        release.set()
+        control._steamvr_check._thread.join(5)
+        control.update_overlay()
+        assert "init" in log and control._overlay is not None
+        # SteamVR closed while the OpenXR layer draws: no process scan until it stops drawing
+        control._overlay.setOverlayRaw = None  # raises TypeError: SteamVR overlay stopped
+        widget.setStyleSheet("background: blue;")
+        write_layer_status(env.buffer, env.now, frames=9)
+        control.update_overlay()
+        write_layer_status(env.buffer, env.now, frames=12)
+        env.now += 50
+        control.update_overlay()
+        assert control._overlay is None and control._xr_drawing
+        threads.clear()
+        for _ in range(3):
+            env.now += vr_overlay.STEAMVR_RETRY_MS
+            write_layer_status(env.buffer, env.now, frames=12 + env.now)
+            control.update_overlay()
+        assert not threads and control._steamvr_check is None
+        env.now += vr_shared.LAYER_TIMEOUT_MS + 1  # game closed: layer silent, SteamVR checked again
+        control.update_overlay()
+        assert threads and (control._steamvr_check is not None or control._overlay is not None)
+    finally:
+        release.set()
+        widget.close()
+        control.disable()
+
+
+def test_openxr_image_rate_limited_and_cropped(env, monkeypatch):
+    """Layer copies the image in the game frame: written at most every OPENXR_MIN_INTERVAL_MS (last image
+    written later even without new paint), transparent margins cropped, same place in VR"""
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    other = FakeOverlayWindow()
+    other.setGeometry(310, 210, 40, 20)
+    other.setStyleSheet("background: green;")
+    other.show()
+    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget, other]))
+    try:
+        control.enable()
+        control.update_overlay()
+        serial = env.frame()[5]
+        width, height = env.frame()[:2]
+        assert (width, height) == (340, 220)  # both widgets: margins cropped
+        widget.setStyleSheet("background: blue;")
+        env.now += 20
+        control.update_overlay()
+        assert env.frame()[5] == serial  # too soon: kept for later
+        env.now += vr_overlay.OPENXR_MIN_INTERVAL_MS
+        control.update_overlay()  # nothing painted since: kept image written now
+        assert env.frame()[5] == serial + 1
+        pixel = env.buffer[vr_shared.DATA_OFFSET + (15 * width + 30) * 4:][:4]
+        assert pixel[2] == 255 and pixel[3] == 255  # blue
+        other.hide()
+        env.now += 20
+        control.update_overlay()
+        assert env.frame()[:2] == (340, 220)  # rate limited
+        env.now += vr_overlay.OPENXR_MIN_INTERVAL_MS
+        control.update_overlay()
+        assert env.frame()[:2] == (60, 30)  # widget only
+        widget.hide()
+        env.now += 1
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE == 0  # all hidden: at once
+    finally:
+        widget.close()
+        other.close()
+        control.disable()
+
+
+def test_cropped_placement_keeps_position_in_vr():
+    placement = vr_shared.Placement(1.0, 1.5, -0.2, 0.1, False)
+    assert vr_shared.cropped_placement(placement, None, 50, 25) == placement
+    assert vr_shared.cropped_placement(placement, (0, 0, 100, 50), 100, 50) == placement
+    top_left = vr_shared.cropped_placement(placement, (0, 0, 100, 50), 50, 25)  # meters: 0.01 per pixel
+    assert top_left[:4] == pytest.approx((0.5, 1.5, -0.2 + 0.125, 0.1 - 0.25))
+    bottom_right = vr_shared.cropped_placement(placement, (90, 40, 100, 50), 10, 10)
+    assert bottom_right[:4] == pytest.approx((0.1, 1.5, -0.2 - 0.2, 0.1 + 0.45))
+    assert bottom_right.attach_to_headset is False
+
+
+def test_content_rect():
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QColor
+
+    image = QImage(301, 97, QImage.Format.Format_RGBA8888)
+    image.fill(0)
+    assert vr_overlay.content_rect(image).isEmpty()
+    image.setPixelColor(7, 5, QColor(0, 0, 0, 1))
+    assert vr_overlay.content_rect(image) == QRect(7, 5, 1, 1)
+    image.setPixelColor(290, 96, QColor(255, 0, 0, 255))
+    assert vr_overlay.content_rect(image) == QRect(7, 5, 284, 92)
+    image.fill(QColor(1, 2, 3, 200))
+    assert vr_overlay.content_rect(image) == QRect(0, 0, 301, 97)
 
 
 def test_enable_never_raises(env, monkeypatch):

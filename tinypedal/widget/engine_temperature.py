@@ -184,14 +184,29 @@ class Realtime(Overlay):
         self.last_temp_oil: float | None = None
         self.last_temp_water: float | None = None
 
+    def post_update(self):
+        """Rate of change restarts from next reading (no rate against stale temperature)"""
+        self.reset_rates()
+
+    def reset_rates(self):
+        """Clear rate of change & last temperature (new session or paused timer)"""
+        self.last_temp_oil = None
+        self.last_temp_water = None
+        if self.wcfg["show_rate_of_change"]:
+            if self.wcfg["show_oil_temperature"]:
+                self.update_rate(self.bar_oil_rate, 0.0)
+            if self.wcfg["show_water_temperature"]:
+                self.update_rate(self.bar_water_rate, 0.0)
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         lap_stime = api.read.timing.start()
         lap_etime = api.read.timing.elapsed()
 
         interval = 0
-        if self.last_lap_etime > lap_etime:
+        if self.last_lap_etime > lap_etime:  # new session
             self.last_lap_etime = lap_etime
+            self.reset_rates()
         elif lap_etime - self.last_lap_etime >= 0.1:
             interval = self.rate_interval / (lap_etime - self.last_lap_etime)
             self.last_lap_etime = lap_etime

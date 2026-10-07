@@ -93,12 +93,15 @@ class BoundedLogStream:
         return iter(self.getvalue().splitlines(keepends=True))
 
 
-def new_stream_handler(_logger: logging.Logger, stream) -> logging.StreamHandler:
+def new_stream_handler(
+    _logger: logging.Logger, stream, level: int = logging.INFO
+) -> logging.StreamHandler:
     """Create new stream handler
 
     Args:
         _logger: logger instance.
         stream: stream object.
+        level: minimum logging level.
     Returns:
         Stream handler.
     """
@@ -107,7 +110,7 @@ def new_stream_handler(_logger: logging.Logger, stream) -> logging.StreamHandler
     )
     _handler = logging.StreamHandler(stream)
     _handler.setFormatter(format_console)
-    _handler.setLevel(logging.INFO)
+    _handler.setLevel(level)
     _logger.addHandler(_handler)
     return _handler
 
@@ -160,9 +163,14 @@ def set_logging_level(_logger: logging.Logger, filepath: str, filename: str, log
     if log_level >= 1:
         new_stream_handler(_logger, sys.stdout)
         _logger.info("LOGGING: output to console")
+    else:
+        new_stream_handler(_logger, sys.stdout, level=logging.WARNING)
     if log_level == 2:
-        new_file_handler(_logger, filepath, filename)
-        _logger.info("LOGGING: output to %s", filename)
+        try:
+            new_file_handler(_logger, filepath, filename)
+            _logger.info("LOGGING: output to %s", filename)
+        except OSError:
+            _logger.warning("LOGGING: unable to create %s", filename)
     # Always keep warning & error (including thread crash traceback) in small rotating file
     try:
         new_file_handler(

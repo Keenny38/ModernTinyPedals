@@ -215,6 +215,46 @@ def test_lazy_page_released_and_built_again(ui_env, counting):
         flush_deleted()
 
 
+def test_lazy_page_release_clears_qml_before_backend(ui_env, tmp_path):
+    """Released page: Qt Quick view emptied before deletion, QML bindings never read the
+    backend (child created before the view, so deleted first by Qt)"""
+    from PySide6.QtCore import Property, QObject, QUrl, qInstallMessageHandler
+    from PySide6.QtQuickWidgets import QQuickWidget
+
+    from tinypedal.ui.lazy_page import LazyPage
+
+    class Backend(QObject):
+        @Property(int, constant=True)
+        def count(self):
+            return 3
+
+    qml = tmp_path / "Page.qml"
+    qml.write_text("import QtQuick\nItem { property int shown: backend.count + 1 }\n", encoding="utf-8")
+
+    def factory(parent):
+        page = QWidget(parent)
+        page.backend = Backend(page)  # created before view, as page backends
+        view = QQuickWidget(page)
+        view.rootContext().setContextProperty("backend", page.backend)
+        view.setSource(QUrl.fromLocalFile(str(qml)))
+        assert view.rootObject().property("shown") == 4
+        return page
+
+    messages = []
+    previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
+    lazy = LazyPage(None, factory)
+    try:
+        lazy.ensure_page()
+        assert lazy.release()
+        flush_deleted()
+        QCoreApplication.processEvents()
+    finally:
+        qInstallMessageHandler(previous)
+        lazy.deleteLater()
+        flush_deleted()
+    assert not [text for text in messages if "TypeError" in text or "null" in text], messages
+
+
 def test_pages_released_while_window_hidden(ui_env, counting):
     from tinypedal.ui.lazy_page import LazyPage, PageRelease
 

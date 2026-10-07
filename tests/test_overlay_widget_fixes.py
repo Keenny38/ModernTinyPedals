@@ -191,6 +191,33 @@ def test_rate_of_change_has_no_start_spike(widgets, monkeypatch, modern):
         assert all(bar.last == 0 for bar in carcass.bars_rdiff)
 
 
+@pytest.mark.parametrize("modern", [True, False])
+@pytest.mark.parametrize("pause", [False, True])
+def test_rate_of_change_restarts_on_new_session(widgets, monkeypatch, modern, pause):
+    """New session (elapsed back to 0) or paused timer: no rate against last session temperature"""
+    engine = widgets("engine_temperature", modern=modern, show_rate_of_change=True, show_net_change_per_lap=False)
+    carcass = widgets("tyre_carcass", modern=modern, show_rate_of_change=True)
+    for elapsed, temp in ((500.0, 110.0), (501.0, 110.0), (0.5, 80.0), (0.7, 80.0)):
+        if elapsed == 0.5 and pause:  # garage: timer paused, then resumed with stale last_elapsed
+            engine.post_update()
+            carcass.post_update()
+            elapsed = 600.0
+        elif elapsed == 0.7 and pause:
+            elapsed = 600.2
+        reader(monkeypatch, "timing", "elapsed", elapsed)
+        reader(monkeypatch, "engine", "oil_temperature", temp)
+        reader(monkeypatch, "engine", "water_temperature", temp)
+        reader(monkeypatch, "tyre", "carcass_temperature", (temp,) * 4)
+        engine.timerEvent(None)
+        carcass.timerEvent(None)
+    if modern:
+        assert engine.rates == {"oil": 0.0, "water": 0.0}
+        assert carcass.rates == [0.0] * 4
+    else:
+        assert engine.bar_oil_rate.last == 0 and engine.bar_water_rate.last == 0
+        assert all(bar.last == 0 for bar in carcass.bars_rdiff)
+
+
 def test_modern_carcass_heating_and_cooling_colors(widgets, monkeypatch):
     carcass = widgets("tyre_carcass", show_rate_of_change=True)
     for elapsed, temps in ((10.0, (85.0,) * 4), (11.0, (95.0, 75.0, 85.0, 85.0))):

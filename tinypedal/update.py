@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import http.client
 import json
 import logging
 import os
@@ -238,7 +239,7 @@ def fetch_localized_summary(repo: str, tag: str, language: str, timeout: float =
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             text = response.read(MAX_CHANGELOG_SIZE).decode("utf-8", "replace")
-    except (OSError, ValueError) as error:  # not translated (404), offline
+    except (OSError, ValueError, http.client.HTTPException) as error:  # not translated (404), offline, cut
         logger.info("UPDATES: no %s release notes: %s", language, error)
         return ""
     version = tag.lstrip("v").split("-")[0]
@@ -713,17 +714,21 @@ class UpdateChecker:
         try:
             raw_bytes = asyncio.run(request_latest_release(repo))
             checked_version, checked_date = parse_release(raw_bytes)
-            self.installer = parse_installer(raw_bytes, repo)
-            self.release_notes = parse_release_notes(raw_bytes)
+            installer = parse_installer(raw_bytes, repo)
+            release_notes = parse_release_notes(raw_bytes)
             current_version = parse_version_string(version.__version__)
-            self._update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
-            self.localized_notes = {}
+            update_available = is_new_version(checked_version, current_version, version.DEVELOPMENT)
+            localized_notes = {}
             language = current_language()
-            if self._update_available and language != "en":  # notes shown in app language
+            if update_available and language != "en":  # notes shown in app language
                 summary = fetch_localized_summary(repo, parse_release_tag(raw_bytes), language)
                 if summary:
-                    self.localized_notes[language] = localize_release_notes(self.release_notes, summary)
-            # Save info
+                    localized_notes[language] = localize_release_notes(release_notes, summary)
+            # Save info, all at once (no partial state on error)
+            self.installer = installer
+            self.release_notes = release_notes
+            self.localized_notes = localized_notes
+            self._update_available = update_available
             self._last_checked_version = checked_version
             self._last_checked_date = checked_date
         except Exception:  # unexpected error: never stuck checking (no check would run again)

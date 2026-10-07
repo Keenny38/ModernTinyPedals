@@ -392,3 +392,20 @@ def test_lmu_restart_uses_new_event(monkeypatch, caplog):
     old_thread.join(5)
     assert not old_thread.is_alive()
     info.stop()
+
+
+def test_lmu_results_driver_key_with_parenthesis_and_xml_entities():
+    """Incident driver key: name up to "(id) reported contact" (may contain parenthesis),
+    XML entities decoded to match mDriverName"""
+    from tinypedal.adapter import lmu_connector
+
+    results = lmu_connector.LMUResults()
+    results.update(
+        b'<Incident et="120.0">Max (FR) Dupont(3) reported contact (12.5) with another vehicle B(4)\n'
+        b'<Incident et="130.0">A &amp; B(5) reported contact (3.0) with Immovable\n'
+        b'<TrackLimits et="140.0" Driver="O&apos;Neil" Lap="2" Resolution="Warning">Warning\n'
+    )
+    assert results.data[b"Max (FR) Dupont"]["contact_vehicle"] == 1
+    assert results.data[b"A & B"]["contact_immovable"] == 1
+    assert results.data[b"O'Neil"]["track_cut"] == 1
+    assert set(results.data) == {b"Max (FR) Dupont", b"A & B", b"O'Neil"}

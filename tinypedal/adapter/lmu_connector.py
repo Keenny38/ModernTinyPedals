@@ -23,7 +23,9 @@ LMU API connector
 from __future__ import annotations
 
 import ctypes
+import html
 import logging
+import re
 import threading
 from collections.abc import Sequence
 from time import monotonic
@@ -102,6 +104,17 @@ def local_scoring_index_by_id(
     return INVALID_INDEX
 
 
+# "<Incident et="120.0">Name (FR)(12) reported contact ..." (name may contain parenthesis)
+INCIDENT_DRIVER = re.compile(rb">(.+?)\(\d+\) reported contact")
+
+
+def unescape_name(name: bytes) -> bytes:
+    """Decode XML entities (&amp;, &apos;...) in driver name, keep other bytes unchanged"""
+    if b"&" not in name:
+        return name
+    return html.unescape(name.decode("utf-8", "surrogateescape")).encode("utf-8", "surrogateescape")
+
+
 class LMUResults:
     """LMU results data (extracted from results stream)"""
 
@@ -141,11 +154,9 @@ class LMUResults:
                 continue
             # Log incidents
             if line.startswith(b"<Incident"):
-                pos_beg = line.find(b">")
-                if pos_beg > 8:
-                    pos_beg += 1
-                    pos_end = line.find(b"(", pos_beg)
-                    driver = line[pos_beg:pos_end]
+                matched = INCIDENT_DRIVER.search(line)
+                if matched:
+                    driver = unescape_name(matched.group(1))
                     self.check_missing(driver)
                     if b"with another vehicle" in line:
                         results_data[driver]["contact_vehicle"] += 1
@@ -158,7 +169,7 @@ class LMUResults:
                 if pos_beg > 11:
                     pos_beg += 8
                     pos_end = line.find(b'"', pos_beg)
-                    driver = line[pos_beg:pos_end]
+                    driver = unescape_name(line[pos_beg:pos_end])
                     self.check_missing(driver)
                     results_data[driver]["track_cut"] += 1
 

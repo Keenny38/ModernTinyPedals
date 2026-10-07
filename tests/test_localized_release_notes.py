@@ -129,6 +129,38 @@ def test_update_check_fetches_notes_in_app_language(monkeypatch, language):
         assert not fetched and checker.notes("fr") == checker.release_notes  # English for every language
 
 
+def test_update_check_state_kept_consistent_on_notes_error(monkeypatch):
+    """Connection cut while fetching translated notes (HTTPException, not OSError): update still
+    notified in English; unexpected error later: no half updated state (update without version)"""
+    import http.client
+
+    checker = update.UpdateChecker()
+
+    async def latest(repo):
+        return release_response()
+
+    def urlopen(url, timeout=0):
+        raise http.client.IncompleteRead(b"partial")
+
+    monkeypatch.setattr(update, "request_latest_release", latest)
+    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(update, "current_language", lambda: "fr")
+    assert update.fetch_localized_summary("Keenny38/ModernTinyPedals", "v99.0.0", "fr") == ""
+    checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
+    assert checker.is_updates() and checker.latest_version() == (99, 0, 0)
+    assert checker.notes("fr") == checker.release_notes
+
+    checker = update.UpdateChecker()
+
+    def fetch(*args):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(update, "fetch_localized_summary", fetch)
+    checker._UpdateChecker__checking("Keenny38/ModernTinyPedals")
+    assert not checker.is_updates() and checker.release_notes == "" and checker.installer is None
+    assert checker.message() == "Unable To Find Updates"
+
+
 def test_no_update_fetches_nothing(monkeypatch):
     checker = update.UpdateChecker()
 

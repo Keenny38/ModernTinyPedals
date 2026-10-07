@@ -293,3 +293,34 @@ def test_log_stream_keeps_latest_text_only():
     stream.truncate(0)
     stream.seek(0)
     assert stream.getvalue() == ""
+
+
+def test_logging_level_0_console_and_unwritable_log_file(tmp_path, capsys):
+    """Level 0: warning & error still printed to console; level 2: unwritable log file
+    does not stop startup (console output kept)"""
+    import logging
+
+    from tinypedal.log_handler import set_logging_level
+
+    logger = logging.getLogger("test_log_level_0")
+    try:
+        set_logging_level(logger, f"{tmp_path}/", "test.log", log_level=0)
+        logger.info("info hidden")
+        logger.warning("warning shown")
+        out = capsys.readouterr().out
+        assert "warning shown" in out and "info hidden" not in out
+    finally:
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+
+    logger = logging.getLogger("test_log_level_2")
+    try:
+        set_logging_level(logger, f"{tmp_path}/missing/", "test.log", log_level=2)
+        logger.info("still logging")
+        out = capsys.readouterr().out
+        assert "still logging" in out and "unable to create test.log" in out
+    finally:
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()

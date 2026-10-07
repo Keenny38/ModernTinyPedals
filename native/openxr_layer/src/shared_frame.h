@@ -101,6 +101,7 @@ uint32_t swapchain_extent(uint32_t image, uint32_t current, uint32_t max);
 // Upload buffer (out_width * out_height RGBA or BGRA, tightly packed) from packed RGBA frame pixels:
 // image at top left, rest transparent, channels swapped for BGRA, colors converted from sRGB to linear
 // for a linear (non sRGB) swapchain format. out_width >= width & out_height >= height.
+// out is reused: resized, image area overwritten, only the rest (border) cleared.
 void convert_pixels(const uint8_t* pixels, uint32_t width, uint32_t height, uint32_t out_width, uint32_t out_height,
                     bool bgra, bool linear, std::vector<uint8_t>& out);
 

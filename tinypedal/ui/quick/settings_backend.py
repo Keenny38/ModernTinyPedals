@@ -34,6 +34,7 @@ from typing import Any, NamedTuple, Protocol
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
+from ... import app_signal
 from ...const_file import ConfigType
 from ...i18n import current_language, tr, trm
 from ...i18n.options import option_help_specific, option_label
@@ -230,6 +231,7 @@ class SettingsBackend(QObject):
         # Navigation entries (read several times per change by the page): made again once state changes
         self._categories: tuple[str, list[dict]] | None = None  # (language, entries)
         self.stateChanged.connect(self._drop_categories)  # before page bindings: connected first
+        app_signal.addresses.connect(self.infoChanged)  # LAN addresses found in background
         self.load_options()
 
     # Options

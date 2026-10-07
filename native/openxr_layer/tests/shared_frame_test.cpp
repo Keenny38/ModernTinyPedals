@@ -241,6 +241,22 @@ void test_convert_pixels() {
     CHECK(out[0] == 0 && out[1] == 128 && out[2] == 255 && out[3] == 200);  // BGRA
     tpvr::convert_pixels(pixels, 2, 1, 2, 1, false, true, out);
     CHECK(out[0] == 255 && out[1] == 55 && out[2] == 0 && out[3] == 200);  // sRGB 128 -> linear 55, alpha kept
+    // Reused buffer: border cleared even where a bigger image left pixels
+    std::vector<uint8_t> reused(5u * 4u * 4u, 0xEE);
+    tpvr::convert_pixels(pixels, 2, 1, 5, 4, false, false, reused);
+    CHECK(reused.size() == 5u * 4u * 4u);
+    CHECK(std::memcmp(reused.data(), pixels, 8) == 0);
+    bool border_clear = true;
+    for (size_t index = 8; index < reused.size(); ++index) {
+        border_clear = border_clear && reused[index] == 0;
+    }
+    CHECK(border_clear);
+    reused.assign(3u * 2u * 4u, 0xEE);
+    tpvr::convert_pixels(pixels, 2, 1, 3, 2, true, true, reused);
+    CHECK(reused[0] == 0 && reused[1] == 55 && reused[2] == 255 && reused[3] == 200);  // BGRA & linear
+    CHECK(reused[8] == 0 && reused[11] == 0 && reused[12] == 0 && reused[23] == 0);  // right & bottom border
+    tpvr::convert_pixels(pixels, 4, 1, 3, 2, false, false, reused);  // image larger than buffer
+    CHECK(reused.size() == 3u * 2u * 4u && reused[0] == 0 && reused[23] == 0);
 }
 
 }  // namespace
