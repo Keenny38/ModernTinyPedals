@@ -15,7 +15,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import app_signal
+from tinypedal import app_signal, vr_overlay
 from tinypedal.setting import cfg
 from tinypedal.vr_overlay import VROverlay
 
@@ -75,7 +75,8 @@ def fake_openvr(log):
 
 
 @pytest.fixture
-def vr_setting(ui_env):
+def vr_setting(ui_env, monkeypatch):
+    monkeypatch.setattr(vr_overlay, "steamvr_running", lambda: True)  # overlay created at once
     setting = cfg.user.config["vr_overlay"]
     setting.update(enable_vr_overlay=True, enable_vr_mirror_window=False)
     errors = []

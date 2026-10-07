@@ -21,7 +21,8 @@ Release build self test: run.py --self-test [REPORT_FILE] (tinypedal.exe --self-
 
 Checks what a frozen build can miss, without game, settings window or overlays:
 data files next to executable, modules imported by name (widgets, modern designs, tools),
-bundled QML modules (every page compiled) and worker processes (lap viewer jobs).
+bundled QML modules (every page compiled), worker processes (lap viewer jobs) and VR overlay libraries
+(OpenXR layer, openvr).
 Exit code 0 if every check passed. Report is written to REPORT_FILE as well,
 since the windowed executable has no console.
 """
@@ -110,11 +111,32 @@ def check_worker_process() -> str:
     return "worker process answered"
 
 
+def check_vr_overlay() -> str:
+    """Release build (Windows): OpenXR layer bundled & loadable without other DLL (a manifest whose DLL
+    cannot load makes the OpenXR loader fail game startup), SteamVR library bundled"""
+    if not getattr(sys, "frozen", False) or sys.platform != "win32":
+        return "skipped (Windows release build only)"
+    import ctypes
+
+    from . import vr_shared
+
+    manifest = vr_shared.find_layer_manifest()
+    if manifest is None:
+        raise FileNotFoundError(f"{vr_shared.LAYER_FOLDER}/{vr_shared.LAYER_MANIFEST} & {vr_shared.LAYER_DLL}")
+    library = ctypes.WinDLL(os.path.join(os.path.dirname(manifest), vr_shared.LAYER_DLL))
+    if not hasattr(library, "xrNegotiateLoaderApiLayerInterface"):
+        raise RuntimeError("xrNegotiateLoaderApiLayerInterface not exported")
+    import openvr  # noqa: F401  # native library found (PyInstaller hook)
+
+    return "OpenXR layer & openvr loaded"
+
+
 CHECKS: tuple[tuple[str, Callable[[], str]], ...] = (
     ("Data files", check_data_files),
     ("Modules", check_modules),
     ("QML pages", check_qml_pages),
     ("Worker process", check_worker_process),
+    ("VR overlay", check_vr_overlay),
 )
 
 

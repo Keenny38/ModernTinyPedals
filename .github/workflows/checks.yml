@@ -90,6 +90,45 @@ jobs:
         path: tests/_render/
         if-no-files-found: ignore
 
+  openxr-layer:
+    # Native OpenXR layer of the VR overlay (native/openxr_layer), compiled warning free (warnings are errors).
+    # Windows: MSVC x64 Release DLL, unit tests & integration test (fake OpenXR runtime driving the DLL with
+    # D3D11 / D3D12 WARP devices, Vulkan skipped without driver). Linux: shared memory reader unit tests (GCC).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            configure: -A x64 -DTPVR_BUILD_TESTS=ON
+          - os: ubuntu-latest
+            configure: -DTPVR_BUILD_LAYER=OFF -DTPVR_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Build
+      env:
+        CONFIGURE: ${{ matrix.configure }}
+      run: |
+        cmake -S native/openxr_layer -B native/openxr_layer/build $CONFIGURE
+        cmake --build native/openxr_layer/build --config Release
+      shell: bash
+
+    - name: Test
+      run: ctest --test-dir native/openxr_layer/build -C Release --output-on-failure
+
+    - name: Upload layer
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: openxr-layer
+        path: native/openxr_layer/build/bin/
+        if-no-files-found: error
+
   visual-regression:
     # Compare widget renders with the base commit, rendered on the same runner (fonts & platform match)
     runs-on: ubuntu-latest

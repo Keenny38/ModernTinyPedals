@@ -84,17 +84,27 @@ Good to know:
 
 ## VR
 
-### SteamVR overlay (experimental)
+### VR overlay (experimental)
 
-`Config` > `VR Overlay (Experimental)` > `enable_vr_overlay` shows all visible overlays, with the same layout as on your desktop, as one SteamVR overlay.
+`Config` > `VR Overlay (Experimental)` > `enable_vr_overlay` shows all visible overlays in your headset, with the same layout as on your desktop. Nothing else to install: everything is included in the Windows release.
 
-- It needs SteamVR running and the `openvr` Python package (included in the Windows release; from source: `pip install openvr`).
-- `enable_attach_to_headset` makes it follow your head; otherwise it is fixed in seated space.
+- **OpenXR games**, on any runtime (SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...): the app comes with its own OpenXR layer, a small DLL that OpenXR games load when they start. It draws the overlays over the game image. Games using Direct3D 11 (Le Mans Ultimate, rFactor 2 and most sim racing games), Direct3D 12 or Vulkan are supported; OpenGL games are not.
+- **SteamVR games** (OpenVR): shown as a SteamVR overlay as soon as SteamVR runs. The app never starts SteamVR, so Meta or Virtual Desktop users without SteamVR are not bothered. When an OpenXR game runs on SteamVR, only the OpenXR layer draws the overlays (no double image).
+- Start the app before or after the game, either works. Overlays disappear from the headset within 2 seconds when the app is closed.
+- `enable_attach_to_headset` makes it follow your head; otherwise it is fixed in front of your seated position (recentering the view in the game moves it too).
 - `overlay_width_meters`, `distance_meters`, `vertical_offset_meters` and `horizontal_offset_meters` place it. `update_interval` sets the refresh (default `50` ms).
 
-### VR mirror window (OpenXR games)
+How the OpenXR layer is installed and removed:
 
-For OpenXR games on any runtime (Meta, Virtual Desktop, WMR...), turn on `enable_vr_mirror_window` in the same page. A desktop window shows all visible overlays as one image. Display it in your headset with a window capture tool such as OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+. `mirror_background_color` sets its background; its position is remembered. Closing the window turns the mirror off until the next reload.
+- Turning `enable_vr_overlay` on registers the layer for your Windows user account only (registry key `HKEY_CURRENT_USER\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, no admin rights). It stays registered while the option is on, also when the app is closed: it then does nothing at all.
+- Turning the option off, or uninstalling the app, removes it. Moving the app folder is handled at the next start.
+- To keep it out of one game, set the environment variable `DISABLE_TINYPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
+- If an OpenXR game misbehaves with the option on, turn it off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
+- From source: build the layer with CMake (`native/openxr_layer/CMakeLists.txt`), and `pip install openvr` for SteamVR.
+
+### VR mirror window
+
+For OpenGL games, or to place overlays with another tool, turn on `enable_vr_mirror_window` in the same page. A desktop window shows all visible overlays as one image. Display it in your headset with a window capture tool such as OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+. `mirror_background_color` sets its background; its position is remembered. Closing the window turns the mirror off until the next reload.
 
 ### VR Compatibility mode
 

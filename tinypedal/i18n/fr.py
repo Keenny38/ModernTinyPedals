@@ -2376,8 +2376,8 @@ TRANSLATION = MappingProxyType({
     "Overlays in a browser of your phone, tablet or PC":
         "Overlays dans le navigateur d'un téléphone, d'une tablette ou d'un PC",
     "VR Overlay": "Overlay VR",
-    "Experimental: overlays shown in your VR headset (OpenVR)":
-        "Expérimental : overlays affichés dans votre casque VR (OpenVR)",
+    "Experimental: overlays in your VR headset, OpenXR & SteamVR games":
+        "Expérimental : overlays dans votre casque VR, jeux OpenXR et SteamVR",
     "Placement": "Placement",
     "Mirror Window": "Fenêtre miroir",
     "Folders of presets, data & recorded laps": "Dossiers des presets, des données et des tours enregistrés",

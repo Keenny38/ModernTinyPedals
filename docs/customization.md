@@ -1014,12 +1014,16 @@ Access token included in every source address. A random token is generated if em
 
 
 ## VR Overlay
-**VR overlay options can be accessed from `Config` menu in main window. Experimental, disabled by default.**
+**VR overlay options can be accessed from `Config` menu in main window. Disabled by default, not yet tested on every headset.**
 
-Shows all visible widgets (same layout as on desktop) as a SteamVR overlay. Requires SteamVR running and the optional `openvr` Python package (included in release builds). The VR overlay is hidden automatically when all widgets are hidden, and only sends a new image when widgets have changed.
+Shows all visible widgets (same layout as on desktop) in your VR headset, with nothing else to install:
+- **OpenXR games** (any runtime: SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...): drawn by the app's own OpenXR layer, loaded by the game (Windows, games using Direct3D 11, Direct3D 12 or Vulkan; OpenGL games are not supported). Start the app before or after the game, either works.
+- **SteamVR games** (OpenVR): shown as a SteamVR overlay once SteamVR runs. The app never starts SteamVR itself.
+
+The VR overlay is hidden automatically when all widgets are hidden, and only sends a new image when widgets have changed.
 
     enable_vr_overlay
-Enable VR overlay.
+Enable VR overlay in OpenXR and SteamVR games. On Windows, this registers the app's OpenXR layer for your user account (no admin rights). It does nothing while the app is closed, and is removed when this option is turned off or the app is uninstalled. To turn it off for one game, set the `DISABLE_TINYPEDAL_XR_LAYER` environment variable to `1`. Games run as administrator do not load it.
 
     enable_attach_to_headset
 Attach overlay to headset (follows head movement), otherwise overlay is fixed in seated space.

@@ -3,6 +3,12 @@ PyInstaller build script (Windows)
 
 Args:
     -c, --clean: force remove old build folder before building.
+    --require-openxr-layer: fail if the OpenXR layer is not built (release builds).
+
+OpenXR layer (VR overlay in OpenXR games), built before with CMake (see native/openxr_layer/CMakeLists.txt):
+    cmake -S native/openxr_layer -B native/openxr_layer/build -A x64
+    cmake --build native/openxr_layer/build --config Release
+bundled in lib/openxr_layer (found there by tinypedal/vr_shared.py).
 """
 
 import argparse
@@ -31,6 +37,11 @@ EXCLUDE_MODULES = [
     "unittest",
     "xmlrpc",
 ]
+
+# OpenXR layer: DLL & its manifest, kept together (manifest gives DLL path relative to itself)
+OPENXR_LAYER_BUILD = os.path.join("native", "openxr_layer", "build", "bin")
+OPENXR_LAYER_FILES = ("TinyPedalXrLayer.dll", "TinyPedalXrLayer.json")
+OPENXR_LAYER_FOLDER = "openxr_layer"  # in lib folder (sys._MEIPASS)
 
 # Files that must stay next to executable (loaded with relative path)
 DATA_FILES = {
@@ -62,7 +73,29 @@ def get_cli_argument():
         action="store_true",
         help="force remove old build folder before building",
     )
+    parse.add_argument(
+        "--require-openxr-layer",
+        action="store_true",
+        help="fail if the OpenXR layer is not built (release builds)",
+    )
     return parse.parse_args()
+
+
+def openxr_layer_arguments(required: bool) -> list[str] | None:
+    """PyInstaller arguments bundling the OpenXR layer, empty if not built (None: required but missing)"""
+    paths = [os.path.abspath(os.path.join(OPENXR_LAYER_BUILD, name)) for name in OPENXR_LAYER_FILES]
+    missing = [path for path in paths if not os.path.isfile(path)]
+    if missing:
+        if required:
+            print("ERROR:OpenXR layer not built:", ", ".join(missing))
+            return None
+        print("WARNING:OpenXR layer not built, VR overlay limited to SteamVR & mirror window:", ", ".join(missing))
+        return []
+    dll, manifest = paths
+    return [
+        f"--add-binary={dll}{os.pathsep}{OPENXR_LAYER_FOLDER}",
+        f"--add-data={manifest}{os.pathsep}{OPENXR_LAYER_FOLDER}",
+    ]
 
 
 def remove_old_build(clean_build: bool) -> bool:
@@ -78,7 +111,7 @@ def remove_old_build(clean_build: bool) -> bool:
     return True
 
 
-def build_exe():
+def build_exe(extra_arguments: list[str]):
     """Build executable with PyInstaller (one folder mode)"""
     temp_dist = os.path.join(WORK_FOLDER, "dist")
     PyInstaller.__main__.run([
@@ -104,6 +137,7 @@ def build_exe():
         # Tool dialogs are imported by name when first opened (ui.tools_view.open_tool)
         "--collect-submodules=tinypedal.ui",
         *(f"--exclude-module={name}" for name in EXCLUDE_MODULES),
+        *extra_arguments,
     ])
     shutil.move(os.path.join(temp_dist, EXE_NAME), APP_FOLDER)
 
@@ -131,11 +165,14 @@ def build_start():
         return
 
     cli_args = get_cli_argument()
+    layer_arguments = openxr_layer_arguments(cli_args.require_openxr_layer)
+    if layer_arguments is None:
+        raise SystemExit(1)
     if not remove_old_build(cli_args.clean):
         print("INFO:Building canceled")
         return
     os.makedirs(DIST_FOLDER, exist_ok=True)
-    build_exe()
+    build_exe(layer_arguments)
     copy_data_files()
     print("INFO:Building finished:", APP_FOLDER)
 

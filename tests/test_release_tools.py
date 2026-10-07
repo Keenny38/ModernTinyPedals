@@ -173,6 +173,7 @@ def test_self_test_checks():
     assert "data files" in self_test.check_data_files()
     assert "QML pages compiled" in self_test.check_qml_pages()
     assert "modules imported" in self_test.check_modules()
+    assert "skipped" in self_test.check_vr_overlay()  # not a frozen build
 
 
 def test_self_test_worker_process():

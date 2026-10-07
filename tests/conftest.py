@@ -88,6 +88,15 @@ def pytest_unconfigure(config):
 
 
 @pytest.fixture(autouse=True)
+def no_openxr_registration(monkeypatch):
+    """VR overlay never registers the OpenXR layer in the real registry nor opens the real shared memory
+    (Windows): tests mock both (test_vr_shared.py)"""
+    from tinypedal import vr_shared
+
+    monkeypatch.setattr(vr_shared, "WINDOWS", False)
+
+
+@pytest.fixture(autouse=True)
 def offline_lap_reference(monkeypatch):
     """Community lap times never downloaded in tests (tests feed sheet text themselves)"""
     from tinypedal.userfile import lap_reference

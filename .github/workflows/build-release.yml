@@ -175,8 +175,16 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-build.txt
 
+    # VR overlay in OpenXR games: native layer DLL (headers fetched at pinned commits, see CMakeLists.txt),
+    # tested with a fake OpenXR runtime, then bundled in lib/openxr_layer by build_pyinstaller.py
+    - name: Build OpenXR layer
+      run: |
+        cmake -S native/openxr_layer -B native/openxr_layer/build -A x64 -DTPVR_BUILD_TESTS=ON
+        cmake --build native/openxr_layer/build --config Release
+        ctest --test-dir native/openxr_layer/build -C Release --output-on-failure
+
     - name: Build Windows executable
-      run: python build_pyinstaller.py -c
+      run: python build_pyinstaller.py -c --require-openxr-layer
 
     # Start the built executable: modules, data files, QML modules & worker process (0.19.0 shipped without
     # multiprocessing, the lap viewer jobs failed). Nothing is published if it fails.
@@ -201,7 +209,9 @@ jobs:
         $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
         [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
         try {
-          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName
+          # OpenXR layer too: loaded by games (some anti-cheat or antivirus tools distrust unsigned DLLs)
+          $files = @((Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName) + (Resolve-Path ./dist/TinyPedal/lib/openxr_layer/TinyPedalXrLayer.dll).Path
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $files
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         } finally {
           Remove-Item $pfx -ErrorAction SilentlyContinue
@@ -219,6 +229,21 @@ jobs:
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
         files-folder: ${{ github.workspace }}/dist/TinyPedal
         files-folder-filter: exe
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+
+    - name: Sign OpenXR layer (Azure Artifact Signing)
+      if: env.USE_AZURE_SIGNING == 'true'
+      uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files: ${{ github.workspace }}/dist/TinyPedal/lib/openxr_layer/TinyPedalXrLayer.dll
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256

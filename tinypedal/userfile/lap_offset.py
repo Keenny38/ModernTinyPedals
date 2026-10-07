@@ -158,7 +158,7 @@ def speed_errors(reference: Sequence[float], compare: Sequence[float], shifts: r
     errors = {}
     for shift in shifts:
         start = shift % count
-        errors[shift] = mean_square(compare, reference[start:] + reference[:start])
+        errors[shift] = mean_square(compare, [*reference[start:], *reference[:start]])
     return errors
 
 

@@ -26,6 +26,7 @@ pylintrc
 !/plugins/*/setting.json
 !/tinypedal/i18n/data/*.json
 !/tools/readme_preview_track.json
+!/native/openxr_layer/TinyPedalXrLayer.json
 *.csv
 *.fuel
 
@@ -38,6 +39,7 @@ pylintrc
 
 # build stuff
 /build/
+/native/openxr_layer/build/
 .venv/
 .ruff_cache/
 .pytest_cache/

@@ -5,7 +5,8 @@
 ;
 ; Installs per user in %LOCALAPPDATA%\Programs\Modern Tiny Pedals (no admin rights),
 ; because the app keeps presets & user data next to the executable.
-; Updating keeps all user files; uninstalling only removes installed files.
+; Updating keeps all user files; uninstalling only removes installed files, and the OpenXR layer registration
+; the app adds for the VR overlay (HKCU, see tinypedal/vr_shared.py).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -78,4 +79,27 @@ var
 begin
   Result := RegQueryDWordValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
     'SystemUsesLightTheme', LightTheme) and (LightTheme = 0);
+end;
+
+// VR overlay: the app registers its OpenXR layer (lib\openxr_layer\TinyPedalXrLayer.json) for the current user.
+// Removed on uninstall: OpenXR games must never look for a layer whose files are gone.
+const
+  OpenXRLayersKey = 'SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit';
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Names: TArrayOfString;
+  AppPath, Name: String;
+  I: Integer;
+begin
+  if CurUninstallStep <> usUninstall then
+    exit;
+  AppPath := Lowercase(AddBackslash(ExpandConstant('{app}')));
+  if RegGetValueNames(HKCU, OpenXRLayersKey, Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+    begin
+      Name := Lowercase(Names[I]);
+      if (Pos(AppPath, Name) = 1) and (Pos('tinypedalxrlayer.json', Name) > 0) then
+        RegDeleteValue(HKCU, OpenXRLayersKey, Names[I]);
+    end;
 end;
