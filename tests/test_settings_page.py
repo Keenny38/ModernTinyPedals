@@ -196,7 +196,9 @@ def test_overlay_style_applied_to_running_overlays(settings, bundled_fonts):
     a stopped overlay reports closed (its Hide event once stopped used to keep it "open" until timeout)"""
     from tinypedal.module_control import wctrl
     from tinypedal.thread_guard import STOP_TIMEOUT
+    from tinypedal.ui.quick.option_kinds import font_families
 
+    font_families.cache_clear()  # read once: maybe by an earlier test, before bundled fonts were loaded (offscreen)
     cfg.user.setting["relative"]["enable"] = True
     wctrl.start("relative")
     try:
@@ -208,7 +210,11 @@ def test_overlay_style_applied_to_running_overlays(settings, bundled_fonts):
         settings.setBool("overlay_style/enable_depth_effects", False)
         settings.setBool("overlay_style/enable_fade_animation", False)
         settings.setNumber("overlay_style/corner_radius_scale", 0.1)
-        settings.setChoice("overlay_style/modern_design_font_name", 1)  # first family other than saved one
+        families = row(settings, "overlay_style/modern_design_font_name")["choices"]
+        saved = cfg.user.config["overlay_style"]["modern_design_font_name"]
+        # First family other than saved one (offscreen: bundled fonts only, saved one among them)
+        settings.setChoice("overlay_style/modern_design_font_name",
+                           next(index for index, family in enumerate(families) if family != saved))
         family = settings._pending["overlay_style/modern_design_font_name"]
         assert settings.apply() and settings.host.applied_sections == [{"overlay_style"}]
         start = time.monotonic()

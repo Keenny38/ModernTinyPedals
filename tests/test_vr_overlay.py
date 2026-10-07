@@ -1,5 +1,7 @@
 """VR overlay tests (no headset required)"""
 
+import sys
+
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -51,6 +53,10 @@ def test_enable_without_steamvr_fails_cleanly(monkeypatch):
     config = copy_setting(cfg.default.config)
     config["vr_overlay"]["enable_vr_overlay"] = True
     monkeypatch.setattr(cfg.user, "config", config, raising=False)
+    # No OpenXR layer either (Windows: else registered in user registry & running without SteamVR)
+    monkeypatch.setattr(VROverlay, "_VROverlay__enable_openxr", lambda self, setting: False)
+    # No openvr package (with it, SteamVR not running: overlay waits for SteamVR, by design)
+    monkeypatch.setitem(sys.modules, "openvr", None)
     errors = []
     app_signal.error.connect(errors.append)
     control = VROverlay()

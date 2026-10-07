@@ -91,6 +91,9 @@ def test_lap_of_other_track_folder_shows_that_track(page):  # noqa: F811
     wait_loaded(page)
     page.add_from_library([other])
     wait_loaded(page)
+    from tests.test_lap_viewer_circuit_shape import listed_path
+
+    other, older = listed_path(page, other), listed_path(page, older)
     assert page.currentTrack == "Monza - Hyper" and page.trackLabel == ""
     assert shown(page) == [other] and listed(page) == {other, older} and not page.external
     assert "Showing Monza" in page.status

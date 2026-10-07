@@ -62,6 +62,15 @@ def write_lap(folder: str, lap: LapData) -> str:
     return os.path.normpath(path)
 
 
+def listed_path(backend, path: str) -> str:
+    """Path of lap as listed by viewer (key of shown lap): laps of telemetry folder keep the slashes of the folder
+    option, laps given from elsewhere are normalized"""
+    from tinypedal.ui.quick.lap_backend import path_key
+
+    return next((entry.file.path for entry in backend.all_entries() if path_key(entry.file.path) == path_key(path)),
+                os.path.normpath(path))
+
+
 # Names: only confident answers
 @pytest.mark.parametrize(("first", "second", "expected"), [
     ("Circuit de Spa-Francorchamps", "spa francorchamps", True),
@@ -142,7 +151,7 @@ def track(ui_env):
     backend = LapViewerBackend(parent, cfg.path.telemetry)
     backend.refresh()
     wait_loaded(backend)
-    yield backend, paths
+    yield backend, [listed_path(backend, path) for path in paths]
     backend.release()
     parent.deleteLater()
 
@@ -177,6 +186,7 @@ def test_imported_lap_of_other_circuit_in_track_folder_unchecked(track):
     other = write_lap(folder, make_lap(8, OTHER))
     backend.refresh()
     wait_loaded(backend)
+    other = listed_path(backend, other)
     backend.add_external([other])  # listed in track: checked
     backend.setReference(paths[0])
     backend.checked.add(other)

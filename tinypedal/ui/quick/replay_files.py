@@ -157,8 +157,9 @@ def temp_files(folder: str, now: float | None = None) -> list[str]:
         name = entry.name.lower()
         if not (name.startswith(TEMP_PATTERN[0]) and name.endswith(TEMP_PATTERN[1])):
             continue
-        try:  # file deleted by the game meanwhile (recording)
-            if entry.is_file() and now - entry.stat().st_mtime > TEMP_MIN_AGE:
+        # File deleted by the game meanwhile (recording): stat of path, entry stat is cached by scandir on Windows
+        try:
+            if entry.is_file() and now - os.stat(entry.path).st_mtime > TEMP_MIN_AGE:
                 paths.append(entry.path)
         except OSError:
             continue

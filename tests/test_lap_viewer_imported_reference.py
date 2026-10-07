@@ -10,7 +10,7 @@ import threading
 import pytest
 
 from tests.test_lap_viewer import wait_loaded
-from tests.test_lap_viewer_circuit_shape import COMBO, OTHER, make_lap, write_lap
+from tests.test_lap_viewer_circuit_shape import COMBO, OTHER, listed_path, make_lap, write_lap
 from tinypedal.setting import cfg
 from tinypedal.userfile.telemetry_lap import LapData, interpolate
 
@@ -28,7 +28,7 @@ def track(ui_env):
     backend = LapViewerBackend(parent, cfg.path.telemetry)
     backend.refresh()
     wait_loaded(backend)
-    yield backend, paths
+    yield backend, [listed_path(backend, path) for path in paths]
     backend.release()
     parent.deleteLater()
 
@@ -203,6 +203,7 @@ def test_live_new_lap_after_other_circuit_opened(track, tmp_path):
     backend.auto_refresh()
     wait_loaded(backend)
     assert backend.currentTrack == COMBO
+    new = listed_path(backend, new)
     assert sorted(lap.key for lap in backend.data.laps) == sorted([paths[0], new])  # compared with best lap
     assert backend.reference_key == paths[0]
     assert "New lap" in backend.status and "another circuit" not in backend.status
