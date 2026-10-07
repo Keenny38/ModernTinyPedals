@@ -320,13 +320,16 @@ def release_response(tag: str) -> bytes:
 
 def test_checker_finds_update(checker, monkeypatch):
     checker, states = checker
+    checked = threading.Event()  # answer held until checking state seen (else may end first: flaky)
 
     async def request(repo):
+        checked.wait(5)
         return release_response("v99.0.0")
 
     monkeypatch.setattr(update, "request_latest_release", request)
     checker.check(True)
     assert states[0] is True and checker.is_checking()
+    checked.set()
     assert wait_for(lambda: not checker.is_checking() and False in states)
     assert checker.is_updates() and checker.installer is not None and checker.release_notes == "### Added\n\n- New"
     assert checker.latest_version() == (99, 0, 0) and checker.latest_date() == (2099, 1, 2)
