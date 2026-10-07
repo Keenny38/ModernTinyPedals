@@ -263,6 +263,10 @@ class VROverlay(QObject):
         except ImportError:
             self.__fail("VR overlay requires \"openvr\" package (pip install openvr).")
             return
+        except Exception as error:  # package found, native library (libopenvr_api) missing or not loadable
+            logger.debug("VR overlay: openvr import failed", exc_info=True)
+            self.__fail(f"VR overlay unavailable, OpenVR library not loaded: {error}")
+            return
         try:
             openvr.init(openvr.VRApplication_Overlay)
             self._openvr = openvr
