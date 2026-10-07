@@ -65,8 +65,12 @@ public:
     explicit VulkanBackend(const XrGraphicsBindingVulkanKHR& binding) : binding_(binding) {}
 
     ~VulkanBackend() override {
-        wait_idle();
         if (device() == VK_NULL_HANDLE || vk_.DestroyFence == nullptr) {
+            return;
+        }
+        if (!wait_idle(UINT64_MAX)) {
+            // Copy may still run on the game queue: objects it uses leaked rather than freed under the GPU
+            log_message("Vulkan fence wait failed at teardown: upload resources leaked");
             return;
         }
         if (memory_ != VK_NULL_HANDLE) {
@@ -174,9 +178,9 @@ public:
         return true;
     }
 
-    void clear_swapchain() override {
-        wait_idle();
+    bool clear_swapchain() override {
         images_.clear();
+        return wait_idle(UINT64_MAX);  // not a per frame path: wait for the copy however long it takes
     }
 
     bool upload(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height) override {
@@ -252,7 +256,7 @@ public:
 private:
     VkDevice device() const { return binding_.device; }
 
-    bool wait_idle() {
+    bool wait_idle(uint64_t timeout_ns = kFenceTimeoutNs) {
         if (fence_ == VK_NULL_HANDLE || vk_.WaitForFences == nullptr) {
             return true;
         }
@@ -270,7 +274,9 @@ private:
             fence_signaled_unknown_ = false;
             return true;
         }
-        return vk_.WaitForFences(device(), 1, &fence_, VK_TRUE, kFenceTimeoutNs) == VK_SUCCESS;
+        const VkResult result = vk_.WaitForFences(device(), 1, &fence_, VK_TRUE, timeout_ns);
+        // Device lost: no GPU work runs any more, resources may be freed
+        return result == VK_SUCCESS || (timeout_ns == UINT64_MAX && result == VK_ERROR_DEVICE_LOST);
     }
 
     bool ensure_buffer(VkDeviceSize size) {

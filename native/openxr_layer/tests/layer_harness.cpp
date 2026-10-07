@@ -826,7 +826,8 @@ bool load_layer(const char* path, Layer& layer) {
 
 // -----------------------------------------------------------------------------------------------------------
 
-uint32_t end_frame(Layer& layer, XrSession session) {
+// Game frame with one projection layer, or none (loading, session not visible)
+uint32_t end_frame(Layer& layer, XrSession session, uint32_t layer_count = 1) {
     static const XrCompositionLayerProjection projection = [] {
         XrCompositionLayerProjection value = {};
         value.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
@@ -837,8 +838,8 @@ uint32_t end_frame(Layer& layer, XrSession session) {
     info.type = XR_TYPE_FRAME_END_INFO;
     info.displayTime = 1;
     info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-    info.layerCount = 1;
-    info.layers = layers;
+    info.layerCount = layer_count;
+    info.layers = layer_count != 0 ? layers : nullptr;
     const XrResult result = layer.get<PFN_xrEndFrame>("xrEndFrame")(session, &info);
     CHECK(result == XR_SUCCESS);
     return runtime.submitted_counts.empty() ? 0 : runtime.submitted_counts.back();
@@ -931,6 +932,8 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
 
     app.write(30, 12, true, false);
     XrSession session = create_session(layer, binding);
+    // First image read during a frame without layers (session starting): uploaded on next frame with layers
+    CHECK(end_frame(layer, session, 0) == 0);
     CHECK(end_frame(layer, session) == 2);  // overlay quad appended
     const XrCompositionLayerQuad& quad = runtime.last_quad;
     CHECK(quad.type == XR_TYPE_COMPOSITION_LAYER_QUAD);
@@ -966,6 +969,15 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     CHECK(runtime.last_quad.subImage.imageRect.extent.width == 20);
     CHECK(swapchain->acquire_count == 2);
     check_pixels(read_released(swapchain), swapchain->info.width, 20, 10, bgra, linear);
+
+    // New image read during a frame without layers (game loading): not lost, uploaded on next frame
+    app.write(24, 10, true, true);
+    CHECK(end_frame(layer, session, 0) == 0);
+    CHECK(swapchain->acquire_count == 2);
+    CHECK(end_frame(layer, session) == 2);
+    CHECK(runtime.last_quad.subImage.imageRect.extent.width == 24);
+    CHECK(swapchain->acquire_count == 3);
+    check_pixels(read_released(swapchain), swapchain->info.width, 24, 10, bgra, linear);
 
     // Bigger image: swapchain created again
     app.write(100, 40, true, true);

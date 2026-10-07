@@ -4,7 +4,7 @@
 #   cmake -S native/openxr_layer -B native/openxr_layer/build -A x64
 #   cmake --build native/openxr_layer/build --config Release
 # Output: native/openxr_layer/build/bin/TinyPedalXrLayer.dll & TinyPedalXrLayer.json, found there by the app
-# when run from source, bundled in lib/openxr_layer by build_pyinstaller.py.
+# when run from source, bundled in lib/openxr_layer_bundle by build_pyinstaller.py.
 #
 # Unit tests of the platform neutral parts (any OS, run by CI on Linux):
 #   cmake -S native/openxr_layer -B build-tests -DTPVR_BUILD_LAYER=OFF -DTPVR_BUILD_TESTS=ON

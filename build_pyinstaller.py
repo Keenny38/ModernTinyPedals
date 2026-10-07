@@ -8,7 +8,8 @@ Args:
 OpenXR layer (VR overlay in OpenXR games), built before with CMake (see native/openxr_layer/CMakeLists.txt):
     cmake -S native/openxr_layer -B native/openxr_layer/build -A x64
     cmake --build native/openxr_layer/build --config Release
-bundled in lib/openxr_layer (found there by tinypedal/vr_shared.py).
+bundled in lib/openxr_layer_bundle (found there by tinypedal/vr_shared.py, which copies it next to the
+executable before registering it: games never load the DLL from lib, rewritten by each update).
 """
 
 import argparse
@@ -41,7 +42,7 @@ EXCLUDE_MODULES = [
 # OpenXR layer: DLL & its manifest, kept together (manifest gives DLL path relative to itself)
 OPENXR_LAYER_BUILD = os.path.join("native", "openxr_layer", "build", "bin")
 OPENXR_LAYER_FILES = ("TinyPedalXrLayer.dll", "TinyPedalXrLayer.json")
-OPENXR_LAYER_FOLDER = "openxr_layer"  # in lib folder (sys._MEIPASS)
+OPENXR_LAYER_FOLDER = "openxr_layer_bundle"  # in lib folder (sys._MEIPASS)
 
 # Files that must stay next to executable (loaded with relative path)
 DATA_FILES = {

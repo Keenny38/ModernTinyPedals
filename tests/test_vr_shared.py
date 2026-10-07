@@ -184,8 +184,8 @@ def test_writer_unavailable_off_windows(monkeypatch):
     writer.close()
 
 
-def write_layer_status(buffer, heartbeat, state=vr_shared.LAYER_ACTIVE, api=1, result=0):
-    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, 4321, state, api, result, 9, 1)
+def write_layer_status(buffer, heartbeat, state=vr_shared.LAYER_ACTIVE, api=1, result=0, frames=9):
+    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, 4321, state, api, result, frames, 1)
 
 
 def test_layer_status():
@@ -293,7 +293,7 @@ def test_find_layer_manifest(tmp_path, monkeypatch):
     assert vr_shared.find_layer_manifest() is None  # manifest without DLL never registered
     (tmp_path / vr_shared.LAYER_DLL).write_bytes(b"MZ")
     assert vr_shared.find_layer_manifest() == str(tmp_path / vr_shared.LAYER_MANIFEST)
-    # Release build: lib/openxr_layer (sys._MEIPASS)
+    # Release build: lib/openxr_layer_bundle (sys._MEIPASS)
     monkeypatch.delenv("TINYPEDAL_XR_LAYER_DIR")
     bundle = tmp_path / "lib"
     (bundle / vr_shared.LAYER_FOLDER).mkdir(parents=True)
@@ -301,6 +301,99 @@ def test_find_layer_manifest(tmp_path, monkeypatch):
         (bundle / vr_shared.LAYER_FOLDER / name).write_bytes(b"x")
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
     assert vr_shared.find_layer_manifest() == str(bundle / vr_shared.LAYER_FOLDER / vr_shared.LAYER_MANIFEST)
+
+
+def make_layer(folder, dll=b"MZ v1"):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / vr_shared.LAYER_DLL).write_bytes(dll)
+    (folder / vr_shared.LAYER_MANIFEST).write_text('{"api_layer": {"library_path": ".\\\\TinyPedalXrLayer.dll"}}')
+    return str(folder / vr_shared.LAYER_MANIFEST)
+
+
+def test_install_layer_outside_bundle(tmp_path, monkeypatch):
+    """Games load a copy outside lib (rewritten by each update), one folder per layer build"""
+    bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
+    root = tmp_path / vr_shared.LAYER_INSTALL_FOLDER
+    installed = vr_shared.install_layer(bundle, str(root))
+    folder = os.path.dirname(installed)
+    assert os.path.dirname(folder) == str(root) and os.path.basename(installed) == vr_shared.LAYER_MANIFEST
+    assert (tmp_path / folder / vr_shared.LAYER_DLL).read_bytes() == b"MZ v1"
+    assert (tmp_path / installed).read_text() == (tmp_path / bundle).read_text()  # DLL path relative to manifest
+    assert [entry.name for entry in root.iterdir()] == [os.path.basename(folder)]  # no temporary folder left
+    # Same build (app restarted, or updated with an unchanged layer): copy reused, never written again
+    def no_write(*args, **kwargs):
+        raise AssertionError("copy written again")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(vr_shared.shutil, "copyfile", no_write)
+        assert vr_shared.install_layer(bundle, str(root)) == installed
+    # New build: new folder, previous one untouched (may still be loaded by a game)
+    make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER, dll=b"MZ v2")
+    newer = vr_shared.install_layer(bundle, str(root))
+    assert os.path.dirname(newer) != folder and os.path.isfile(installed)
+    # Incomplete copy (DLL removed by hand): written again
+    os.remove(os.path.join(os.path.dirname(newer), vr_shared.LAYER_DLL))
+    assert vr_shared.install_layer(bundle, str(root)) == newer
+    assert os.path.isfile(os.path.join(os.path.dirname(newer), vr_shared.LAYER_DLL))
+
+
+def test_remove_old_layers_keeps_copy_in_use(tmp_path, monkeypatch):
+    root = tmp_path / vr_shared.LAYER_INSTALL_FOLDER
+    current = root / "current"
+    old = root / "old"
+    in_use = root / "in_use"
+    for folder in (current, old, in_use):
+        make_layer(folder)
+    (root / ".tmp-crashed").mkdir()  # copy interrupted
+    (root / "notes.txt").write_text("not a layer folder")
+    locked = str(in_use / vr_shared.LAYER_DLL)
+    real_remove = os.remove
+
+    def remove(path):
+        if os.path.abspath(path) == locked:
+            raise PermissionError("loaded by a running game")
+        real_remove(path)
+
+    monkeypatch.setattr(os, "remove", remove)
+    assert vr_shared.remove_old_layers(str(root), str(current)) == 2
+    assert sorted(entry.name for entry in root.iterdir()) == ["current", "in_use", "notes.txt"]
+    assert (in_use / vr_shared.LAYER_MANIFEST).is_file()  # manifest kept with its DLL
+    assert vr_shared.remove_old_layers(str(tmp_path / "missing"), str(current)) == 0
+
+
+def test_prepare_layer(tmp_path, monkeypatch):
+    bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
+    # From source: build folder registered as is
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert vr_shared.layer_install_root() is None
+    assert vr_shared.prepare_layer(bundle) == bundle
+    # Release: copy next to executable, older copies removed
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "tinypedal.exe"))
+    root = tmp_path / vr_shared.LAYER_INSTALL_FOLDER
+    assert vr_shared.layer_install_root() == str(root)
+    make_layer(root / "previous_build", dll=b"MZ v0")
+    installed = vr_shared.prepare_layer(bundle)
+    assert installed.startswith(str(root)) and installed != bundle
+    assert [entry.name for entry in root.iterdir()] == [os.path.basename(os.path.dirname(installed))]
+    # Copy impossible (folder read only...): bundled layer registered, still works until next update
+    def denied(*args, **kwargs):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(vr_shared.tempfile, "mkdtemp", denied)
+    assert vr_shared.prepare_layer(bundle, str(tmp_path / "other")) == bundle
+
+
+def test_installer_never_closes_openxr_games():
+    """Updates replace no file a game loads: Restart Manager limited to executables, copies removed on
+    uninstall (registry entries too, by install folder)"""
+    with open(os.path.join(ROOT, "installer", "tinypedal.iss"), encoding="utf-8") as file:
+        script = file.read()
+    assert re.search(r"^CloseApplicationsFilter=\*\.exe$", script, re.MULTILINE)
+    assert f'Type: filesandordirs; Name: "{{app}}\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
+    assert re.search(r"^\[UninstallDelete\]$", script, re.MULTILINE)
+    assert "RegDeleteValue(HKCU, OpenXRLayersKey" in script
+    assert vr_shared.LAYER_INSTALL_FOLDER != "lib"
 
 
 def test_is_layer_entry():
@@ -387,6 +480,23 @@ def make_widget(monkeypatch):
     widget.show()
     monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget] if widget.isVisible() else []))
     return widget
+
+
+def test_release_registers_layer_copy_outside_lib(env, tmp_path, monkeypatch):
+    """Release: layer registered from its copy next to executable, never from lib (deleted by updates)"""
+    bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
+    monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: bundle)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "tinypedal.exe"))
+    control = VROverlay()
+    try:
+        control.enable()
+        assert control.openxr_active and len(env.registered) == 1
+        registered = env.registered[0]
+        assert registered.startswith(str(tmp_path / "app" / vr_shared.LAYER_INSTALL_FOLDER))
+        assert os.path.isfile(os.path.join(os.path.dirname(registered), vr_shared.LAYER_DLL))
+    finally:
+        control.disable()
 
 
 def test_openxr_layer_receives_frames(env, monkeypatch):
@@ -479,12 +589,15 @@ def test_steamvr_overlay_hidden_while_openxr_layer_draws(env, monkeypatch):
         control.update_overlay()
         assert control._visible
         log.clear()
-        write_layer_status(env.buffer, env.now)  # OpenXR game frame drawn by layer
+        write_layer_status(env.buffer, env.now, frames=9)  # OpenXR game frames drawn by layer
+        control.update_overlay()
+        write_layer_status(env.buffer, env.now, frames=12)
         env.now += 50
         control.update_overlay()
         assert log == ["hideOverlay"] and not control._visible
         widget.setStyleSheet("background: blue;")
         env.now += 50
+        write_layer_status(env.buffer, env.now, frames=15)
         control.update_overlay()
         assert "showOverlay" not in log  # new image uploaded, overlay stays hidden
         env.now += vr_shared.LAYER_TIMEOUT_MS + 1  # game closed: layer silent
@@ -496,6 +609,38 @@ def test_steamvr_overlay_hidden_while_openxr_layer_draws(env, monkeypatch):
         log.clear()
         control.update_overlay()
         assert "hideOverlay" not in log and control._visible
+    finally:
+        widget.close()
+        control.disable()
+
+
+def test_steamvr_overlay_kept_while_openxr_layer_draws_nothing(env, monkeypatch):
+    """Layer ACTIVE but no quad submitted (no layer slot left, image lost or refused): SteamVR overlay kept"""
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    env.steamvr = True
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        assert control._visible
+        log.clear()
+        for _ in range(5):  # heartbeat written every game frame, frames_shown never grows
+            write_layer_status(env.buffer, env.now, frames=9)
+            env.now += 50
+            control.update_overlay()
+        assert "hideOverlay" not in log and control._visible
+        write_layer_status(env.buffer, env.now, frames=10)  # layer starts drawing
+        env.now += 50
+        control.update_overlay()
+        assert log == ["hideOverlay"] and not control._visible
+        log.clear()
+        for _ in range(vr_shared.LAYER_TIMEOUT_MS // 100 + 2):  # stops drawing, game still running
+            write_layer_status(env.buffer, env.now, frames=10)
+            env.now += 100
+            control.update_overlay()
+        assert log == ["showOverlay"] and control._visible
     finally:
         widget.close()
         control.disable()

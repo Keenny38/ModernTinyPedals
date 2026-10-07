@@ -42,7 +42,13 @@ public:
     }
 
     ~D3D12Backend() override {
-        wait_idle();
+        if (!wait_idle(INFINITE)) {
+            // Copy may still run on the game queue: objects it uses leaked rather than freed under the GPU
+            log_message("D3D12 fence wait failed at teardown: upload resources leaked");
+            queue_->Release();
+            device_->Release();
+            return;
+        }
         release(list_);
         release(allocator_);
         release(upload_);
@@ -103,9 +109,9 @@ public:
         return true;
     }
 
-    void clear_swapchain() override {
-        wait_idle();
+    bool clear_swapchain() override {
         textures_.clear();
+        return wait_idle(INFINITE);  // not a per frame path: wait for the copy however long it takes
     }
 
     bool upload(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height) override {
@@ -172,14 +178,14 @@ public:
     }
 
 private:
-    bool wait_idle() {
+    bool wait_idle(DWORD timeout_ms = kFenceTimeoutMs) {
         if (fence_ == nullptr || fence_->GetCompletedValue() >= fence_value_) {
             return true;
         }
         if (event_ == nullptr || FAILED(fence_->SetEventOnCompletion(fence_value_, event_))) {
             return false;
         }
-        return WaitForSingleObject(event_, kFenceTimeoutMs) == WAIT_OBJECT_0;
+        return WaitForSingleObject(event_, timeout_ms) == WAIT_OBJECT_0;
     }
 
     bool ensure_upload_buffer(UINT64 size) {

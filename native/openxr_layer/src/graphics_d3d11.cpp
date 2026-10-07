@@ -75,7 +75,10 @@ public:
         return true;
     }
 
-    void clear_swapchain() override { textures_.clear(); }
+    bool clear_swapchain() override {
+        textures_.clear();
+        return true;  // D3D11 keeps resources alive until GPU work using them finished
+    }
 
     bool upload(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height) override {
         if (image_index >= textures_.size() || pixels == nullptr) {

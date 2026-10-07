@@ -32,8 +32,9 @@ public:
     virtual const FormatCandidate* format_candidates(size_t& count) const = 0;
     // Swapchain created by layer: keep its images (returns false on failure)
     virtual bool set_swapchain(XrSwapchain swapchain, PFN_xrEnumerateSwapchainImages enumerate, int64_t format) = 0;
-    // Swapchain about to be destroyed: GPU work using its images finished, images forgotten
-    virtual void clear_swapchain() = 0;
+    // Swapchain about to be destroyed: waits (no timeout) for GPU work using its images, images forgotten.
+    // False: GPU work may still use the images, swapchain must be leaked rather than destroyed
+    virtual bool clear_swapchain() = 0;
     // Copy pixels (width * height, tightly packed, swapchain byte order) to top left of acquired image
     virtual bool upload(uint32_t image_index, const uint8_t* pixels, uint32_t width, uint32_t height) = 0;
 };

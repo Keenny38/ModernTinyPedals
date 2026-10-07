@@ -41,6 +41,9 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
+; Only processes running a replaced executable (the app). OpenXR games load the layer DLL, never from the
+; files replaced here (copied by the app to {app}\openxr_layer, see below): never closed by an update.
+CloseApplicationsFilter=*.exe
 RestartApplications=no
 
 [Languages]
@@ -59,6 +62,11 @@ Type: filesandordirs; Name: "{app}\plugins\example_speed"
 
 [Files]
 Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[UninstallDelete]
+; OpenXR layer copies made by the app (one folder per layer build, outside lib so updates never touch a DLL
+; loaded by a game). A copy still loaded by a running game stays until removed by hand.
+Type: filesandordirs; Name: "{app}\openxr_layer"
 
 [Icons]
 ; Shortcut icon matches Windows light / dark mode at install time (white & gold icon when dark)
@@ -81,7 +89,8 @@ begin
     'SystemUsesLightTheme', LightTheme) and (LightTheme = 0);
 end;
 
-// VR overlay: the app registers its OpenXR layer (lib\openxr_layer\TinyPedalXrLayer.json) for the current user.
+// VR overlay: the app copies its OpenXR layer from lib\openxr_layer_bundle to {app}\openxr_layer\<build>\ and
+// registers that TinyPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
 // Removed on uninstall: OpenXR games must never look for a layer whose files are gone.
 const
   OpenXRLayersKey = 'SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit';

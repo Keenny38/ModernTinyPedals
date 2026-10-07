@@ -278,6 +278,8 @@ class VROverlay(QObject):
         self._xr_checksum: int | None = None
         self._xr_drawing = False
         self._xr_state: tuple | None = None  # last layer state logged
+        self._xr_frames: tuple[int, int] | None = None  # (pid, frames_shown) of layer at last tick
+        self._xr_shown_at: int | None = None  # tick (ms) when layer frames_shown last grew
         # Mirror window
         self._mirror: MirrorWindow | None = None
         self._mirror_checksum: int | None = None
@@ -343,6 +345,7 @@ class VROverlay(QObject):
             if manifest is None:
                 logger.info("VR overlay: OpenXR layer not found (from source: build native/openxr_layer)")
                 return False
+            manifest = vr_shared.prepare_layer(manifest)  # release: copy outside lib, rewritten by updates
             if not vr_shared.register_layer(manifest):
                 return False
             writer = vr_shared.SharedFrameWriter()
@@ -351,6 +354,7 @@ class VROverlay(QObject):
             self._xr = writer
             self._xr_checksum = None
             self._xr_state = None
+            self._xr_frames = self._xr_shown_at = None
             logger.info("ENABLED: VR overlay (OpenXR layer %s)", manifest)
         self._xr.set_placement(placement_from(setting))
         return True
@@ -367,6 +371,7 @@ class VROverlay(QObject):
         writer, self._xr = self._xr, None
         self._xr_checksum = None
         self._xr_drawing = False
+        self._xr_frames = self._xr_shown_at = None
         if writer is not None:
             writer.close()
             logger.info("DISABLED: VR overlay (OpenXR layer)")
@@ -374,7 +379,14 @@ class VROverlay(QObject):
     def __update_openxr_status(self, now: int):
         """Layer state of OpenXR game: logged on change, SteamVR overlay hidden while layer draws"""
         status = self._xr.layer_status() if self._xr is not None else None
-        drawing = status is not None and status.drawing(now)
+        frames = (status.pid, status.frames_shown) if status is not None else None
+        last = self._xr_frames
+        if frames is not None and last is not None and frames[0] == last[0] and frames[1] > last[1]:
+            self._xr_shown_at = now
+        self._xr_frames = frames
+        # ACTIVE layer may still submit no quad (no layer slot left, image refused): SteamVR overlay kept
+        drawing = (status is not None and status.drawing(now) and self._xr_shown_at is not None
+                   and now - self._xr_shown_at <= vr_shared.LAYER_TIMEOUT_MS)
         state = (status.pid, status.state, status.graphics_api) if status is not None and status.recent(now) else None
         if state != self._xr_state:
             self._xr_state = state

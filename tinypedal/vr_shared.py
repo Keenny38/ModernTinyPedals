@@ -33,11 +33,14 @@ Shared memory layout: native/openxr_layer/include/tinypedal_vr_shared.h (kept in
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import ntpath
 import os
+import shutil
 import struct
 import sys
+import tempfile
 import time
 from typing import Any, NamedTuple
 
@@ -80,7 +83,8 @@ LAYER_FORMAT = "<QIIIiQI"  # heartbeat, pid, state, graphics_api, last_result, f
 LAYER_NAME = "XR_APILAYER_TINYPEDAL_overlay"
 LAYER_DLL = "TinyPedalXrLayer.dll"
 LAYER_MANIFEST = "TinyPedalXrLayer.json"
-LAYER_FOLDER = "openxr_layer"  # in bundled lib folder
+LAYER_FOLDER = "openxr_layer_bundle"  # in bundled lib folder: copied to LAYER_INSTALL_FOLDER, never loaded there
+LAYER_INSTALL_FOLDER = "openxr_layer"  # next to executable: one subfolder per layer build, loaded by games
 REGISTRY_KEY = r"SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit"
 DISABLE_ENVIRONMENT = "DISABLE_TINYPEDAL_XR_LAYER"
 
@@ -269,7 +273,7 @@ class SharedFrameWriter:
 def find_layer_manifest() -> str | None:
     """Manifest of the OpenXR layer with its DLL next to it, None if not found
 
-    Release (PyInstaller): lib/openxr_layer. From source: native/openxr_layer/build/bin (CMake build),
+    Release (PyInstaller): lib/openxr_layer_bundle (registered from its copy, see install_layer). From source: native/openxr_layer/build/bin (CMake build),
     or folder given by TINYPEDAL_XR_LAYER_DIR.
     """
     folders = []
@@ -287,6 +291,86 @@ def find_layer_manifest() -> str | None:
         if os.path.isfile(manifest) and os.path.isfile(os.path.join(folder, LAYER_DLL)):
             return os.path.abspath(manifest)
     return None
+
+
+def layer_install_root() -> str | None:
+    """Folder of the layer copies loaded by games: next to executable in release, None from source"""
+    if not getattr(sys, "frozen", False):
+        return None
+    return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), LAYER_INSTALL_FOLDER)
+
+
+def install_layer(manifest: str, root: str) -> str:
+    """Copy layer files to their own subfolder of root, named after their content, returns its manifest
+
+    OpenXR games keep the layer DLL loaded, even with the app closed. Loaded from the bundled lib folder,
+    which each update deletes & rewrites, it would make the installer close the game or fail. A copy is
+    never written again once complete: a new layer build goes to a new folder, older ones removed once
+    no game uses them (see remove_old_layers).
+    """
+    source = os.path.dirname(os.path.abspath(manifest))
+    digest = hashlib.sha256()
+    for name in (LAYER_DLL, LAYER_MANIFEST):
+        with open(os.path.join(source, name), "rb") as file:
+            digest.update(file.read())
+    folder = os.path.join(root, digest.hexdigest()[:16])
+    installed = os.path.join(folder, LAYER_MANIFEST)
+    if os.path.isfile(installed) and os.path.isfile(os.path.join(folder, LAYER_DLL)):
+        return installed
+    os.makedirs(root, exist_ok=True)
+    if os.path.isdir(folder):
+        shutil.rmtree(folder)  # incomplete copy (raises if its DLL is loaded: registered from bundle)
+    temp = tempfile.mkdtemp(prefix=".tmp-", dir=root)
+    try:
+        for name in (LAYER_DLL, LAYER_MANIFEST):
+            shutil.copyfile(os.path.join(source, name), os.path.join(temp, name))
+        os.rename(temp, folder)  # complete folder or none
+    except OSError:
+        shutil.rmtree(temp, ignore_errors=True)
+        raise
+    return installed
+
+
+def remove_old_layers(root: str, keep: str) -> int:
+    """Remove layer copies of root other than folder keep, returns number removed
+
+    Copy still loaded by a running game: its DLL cannot be deleted, folder kept until a later start.
+    """
+    removed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder) or os.path.normcase(os.path.abspath(folder)) == os.path.normcase(
+                os.path.abspath(keep)):
+            continue
+        try:
+            dll = os.path.join(folder, LAYER_DLL)
+            if os.path.lexists(dll):
+                os.remove(dll)  # first: fails while loaded, manifest kept with its DLL
+            shutil.rmtree(folder)
+            removed += 1
+        except OSError:
+            logger.debug("VR overlay: OpenXR layer copy %s in use, kept", folder, exc_info=True)
+    return removed
+
+
+def prepare_layer(manifest: str, root: str | None = None) -> str:
+    """Manifest to register: copy of bundled layer outside lib folder in release (root default),
+    manifest unchanged from source or when copy fails"""
+    if root is None:
+        root = layer_install_root()
+        if root is None:
+            return manifest
+    try:
+        installed = install_layer(manifest, root)
+    except OSError as error:
+        logger.warning("VR overlay: OpenXR layer not copied to %s, registered from %s: %s", root, manifest, error)
+        return manifest
+    remove_old_layers(root, os.path.dirname(installed))
+    return installed
 
 
 def is_layer_entry(name: str) -> bool:

@@ -123,6 +123,13 @@ def check_vr_overlay() -> str:
     manifest = vr_shared.find_layer_manifest()
     if manifest is None:
         raise FileNotFoundError(f"{vr_shared.LAYER_FOLDER}/{vr_shared.LAYER_MANIFEST} & {vr_shared.LAYER_DLL}")
+    # Copied outside lib folder before registration (games never load the DLL from lib, rewritten by updates)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as root:
+        installed = vr_shared.install_layer(manifest, root)
+        if not os.path.isfile(os.path.join(os.path.dirname(installed), vr_shared.LAYER_DLL)):
+            raise FileNotFoundError(f"{vr_shared.LAYER_DLL} not copied next to {installed}")
     library = ctypes.WinDLL(os.path.join(os.path.dirname(manifest), vr_shared.LAYER_DLL))
     if not hasattr(library, "xrNegotiateLoaderApiLayerInterface"):
         raise RuntimeError("xrNegotiateLoaderApiLayerInterface not exported")

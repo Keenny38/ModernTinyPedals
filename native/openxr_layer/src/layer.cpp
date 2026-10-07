@@ -241,10 +241,11 @@ void fail(SessionData& session, const char* what, XrResult result) {
 
 void destroy_swapchain(SessionData& session) {
     if (session.swapchain != XR_NULL_HANDLE) {
-        if (session.graphics) {
-            session.graphics->clear_swapchain();
+        if (!session.graphics || session.graphics->clear_swapchain()) {
+            session.instance->DestroySwapchain(session.swapchain);
+        } else {
+            log_message("GPU copy not finished: overlay swapchain leaked");  // never freed under the GPU
         }
-        session.instance->DestroySwapchain(session.swapchain);
         session.swapchain = XR_NULL_HANDLE;
     }
     session.swapchain_width = session.swapchain_height = 0;
@@ -458,6 +459,9 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
         status.frames_shown = session.frames_shown;
         write_layer_status(view, size, status, now);
     });
+    if (pixels_changed) {
+        session.stale = true;  // before any early return: change consumed from reader, uploaded on a later frame
+    }
     if (!drawable || session.failed) {
         return false;
     }
@@ -466,9 +470,6 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
     }
     if (!ensure_spaces(session)) {
         return false;
-    }
-    if (pixels_changed) {
-        session.stale = true;
     }
     if (session.stale || session.pending) {
         update_image(session);
@@ -674,7 +675,7 @@ XRAPI_ATTR XrResult XRAPI_CALL hook_xrDestroyInstance(XrInstance instance) {
             // Handles destroyed by the runtime with the instance, graphics resources released here
             std::lock_guard<std::mutex> lock(session->mutex);
             if (session->graphics) {
-                session->graphics->clear_swapchain();
+                (void)session->graphics->clear_swapchain();  // swapchain destroyed by runtime either way
             }
             session->graphics.reset();
         } catch (...) {

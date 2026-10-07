@@ -176,7 +176,7 @@ jobs:
         pip install -r requirements-build.txt
 
     # VR overlay in OpenXR games: native layer DLL (headers fetched at pinned commits, see CMakeLists.txt),
-    # tested with a fake OpenXR runtime, then bundled in lib/openxr_layer by build_pyinstaller.py
+    # tested with a fake OpenXR runtime, then bundled in lib/openxr_layer_bundle by build_pyinstaller.py
     - name: Build OpenXR layer
       run: |
         cmake -S native/openxr_layer -B native/openxr_layer/build -A x64 -DTPVR_BUILD_TESTS=ON
@@ -210,7 +210,7 @@ jobs:
         [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
         try {
           # OpenXR layer too: loaded by games (some anti-cheat or antivirus tools distrust unsigned DLLs)
-          $files = @((Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName) + (Resolve-Path ./dist/TinyPedal/lib/openxr_layer/TinyPedalXrLayer.dll).Path
+          $files = @((Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName) + (Resolve-Path ./dist/TinyPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll).Path
           & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $files
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         } finally {
@@ -243,7 +243,7 @@ jobs:
         endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
         signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files: ${{ github.workspace }}/dist/TinyPedal/lib/openxr_layer/TinyPedalXrLayer.dll
+        files: ${{ github.workspace }}/dist/TinyPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256
