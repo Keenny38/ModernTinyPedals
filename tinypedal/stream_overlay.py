@@ -92,6 +92,9 @@ OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
 TOKEN_BYTES = 18  # access token: 24 url-safe characters
+# Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
+# until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
+BIND_RETRY_MS = 5000
 
 
 def stream_visibility(wcfg) -> str:
@@ -684,6 +687,8 @@ class StreamOverlay:
         self.store = FrameStore()
         self.results = ResultsCache()
         self._capture: OverlayCapture | None = None
+        self._retry: QTimer | None = None  # listening tried again while port unavailable
+        self._failed_address: tuple[str, int] | None = None  # unavailable address reported (not at every retry)
 
     @property
     def running(self) -> bool:
@@ -747,9 +752,15 @@ class StreamOverlay:
             try:
                 self._server = StreamServer(address, StreamHandler)
             except (OSError, OverflowError) as error:  # OverflowError: port out of range
-                logger.error("STREAM OVERLAY: unable to listen on %s:%s (%s)", *address, error)
-                app_signal.error.emit(f"Stream overlay: port {address[1]} unavailable ({bind_error_text(error)}).")
+                if self._failed_address != address:
+                    self._failed_address = address
+                    logger.error("STREAM OVERLAY: unable to listen on %s:%s (%s)", *address, error)
+                    app_signal.error.emit(
+                        f"Stream overlay: port {address[1]} unavailable ({bind_error_text(error)}).")
+                if isinstance(error, OSError):
+                    self.retry_later()
                 return
+            self.stop_retry()
             self._address = address
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Stream overlay")
             self._thread.start()
@@ -758,10 +769,28 @@ class StreamOverlay:
             self._capture = OverlayCapture(self.store)
         self._capture.start(int(setting["frame_rate"]))
 
-    def disable(self):
-        """Stop server & capture"""
+    def retry_later(self):
+        """Listen again soon (port held by a previous server's connections, another program)"""
+        if self._retry is None:
+            self._retry = QTimer()
+            self._retry.setSingleShot(True)
+            self._retry.timeout.connect(self.enable)
+        self._retry.start(BIND_RETRY_MS)
+
+    def stop_retry(self):
+        self._failed_address = None
+        if self._retry is not None:
+            self._retry.stop()
+
+    def suspend(self):
+        """Stop capture, server kept listening: browser sources stay connected while overlays reload"""
         if self._capture is not None:
             self._capture.stop()
+
+    def disable(self):
+        """Stop server & capture"""
+        self.stop_retry()
+        self.suspend()
         if self._server is None:
             return
         self._server.shutdown()

@@ -198,8 +198,8 @@ def reload(reload_preset: bool = False):
     logger.info("RELOADING............")
     # 0 wait unfinished saving
     cfg.flush()
-    # 1 unload modules
-    unload_modules()
+    # 1 unload modules (stream overlay server kept: browser sources stay connected)
+    unload_modules(keep_stream=True)
     # 2 reload user preset from file
     if reload_preset:
         cfg.load_user()
@@ -238,10 +238,18 @@ def load_modules():
         streamoverlay.enable()  # 7 stream overlay
 
 
-def unload_modules():
-    """Unload modules, widgets"""
+def unload_modules(keep_stream: bool = False):
+    """Unload modules, widgets
+
+    Args:
+        keep_stream: keep stream overlay server listening (reload), only capture stopped. A server stopped
+            then started again can find its port still held by its closed connections (Windows).
+    """
     vroverlay().disable()  # 0 vr overlay
-    streamoverlay.disable()  # 0 stream overlay
+    if keep_stream:
+        streamoverlay.suspend()  # 0 stream overlay capture, started again by load_modules
+    else:
+        streamoverlay.disable()  # 0 stream overlay
     cmdserver.disable()  # 0 remote control
     webdashboard.disable()  # 0 web dashboard
     kctrl.disable()  # 1 hotkey

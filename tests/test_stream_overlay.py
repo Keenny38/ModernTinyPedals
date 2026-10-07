@@ -381,6 +381,76 @@ def test_port_unavailable(ui_env, monkeypatch):
     app_signal.error.disconnect(errors.append)
 
 
+def test_listening_tried_again_until_port_free(ui_env, monkeypatch):
+    """Port held (Windows: connections of a stopped server, up to minutes): server started once free,
+    error reported once"""
+    from tinypedal import app_signal
+    from tinypedal.setting import cfg
+
+    monkeypatch.setattr(stream_overlay, "BIND_RETRY_MS", 20)
+    errors = []
+    app_signal.error.connect(errors.append)
+    control = stream_overlay.StreamOverlay()
+    try:
+        busy = socket.socket()
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        cfg.user.config["stream_overlay"].update({
+            "enable_stream_overlay": True, "stream_overlay_port": busy.getsockname()[1], "access_token": ""})
+        control.enable()
+        process_events(0.1)
+        assert not control.running and len(errors) == 1
+        busy.close()
+        end = time.monotonic() + 3
+        while not control.running and time.monotonic() < end:
+            process_events(0.02)
+        assert control.running and len(errors) == 1
+        assert get(control.url("/layout"))[0] == 200
+    finally:
+        control.disable()
+        app_signal.error.disconnect(errors.append)
+    process_events(0.1)
+    assert not control.running  # disabled: not tried again
+
+
+def test_reload_keeps_sources_connected(server, monkeypatch):
+    """App reload (settings Apply, preset loaded): server kept, keep-alive source (OBS) still gets frames
+
+    Windows binds the port exclusively (no address reuse): a server stopped & started again while a source
+    was connected could not listen again (port held by its closed connections), stream lost.
+    """
+    import http.client
+    from types import SimpleNamespace
+    from urllib.parse import urlsplit
+
+    from tinypedal import loader
+
+    monkeypatch.setattr(stream_overlay.StreamServer, "allow_reuse_address", False)  # as on Windows
+    calls = []
+    for name in ("octrl", "mctrl", "wctrl", "kctrl", "cmdserver", "webdashboard", "api"):
+        monkeypatch.setattr(loader, name, SimpleNamespace(**{
+            action: (lambda *args, _name=name, _action=action: calls.append(f"{_name}.{_action}"))
+            for action in ("enable", "disable", "start", "close", "stop", "restart", "connect")}))
+    monkeypatch.setattr(loader, "vroverlay", lambda: SimpleNamespace(enable=lambda: None, disable=lambda: None))
+    monkeypatch.setattr(loader, "streamoverlay", server)
+    monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
+    url = urlsplit(server.url("/api/frames", "view=gear&seq=0"))
+    connection = http.client.HTTPConnection("127.0.0.1", server.port(), timeout=5)
+    try:
+        connection.request("GET", f"{url.path}?{url.query}")
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 200
+        loader.reload()
+        assert "wctrl.start" in calls and server.running
+        connection.request("GET", f"{url.path}?{url.query}")  # same connection
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 200
+    finally:
+        connection.close()
+
+
 # Page
 @pytest.fixture
 def page_backend(server, monkeypatch):
