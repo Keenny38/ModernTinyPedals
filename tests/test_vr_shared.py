@@ -6,6 +6,7 @@ while the OpenXR layer draws the overlay.
 """
 
 import json
+import ntpath
 import os
 import re
 import struct
@@ -310,8 +311,8 @@ def test_writer_unavailable_off_windows(monkeypatch):
 
 
 def write_layer_status(buffer, heartbeat, state=vr_shared.LAYER_ACTIVE, api=1, result=0, frames=9,
-                       version=vr_shared.VERSION):
-    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, 4321, state, api, result, frames,
+                       version=vr_shared.VERSION, pid=4321):
+    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, pid, state, api, result, frames,
                      version)
 
 
@@ -620,6 +621,29 @@ def test_installer_never_closes_openxr_games():
     assert vr_shared.LAYER_INSTALL_FOLDER != "lib"
 
 
+def test_installer_removes_every_ascii_layer_copy(monkeypatch):
+    """Uninstall removes the copies of each ascii_layer_roots folder (%PUBLIC%, system drive root too) and
+    their registry entries, even while the files still exist: no OpenXR game keeps loading the layer"""
+    with open(os.path.join(ROOT, "installer", "tinypedal.iss"), encoding="utf-8") as file:
+        script = file.read()
+    monkeypatch.setenv("PROGRAMDATA", "C:\\ProgramData")
+    monkeypatch.setenv("PUBLIC", "C:\\Users\\Public")
+    monkeypatch.setenv("SYSTEMDRIVE", "C:")
+    monkeypatch.setattr(vr_shared.os.path, "join", ntpath.join)  # Windows paths on any OS
+    roots = vr_shared.ascii_layer_roots()
+    # Each root is <base>\ModernTinyPedals\<install folder>\<user>: base matched by the uninstaller
+    suffix = f"ModernTinyPedals\\{vr_shared.LAYER_INSTALL_FOLDER}\\"
+    assert f"LayerCopyFolder = '{suffix}';" in script
+    assert [root.rsplit("\\", 1)[0] + "\\" for root in roots] == [
+        "C:\\ProgramData\\" + suffix, "C:\\Users\\Public\\" + suffix, "C:\\" + suffix]
+    code = script[script.index("procedure CurUninstallStepChanged"):]
+    for base in ("ExpandConstant('{commonappdata}')", "GetEnv('PUBLIC')", "ExpandConstant('{sd}')"):
+        assert f"AddBackslash({base}) + LayerCopyFolder" in code
+    assert "DelTree(RemoveBackslash(Roots[J]), True, True, True)" in code
+    assert "Pos(Lowercase(Roots[J]), Name) = 1" in code  # entry removed by folder, file deleted or not
+    assert code.index("DelTree(") < code.index("RegGetValueNames(")
+
+
 def test_is_layer_entry():
     assert vr_shared.is_layer_entry(r"C:\A\lib\openxr_layer\TinyPedalXrLayer.json")
     assert vr_shared.is_layer_entry(r"c:\a\tinypedalxrlayer.JSON")
@@ -895,6 +919,149 @@ def test_steamvr_overlay_kept_while_openxr_layer_draws_nothing(env, monkeypatch)
             env.now += 100
             control.update_overlay()
         assert log == ["setOverlayRaw", "showOverlay"] and control._visible
+    finally:
+        widget.close()
+        control.disable()
+
+
+def test_two_openxr_games_write_layer_status_in_turn(env, monkeypatch, caplog):
+    """Two OpenXR games run the layer: each writes the single status block in turn. SteamVR overlay hidden
+    while one of them draws, each game's state logged once (not every tick)"""
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    env.steamvr = True
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        assert control._visible
+        log.clear()
+        with caplog.at_level("INFO", logger="tinypedal.vr_overlay"):
+            for tick in range(20):  # game 1111 draws (frames grow), game 2222 draws nothing (no layer slot)
+                if tick % 2:
+                    write_layer_status(env.buffer, env.now, frames=50, pid=2222)
+                else:
+                    write_layer_status(env.buffer, env.now, frames=10 + tick, pid=1111)
+                env.now += 50
+                control.update_overlay()
+                if tick >= 2:
+                    assert control._xr_drawing and not control._visible
+        assert log == ["hideOverlay"]
+        messages = [record.getMessage() for record in caplog.records]
+        assert len([m for m in messages if "shown in OpenXR game" in m]) == 2  # once per game process
+        assert len([m for m in messages if "SteamVR overlay" in m]) == 1  # hidden once, never shown again
+        assert set(control._xr_layers) == {1111, 2222}
+        # Game 1111 closed (session ended): game 2222 draws nothing, SteamVR overlay shown again
+        write_layer_status(env.buffer, 0, frames=30, pid=1111)
+        caplog.clear()
+        log.clear()
+        with caplog.at_level("INFO", logger="tinypedal.vr_overlay"):
+            for _ in range(vr_shared.LAYER_TIMEOUT_MS // 100 + 2):
+                env.now += 100
+                control.update_overlay()
+                write_layer_status(env.buffer, env.now, frames=50, pid=2222)
+        assert log == ["setOverlayRaw", "showOverlay"] and control._visible
+        messages = [record.getMessage() for record in caplog.records]
+        assert messages.count("VR overlay: OpenXR game closed (process 1111)") == 1
+        assert not any("2222" in m for m in messages)  # unchanged state: not logged again
+    finally:
+        widget.close()
+        control.disable()
+
+
+def _drawing_game(env, control, frames=10, ticks=3):
+    for _ in range(ticks):
+        frames += 1
+        write_layer_status(env.buffer, env.now, frames=frames)
+        env.now += 50
+        control.update_overlay()
+    return frames
+
+
+def test_steamvr_overlay_kept_hidden_while_layer_resumes(env, monkeypatch):
+    """Widgets shown again (auto hide) in a game whose layer drew them: no SteamVR image (~50 ms double image)
+    while the layer's frames resume; bounded wait, SteamVR overlay shown if the layer draws nothing"""
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    env.steamvr = True
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        frames = _drawing_game(env, control)
+        assert not control._visible and control._xr_drawing
+        log.clear()
+        widget.hide()  # auto hide: no tiles, layer submits no quad, frames_shown stops growing
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE == 0
+        for _ in range(vr_shared.LAYER_TIMEOUT_MS // 100 * 5):  # long hidden, game still running
+            write_layer_status(env.buffer, env.now, frames=frames)
+            env.now += 100
+            control.update_overlay()
+        assert "showOverlay" not in log and "setOverlayRaw" not in log
+        widget.show()  # widgets back: tiles written, SteamVR overlay stays hidden, no image sent
+        write_layer_status(env.buffer, env.now, frames=frames)
+        env.now += 50
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE
+        assert "showOverlay" not in log and "setOverlayRaw" not in log and not control._visible
+        frames = _drawing_game(env, control, frames)  # layer draws again
+        assert "showOverlay" not in log and control._xr_drawing
+        # Hidden & shown again, but the layer no longer draws (no layer slot left): shown after the grace window
+        widget.hide()
+        control.update_overlay()
+        widget.show()
+        env.now += 50
+        control.update_overlay()
+        assert not control._visible
+        for _ in range(vr_overlay.OPENXR_RESUME_GRACE_MS // 100 + 1):
+            write_layer_status(env.buffer, env.now, frames=frames)
+            env.now += 100
+            control.update_overlay()
+        assert log[-2:] == ["setOverlayRaw", "showOverlay"] and control._visible and not control._xr_drawing
+    finally:
+        widget.close()
+        control.disable()
+
+
+def test_steamvr_overlay_kept_hidden_when_game_session_restarts(env, monkeypatch):
+    """Same game restarts its OpenXR session (frames count from 0): SteamVR overlay kept hidden while the
+    layer resumes; another game process gets no grace (its layer may never draw)"""
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    env.steamvr = True
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        _drawing_game(env, control)
+        log.clear()
+        write_layer_status(env.buffer, 0, frames=13)  # xrDestroySession
+        env.now += 50
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE == 0  # no layer: tiles hidden
+        assert log == ["setOverlayRaw", "showOverlay"]  # no OpenXR session: SteamVR overlay shown meanwhile
+        log.clear()
+        env.now += 500
+        write_layer_status(env.buffer, env.now, frames=0)  # new session, nothing drawn yet
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE and not control._visible and control._xr_drawing
+        assert log == ["hideOverlay"]  # at once, not after the layer's next frames
+        _drawing_game(env, control, frames=0)
+        assert log == ["hideOverlay"]
+        # Game closed for longer than the grace window, next game (other process): SteamVR overlay shown
+        # until its layer draws
+        env.now += vr_overlay.OPENXR_RESUME_GRACE_MS + vr_shared.LAYER_TIMEOUT_MS
+        control.update_overlay()
+        assert control._visible and not control._xr_layers
+        log.clear()
+        write_layer_status(env.buffer, env.now, frames=0, pid=5555)
+        env.now += 50
+        control.update_overlay()
+        assert control._visible and not control._xr_drawing
     finally:
         widget.close()
         control.disable()

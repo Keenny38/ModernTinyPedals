@@ -63,6 +63,46 @@ OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per 
 OPENXR_MAX_TILES = 8  # tiles (quad layers) at most, room left for the game's layers (runtimes allow 16 or more)
 OPENXR_TILE_GAP = 32  # widgets closer than this (pixels) share a tile
 HEARTBEAT_INTERVAL_MS = 500  # app heartbeat for the OpenXR layer, whatever the update interval (layer timeout 2 s)
+# Layer of a game that drew the overlay, tiles shown again (auto hide) or session restarted: SteamVR overlay kept
+# hidden at most this long while its frames resume (no ~50 ms double image), shown if the layer draws nothing
+OPENXR_RESUME_GRACE_MS = 3000
+
+
+class XrLayerProcess:
+    """Layer status of one OpenXR game process: several games may run the layer, each writing the single
+    status block of the shared memory in turn (app sees one of them per tick)"""
+
+    __slots__ = ("status", "shown_at", "wait_from", "drew_before_hide", "logged")
+
+    def __init__(self, status: vr_shared.LayerStatus):
+        self.status = status
+        self.shown_at: int | None = None  # tick (ms) when frames_shown last grew
+        self.wait_from: int | None = None  # tick (ms) from which frames are expected again (grace window)
+        self.drew_before_hide = False  # drew the overlay when tiles were last hidden
+        self.logged: tuple | None = None  # (state, graphics API) last logged, None once closed
+
+    def update(self, status: vr_shared.LayerStatus, now: int):
+        """New status of this process: frames growth recorded (lower count: new session or mixed read of two
+        writers, new base only)"""
+        if status.frames_shown > self.status.frames_shown and status.heartbeat_ms != 0:
+            self.shown_at = now
+            self.wait_from = None
+        self.status = status
+
+    def drew_recently(self, now: int, within: int) -> bool:
+        return self.shown_at is not None and 0 <= now - self.shown_at <= within
+
+    def drawing(self, now: int, tiles_visible: bool) -> bool:
+        """Layer shows the overlay: frames shown within LAYER_TIMEOUT_MS, or drew before tiles were hidden
+        (nothing to draw) and frames resuming within OPENXR_RESUME_GRACE_MS. ACTIVE layer may still submit
+        no quad (no layer slot left, image refused): not drawing then."""
+        if not self.status.drawing(now):
+            return False
+        if self.drew_recently(now, vr_shared.LAYER_TIMEOUT_MS):
+            return True
+        if not tiles_visible:
+            return self.drew_before_hide
+        return self.wait_from is not None and 0 <= now - self.wait_from <= OPENXR_RESUME_GRACE_MS
 
 
 class MirrorWindow(QWidget):
@@ -417,9 +457,8 @@ class VROverlay(QObject):
         self._xr_dirty = False  # widgets changed since last tiles written (waiting for next write slot)
         self._xr_written_at: int | None = None  # tick (ms) of last image written
         self._xr_drawing = False
-        self._xr_state: tuple | None = None  # last layer state logged
-        self._xr_frames: tuple[int, int] | None = None  # (pid, frames_shown) of layer at last tick
-        self._xr_shown_at: int | None = None  # tick (ms) when layer frames_shown last grew
+        self._xr_layers: dict[int, XrLayerProcess] = {}  # OpenXR game processes running the layer, by pid
+        self._xr_tiles_visible = False  # tiles written & shown (not hidden) for the layer
         self._xr_layer_present = False  # layer heartbeat recent (OpenXR game running): tiles written
         self._xr_mismatch_reported: set[int] = set()  # game processes running a layer of another version
         self._xr_errors_shown: set[str] = set()  # layer setup problems reported once
@@ -510,8 +549,8 @@ class VROverlay(QObject):
             self._xr = writer
             self._xr_checksum = self._xr_written_at = None
             self._xr_dirty = False
-            self._xr_state = None
-            self._xr_frames = self._xr_shown_at = None
+            self._xr_layers.clear()
+            self._xr_tiles_visible = False
             self._xr_layer_present = False
             self._heartbeat_timer.start()
             logger.info("ENABLED: VR overlay (OpenXR layer %s)", loadable)
@@ -533,7 +572,8 @@ class VROverlay(QObject):
         self._xr_checksum = self._xr_written_at = None
         self._xr_dirty = False
         self._xr_drawing = False
-        self._xr_frames = self._xr_shown_at = None
+        self._xr_layers.clear()
+        self._xr_tiles_visible = False
         if writer is not None:
             writer.close()
             logger.info("DISABLED: VR overlay (OpenXR layer)")
@@ -550,51 +590,91 @@ class VROverlay(QObject):
         if status is not None and status.recent(now) and not self._xr_layer_present:
             self.update_overlay()
 
+    def __read_layer_status(self) -> vr_shared.LayerStatus | None:
+        """Layer status, None if not open or being written (read twice: two games may write it in turn)"""
+        if self._xr is None:
+            return None
+        status = self._xr.layer_status()
+        return status if status is not None and status == self._xr.layer_status() else None
+
     def __update_openxr_status(self, now: int):
-        """Layer state of OpenXR game: logged on change, SteamVR overlay hidden while layer draws.
-        Tiles written only while a layer runs (an OpenXR game): written at once when one appears,
-        hidden when it goes (nothing outdated shown by the next game)."""
-        status = self._xr.layer_status() if self._xr is not None else None
-        present = status is not None and status.recent(now)
+        """Layer state of OpenXR games (one or several processes): logged on change of each process, SteamVR
+        overlay hidden while a layer draws. Tiles written only while a layer runs (an OpenXR game): written at
+        once when one appears, hidden when all go (nothing outdated shown by the next game)."""
+        layers = self._xr_layers
+        status = self.__read_layer_status()
+        if status is not None and status.pid != 0:
+            layer = layers.get(status.pid)
+            if layer is None:
+                if status.recent(now):
+                    layers[status.pid] = layer = XrLayerProcess(status)
+            else:
+                layer.update(status, now)
+            if layer is not None:
+                self.__log_layer_state(layer, now)
+        for pid, layer in list(layers.items()):
+            if not layer.status.recent(now):
+                if layer.logged is not None:
+                    layer.logged = None
+                    logger.info("VR overlay: OpenXR game closed (process %s)", pid)
+                # Kept a while: session restarted by the same game, frames expected again (grace window)
+                if not layer.drew_recently(now, OPENXR_RESUME_GRACE_MS):
+                    del layers[pid]
+        present = any(layer.status.recent(now) for layer in layers.values())
         if present != self._xr_layer_present:
             self._xr_layer_present = present
             if present:
                 self._xr_dirty = True  # written on this tick, rate limit ignored
                 self._xr_written_at = None
-            elif self._xr is not None:
-                self._xr.hide()
-                self._xr_checksum = None
-        frames = (status.pid, status.frames_shown) if status is not None else None
-        last = self._xr_frames
-        if frames is not None and last is not None and frames[0] == last[0] and frames[1] > last[1]:
-            self._xr_shown_at = now
-        self._xr_frames = frames
-        # ACTIVE layer may still submit no quad (no layer slot left, image refused): SteamVR overlay kept
-        drawing = (status is not None and status.drawing(now) and self._xr_shown_at is not None
-                   and now - self._xr_shown_at <= vr_shared.LAYER_TIMEOUT_MS)
-        state = (status.pid, status.state, status.graphics_api) if status is not None and status.recent(now) else None
-        if state != self._xr_state:
-            self._xr_state = state
-            if status is not None and state is not None:
-                if status.state == vr_shared.LAYER_ACTIVE:
-                    logger.info("VR overlay: shown in OpenXR game (%s, process %s)", status.graphics_name, status.pid)
-                elif status.state == vr_shared.LAYER_UNSUPPORTED:
-                    logger.warning("VR overlay: OpenXR game uses %s, not supported by OpenXR layer "
-                                   "(SteamVR overlay or mirror window still work)", status.graphics_name)
-                elif status.version_mismatch:
-                    logger.warning("VR overlay: OpenXR game (process %s) runs the layer of another app version "
-                                   "(protocol %s, app %s), nothing drawn: restart the game "
-                                   "(SteamVR overlay or mirror window still work)",
-                                   status.pid, status.version, vr_shared.VERSION)
-                    if status.pid not in self._xr_mismatch_reported:
-                        self._xr_mismatch_reported.add(status.pid)
-                        app_signal.error.emit("VR overlay: restart the VR game to show the overlay in it "
-                                              "(game started before the app was updated)")
-                else:
-                    logger.warning("VR overlay: OpenXR layer stopped in game (XrResult %s)", status.last_result)
-            elif self._xr_drawing:
-                logger.info("VR overlay: OpenXR game closed")
-        self._xr_drawing = drawing
+            else:
+                self.__hide_tiles(now)
+        self._xr_drawing = any(layer.drawing(now, self._xr_tiles_visible) for layer in layers.values())
+
+    def __log_layer_state(self, layer: XrLayerProcess, now: int):
+        """State of a game process logged when it changes (several games: each logged once per change)"""
+        status = layer.status
+        state = (status.state, status.graphics_api) if status.recent(now) else None
+        if state is None or state == layer.logged:
+            return
+        layer.logged = state
+        if status.state == vr_shared.LAYER_ACTIVE:
+            logger.info("VR overlay: shown in OpenXR game (%s, process %s)", status.graphics_name, status.pid)
+        elif status.state == vr_shared.LAYER_UNSUPPORTED:
+            logger.warning("VR overlay: OpenXR game uses %s, not supported by OpenXR layer "
+                           "(SteamVR overlay or mirror window still work)", status.graphics_name)
+        elif status.version_mismatch:
+            logger.warning("VR overlay: OpenXR game (process %s) runs the layer of another app version "
+                           "(protocol %s, app %s), nothing drawn: restart the game "
+                           "(SteamVR overlay or mirror window still work)",
+                           status.pid, status.version, vr_shared.VERSION)
+            if status.pid not in self._xr_mismatch_reported:
+                self._xr_mismatch_reported.add(status.pid)
+                app_signal.error.emit("VR overlay: restart the VR game to show the overlay in it "
+                                      "(game started before the app was updated)")
+        else:
+            logger.warning("VR overlay: OpenXR layer stopped in game (XrResult %s)", status.last_result)
+
+    def __hide_tiles(self, now: int):
+        """Nothing for the layer to draw: games that drew it keep their state until tiles are shown again"""
+        if self._xr is not None:
+            self._xr.hide()
+        self._xr_checksum = None
+        if self._xr_tiles_visible:
+            self._xr_tiles_visible = False
+            for layer in self._xr_layers.values():
+                layer.drew_before_hide = layer.drew_recently(now, OPENXR_RESUME_GRACE_MS)
+
+    def __tiles_shown(self, now: int):
+        """Tiles shown again (auto hide, game session restarted): SteamVR overlay kept hidden while the games
+        that drew them resume (OPENXR_RESUME_GRACE_MS at most)"""
+        if self._xr_tiles_visible:
+            return
+        self._xr_tiles_visible = True
+        for layer in self._xr_layers.values():
+            if layer.drew_before_hide:
+                layer.wait_from = now
+            layer.drew_before_hide = False
+        self._xr_drawing = any(layer.drawing(now, True) for layer in self._xr_layers.values())
 
     def __write_openxr(self, widgets: list, now: int):
         """Tiles for OpenXR layer: copied by the layer in the game's frame, so written at most every
@@ -606,8 +686,7 @@ class VROverlay(QObject):
             return
         if not any(widget.isVisible() and widget.width() > 0 for widget in widgets):
             self._xr_dirty = False
-            writer.hide()
-            self._xr_checksum = None
+            self.__hide_tiles(now)
             return
         if not self._xr_layer_present:  # no OpenXR game: nothing composed (written once a layer appears)
             self._xr_dirty = False
@@ -618,8 +697,7 @@ class VROverlay(QObject):
         self._xr_dirty = False
         frame = compose_tiles(widgets)
         if frame is None:  # nothing visible
-            writer.hide()
-            self._xr_checksum = None
+            self.__hide_tiles(now)
             return
         if frame.checksum == self._xr_checksum:
             return
@@ -632,6 +710,8 @@ class VROverlay(QObject):
         except (ValueError, TypeError, BufferError) as error:
             self._xr_checksum = None
             logger.warning("VR overlay: OpenXR image not written: %s", error)
+        else:
+            self.__tiles_shown(now)
 
     # SteamVR (OpenVR)
 

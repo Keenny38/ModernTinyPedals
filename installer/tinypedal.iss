@@ -67,7 +67,8 @@ Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 ; OpenXR layer copies made by the app (one folder per layer build, outside lib so updates never touch a DLL
 ; loaded by a game). A copy still loaded by a running game stays until removed by hand.
 Type: filesandordirs; Name: "{app}\openxr_layer"
-; Copies to an ASCII folder when the app folder has non-ASCII characters (OpenXR loader reads ANSI paths)
+; Copies to an ASCII folder when the app folder has non-ASCII characters (OpenXR loader reads ANSI paths);
+; copies in %PUBLIC% or at the system drive root removed by CurUninstallStepChanged (below)
 Type: filesandordirs; Name: "{commonappdata}\ModernTinyPedals\openxr_layer"
 
 [Icons]
@@ -93,27 +94,47 @@ end;
 
 // VR overlay: the app copies its OpenXR layer from lib\openxr_layer_bundle to {app}\openxr_layer\<build>\ and
 // registers that TinyPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
-// Non-ASCII app folder: registered by its 8.3 short path, or copied to {commonappdata}\ModernTinyPedals\openxr_layer.
+// Non-ASCII app folder: registered by its 8.3 short path, or copied to the first writable ASCII folder of
+// tinypedal/vr_shared.py ascii_layer_roots: {commonappdata}, %PUBLIC% or system drive root, each followed by
+// ModernTinyPedals\openxr_layer\<user>\<build>\.
 // Removed on uninstall (after files are deleted): OpenXR games must never look for a layer whose files are gone.
 const
   OpenXRLayersKey = 'SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit';
+  LayerCopyFolder = 'ModernTinyPedals\openxr_layer\';
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Names: TArrayOfString;
-  AppPath, CopyPath, Name: String;
-  I: Integer;
+  Names, Roots: TArrayOfString;
+  Name: String;
+  I, J: Integer;
+  Remove: Boolean;
 begin
   if CurUninstallStep <> usPostUninstall then
     exit;
-  AppPath := Lowercase(AddBackslash(ExpandConstant('{app}')));
-  CopyPath := Lowercase(AddBackslash(ExpandConstant('{commonappdata}')) + 'ModernTinyPedals\openxr_layer\');
+  // Index 0: install folder (files already deleted), 1-3: ASCII copy folders (all users' copies removed)
+  SetArrayLength(Roots, 4);
+  Roots[0] := AddBackslash(ExpandConstant('{app}'));
+  Roots[1] := AddBackslash(ExpandConstant('{commonappdata}')) + LayerCopyFolder;
+  Roots[2] := '';
+  if GetEnv('PUBLIC') <> '' then
+    Roots[2] := AddBackslash(GetEnv('PUBLIC')) + LayerCopyFolder;
+  Roots[3] := AddBackslash(ExpandConstant('{sd}')) + LayerCopyFolder;
+  for J := 1 to 3 do
+    if Roots[J] <> '' then
+    begin
+      // A copy still loaded by a running game stays until removed by hand
+      DelTree(RemoveBackslash(Roots[J]), True, True, True);
+      RemoveDir(ExtractFileDir(RemoveBackslash(Roots[J])));  // ModernTinyPedals folder, only if empty
+    end;
   if RegGetValueNames(HKCU, OpenXRLayersKey, Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
     begin
       Name := Lowercase(Names[I]);
-      if (Pos('tinypedalxrlayer.json', Name) > 0) and ((Pos(AppPath, Name) = 1) or (Pos(CopyPath, Name) = 1)
-          or not FileExists(Names[I])) then
+      Remove := not FileExists(Names[I]);
+      for J := 0 to 3 do
+        if (Roots[J] <> '') and (Pos(Lowercase(Roots[J]), Name) = 1) then
+          Remove := True;
+      if (Pos('tinypedalxrlayer.json', Name) > 0) and Remove then
         RegDeleteValue(HKCU, OpenXRLayersKey, Names[I]);
     end;
 end;
