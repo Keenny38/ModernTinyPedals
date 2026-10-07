@@ -657,3 +657,20 @@ def test_former_tool_pages_reopen_as_race_calculator(window, monkeypatch):
             if page.dialog is not None:
                 page.dialog.close()
         other.deleteLater()
+
+
+def test_language_change_with_timer_pages_open(window, monkeypatch):
+    """Pages with a refresh timer deleted by a language change stop it (timer firing on a deleted page crashed)"""
+    import time
+
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool("perf_view.PerformanceView", window)
+    open_tool("replay_view.ReplayView", window)
+    monkeypatch.setitem(cfg.application, "language", "Français")
+    window.retranslate()
+    deadline = time.monotonic() + 1.5  # performance page refreshes every second
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.02)

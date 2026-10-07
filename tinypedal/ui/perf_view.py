@@ -86,6 +86,7 @@ class PerformanceView(BaseDialog):
         super().__init__(parent)
         self.set_utility_title(tr("Widget Performance"))
         self._update_timer = QBasicTimer()
+        self.destroyed.connect(self._update_timer.stop)  # page deleted without close (language change)
 
         self.table = QTableWidget(0, len(HEADER), self)
         self.table.setHorizontalHeaderLabels([tr(text) for text in HEADER])

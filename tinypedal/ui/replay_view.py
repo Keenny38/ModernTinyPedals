@@ -281,6 +281,7 @@ class ReplayView(BaseDialog):
         super().__init__(parent)
         self.set_utility_title(tr("Session Recorder"))
         self._update_timer = QBasicTimer()
+        self.destroyed.connect(self._update_timer.stop)  # page deleted without close (language change)
         self._loaded_file = ""
 
         # Recording
