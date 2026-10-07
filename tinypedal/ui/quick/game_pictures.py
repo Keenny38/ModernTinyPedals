@@ -114,6 +114,9 @@ class PictureNotifier(QObject):
         self._timer.timeout.connect(self.changed)
         self._arrived.connect(self._timer.start)
         images.add_listener(self._picture_arrived)
+        app = QGuiApplication.instance()
+        if isinstance(app, QGuiApplication):  # light or dark theme: logos recolored for it, pages told too
+            app.paletteChanged.connect(self._timer.start)
 
     def _picture_arrived(self):
         """Fetch thread: hand over to UI thread (nothing once app objects are gone)"""

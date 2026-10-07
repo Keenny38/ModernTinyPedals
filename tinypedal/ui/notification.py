@@ -28,6 +28,7 @@ import threading
 from contextlib import suppress
 from time import monotonic
 
+import shiboken6
 from PySide6.QtCore import QLocale, QObject, Qt, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -367,8 +368,7 @@ class UpdatesNotifyButton(QPushButton):
 
     def skip(self):
         """Skip version of available update: notice not shown again (a newer version is), saved"""
-        skip_version(update_checker.latest_version())
-        UpdatesNotifyButton.dismissed_message = update_checker.message()
+        skip_update_version()
         self.hide()
 
     def can_install(self) -> bool:
@@ -459,8 +459,11 @@ class UpdatesNotifyButton(QPushButton):
             can_install=self.can_install(), prompt=prompt,
             download_url=installer.url if installer is not None and not portable else "", portable=portable,
             installer=update_installer(), can_skip=update_checker.is_updates())
-        dialog.install_requested.connect(self.install_from_notes)
-        dialog.skip_requested.connect(self.skip)
+        # Page may outlive this button (kept when view is rebuilt in new language): not only bound to it
+        dialog.install_requested.connect(
+            lambda button=self: button.install_from_notes() if shiboken6.isValid(button) else install_from_notes())
+        dialog.skip_requested.connect(skip_from_notes)
+        dialog.skip_requested.connect(self.hide)
         return dialog
 
     def show_release_notes(self, prompt: bool = False, bring_to_front: bool = True):
@@ -485,3 +488,23 @@ class UpdatesNotifyButton(QPushButton):
         """Download installer in background thread (once, while not already downloading)"""
         auto_install, self._auto_install = self._auto_install, False
         update_installer().download(auto_install)
+
+
+def install_from_notes():
+    """Install asked from what's new page: installs once downloaded, no second question"""
+    update_installer().download(auto_install=True)
+
+
+def skip_update_version():
+    """Version of available update skipped (saved): notice not shown again, a newer version is"""
+    skip_version(update_checker.latest_version())
+    UpdatesNotifyButton.dismissed_message = update_checker.message()
+
+
+def skip_from_notes():
+    """Skip asked from what's new page: version skipped, update notices of main window hidden"""
+    skip_update_version()
+    window = main_window()
+    if window is not None:
+        for button in window.findChildren(UpdatesNotifyButton):
+            button.hide()

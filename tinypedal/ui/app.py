@@ -558,6 +558,7 @@ class TabView(QWidget):
         self._button_api.setCheckable(False)
         self._button_api.clicked.connect(self.show_api_menu)
         self._menu_api = APIMenu(tr("API"), parent)
+        self.destroyed.connect(self._menu_api.deleteLater)  # parented to window: view replaced (language change)
         layout_quick.addWidget(self._button_api, 2, 1)
         button_search = NavButton(f"{tr('Command Palette')} (Ctrl+K)", "\ue721", "K", icon_family, rail, compact=True)
         button_search.setCheckable(False)
@@ -655,6 +656,7 @@ class TabView(QWidget):
         menu = QMenu(self)
         menu.addAction(tr("Customize Navigation Bar...")).triggered.connect(self.open_rail_editor)
         menu.exec(self._rail.mapToGlobal(position))
+        menu.deleteLater()
 
     def open_rail_editor(self):
         RailEditor(self, self.build_rail_items).open()
@@ -814,7 +816,8 @@ class TabView(QWidget):
         super().showEvent(event)
         self.update_page_minimum()  # window laid out on its screen: minimum kept within it
         if self._fit_pending:
-            QTimer.singleShot(0, self.fit_pending_pages)  # once view geometry is set by window layout
+            # Once view geometry is set by window layout, never on a view replaced meanwhile (language change)
+            QTimer.singleShot(0, self, self.fit_pending_pages)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -972,6 +975,7 @@ class TabView(QWidget):
         menu.addAction(tr("Close All")).triggered.connect(lambda: self.close_all_pages(self.other_pages()))
         button = self._button_pages
         menu.exec(button.mapToGlobal(button.rect().topRight()))
+        menu.deleteLater()
 
     def open_page_paths(self) -> list[str]:
         """Tool dialog paths of open pages in order, shown page marked with leading "*" """
@@ -993,6 +997,7 @@ class TabView(QWidget):
         current = self._pages.currentWidget()
         paths: list[str] = []
         kept: list[DialogPage] = []
+        reopened: list[DialogPage] = []
         shown = None
         for page in self.dialog_pages():
             dialog = page.dialog
@@ -1002,6 +1007,7 @@ class TabView(QWidget):
             path = tools.get(type(dialog).__name__)
             if path and not (callable(is_modified) and is_modified()):
                 paths.append(f"*{path}" if page is current else path)
+                reopened.append(page)
                 continue
             page.closed.disconnect(self.close_dialog_page)
             page.modified_changed.disconnect(self.refresh_open_pages)
@@ -1012,6 +1018,12 @@ class TabView(QWidget):
             kept.append(page)
             if page is current:
                 shown = page
+        # Reopened pages closed now (not only deleted with view): their close cleanup runs (backends
+        # released, loaders stopped), page left as it is (deleted with view, window size kept)
+        for page in reopened:
+            page.closed.disconnect(self.close_dialog_page)
+            if page.dialog is not None:
+                page.dialog.close()
         return paths, kept, shown
 
     def adopt_pages(self, pages: list[DialogPage]):

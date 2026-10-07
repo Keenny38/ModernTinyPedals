@@ -147,6 +147,7 @@ class OverlayMenu(QMenu):
 
         # Reset submenu
         menu_reset_data = ResetDataMenu(tr("Reset Data"), parent)
+        self.destroyed.connect(menu_reset_data.deleteLater)  # parented to window: menu rebuilt (language change)
         self.addMenu(menu_reset_data)
         self.addSeparator()
 

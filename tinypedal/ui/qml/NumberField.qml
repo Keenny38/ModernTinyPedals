@@ -28,7 +28,9 @@ TextField {
             return
         }
         number = clamp(number)
-        if (format(number) !== format(value))
+        // Text left as shown: value kept (not rounded to shown decimals), else typed number compared to
+        // value, not to shown text: 4.6 typed over 5 shown without decimals is a change too
+        if (text !== format(value) && number !== value)
             edited(number)
         text = format(value)
     }

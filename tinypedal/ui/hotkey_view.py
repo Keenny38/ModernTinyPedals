@@ -22,6 +22,7 @@ Hotkey list view
 
 import os
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, cast
 
 from PySide6.QtCore import QBasicTimer, Qt, Slot
@@ -397,5 +398,6 @@ class ConfigHotkey(BaseDialog):
     def closeEvent(self, event):
         """Close dialog"""
         self._update_timer.stop()
-        self.reloading()
+        with suppress(RuntimeError):  # hotkey page it came from replaced meanwhile (language change)
+            self.reloading()
         self.__dict__.clear()

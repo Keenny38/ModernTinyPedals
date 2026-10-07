@@ -574,6 +574,7 @@ class HomeView(QWidget):
         menu = QMenu(self)
         menu.addAction(tr("Customize Quick Access...")).triggered.connect(self.customize_quick_access)
         menu.exec(self.quick_box.mapToGlobal(position))
+        menu.deleteLater()
 
     # Layout
     def column_count(self, width: int) -> int:

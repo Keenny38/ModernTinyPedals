@@ -316,6 +316,27 @@ def test_logo_cache_follows_theme(game, monkeypatch):
     assert logos.track("Le Mans", "") == dark_url
 
 
+def test_pages_told_when_theme_changes(game):
+    """Light or dark theme chosen: pages showing logos told to read them again (was: logos of the other theme,
+    unreadable, kept by results, race & spectate pages until game pictures changed)"""
+    from PySide6.QtGui import QColor, QGuiApplication, QPalette
+
+    from tinypedal.ui.quick import game_pictures as gp
+
+    notifier = gp.notifier()
+    notifier._timer.stop()
+    palette = QGuiApplication.palette()
+    changed = QPalette(palette)
+    changed.setColor(QPalette.ColorRole.Window, QColor("#fafafa" if gp.light_theme() is False else "#202020"))
+    try:
+        QGuiApplication.setPalette(changed)
+        QCoreApplication.processEvents()
+        assert notifier._timer.isActive()
+    finally:
+        QGuiApplication.setPalette(palette)
+        notifier._timer.stop()
+
+
 def test_results_rows_show_logos(game):
     from tinypedal.process.results_file import Entry, SessionResult
     from tinypedal.ui.quick import results_backend as rb

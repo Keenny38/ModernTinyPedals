@@ -705,3 +705,33 @@ def test_backend_texts_translated(options):
         assert "overlay" in options.host.notices[-1] and "set to" not in options.host.notices[-1]
     finally:
         i18n.set_language("English")
+
+
+def test_decimal_typed_in_whole_number_field(window):
+    """Decimal number typed in field of a whole value (shown without decimals): taken (was: dropped when
+    rounded to the shown value, 5 -> 4.6 kept 5)"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from tinypedal.i18n.options import option_label
+    from tinypedal.ui.overlay_options import open_overlay_options
+
+    key = "speed_minimum_reset_cooldown"
+    assert cfg.user.setting["speedometer"][key] == 5
+    page = open_overlay_options(window, "speedometer", key)
+    page.view.setFocus()
+    QTest.qWait(150)
+    flush()
+    label = option_label(key)
+    stack, field = [page.view.rootObject()], None
+    while stack and field is None:
+        item = stack.pop()
+        if "NumberField" in item.metaObject().className() and item.property("tip") == label:
+            field = item
+        stack.extend(item.childItems())
+    assert field is not None
+    field.forceActiveFocus()
+    QTest.keyClicks(page.view, "4.6")  # focused field selects its text: replaced
+    QTest.keyClick(page.view, Qt.Key.Key_Return)
+    flush()
+    assert page.backend.value("speedometer", key) == 4.6

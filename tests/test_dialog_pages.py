@@ -737,3 +737,128 @@ def test_quit_unloads_qml_views(window, monkeypatch):
     assert any(not view.source().isEmpty() for view in views)
     window.quit_app()
     assert all(view.source().isEmpty() for view in window.findChildren(QQuickWidget))
+
+
+def test_language_change_closes_reopened_tool_pages(window):
+    """Tool pages reopened in new language: old ones closed first, their close cleanup done (was: only
+    deleted, backends never released, vertices of map pages kept in memory, loaders left running)"""
+    from tinypedal.ui.quick.lines import VertexStore, Vertices
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool("track_map_viewer.TrackMapViewer", window)
+    QApplication.processEvents()
+    view = window.centralWidget()
+    page = view.find_dialog_page("TrackMapViewer")
+    assert page is not None
+    key = page.dialog.backend.key("test")
+    VertexStore.set(key, Vertices(bytearray(), 0))
+    language = cfg.application["language"]
+    try:
+        cfg.application["language"] = "Français"
+        window.last_language = "Français"
+        window.retranslate()
+        settle()
+        assert not VertexStore.has(key)  # old page closed: backend released
+        assert window.centralWidget().find_dialog_page("TrackMapViewer") is not None  # reopened
+    finally:
+        VertexStore.remove_prefix(key)
+        cfg.application["language"] = language
+        window.last_language = language
+        window.retranslate()  # back to English for other tests
+        settle()
+
+
+def test_language_changed_twice_in_a_row(window, monkeypatch):
+    """View replaced again before its pending page fit ran: nothing run on deleted view (was: RuntimeError,
+    internal C++ object already deleted, in fit_pending_pages)"""
+    import sys
+
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool("race_calculator.RaceCalculator", window)
+    settle()
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *args: errors.append(args[1]))
+    language = cfg.application["language"]
+    try:
+        cfg.application["language"] = "Français"
+        window.retranslate()  # language not marked applied: retranslated again by refresh it emits
+        for _ in range(5):
+            QApplication.processEvents()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    finally:
+        cfg.application["language"] = language
+        window.last_language = language
+        window.retranslate()  # back to English for other tests
+        settle()
+    assert not errors, errors
+
+
+def test_language_change_leaves_no_menus(window):
+    """Menus parented to window by rebuilt view & menus deleted with them (was: API & Reset Data menus
+    added at every language change), context menus deleted once closed"""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QMenu
+
+    def menus() -> list[str]:
+        for _ in range(3):
+            QApplication.processEvents()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        return sorted(type(menu).__name__ for menu in window.findChildren(QMenu))
+
+    window.show()
+    language = cfg.application["language"]
+    before = menus()
+    try:
+        for name in ("Français", language):
+            cfg.application["language"] = name
+            window.last_language = name
+            window.retranslate()
+            settle()
+        assert menus() == before
+        view = window.centralWidget()
+        QTimer.singleShot(0, lambda: QApplication.activePopupWidget() and QApplication.activePopupWidget().close())
+        view.show_rail_menu(view._rail.rect().center())
+        assert menus() == before
+    finally:
+        cfg.application["language"] = language
+        window.last_language = language
+
+
+def test_key_binding_page_kept_by_language_change_closes(window, monkeypatch):
+    """Key binding page (opened from hotkey page) kept by a language change: closing it works (hotkey page it
+    came from was replaced)"""
+    import sys
+
+    from tinypedal.ui.hotkey_view import ConfigHotkey, HotkeyConfigItem
+    from tinypedal.ui.nav_rail import PAGE_INDEX
+
+    window.show()
+    view = window.centralWidget()
+    view.select_page(PAGE_INDEX["hotkey"])
+    settle()
+    item = window.findChildren(HotkeyConfigItem)[0]
+    item.open_config_dialog()
+    settle()
+    assert view.find_dialog_page("ConfigHotkey") is not None
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *args: errors.append(args[1]))
+    language = cfg.application["language"]
+    try:
+        cfg.application["language"] = "Français"
+        window.last_language = "Français"
+        window.retranslate()
+        settle()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # replaced view deleted
+        page = window.centralWidget().find_dialog_page("ConfigHotkey")
+        assert page is not None and isinstance(page.dialog, ConfigHotkey)
+        page.dialog.close()
+        settle()
+    finally:
+        cfg.application["language"] = language
+        window.last_language = language
+        window.retranslate()  # back to English for other tests
+        settle()
+    assert not errors, errors

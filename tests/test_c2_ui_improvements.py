@@ -940,3 +940,36 @@ def test_new_controls_keyboard_reachable(ui_env, updates):
         notes.deleteLater()
         button.deleteLater()
         flush_deleted()
+
+
+def test_release_notes_page_kept_by_language_change_still_installs(window, updates, monkeypatch):
+    """What's new page waiting inside app kept by a language change: its Install & Skip buttons still work (was:
+    connected to update button of replaced view, deleted with it: clicks did nothing)"""
+    from tinypedal.ui.notification import UpdatesNotifyButton
+    from tinypedal.ui.release_notes import ReleaseNotesDialog
+
+    window.show()
+    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button.checking(False)  # update found: what's new page shown (prompt)
+    flush_deleted()
+    downloads = []
+    monkeypatch.setattr(updates, "download", lambda auto_install=False: downloads.append(auto_install))
+    language = cfg.application["language"]
+    try:
+        cfg.application["language"] = "Français"
+        window.last_language = "Français"
+        window.retranslate()
+        flush_deleted()
+        pages = [page for page in window.centralWidget().dialog_pages()
+                 if isinstance(page.dialog, ReleaseNotesDialog)]
+        assert len(pages) == 1
+        pages[0].dialog.install_requested.emit()
+        assert downloads == [True]
+        pages[0].dialog.skip_requested.emit()
+        assert cfg.application["skipped_update_version"] == 99_001_002
+        assert window.centralWidget().findChild(UpdatesNotifyButton).isHidden()
+    finally:
+        cfg.application["language"] = language
+        window.last_language = language
+        window.retranslate()  # back to English for other tests
+        flush_deleted()
