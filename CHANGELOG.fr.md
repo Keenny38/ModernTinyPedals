@@ -3,6 +3,52 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.22.3 (2026-10-08)
+
+### Overlays
+
+- **Déverrouiller ne lance plus le mode édition** : comme avant la 0.22.0, `Déverrouiller l'overlay` rend seulement les overlays déplaçables. Passe la souris sur un overlay pour voir son contour, son nom et sa poignée d'angle, puis fais-le glisser ; les flèches et `Ctrl+Z` fonctionnent toujours. La barre d'outils du mode édition est dans le menu clic droit d'un overlay (`Mode édition`). Pour l'avoir à chaque déverrouillage, active `Mode édition au déverrouillage` dans `Config` > `Application` > `Édition des overlays`.
+- **Rapport** : la pastille du limiteur de vitesse (et son rappel dans la voie des stands) chevauchait le bord du haut et les chiffres de la vitesse. Elle prend maintenant la place de l'unité, sous la vitesse.
+- **Polices du Style de l'overlay dans les overlays modernes** : avec `enable_modern_font`, les libellés et noms gardent `modern_design_font_name` et les valeurs (temps, écarts, vitesses, températures, carburant) utilisent `modern_font_name` (JetBrains Mono : les chiffres ne bougent plus). Désactivé, chaque overlay moderne dessine son texte dans son propre `font_name`. Rapport s'élargit pour ses valeurs de barres.
+- Les overlays ne se figent plus 5 secondes à chaque `Appliquer` des réglages ou quand un overlay est désactivé.
+- `Accélération` classique ne démarrait pas avec une seule ou aucune plage de vitesse. La carte et l'élévation classiques ne plantent plus sur des secteurs au-delà de la carte.
+- Fondu du radar classique corrigé ; cache des fonds limité à 32 Mo.
+
+### Overlay VR
+
+- **Overlay VR dans les jeux OpenXR**, sur n'importe quel runtime OpenXR (pas seulement SteamVR) : une couche OpenXR fournie (D3D11, D3D12, Vulkan) dessine les overlays dans le jeu. L'app l'inscrit pour ton utilisateur Windows tant que l'overlay VR est activé, et la désinstallation la retire. Les overlays proches sont envoyés en tuiles, pas en une grande image. Pas encore testé dans un casque : dis-nous comment ça marche chez toi.
+- L'overlay SteamVR démarre une fois SteamVR lancé et se masque quand la couche OpenXR dessine. Deux jeux OpenXR en même temps sont gérés.
+- L'overlay VR ne s'affichait jamais dans l'app installée (bibliothèque OpenVR manquante). Aussi corrigé : noms d'utilisateur Windows avec accents, app lancée en administrateur, entrées de couche cassées qui empêchaient les jeux OpenXR de démarrer.
+
+### Visionneuse de télémétrie et rejeux
+
+- **Tour d'un autre circuit** : l'ouvrir (fichier, glisser-déposer, bibliothèque de tours, import MoTeC) bascule la visionneuse sur ce circuit au lieu de le refuser. Les tours de deux circuits ne sont jamais comparés, même quand un tour d'un autre tracé a une longueur proche (la forme de la trajectoire est vérifiée).
+- Les tours importés (MoTeC) étaient décalés en distance, et un tour de référence importé décalait les tours enregistrés. Son export en delta best est aligné et mis à l'échelle de la longueur du circuit.
+- Les tours aux positions invalides ne bloquent plus la visionneuse. L'export MoTeC de plusieurs tours n'écrase jamais un fichier.
+- **Longs rejeux** : un rejeu de 3 heures s'ouvre en 0,4 s au lieu de 14 s et utilise 1 Mo au lieu de 400 Mo de mémoire. Les rejeux se chargent en arrière-plan avec la progression. Ouvrir un rejeu n'arrête plus l'enregistrement avant qu'il soit chargé, et une erreur d'enregistrement est signalée puis réessayée après 30 s.
+- La carte de la page `Rejeux` était affichée à l'envers.
+
+### Données enregistrées
+
+- **Meilleur tour gardé quand tu appuies sur Échap juste après la ligne** : delta best, carburant, statistiques et secteurs attendent le temps du tour donné par le jeu (jusqu'à 10 s), aussi au garage.
+- Les fichiers de données bloqués par un autre programme (antivirus, OneDrive) au moment de leur lecture ne sont jamais écrasés : réglages, statistiques pilote, historique, marques de tours, delta best, secteurs et historique de consommation. Ils sont fusionnés dès qu'ils sont lisibles, et un fichier corrompu est sauvegardé.
+- Le meilleur S3 et les meilleurs secteurs personnels ne viennent plus jamais d'un tour invalide.
+
+### Overlay de stream, tableau de bord web et contrôle à distance
+
+- Ils restaient coupés après un `Appliquer` des réglages ou un chargement de preset sous Windows : les serveurs restent maintenant à l'écoute pendant les rechargements et réessaient si l'adresse est occupée. Les sessions du tableau de bord web restent ouvertes tant que le code d'accès ne change pas.
+- Un client lent ou malveillant sur ton réseau ne peut plus figer les tableaux de bord : les connexions sont limitées et doivent envoyer leur requête en moins de 10 s. Plus de blocage de l'interface avec un DNS lent, ni d'erreur au démarrage avec un nom d'ordinateur non ASCII.
+
+### Corrections
+
+- Changement de langue : plus de plantage avec `Performances des widgets` ou `Enregistreur` ouvert, les pages et fenêtres rouvertes sont bien fermées, les logos des marques suivent le thème clair/sombre.
+- Plus d'erreurs QML en quittant avec `Spectate` ou `Preset` ouvert.
+- Un raccourci qui recharge le preset ne se relance plus tant qu'il est maintenu.
+- Les champs numériques acceptent une décimale tapée dans un nombre entier.
+- La capture et l'aimantation de l'`Éditeur de disposition` fonctionnent sur chaque écran d'une configuration multi-écrans.
+- Les packs de langue aux messages invalides, les paquets corrompus, les fichiers de heatmap invalides et les fichiers de réglages enregistrés à 1000 ms sont gérés.
+- Les fichiers temporaires de rejeu supprimés par le jeu pendant un scan ne sont plus listés.
+
 ## 0.22.2 (2026-10-06)
 
 ### Corrections

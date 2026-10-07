@@ -3,6 +3,52 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.22.3 (2026-10-08)
+
+### Overlays
+
+- **Unlocking no longer starts the edit mode**: as before 0.22.0, `Unlock Overlay` only makes overlays movable. Move the mouse over an overlay to see its outline, name and corner handle, then drag it; arrow keys and `Ctrl+Z` still work. The edit mode toolbar is in the right-click menu of an overlay (`Edit Mode`). To get it at each unlock, turn on `enable_edit_mode_on_unlock` in `Config` > `Application` > `Overlay Editing`.
+- **Gear**: the speed limiter pill (and its pit lane reminder) sat over the top edge and the speed digits. It now takes the place of the speed unit under the speed.
+- **Overlay Style fonts in modern overlays**: with `enable_modern_font`, labels and names keep `modern_design_font_name` and values (times, gaps, speeds, temperatures, fuel) use `modern_font_name` (JetBrains Mono: digits stay in place). Turned off, every modern overlay draws its text in its own `font_name`. Gear widens to fit its bar readings.
+- Overlays no longer freeze for 5 seconds on every settings `Apply` or when an overlay is turned off.
+- Classic `Acceleration` failed to start with one or no speed range enabled. Classic track map and elevation no longer fail on sectors beyond the map.
+- Classic radar fade drawn correctly; background cache limited to 32 MB.
+
+### VR overlay
+
+- **VR overlay in OpenXR games**, on any OpenXR runtime (not only SteamVR): a bundled OpenXR layer (D3D11, D3D12, Vulkan) draws the overlays in the game. The app registers it for your Windows user while the VR overlay is enabled, and the uninstaller removes it. Nearby overlays are sent as tiles, not as one large image. Not tested on a headset yet: tell us how it works for you.
+- The SteamVR overlay starts once SteamVR runs and hides while the OpenXR layer draws. Two OpenXR games at once are handled.
+- The VR overlay was never shown in the installed app (OpenVR library missing). Also fixed: Windows user names with accents, app run as administrator, broken layer entries that stopped OpenXR games from starting.
+
+### Telemetry viewer and replays
+
+- **Lap of another circuit**: opening one (file, drop, lap library, MoTeC import) switches the viewer to that circuit instead of refusing it. Laps of two circuits are never compared, also when a lap of another layout has a similar length (driving line shape is checked).
+- Imported laps (MoTeC) were shifted along the distance, and an imported reference lap shifted the recorded laps. Its delta best export is aligned and scaled to the track length.
+- Laps with invalid positions no longer stop the viewer. Multi lap MoTeC export never overwrites a file.
+- **Long replays**: a 3-hour replay opens in 0.4 s instead of 14 s and uses 1 MB instead of 400 MB of memory. Replays load in the background with progress. Opening a replay no longer stops recording before it is loaded, and a recording error is reported, then retried after 30 s.
+- `Replays` page track map was shown upside down.
+
+### Recorded data
+
+- **Best lap kept when you press Esc right after the line**: delta best, fuel, stats and sectors wait for the game lap time (up to 10 s), also in the garage.
+- Data files held by another program (antivirus, OneDrive) when the app reads them are never saved over: settings, driver stats, history, lap marks, delta best, sectors and consumption history. They are merged once readable, and a corrupt file is backed up.
+- Best S3 and personal best sectors never come from an invalid lap.
+
+### Stream overlay, web dashboard and remote control
+
+- They stayed off after a settings `Apply` or a preset load on Windows: servers now keep listening across reloads and retry when the address is busy. Web dashboard sessions stay open unless the access code changes.
+- A slow or hostile client on your network can no longer freeze the dashboards: connections are limited and must send their request within 10 s. No more GUI freeze on a slow DNS, nor start error with a non ASCII computer name.
+
+### Fixes
+
+- Language change: no more crash with `Widget Performance` or `Recorder` open, pages and dialogs reopened by it are closed properly, brand logos follow the light/dark theme.
+- No QML errors when quitting with `Spectate` or `Preset` open.
+- A hotkey that reloads the preset no longer runs again while it is still held.
+- Number fields accept a decimal typed in a whole number.
+- `Layout Editor` screenshot and snapping work on each screen of a multi monitor setup.
+- Language packs with invalid messages, corrupt packages, invalid heatmap files and setup files saved at 1000 ms are handled.
+- Game replay temporary files deleted by the game during a scan are no longer listed.
+
 ## 0.22.2 (2026-10-06)
 
 ### Fixes
