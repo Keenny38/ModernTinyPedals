@@ -320,7 +320,7 @@ class Realtime(RadarMixin, Overlay):
             if radar_alpha < 1:
                 self.radar_fade_color.setAlphaF(radar_alpha)
                 painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-                fill_rect(painter, self.rect_radar, self.radar_fade_color)
+                painter.fillRect(self.rect_radar, self.radar_fade_color)  # raw mask, never rounded or shaded
 
     def draw_radar_mask(self):
         """Draw radar mask"""

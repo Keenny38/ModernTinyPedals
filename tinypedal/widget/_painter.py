@@ -119,15 +119,23 @@ def _cached_background(width: float, height: float, rgba: int, radius: float, de
             return None
         pixmap = _background_pixmap(*key)
         _background_cache[key] = pixmap
-        if len(_background_cache) > _CACHE_SIZE:
-            _background_cache.popitem(last=False)
+        _trim_background_cache()
     else:
         _background_cache.move_to_end(key)
     return pixmap
 
 
+def _trim_background_cache() -> None:
+    """Evict least recently used pixmaps over count or memory budget (keep newest)"""
+    cache_bytes = sum(key[0] * key[1] * 4 for key in _background_cache)
+    while len(_background_cache) > 1 and (len(_background_cache) > _CACHE_SIZE or cache_bytes > _CACHE_BYTES):
+        key, _ = _background_cache.popitem(last=False)
+        cache_bytes -= key[0] * key[1] * 4
+
+
 _CACHE_MAX_PIXELS = 512 * 512  # larger fills are drawn directly
 _CACHE_SIZE = 512
+_CACHE_BYTES = 32 * 1024 * 1024  # ARGB32 pixmaps memory budget
 _SEEN_SIZE = 2048
 _background_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
 _background_seen: OrderedDict[tuple, None] = OrderedDict()

@@ -32,6 +32,7 @@ from . import app_signal
 logger = logging.getLogger(__name__)
 
 STOP_TIMEOUT = 5.0  # seconds, wait for a thread to stop before giving up
+HEALTHY_RUN = 60.0  # seconds, a crash after running this long starts a fresh restart budget
 
 
 def wait_stopped(is_stopped: Callable[[], bool], name: str, timeout: float | None = None) -> bool:
@@ -95,20 +96,25 @@ def run_supervised(
         target: loop function to run, returns when stop event is set.
         name: display name for log & notification.
         stop_event: stop event, restart is canceled once set.
-        max_restarts: maximum restart attempts after error.
+        max_restarts: maximum restart attempts after error, budget reset after a healthy run.
         restart_delay: delay (seconds) before restart.
 
     Returns:
         True if target exited normally, False if stopped after errors.
     """
-    for attempt in range(max_restarts + 1):
+    attempt = 0
+    while True:
+        started = monotonic()
         try:
             target()
             return True
         except Exception:
+            if monotonic() - started >= HEALTHY_RUN:
+                attempt = 0  # sporadic error after a healthy run, not a crash loop
             logger.exception("ERROR: %s crashed (%s/%s)", name, attempt + 1, max_restarts + 1)
         if attempt >= max_restarts or stop_event.wait(restart_delay):
             break
+        attempt += 1
         logger.warning("ERROR: restarting %s", name)
         app_signal.error.emit(f"{name} crashed and was restarted, see log for details.")
     if not stop_event.is_set():

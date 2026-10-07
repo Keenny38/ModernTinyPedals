@@ -306,6 +306,28 @@ def test_radar_fade_with_distance(widgets, monkeypatch):
     assert widget.radar_alpha() == 1
 
 
+@pytest.mark.parametrize("fade", [0.0, 0.5])
+def test_classic_radar_fade_mask_uniform_in_modern_style(widgets, monkeypatch, fade):
+    """Fade mask scales every pixel alpha, never rounded/shaded (nor skipped at alpha 0) by modern style"""
+    from tinypedal.widget import _painter, radar
+
+    widget = widgets("radar", enable_classic_layout=True, enable_auto_hide=False, show_background=True,
+                     show_edge_fade_out=False, background_color="#FF222222")
+    assert isinstance(widget, radar.Realtime)
+    assert _painter.OverlayStyle.corner_scale > 0 and _painter.OverlayStyle.depth_effects
+    widget.show_radar = True
+    images = []
+    for alpha in (1.0, fade, fade):  # fade drawn twice: second from background cache
+        monkeypatch.setattr(widget, "radar_alpha", lambda alpha=alpha: alpha)
+        images.append(render(widget))
+    full = images[0]
+    for faded in images[1:]:
+        for y in range(0, full.height(), 3):
+            for x in range(0, full.width(), 3):
+                expected = full.pixelColor(x, y).alpha() * fade
+                assert abs(faded.pixelColor(x, y).alpha() - expected) <= 2, (x, y, fade)
+
+
 # --- Steering wheel
 def test_steering_wheel_rotation_arc_and_reading(widgets, monkeypatch):
     reader(monkeypatch, "inputs", "steering_raw", 0.25)

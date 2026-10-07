@@ -366,6 +366,34 @@ def test_animated_fill_not_cached(ui_env):
         _painter.OverlayStyle.corner_scale = saved
 
 
+def test_background_cache_bounded_in_bytes(ui_env):
+    """Large fills of many colors (alpha fading) never hold more pixmap memory than budget"""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QPainter, QPixmap
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale
+    _painter.OverlayStyle.corner_scale = 0.2
+    _painter._background_cache.clear()
+    try:
+        pixmap = QPixmap(360, 360)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        color = QColor(0, 0, 0)
+        for alpha in range(1, 256):
+            color.setAlpha(alpha)
+            for _ in range(2):  # cached once drawn again
+                _painter.fill_rect(painter, QRectF(0, 0, 360, 360), color)
+        painter.end()
+        cached = sum(p.width() * p.height() * 4 for p in _painter._background_cache.values())
+        assert 0 < cached <= 32 * 1024 * 1024  # not 126 MiB
+        assert next(reversed(_painter._background_cache))[4] == color.rgba()  # newest kept
+    finally:
+        _painter.OverlayStyle.corner_scale = saved
+        _painter._background_cache.clear()
+
+
 def test_black_box_updates_while_hidden():
     from tinypedal.widget import black_box, speedometer, trailing
 
