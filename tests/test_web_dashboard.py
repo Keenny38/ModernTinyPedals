@@ -490,3 +490,159 @@ def test_disable_closes_open_connections(dashboard):
             client.getresponse().read()
     finally:
         client.close()
+
+
+def test_blocked_client_not_reading_never_holds_lock(monkeypatch):
+    """429 for a locked out address sent after lock released: a client not reading its responses
+    never blocks other connections (session check of every dashboard)"""
+    import threading
+
+    sending = threading.Event()
+    release = threading.Event()
+
+    def stalled_send(self, status, body, content_type):  # send blocked: client not reading
+        sending.set()
+        release.wait(5)
+
+    monkeypatch.setattr(DashboardHandler, "send_body", stalled_send)
+    now = time.monotonic()
+    monkeypatch.setattr(DashboardHandler, "failures", {"10.0.0.9": [10, now + 60, now]})
+    handler = DashboardHandler.__new__(DashboardHandler)
+    handler.client_address = ("10.0.0.9", 50000)
+    thread = threading.Thread(target=handler.authorized, args=("WRONG",), daemon=True)
+    thread.start()
+    try:
+        assert sending.wait(5)
+        assert DashboardHandler.lock.acquire(timeout=1)  # has_session of another connection not blocked
+        DashboardHandler.lock.release()
+    finally:
+        release.set()
+        thread.join(5)
+
+
+def test_wrong_code_response_sent_without_lock(monkeypatch):
+    """401 for a wrong code also sent after lock released"""
+    held = []
+    monkeypatch.setattr(DashboardHandler, "failures", {})
+    monkeypatch.setattr(DashboardHandler, "access_code", "TESTCODE")
+    monkeypatch.setattr(DashboardHandler, "send_body",
+                        lambda self, *args: held.append(DashboardHandler.lock.locked()))
+    handler = DashboardHandler.__new__(DashboardHandler)
+    handler.client_address = ("10.0.0.8", 50000)
+    assert not handler.authorized("WRONG")
+    assert held == [False]
+    assert DashboardHandler.failures["10.0.0.8"][0] == 1
+    assert handler.authorized("TESTCODE")
+    assert "10.0.0.8" not in DashboardHandler.failures
+
+
+def test_slow_login_body_closed_at_deadline(monkeypatch):
+    """Login form body sent a byte now and then never holds a handler thread past request deadline"""
+    import socket
+    import threading
+
+    from tinypedal.web_dashboard import DashboardServer
+
+    monkeypatch.setattr(DashboardHandler, "request_seconds", 0.5)
+    monkeypatch.setattr(DashboardHandler, "secure", False)
+    httpd = DashboardServer(("127.0.0.1", 0), DashboardHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", httpd.server_port), timeout=5) as client:
+            client.sendall(b"POST /login HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\n\r\ncode=")
+            client.settimeout(0.1)
+            start = time.monotonic()
+            closed = False
+            while time.monotonic() - start < 4:
+                try:
+                    client.sendall(b"A")
+                    if client.recv(1024) == b"":
+                        closed = True
+                        break
+                except TimeoutError:
+                    continue
+                except OSError:
+                    closed = True
+                    break
+            assert closed and time.monotonic() - start < 3
+    finally:
+        httpd.stop()
+
+
+def test_https_lan_enable_never_looks_up_addresses(ui_env, monkeypatch):
+    """Reload with HTTPS & LAN access: cached LAN addresses used, never a host name lookup on GUI thread"""
+    from tinypedal import web_dashboard
+
+    calls = []
+
+    def addresses(max_age=web_dashboard.ADDRESS_CACHE_SECONDS, wait=False):
+        calls.append((max_age, wait))
+        return ["192.0.2.10"]
+
+    monkeypatch.setattr(web_dashboard, "local_addresses", addresses)
+    cfg.user.config["web_dashboard"].update(
+        enable_web_dashboard=True, web_dashboard_port=free_port(), access_code="TESTCODE",
+        enable_https=True, enable_lan_access=True)
+    server = WebDashboard()
+    try:
+        server.enable()
+        assert server.running
+        server.enable()  # reload
+        assert calls and all(not wait and max_age > 0 for max_age, wait in calls)
+    finally:
+        server.disable()
+        DashboardHandler.secure = False
+
+
+def test_https_certificate_follows_lan_addresses_without_restart(ui_env, monkeypatch):
+    """LAN address changed: certificate made again in background and loaded in running server,
+    server kept (open connections stay, port never bound again)"""
+    import socket
+
+    from tinypedal import app_signal, web_dashboard
+
+    known = ["192.0.2.10"]
+    monkeypatch.setattr(web_dashboard, "local_addresses", lambda max_age=0, wait=False: list(known))
+    port = free_port()
+    cfg.user.config["web_dashboard"].update(
+        enable_web_dashboard=True, web_dashboard_port=port, access_code="TESTCODE",
+        enable_https=True, enable_lan_access=True)
+    cert_file = tls_cert.cert_paths(cfg.path.config)[0]
+
+    def client_for(address: str) -> http.client.HTTPSConnection:
+        """Connection to 127.0.0.1, certificate checked against LAN address"""
+        context = ssl.create_default_context(cafile=cert_file)
+        connection = http.client.HTTPSConnection(address, port, context=context, timeout=5)
+        connection.sock = context.wrap_socket(
+            socket.create_connection(("127.0.0.1", port), timeout=5), server_hostname=address)
+        return connection
+
+    server = WebDashboard()
+    try:
+        server.enable()
+        listening = server._server
+        kept = client_for("192.0.2.10")
+        kept.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+        assert kept.getresponse().read()
+        known.append("192.0.2.11")
+        app_signal.addresses.emit()
+        end = time.monotonic() + 5
+        while not tls_cert.covers(cert_file, ["127.0.0.1", *known]) and time.monotonic() < end:
+            time.sleep(0.02)
+        time.sleep(0.2)  # loaded in context after file written
+        server.enable()  # reload: same listening setup, server kept
+        assert server._server is listening
+        kept.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+        assert kept.getresponse().status == 200  # open connection kept
+        kept.close()
+        fresh = client_for("192.0.2.11")  # new address covered by certificate of running server
+        fresh.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+        assert fresh.getresponse().status == 200
+        fresh.close()
+    finally:
+        server.disable()
+        DashboardHandler.secure = False
+    known.append("192.0.2.12")
+    app_signal.addresses.emit()  # disabled: nothing updated
+    time.sleep(0.1)
+    assert not tls_cert.covers(cert_file, ["192.0.2.12"])

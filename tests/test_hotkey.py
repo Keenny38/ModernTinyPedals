@@ -255,9 +255,7 @@ def run_hotkeys(monkeypatch, key_states: list[set[int]], binds: dict[str, str]) 
         pressed.update(next(states, set()))
         return stop_after.wait(timeout)
 
-    control._event = SimpleNamespace(wait=wait)
-    control._HotkeyControl__update_loop()
-    assert control._stopped
+    control._HotkeyControl__update_loop(SimpleNamespace(wait=wait))
     return ran
 
 
@@ -297,22 +295,62 @@ def test_hotkey_control_stops_without_commands(ui_env, monkeypatch):
 
 
 def test_hotkey_control_enable_disable(ui_env, monkeypatch, caplog):
+    import threading
+
     from tinypedal import hotkey_control, thread_guard
     from tinypedal.setting import cfg
 
     control = hotkey_control.HotkeyControl()
     monkeypatch.setitem(cfg.application, "enable_global_hotkey", False)
     control.enable()
-    assert control._stopped  # disabled in config: no thread
+    assert control._stopped()  # disabled in config: no thread
     monkeypatch.setitem(cfg.application, "enable_global_hotkey", True)
     monkeypatch.setattr(hotkey_control, "run_supervised", lambda target, name, event: event.wait(5))
     control.enable()
-    assert not control._stopped
+    assert not control._stopped()
     control.reload()  # stopped & started again
     control.disable()
-    assert control._stopped
+    assert control._stopped()
     # Thread stuck: disable gives up after timeout
+    stuck = threading.Event()
+    monkeypatch.setattr(hotkey_control, "run_supervised", lambda target, name, event: stuck.wait(5))
     monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
-    control._stopped = False
+    control.enable()
     control.disable()
     assert "not stopped" in caplog.text
+    stuck.set()
+
+
+def test_hotkey_control_old_thread_never_marks_new_stopped(ui_env, monkeypatch):
+    """A thread stopping late (after reload started its replacement) never lets a third thread start"""
+    import threading
+
+    from tinypedal import hotkey_control, thread_guard
+    from tinypedal.setting import cfg
+
+    monkeypatch.setitem(cfg.application, "enable_global_hotkey", True)
+    monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
+    release_first = threading.Event()
+    running: list[threading.Event] = []
+
+    def supervised(target, name, event):
+        running.append(event)
+        if len(running) == 1:
+            release_first.wait(5)  # first thread slow to stop: ignores its event for a while
+        else:
+            event.wait(5)
+
+    monkeypatch.setattr(hotkey_control, "run_supervised", supervised)
+    control = hotkey_control.HotkeyControl()
+    control.enable()
+    first = control._thread
+    control.reload()  # first thread not stopped in time: replaced
+    second = control._thread
+    assert second is not first and len(running) == 2
+    release_first.set()
+    first.join(2)
+    control.enable()  # second thread still running: nothing started
+    assert control._thread is second and second.is_alive()
+    assert len(running) == 2
+    control.disable()
+    assert control._stopped()

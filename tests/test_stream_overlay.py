@@ -566,3 +566,47 @@ def test_port_out_of_range_reported(ui_env):
         control.disable()
     finally:
         app_signal.error.disconnect(errors.append)
+
+
+def test_safe_mode_reload_resumes_capture(server, monkeypatch):
+    """Safe mode: server started from stream page keeps capturing after reload (never a frozen stream),
+    server never started by reload when off"""
+    from types import SimpleNamespace
+
+    from tinypedal import loader, safe_mode
+
+    monkeypatch.setattr(safe_mode, "state", safe_mode.SafeModeState())
+    safe_mode.state.enabled = True
+    for name in ("octrl", "mctrl", "wctrl", "kctrl", "cmdserver", "webdashboard", "api"):
+        monkeypatch.setattr(loader, name, SimpleNamespace(**{
+            action: (lambda *args: None)
+            for action in ("enable", "disable", "start", "close", "stop", "restart", "connect")}))
+    monkeypatch.setattr(loader, "vroverlay", lambda: SimpleNamespace(enable=lambda: None, disable=lambda: None))
+    monkeypatch.setattr(loader, "streamoverlay", server)
+    monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
+    listening = server._server
+    loader.reload()
+    assert server._server is listening and server._capture is not None and server._capture.running
+    server.disable()
+    loader.reload()
+    assert not server.running  # off: not started in safe mode
+
+
+def test_page_status_in_safe_mode(page_backend, monkeypatch):
+    """Server enabled but never started (safe mode): status says so, not "port unavailable\""""
+    from tinypedal import i18n, safe_mode
+
+    i18n.set_language("English")
+    monkeypatch.setattr(safe_mode, "state", safe_mode.SafeModeState())
+    safe_mode.state.enabled = True
+    page_backend._server_state = None
+    stream_overlay.streamoverlay.disable()
+    stream_overlay.streamoverlay.setting()["enable_stream_overlay"] = True
+    assert page_backend.statusText == "Off in safe mode"
+    with socket.socket() as busy:  # started from stream page, port unavailable: reported
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        stream_overlay.streamoverlay.setting()["stream_overlay_port"] = busy.getsockname()[1]
+        stream_overlay.streamoverlay.enable()
+        assert page_backend.statusText.startswith("Port ")
+        stream_overlay.streamoverlay.disable()

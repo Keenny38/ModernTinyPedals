@@ -315,6 +315,16 @@ def test_status_card_updated_when_lan_addresses_found(settings):
     assert changed == [1]
 
 
+def test_status_card_updated_when_server_listening_again(settings):
+    """Port unavailable at enable, listening once free (tried again in background): status cards read again"""
+    from tinypedal import app_signal
+
+    changed = []
+    settings.infoChanged.connect(lambda: changed.append(1))
+    app_signal.servers.emit()
+    assert changed == [1]
+
+
 # Page in app
 @pytest.fixture
 def window(ui_env, monkeypatch):

@@ -63,42 +63,47 @@ class HotkeyControl:
     """Hotkey control"""
 
     __slots__ = (
-        "_stopped",
+        "_thread",
         "_event",
     )
 
     def __init__(self):
-        self._stopped = True
+        self._thread: threading.Thread | None = None
         self._event = threading.Event()
+
+    def _stopped(self) -> bool:
+        """Whether update thread stopped (or never started)"""
+        return self._thread is None or not self._thread.is_alive()
 
     def enable(self):
         """Enable hotkey control"""
-        if self._stopped and cfg.application["enable_global_hotkey"]:
-            self._stopped = False
-            self._event.clear()
-            threading.Thread(target=self.__updating, daemon=True, name="Hotkey control").start()
+        if not cfg.application["enable_global_hotkey"]:
+            return
+        # A previous thread still stopping (event set) is replaced, it exits on its own event
+        if self._stopped() or self._event.is_set():
+            self._event = threading.Event()
+            self._thread = threading.Thread(
+                target=self.__updating, args=(self._event,), daemon=True, name="Hotkey control")
+            self._thread.start()
             logger.info("ENABLED: hotkey control")
 
     def disable(self):
         """Disable hotkey control, wait (bounded) until stopped"""
         self._event.set()
-        wait_stopped(lambda: self._stopped, "hotkey control")
+        wait_stopped(self._stopped, "hotkey control")
 
     def reload(self):
         """Reload"""
         self.disable()
         self.enable()
 
-    def __updating(self):
-        """Run update loop, always mark stopped (disable() waits for it)"""
-        try:
-            run_supervised(self.__update_loop, "hotkey control", self._event)
-        finally:
-            self._stopped = True
+    def __updating(self, event: threading.Event):
+        """Run update loop"""
+        run_supervised(lambda: self.__update_loop(event), "hotkey control", event)
 
-    def __update_loop(self):
+    def __update_loop(self, event: threading.Event):
         """Update hotkey state"""
-        _event_wait = self._event.wait
+        _event_wait = event.wait
         available_commands = gather_command(chain(COMMANDS_GENERAL, COMMANDS_PRESET, COMMANDS_MODULE, COMMANDS_WIDGET))
         available_key_codes = sort_key_codes(available_commands.keys())
 
@@ -126,7 +131,6 @@ class HotkeyControl:
                         hotkey_name,
                     )
 
-        self._stopped = True
         logger.info("DISABLED: hotkey control")
 
 

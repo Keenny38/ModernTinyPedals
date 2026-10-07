@@ -106,6 +106,7 @@ class ApplicationSignal(QObject):
         error: signal for notifying background error message (thread crash, save failure).
         saving: signal for saving state changes (True = started, False = finished).
         addresses: signal for LAN addresses of this computer changed (looked up in background).
+        servers: signal for a server listening again (port unavailable before, tried again in background).
     """
 
     reload = Signal(bool)
@@ -116,6 +117,7 @@ class ApplicationSignal(QObject):
     error = Signal(str)
     saving = Signal(bool)
     addresses = Signal()
+    servers = Signal()
     __slots__ = ()
 
 

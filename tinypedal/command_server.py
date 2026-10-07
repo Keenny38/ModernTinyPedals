@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
+import ipaddress
 import json
 import logging
 import select
@@ -50,6 +52,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import chain
+from time import monotonic
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from PySide6.QtCore import QTimer
@@ -71,19 +74,37 @@ STREAM_INTERVAL_RANGE = (20, 5000)
 # Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
 # until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
 BIND_RETRY_MS = 5000
+# Open connections refused above these (slow or idle clients never use up threads & memory),
+# connections from this computer are only counted in server limit (browser sources, local tools)
+MAX_CONNECTIONS = 64
+MAX_CONNECTIONS_PER_ADDRESS = 16
+REQUEST_SECONDS = 10  # request (line, headers, body) received in this time once started, or connection closed
+
+
+def is_loopback(address: str) -> bool:
+    """Client address of this computer"""
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
-    """Threading HTTP server, port held exclusively on Windows, open connections tracked
+    """Threading HTTP server, port held exclusively on Windows, open connections tracked & limited
 
     SO_REUSEADDR on Windows lets a second server bind a listening port in use,
     SO_EXCLUSIVEADDRUSE makes bind fail instead (port unavailable reported).
+
+    Connections above max_connections (or max_connections_per_address from another computer) are closed
+    at once, never given a thread.
 
     server_close() only closes the listening socket: stop() also ends open (keep-alive, streaming)
     connections, and sets this server's own stopping event (a new server never clears it).
     """
 
     daemon_threads = True
+    max_connections = MAX_CONNECTIONS
+    max_connections_per_address = MAX_CONNECTIONS_PER_ADDRESS
 
     if sys.platform == "win32":
         allow_reuse_address = False
@@ -94,18 +115,29 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         self.stopping = threading.Event()  # long running handlers (stream) end when set
-        self._connections: set[socket.socket] = set()
+        self._connections: dict[socket.socket, str] = {}  # open connection: client address
         self._connections_lock = threading.Lock()
         super().__init__(*args, **kwargs)
 
-    def process_request(self, request, client_address):
+    def verify_request(self, request, client_address):
+        """Accept connection if under limits (refused connection closed by caller)"""
+        address = str(client_address[0])
         with self._connections_lock:
-            self._connections.add(request)
-        super().process_request(request, client_address)
+            if len(self._connections) >= self.max_connections:
+                refused = "server"
+            elif not is_loopback(address) and sum(
+                    1 for client in self._connections.values() if client == address
+            ) >= self.max_connections_per_address:
+                refused = "address"
+            else:
+                self._connections[request] = address
+                return True
+        logger.debug("%s: connection from %s refused (%s connection limit)", type(self).__name__, address, refused)
+        return False
 
     def shutdown_request(self, request):
         with self._connections_lock:
-            self._connections.discard(request)
+            self._connections.pop(request, None)
         super().shutdown_request(request)
 
     def close_connections(self):
@@ -125,6 +157,60 @@ class LocalHTTPServer(ThreadingHTTPServer):
         self.close_connections()
 
 
+class DeadlineReader(socket.SocketIO):
+    """Socket reader, reads fail (TimeoutError) once deadline passed (each read also bounded by socket timeout)"""
+
+    def __init__(self, sock: socket.socket):
+        super().__init__(sock, "rb")
+        self.deadline: float | None = None  # monotonic time, None: socket timeout only
+
+    def readinto(self, buffer):
+        deadline = self.deadline
+        if deadline is None:
+            return super().readinto(buffer)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError("request not received in time")
+        sock = self._sock  # type: ignore[attr-defined]
+        timeout = sock.gettimeout()
+        if timeout is not None and timeout <= remaining:
+            return super().readinto(buffer)
+        sock.settimeout(remaining)
+        try:
+            return super().readinto(buffer)
+        finally:
+            sock.settimeout(timeout)
+
+
+class BoundedRequestHandler(BaseHTTPRequestHandler):
+    """Request handler, a started request (line, headers, body) received within REQUEST_SECONDS
+
+    Socket timeout alone lets a client sending a byte now and then hold a connection forever (slowloris).
+    Waiting for next request of a kept connection (keep-alive) only bounded by socket timeout.
+    """
+
+    request_seconds: float = REQUEST_SECONDS
+
+    def setup(self):
+        super().setup()
+        self.rfile.close()  # replaced, reads bounded by request deadline
+        self._reader = DeadlineReader(self.connection)
+        self.rfile = io.BufferedReader(self._reader)
+
+    def handle_one_request(self):
+        self._reader.deadline = None
+        try:
+            self.rfile.peek(1)  # type: ignore[attr-defined]  # next request started (idle: socket timeout)
+        except TimeoutError:
+            self.close_connection = True
+            return
+        self._reader.deadline = monotonic() + self.request_seconds
+        try:
+            super().handle_one_request()
+        finally:
+            self._reader.deadline = None
+
+
 class BindRetry:
     """Server listening tried again later while its port is unavailable, error reported once per address
 
@@ -141,6 +227,11 @@ class BindRetry:
         self._timer: QTimer | None = None
         self._failed: tuple | None = None  # unavailable address reported (not at every retry)
 
+    @property
+    def failing(self) -> bool:
+        """Last listening attempt failed (port unavailable)"""
+        return self._failed is not None
+
     def failed(self, address: tuple[str, int], error: Exception):
         """Bind failed: report (once for this address), try again later if port may become available"""
         if self._failed != address:
@@ -154,8 +245,16 @@ class BindRetry:
                 self._timer.timeout.connect(self._start)
             self._timer.start(BIND_RETRY_MS)
 
+    def listening(self):
+        """Listening: nothing tried again, next failure reported, status shown again if listening after failure"""
+        failed = self._failed is not None
+        self.stop()
+        if failed:
+            logger.info("%s: listening again", self.name.upper())
+            app_signal.servers.emit()
+
     def stop(self):
-        """Listening (or server disabled): nothing tried again, next failure reported"""
+        """Server disabled: nothing tried again, next failure reported"""
         self._failed = None
         if self._timer is not None:
             self._timer.stop()
@@ -295,7 +394,7 @@ def default_snapshot() -> dict:
     return telemetry_snapshot()
 
 
-class CommandHandler(BaseHTTPRequestHandler):
+class CommandHandler(BoundedRequestHandler):
     """Command request handler"""
 
     server_version = "TinyPedal"
@@ -440,7 +539,7 @@ class CommandServer:
         except (OSError, OverflowError) as error:  # OverflowError: port out of range
             self._retry.failed((HOST, port), error)
             return
-        self._retry.stop()
+        self._retry.listening()
         self._port = port
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Remote control")
         self._thread.start()

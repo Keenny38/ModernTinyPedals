@@ -44,20 +44,21 @@ import json
 import logging
 import secrets
 import socket
+import ssl
 import threading
 import time
+from contextlib import suppress
 from html import escape
 from http.cookies import CookieError, SimpleCookie
-from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import app_signal, units
-from .command_server import BindRetry, LocalHTTPServer
+from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
 from .setting import cfg
-from .userfile.tls_cert import server_context
+from .userfile.tls_cert import load_certificate, server_context
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,7 @@ def telemetry_snapshot() -> dict:
     }
 
 
-class DashboardHandler(BaseHTTPRequestHandler):
+class DashboardHandler(BoundedRequestHandler):
     """Dashboard request handler
 
     HTTP/1.1 keep-alive: page polls telemetry every 150 ms on one connection, instead of a new connection
@@ -385,18 +386,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return False
         address = self.client_address[0]
         now = time.monotonic()
+        # Response sent after lock released: a client not reading never blocks other connections
         with self.lock:
             self.purge_failures(now)
             count, until, _ = self.failures.get(address, [0, 0.0, 0.0])
-            if until > now:
-                self.send_body(429, b"too many attempts, try again later", "text/plain")
-                return False
-            if code and hmac.compare_digest(code.encode("utf-8"), self.access_code.encode("utf-8")):
-                self.failures.pop(address, None)
-                return True
-            count += 1
-            self.failures[address] = [count, now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0, now]
-        self.send_unauthorized(html)
+            blocked = until > now
+            if not blocked:
+                if hmac.compare_digest(code.encode("utf-8"), self.access_code.encode("utf-8")):
+                    self.failures.pop(address, None)
+                    return True
+                count += 1
+                self.failures[address] = [count, now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0, now]
+        if blocked:
+            self.send_body(429, b"too many attempts, try again later", "text/plain")
+        else:
+            self.send_unauthorized(html)
         return False
 
     def send_unauthorized(self, html: bool):
@@ -464,13 +468,15 @@ class DashboardServer(LocalHTTPServer):
 class WebDashboard:
     """Web dashboard server control"""
 
-    __slots__ = ("_server", "_thread", "_key", "_retry")
+    __slots__ = ("_server", "_thread", "_key", "_retry", "_context", "_cert_lock", "__weakref__")  # signal slot
 
     def __init__(self):
         self._server: DashboardServer | None = None
         self._thread: threading.Thread | None = None
-        self._key: tuple | None = None  # listening setup of running server: address, HTTPS, LAN addresses
+        self._key: tuple | None = None  # listening setup of running server: address, HTTPS
         self._retry = BindRetry("Web dashboard", self.enable)
+        self._context: ssl.SSLContext | None = None  # HTTPS & LAN access: certificate follows LAN addresses
+        self._cert_lock = threading.Lock()  # one certificate update at a time
 
     @property
     def running(self) -> bool:
@@ -522,9 +528,7 @@ class WebDashboard:
                 DashboardHandler.failures = {}
                 DashboardHandler.sessions = {}
         host, port, secure = self.host(), self.port(), self.use_https()
-        # HTTPS certificate covers LAN addresses: made again (server started again) if they changed
-        addresses = local_addresses(max_age=0, wait=True) if secure and host != "127.0.0.1" else []
-        key = (host, port, secure, tuple(addresses))
+        key = (host, port, secure)
         if self._server is not None and self._key != key:
             self.disable()
         if self._server is not None:
@@ -534,8 +538,11 @@ class WebDashboard:
         except (OSError, OverflowError) as error:  # OverflowError: port out of range
             self._retry.failed((host, port), error)
             return
-        self._retry.stop()
+        lan = host != "127.0.0.1"
         if secure:
+            # Certificate covers LAN addresses known now (never looked up here, GUI not blocked),
+            # made again in background once they change (server kept, see addresses_changed)
+            addresses = local_addresses() if lan else []
             try:
                 context = server_context(cfg.path.config, addresses)
             except (OSError, ValueError, ImportError) as error:
@@ -544,6 +551,7 @@ class WebDashboard:
                 server.server_close()
                 return
             server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+        self._retry.listening()
         DashboardHandler.secure = secure
         self._server = server
         self._key = key
@@ -551,12 +559,44 @@ class WebDashboard:
         self._thread.start()
         scheme = "https" if secure else "http"
         logger.info("ENABLED: web dashboard on %s://%s:%s", scheme, host, port)
-        if host != "127.0.0.1" and not secure:
+        if lan and not secure:
             logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
+        if secure and lan:
+            self._context = context
+            app_signal.addresses.connect(self.addresses_changed)
+            if local_addresses() != addresses:  # found meanwhile (signal emitted before connected)
+                self.addresses_changed()
+
+    def addresses_changed(self):
+        """LAN addresses changed (any thread): certificate made again in background, loaded in running server,
+        so connections are kept and port never bound again"""
+        context = self._context
+        if context is not None:
+            threading.Thread(
+                target=self.update_certificate, args=(context,), daemon=True, name="Web dashboard certificate"
+            ).start()
+
+    def update_certificate(self, context: ssl.SSLContext):
+        """Load certificate covering current LAN addresses in server context (created if needed)"""
+        with self._cert_lock:
+            if context is not self._context:  # server stopped or started again meanwhile
+                return
+            addresses = local_addresses()
+            try:
+                load_certificate(context, cfg.path.config, addresses)
+            except (OSError, ValueError, ImportError) as error:  # previous certificate kept
+                logger.error("WEB DASHBOARD: unable to update HTTPS certificate (%s)", error)
+                app_signal.error.emit(f"Web dashboard: unable to update HTTPS certificate ({error}).")
+                return
+        logger.info("WEB DASHBOARD: HTTPS certificate covers %s", ", ".join(["127.0.0.1", *addresses]))
 
     def disable(self):
         """Stop server, end open connections"""
         self._retry.stop()
+        if self._context is not None:
+            self._context = None
+            with suppress(RuntimeError, TypeError):  # already disconnected
+                app_signal.addresses.disconnect(self.addresses_changed)
         if self._server is None:
             return
         self._server.stop()

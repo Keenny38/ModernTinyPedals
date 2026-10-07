@@ -236,6 +236,8 @@ def load_modules():
     if not safe_mode.state.enabled:
         vroverlay().enable()  # 6 vr overlay
         streamoverlay.enable()  # 7 stream overlay
+    elif streamoverlay.running:  # 7 started from stream page: capture suspended by unload_modules resumed
+        streamoverlay.enable()
 
 
 def unload_modules(keep_servers: bool = False):

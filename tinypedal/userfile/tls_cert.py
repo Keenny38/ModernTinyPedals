@@ -102,14 +102,20 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
 
 def server_context(folder: str, addresses: list[str]) -> ssl.SSLContext:
     """TLS server context, creating certificate if needed (raise OSError, ValueError or ImportError)"""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    load_certificate(context, folder, addresses)
+    return context
+
+
+def load_certificate(context: ssl.SSLContext, folder: str, addresses: list[str]) -> None:
+    """Load certificate in context (running server: used by next connections), creating it if it does not
+    cover addresses (raise OSError, ValueError or ImportError)"""
     cert_file, key_file = cert_paths(folder)
     addresses = sorted({"127.0.0.1", *addresses})
     if not (os.path.exists(key_file) and covers(cert_file, addresses)):
         create_certificate(cert_file, key_file, addresses)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert_file, key_file)
-    return context
 
 
 def fingerprint(folder: str) -> str:

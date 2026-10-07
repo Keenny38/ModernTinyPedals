@@ -269,6 +269,32 @@ def test_port_out_of_range_reported(port, monkeypatch):
         app_signal.error.disconnect(errors.append)
 
 
+def test_listening_signaled_only_after_failure():
+    """Listening on first try: no signal; listening after a failure: signaled once"""
+    signaled = []
+
+    def on_listening():
+        signaled.append(1)
+
+    app_signal.servers.connect(on_listening)
+    errors = []
+    app_signal.error.connect(errors.append)
+    try:
+        retry = command_server.BindRetry("Test", lambda: None)
+        retry.listening()
+        assert not signaled
+        retry.failed(("127.0.0.1", 70000), OverflowError("port out of range"))  # never tried again
+        retry.listening()
+        retry.listening()
+        assert len(signaled) == 1
+        retry.failed(("127.0.0.1", 70000), OverflowError("port out of range"))
+        retry.stop()  # disabled: not listening
+        assert len(signaled) == 1
+    finally:
+        app_signal.servers.disconnect(on_listening)
+        app_signal.error.disconnect(errors.append)
+
+
 def test_bind_error_text():
     assert command_server.bind_error_text(OSError(98, "Address in use")) == "Address in use"
     assert command_server.bind_error_text(OverflowError("port must be 0-65535.")) == "port must be 0-65535."
@@ -418,7 +444,13 @@ def test_listening_tried_again_until_port_free(monkeypatch):
     error reported once"""
     monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
     errors = []
+    listening = []
+
+    def on_listening():
+        listening.append(1)
+
     app_signal.error.connect(errors.append)
+    app_signal.servers.connect(on_listening)
     control = CommandServer()
     busy = socket.socket()
     try:
@@ -427,7 +459,7 @@ def test_listening_tried_again_until_port_free(monkeypatch):
         remote_config(monkeypatch, remote_control_port=busy.getsockname()[1])
         control.enable()
         process_events(0.1)
-        assert not control.running and len(errors) == 1
+        assert not control.running and len(errors) == 1 and not listening
         busy.close()
         import time
 
@@ -435,9 +467,122 @@ def test_listening_tried_again_until_port_free(monkeypatch):
         while not control.running and time.monotonic() < end:
             process_events(0.02)
         assert control.running and len(errors) == 1
+        assert len(listening) == 1  # status shown again (settings card)
+        control.enable()  # already listening: not signaled again
+        assert len(listening) == 1
     finally:
         busy.close()
         control.disable()
         app_signal.error.disconnect(errors.append)
+        app_signal.servers.disconnect(on_listening)
     process_events(0.1)
     assert not control.running  # disabled: not tried again
+
+
+# Connection limits, request deadline (slow clients never use up threads)
+@pytest.fixture
+def local_server(monkeypatch):
+    """Command handler on an ephemeral port, server object returned"""
+    import threading
+
+    monkeypatch.setattr(command_server.CommandHandler, "commands", {"overlay_lock": lambda: None})
+    httpd = command_server.LocalHTTPServer(("127.0.0.1", 0), command_server.CommandHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield httpd
+    httpd.stop()
+
+
+def test_connections_over_limit_refused(local_server, monkeypatch):
+    """Connections above server limit closed at once, accepted again once one is closed"""
+    import time
+
+    monkeypatch.setattr(local_server, "max_connections", 3)
+    port = local_server.server_port
+    held = [socket.create_connection(("127.0.0.1", port), timeout=5) for _ in range(3)]
+    try:
+        end = time.monotonic() + 3
+        while len(local_server._connections) < 3 and time.monotonic() < end:
+            time.sleep(0.01)
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as extra:
+            assert_closed_soon(extra, 2)
+        held.pop().close()
+        end = time.monotonic() + 3
+        while len(local_server._connections) > 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+            client.sendall(f"GET /commands HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+            assert client.recv(1024).startswith(b"HTTP/1.0 200")
+    finally:
+        for sock in held:
+            sock.close()
+
+
+def test_connections_per_address_limited(local_server, monkeypatch):
+    """Another computer (LAN) holds a few connections only, this computer counted in server limit only"""
+    monkeypatch.setattr(local_server, "max_connections_per_address", 2)
+    sockets = [socket.socket() for _ in range(6)]
+    try:
+        assert local_server.verify_request(sockets[0], ("192.168.1.5", 50000))
+        assert local_server.verify_request(sockets[1], ("192.168.1.5", 50001))
+        assert not local_server.verify_request(sockets[2], ("192.168.1.5", 50002))
+        assert local_server.verify_request(sockets[3], ("192.168.1.6", 50000))  # other address
+        assert local_server.verify_request(sockets[4], ("127.0.0.1", 50000))
+        assert local_server.verify_request(sockets[5], ("127.0.0.1", 50001))
+        local_server.shutdown_request(sockets[0])  # closed: slot of address free again
+        assert local_server.verify_request(sockets[2], ("192.168.1.5", 50002))
+    finally:
+        for sock in sockets:
+            sock.close()
+
+
+@pytest.mark.parametrize("partial", [
+    b"GET /commands HTTP/1.1\r\n",  # headers sent slowly
+    b"POST /command/overlay_lock HTTP/1.1\r\nHost: 127.0.0.1\r\nX-TinyPedal: 1\r\n",
+])
+def test_slow_request_closed_at_deadline(local_server, monkeypatch, partial):
+    """Client sending a byte now and then (each read under socket timeout) closed once request deadline passed"""
+    import time
+
+    monkeypatch.setattr(command_server.CommandHandler, "request_seconds", 0.5)
+    with socket.create_connection(("127.0.0.1", local_server.server_port), timeout=5) as client:
+        client.sendall(partial)
+        start = time.monotonic()
+        client.settimeout(0.1)
+        closed = False
+        while time.monotonic() - start < 4:
+            try:
+                client.sendall(b"X")  # header line never ending
+                if client.recv(1024) == b"":
+                    closed = True
+                    break
+            except TimeoutError:
+                continue
+            except OSError:
+                closed = True
+                break
+        assert closed and time.monotonic() - start < 3
+
+
+def test_keep_alive_idle_not_bounded_by_request_deadline(local_server, monkeypatch):
+    """Kept connection waiting longer than request deadline between requests stays open (socket timeout)"""
+    import http.client
+    import time
+
+    monkeypatch.setattr(command_server.CommandHandler, "request_seconds", 0.3)
+    monkeypatch.setattr(command_server.CommandHandler, "protocol_version", "HTTP/1.1")
+    port = local_server.server_port
+    client = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        for _ in range(2):
+            client.request("GET", "/commands", headers={"Host": f"127.0.0.1:{port}"})
+            response = client.getresponse()
+            assert response.status == 200 and json.loads(response.read())
+            assert not response.will_close
+            time.sleep(0.6)
+        sock = client.sock
+        client.request("GET", "/commands", headers={"Host": f"127.0.0.1:{port}"})
+        assert client.getresponse().status == 200
+        assert client.sock is sock  # same connection
+    finally:
+        client.close()

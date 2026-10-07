@@ -55,7 +55,6 @@ import threading
 import time
 import zlib
 from html import escape
-from http.server import BaseHTTPRequestHandler
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -63,7 +62,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTim
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .command_server import BindRetry, LocalHTTPServer
+from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_file import ConfigType, FontFile
 from .i18n import current_language, tr
 from .process import results_file as rf
@@ -532,7 +531,7 @@ def new_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
 
 
-class StreamHandler(BaseHTTPRequestHandler):
+class StreamHandler(BoundedRequestHandler):
     """Stream overlay request handler"""
 
     protocol_version = "HTTP/1.1"  # frames asked again and again on same connection
@@ -720,7 +719,7 @@ class StreamOverlay:
             except (OSError, OverflowError) as error:  # OverflowError: port out of range
                 self._retry.failed(address, error)
                 return
-            self._retry.stop()
+            self._retry.listening()
             self._address = address
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Stream overlay")
             self._thread.start()
@@ -746,6 +745,11 @@ class StreamOverlay:
         self._address = None
         self.store.clear()
         logger.info("DISABLED: stream overlay")
+
+    @property
+    def port_unavailable(self) -> bool:
+        """Listening failed, tried again while port unavailable"""
+        return self._retry.failing
 
     def watched(self) -> set[str]:
         """Overlays (and "layout") shown by a source now"""

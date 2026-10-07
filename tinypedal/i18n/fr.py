@@ -1840,6 +1840,7 @@ TRANSLATION = MappingProxyType({
     "Stream": "Stream",
     "Server off": "Serveur arrêté",
     "Port %1 unavailable": "Port %1 indisponible",
+    "Off in safe mode": "Arrêté en mode sans échec",
     "On air: %1 sources shown": "En direct : %1 sources affichées",
     "Ready": "Prêt",
     "New access token: copy the addresses again into your streaming software.":

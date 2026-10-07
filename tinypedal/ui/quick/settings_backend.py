@@ -232,6 +232,7 @@ class SettingsBackend(QObject):
         self._categories: tuple[str, list[dict]] | None = None  # (language, entries)
         self.stateChanged.connect(self._drop_categories)  # before page bindings: connected first
         app_signal.addresses.connect(self.infoChanged)  # LAN addresses found in background
+        app_signal.servers.connect(self.infoChanged)  # server listening once its port is available again
         self.load_options()
 
     # Options
