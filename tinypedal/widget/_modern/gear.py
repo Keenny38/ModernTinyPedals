@@ -117,8 +117,16 @@ class Realtime(ModernOverlay):
             if wcfg[f"show_{key}_reading"] else None
             for key in ("rpm", "battery", "consumption")
         }
-        limiter_w = min(self.text_width("label", self.text_limiter) + unit * 1.4, width)
-        self.rect_limiter = QRectF(pad + width - limiter_w, pad - unit * 0.4, limiter_w, unit * 1.5)
+        if show_speed:  # in place of speed unit (never over speed digits): centered on unit label
+            limiter_w = min(self.text_width("label", self.text_limiter) + unit * 1.4, self.rect_speed.width())
+            label_center = self.speed_label_rect().center()
+            # Speed below gear: short speed part, pill at its bottom (unit label overlaps digits area)
+            top = (self.rect_speed.bottom() - unit * 1.5 if wcfg["show_speed_below_gear"]
+                   else label_center.y() - unit * 0.75)
+            self.rect_limiter = QRectF(label_center.x() - limiter_w / 2, top, limiter_w, unit * 1.5)
+        else:
+            limiter_w = min(self.text_width("label", self.text_limiter) + unit * 1.4, width)
+            self.rect_limiter = QRectF(pad + width - limiter_w, pad - unit * 0.4, limiter_w, unit * 1.5)
         self.content_width = width
         self.bars_top = max(self.rect_gear.bottom(), self.rect_speed.bottom() if show_speed else 0) + gap
         self.battery_shown = False  # battery bar of hybrid car only (electric motor available)
@@ -169,10 +177,11 @@ class Realtime(ModernOverlay):
         for rect in (self.rect_rpm, self.rect_battery, self.rect_consumption):
             if not rect.isNull():
                 rounded(painter, rect, rect.height() / 2, theme.surface_raised)
-        if not self.rect_speed.isNull():
-            label = QRectF(self.rect_speed.left(), self.rect_speed.bottom() - self.unit * 2.1,
-                           self.rect_speed.width(), self.unit * 1.4)
-            self.draw_text(painter, label, self.symbol_speed, "label", theme.text_muted, CENTER, elide=False)
+
+    def speed_label_rect(self) -> QRectF:
+        """Speed unit label, under speed digits"""
+        return QRectF(self.rect_speed.left(), self.rect_speed.bottom() - self.unit * 2.1,
+                      self.rect_speed.width(), self.unit * 1.4)
 
     def paint(self, painter: QPainter):
         theme = self.theme
@@ -188,6 +197,9 @@ class Realtime(ModernOverlay):
             speed_rect = QRectF(self.rect_speed.left(), self.rect_speed.top(), self.rect_speed.width(),
                                 self.rect_speed.height() - self.unit * 1.6)
             self.draw_text(painter, speed_rect, speed, "speed", theme.text, CENTER, elide=False)
+            if limiter == LIMITER_OFF:  # else speed limiter pill in its place
+                self.draw_text(painter, self.speed_label_rect(), self.symbol_speed, "label", theme.text_muted,
+                               CENTER, elide=False)
         rpm_colors = {NORMAL: theme.text_dim, SAFE: theme.positive, REDLINE: theme.warning, OVER_REV: theme.negative}
         rpm_text, battery_text, consumption_text = readings
         if not self.rect_rpm.isNull():
