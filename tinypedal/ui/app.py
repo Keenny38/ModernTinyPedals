@@ -81,7 +81,7 @@ from . import (
     system_dark_mode,
 )
 from ._common import MODIFIED_MARKER, BaseDialog, DialogSingleton, UIScaler
-from .lazy_page import LazyPage, PageRelease
+from .lazy_page import LazyPage, PageRelease, release_quick_views
 from .menu import APIMenu, ConfigMenu, HelpMenu, OverlayMenu, ToolsMenu, WindowMenu, open_config_application
 from .nav_rail import NAV_PAGES, PAGE_INDEX, RailEditor, current_rail_items, rail_entries
 from .notification import NotifyBar
@@ -1526,6 +1526,9 @@ class AppWindow(QMainWindow):
                 old_menu.deleteLater()
         self.menuBar().clear()
         self.set_menu_bar()
+        old_view = self.centralWidget()
+        if old_view is not None:  # deleted by Qt once replaced: QML views unloaded before their backends
+            release_quick_views(old_view)
         tab_view = TabView(self)
         self.setCentralWidget(tab_view)
         if growth is not None:
@@ -1813,6 +1816,7 @@ class AppWindow(QMainWindow):
         """
         if not self.close_pages_for_quit():
             return False
+        release_quick_views(self)  # QML views unloaded before their backends are deleted
         loader.close()  # must close this first
         self.save_window_state()
         self.__break_signal()

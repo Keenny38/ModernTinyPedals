@@ -76,18 +76,18 @@ def car_picture_url(vehicle_name: str, large: bool = False) -> str:
 
 
 class LogoCache:
-    """URLs of logos asked on every update (live lists): looked for once per name, again once game
-    pictures change"""
+    """URLs of logos asked on every update (live lists): looked for once per name & theme (logos
+    recolored for light or dark pages), again once game pictures change"""
 
     def __init__(self):
-        self._urls: dict[tuple[str, str, str], str] = {}
+        self._urls: dict[tuple[str, str, str, bool], str] = {}
         self._version = -1
 
     def _get(self, kind: str, first: str, second: str) -> str:
         if self._version != images.version:
             self._version = images.version
             self._urls.clear()
-        key = (kind, first, second)
+        key = (kind, first, second, light_theme())
         url = self._urls.get(key)
         if url is None:
             url = self._urls[key] = brand_logo_url(first, second) if kind == "brand" else track_logo_url(first, second)

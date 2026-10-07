@@ -87,8 +87,11 @@ def read_language_pack(filename: str) -> dict:
             raise ValueError(f"invalid {section} section")
         # Untranslated (empty) entries fall back to English
         pack[section] = {str(key): value for key, value in values.items() if isinstance(value, str) and value}
+    messages = data.get("messages", [])
+    if not isinstance(messages, list):
+        raise ValueError("invalid messages section")
     rules = []
-    for rule in data.get("messages", []):
+    for rule in messages:
         if isinstance(rule, list) and len(rule) == 2 and all(isinstance(part, str) for part in rule) and rule[1]:
             # Bad replacement ("\9", "\g<x>") only raises at sub(), test it once here
             try:
@@ -112,7 +115,7 @@ def load_language_packs(*folders: str) -> list[str]:
                 continue
             try:
                 pack = read_language_pack(os.path.join(folder, filename))
-            except (OSError, ValueError, UnicodeDecodeError) as error:
+            except (OSError, ValueError, TypeError, RecursionError) as error:
                 logger.error("I18N: invalid language pack %s: %s", filename, error)
                 continue
             code, name = pack["code"], pack["name"]

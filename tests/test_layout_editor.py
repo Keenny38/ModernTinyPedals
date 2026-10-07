@@ -24,6 +24,53 @@ def test_no_snap_when_far():
     assert snap_position(target, [QRect(0, 200, 50, 50)], SCREEN) == QPoint(500, 500)
 
 
+def test_snap_per_screen_center():
+    """Multi-monitor: snap to each screen center, not the virtual desktop center"""
+    screens = [QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)]
+    target = QRect(3146, 700, 100, 40)  # center 3196, right screen center 3200
+    assert snap_position(target, [], screens) == QPoint(3150, 700)
+    # Center 2236 near virtual desktop center (2240): no snap
+    assert snap_position(QRect(2186, 700, 100, 40), [], screens) == QPoint(2186, 700)
+
+
+def test_screenshot_mapped_to_matching_screen():
+    from PySide6.QtCore import QSize
+
+    from tinypedal.ui.layout_editor import screen_for_image
+
+    left, right = QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)
+    screens = [(left, 1.0), (right, 1.0)]
+    assert screen_for_image(QSize(2560, 1440), screens, left) == right
+    assert screen_for_image(QSize(1920, 1080), screens, right) == left
+    # HiDPI: screenshot in device pixels
+    assert screen_for_image(QSize(3840, 2160), [(left, 2.0), (right, 1.0)], right) == left
+    # Unknown size: fallback (primary/current screen), never the whole virtual desktop
+    assert screen_for_image(QSize(4480, 1440), screens, left) == left
+
+
+def test_canvas_background_drawn_on_one_screen(ui_env):
+    from PySide6.QtGui import QPixmap
+
+    from tinypedal.ui.layout_editor import LayoutCanvas
+
+    canvas = LayoutCanvas(None)
+    try:
+        canvas.screens = [QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)]
+        canvas.screen_rect = QRect(0, 0, 4480, 1440)
+        canvas.set_background(QPixmap(2560, 1440), QRect(1920, 0, 2560, 1440))
+        assert canvas.screen_rect == canvas.background_rect == QRect(1920, 0, 2560, 1440)
+        canvas.resize(512, 288)
+        assert canvas.to_view(canvas.background_rect) == canvas.view_rect()
+        # Guides per screen: box centered on right screen
+        canvas.boxes = {"gear": QRect(0, 0, 100, 40)}
+        canvas.select("gear")
+        canvas.move_selected(QPoint(3148, 700), snap=True)
+        assert canvas.boxes["gear"].topLeft() == QPoint(3150, 700)
+        assert 3200 in canvas._guides[0]
+    finally:
+        canvas.deleteLater()
+
+
 class FakeWidget:
     def __init__(self, rect):
         self.rect = QRect(rect)

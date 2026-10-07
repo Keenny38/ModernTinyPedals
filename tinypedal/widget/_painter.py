@@ -38,6 +38,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QStaticText,
+    QTransform,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -57,6 +58,8 @@ _DEPTH_TOP = QColor(255, 255, 255, 22)
 _DEPTH_BOTTOM = QColor(0, 0, 0, 30)
 _DEPTH_EDGE = QColor(255, 255, 255, 28)
 _DEPTH_MIN_SIZE = 6  # smaller elements (marks, thin lines) stay flat
+# Cached pixmaps drawn only without scaling (scaled pixmap: jagged corners, differs from direct fill)
+_PLAIN_TRANSFORMS = (QTransform.TransformationType.TxNone, QTransform.TransformationType.TxTranslate)
 
 
 @lru_cache(maxsize=1024)
@@ -78,6 +81,9 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     if not rgba >> 24:  # fully transparent: no panel to round or shade
         return
     rect = QRectF(rect)
+    if painter.transform().type() not in _PLAIN_TRANSFORMS:  # scaled (black box fixed size)
+        _fill_rect_direct(painter, rect, color, radius, depth)
+        return
     pixmap = _cached_background(rect.width(), rect.height(), rgba, radius, depth, painter.device().devicePixelRatioF())
     if pixmap is None:
         _fill_rect_direct(painter, rect, color, radius, depth)

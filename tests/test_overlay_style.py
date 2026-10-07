@@ -310,6 +310,35 @@ def test_cached_fill_matches_direct_fill(ui_env):
         _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
 
 
+def test_scaled_painter_fill_same_every_frame(ui_env):
+    """Scaling painter (black box fixed size): filled directly, never with cached pixmap scaled
+    (was: jagged corners, first & second frame differed)"""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainter, QPixmap
+
+    from tinypedal.widget import _painter
+
+    saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
+    try:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
+        _painter._background_cache.clear()
+        _painter._background_seen.clear()
+        images = []
+        for _ in range(3):
+            pixmap = QPixmap(120, 60)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.scale(1.7, 1.7)
+            _painter.fill_rect(painter, QRectF(2, 3, 50, 20), "#336699")
+            painter.end()
+            images.append(pixmap.toImage())
+        assert images[0] == images[1] == images[2]
+        assert not _painter._background_cache
+    finally:
+        _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = saved
+
+
 def test_hidden_widget_does_not_update(ui_env):
     from tinypedal import overlay_signal, realtime_state
     from tinypedal.setting import cfg

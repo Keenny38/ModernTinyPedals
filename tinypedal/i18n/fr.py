@@ -330,6 +330,9 @@ TRANSLATION = MappingProxyType({
     "Tracks with stats": "Circuits avec statistiques",
     "Unable to read stats file.": "Impossible de lire le fichier de statistiques.",
     "Unable to save stats file.": "Impossible d'enregistrer le fichier de statistiques.",
+    "Unable to save stats file. Session history was changed anyway, use Undo to revert it.": (
+        "Impossible d'enregistrer le fichier de statistiques. L'historique des sessions a quand même été modifié, "
+        "utilisez Annuler pour revenir en arrière."),
     "View": "Affichage",
     "Delete Track": "Supprimer le circuit",
     "Export Raw Values (CSV)...": "Exporter les valeurs brutes (CSV)...",

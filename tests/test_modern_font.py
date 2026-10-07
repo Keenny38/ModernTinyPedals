@@ -90,6 +90,34 @@ def test_modern_font_on_draws_value_with_modern_font(make, monkeypatch):
     assert used == [MONO, design_font_family(cfg.user.config["overlay_style"])]
 
 
+def test_elided_label_keeps_label_font(make, monkeypatch):
+    """Elided name ("#93 Peug…" looks like a value) drawn in font of whole text, inside its cell
+    (was: wider monospace value font, overflowing up to 12 px)"""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPainter, QPixmap
+
+    widget = make("relative", {"enable_modern_font": True, "modern_font_name": MONO,
+                               "modern_design_font_name": DESIGN})
+    text = "#93 Peugeot TotalEnergies 9X8"
+    drawn = []
+    monkeypatch.setattr(QPainter, "setFont", lambda painter, font: drawn.append([font]))
+    monkeypatch.setattr(QPainter, "drawStaticText",
+                        lambda painter, pos, static: drawn[-1].extend((pos.x(), static.text())))
+    pixmap = QPixmap(300, 40)
+    painter = QPainter(pixmap)
+    value_like = 0
+    for width in range(20, 160, 2):
+        rect = QRectF(0, 0, width, 20)
+        drawn.clear()
+        widget.draw_text(painter, rect, text, "value")
+        font, x, shown = drawn[0]
+        value_like += is_value_text(shown)
+        assert font.family() == DESIGN, shown
+        assert x + QFontMetricsF(font).horizontalAdvance(shown) <= rect.right() + 0.5, shown
+    painter.end()
+    assert value_like  # elided texts classified as values were checked
+
+
 def test_modern_font_off_widget_font_for_all_text(make):
     widget = make("relative", {"enable_modern_font": False}, font_name="DejaVu Sans")
     assert widget.font_family == "DejaVu Sans" and widget.value_family == ""
@@ -118,6 +146,26 @@ def test_font_option_shown_when_modern_font_off(ui_env):
     assert "font_name" not in design_option_keys(cfg, "relative", keys)
     cfg.user.config["overlay_style"]["enable_modern_font"] = False
     assert "font_name" in design_option_keys(cfg, "relative", keys)
+
+
+def test_restyled_font_weight_kept_when_modern_font_off(make):
+    """Restyled widgets, modern font off: widget font weight option applied & shown
+    (was: forced to design weight, option hidden)"""
+    from tinypedal.widget._modern import design_option_keys
+    from tinypedal.widget._modern.restyle import DESIGN_WEIGHT
+
+    for name in ("black_box", "pace_notes"):
+        cfg.user.setting[name]["font_weight"] = "Bold"
+        off = make(name, {"enable_modern_font": False}, enable_auto_resize=False)
+        assert off.wcfg["font_weight"] == "Bold"
+        assert {"font_name", "font_weight"} <= set(design_option_keys(cfg, name, list(cfg.user.setting[name])))
+        cfg.user.setting[name]["font_weight"] = cfg.default.setting[name]["font_weight"]
+        on = make(name, {"enable_modern_font": True}, enable_auto_resize=False)
+        assert on.wcfg["font_weight"] == DESIGN_WEIGHT
+        assert "font_weight" not in design_option_keys(cfg, name, list(cfg.user.setting[name]))
+    keys = list(cfg.user.setting["relative"])
+    cfg.user.config["overlay_style"]["enable_modern_font"] = False
+    assert "font_weight" not in design_option_keys(cfg, "relative", keys)  # modern design: not read
 
 
 def test_classic_layout_unchanged(make):

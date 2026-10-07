@@ -216,6 +216,7 @@ class PresetList(QWidget):
                     notes_paths={"tracknotes": cfg.path.track_notes, "pacenotes": cfg.path.pace_notes},
                 )
         except (ValueError, OSError, zipfile.BadZipFile) as error:
+            self.refresh()  # presets imported before error
             QMessageBox.warning(self, tr("Error"), trm(f"Unable to import package:<br>{error}"))
             return
         self.refresh()

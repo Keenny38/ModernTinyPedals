@@ -70,3 +70,9 @@ def test_parse_game_lists():
 ])
 def test_brand_in_car_model(text, brand):
     assert gi.brand_in(text) == brand
+
+
+def test_dark_and_png_brands_are_known_brands():
+    """Brand names spelled as game logo files (was: "Isotto Fraschini" typo, dark logo never used)"""
+    assert gi.DARK_BRANDS.issubset(gi.KNOWN_BRANDS)
+    assert gi.PNG_BRANDS.issubset(gi.KNOWN_BRANDS)

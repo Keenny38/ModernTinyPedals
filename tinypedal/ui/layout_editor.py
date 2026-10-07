@@ -22,7 +22,9 @@ Layout editor: place & align overlay widgets on a game screenshot
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
+from collections.abc import Sequence
+
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -56,10 +58,32 @@ def virtual_screen() -> QRect:
     return rect if rect.isValid() else QRect(0, 0, 1920, 1080)
 
 
-def snap_position(target: QRect, others: list[QRect], screen: QRect, distance: int = SNAP_DISTANCE) -> QPoint:
-    """Snap target top-left so its edges or center line up with other rects or screen center
+def screen_geometries() -> list[QRect]:
+    """Geometry of each screen, in desktop coordinates"""
+    return [screen.geometry() for screen in QGuiApplication.screens()] or [virtual_screen()]
+
+
+def screen_for_image(size: QSize, screens: Sequence[tuple[QRect, float]], fallback: QRect) -> QRect:
+    """Geometry of the screen a screenshot of this pixel size was taken on, else fallback
+
+    Args:
+        size: screenshot size in pixels.
+        screens: (geometry, device pixel ratio) of each screen.
+        fallback: geometry used when no screen has the screenshot size.
+    """
+    for geometry, ratio in screens:
+        if size in (geometry.size(), (geometry.size().toSizeF() * ratio).toSize()):
+            return QRect(geometry)
+    return QRect(fallback)
+
+
+def snap_position(
+    target: QRect, others: list[QRect], screen: QRect | Sequence[QRect], distance: int = SNAP_DISTANCE
+) -> QPoint:
+    """Snap target top-left so its edges or center line up with other rects or screen edges & center
 
     Each axis snaps to the closest reference within distance, else keeps its position.
+    Screen can be a single rect or the geometry of each screen (multi-monitor).
     """
     def best_offset(points: tuple[float, ...], refs: set[float]) -> float:
         best = 0.0
@@ -72,8 +96,11 @@ def snap_position(target: QRect, others: list[QRect], screen: QRect, distance: i
                     best = ref - point
         return best if best_gap <= distance else 0.0
 
-    ref_x: set[float] = {screen.left(), screen.left() + screen.width(), screen.center().x() + 0.5}
-    ref_y: set[float] = {screen.top(), screen.top() + screen.height(), screen.center().y() + 0.5}
+    ref_x: set[float] = set()
+    ref_y: set[float] = set()
+    for rect in [screen] if isinstance(screen, QRect) else screen:
+        ref_x.update((rect.left(), rect.left() + rect.width(), rect.center().x() + 0.5))
+        ref_y.update((rect.top(), rect.top() + rect.height(), rect.center().y() + 0.5))
     for rect in others:
         ref_x.update((rect.left(), rect.left() + rect.width(), rect.left() + rect.width() / 2))
         ref_y.update((rect.top(), rect.top() + rect.height(), rect.top() + rect.height() / 2))
@@ -94,8 +121,10 @@ class LayoutCanvas(QWidget):
         self.setMouseTracking(False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(UIScaler.size(40), UIScaler.size(22.5))
-        self.screen_rect = virtual_screen()
+        self.screen_rect = virtual_screen()  # area shown
+        self.screens = screen_geometries()  # snapping & guides per screen
         self.background = QPixmap()
+        self.background_rect = QRect(self.screen_rect)  # desktop area covered by background
         self.boxes: dict[str, QRect] = {}
         self.selected = ""
         self.snap = True
@@ -129,6 +158,13 @@ class LayoutCanvas(QWidget):
             round((pos.y() - view.top()) / scale + self.screen_rect.top()),
         )
 
+    def set_background(self, pixmap: QPixmap, screen: QRect):
+        """Show screenshot over one screen, view limited to that screen"""
+        self.screen_rect = QRect(screen)
+        self.background_rect = QRect(screen)
+        self.background = pixmap
+        self.update()
+
     # Editing
     def box_at(self, pos: QPoint) -> str:
         for name in reversed(tuple(self.boxes)):  # topmost (last drawn) first
@@ -146,9 +182,15 @@ class LayoutCanvas(QWidget):
         rect.moveTopLeft(top_left)
         others = [box for name, box in self.boxes.items() if name != self.selected]
         if snap:
-            rect.moveTopLeft(snap_position(rect, others, self.screen_rect))
+            rect.moveTopLeft(snap_position(rect, others, self.screens))
         self.boxes[self.selected] = rect
-        self._guides = alignment_lines(rect, others, self.screen_rect)
+        lines_x: set[int] = set()
+        lines_y: set[int] = set()
+        for screen in self.screens:
+            screen_x, screen_y = alignment_lines(rect, others, screen)
+            lines_x |= screen_x
+            lines_y |= screen_y
+        self._guides = (lines_x, lines_y)
         self.selectionChanged.emit(self.selected)
         self.update()
 
@@ -188,10 +230,9 @@ class LayoutCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         view = self.view_rect()
         painter.fillRect(self.rect(), self.palette().window())
-        if self.background.isNull():
-            painter.fillRect(view, COLOR_BACKGROUND)
-        else:
-            painter.drawPixmap(view, self.background, QRectF(self.background.rect()))
+        painter.fillRect(view, COLOR_BACKGROUND)
+        if not self.background.isNull():
+            painter.drawPixmap(self.to_view(self.background_rect), self.background, QRectF(self.background.rect()))
         # Screen edges
         painter.setPen(QPen(COLOR_BOX_EDGE, 1, Qt.PenStyle.DotLine))
         for screen in QGuiApplication.screens():
@@ -300,8 +341,10 @@ class LayoutEditor(BaseDialog):
             if pixmap.isNull():
                 self.label_info.setText(tr("Unable to load image."))
             else:
-                self.canvas.background = pixmap
-                self.canvas.update()
+                current = self.screen() or QGuiApplication.primaryScreen()
+                fallback = current.geometry() if current is not None else virtual_screen()
+                screens = [(screen.geometry(), screen.devicePixelRatio()) for screen in QGuiApplication.screens()]
+                self.canvas.set_background(pixmap, screen_for_image(pixmap.size(), screens, fallback))
 
     def capture_screen(self):
         """Capture primary screen, without this dialog (or main window when shown as page)"""
@@ -317,9 +360,7 @@ class LayoutEditor(BaseDialog):
         window.raise_()
         window.activateWindow()
         if not pixmap.isNull():
-            self.canvas.screen_rect = screen.geometry()
-            self.canvas.background = pixmap
-            self.canvas.update()
+            self.canvas.set_background(pixmap, screen.geometry())
 
     def apply(self) -> int:
         """Move widgets & update preset, return number of moved widgets"""

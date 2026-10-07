@@ -679,3 +679,61 @@ def test_language_change_with_timer_pages_open(window):
     finally:
         cfg.application["language"] = language
         window.retranslate()  # back to English for other tests
+
+
+def test_language_change_unloads_qml_before_backends(window):
+    """Pages deleted by a language change: QML views unloaded first (was: hundreds of
+    "Cannot read property ... of null" errors, QML bindings reading deleted backends)"""
+    import time
+
+    from PySide6.QtCore import qInstallMessageHandler
+
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    for path in ("driver_stats_viewer.DriverStatsViewer", "game_replays.GameReplays",
+                 "race_results_viewer.RaceResultsViewer", "track_map_viewer.TrackMapViewer"):
+        open_tool(path, window)
+        QApplication.processEvents()
+    errors = []
+    previous = qInstallMessageHandler(
+        lambda mode, context, message: errors.append(message) if "of null" in message else None)
+    language = cfg.application["language"]
+    try:
+        cfg.application["language"] = "Français"
+        window.retranslate()
+        deadline = time.monotonic() + 0.3
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            time.sleep(0.02)
+    finally:
+        qInstallMessageHandler(previous)
+        cfg.application["language"] = language
+        window.retranslate()  # back to English for other tests
+    assert not errors, errors[:5]
+
+
+def test_quit_unloads_qml_views(window, monkeypatch):
+    """Quit: QML views unloaded before their backends are deleted with the window"""
+    from PySide6.QtQuickWidgets import QQuickWidget
+
+    from tinypedal import loader
+    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    view = window.centralWidget()
+    for key in ("widget", "module", "preset", "spectate"):  # Qt Quick pages
+        view.select_page(PAGE_INDEX[key])
+        QApplication.processEvents()
+    open_tool("driver_stats_viewer.DriverStatsViewer", window)
+    QApplication.processEvents()
+    monkeypatch.setattr(loader, "close", lambda: None)
+    monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: None))
+    monkeypatch.setattr(type(window), "save_window_state", lambda self: None, raising=False)
+    monkeypatch.setattr(window, "_AppWindow__break_signal", lambda: None, raising=False)
+    views = window.findChildren(QQuickWidget)
+    assert any(not view.source().isEmpty() for view in views)
+    window.quit_app()
+    assert all(view.source().isEmpty() for view in window.findChildren(QQuickWidget))

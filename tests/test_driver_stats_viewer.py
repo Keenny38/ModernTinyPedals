@@ -546,6 +546,48 @@ def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
     assert not backend.canUndo and dialogs
 
 
+@pytest.mark.parametrize("rollback_failures", (2, 99))
+def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, rollback_failures):
+    """Stats not saved & history change undo fails: tried again, else history-only undo recorded & warned
+    (was: single attempt, error suppressed, history and stats out of sync without undo)"""
+    from tinypedal.ui.quick import stats_backend
+    from tinypedal.userfile import json_setting
+
+    driver_history.save_history(cfg.path.config, EDIT_HISTORY)
+    real_replace = stats_backend.replace_records
+    calls = []
+    locked = [True]
+
+    def flaky_replace(*args):
+        calls.append(args)
+        if locked[0] and 1 < len(calls) <= 1 + rollback_failures:  # edit done, rollback fails
+            raise PermissionError(13, "locked")
+        real_replace(*args)
+
+    monkeypatch.setattr(stats_backend, "replace_records", flaky_replace)
+    monkeypatch.setattr(stats_backend, "ROLLBACK_DELAY", 0)
+    with monkeypatch.context() as patch:
+        patch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
+        backend.selectRow("Hyper - Ferrari")
+        backend.removeVehicle()
+    locked[0] = False
+    assert "Hyper - Ferrari" in load_stats()[SPA]
+    if rollback_failures < stats_backend.ROLLBACK_ATTEMPTS:
+        assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY  # undone on retry
+        assert not backend.canUndo and dialogs == ["Unable to save stats file."]
+        return
+    assert len(calls) == 1 + stats_backend.ROLLBACK_ATTEMPTS
+    assert driver_history.read_records(cfg.path.config) != EDIT_HISTORY  # history changed only
+    assert backend.canUndo and "Undo" in dialogs[-1]
+    stats_before = load_stats()
+    backend.undo()
+    assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY
+    assert load_stats() == stats_before and not backend.canUndo
+    backend.redo()
+    assert driver_history.read_records(cfg.path.config) != EDIT_HISTORY
+    assert load_stats() == stats_before
+
+
 # --- Qt Quick page
 @pytest.fixture
 def page(dialogs, monkeypatch):

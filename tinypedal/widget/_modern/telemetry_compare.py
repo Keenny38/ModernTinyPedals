@@ -30,7 +30,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 
 from ...i18n import tr_overlay as tr
-from ..telemetry_compare import CENTERED_CHANNELS, PANEL_LABELS, TelemetryCompareMixin, shown_panels
+from ..telemetry_compare import CENTERED_CHANNELS, PANEL_LABELS, TelemetryCompareMixin, delta_limit, shown_panels
 from .base import LEFT, RIGHT, ModernOverlay
 from .draw import panel, rounded
 
@@ -75,7 +75,10 @@ class Realtime(TelemetryCompareMixin, ModernOverlay):
         self.setup_compare(pad, width, panels)
         self.set_size(width + pad * 2, top - gap + pad)
 
-        self.delta_w = self.text_width("value", "+88." + "8" * self.decimals if self.decimals else "+88")
+        limit = delta_limit(self.decimals)  # widest delta once rounded
+        self.delta_w = self.text_width("value", self.widest("value", (
+            "+88." + "8" * self.decimals if self.decimals else "+88", f"{limit:+.{self.decimals}f}",
+            f"{-limit:+.{self.decimals}f}")))
         self.speed_w = self.text_width("small", f"+888 {self.speed_symbol}")
         self.ref_label = tr("Ref")
         self.ref_label_w = self.text_width("label", self.ref_label) + unit * 0.3

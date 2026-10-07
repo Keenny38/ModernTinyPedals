@@ -359,6 +359,8 @@ MESSAGE_RULES = (
     (r"(^| · )([0-9]+) failed: ", r"\1\2 en échec : "),
     (r"^([0-9]+) laps(, |$)", r"\1 tours\2"),
     (r"Unable to save replay section: (.+)", r"Impossible d'enregistrer la section du rejeu : \1"),
+    (r"^Replay recording stopped: ", "Enregistrement du rejeu arrêté : "),
+    (r"^Recording stopped: ", "Enregistrement arrêté : "),
     (r"^(\d+) widgets moved$", r"\1 widget(s) déplacé(s)"),
     (r"^(\d+) widgets$", r"\1 widget(s)"),
     (r"Unable to download update: (.+)", r"Impossible de télécharger la mise à jour : \1"),

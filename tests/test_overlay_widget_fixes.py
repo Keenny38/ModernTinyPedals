@@ -218,6 +218,26 @@ def test_rate_of_change_restarts_on_new_session(widgets, monkeypatch, modern, pa
         assert all(bar.last == 0 for bar in carcass.bars_rdiff)
 
 
+@pytest.mark.parametrize("modern", [True, False])
+def test_net_change_per_lap_restarts_on_new_session(widgets, monkeypatch, modern):
+    """New session: no net change against last session lap start temperature (was: -32 shown)"""
+    engine = widgets("engine_temperature", modern=modern, show_rate_of_change=False, show_net_change_per_lap=True)
+    for elapsed, lap_start, temp in ((500.0, 400.0, 110.0), (501.0, 480.0, 112.0), (0.5, 0.0, 80.0)):
+        reader(monkeypatch, "timing", "elapsed", elapsed)
+        reader(monkeypatch, "timing", "start", lap_start)
+        reader(monkeypatch, "engine", "oil_temperature", temp)
+        reader(monkeypatch, "engine", "water_temperature", temp)
+        engine.timerEvent(None)
+        if elapsed == 501.0:  # lap done in first session: net change shown
+            assert (engine.net["oil"] if modern else engine.bar_oil_net.text) == (2.0 if modern else "2.0")
+    if modern:
+        assert engine.net == {"oil": 0.0, "water": 0.0}
+        assert engine.lap_start_temps == {"oil": 80.0, "water": 80.0}
+    else:
+        assert engine.bar_oil_net.text == engine.bar_water_net.text == "0.0"
+        assert engine.bar_oil_net.last == 80.0  # lap start temperature of new session
+
+
 def test_modern_carcass_heating_and_cooling_colors(widgets, monkeypatch):
     carcass = widgets("tyre_carcass", show_rate_of_change=True)
     for elapsed, temps in ((10.0, (85.0,) * 4), (11.0, (95.0, 75.0, 85.0, 85.0))):

@@ -75,6 +75,11 @@ CHANNEL_OPTIONS = {
 CENTERED_CHANNELS = frozenset(("steering",))  # zero line at middle of chart
 
 
+def delta_limit(decimals: int) -> float:
+    """Largest delta shown with decimals, still 2 digits once rounded (99.99 rounds to 100 with 0-1 decimals)"""
+    return min(99.99, 100 - 10 ** -decimals)
+
+
 def shown_panels(wcfg) -> list[tuple[str, float, tuple[str, ...]]]:
     """Panels with at least one shown channel (speed panel if none): panel, height share, channels"""
     panels = []
@@ -288,7 +293,7 @@ class TelemetryCompareMixin:
         delta = laptime - reference_time
         if abs(delta) > max(trace.lap_time * DELTA_LIMIT, 10.0):
             return None
-        return round(calc.sym_max(delta, 99.99), self.decimals)
+        return round(calc.sym_max(delta, delta_limit(self.decimals)), self.decimals)
 
     def reference_changed(self, trace: ReferenceTrace | None):
         """New reference lap: chart ranges, chart y of every reference value"""

@@ -77,6 +77,11 @@ class Realtime(StatsMixin, ModernOverlay):
         self.rates = {"oil": 0.0, "water": 0.0}
         self.last_temps = {"oil": None, "water": None}
 
+    def reset_net(self):
+        """Clear net change per lap (new session: no change against last session temperature)"""
+        self.lap_start_temps = {"oil": 0.0, "water": 0.0}
+        self.net = {"oil": 0.0, "water": 0.0}
+
     def paint_static(self, painter: QPainter):
         self.paint_stats_static(painter)
 
@@ -99,6 +104,7 @@ class Realtime(StatsMixin, ModernOverlay):
         if self.last_elapsed > elapsed:  # new session
             self.last_elapsed = elapsed
             self.reset_rates()
+            self.reset_net()
         elif elapsed - self.last_elapsed >= 0.1:
             interval = self.rate_interval / (elapsed - self.last_elapsed)
             self.last_elapsed = elapsed

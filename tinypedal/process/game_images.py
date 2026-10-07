@@ -54,7 +54,7 @@ TRACKS_ROUTE = "/rest/sessions/getTracksAll"
 
 # Brands with a dark logo variant in game (logo on light background)
 DARK_BRANDS = frozenset((
-    "Alpine", "Aston Martin", "BMW", "Cadillac", "Isotto Fraschini", "Lexus", "Oreca", "Ligier", "Toyota",
+    "Alpine", "Aston Martin", "BMW", "Cadillac", "Isotta Fraschini", "Lexus", "Oreca", "Ligier", "Toyota",
     "Vanwall", "Genesis",
 ))
 PNG_BRANDS = frozenset(("Porsche", "Chevrolet"))  # brand logos in PNG (others SVG)

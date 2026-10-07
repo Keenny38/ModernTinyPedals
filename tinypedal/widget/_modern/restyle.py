@@ -83,7 +83,8 @@ class Restyled:
                 if design_font:
                     overrides[key] = design_font_family(style)
             elif key.endswith("font_weight"):
-                overrides[key] = DESIGN_WEIGHT
+                if design_font:  # off: widget font weight option kept (shown in config dialog)
+                    overrides[key] = DESIGN_WEIGHT
             elif key in tokens and isinstance(value, str):
                 overrides[key] = token_color(theme, tokens[key], value)
         return overrides

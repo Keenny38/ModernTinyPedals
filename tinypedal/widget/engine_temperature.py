@@ -198,6 +198,14 @@ class Realtime(Overlay):
             if self.wcfg["show_water_temperature"]:
                 self.update_rate(self.bar_water_rate, 0.0)
 
+    def reset_net(self):
+        """Clear net change per lap (new session: no change against last session temperature)"""
+        if self.wcfg["show_net_change_per_lap"]:
+            if self.wcfg["show_oil_temperature"]:
+                self.update_net(self.bar_oil_net, 0.0, 0.0)
+            if self.wcfg["show_water_temperature"]:
+                self.update_net(self.bar_water_net, 0.0, 0.0)
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         lap_stime = api.read.timing.start()
@@ -207,6 +215,7 @@ class Realtime(Overlay):
         if self.last_lap_etime > lap_etime:  # new session
             self.last_lap_etime = lap_etime
             self.reset_rates()
+            self.reset_net()
         elif lap_etime - self.last_lap_etime >= 0.1:
             interval = self.rate_interval / (lap_etime - self.last_lap_etime)
             self.last_lap_etime = lap_etime

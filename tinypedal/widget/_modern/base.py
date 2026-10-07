@@ -292,14 +292,18 @@ class ModernOverlay(Overlay):
         """Widest of texts with role font (sizing sample of values that vary by unit or language)"""
         return max(texts, key=lambda text: self.text_width(role, text), default="")
 
-    def advance(self, role: str, text: str) -> float:
-        """Cached text advance width (text already in role capitalization)"""
-        key = (role, text)
+    def advance(self, role: str, text: str, font_role: str = "") -> float:
+        """Cached text advance width (text already in role capitalization)
+
+        Args:
+            font_role: role whose font measures text, else found from text (see font_role).
+        """
+        key = (role, text, font_role) if font_role else (role, text)
         width = self._width_cache.get(key)
         if width is None:
             if len(self._width_cache) > self.text_cache_size():
                 self._width_cache.clear()
-            width = self.metrics[self.font_role(role, text)].horizontalAdvance(text)
+            width = self.metrics[font_role or self.font_role(role, text)].horizontalAdvance(text)
             self._width_cache[key] = width
         return width
 
@@ -311,18 +315,22 @@ class ModernOverlay(Overlay):
         """Number of cached texts: in proportion to texts drawn in last paint (memory of long races)"""
         return min(TEXT_CACHE_SIZE, max(TEXT_CACHE_MIN, self._last_texts_drawn * TEXT_CACHE_PER_DRAW))
 
-    def static_text(self, role: str, text: str) -> QStaticText:
+    def static_text(self, role: str, text: str, font_role: str = "") -> QStaticText:
         """Cached text layout, least recently drawn dropped first (names & labels drawn every
-        update stay cached in long races, changing values make way)"""
+        update stay cached in long races, changing values make way)
+
+        Args:
+            font_role: role whose font lays out text, else found from text (see font_role).
+        """
         self._texts_drawn += 1
-        key = (role, text)
+        key = (role, text, font_role) if font_role else (role, text)
         cache = self._text_cache
         static = cache.get(key)
         if static is None:
             static = QStaticText(text)
             static.setTextFormat(Qt.TextFormat.PlainText)
             static.setPerformanceHint(QStaticText.PerformanceHint.AggressiveCaching)
-            static.prepare(font=self.fonts[self.font_role(role, text)])
+            static.prepare(font=self.fonts[font_role or self.font_role(role, text)])
             cache[key] = static
             size = self.text_cache_size()
             while len(cache) > size:
@@ -349,13 +357,15 @@ class ModernOverlay(Overlay):
             return
         if role in self._caps_roles:
             text = text.upper()
+        font_role = self.font_role(role, text)  # value font for values
         width = self.advance(role, text)
+        cut_role = ""  # elided text keeps font of whole text ("#93 Peug…" is no value)
         if elide and width > rect.width() + 0.5:  # (centered text not elided overflows on both sides)
             text = self.elided(role, text, rect.width())
-            width = self.advance(role, text)
-        font_role = self.font_role(role, text)  # value font for values
+            cut_role = font_role
+            width = self.advance(role, text, cut_role)
         metrics = self.metrics[font_role]
-        static = self.static_text(role, text)
+        static = self.static_text(role, text, cut_role)
         if align & RIGHT:
             x = rect.right() - width
         elif align & CENTER:

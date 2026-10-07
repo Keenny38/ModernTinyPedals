@@ -50,6 +50,10 @@ def test_french_game_data_messages(french):
     assert i18n.trm("Unable to open game shared memory, see log for details.").startswith("Impossible d'ouvrir")
     assert i18n.trm("Replay not compatible with rFactor 2 API, reading game data.").startswith("Rejeu non compatible")
     assert i18n.tr("Receiving data") == "Réception des données"
+    # Replay recording errors (status bar & replay page)
+    assert i18n.trm("Replay recording stopped: [Errno 28] No space left on device") == (
+        "Enregistrement du rejeu arrêté : [Errno 28] No space left on device")
+    assert i18n.trm("Recording stopped: disk lost") == "Enregistrement arrêté : disk lost"
 
 
 def test_language_pack(tmp_path):
@@ -96,6 +100,22 @@ def test_language_pack_bad_replacement_skipped(tmp_path):
     }
     (tmp_path / "xx.json").write_text(json.dumps(pack), encoding="utf-8")
     assert read_language_pack(str(tmp_path / "xx.json"))["messages"] == (("^(Saved)", r"\1!"),)
+
+
+def test_language_pack_invalid_messages_skipped(tmp_path):
+    """Pack with non-list messages (or too deep json) skipped, never breaks startup"""
+    import json
+
+    from tinypedal.i18n import LANGUAGE_PACK_FORMAT, LANGUAGES, load_language_packs, read_language_pack
+
+    for index, messages in enumerate((None, 5, {"a": "b"})):
+        pack = {"format": LANGUAGE_PACK_FORMAT, "code": f"x{index}", "name": f"Bad{index}", "messages": messages}
+        (tmp_path / f"x{index}.json").write_text(json.dumps(pack), encoding="utf-8")
+        with pytest.raises(ValueError):
+            read_language_pack(str(tmp_path / f"x{index}.json"))
+    (tmp_path / "deep.json").write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
+    assert load_language_packs(str(tmp_path)) == []
+    assert not any(name.startswith("Bad") for name in LANGUAGES)
 
 
 def test_pack_language_kept_at_launch(tmp_path, monkeypatch):

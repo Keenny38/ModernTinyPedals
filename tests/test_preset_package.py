@@ -185,3 +185,46 @@ def test_imported_styles_loaded_in_memory(ui_env, tmp_path, source, monkeypatch)
     view.import_package_file(str(package))
     assert "Hypercar" in cfg.user.classes and "Old" not in cfg.user.classes
     view.deleteLater()
+
+
+def corrupt_package(tmp_path, flag_encrypted: bool) -> str:
+    """Package with one corrupted (or encrypted flagged) preset entry"""
+    filename = str(tmp_path / "bad.zip")
+    with zipfile.ZipFile(filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("manifest.json", json.dumps({"format": PACKAGE_FORMAT, "version": 1}))
+        package.writestr("presets/a.json", json.dumps({"x": list(range(2000))}))
+    with zipfile.ZipFile(filename) as package:
+        info = package.getinfo("presets/a.json")
+    data = bytearray((tmp_path / "bad.zip").read_bytes())
+    if flag_encrypted:
+        data[info.header_offset + 6] |= 1
+        data[data.rfind(b"PK\x01\x02") + 8] |= 1
+    else:
+        start = info.header_offset + 30 + len(info.filename) + len(info.extra)
+        for index in range(start + 2, start + 12):
+            data[index] ^= 0xFF
+    (tmp_path / "bad.zip").write_bytes(bytes(data))
+    return filename
+
+
+@pytest.mark.parametrize("flag_encrypted", (False, True))
+def test_corrupt_or_encrypted_entry_raises_value_error(tmp_path, flag_encrypted):
+    """Shown as import error message, never an uncaught zlib.error/RuntimeError"""
+    target = tmp_path / "dst"
+    target.mkdir()
+    with pytest.raises(ValueError, match=r"presets/a\.json"):
+        import_preset_package(corrupt_package(tmp_path, flag_encrypted), f"{target}/")
+    assert not list(target.iterdir())
+
+
+def test_export_error_keeps_existing_package(tmp_path, source):
+    """Package written to temporary file: failed export never destroys previous package"""
+    settings, _ = source
+    package = tmp_path / "race.zip"
+    export_preset_package(str(package), f"{settings}/", "race.json")
+    before = package.read_bytes()
+    (settings / "race.json").unlink()  # preset deleted meanwhile
+    with pytest.raises(OSError):
+        export_preset_package(str(package), f"{settings}/", "race.json")
+    assert package.read_bytes() == before
+    assert not (tmp_path / "race.zip.part").exists()

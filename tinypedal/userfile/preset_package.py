@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import json
 import logging
+import lzma
 import os
 import zipfile
+import zlib
 from contextlib import suppress
 from typing import NamedTuple
 
@@ -79,9 +81,31 @@ def export_preset_package(
         include_styles: include style presets.
         notes_paths: package notes folder (key of NOTES_FOLDERS): user notes folder path.
 
+    Written to temporary file, then replaces target: existing package kept on error.
+
     Returns:
         Number of files added.
     """
+    temp_name = f"{zip_filename}.part"
+    try:
+        count = write_preset_package(temp_name, settings_path, preset_filename, include_styles, notes_paths)
+        os.replace(temp_name, zip_filename)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_name)
+        raise
+    logger.info("USERDATA: exported %s files to %s", count, zip_filename)
+    return count
+
+
+def write_preset_package(
+    zip_filename: str,
+    settings_path: str,
+    preset_filename: str,
+    include_styles: bool,
+    notes_paths: dict[str, str] | None,
+) -> int:
+    """Write preset package zip file, returns number of files added"""
     count = 0
     with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
         manifest = {
@@ -105,7 +129,6 @@ def export_preset_package(
                 if filename.lower().endswith(extensions):
                     package.write(os.path.join(filepath, filename), f"{folder}/{filename}")
                     count += 1
-    logger.info("USERDATA: exported %s files to %s", count, zip_filename)
     return count
 
 
@@ -164,7 +187,7 @@ def import_preset_package(
             if not filename or "/" in folder or info.file_size > MAX_FILE_SIZE:
                 skipped.append(info.filename)
                 continue
-            data = package.read(info)
+            data = read_entry(package, info)
             if folder == "presets" and filename.lower().endswith(FileExt.JSON):
                 if not is_allowed_filename(filename[:-len(FileExt.JSON)]) or not is_json_dict(data):
                     skipped.append(info.filename)
@@ -192,6 +215,14 @@ def import_preset_package(
         len(presets), len(styles), notes, zip_filename,
     )
     return ImportResult(presets, styles, notes, skipped)
+
+
+def read_entry(package: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    """Read package entry, raise ValueError if corrupted, encrypted or unsupported compression"""
+    try:
+        return package.read(info)
+    except (zipfile.BadZipFile, zlib.error, lzma.LZMAError, EOFError, RuntimeError, NotImplementedError) as error:
+        raise ValueError(f"unable to read {info.filename} ({error})") from error
 
 
 def is_json_dict(data: bytes) -> bool:

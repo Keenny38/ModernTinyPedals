@@ -301,6 +301,21 @@ def test_page_urls_and_notifier(game, monkeypatch):
     assert notifier._timer.isActive()  # pages told once pictures stop arriving
 
 
+def test_logo_cache_follows_theme(game, monkeypatch):
+    """Logos recolored for light or dark pages: cached per theme (was: stale logo after theme change)"""
+    from tinypedal.ui.quick import game_pictures as gp
+
+    _, cache = game
+    assert cache.fetch_picture(gi.TRACK_LOGO, "lemanswec")
+    logos = gp.LogoCache()
+    dark_url = logos.track("Le Mans", "")
+    monkeypatch.setattr(gp, "light_theme", lambda: True)
+    light_url = logos.track("Le Mans", "")
+    assert light_url == gp.track_logo_url("Le Mans") != dark_url
+    monkeypatch.setattr(gp, "light_theme", lambda: False)
+    assert logos.track("Le Mans", "") == dark_url
+
+
 def test_results_rows_show_logos(game):
     from tinypedal.process.results_file import Entry, SessionResult
     from tinypedal.ui.quick import results_backend as rb

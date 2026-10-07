@@ -316,3 +316,25 @@ def test_modern_options_hide_classic_colors(ui_env):
     shown = design_option_keys(cfg, "telemetry_compare", keys)
     assert "reference_lap_source" in shown and "distance_ahead" in shown
     assert "line_color_brake" not in shown and "font_name" not in shown
+
+
+@pytest.mark.parametrize("modern", [True, False])
+@pytest.mark.parametrize("decimals", [0, 1, 2, 3])
+def test_largest_delta_fits_its_width(driving, monkeypatch, modern, decimals):
+    """Delta near 99.99 never rounds to 100 (0-1 decimals): text as wide as measured
+    (was: "+100.0" drawn in a "+88.8" wide cell)"""
+    from types import SimpleNamespace
+
+    from tests.test_race_aid_widgets import make
+
+    widget = make("telemetry_compare", modern, decimal_places=decimals)
+    try:
+        trace = SimpleNamespace(time_at=lambda distance: 400.0, lap_time=500.0)
+        for laptime in (499.995, 300.005):  # delta +99.995, -99.995
+            driving["laptime"] = laptime
+            text = widget.delta_text(widget.delta_at(trace, 0.0))
+            assert len(text) == len(f"{88.0:+.{decimals}f}"), text
+            if modern:
+                assert widget.text_width("value", text) <= widget.delta_w + 0.01
+    finally:
+        widget.deleteLater()

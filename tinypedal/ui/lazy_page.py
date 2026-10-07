@@ -35,6 +35,19 @@ RELEASE_DELAY_MS = 60_000  # window hidden or minimized this long: pages release
 DESTROY_DELAY_MS = 1_000  # released pages deleted meanwhile, then hidden window's graphics freed
 
 
+def release_quick_views(widget: QWidget):
+    """Unload Qt Quick views of widget & its children before they are deleted
+
+    Qt Quick views go first: backend (created before view) is deleted first by Qt,
+    QML bindings still active would then read a null backend.
+    """
+    from PySide6.QtCore import QUrl
+    from PySide6.QtQuickWidgets import QQuickWidget
+
+    for view in widget.findChildren(QQuickWidget):
+        view.setSource(QUrl())
+
+
 class LazyPage(QWidget):
     """Placeholder of main window page, page built by factory when first shown or selected
 
@@ -80,13 +93,7 @@ class LazyPage(QWidget):
         self.setFocusProxy(None)  # type: ignore[arg-type]  # PySide6 stubs refuse None
         self._layout.removeWidget(page)
         page.hide()
-        # Qt Quick views go first: backend (created before view) is deleted first by Qt,
-        # QML bindings still active would then read a null backend
-        from PySide6.QtCore import QUrl
-        from PySide6.QtQuickWidgets import QQuickWidget
-
-        for view in page.findChildren(QQuickWidget):
-            view.setSource(QUrl())
+        release_quick_views(page)
         page.deleteLater()
         return True
 
