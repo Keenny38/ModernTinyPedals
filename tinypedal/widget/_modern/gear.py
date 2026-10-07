@@ -85,6 +85,16 @@ class Realtime(ModernOverlay):
         gear_h = self.metrics["gear"].capHeight() + unit * 2.6
         speed_w = max(self.text_width("speed", "888"), self.text_width("label", self.symbol_speed)) + unit * 1.2
         show_speed = wcfg["show_speed"]
+        # Bar readings fit (wider digits of modern font): widest reading widens speed, else gear part
+        samples = {"rpm": 88888, "battery": 100, "consumption": 8}
+        reading_w = max((self.text_width("value", f"{samples[key]:.{max(int(wcfg[f'decimal_places_{key}']), 0)}f}")
+                         + unit * 1.2 for key in samples if wcfg[f"show_{key}_reading"]), default=0.0)
+        if not show_speed:
+            gear_w = max(gear_w, reading_w)
+        elif wcfg["show_speed_below_gear"]:
+            speed_w = max(speed_w, reading_w)
+        else:
+            speed_w = max(speed_w, reading_w - gear_w - gap)
         if not show_speed:
             width = gear_w
             self.rect_speed = QRectF()

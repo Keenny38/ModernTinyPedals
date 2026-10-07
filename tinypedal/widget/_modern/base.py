@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 from collections import OrderedDict
 from collections.abc import Iterable
+from functools import lru_cache
 from math import ceil
 from time import gmtime, strftime
 from typing import Any, ClassVar
@@ -69,9 +70,59 @@ WEIGHTS = {
 }
 
 
+# Value text (number with sign, separators & short unit: "1:23.456", "+0.12", "88°", "1.85bar",
+# "0 km/h", "73.36/~227.92 (+0)"), drawn in the value font (monospace) when modern font is on.
+# Text with a word before the number ("Max 2.02", "GT3", "S1") is a label: design font.
+VALUE_TEXT = re.compile(
+    r"[^\w\s]*\s*"  # leading symbols (arrows, signs)
+    r"[x\u00d7]?"  # multiplier ("x1")
+    r"[\d\s.,:+\-\u2212\u2013/~%°()Δ±]*\d[\d\s.,:+\-\u2212\u2013/~%°()Δ±]*"
+    r"(?:[A-Za-z]{1,4}(?:/[A-Za-z]{1,2})?)?"  # unit ("kW", "km/h", "PM")
+    r"\s*[^\w\s]*"  # trailing symbols (arrows, dots)
+)
+
+
 def design_font_family(style: dict) -> str:
     """Font family of modern design"""
     return style.get("modern_design_font_name") or FontFile.DESIGN_FAMILY
+
+
+def modern_font_enabled(style: dict) -> bool:
+    """Modern font on: design font for text, modern (monospace) font for values of modern design;
+    off: each modern design overlay uses its own "font_name" option for all text"""
+    return bool(style.get("enable_modern_font", True))
+
+
+def value_font_family(style: dict) -> str:
+    """Font family of values (numbers) of modern design, "" if values use design font"""
+    if not modern_font_enabled(style):
+        return ""
+    return style.get("modern_font_name") or FontFile.MODERN_FAMILY
+
+
+@lru_cache(maxsize=4096)
+def is_value_text(text: str) -> bool:
+    """Whether text is a value (number, time, gap...) drawn in value font"""
+    return VALUE_TEXT.fullmatch(text) is not None
+
+
+def cap_height_ratio(font: QFont, value_family: str) -> float:
+    """Pixel size ratio of value font to font, for the same capital letter & digit height (value
+    font digits as tall as design text beside them)"""
+    return _cap_height_ratio(font.family(), font.weight().value, value_family)
+
+
+@lru_cache(maxsize=32)
+def _cap_height_ratio(family: str, weight: int, value_family: str) -> float:
+    heights = []
+    for name in (family, value_family):
+        font = QFont(name)
+        font.setPixelSize(100)
+        font.setWeight(QFont.Weight(weight))
+        heights.append(QFontMetricsF(font).capHeight())
+    if heights[1] <= 0:
+        return 1.0
+    return min(max(heights[0] / heights[1], 0.7), 1.3)
 
 
 def display_order_options(name: str) -> tuple[str, ...]:
@@ -106,12 +157,17 @@ class ModernOverlay(Overlay):
         style = self.cfg.user.config["overlay_style"]
         self.theme = build_theme(style)
         self.unit = max(self.design_unit(), 6.0)
-        self.font_family = design_font_family(style)
+        # Modern font on: design font & monospace values, off: widget font option for all text
+        self.modern_font = modern_font_enabled(style)
+        self.font_family = design_font_family(style) if self.modern_font else (
+            self.wcfg.get("font_name") or design_font_family(style))
+        self.value_family = value_font_family(style)
         corner = min(max(float(style.get("corner_radius_scale", DEFAULT_CORNER_SCALE)), 0.0), 0.5)
         self.corner = corner / DEFAULT_CORNER_SCALE  # 1 = default roundness, 0 = square
         self.depth_effects = bool(style.get("enable_depth_effects", True))
         self.fonts: dict[str, QFont] = {}
         self.metrics: dict[str, QFontMetricsF] = {}
+        self._value_roles: dict[str, str] = {}  # role: role of its value font (numbers)
         self._text_cache: OrderedDict[tuple, QStaticText] = OrderedDict()
         self._elide_cache: dict[tuple, str] = {}
         self._width_cache: dict[tuple, float] = {}
@@ -177,27 +233,60 @@ class ModernOverlay(Overlay):
     # Fonts & text
     def add_font(self, role: str, scale: float, weight: str = "semibold", spacing: float = 100,
                  caps: bool = False, family: str = "") -> QFont:
-        """Create font for role (value, label...), size relative to unit"""
-        font = self.config_font(family or self.font_family, self.unit * scale)
+        """Create font for role (value, label...), size relative to unit
+
+        Modern font on, a role in design font (not caps labels, nor own family) gets a value font:
+        values (numbers) drawn with role are in modern font (monospace digits), same digit height.
+        Modern font off, every role is in widget font option.
+        """
+        if not self.modern_font:
+            family = ""  # widget font for all text
+        font = self._make_font(role, family or self.font_family, self.unit * scale, weight, spacing, caps)
+        if caps:
+            self._caps_roles.add(role)
+        else:
+            self._caps_roles.discard(role)
+        value_role = f"{role}#value"
+        if self.value_family and not caps and not family:
+            ratio = cap_height_ratio(font, self.value_family)
+            self._make_font(value_role, self.value_family, self.unit * scale * ratio, weight, spacing, caps)
+            self._value_roles[role] = value_role
+        else:
+            self._value_roles.pop(role, None)
+            self.fonts.pop(value_role, None)
+            self.metrics.pop(value_role, None)
+        self._width_cache.clear()
+        return font
+
+    def _make_font(self, role: str, family: str, size: float, weight: str, spacing: float,
+                   caps: bool) -> QFont:
+        font = self.config_font(family, size)
         font.setWeight(WEIGHTS.get(weight, QFont.Weight.DemiBold))
         font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         if spacing != 100:
             font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, spacing)
         if caps:
             font.setCapitalization(QFont.Capitalization.AllUppercase)
-            self._caps_roles.add(role)
-        else:
-            self._caps_roles.discard(role)
-        self._width_cache.clear()
         self.fonts[role] = font
         self.metrics[role] = QFontMetricsF(font)
         return font
+
+    def font_role(self, role: str, text: str) -> str:
+        """Role whose font draws text: value font role for values (modern font on), else role"""
+        value_role = self._value_roles.get(role)
+        if value_role is not None and is_value_text(text):
+            return value_role
+        return role
+
+    def text_font(self, role: str, text: str) -> QFont:
+        """Font drawing text with role (value font for values)"""
+        return self.fonts[self.font_role(role, text)]
 
     def text_width(self, role: str, text: str) -> float:
         """Text advance width with role font"""
         if self.fonts[role].capitalization() == QFont.Capitalization.AllUppercase:
             text = text.upper()
-        return self.metrics[role].horizontalAdvance(text)
+        return self.metrics[self.font_role(role, text)].horizontalAdvance(text)
 
     def widest(self, role: str, texts: Iterable[str]) -> str:
         """Widest of texts with role font (sizing sample of values that vary by unit or language)"""
@@ -210,13 +299,13 @@ class ModernOverlay(Overlay):
         if width is None:
             if len(self._width_cache) > self.text_cache_size():
                 self._width_cache.clear()
-            width = self.metrics[role].horizontalAdvance(text)
+            width = self.metrics[self.font_role(role, text)].horizontalAdvance(text)
             self._width_cache[key] = width
         return width
 
     def digit_width(self, role: str) -> float:
-        """Width of one digit (tabular figures)"""
-        return self.metrics[role].horizontalAdvance("0")
+        """Width of one digit (tabular figures, value font when modern font is on)"""
+        return self.metrics[self.font_role(role, "0")].horizontalAdvance("0")
 
     def text_cache_size(self) -> int:
         """Number of cached texts: in proportion to texts drawn in last paint (memory of long races)"""
@@ -233,7 +322,7 @@ class ModernOverlay(Overlay):
             static = QStaticText(text)
             static.setTextFormat(Qt.TextFormat.PlainText)
             static.setPerformanceHint(QStaticText.PerformanceHint.AggressiveCaching)
-            static.prepare(font=self.fonts[role])
+            static.prepare(font=self.fonts[self.font_role(role, text)])
             cache[key] = static
             size = self.text_cache_size()
             while len(cache) > size:
@@ -249,7 +338,7 @@ class ModernOverlay(Overlay):
         if result is None:
             if len(self._elide_cache) > self.text_cache_size():
                 self._elide_cache.clear()
-            result = self.metrics[role].elidedText(text, Qt.TextElideMode.ElideRight, width)
+            result = self.metrics[self.font_role(role, text)].elidedText(text, Qt.TextElideMode.ElideRight, width)
             self._elide_cache[key] = result
         return result
 
@@ -258,13 +347,14 @@ class ModernOverlay(Overlay):
         """Draw single line text in rect, capital letters centered vertically"""
         if not text or not drawable(rect):
             return
-        metrics = self.metrics[role]
         if role in self._caps_roles:
             text = text.upper()
         width = self.advance(role, text)
         if elide and width > rect.width() + 0.5:  # (centered text not elided overflows on both sides)
             text = self.elided(role, text, rect.width())
             width = self.advance(role, text)
+        font_role = self.font_role(role, text)  # value font for values
+        metrics = self.metrics[font_role]
         static = self.static_text(role, text)
         if align & RIGHT:
             x = rect.right() - width
@@ -273,7 +363,7 @@ class ModernOverlay(Overlay):
         else:
             x = rect.left()
         y = rect.center().y() + metrics.capHeight() / 2 - metrics.ascent()
-        painter.setFont(self.fonts[role])
+        painter.setFont(self.fonts[font_role])
         painter.setPen(color if color is not None else self.theme.text)
         painter.drawStaticText(QPointF(x, y), static)
 

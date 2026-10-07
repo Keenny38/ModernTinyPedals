@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 from PySide6.QtGui import QColor
 
 from ...template.setting_widget import WIDGET_DEFAULT
-from .base import design_font_family
+from .base import design_font_family, modern_font_enabled
 from .theme import build_theme
 
 DESIGN_WEIGHT = "Semi Bold"
@@ -75,11 +75,13 @@ class Restyled:
         theme = build_theme(style)
         overrides: dict = {}
         tokens = {**{key: "surface" for key in self.background_options}, **self.color_tokens}
+        design_font = modern_font_enabled(style)  # off: widget font options kept
         for key, value in default.items():
             if user.get(key) != value:  # customized by user
                 continue
             if key.endswith("font_name"):
-                overrides[key] = design_font_family(style)
+                if design_font:
+                    overrides[key] = design_font_family(style)
             elif key.endswith("font_weight"):
                 overrides[key] = DESIGN_WEIGHT
             elif key in tokens and isinstance(value, str):

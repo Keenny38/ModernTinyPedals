@@ -863,13 +863,13 @@ Light themes invert gray panels and text, keep colored backgrounds (flags, warni
 Colorblind safe variant of overlay theme (Okabe-Ito palette): red / green pairs become orange / blue, on every theme. Default is disabled.
 
     enable_modern_font
-Classic layout only (widgets with `enable_classic_layout` enabled, while a `Modern` overlay theme is selected): replace default widget font with `modern_font_name`. Width of text bar is calculated from digit width to avoid clipping numbers. Modern design widgets use `modern_design_font_name` instead. Default is enabled.
+Use modern fonts while a `Modern` overlay theme is selected. Modern design widgets draw labels and names in `modern_design_font_name`, and values (times, gaps, speeds, temperatures, fuel...) in `modern_font_name`, a monospace font that keeps digits steady and aligned. Classic layout widgets (`enable_classic_layout` enabled) replace their default font with `modern_font_name`; width of text bar is calculated from digit width to avoid clipping numbers. Disable to draw every widget, modern design included, in its own `font_name` option. Default is enabled.
 
     modern_font_name
-Set modern font name of classic layout widgets, see `enable_modern_font`. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Ligatures are disabled.
+Set font of values (numbers) of modern design widgets, and of every text of classic layout widgets, see `enable_modern_font`. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Values are sized to the height of the text beside them. Ligatures are disabled.
 
     modern_design_font_name
-Set font of modern design widgets (see [Modern design](#modern-design)). Default is `Barlow Semi Condensed`, which is bundled with Modern Tiny Pedals (`fonts` folder) along with `Barlow`. A proportional font with tabular digits keeps numbers aligned.
+Set font of labels, names and other text of modern design widgets (see [Modern design](#modern-design)), while `enable_modern_font` is enabled (values use `modern_font_name`). Default is `Barlow Semi Condensed`, which is bundled with Modern Tiny Pedals (`fonts` folder) along with `Barlow`.
 
     corner_radius_scale
 Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
@@ -2070,11 +2070,11 @@ Each widget can be configured by accessing `Config` button from `Overlays` tab i
 ## Modern design
 With `Modern Dark` or `Modern Light` overlay theme in [Overlay Style](#overlay-style), every widget uses its modern design: one panel with rounded corners, short labels above or beside values, values colored by meaning (gain, loss, warning, best), gauges, tyre & brake tiles in heatmap colors, class colored pills. Labels follow application language. Colors follow `overlay_theme` and `enable_colorblind_colors`.
 
-Modern design reads fewer options than classic layout: per cell colors, fonts and paddings are set by design, so Overlay Options page shows only the options the design reads. Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: select a `Legacy` overlay theme (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
+Modern design reads fewer options than classic layout: per cell colors, fonts and paddings are set by design, so Overlay Options page shows only the options the design reads. Fonts follow `enable_modern_font`: labels in `modern_design_font_name` and values in `modern_font_name` while enabled, else every text in widget `font_name` (then shown in Overlay Options page). Relative, standings and rivals choose their columns with `column_*` options. Each widget keeps its classic options: select a `Legacy` overlay theme (all widgets) or enable `enable_classic_layout` (one widget) to use classic layout again.
 
 Display order options (`display_order_*`) apply where modern layout has the same rows, tiles, bars or columns: design order is kept while every display order option of a widget is at default value, and display order options set the order once one of them is changed. Fuel, virtual energy, pit stop estimate, acceleration, sectors and brake temperature keep design order (their modern layout has no matching rows). Classic text options (pit status texts, leader texts, session names, speed limiter text) replace design labels once changed from default value.
 
-Black box and pace notes keep their own drawing with design font & theme colors; their options other than fonts and the colors set by design (background, colors left at default value) are shown, so other colors can still be customized.
+Black box and pace notes keep their own drawing with design font (widget `font_name` while `enable_modern_font` is disabled) & theme colors; their options other than fonts and the colors set by design (background, colors left at default value) are shown, so other colors can still be customized.
 
 Widget context menu can be accessed by `Right-Click` on widget, which provides additional options:
 - Center horizontally: align widget to the center of active screen horizontally.

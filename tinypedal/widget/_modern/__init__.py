@@ -79,6 +79,8 @@ def design_option_keys(config, name: str, keys: list[str]) -> list[str]:
         return keys
     if uses_modern_design(config, name):
         shown = {*COMMON_OPTIONS, *modern_module(name).Realtime.options}
+        if not config.user.config["overlay_style"].get("enable_modern_font", True):
+            shown.add("font_name")  # modern font off: design drawn in widget font
         return [key for key in keys if key in shown]
     if not overlay_theme(config.user.config["overlay_style"]).modern:  # legacy theme: no design switch either
         modern_only = {**modern_only, CLASSIC_LAYOUT_OPTION: False}

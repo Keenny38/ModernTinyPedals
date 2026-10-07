@@ -10,7 +10,7 @@ Modern Tiny Pedals has **87 overlays** (called widgets in the settings files). T
 
 Every overlay has a **modern design**:
 
-- one rounded panel per overlay, the bundled **Barlow** font, short labels above the values, translated into the app language;
+- one rounded panel per overlay, the bundled **Barlow** font for labels and monospace **JetBrains Mono** for values (`enable_modern_font`), short labels above the values, translated into the app language;
 - values colored by meaning: gain, loss, warning, best time;
 - standings as rows with a position badge, class pill and position in class, with selectable columns (`column_*` options of Relative, Standings and Rivals);
 - fuel and energy with a gauge and markers, tyres and brakes as tiles in heatmap colors, LEDs as glowing dots.
@@ -25,7 +25,7 @@ The **classic layout** is still available:
 - for every overlay: choose a `Legacy` theme (see below), the original TinyPedal look;
 - for one overlay: turn on its `enable_classic_layout` option (classic layout with modern colors).
 
-Other options of `Config` > `Overlay Style` (they apply to all presets): `modern_design_font_name` (default `Barlow Semi Condensed`), `modern_font_name` (classic layout font, default `JetBrains Mono`, bundled), `corner_radius_scale`, `enable_depth_effects`, `minimum_bar_gap`, `overlay_scale` (scale of all overlays) and `enable_fade_animation`.
+Other options of `Config` > `Overlay Style` (they apply to all presets): `enable_modern_font` (on: labels in `modern_design_font_name`, default `Barlow Semi Condensed`, and values in `modern_font_name`, default `JetBrains Mono`, monospace and bundled, also the font of classic layout overlays; off: each overlay in its own `font_name` option), `corner_radius_scale`, `enable_depth_effects`, `minimum_bar_gap`, `overlay_scale` (scale of all overlays) and `enable_fade_animation`.
 
 ## Themes
 
