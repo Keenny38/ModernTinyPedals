@@ -485,8 +485,8 @@ class Realtime(TrackMapMixin, Overlay):
         # Draw sector line
         pen.setCapStyle(Qt.PenCapStyle.SquareCap)
         if self.map_scaled:
-            # SF line
-            if self.wcfg["show_start_line"]:
+            # SF line (line across first 2 nodes)
+            if self.wcfg["show_start_line"] and len(self.map_scaled) > 1:
                 pen.setWidth(self.wcfg["start_line_width"])
                 pen.setColor(self.wcfg["start_line_color"])
                 painter.setPen(pen)
@@ -501,6 +501,8 @@ class Realtime(TrackMapMixin, Overlay):
                 painter.setPen(pen)
 
                 for index in sectors_index:
+                    if not 0 <= index < len(self.map_scaled) - 1:  # index out of map (edited or other map file)
+                        continue
                     pos_x1, pos_y1, pos_x2, pos_y2 = self.map_line(index, self.wcfg["sector_line_length"])
                     painter.drawLine(int(pos_x1), int(pos_y1), int(pos_x2), int(pos_y2))
         else:

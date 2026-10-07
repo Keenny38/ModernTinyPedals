@@ -67,7 +67,7 @@ class Realtime(Overlay):
         self.unit_speed = units.set_unit_speed(self.cfg.units["speed_unit"])
 
         # Speed range
-        self.bars_speed_range = self.set_rawtext(
+        self.bars_speed_range = self.set_rawtext_row(
             font=font_cap,
             text=TEXT_PLACEHOLDER,
             width=bar_width,
@@ -96,7 +96,7 @@ class Realtime(Overlay):
                 self.wcfg["background_color_active_timer"],
             ),
         )
-        self.bars_timer_last = self.set_rawtext(
+        self.bars_timer_last = self.set_rawtext_row(
             text=TEXT_PLACEHOLDER,
             width=bar_width,
             fixed_height=font_m.height,
@@ -114,7 +114,7 @@ class Realtime(Overlay):
         )
 
         # Best timer
-        self.bars_timer_best = self.set_rawtext(
+        self.bars_timer_best = self.set_rawtext_row(
             text=TEXT_PLACEHOLDER,
             width=bar_width,
             fixed_height=font_m.height,
@@ -137,7 +137,7 @@ class Realtime(Overlay):
             self.wcfg["font_color_lap_loss"],
             self.wcfg["font_color_delta_time"],
         )
-        self.bars_timer_delta = self.set_rawtext(
+        self.bars_timer_delta = self.set_rawtext_row(
             text=TEXT_PLACEHOLDER,
             width=bar_width,
             fixed_height=font_m.height,
@@ -211,6 +211,11 @@ class Realtime(Overlay):
             target.update()
 
     # Additional methods
+    def set_rawtext_row(self, count: int, **kwargs) -> tuple:
+        """One RawText per speed range, always a tuple (set_rawtext returns a single RawText for 1,
+        fails for 0: user can disable every range but one, or all of them)"""
+        return tuple(self.set_rawtext(**kwargs) for _ in range(count))
+
     def set_timers(self):
         """Set acceleration timers"""
         speed_drop = max(self.wcfg["speed_drop_threshold"], 0)

@@ -316,6 +316,8 @@ class Realtime(Overlay):
             pen.setColor(self.wcfg["sector_line_color"])
             painter.setPen(pen)
             for index in sectors_index:
+                if not 0 <= index < len(self.map_scaled):  # index out of map (edited or other map file)
+                    continue
                 pos_x = self.map_scaled[index][0]
                 painter.drawLine(pos_x, -999, pos_x, 999)
 

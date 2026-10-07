@@ -451,3 +451,13 @@ def test_app_cpu_kept_within_every_core():
     assert app_cpu_percent(Process(8213.0), 8) == 100.0
     assert app_cpu_percent(Process(200.0), 8) == 25.0
     assert app_cpu_percent(Process(-1.0), 8) == 0.0
+
+
+# --- Acceleration: one speed range kept (or none) built a single cell instead of a row (TypeError, StopIteration)
+@pytest.mark.parametrize("ranges", [0, 1, 2])
+def test_classic_acceleration_with_few_speed_ranges(widgets, ranges):
+    options = {f"speed_range_{index}_end": 100 if index <= ranges else 0 for index in range(1, 11)}
+    widget = widgets("acceleration", modern=False, **options)
+    assert len(widget.timers) == len(widget.bars_speed_range) == len(widget.bars_timer_delta) == ranges
+    widget.timerEvent(None)
+    widget.grab()

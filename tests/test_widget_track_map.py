@@ -110,3 +110,19 @@ def test_open_map_not_closed(track):
     minfo.mapping.coordinates = tuple((i * 10.0, 0.5 * i) for i in range(NODES))  # point to point stage
     widget, _ = render()
     assert not widget.circular_map
+
+
+@pytest.mark.parametrize("name", ["track_map", "elevation"])
+def test_sector_index_out_of_map_skipped(track, name):
+    """Sector index past last node (edited map file, or file of another layout): map still drawn, line skipped"""
+    from importlib import import_module
+
+    minfo.mapping.sectors = (66, NODES + 50)
+    wcfg = cfg.user.setting[name]
+    wcfg.update(show_sector_line=True, show_start_line=True)
+    widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+    try:
+        widget.timerEvent(QTimerEvent(0))  # raised IndexError (map image left half drawn)
+        assert visible_pixels(widget.grab().toImage()) > 100
+    finally:
+        widget.deleteLater()
