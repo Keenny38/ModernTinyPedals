@@ -195,6 +195,37 @@ def speed_offset(reference: LapData, compare: LapData, scale: float, length: flo
     return float(found)
 
 
+def speed_correlation(reference: LapData, compare: LapData, scale: float = 1.0, points: int = 500) -> float | None:
+    """Best correlation (-1 to 1) of speed along distance (compared lap distances multiplied by scale) over offsets
+    searched (see search_window, twice as far), None if a lap has no speed or a flat speed trace
+
+    Same circuit: braking zones at the same places whatever the car or pace (close to 1). Another circuit of about
+    the same length: low (braking zones elsewhere).
+    """
+    if "speed_kph" not in reference.columns or "speed_kph" not in compare.columns or len(compare) < 10:
+        return None
+    length = lap_end_distance(reference)
+    if length <= 0 or len(reference) < 10:
+        return None
+    step = length / points
+    grid = [index * step for index in range(points)]
+    ref = column_on_grid(reference, "speed_kph", grid)
+    own = column_on_grid(compare, "speed_kph", grid, scale)
+    ref_mean, own_mean = sum(ref) / points, sum(own) / points
+    ref = [value - ref_mean for value in ref]
+    own = [value - own_mean for value in own]
+    norm = math.sqrt(sum(value * value for value in ref) * sum(value * value for value in own))
+    if not norm > 0:
+        return None
+    reach = min(int(2 * search_window(length) / step), points // 2)
+    best = -1.0
+    for shift in range(-reach, reach + 1):
+        start = shift % points
+        moved = [*ref[start:], *ref[:start]]
+        best = max(best, sum(a * b for a, b in zip(own, moved)) / norm)
+    return best
+
+
 def is_complete(lap: LapData) -> bool:
     """Whether lap goes from line to line with its lap time (can be turned around its line)"""
     if "lap_time" not in lap.columns or len(lap) < 10 or official_lap_time(lap) <= 0:

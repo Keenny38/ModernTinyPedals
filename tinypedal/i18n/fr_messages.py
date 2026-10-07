@@ -337,6 +337,7 @@ MESSAGE_RULES = (
     (r"Undo with Ctrl\+Z while this page is open\.", "Annulable avec Ctrl+Z tant que cette page est ouverte."),
     (r"(\d+) frames: (.+)", r"\1 images : \2"),
     (r"Unable to open replay file: (.+)", r"Impossible d'ouvrir le fichier de rejeu : \1"),
+    (r"^Loading replay (.+): ([0-9]+)%$", r"Chargement du rejeu \1 : \2 %"),
     (r"Select (.+?) API to record or replay telemetry\.", r"Sélectionnez l'API \1 pour enregistrer ou rejouer la télémétrie."),
     (r"Unable to export lap: (.+)", r"Impossible d'exporter le tour : \1"),
     (r"Exported: (.+)", r"Exporté : \1"),

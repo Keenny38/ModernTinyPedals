@@ -79,6 +79,7 @@ SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0)
 MAX_FRAME_SIZE = 64 * 1024 * 1024  # bound of header frame size (largest shared memory is a few MB)
 MAX_EXTRA_SIZE = 16 * 1024 * 1024  # bound of Rest API snapshot, marker & summary payload
 EXPORT_PROGRESS_STEP = 100  # frames between export progress calls
+SCAN_CHECK_STEP = 2000  # frames between cancel checks & progress calls while scanning replay file
 
 
 # Replay source API names that share shared memory structures
@@ -93,6 +94,10 @@ def replay_compatible(source: str, api_name: str) -> bool:
     if source == api_name:
         return True
     return any(source in family and api_name in family for family in REPLAY_FAMILIES)
+
+
+class ReplayLoadCancelled(Exception):
+    """Replay file loading cancelled (other file opened, window closed)"""
 
 
 class ReplayMismatch(ValueError):
@@ -387,11 +392,20 @@ class ReplayFile:
     frame until next keyframe).
     """
 
-    def __init__(self, filename: str):
+    def __init__(
+        self, filename: str, cancel: threading.Event | None = None,
+        progress: Callable[[int, int], None] | None = None,
+    ):
+        """Open replay file and index its frames (seconds for a long recording, see ReplayControl.prepare)
+
+        Args:
+            cancel: set to stop scanning (any thread), raises ReplayLoadCancelled, file closed.
+            progress: called with (bytes scanned, file size) every SCAN_CHECK_STEP frames.
+        """
         self.filename = filename
         self._file = open(filename, "rb")  # noqa: SIM115 (kept open, frames are read on demand)
         try:
-            self._scan()
+            self._scan(cancel, progress)
         except Exception:
             self._file.close()
             raise
@@ -402,7 +416,7 @@ class ReplayFile:
         self._broken = True  # previous frame unavailable: wait for keyframe
         self._corrupt: set[int] = set()
 
-    def _scan(self):
+    def _scan(self, cancel: threading.Event | None, progress: Callable[[int, int], None] | None):
         file = self._file
         header = read_header(file)
         self.header = header
@@ -437,7 +451,15 @@ class ReplayFile:
         file_size = os.fstat(file.fileno()).st_size
         position = file.tell()
         last_time = float("-inf")
+        countdown = SCAN_CHECK_STEP
         while True:
+            countdown -= 1
+            if not countdown:
+                countdown = SCAN_CHECK_STEP
+                if cancel is not None and cancel.is_set():
+                    raise ReplayLoadCancelled(self.filename)
+                if progress is not None:
+                    progress(position, file_size)
             head = file.read(frame_header.size)
             if len(head) < frame_header.size:
                 break  # end of file, or truncated frame from interrupted recording
@@ -824,7 +846,9 @@ class ReplayControl:
         return self.player is not None
 
     def load(self, filename: str, api_name: str = "", layout: Sequence[Sequence] | None = None) -> ReplayPlayer:
-        """Load replay file, raise OSError or ValueError on invalid file
+        """Load replay file and play it, raise OSError or ValueError on invalid file
+
+        Blocks while file is scanned: user interface loads in background with prepare & activate.
 
         Args:
             api_name: API to play replay with, checked with layout if given.
@@ -834,15 +858,36 @@ class ReplayControl:
             ReplayMismatch: replay cannot be played with API.
         """
         self.unload()
-        replay_file = ReplayFile(filename)
+        return self.activate(self.prepare(filename, api_name, layout))
+
+    @staticmethod
+    def prepare(
+        filename: str, api_name: str = "", layout: Sequence[Sequence] | None = None,
+        cancel: threading.Event | None = None, progress: Callable[[int, int], None] | None = None,
+    ) -> ReplayFile:
+        """Open & check replay file without playing it (any thread), raise OSError or ValueError on invalid file
+
+        Args:
+            api_name, layout: see load.
+            cancel, progress: see ReplayFile.
+
+        Raises:
+            ReplayMismatch: replay cannot be played with API.
+            ReplayLoadCancelled: cancel set while scanning, file closed.
+        """
+        replay_file = ReplayFile(filename, cancel, progress)
         if api_name and layout is not None:
             mismatch = replay_mismatch(replay_file, api_name, layout)
             if mismatch is not None:
                 replay_file.close()
                 logger.warning("replay: %s not loaded: %s", filename, mismatch)
                 raise mismatch
+        return replay_file
+
+    def activate(self, replay_file: ReplayFile) -> ReplayPlayer:
+        """Play prepared replay file (replaces replay being played)"""
         self.player = ReplayPlayer(replay_file)
-        logger.info("replay: loaded %s (%s frames)", filename, len(self.player.replay))
+        logger.info("replay: loaded %s (%s frames)", replay_file.filename, len(replay_file))
         return self.player
 
     def unload(self) -> None:

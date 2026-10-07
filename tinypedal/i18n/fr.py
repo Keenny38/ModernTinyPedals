@@ -1889,6 +1889,7 @@ TRANSLATION = MappingProxyType({
         "Rejeu enregistré avec une autre structure de données du jeu (version plus ancienne du jeu ou de "
         "l'application), il ne peut pas être lu.",
     "Saving section…": "Enregistrement de la section…",
+    "Loading replay…": "Chargement du rejeu…",
     "API not connected": "API non connectée",
     "Shared memory: no data yet": "Mémoire partagée : aucune donnée pour l'instant",
     "Rest API data read from replay file.": "Données de l'API Rest lues depuis le fichier de rejeu.",

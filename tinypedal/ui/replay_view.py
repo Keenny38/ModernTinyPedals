@@ -22,9 +22,11 @@ Session recorder: telemetry recording & replay control
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 
 from PySide6.QtCore import QBasicTimer, QObject, QRect, Qt, QUrl, Signal
@@ -51,10 +53,21 @@ from .. import app_signal
 from ..api_control import api
 from ..const_api import API_LMU_NAME, API_RF2_NAME
 from ..i18n import tr, trm
-from ..replay import FILE_EXT, SPEEDS, ReplayFile, ReplayMismatch, list_replays, replay, same_file
+from ..replay import (
+    FILE_EXT,
+    SPEEDS,
+    ReplayFile,
+    ReplayLoadCancelled,
+    ReplayMismatch,
+    list_replays,
+    replay,
+    same_file,
+)
 from ..replay_session import api_supported, section_filename, start_api_recording
 from ..setting import cfg
 from ._common import BaseDialog, UIScaler, singleton_dialog, translate_filter
+
+logger = logging.getLogger(__name__)
 
 SLIDER_SCALE = 10  # slider steps per second
 SEEK_STEP = 5.0  # seconds, arrow keys
@@ -128,6 +141,95 @@ class SectionExport(QObject):
         if self._thread is not None:
             self._thread.join(timeout)
         return not self.busy
+
+
+class ReplayLoad(QObject):
+    """Load replay file in background (indexing a long recording takes seconds), result in user interface thread
+
+    Only last started loading is delivered: starting another one or cancelling stops the previous
+    one, a result arriving later is dropped (file closed).
+
+    Signals:
+        finished: loaded replay file (None on error), error (None if loaded).
+    """
+
+    finished = Signal(object, object)
+    _done = Signal(int, object, object)  # loading number, replay file, error (from loading thread)
+
+    def __init__(self, parent: QObject):
+        super().__init__(parent)
+        self._threads: list[threading.Thread] = []
+        self._cancel = threading.Event()
+        self._number = 0
+        self.filename = ""  # file being loaded, empty if none
+        self.percent = 0  # loading progress
+        self._done.connect(self._deliver)
+
+    @property
+    def busy(self) -> bool:
+        """Whether a file is being loaded"""
+        return bool(self.filename)
+
+    def start(self, filename: str, api_name: str = "", layout: Sequence[Sequence] | None = None):
+        """Load file (checked with API name & layout, see ReplayControl.prepare), previous loading cancelled"""
+        self.cancel()
+        self._number += 1
+        number = self._number
+        cancel = self._cancel = threading.Event()
+        self.filename = filename
+        self.percent = 0
+
+        def report(done: int, total: int):
+            if number == self._number:
+                self.percent = done * 100 // max(total, 1)
+
+        def load():
+            replay_file: ReplayFile | None = None
+            error: Exception | None = None
+            try:
+                replay_file = replay.prepare(filename, api_name, layout, cancel, report)
+            except ReplayLoadCancelled:
+                return
+            except (OSError, ValueError) as load_error:
+                error = load_error
+            except Exception as load_error:  # never leave loading thread with unexpected error unlogged
+                logger.exception("replay: loading failed, %s", filename)
+                error = load_error
+            if not cancel.is_set():
+                try:
+                    self._done.emit(number, replay_file, error)
+                    return
+                except RuntimeError:  # window closed meanwhile
+                    pass
+            if replay_file is not None:
+                replay_file.close()
+
+        self._threads = [thread for thread in self._threads if thread.is_alive()]
+        thread = threading.Thread(target=load, daemon=True, name="Replay load")
+        self._threads.append(thread)
+        thread.start()
+
+    def cancel(self):
+        """Stop loading, result not delivered"""
+        self._cancel.set()
+        self._number += 1
+        self.filename = ""
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Wait for loading threads to end (cancelled or result sent), returns True if ended"""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for thread in self._threads:
+            thread.join(None if deadline is None else max(deadline - time.monotonic(), 0.0))
+        self._threads = [thread for thread in self._threads if thread.is_alive()]
+        return not self._threads
+
+    def _deliver(self, number: int, replay_file: ReplayFile | None, error: Exception | None):
+        if number != self._number:  # stale: other file opened or cancelled meanwhile
+            if replay_file is not None:
+                replay_file.close()
+            return
+        self.filename = ""
+        self.finished.emit(replay_file, error)
 
 
 class MarkerSlider(QSlider):
@@ -257,6 +359,9 @@ class ReplayView(BaseDialog):
         self.export = SectionExport(self)
         self.export.progress.connect(self.export_progress)
         self.export.finished.connect(self.export_finished)
+        self.loader = ReplayLoad(self)
+        self.loader.finished.connect(self.load_finished)
+        self._on_loaded: Callable[[], None] | None = None
 
         box_replay = QGroupBox(tr("Replay"), self)
         layout_replay = QGridLayout(box_replay)
@@ -316,8 +421,11 @@ class ReplayView(BaseDialog):
         self.refresh()
 
     def closeEvent(self, event):
-        """Stop refresh timer, replay & recording keep running"""
+        """Stop refresh timer & replay loading, replay & recording keep running"""
         self._update_timer.stop()
+        self._on_loaded = None
+        self.loader.cancel()
+        self.loader.wait(2)  # scanning stops at next check, file closed
         super().closeEvent(event)
 
     def refresh(self):
@@ -331,7 +439,8 @@ class ReplayView(BaseDialog):
             self.button_record.setText(tr("Start Recording"))
             if not replay.recording_file:
                 self.label_record.setText("")
-        self.button_record.setEnabled(not replay.active)
+        loading = self.loader.busy
+        self.button_record.setEnabled(not replay.active and not loading)
 
         player = replay.player
         for widget in (
@@ -343,8 +452,12 @@ class ReplayView(BaseDialog):
         self.button_prev_incident.setEnabled(has_incidents)
         self.button_next_incident.setEnabled(has_incidents)
         self.button_section_save.setEnabled(player is not None and None not in self.section and not self.export.busy)
+        if loading:  # replay being played (if any) goes on meanwhile
+            self.label_file.setText(
+                trm(f"Loading replay {os.path.basename(self.loader.filename)}: {self.loader.percent}%"))
         if player is None:
-            self.label_file.setText(tr("Not replaying, reading from game."))
+            if not loading:
+                self.label_file.setText(tr("Not replaying, reading from game."))
             self.label_position.setText("")
             self.button_play.setText(tr("Pause"))
             if self._loaded_file:
@@ -354,7 +467,8 @@ class ReplayView(BaseDialog):
             self.load_markers()
         duration = player.replay.duration
         position = player.position
-        self.label_file.setText(os.path.basename(player.replay.filename))
+        if not loading:
+            self.label_file.setText(os.path.basename(player.replay.filename))
         self.label_position.setText(f"{format_time(position)} / {format_time(duration)}")
         self.button_play.setText(tr("Play") if player.paused else tr("Pause"))
         if not self.slider.isSliderDown():
@@ -428,33 +542,52 @@ class ReplayView(BaseDialog):
         if filename:
             self.open_file(filename)
 
-    def open_file(self, filename: str):
-        """Load replay file and switch API to it"""
+    def open_file(self, filename: str, on_loaded: Callable[[], None] | None = None):
+        """Load replay file in background, then switch API to it
+
+        Replay being played goes on while loading, opening another file meanwhile replaces this one.
+
+        Args:
+            on_loaded: called once replay is loaded & played (not on error or if replaced).
+        """
         if not self.check_lmu_api():
             return
         if replay.recording:
             replay.stop_recording()
-        try:
-            replay.load(filename, api.name, api.replay_layout())
-        except ReplayMismatch as error:
-            if error.reason == "source":
-                message = trm(f"Replay recorded with {error.source} API, select {error.source} API to play it.")
+        self._on_loaded = on_loaded
+        self.loader.start(filename, api.name, api.replay_layout())
+        self.refresh()
+
+    def load_finished(self, replay_file: ReplayFile | None, error: Exception | None):
+        """Replay file loaded in background: play it, or report error"""
+        on_loaded, self._on_loaded = self._on_loaded, None
+        if replay_file is None:
+            if isinstance(error, ReplayMismatch):
+                if error.reason == "source":
+                    message = trm(f"Replay recorded with {error.source} API, select {error.source} API to play it.")
+                else:
+                    message = tr("Replay recorded with another game data structure (older game or app version), "
+                                 "it cannot be played.")
             else:
-                message = tr("Replay recorded with another game data structure (older game or app version), "
-                             "it cannot be played.")
+                message = trm(f"Unable to open replay file: {error}")
+            self.refresh()
             QMessageBox.warning(self, tr("Error"), message)
             return
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, tr("Error"), trm(f"Unable to open replay file: {error}"))
-            return
+        if replay.recording:  # started meanwhile (recorder module)
+            replay.stop_recording()
+        replay.activate(replay_file)
         restart_api()
         self.set_speed()
         self.set_loop(self.check_loop.isChecked())
         self.load_markers()
         self.refresh()
+        if on_loaded is not None:
+            on_loaded()
 
     def stop_replay(self):
         """Leave replay mode, read from game again"""
+        self._on_loaded = None
+        self.loader.cancel()
         replay.unload()
         restart_api()
         self.refresh()

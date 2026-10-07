@@ -41,14 +41,15 @@ from typing import NamedTuple
 from .corner_analysis import resample_sorted
 from .lap_cache import file_stamp, load_cached_lap
 from .telemetry_lap import (
+    DISTANCE_SCALE_MIN,
     LapFile,
-    best_laps,
     interpolate,
     lap_files,
     lap_length,
     lap_time_curve,
     monotonic_distance,
     official_lap_time,
+    read_lap_info,
     viewer_reference_name,
 )
 
@@ -64,24 +65,41 @@ SHIFT_SPEED = 10.0  # km/h, neutral gear above it is a gear shift
 _executor: ThreadPoolExecutor | None = None
 
 
-def reference_file(filepath: str, track: str, source: str) -> LapFile | None:
+def same_layout(lap: LapFile, track_length: float) -> bool:
+    """Whether lap was recorded on current track layout: recorded track length (lap info) within 1% of game track
+    length (see same_circuit), True if a length is unknown (older lap without lap info)"""
+    if not track_length > 0:
+        return True
+    length = read_lap_info(lap.path).get("track_length")
+    if not isinstance(length, (int, float)) or isinstance(length, bool) or not length > 0:
+        return True
+    return abs(length / track_length - 1) <= DISTANCE_SCALE_MIN
+
+
+def reference_file(filepath: str, track: str, source: str, track_length: float = 0.0) -> LapFile | None:
     """Recorded lap of track folder used as reference, None if track has no lap
 
     Viewer: lap set as reference in lap viewer, Best: fastest valid lap, Last: newest lap (valid or not).
     Without viewer reference, fastest valid lap is used, without valid lap, newest lap.
+    Game track length (0 if unknown): laps of another layout of the same track name (other track length) never
+    used, None if no lap of current layout.
     """
     laps = lap_files(os.path.join(filepath, track))
     if not laps:
         return None
+
+    def first(candidates: list[LapFile]) -> LapFile | None:  # lap info read only until a lap matches
+        return next((lap for lap in candidates if same_layout(lap, track_length)), None)
+
     if source == "Last":
-        return laps[0]
+        return first(laps)
     if source == "Viewer":
         name = viewer_reference_name(filepath, track)
-        found = next((lap for lap in laps if lap.filename == name), None) if name else None
+        found = first([lap for lap in laps if lap.filename == name]) if name else None
         if found is not None:
             return found
-    best = best_laps(laps, 1)
-    return best[0] if best else laps[0]
+    timed = sorted((lap for lap in laps if lap.valid and lap.lap_time > 0), key=lambda lap: lap.lap_time)
+    return first(timed) or first(laps)
 
 
 class ReferenceTrace(NamedTuple):
@@ -212,14 +230,24 @@ class ReferenceLoader:
         self.trace: ReferenceTrace | None = None
         self.version = 0  # changed when trace changes
         self.track = ""
+        self.track_length = 0.0  # game track length (laps of another layout never used), 0 if unknown
         self._job: Future | None = None
         self._job_track = ""
+        self._job_length = 0.0
         self._next_check = 0.0
         self._failed: tuple[str, tuple[int, int]] | None = None  # lap file not loadable (same file not retried)
 
-    def poll(self, track: str, now: float) -> bool:
-        """Update with track folder name (empty if none) & monotonic time, True if trace changed"""
+    def poll(self, track: str, now: float, track_length: float = 0.0) -> bool:
+        """Update with track folder name (empty if none), monotonic time & game track length (0 if unknown: last known
+        length kept), True if trace changed"""
         changed = False
+        if (isinstance(track_length, (int, float)) and track_length > 0  # unknown (0): last known length kept
+                and abs(track_length - self.track_length) > DISTANCE_SCALE_MIN * track_length):
+            if self.track_length and self.trace is not None:  # another layout of the same track name
+                self.trace = None
+                changed = True
+            self.track_length = float(track_length)
+            self._next_check = 0.0
         if track != self.track:
             self.track = track
             self._next_check = 0.0
@@ -236,21 +264,22 @@ class ReferenceLoader:
                     trace = job.result()
                 else:
                     logger.error("REFERENCE LAP: check failed: %s", error)
-            if self._job_track == self.track and trace is not self.trace:
+            if (self._job_track, self._job_length) == (self.track, self.track_length) and trace is not self.trace:
                 self.trace = trace
                 changed = True
         if self._job is None and track and now >= self._next_check:
             self._next_check = now + CHECK_INTERVAL
             self._job_track = track
-            self._job = executor().submit(self.find, track, self.trace)
+            self._job_length = self.track_length
+            self._job = executor().submit(self.find, track, self.trace, self.track_length)
         if changed:
             self.version += 1
         return changed
 
-    def find(self, track: str, current: ReferenceTrace | None) -> ReferenceTrace | None:
-        """Reference trace of track: current one if same lap file unchanged, else loaded, None if no lap
-        (background thread)"""
-        lap = reference_file(self.filepath, track, self.source)
+    def find(self, track: str, current: ReferenceTrace | None, track_length: float = 0.0) -> ReferenceTrace | None:
+        """Reference trace of track: current one if same lap file unchanged, else loaded, None if no lap of current
+        layout (track length) (background thread)"""
+        lap = reference_file(self.filepath, track, self.source, track_length)
         if lap is None:
             return None
         try:

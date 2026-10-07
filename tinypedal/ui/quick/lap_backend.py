@@ -62,6 +62,7 @@ from ...const_api import API_LMU_CONFIG
 from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile import track_geometry
+from ...userfile.circuit_match import same_imported_circuit
 from ...userfile.corner_analysis import (
     SPEED_HYSTERESIS,
     CornerComparison,
@@ -656,6 +657,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._marks: dict[str, dict[str, dict]] = {}
         self._color_slots: dict[str, int] = {}  # lap color index of each shown lap, kept while shown
         self._failed: set[str] = set()  # checked laps that could not be read
+        # (main lap path, lap path): main lap & lap data checked, whether same circuit (imported lap, see
+        # same_imported_circuit; False: another circuit)
+        self._shape_checks: dict[tuple[str, str], tuple[LapData, LapData, bool | None]] = {}
         self._compare_key = ""  # lap compared corner by corner & on gain map, first compared lap if not shown
         self._loader: threading.Thread | None = None
         self._exports = 0  # MoTeC & CSV export jobs running
@@ -2610,7 +2614,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self.load_in_background(missing)
             return
         entries = {entry.file.path: entry for entry in self.all_entries()}
-        loaded = [(path, self.read_lap(path)) for path in ordered]
+        loaded = self.drop_other_shapes([(path, self.read_lap(path)) for path in ordered])
+        paths = [path for path in paths if path in self.checked]
         self._failed = {path for path, lap_data in loaded if lap_data is None}
         if self.reference_key in self._failed:  # first lap read is reference (star, compared laps, exports, saved)
             self.reference_key = next((path for path, lap_data in loaded if lap_data is not None), self.reference_key)
@@ -2654,17 +2659,56 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         infos = {entry.file.path: entry.info for entry in self.external}
         return infos.get(self.reference_key, {}), self.reference_key
 
-    @staticmethod
-    def other_circuit(main: tuple[dict, str], info: dict, path: str) -> bool:
+    def other_circuit(self, main: tuple[dict, str], info: dict, path: str) -> bool:
         """Whether lap (lap info & path) was driven on another circuit than main lap: game track name & length (see
-        same_circuit), else track of track folder ("<track> - <class>") of laps without lap info"""
+        same_circuit), else track of track folder ("<track> - <class>") of laps without lap info, imported lap found
+        on another circuit from its telemetry once loaded (see drop_other_shapes)"""
         main_info, main_path = main
         if path == main_path:
             return False
         if not same_circuit(LapData("", {}, main_info), LapData("", {}, info)):
             return True
         names = [circuit_name(main_info, main_path), circuit_name(info, path)]
-        return all(names) and names[0].casefold() != names[1].casefold()
+        if all(names) and names[0].casefold() != names[1].casefold():
+            return True
+        checked = self._shape_checks.get((main_path, path))
+        return checked is not None and checked[2] is False
+
+    def drop_other_shapes(self, loaded: list[tuple[str, LapData | None]]) -> list[tuple[str, LapData | None]]:
+        """Loaded laps without imported laps found driven on another circuit than main lap from their telemetry
+        (driven line, else speed trace, see same_imported_circuit): added laps no longer listed, laps of track
+        unchecked (told in status line like laps of another circuit)"""
+        main_path = self.main_circuit()[1]
+        main = dict(loaded).get(main_path) or self._lap_cache.get(main_path)
+        if main is None:
+            return loaded
+        checks = {key: value for key, value in self._shape_checks.items() if key[0] == main_path}
+        others = []
+        for path, lap_data in loaded:
+            if lap_data is None or path == main_path:
+                continue
+            found = checks.get((main_path, path))
+            if found is None or found[0] is not main or found[1] is not lap_data:
+                found = checks[(main_path, path)] = (main, lap_data, same_imported_circuit(main, lap_data))
+            if found[2] is False:
+                others.append(path)
+        self._shape_checks = checks
+        if not others:
+            return loaded
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        names = ", ".join(self.circuit_names(others, infos))
+        self.checked.difference_update(others)
+        added = {entry.file.path for entry in self.external} & set(others)
+        if added:  # never listed, like laps of another circuit added (see add_external)
+            self.external = [entry for entry in self.external if entry.file.path not in added]
+            self.fill_list()
+            self.set_status(trm(f"Laps from another circuit, not added: {names}"))
+        else:
+            self.set_status(trm(f"Laps from another circuit, not compared with reference lap: {names}"))
+        kept = [(path, lap_data) for path, lap_data in loaded if path not in others]
+        if self.reference_key in others:
+            self.reference_key = next((path for path, lap_data in kept if lap_data is not None), main_path)
+        return kept
 
     @staticmethod
     def circuit_names(paths: list[str], infos: dict[str, dict]) -> list[str]:
@@ -3559,12 +3603,22 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if not views:
             return
         view: Any = views[-1]  # ReplayView (imported only when replay page opens)
-        player = replay.player
-        if player is None or os.path.normpath(player.replay.filename) != os.path.normpath(filename):
-            view.open_file(filename)
+
+        def show_position():
             player = replay.player
-        if player is not None and os.path.normpath(player.replay.filename) == os.path.normpath(filename):
+            if player is None or os.path.normpath(player.replay.filename) != os.path.normpath(filename):
+                return
             player.seek(position)
             player.set_paused(True)
             view.refresh()
-            self.set_status(trm(f"Replay: {html.escape(os.path.basename(filename))} at {format_axis_time(position)}"))
+            with suppress(RuntimeError):  # lap viewer closed while replay was loading
+                self.set_status(
+                    trm(f"Replay: {html.escape(os.path.basename(filename))} at {format_axis_time(position)}"))
+
+        player = replay.player
+        if player is None or os.path.normpath(player.replay.filename) != os.path.normpath(filename):
+            view.open_file(filename, show_position)  # loaded in background, position shown once loaded
+            if view.loader.busy:
+                self.set_status(tr("Loading replay…"))
+        else:
+            show_position()

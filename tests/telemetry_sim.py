@@ -146,42 +146,77 @@ def fake_reader(sim: LapSim) -> SimpleNamespace:
 CIRCUIT_CORNERS = ((0.12, 0.03, 45.0), (0.35, 0.02, 35.0), (0.6, 0.05, 50.0), (0.85, 0.025, 30.0))  # share, width, m/s
 
 
-def circuit_speed(distance: float, track_length: float) -> float:
-    """Speed (m/s) along a circuit with braking zones: same at the same place of every lap"""
+def circuit_speed(distance: float, track_length: float, corners: tuple[tuple[float, float, float], ...] = ()
+                  ) -> float:
+    """Speed (m/s) along a circuit with braking zones (CIRCUIT_CORNERS unless given): same at the same place of
+    every lap"""
     share = (distance % track_length) / track_length
     speed = 75.0
-    for center, width, depth in CIRCUIT_CORNERS:
+    for center, width, depth in corners or CIRCUIT_CORNERS:
         gap = min(abs(share - center), 1 - abs(share - center))
         speed -= depth * math.exp(-(gap / width) ** 2)
     return speed
 
 
+def turned_positions(distances: list[float], track_length: float, turns: tuple[tuple[float, float, float], ...]
+                     ) -> tuple[list[float], list[float]]:
+    """World positions along a circuit of turns (lap share of turn center, turn angle in degrees, turn length share),
+    turn angles adding up to 360 (closed circuit)"""
+    count = 4000
+    step = track_length / count
+
+    def heading(share: float) -> float:
+        return sum(math.radians(angle) / (1 + math.exp(-(share - center) / (width / 4)))
+                   for center, angle, width in turns)
+
+    xs, zs = [0.0], [0.0]
+    for index in range(count):
+        angle = heading((index + 0.5) / count)
+        xs.append(xs[-1] + step * math.cos(angle))
+        zs.append(zs[-1] + step * math.sin(angle))
+    gap_x, gap_z = xs[-1] - xs[0], zs[-1] - zs[0]  # closing error spread along lap
+    xs = [x - gap_x * index / count for index, x in enumerate(xs)]
+    zs = [z - gap_z * index / count for index, z in enumerate(zs)]
+    result_x, result_z = [], []
+    for distance in distances:
+        position = (distance % track_length) / step
+        index = min(int(position), count - 1)
+        share = position - index
+        result_x.append(xs[index] + (xs[index + 1] - xs[index]) * share)
+        result_z.append(zs[index] + (zs[index + 1] - zs[index]) * share)
+    return result_x, result_z
+
+
 def circuit_lap(track_length: float = 3000.0, start: float = 0.0, pace: float = 1.0, step: float = 0.05,
-                positions: bool = True) -> tuple[dict[str, list[float]], float]:
+                positions: bool = True, turns: tuple[tuple[float, float, float], ...] = (),
+                corners: tuple[tuple[float, float, float], ...] = ()) -> tuple[dict[str, list[float]], float]:
     """Lap columns of a car driven from track distance start to one lap later (lap distance & lap time from 0
     there) & its lap time, pace: lap time factor (1.02 = 2% slower everywhere)
 
     A lap starting away from the line (start not 0) is an imported lap whose distance zero is meters away from
-    the start line. Positions on a circle (track distance turns once around it).
+    the start line. Positions on a circle (track distance turns once around it), else along turns (see
+    turned_positions), corners: braking zones of another circuit (see CIRCUIT_CORNERS).
     """
     distances, times, speeds = [], [], []
     distance, elapsed = start, 0.0
     end = start + track_length - 0.05  # last sample just before the line (lap end rounded like an import)
     while distance < end:
-        speed = circuit_speed(distance, track_length) / pace
+        speed = circuit_speed(distance, track_length, corners) / pace
         distances.append(distance)
         times.append(elapsed)
         speeds.append(speed * 3.6)
         distance += speed * step
         elapsed += step
-    speed = circuit_speed(end, track_length) / pace
+    speed = circuit_speed(end, track_length, corners) / pace
     lap_time = times[-1] + (end - distances[-1]) / speed
     distances.append(end)
     times.append(lap_time)
     speeds.append(speed * 3.6)
     lap_time += (start + track_length - end) / speed
     columns = {"distance": [value - start for value in distances], "lap_time": times, "speed_kph": speeds}
-    if positions:
+    if positions and turns:
+        columns["pos_x"], columns["pos_z"] = turned_positions(distances, track_length, turns)
+    elif positions:
         radius = track_length / (2 * math.pi)
         columns["pos_x"] = [radius * math.cos(value / radius) for value in distances]
         columns["pos_z"] = [radius * math.sin(value / radius) for value in distances]

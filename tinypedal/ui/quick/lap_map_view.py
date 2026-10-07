@@ -731,7 +731,7 @@ class MapView(BackendBase):
         if not mini or reference is None:
             return {}
         bounds = mini["bounds"]
-        key = tuple(round(bound, 2) for bound in bounds)
+        key = (reference.key, *(round(bound, 2) for bound in bounds))  # imported laps aligned on reference lap
         shown = {lap.key: times for lap, times in zip(self.data.laps, mini["times"]) if times}
         times: list[list[float]] = []
         missing: list[tuple[str, float]] = []
@@ -750,16 +750,18 @@ class MapView(BackendBase):
             else:
                 missing.append((path, mtime))
         if missing:
-            self.start_consistency_job(missing, list(bounds), key, self.data.lap_end(reference), dict(reference.data.meta))
+            self.start_consistency_job(missing, list(bounds), key, self.data.lap_end(reference), dict(reference.data.meta),
+                                       reference.key)
         return {"bounds": bounds, "spreads": mini_sector_spread(times), "laps": len(times),
                 "busy": bool(missing) or self._mini_busy}
 
     def start_consistency_job(self, todo: list[tuple[str, float]], bounds: list[float], key: tuple, length: float,
-                              reference_info: dict | None = None):
+                              reference_info: dict | None = None, reference_path: str = ""):
         """Mini-sector times of laps not shown read in worker process (cached by lap file time), map colored again
 
         length: reference lap end distance (see TraceData.lap_end), reference_info: reference lap info (laps of the
-        same track length never scaled, see mini_sector_job).
+        same track length never scaled, see mini_sector_job), reference_path: reference lap file (imported laps aligned
+        on it like shown laps).
         """
         if self._mini_busy:
             return
@@ -776,7 +778,7 @@ class MapView(BackendBase):
             self.mapChanged.emit()
 
         self.run_process_job("mini-sectors", done, mini_sector_job, self.folder, [path for path, _ in todo], bounds,
-                             length, reference_info)
+                             length, reference_info, reference_path)
 
     def consistency_legend(self) -> dict:
         """Map legend of consistency mode: lowest & highest spread (s), laps counted, scope"""

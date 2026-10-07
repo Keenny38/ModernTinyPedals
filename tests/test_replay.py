@@ -168,7 +168,10 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
     dialog = replay_view.ReplayView(None)
     try:
         assert not dialog.button_play.isEnabled()
-        dialog.open_replay()
+        dialog.open_replay()  # loaded in background
+        assert not replay.active and dialog.loader.busy
+        assert dialog.loader.wait(10)
+        QCoreApplication.processEvents()  # finished signal from loading thread
         assert replay.active and restarts == [True]
         assert dialog.button_play.isEnabled()
         dialog.toggle_pause()
@@ -418,6 +421,8 @@ def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
         assert dialog.replay_list.topLevelItem(0).text(1) == "Spa"
         dialog.replay_list.setCurrentItem(dialog.replay_list.topLevelItem(0))
         dialog.open_selected()
+        assert dialog.loader.wait(10)
+        QCoreApplication.processEvents()  # finished signal from loading thread
         assert replay.active
         assert dialog.slider.laps == [2.0] and dialog.slider.incidents == [6.0]
         assert dialog.combo_lap.count() == 1

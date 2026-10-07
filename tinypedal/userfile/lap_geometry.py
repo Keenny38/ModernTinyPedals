@@ -37,8 +37,10 @@ from itertools import pairwise
 from typing import NamedTuple
 
 from .lap_cache import load_cached_lap, read_arrays_file, write_arrays_file
+from .lap_offset import aligned_lap
 from .telemetry_lap import (
     LapData,
+    distance_scale,
     interpolate,
     lap_files,
     lap_time_curve,
@@ -595,7 +597,7 @@ def mini_sector_spread(times_by_lap: Sequence[Sequence[float]], minimum: int = 3
 
 
 def mini_sector_job(folder: str, paths: list[str], bounds: list[float], reference_length: float,
-                    reference_info: dict | None = None) -> dict[str, list[float]]:
+                    reference_info: dict | None = None, reference_path: str = "") -> dict[str, list[float]]:
     """Time of each lap in each mini-sector: lap path: times, laps without lap time or unreadable left out
 
     Args:
@@ -603,13 +605,24 @@ def mini_sector_job(folder: str, paths: list[str], bounds: list[float], referenc
         reference_length: reference lap end distance (see TraceData.lap_end): lap distances scaled to it like
             distance_scale.
         reference_info: reference lap info, laps recorded on the same track length never scaled.
+        reference_path: reference lap file, laps not recorded by the app (imported logs) aligned on it like shown
+            laps (distance zero at the line, see lap_offset & TraceData.aligned_laps), laps recorded by the app
+            never shifted.
     """
+    reference = None
+    if reference_path:
+        try:
+            reference = load_cached_lap(folder, reference_path)
+        except (OSError, ValueError):
+            reference = None
     found = {}
     for path in paths:
         try:
             lap = load_cached_lap(folder, path)
         except (OSError, ValueError):
             continue
+        if reference is not None and path != reference_path:
+            lap = aligned_lap(reference, lap, distance_scale(reference, lap))[0]
         distances, times = lap_time_curve(lap)
         if len(distances) < 2:
             continue

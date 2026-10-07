@@ -237,7 +237,7 @@ class TelemetryCompareMixin:
             self.track_time = now
             self.track = lap_folder_name(api.read.session.combo_name())
         loader = self.loader
-        loader.poll(self.track, now)
+        loader.poll(self.track, now, api.read.lap.track_length())
         if loader.version != self.reference_version:
             self.reference_version = loader.version
             self.reference_changed(loader.trace)
