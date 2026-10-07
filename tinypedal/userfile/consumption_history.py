@@ -38,7 +38,18 @@ logger = logging.getLogger(__name__)
 def load_consumption_history_file(
     filepath: str, filename: str, extension: str = FileExt.CONSUMPTION, backup: bool = False
 ) -> tuple[ConsumptionDataSet, ...]:
-    """Load fuel/energy consumption history file (*.consumption)
+    """Load fuel/energy consumption history file (*.consumption), see read_consumption_history_file"""
+    return read_consumption_history_file(filepath, filename, extension, backup)[0]
+
+
+def read_consumption_history_file(
+    filepath: str, filename: str, extension: str = FileExt.CONSUMPTION, backup: bool = False
+) -> tuple[tuple[ConsumptionDataSet, ...], bool]:
+    """Read fuel/energy consumption history file (*.consumption)
+
+    Returns:
+        Laps (placeholder if none), whether file is readable: False if file exists but is not accessible
+        (locked by antivirus or cloud sync), which must not be saved over.
 
     Args:
         backup: keep a timestamped backup of a file with content that could not be read
@@ -62,18 +73,38 @@ def load_consumption_history_file(
         dataset = tuple(data for data in dataset if all(map(is_finite_number, data)))
         if not dataset:
             raise ValueError
-        return dataset
+        return dataset, True
     except FileNotFoundError:
         logger.info("MISSING: consumption history (%s) data", extension)
-    except OSError:  # not accessible (locked...), file left as is
-        logger.info("MISSING: unreadable consumption history (%s) file", extension)
+    except OSError as error:  # not accessible (locked...), file left as is
+        logger.warning("USERDATA: %s%s not accessible (%s), not replaced", filename, extension, error)
+        return (ConsumptionDataSet(),), False
     except (IndexError, KeyError, ValueError, TypeError, csv.Error) as error:
         logger.info("MISSING: invalid consumption history (%s) data", extension)
         # Keep unreadable file, as next save replaces it with new data only
         # (not text or malformed csv: content too, even if failed at first line)
         if backup and (has_content or isinstance(error, (UnicodeDecodeError, csv.Error))):
             create_backup_file(f"{filename}{extension}", filepath, set_backup_timestamp(), show_log=True)
-    return (ConsumptionDataSet(),)
+    return (ConsumptionDataSet(),), True
+
+
+def merge_consumption_history(
+    recorded: Sequence[ConsumptionDataSet], saved: Sequence[ConsumptionDataSet], max_laps: int | None = None
+) -> list[ConsumptionDataSet]:
+    """Laps recorded (newest first) followed by saved laps of file not accessible at load, without
+    duplicates, up to max_laps (placeholder only after a single lap, as saved by module)"""
+    placeholder = ConsumptionDataSet()
+    merged: list[ConsumptionDataSet] = []
+    seen: set[ConsumptionDataSet] = set()
+    for lap in (*recorded, *saved):
+        if lap == placeholder or lap in seen:
+            continue
+        seen.add(lap)
+        merged.append(lap)
+    merged = merged[:max_laps]
+    if len(merged) < 2:  # single lap saved with placeholder (skipped on load)
+        merged.append(placeholder)
+    return merged
 
 
 def convert_line(data: dict, default_data: dict) -> ConsumptionDataSet | None:

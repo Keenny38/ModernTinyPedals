@@ -30,7 +30,8 @@ from ..api_control import api
 from ..const_common import FLOAT_INF, MAX_SECONDS
 from ..module_info import ConsumptionDataSet, HistoryInfo, StintDataSet, minfo
 from ..userfile.consumption_history import (
-    load_consumption_history_file,
+    merge_consumption_history,
+    read_consumption_history_file,
     save_consumption_history_file,
 )
 from ..userfile.heatmap import select_compound_symbol
@@ -100,6 +101,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
     delayed_save = False
 
     combo_name = ""
+    readable = True  # history file readable at load, False if not accessible (never saved over)
 
     while True:
         reset = yield None
@@ -108,11 +110,19 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
         if last_reset != reset:
             # Save data
             if delayed_save:
-                save_consumption_history_file(
-                    dataset=output.consumptionDataSet,
-                    filepath=filepath,
-                    filename=combo_name,
-                )
+                if not readable:  # not accessible at load: laps of file kept, added to recorded laps
+                    saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
+                    if readable:
+                        output.consumptionDataSet = deque(merge_consumption_history(
+                            output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
+                        ), output.consumptionDataSet.maxlen)
+                        output.consumptionDataVersion += 1
+                if readable:
+                    save_consumption_history_file(
+                        dataset=output.consumptionDataSet,
+                        filepath=filepath,
+                        filename=combo_name,
+                    )
                 delayed_save = False
 
             # Delay reset until driving (module stopping: data saved only)
@@ -122,7 +132,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
 
             # Load data
             combo_name = api.read.session.combo_name()
-            dataset = load_consumption_history_file(
+            dataset, readable = read_consumption_history_file(
                 filepath=filepath,
                 filename=combo_name,
                 backup=True,  # own history file, replaced by next save

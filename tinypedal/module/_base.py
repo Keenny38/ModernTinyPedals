@@ -20,9 +20,13 @@
 Data module base
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from functools import partial
+from time import monotonic
+from typing import Any
 
 from .. import realtime_state
 from ..api_control import api
@@ -34,6 +38,9 @@ logger = logging.getLogger(__name__)
 round6 = partial(round, ndigits=6)
 # Sent to data generator when module stops: save data not saved yet, without reloading
 MODULE_STOP = object()
+# Sent to data generator while player inactive (left track, garage) with a lap waiting for validation
+PENDING_CHECK = object()
+PENDING_WAIT = 10.0  # seconds to validate completed lap after leaving track just after start line
 
 
 def data_stamp() -> tuple:
@@ -49,6 +56,57 @@ def data_stamp() -> tuple:
         read.vehicle.player_index(),
         realtime_state.resets,
     )
+
+
+class PendingLap:
+    """Lap just completed, waiting for validation by game lap time (scoring updates slower than telemetry)
+
+    Lap data is captured at the line, so a new lap started meanwhile (back to garage starts a new lap)
+    never replaces it. Player leaving track (reset, inactive) before validation: lap kept & checked
+    for up to PENDING_WAIT seconds (see resolve), saved if validated.
+
+    Attributes:
+        laptime: lap time from lap start times.
+        finish: game elapsed time at the line.
+        data: lap data of module.
+        deadline: clock time limit of validation once player left track, 0 while driving.
+    """
+
+    __slots__ = ("laptime", "finish", "data", "deadline")
+
+    def __init__(self, laptime: float, finish: float, data: Any = None):
+        self.laptime = laptime
+        self.finish = finish
+        self.data = data
+        self.deadline = 0.0
+
+    def matched(self, laptime_valid: float) -> bool:
+        """Whether game last lap time (laptime_valid) is the lap time of this lap"""
+        return laptime_valid > 0 and abs(laptime_valid - self.laptime) < 0.001
+
+    def confirmed(self) -> bool:
+        """Whether game last lap time is the lap time of this lap"""
+        try:
+            return self.matched(api.read.timing.last_laptime())
+        except (AttributeError, TypeError):
+            return False
+
+    def resolve(self, final: bool = False) -> bool | None:
+        """Validate lap after player left track (game data may not update while driving stopped)
+
+        Args:
+            final: last check (module stopping, new stint starting), never waits.
+
+        Returns:
+            True if validated by game lap time, False if not validated in time, None if still waiting.
+        """
+        if not self.deadline:
+            self.deadline = monotonic() + PENDING_WAIT
+        if self.confirmed():
+            return True
+        if final or monotonic() >= self.deadline:
+            return False
+        return None
 
 
 class DataModule:

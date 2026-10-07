@@ -30,6 +30,7 @@ from ..const_common import MAX_SECONDS
 from ..const_file import FileExt
 from ..validator import invalid_save_name, is_finite_number, is_same_session
 from . import atomic_write
+from .delta_best import backup_invalid_file
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +50,30 @@ def load_sector_best_file(
     defaults: tuple[float, float, float],
     extension: str = FileExt.SECTOR,
 ) -> tuple[list, list, list, list]:
-    """Load sector best file (*.sector)
+    """Load sector best file (*.sector), defaults if missing, invalid or not accessible
+    (see read_sector_best_file)"""
+    return read_sector_best_file(filepath, filename, session_id, defaults, extension)[0]
+
+
+def read_sector_best_file(
+    filepath: str,
+    filename: str,
+    session_id: tuple[float, ...],
+    defaults: tuple[float, float, float],
+    extension: str = FileExt.SECTOR,
+    backup: bool = False,
+) -> tuple[tuple[list, list, list, list], bool]:
+    """Read sector best file (*.sector)
 
     Args:
         session_id: session token (see validator.session_token), session best data loaded
             only if same session as saved one.
+        backup: keep a timestamped backup of a file with invalid content (own file, as next save replaces it).
+
+    Returns:
+        Session best TB & PB, all time best TB & PB sectors (defaults if missing or invalid), whether
+        file is readable: False if file exists but is not accessible (locked by antivirus or cloud sync),
+        which must not be saved over.
     """
     try:
         with open(f"{filepath}{filename}{extension}", newline="", encoding="utf-8") as csvfile:
@@ -68,12 +88,27 @@ def load_sector_best_file(
         # All time best data
         all_best_s_tb = valid_sector_row(temp_list[3], defaults)
         all_best_s_pb = valid_sector_row(temp_list[4], defaults)
-        return best_s_tb, best_s_pb, all_best_s_tb, all_best_s_pb
+        return (best_s_tb, best_s_pb, all_best_s_tb, all_best_s_pb), True
     except FileNotFoundError:
         logger.info("MISSING: sector best (%s) data", extension)
-    except (IndexError, ValueError, TypeError, OSError, csv.Error):
+    except OSError as error:  # locked, not missing nor invalid: never saved over
+        logger.warning("USERDATA: %s%s not accessible (%s), not replaced", filename, extension, error)
+        return (list(defaults), list(defaults), list(defaults), list(defaults)), False
+    except (IndexError, ValueError, TypeError, csv.Error):
         logger.info("MISSING: invalid sector best (%s) data", extension)
-    return list(defaults), list(defaults), list(defaults), list(defaults)
+        if backup:
+            backup_invalid_file(filepath, f"{filename}{extension}")
+    return (list(defaults), list(defaults), list(defaults), list(defaults)), True
+
+
+def merge_sector_best(best_tb: list[float], best_pb: list[float], saved_tb: list[float], saved_pb: list[float]):
+    """Merge saved best sectors (file not accessible at load) into best sectors, in place
+
+    Theoretical best: best of each sector. Personal best: sectors of faster lap.
+    """
+    best_tb[:] = [min(best, saved) for best, saved in zip(best_tb, saved_tb)]
+    if sum(saved_pb) < sum(best_pb):
+        best_pb[:] = saved_pb
 
 
 def load_theoretical_best(filepath: str, filename: str, extension: str = FileExt.SECTOR) -> float:

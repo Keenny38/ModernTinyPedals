@@ -41,7 +41,7 @@ from ..const_file import FileExt
 from ..module_info import FuelInfo, minfo
 from ..userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 from ..validator import generator_init, valid_delta_raw
-from ._base import MODULE_STOP, DataModule, data_stamp, round6
+from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp, round6
 
 # Consumption estimate method in use (FuelInfo.consumptionMethod)
 METHOD_GAME = "game"  # game estimate, no lap of car & track recorded yet
@@ -63,6 +63,7 @@ class Realtime(DataModule):
         _event_wait = self._event.wait
         reset = False
         vehicle_resets = None
+        waiting_fuel = waiting_energy = False  # completed lap waiting for validation
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update
         green_flag_laps = (
@@ -106,12 +107,12 @@ class Realtime(DataModule):
                     last_stamp = stamp
 
                     # Calculate fuel
-                    gen_fuel_usage.send(vehicle_resets)
+                    waiting_fuel = gen_fuel_usage.send(vehicle_resets)
 
                     # Calculate virtual energy if available
                     minfo.energy.available = (api.read.engine.virtual_energy() != 0)
                     if minfo.energy.available:
-                        gen_energy_usage.send(vehicle_resets)
+                        waiting_energy = gen_energy_usage.send(vehicle_resets)
 
                         # Update hybrid info
                         minfo.hybrid.fuelEnergyRatio = calc.fuel_to_energy_ratio(
@@ -126,6 +127,11 @@ class Realtime(DataModule):
                     if reset:
                         reset = False
                         update_interval = self.idle_interval
+                    # Left track just after line: keep validating lap just completed
+                    if waiting_fuel:
+                        waiting_fuel = gen_fuel_usage.send(PENDING_CHECK)
+                    if waiting_energy:
+                        waiting_energy = gen_energy_usage.send(PENDING_CHECK)
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_fuel_usage, gen_energy_usage)
@@ -198,9 +204,16 @@ def calc_consumption(
     Args:
         green_flag_laps: estimate from median of this many last valid green flag laps, 0 = from
             last valid lap (laps under yellow & invalid laps count as valid then).
+
+    Lap is validated 0.3-3s after the line (game last lap time must match lap time from lap start times).
+    Lap completed just before leaving track (reset, inactive: PENDING_CHECK sent) keeps being validated
+    for up to PENDING_WAIT seconds before data is saved & reset (MODULE_STOP: last check).
+    Yields whether a lap is waiting for validation.
     """
     last_reset = None  # reset check
+    sent_reset = None  # last reset value sent
     delayed_save = False
+    pending: PendingLap | None = None  # lap just completed waiting for validation
 
     combo_name = ""
     delta_array_last: tuple[tuple[float, ...], ...] = ()
@@ -211,11 +224,46 @@ def calc_consumption(
     green_laps: deque[float] = deque(maxlen=max(green_flag_laps, 1))  # kept over resets of same car & track
     green_combo = ""
 
+    def validated_lap(lap: PendingLap):
+        """Lap validated by game: reference consumption (saved on reset)"""
+        nonlocal used_last_valid, delta_array_last, delayed_save
+        used_last_valid, delta_array_last = lap.data
+        delayed_save = True
+        if use_median:  # only green flag laps are validated with median
+            green_laps.append(used_last_valid)
+
+    def resolve_pending(final: bool = False):
+        """Validate lap waiting for validation after player left track"""
+        nonlocal pending
+        if pending is None:
+            return
+        valid = pending.resolve(final)
+        if valid is None:
+            return
+        if valid:
+            validated_lap(pending)
+        pending = None
+
     while True:
-        reset = yield None
+        reset = yield pending is not None
+
+        # Player inactive: only validate lap just completed (saved on reset)
+        if reset is PENDING_CHECK:
+            if last_reset == sent_reset:  # no reset waiting
+                resolve_pending()
+                continue
+            reset = sent_reset  # reset waiting for lap validation
+        elif reset is not MODULE_STOP:
+            sent_reset = reset
 
         # Reset
         if last_reset != reset:
+            # Left track just after line: validate lap just completed before saving (bounded wait)
+            if pending is not None:
+                resolve_pending(final=reset is MODULE_STOP)
+                if pending is not None:
+                    continue
+
             # Save data
             if delayed_save:
                 save_fuel_delta_file(
@@ -235,7 +283,6 @@ def calc_consumption(
             output.reset()
             recording = False
             delayed_save = False
-            validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
             is_yellow_lap = False  # lap under full course yellow or safety car (median only)
             is_invalid_lap = False  # lap invalidated by game, track limits (median only)
@@ -254,7 +301,6 @@ def calc_consumption(
                 defaults=(DELTA_DEFAULT, 0.0, 0.0)
             )
             delta_array_raw: list[tuple[float, ...]] = [DELTA_ZERO]  # distance, fuel used, laptime
-            delta_array_temp: tuple[tuple[float, ...], ...] = DELTA_DEFAULT  # last lap temp
             delta_fuel = 0.0  # delta fuel consumption compare to last lap
 
             amount_start = -FLOAT_INF  # start fuel reading
@@ -328,8 +374,8 @@ def calc_consumption(
                     round6(used_curr),
                     round6(laptime_last)
                 ))
-                delta_array_temp = tuple(delta_array_raw)
-                validating = elapsed_time
+                # Lap data kept until validated (new lap may start meanwhile: back to garage)
+                pending = PendingLap(laptime_last, elapsed_time, (used_curr, tuple(delta_array_raw)))
             delta_array_raw[:] = DELTA_DEFAULT
             pos_last = pos_recorded = pos_curr
             used_last_raw = used_curr
@@ -358,21 +404,17 @@ def calc_consumption(
             pos_last = pos_curr  # reset last position
 
         # Validating 1s after passing finish line
-        if validating:
-            timer = elapsed_time - validating
-            laptime_valid = api.read.timing.last_laptime()
-            if timer > 3:  # switch off after 3s
-                validating = 0
-            elif (timer > 0.3 and  # compare current time
-                laptime_valid > 0 and  # is valid laptime
-                abs(laptime_valid - laptime_last) < 0.001):  # is lap just completed (scoring lags)
-                used_last_valid = used_last_raw
-                delta_array_last = delta_array_temp
-                delta_array_temp = DELTA_DEFAULT
-                delayed_save = True
-                validating = 0
-                if use_median:  # only green flag laps are validated with median
-                    green_laps.append(used_last_raw)
+        if pending is not None:
+            if pending.deadline:  # player left track meanwhile (inactive without reset)
+                resolve_pending()
+            else:
+                timer = elapsed_time - pending.finish
+                if timer > 3:  # switch off after 3s
+                    pending = None
+                elif (timer > 0.3 and  # compare current time
+                    pending.matched(api.read.timing.last_laptime())):  # is lap just completed (scoring lags)
+                    validated_lap(pending)
+                    pending = None
 
         # Calc delta
         if pos_synced_last != pos_synced:

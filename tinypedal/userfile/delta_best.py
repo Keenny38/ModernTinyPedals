@@ -29,20 +29,49 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from typing import Any
 
 from ..const_common import DELTA_DEFAULT, MAX_SECONDS
 from ..const_file import FileExt
 from ..validator import invalid_save_name, is_same_session, load_json_strict, valid_delta_set
 from . import atomic_write
+from .json_setting import create_backup_file, set_backup_timestamp
 
 logger = logging.getLogger(__name__)
 
 
-def load_delta_best_file(
-    filepath: str, filename: str, defaults: tuple, extension: str = FileExt.CSV
-) -> tuple[tuple, float]:
-    """Load delta best file (*.csv)"""
+_backed_up_files: set[tuple[str, int, int]] = set()  # invalid files backed up (path, modified time, size)
+
+
+def backup_invalid_file(filepath: str, filename: str) -> None:
+    """Keep timestamped backup of a file with invalid content (not empty), as next save replaces it
+
+    Backed up once (file loaded again at each vehicle reset until replaced).
+    """
+    try:
+        stat = os.stat(f"{filepath}{filename}")
+    except OSError:
+        return
+    key = (os.path.normcase(os.path.abspath(f"{filepath}{filename}")), stat.st_mtime_ns, stat.st_size)
+    if stat.st_size <= 0 or key in _backed_up_files:
+        return
+    if create_backup_file(filename, filepath, set_backup_timestamp(), show_log=True):
+        _backed_up_files.add(key)
+
+
+def read_delta_best_file(
+    filepath: str, filename: str, defaults: tuple, extension: str = FileExt.CSV, backup: bool = False
+) -> tuple[tuple[tuple, float], bool]:
+    """Read delta best file (*.csv)
+
+    Args:
+        backup: keep a timestamped backup of a file with invalid content (own file, as next save replaces it).
+
+    Returns:
+        Delta set & lap time (defaults if missing or invalid), whether file is readable: False if file
+        exists but is not accessible (locked by antivirus or cloud sync), which must not be saved over.
+    """
     try:
         with open(f"{filepath}{filename}{extension}", newline="", encoding="utf-8") as csvfile:
             data_reader = csv.reader(csvfile, quoting=csv.QUOTE_NONNUMERIC)
@@ -50,12 +79,24 @@ def load_delta_best_file(
         # Validate data
         bestlist = valid_delta_set(temp_list)
         laptime_best = bestlist[-1][1]
-        return bestlist, laptime_best
+        return (bestlist, laptime_best), True
     except FileNotFoundError:
         logger.info("MISSING: delta best (%s) data", extension)
-    except (IndexError, ValueError, TypeError, OSError, csv.Error):
+    except OSError as error:  # locked, not missing nor invalid: never saved over
+        logger.warning("USERDATA: %s%s not accessible (%s), not replaced", filename, extension, error)
+        return defaults, False
+    except (IndexError, ValueError, TypeError, csv.Error):
         logger.info("MISSING: invalid delta best (%s) data", extension)
-    return defaults
+        if backup:
+            backup_invalid_file(filepath, f"{filename}{extension}")
+    return defaults, True
+
+
+def load_delta_best_file(
+    filepath: str, filename: str, defaults: tuple, extension: str = FileExt.CSV
+) -> tuple[tuple, float]:
+    """Load delta best file (*.csv), defaults if missing, invalid or not accessible"""
+    return read_delta_best_file(filepath, filename, defaults, extension)[0]
 
 
 def save_delta_best_file(
@@ -82,7 +123,16 @@ def load_delta_session_file(
     filepath: str, filename: str, session_id: tuple[float, ...], pitstops: int,
     extension: str = FileExt.DELTA_SESSION,
 ) -> tuple[tuple, float, tuple, float]:
-    """Load session & stint best laps (*.session) saved in same session
+    """Load session & stint best laps (*.session) saved in same session, none if not accessible
+    (see read_delta_session_file)"""
+    return read_delta_session_file(filepath, filename, session_id, pitstops, extension)[0]
+
+
+def read_delta_session_file(
+    filepath: str, filename: str, session_id: tuple[float, ...], pitstops: int,
+    extension: str = FileExt.DELTA_SESSION,
+) -> tuple[tuple[tuple, float, tuple, float], bool]:
+    """Read session & stint best laps (*.session) saved in same session
 
     Args:
         session_id: session token (see validator.session_token), laps loaded only if same
@@ -91,22 +141,26 @@ def load_delta_session_file(
 
     Returns:
         Session best delta set & lap time, stint best delta set & lap time (default set &
-        MAX_SECONDS if none).
+        MAX_SECONDS if none), whether file is readable: False if file exists but is not accessible
+        (locked by antivirus or cloud sync), which must not be saved over.
     """
     none = (DELTA_DEFAULT, MAX_SECONDS)
     try:
         with open(f"{filepath}{filename}{extension}", encoding="utf-8") as file:
             data = load_json_strict(file.read())
         if not isinstance(data, dict) or not is_same_session(tuple(data["session"]), session_id):
-            return (*none, *none)
+            return (*none, *none), True
         session = best_lap(data.get("session_best"))
         stint = best_lap(data.get("stint_best")) if data.get("pitstops") == pitstops else none
-        return (*session, *stint)
+        return (*session, *stint), True
     except FileNotFoundError:
         pass
-    except (KeyError, IndexError, ValueError, TypeError, OSError):
+    except OSError as error:  # locked, not missing nor invalid: never saved over
+        logger.warning("USERDATA: %s%s not accessible (%s), not replaced", filename, extension, error)
+        return (*none, *none), False
+    except (KeyError, IndexError, ValueError, TypeError):
         logger.info("MISSING: invalid delta session (%s) data", extension)
-    return (*none, *none)
+    return (*none, *none), True
 
 
 def save_delta_session_file(

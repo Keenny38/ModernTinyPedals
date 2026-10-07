@@ -26,8 +26,8 @@ from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import DeltaInfo, minfo
 from ..userfile.delta_best import (
-    load_delta_best_file,
-    load_delta_session_file,
+    read_delta_best_file,
+    read_delta_session_file,
     save_delta_best_file,
     save_delta_session_file,
 )
@@ -38,7 +38,7 @@ from ..validator import (
     valid_delta_raw,
     vehicle_position_sync,
 )
-from ._base import DataModule, data_stamp, round6
+from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp, round6
 
 
 class Realtime(DataModule):
@@ -53,6 +53,7 @@ class Realtime(DataModule):
         """Update module data"""
         _event_wait = self._event.wait
         reset = False
+        waiting = False  # completed lap waiting for validation
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update
 
@@ -68,29 +69,36 @@ class Realtime(DataModule):
             laptime_pace_margin=max(self.mcfg["laptime_pace_margin"], 0.1),
         )
 
-        while not _event_wait(update_interval):
-            if realtime_state.active:
-                vehicle_resets = realtime_state.resets
+        try:
+            while not _event_wait(update_interval):
+                if realtime_state.active:
+                    vehicle_resets = realtime_state.resets
 
-                if not reset:
-                    reset = True
-                    update_interval = self.active_interval
-                    last_stamp = ()  # never skip first tick
+                    if not reset:
+                        reset = True
+                        update_interval = self.active_interval
+                        last_stamp = ()  # never skip first tick
 
-                # Skip while game data not updated since last tick
-                stamp = data_stamp()
-                if last_stamp == stamp:
-                    continue
-                last_stamp = stamp
+                    # Skip while game data not updated since last tick
+                    stamp = data_stamp()
+                    if last_stamp == stamp:
+                        continue
+                    last_stamp = stamp
 
-                # Run calculation
-                gen_delta_distance.send(vehicle_resets)
-                gen_delta_time.send(vehicle_resets)
+                    # Run calculation
+                    gen_delta_distance.send(vehicle_resets)
+                    waiting = gen_delta_time.send(vehicle_resets)
 
-            else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
+                else:
+                    if reset:
+                        reset = False
+                        update_interval = self.idle_interval
+                    if waiting:  # left track just after line: keep validating lap just completed
+                        waiting = gen_delta_time.send(PENDING_CHECK)
+        finally:
+            # Module stopped (reload, quit): last check of lap waiting for validation
+            if waiting:
+                self.save_on_stop(gen_delta_time)
 
 
 @generator_init
@@ -166,8 +174,18 @@ def calc_delta_time(
     laptime_pace_samples: int,
     laptime_pace_margin: float,
 ):
-    """Calculate delta time data"""
+    """Calculate delta time data
+
+    Lap is validated 1-10s after the line (game last lap time must match lap time from lap start times),
+    then saved as delta best, session & stint best if faster. Lap completed just before leaving track
+    (reset, inactive: PENDING_CHECK sent) keeps being validated for up to PENDING_WAIT seconds before
+    data is reset (MODULE_STOP: last check). Yields whether a lap is waiting for validation.
+    """
     last_reset = None  # reset check
+    sent_reset = None  # last reset value sent
+    pending: PendingLap | None = None  # lap just completed waiting for validation
+    best_readable = True  # delta best file readable at load, False if not accessible (never saved over)
+    session_readable = True  # same for session file
 
     last_combo_name = ""
     last_session_id: tuple[float, ...] = ()  # session token
@@ -175,29 +193,125 @@ def calc_delta_time(
     delta_array_stint: tuple[tuple[float, float], ...] = DELTA_DEFAULT
     laptime_session_best = MAX_SECONDS
     laptime_stint_best = MAX_SECONDS
+    delta_array_best: tuple[tuple[float, float], ...] = DELTA_DEFAULT  # set on reset (loaded)
+    laptime_best = MAX_SECONDS
+    laptime_pace = 0.0
 
     calc_ema_delta = calc.ema_filter(delta_smoothing_samples)
     calc_ema_laptime = calc.ema_filter(laptime_pace_samples)
 
+    def validated_lap(lap: PendingLap, laptime_valid: float):
+        """Lap validated by game: pace, delta best (file), session & stint best (file)"""
+        nonlocal laptime_pace, laptime_best, delta_array_best
+        nonlocal laptime_session_best, delta_array_session, laptime_stint_best, delta_array_stint
+        laptime_lap = lap.laptime
+        delta_array_lap, lap_comparable, lap_clean = lap.data
+        # Update laptime pace: lap just completed (not the new lap) without pit lane
+        # (no out lap or pit in lap), not invalidated by game (track limits)
+        if lap_comparable and lap_clean:
+            # Set initial laptime if invalid, or align to faster laptime
+            if not 0 < laptime_pace < MAX_SECONDS or laptime_valid < laptime_pace:
+                laptime_pace = laptime_valid
+            else:
+                laptime_pace = min(
+                    calc_ema_laptime(laptime_pace, laptime_valid),
+                    laptime_pace + laptime_pace_margin,
+                )
+        # Invalidated lap (track limits): never delta best, session or stint best
+        if not lap_clean:
+            return
+        # Update delta best list
+        if laptime_best > laptime_lap:
+            laptime_best = laptime_lap
+            output.deltaBestData = delta_array_best = delta_array_lap
+            save_best_file()
+        # Update delta session & stint best list, kept in file for module restarts
+        if laptime_session_best > laptime_lap or laptime_stint_best > laptime_lap:
+            if laptime_session_best > laptime_lap:
+                laptime_session_best = laptime_lap
+                delta_array_session = delta_array_lap
+            if laptime_stint_best > laptime_lap:
+                laptime_stint_best = laptime_lap
+                delta_array_stint = delta_array_lap
+            save_session_file()
+
+    def save_best_file():
+        """Save delta best file, never over a faster lap of file not accessible at load"""
+        nonlocal best_readable, laptime_best, delta_array_best
+        if not best_readable:  # file kept unless lap faster than its lap
+            (saved_array, saved_laptime), best_readable = read_delta_best_file(
+                filepath, combo_name, (DELTA_DEFAULT, MAX_SECONDS))
+            if not best_readable:
+                return
+            if saved_laptime <= laptime_best:  # all time best of file used
+                laptime_best = saved_laptime
+                output.deltaBestData = delta_array_best = saved_array
+                return
+        save_delta_best_file(
+            filepath=filepath,
+            filename=combo_name,
+            dataset=delta_array_best,
+        )
+
+    def save_session_file(keep_stint: bool = True):
+        """Save session & stint best file, faster laps of file not accessible at load kept"""
+        nonlocal session_readable, laptime_session_best, delta_array_session
+        nonlocal laptime_stint_best, delta_array_stint
+        pitstops = api.read.vehicle.number_pitstops()
+        if not session_readable:
+            saved, session_readable = read_delta_session_file(filepath, combo_name, last_session_id, pitstops)
+            if not session_readable:
+                return
+            if saved[1] < laptime_session_best:
+                delta_array_session, laptime_session_best = saved[:2]
+            if keep_stint and saved[3] < laptime_stint_best:
+                delta_array_stint, laptime_stint_best = saved[2:]
+        save_delta_session_file(
+            filepath, combo_name, last_session_id, pitstops,
+            delta_array_session, delta_array_stint,
+        )
+
+    def resolve_pending(final: bool = False):
+        """Validate lap waiting for validation after player left track"""
+        nonlocal pending
+        if pending is None:
+            return
+        valid = pending.resolve(final)
+        if valid is None:
+            return
+        if valid:
+            validated_lap(pending, api.read.timing.last_laptime())
+        pending = None
+
     while True:
-        reset = yield None
+        reset = yield pending is not None
+
+        # Player inactive: only validate lap just completed (data of lap kept until reset)
+        if reset is PENDING_CHECK:
+            resolve_pending()
+            continue
+        if reset is not MODULE_STOP:
+            sent_reset = reset
 
         # Reset
-        if last_reset != reset:
-            # Delay reset until driving
-            if not realtime_state.active:
+        if last_reset != sent_reset or reset is MODULE_STOP:
+            # Left track just after line: validate lap just completed before reset (bounded wait)
+            if pending is not None:
+                resolve_pending(final=reset is MODULE_STOP)
+                if pending is not None:
+                    continue
+            # Delay reset until driving (module stopping: last check only)
+            if reset is MODULE_STOP or not realtime_state.active:
                 continue
             last_reset = reset
 
             # Load data
             recording = False
-            validating = 0.0
             is_pit_lap = 0  # whether pit in or pit out lap
             # Lap started in pit lane or garage (back to garage starts a new lap): out lap
             is_out_lap = bool(api.read.vehicle.in_pits())
             last_lap_comparable = False  # last lap recorded without pit lane
             is_invalid_lap = False  # lap in progress invalidated by game (track limits...)
-            last_lap_clean = False  # last lap not invalidated by game
 
             combo_name = api.read.session.combo_name()
             session_id = session_token(api.read.session.identifier())
@@ -206,7 +320,7 @@ def calc_delta_time(
             # same session saved before (app restarted, preset reloaded...), else none
             if combo_name != last_combo_name or not is_same_session(last_session_id, session_id):
                 (delta_array_session, laptime_session_best,
-                 delta_array_stint, laptime_stint_best) = load_delta_session_file(
+                 delta_array_stint, laptime_stint_best), session_readable = read_delta_session_file(
                     filepath=filepath,
                     filename=combo_name,
                     session_id=session_id,
@@ -215,10 +329,11 @@ def calc_delta_time(
             last_combo_name = combo_name
             last_session_id = session_id
 
-            delta_array_best, laptime_best = load_delta_best_file(
+            (delta_array_best, laptime_best), best_readable = read_delta_best_file(
                 filepath=filepath,
                 filename=combo_name,
-                defaults=(DELTA_DEFAULT, MAX_SECONDS)
+                defaults=(DELTA_DEFAULT, MAX_SECONDS),
+                backup=True,  # own delta best file, replaced by next best lap
             )
             output.deltaBestData = delta_array_best
             delta_array_raw: list[tuple[float, float]] = [DELTA_ZERO]  # distance, laptime
@@ -251,10 +366,7 @@ def calc_delta_time(
         if in_pits and laptime_stint_best != MAX_SECONDS and api.read.vehicle.speed() < 0.1:
             delta_array_stint = DELTA_DEFAULT
             laptime_stint_best = MAX_SECONDS
-            save_delta_session_file(
-                filepath, combo_name, last_session_id, api.read.vehicle.number_pitstops(),
-                delta_array_session, delta_array_stint,
-            )
+            save_session_file(keep_stint=False)
 
         # Lap start & finish detection
         if lap_stime > last_lap_stime:
@@ -265,11 +377,14 @@ def calc_delta_time(
                     round6(laptime_last),
                 ))
                 delta_array_last = tuple(delta_array_raw)
-                validating = api.read.timing.elapsed()
+                # Lap data kept until validated (new lap may start meanwhile: back to garage)
+                pending = PendingLap(
+                    laptime_last, api.read.timing.elapsed(),
+                    (delta_array_last, not is_pit_lap, not is_invalid_lap),
+                )
                 last_lap_comparable = not is_pit_lap
             else:
                 last_lap_comparable = False
-            last_lap_clean = not is_invalid_lap  # latch state of lap just completed
             is_invalid_lap = False
             delta_array_raw[:] = DELTA_DEFAULT
             pos_last = pos_recorded = pos_curr
@@ -299,49 +414,17 @@ def calc_delta_time(
             pos_last = pos_curr  # reset last position
 
         # Validating 1s after passing finish line
-        if validating:
-            timer = api.read.timing.elapsed() - validating
-            if timer > 10:  # switch off after 10s
-                validating = 0
-            elif (timer > 1 and  # compare current time
-                laptime_valid > 0 and  # is valid laptime
-                abs(laptime_valid - laptime_last) < 0.001):  # is matched laptime
-                # Update laptime pace: lap just completed (not the new lap) without pit lane
-                # (no out lap or pit in lap), not invalidated by game (track limits)
-                if last_lap_comparable and last_lap_clean:
-                    # Set initial laptime if invalid, or align to faster laptime
-                    if not 0 < laptime_pace < MAX_SECONDS or laptime_valid < laptime_pace:
-                        laptime_pace = laptime_valid
-                    else:
-                        laptime_pace = min(
-                            calc_ema_laptime(laptime_pace, laptime_valid),
-                            laptime_pace + laptime_pace_margin,
-                        )
-                # Invalidated lap (track limits): never delta best, session or stint best
-                if last_lap_clean:
-                    # Update delta best list
-                    if laptime_best > laptime_last:
-                        laptime_best = laptime_last
-                        output.deltaBestData = delta_array_best = delta_array_last
-                        save_delta_best_file(
-                            filepath=filepath,
-                            filename=combo_name,
-                            dataset=delta_array_best,
-                        )
-                    # Update delta session & stint best list, kept in file for module restarts
-                    if laptime_session_best > laptime_last or laptime_stint_best > laptime_last:
-                        if laptime_session_best > laptime_last:
-                            laptime_session_best = laptime_last
-                            delta_array_session = delta_array_last
-                        if laptime_stint_best > laptime_last:
-                            laptime_stint_best = laptime_last
-                            delta_array_stint = delta_array_last
-                        save_delta_session_file(
-                            filepath, combo_name, last_session_id,
-                            api.read.vehicle.number_pitstops(),
-                            delta_array_session, delta_array_stint,
-                        )
-                validating = 0
+        if pending is not None:
+            if pending.deadline:  # player left track meanwhile (inactive without reset)
+                resolve_pending()
+            else:
+                timer = api.read.timing.elapsed() - pending.finish
+                if timer > 10:  # switch off after 10s
+                    pending = None
+                elif (timer > 1 and  # compare current time
+                    pending.matched(laptime_valid)):  # is valid & matched laptime
+                    validated_lap(pending, laptime_valid)
+                    pending = None
 
         # Calc delta
         if pos_synced_last != pos_synced:

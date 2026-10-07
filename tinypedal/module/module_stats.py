@@ -39,7 +39,7 @@ from ..userfile.car_setup import (
 from ..userfile.driver_history import append_record, session_record, worth_recording
 from ..userfile.driver_stats import DriverStats, load_driver_stats, save_driver_stats
 from ..validator import generator_init
-from ._base import MODULE_STOP, DataModule
+from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap
 
 
 class Realtime(DataModule):
@@ -55,6 +55,7 @@ class Realtime(DataModule):
         _event_wait = self._event.wait
         reset = False
         vehicle_resets = None
+        waiting = False  # completed lap waiting for validation
         update_interval = self.idle_interval
 
         gen_auto_backup_car_setup = auto_backup_car_setup(
@@ -85,7 +86,7 @@ class Realtime(DataModule):
                         reset = True
                         update_interval = self.active_interval
 
-                    gen_record_driver_stats.send(vehicle_resets)
+                    waiting = gen_record_driver_stats.send(vehicle_resets)
 
                     if self.cfg.telemetry["enable_auto_backup_car_setup"]:
                         gen_auto_backup_car_setup.send(vehicle_resets)
@@ -94,6 +95,8 @@ class Realtime(DataModule):
                     if reset:
                         reset = False
                         update_interval = self.idle_interval
+                    if waiting:  # left track just after line: keep validating lap just completed
+                        waiting = gen_record_driver_stats.send(PENDING_CHECK)
         finally:
             # Also save on error exit, as restarted module reloads data from file
             self.save_on_stop(gen_record_driver_stats, gen_auto_backup_car_setup)
@@ -142,9 +145,17 @@ def record_driver_stats(
     max_moved_distance: float,
     podium_by_class: bool,
 ):
-    """Record driver stats, and history record of each stint (track, vehicle, session, best lap, result)"""
+    """Record driver stats, and history record of each stint (track, vehicle, session, best lap, result)
+
+    Lap is counted 2s after the line (valid if game has a last lap time), best lap times once game last
+    lap time matches lap time from lap start times. Lap completed just before leaving track (reset,
+    inactive: PENDING_CHECK sent) keeps being validated for up to PENDING_WAIT seconds before stats are
+    saved & reset (MODULE_STOP: last check). Yields whether a lap is waiting for validation.
+    """
     last_reset = None  # reset check
+    sent_reset = None  # last reset value sent
     delayed_save = False
+    pending: PendingLap | None = None  # lap just completed, not counted yet
 
     default_stats = DriverStats()
     driver_stats = DriverStats()
@@ -154,12 +165,69 @@ def record_driver_stats(
     session_type = 0
     finish_place = 0
     finish_state = 0
+    is_pit_lap = 0  # set on reset
+    last_lap_stime = FLOAT_INF
+    last_best_laptime = FLOAT_INF
+    last_raw_laptime = FLOAT_INF
+
+    def best_laptime(laptime_valid: float, lap_session_type: int):
+        """Personal, qualifying & race best lap times"""
+        # Personal best (any session)
+        if driver_stats.pb > laptime_valid:
+            driver_stats.pb = laptime_valid
+        # Qualifying best
+        if lap_session_type == 2:
+            if driver_stats.qb > laptime_valid:
+                driver_stats.qb = laptime_valid
+        # Race best
+        elif lap_session_type == 4 and driver_stats.rb > laptime_valid:
+            driver_stats.rb = laptime_valid
+
+    def resolve_pending(final: bool = False):
+        """Count lap completed before player left track: valid & best lap time once validated by game"""
+        nonlocal pending, last_lap_stime, last_raw_laptime, last_best_laptime, is_pit_lap
+        if pending is None:
+            return
+        valid = pending.resolve(final)
+        if valid is None:
+            return
+        lap_session_type, lap_pit = pending.data
+        laptime_valid = api.read.timing.last_laptime()
+        # Lap counted (as at 2s after line)
+        last_lap_stime = pending.finish
+        last_raw_laptime = pending.laptime
+        is_pit_lap = 0
+        if valid:
+            driver_stats.valid += 1
+            if last_best_laptime > laptime_valid:
+                last_best_laptime = laptime_valid
+                best_laptime(laptime_valid, lap_session_type)
+        elif laptime_valid > 0:  # not validated in time: counted as at 2s after line
+            driver_stats.valid += 1
+        elif not lap_pit:  # only count non-pit invalid lap
+            driver_stats.invalid += 1
+        pending = None
 
     while True:
-        reset = yield None
+        reset = yield pending is not None
+
+        # Player inactive: only validate lap just completed (saved on reset)
+        if reset is PENDING_CHECK:
+            if last_reset == sent_reset:  # no reset waiting
+                resolve_pending()
+                continue
+            reset = sent_reset  # reset waiting for lap validation
+        elif reset is not MODULE_STOP:
+            sent_reset = reset
 
         # Reset
         if last_reset != reset:
+            # Left track just after line: count lap just completed before saving (bounded wait)
+            if pending is not None:
+                resolve_pending(final=reset is MODULE_STOP)
+                if pending is not None:
+                    continue
+
             # Save data (keys of stint start: track & vehicle may already be the next ones)
             if delayed_save:
                 save_driver_stats(
@@ -215,16 +283,7 @@ def record_driver_stats(
         if (last_best_laptime > last_valid_laptime > 1 and
             abs(last_valid_laptime - last_raw_laptime) < 0.001):  # validate lap time
             last_best_laptime = last_valid_laptime
-            # Personal best (any session)
-            if driver_stats.pb > last_valid_laptime:
-                driver_stats.pb = last_valid_laptime
-            # Qualifying best
-            if session_type == 2:
-                if driver_stats.qb > last_valid_laptime:
-                    driver_stats.qb = last_valid_laptime
-            # Race best
-            elif session_type == 4 and driver_stats.rb > last_valid_laptime:
-                driver_stats.rb = last_valid_laptime
+            best_laptime(last_valid_laptime, session_type)
 
         # Driven distance
         gps_curr = api.read.vehicle.position_xyz()
@@ -237,14 +296,20 @@ def record_driver_stats(
         # Laps complete
         if last_lap_stime > lap_stime:
             last_lap_stime = lap_stime
-        elif last_lap_stime < lap_stime and lap_etime - lap_stime > 2:
-            last_raw_laptime = lap_stime - last_lap_stime
-            if last_valid_laptime > 0: # valid lap check
-                driver_stats.valid += 1  # 1 lap at a time
-            elif not is_pit_lap:  # only count non-pit invalid lap
-                driver_stats.invalid += 1
-            is_pit_lap = 0
-            last_lap_stime = lap_stime
+            pending = None
+        elif last_lap_stime < lap_stime:
+            # Line crossed: lap kept until counted (new lap may start meanwhile: back to garage)
+            if pending is None:
+                pending = PendingLap(lap_stime - last_lap_stime, lap_stime, (session_type, is_pit_lap))
+            if lap_etime - lap_stime > 2:
+                last_raw_laptime = lap_stime - last_lap_stime
+                if last_valid_laptime > 0: # valid lap check
+                    driver_stats.valid += 1  # 1 lap at a time
+                elif not is_pit_lap:  # only count non-pit invalid lap
+                    driver_stats.invalid += 1
+                is_pit_lap = 0
+                last_lap_stime = lap_stime
+                pending = None
 
         # Seconds spent
         if last_lap_etime > lap_etime:
