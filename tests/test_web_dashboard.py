@@ -28,6 +28,8 @@ PORT = 18338
 def dashboard(ui_env):
     config = cfg.user.config["web_dashboard"]
     config.update(enable_web_dashboard=True, web_dashboard_port=PORT, access_code="TESTCODE")
+    DashboardHandler.sessions.clear()  # kept by server while access code unchanged
+    DashboardHandler.failures.clear()
     server = WebDashboard()
     server.enable()
     yield server
@@ -278,3 +280,213 @@ def test_port_out_of_range_reported(ui_env):
         assert errors and "port 70000 unavailable" in errors[0]
     finally:
         app_signal.error.disconnect(errors.append)
+
+
+# Reload, stop, listening tried again, keep-alive
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def process_events(seconds: float):
+    from PySide6.QtCore import QCoreApplication
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+
+
+def mock_loader(monkeypatch, **kept):
+    """Loader with every part mocked except the given ones"""
+    from types import SimpleNamespace
+
+    from tinypedal import loader
+
+    calls = []
+    for name in ("octrl", "mctrl", "wctrl", "kctrl", "cmdserver", "webdashboard", "streamoverlay", "api"):
+        if name in kept:
+            monkeypatch.setattr(loader, name, kept[name])
+            continue
+        monkeypatch.setattr(loader, name, SimpleNamespace(**{
+            action: (lambda *args, _name=name, _action=action: calls.append(f"{_name}.{_action}"))
+            for action in ("enable", "disable", "suspend", "start", "close", "stop", "restart", "connect")}))
+    monkeypatch.setattr(loader, "vroverlay", lambda: SimpleNamespace(enable=lambda: None, disable=lambda: None))
+    monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
+    return loader, calls
+
+
+def port_get(port, path, opener=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}")
+    try:
+        with (opener or urllib.request.build_opener()).open(req, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def test_reload_keeps_dashboard_and_session(ui_env, monkeypatch):
+    """App reload (preset auto-loaded, settings Apply): dashboard kept, phone still logged in
+
+    Windows binds the port exclusively (no address reuse): a server stopped & started again found its port
+    held by connections of the polling page (could not listen until next restart), and every reload
+    forgot sessions (phone asked for the access code again).
+    """
+    from tinypedal import web_dashboard
+
+    monkeypatch.setattr(web_dashboard.DashboardServer, "allow_reuse_address", False)  # as on Windows
+    port = free_port()
+    cfg.user.config["web_dashboard"].update(
+        enable_web_dashboard=True, web_dashboard_port=port, access_code="TESTCODE", enable_https=False)
+    server = WebDashboard()
+    loader, calls = mock_loader(monkeypatch, webdashboard=server)
+    server.enable()
+    try:
+        opener = browser()
+        assert port_get(port, "/?code=TESTCODE", opener) == 200
+        for _ in range(3):  # page polling
+            assert port_get(port, "/api/telemetry", opener) == 200
+        loader.reload()
+        assert "wctrl.start" in calls and server.running
+        assert port_get(port, "/api/telemetry", opener) == 200  # session kept
+    finally:
+        server.disable()
+
+
+def test_session_kept_unless_access_code_changed(dashboard):
+    """Server started again (address changed): sessions kept, forgotten once access code is changed"""
+    opener = browser()
+    get("/?code=TESTCODE", opener=opener)
+    assert get("/api/telemetry", opener=opener)[0] == 200
+    dashboard.disable()
+    dashboard.enable()
+    assert get("/api/telemetry", opener=opener)[0] == 200
+    cfg.user.config["web_dashboard"]["access_code"] = "NEWCODE1"
+    dashboard.enable()
+    assert get("/api/telemetry", opener=opener)[0] == 401
+    assert get("/api/telemetry", {"X-Access-Code": "TESTCODE"})[0] == 401
+    assert get("/api/telemetry", {"X-Access-Code": "NEWCODE1"})[0] == 200
+    DashboardHandler.failures.clear()
+
+
+def test_reload_applies_dashboard_setting(ui_env, monkeypatch):
+    """Port, LAN access, HTTPS changed: server listens again with them; turned off: server stopped"""
+    port = free_port()
+    setting = cfg.user.config["web_dashboard"]
+    setting.update(enable_web_dashboard=True, web_dashboard_port=port, access_code="TESTCODE", enable_https=False)
+    server = WebDashboard()
+    loader, _ = mock_loader(monkeypatch, webdashboard=server)
+    server.enable()
+    try:
+        new_port = free_port()
+        setting["web_dashboard_port"] = new_port
+        loader.reload()
+        assert port_get(new_port, "/api/telemetry") == 401
+        with pytest.raises(urllib.error.URLError):
+            port_get(port, "/api/telemetry")
+        setting["enable_lan_access"] = True
+        loader.reload()
+        assert server.running and server._server.server_address[0] == "0.0.0.0"
+        setting["enable_lan_access"] = False
+        setting["enable_https"] = True
+        loader.reload()
+        client = http.client.HTTPSConnection(
+            "127.0.0.1", new_port, timeout=5,
+            context=ssl.create_default_context(cafile=tls_cert.cert_paths(cfg.path.config)[0]))
+        client.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+        assert client.getresponse().status == 200
+        client.close()
+        setting["enable_web_dashboard"] = False
+        loader.reload()
+        assert not server.running
+    finally:
+        server.disable()
+        DashboardHandler.secure = False
+
+
+def test_listening_tried_again_until_port_free(ui_env, monkeypatch):
+    """Port held (Windows: connections of a stopped server, up to minutes): server started once free,
+    error reported once"""
+    import socket
+
+    from tinypedal import app_signal, command_server
+
+    monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
+    errors = []
+    app_signal.error.connect(errors.append)
+    server = WebDashboard()
+    busy = socket.socket()
+    try:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        cfg.user.config["web_dashboard"].update(
+            enable_web_dashboard=True, web_dashboard_port=port, access_code="TESTCODE", enable_https=False)
+        server.enable()
+        process_events(0.1)
+        assert not server.running and len(errors) == 1
+        busy.close()
+        end = time.monotonic() + 3
+        while not server.running and time.monotonic() < end:
+            process_events(0.02)
+        assert server.running and len(errors) == 1
+        assert port_get(port, "/api/telemetry", None) == 401
+    finally:
+        busy.close()
+        server.disable()
+        app_signal.error.disconnect(errors.append)
+    process_events(0.1)
+    assert not server.running  # disabled: not tried again
+
+
+def test_polling_reuses_connection(dashboard):
+    """Page polling every 150 ms keeps one connection (keep-alive), no new connection per request"""
+    client = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+    try:
+        for _ in range(3):
+            client.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+            response = client.getresponse()
+            assert response.status == 200 and json.loads(response.read())
+            assert not response.will_close
+        client.request("GET", "/?code=TESTCODE")
+        response = client.getresponse()
+        response.read()
+        assert response.status == 303 and not response.will_close
+        client.request("GET", "/missing")
+        response = client.getresponse()
+        assert response.status == 404 and response.read() == b"not found"
+    finally:
+        client.close()
+
+
+def test_login_body_left_unread_closes_connection(dashboard):
+    """Body longer than read (oversized form) never read as next request of a kept connection"""
+    client = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+    try:
+        client.putrequest("POST", "/login")
+        body = b"code=TESTCODE&pad=" + b"x" * 2000
+        client.putheader("Content-Length", str(len(body)))
+        client.endheaders()
+        client.send(body)
+        response = client.getresponse()
+        response.read()
+        assert response.status == 303 and response.will_close
+    finally:
+        client.close()
+
+
+def test_disable_closes_open_connections(dashboard):
+    """Kept connection (polling page) ended once server is stopped"""
+    client = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+    try:
+        client.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+        client.getresponse().read()
+        dashboard.disable()
+        with pytest.raises((OSError, http.client.HTTPException)):
+            client.request("GET", "/api/telemetry", headers={"X-Access-Code": "TESTCODE"})
+            client.getresponse().read()
+    finally:
+        client.close()

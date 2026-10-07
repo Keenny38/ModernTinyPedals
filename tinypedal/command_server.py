@@ -47,9 +47,12 @@ import struct
 import sys
 import threading
 from collections.abc import Callable
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import chain
 from urllib.parse import parse_qs, unquote, urlsplit
+
+from PySide6.QtCore import QTimer
 
 from . import app_signal
 from .setting import cfg
@@ -65,14 +68,22 @@ WS_OP_PING = 0x9
 WS_OP_PONG = 0xA
 STREAM_INTERVAL = 100  # ms, default push interval
 STREAM_INTERVAL_RANGE = (20, 5000)
+# Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
+# until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
+BIND_RETRY_MS = 5000
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
-    """Threading HTTP server, port held exclusively on Windows
+    """Threading HTTP server, port held exclusively on Windows, open connections tracked
 
     SO_REUSEADDR on Windows lets a second server bind a listening port in use,
     SO_EXCLUSIVEADDRUSE makes bind fail instead (port unavailable reported).
+
+    server_close() only closes the listening socket: stop() also ends open (keep-alive, streaming)
+    connections, and sets this server's own stopping event (a new server never clears it).
     """
+
+    daemon_threads = True
 
     if sys.platform == "win32":
         allow_reuse_address = False
@@ -80,6 +91,74 @@ class LocalHTTPServer(ThreadingHTTPServer):
         def server_bind(self):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             super().server_bind()
+
+    def __init__(self, *args, **kwargs):
+        self.stopping = threading.Event()  # long running handlers (stream) end when set
+        self._connections: set[socket.socket] = set()
+        self._connections_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        with self._connections_lock:
+            self._connections.add(request)
+        super().process_request(request, client_address)
+
+    def shutdown_request(self, request):
+        with self._connections_lock:
+            self._connections.discard(request)
+        super().shutdown_request(request)
+
+    def close_connections(self):
+        """Shut down open client connections (handler threads see connection closed)"""
+        with self._connections_lock:
+            connections = tuple(self._connections)
+            self._connections.clear()
+        for sock in connections:
+            with suppress(OSError):  # TLS socket: plain socket shutdown, TLS state left to handler thread
+                socket.socket.shutdown(sock, socket.SHUT_RDWR)
+
+    def stop(self):
+        """Stop serving, close listening socket & open connections"""
+        self.stopping.set()
+        self.shutdown()
+        self.server_close()
+        self.close_connections()
+
+
+class BindRetry:
+    """Server listening tried again later while its port is unavailable, error reported once per address
+
+    Args:
+        name: server name in error message.
+        start: called to listen again (server enable).
+    """
+
+    __slots__ = ("name", "_start", "_timer", "_failed")
+
+    def __init__(self, name: str, start: Callable[[], None]):
+        self.name = name
+        self._start = start
+        self._timer: QTimer | None = None
+        self._failed: tuple | None = None  # unavailable address reported (not at every retry)
+
+    def failed(self, address: tuple[str, int], error: Exception):
+        """Bind failed: report (once for this address), try again later if port may become available"""
+        if self._failed != address:
+            self._failed = address
+            logger.error("%s: unable to listen on %s:%s (%s)", self.name.upper(), *address, error)
+            app_signal.error.emit(f"{self.name}: port {address[1]} unavailable ({bind_error_text(error)}).")
+        if isinstance(error, OSError):  # OverflowError (port out of range) never changes
+            if self._timer is None:
+                self._timer = QTimer()
+                self._timer.setSingleShot(True)
+                self._timer.timeout.connect(self._start)
+            self._timer.start(BIND_RETRY_MS)
+
+    def stop(self):
+        """Listening (or server disabled): nothing tried again, next failure reported"""
+        self._failed = None
+        if self._timer is not None:
+            self._timer.stop()
 
 
 def available_commands() -> dict[str, Callable]:
@@ -224,7 +303,6 @@ class CommandHandler(BaseHTTPRequestHandler):
     stream_timeout = 5  # WebSocket send timeout, server can stop a stream to a stalled client
     commands: dict[str, Callable] = {}
     snapshot: Callable[[], dict] = staticmethod(default_snapshot)
-    stopping = threading.Event()
 
     def check_host(self) -> bool:
         """Verify Host header, send 403 if not allowed"""
@@ -285,9 +363,11 @@ class CommandHandler(BaseHTTPRequestHandler):
         options = StreamOptions.from_path(self.path)
         sock = self.connection
         sock.settimeout(self.stream_timeout)  # client not reading: sendall times out (OSError), never blocks
+        # Event of this server: a server started again (reload, port changed) never revives an old stream
+        stopping: threading.Event = getattr(self.server, "stopping", None) or threading.Event()
         logger.info("REMOTE CONTROL: stream client connected (%sms)", round(interval * 1000))
         try:
-            while not self.stopping.is_set():
+            while not stopping.is_set():
                 try:
                     data = self.snapshot()
                 except Exception:  # never break stream on bad telemetry
@@ -327,44 +407,54 @@ class CommandHandler(BaseHTTPRequestHandler):
 class CommandServer:
     """Command server control"""
 
-    __slots__ = ("_server", "_thread")
+    __slots__ = ("_server", "_thread", "_port", "_retry")
 
     def __init__(self):
         self._server: LocalHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._port: int | None = None
+        self._retry = BindRetry("Remote control", self.enable)
 
     @property
     def running(self) -> bool:
         return self._server is not None
 
     def enable(self):
-        """Start server if enabled in setting"""
+        """Start server if enabled in setting, stop it if not (server kept if port unchanged)
+
+        Server kept across reload: a server stopped then started again can find its port still held
+        by connections it accepted (Windows), and connected stream clients would be dropped.
+        """
         setting = cfg.user.config["remote_control"]
-        if not setting["enable_remote_control"] or self.running:
+        if not setting["enable_remote_control"]:
+            self.disable()
             return
         port = int(setting["remote_control_port"])
+        if self._server is not None and self._port != port:
+            self.disable()
         CommandHandler.commands = available_commands()
-        CommandHandler.stopping.clear()
+        if self._server is not None:
+            return
         try:
             self._server = LocalHTTPServer((HOST, port), CommandHandler)
         except (OSError, OverflowError) as error:  # OverflowError: port out of range
-            logger.error("REMOTE CONTROL: unable to listen on %s:%s (%s)", HOST, port, error)
-            app_signal.error.emit(f"Remote control: port {port} unavailable ({bind_error_text(error)}).")
+            self._retry.failed((HOST, port), error)
             return
-        self._server.daemon_threads = True
+        self._retry.stop()
+        self._port = port
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Remote control")
         self._thread.start()
         logger.info("ENABLED: remote control on http://%s:%s", HOST, port)
 
     def disable(self):
-        """Stop server"""
+        """Stop server, end open streams"""
+        self._retry.stop()
         if self._server is None:
             return
-        CommandHandler.stopping.set()  # end open streams
-        self._server.shutdown()
-        self._server.server_close()
+        self._server.stop()
         self._server = None
         self._thread = None
+        self._port = None
         logger.info("DISABLED: remote control")
 
 

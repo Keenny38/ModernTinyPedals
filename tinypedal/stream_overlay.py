@@ -50,12 +50,10 @@ import logging
 import os
 import re
 import secrets
-import socket
 import struct
 import threading
 import time
 import zlib
-from contextlib import suppress
 from html import escape
 from http.server import BaseHTTPRequestHandler
 from typing import Any, NamedTuple
@@ -65,8 +63,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPoint, QTim
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
-from . import app_signal
-from .command_server import LocalHTTPServer, bind_error_text
+from .command_server import BindRetry, LocalHTTPServer
 from .const_file import ConfigType, FontFile
 from .i18n import current_language, tr
 from .process import results_file as rf
@@ -92,9 +89,6 @@ OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
 TOKEN_BYTES = 18  # access token: 24 url-safe characters
-# Port unavailable: listening tried again this often while enabled. Windows holds a port bound exclusively
-# until connections accepted by the previous server are gone (TIME_WAIT, up to 4 minutes after app restart)
-BIND_RETRY_MS = 5000
 
 
 def stream_visibility(wcfg) -> str:
@@ -643,35 +637,8 @@ class StreamHandler(BaseHTTPRequestHandler):
 class StreamServer(LocalHTTPServer):
     """Stream overlay HTTP server, client errors (dropped connection) only logged
 
-    Open (keep-alive) connections tracked: server_close() leaves them open,
-    close_connections() ends them so a client stops receiving frames.
+    Open (keep-alive) connections ended by stop(), so a client stops receiving frames.
     """
-
-    daemon_threads = True
-
-    def __init__(self, *args, **kwargs):
-        self._connections: set[socket.socket] = set()
-        self._connections_lock = threading.Lock()
-        super().__init__(*args, **kwargs)
-
-    def process_request(self, request, client_address):
-        with self._connections_lock:
-            self._connections.add(request)
-        super().process_request(request, client_address)
-
-    def shutdown_request(self, request):
-        with self._connections_lock:
-            self._connections.discard(request)
-        super().shutdown_request(request)
-
-    def close_connections(self):
-        """Shut down open client connections"""
-        with self._connections_lock:
-            connections = tuple(self._connections)
-            self._connections.clear()
-        for sock in connections:
-            with suppress(OSError):
-                sock.shutdown(socket.SHUT_RDWR)
 
     def handle_error(self, request, client_address):
         logger.debug("STREAM OVERLAY: request from %s failed", client_address[0], exc_info=True)
@@ -687,8 +654,7 @@ class StreamOverlay:
         self.store = FrameStore()
         self.results = ResultsCache()
         self._capture: OverlayCapture | None = None
-        self._retry: QTimer | None = None  # listening tried again while port unavailable
-        self._failed_address: tuple[str, int] | None = None  # unavailable address reported (not at every retry)
+        self._retry = BindRetry("Stream overlay", self.enable)  # listening tried again while port unavailable
 
     @property
     def running(self) -> bool:
@@ -752,15 +718,9 @@ class StreamOverlay:
             try:
                 self._server = StreamServer(address, StreamHandler)
             except (OSError, OverflowError) as error:  # OverflowError: port out of range
-                if self._failed_address != address:
-                    self._failed_address = address
-                    logger.error("STREAM OVERLAY: unable to listen on %s:%s (%s)", *address, error)
-                    app_signal.error.emit(
-                        f"Stream overlay: port {address[1]} unavailable ({bind_error_text(error)}).")
-                if isinstance(error, OSError):
-                    self.retry_later()
+                self._retry.failed(address, error)
                 return
-            self.stop_retry()
+            self._retry.stop()
             self._address = address
             self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Stream overlay")
             self._thread.start()
@@ -769,19 +729,6 @@ class StreamOverlay:
             self._capture = OverlayCapture(self.store)
         self._capture.start(int(setting["frame_rate"]))
 
-    def retry_later(self):
-        """Listen again soon (port held by a previous server's connections, another program)"""
-        if self._retry is None:
-            self._retry = QTimer()
-            self._retry.setSingleShot(True)
-            self._retry.timeout.connect(self.enable)
-        self._retry.start(BIND_RETRY_MS)
-
-    def stop_retry(self):
-        self._failed_address = None
-        if self._retry is not None:
-            self._retry.stop()
-
     def suspend(self):
         """Stop capture, server kept listening: browser sources stay connected while overlays reload"""
         if self._capture is not None:
@@ -789,13 +736,11 @@ class StreamOverlay:
 
     def disable(self):
         """Stop server & capture"""
-        self.stop_retry()
+        self._retry.stop()
         self.suspend()
         if self._server is None:
             return
-        self._server.shutdown()
-        self._server.server_close()
-        self._server.close_connections()
+        self._server.stop()
         self._server = None
         self._thread = None
         self._address = None

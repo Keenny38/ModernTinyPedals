@@ -52,7 +52,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import app_signal, units
-from .command_server import LocalHTTPServer, bind_error_text
+from .command_server import BindRetry, LocalHTTPServer
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
@@ -240,9 +240,14 @@ def telemetry_snapshot() -> dict:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Dashboard request handler"""
+    """Dashboard request handler
+
+    HTTP/1.1 keep-alive: page polls telemetry every 150 ms on one connection, instead of a new connection
+    (and TLS handshake) per request, each left in TIME_WAIT. Every response sends Content-Length.
+    """
 
     server_version = "TinyPedal"
+    protocol_version = "HTTP/1.1"
     timeout = 15  # idle client never holds a handler thread (socket timeout, no streaming endpoint)
     access_code = ""
     failures: dict[str, list[float]] = {}  # address: [count, blocked until, last failure]
@@ -286,10 +291,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_body(404, b"not found", "text/plain")
             return
         try:  # never read more than form size (negative length reads until connection closed)
-            length = max(min(int(self.headers.get("Content-Length") or 0), MAX_FORM_SIZE), 0)
+            declared = int(self.headers.get("Content-Length") or 0)
         except ValueError:
+            self.close_connection = True  # body length unknown: never read as next request
             self.send_body(400, b"invalid request", "text/plain")
             return
+        length = max(min(declared, MAX_FORM_SIZE), 0)
+        if length != declared:
+            self.close_connection = True  # rest of body left unread: never read as next request
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         if self.authorized(form.get("code", [""])[0].strip(), html=True):
             self.send_redirect_with_session()
@@ -385,7 +394,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_connection_header()
         self.end_headers()
+
+    def send_connection_header(self):
+        """Client told connection is not kept (body left unread, HTTP/1.0 client)"""
+        if self.close_connection:
+            self.send_header("Connection", "close")
 
     def send_body(self, status: int, body: bytes, content_type: str):
         self.send_response(status)
@@ -395,6 +410,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
+        self.send_connection_header()
         self.end_headers()
         self.wfile.write(body)
 
@@ -403,7 +419,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 class DashboardServer(LocalHTTPServer):
-    """Dashboard HTTP server, client errors (failed TLS handshake, dropped connection) only logged"""
+    """Dashboard HTTP server, client errors (failed TLS handshake, dropped connection) only logged
+
+    Open (keep-alive) connections ended by stop().
+    """
 
     def handle_error(self, request, client_address):
         logger.debug("WEB DASHBOARD: request from %s failed", client_address[0], exc_info=True)
@@ -412,11 +431,13 @@ class DashboardServer(LocalHTTPServer):
 class WebDashboard:
     """Web dashboard server control"""
 
-    __slots__ = ("_server", "_thread")
+    __slots__ = ("_server", "_thread", "_key", "_retry")
 
     def __init__(self):
         self._server: DashboardServer | None = None
         self._thread: threading.Thread | None = None
+        self._key: tuple | None = None  # listening setup of running server: address, HTTPS, LAN addresses
+        self._retry = BindRetry("Web dashboard", self.enable)
 
     @property
     def running(self) -> bool:
@@ -453,48 +474,62 @@ class WebDashboard:
         return bool(cfg.user.config["web_dashboard"]["enable_https"])
 
     def enable(self):
-        """Start server if enabled in setting"""
-        if not cfg.user.config["web_dashboard"]["enable_web_dashboard"] or self.running:
+        """Start server if enabled in setting, stop it if not (server kept if listening setup unchanged)
+
+        Server kept across reload: a server stopped then started again can find its port still held
+        by connections it accepted (Windows). Sessions kept unless access code changed.
+        """
+        if not cfg.user.config["web_dashboard"]["enable_web_dashboard"]:
+            self.disable()
             return
-        DashboardHandler.access_code = self.access_code()
-        DashboardHandler.failures = {}
-        DashboardHandler.sessions = {}
-        host, port = self.host(), self.port()
+        code = self.access_code()
+        if code != DashboardHandler.access_code:  # logins made with old code end
+            with DashboardHandler.lock:
+                DashboardHandler.access_code = code
+                DashboardHandler.failures = {}
+                DashboardHandler.sessions = {}
+        host, port, secure = self.host(), self.port(), self.use_https()
+        # HTTPS certificate covers LAN addresses: made again (server started again) if they changed
+        addresses = local_addresses(max_age=0) if secure and host != "127.0.0.1" else []
+        key = (host, port, secure, tuple(addresses))
+        if self._server is not None and self._key != key:
+            self.disable()
+        if self._server is not None:
+            return
         try:
-            self._server = DashboardServer((host, port), DashboardHandler)
+            server = DashboardServer((host, port), DashboardHandler)
         except (OSError, OverflowError) as error:  # OverflowError: port out of range
-            logger.error("WEB DASHBOARD: unable to listen on %s:%s (%s)", host, port, error)
-            app_signal.error.emit(f"Web dashboard: port {port} unavailable ({bind_error_text(error)}).")
+            self._retry.failed((host, port), error)
             return
-        self._server.daemon_threads = True
-        DashboardHandler.secure = self.use_https()
-        if DashboardHandler.secure:
+        self._retry.stop()
+        if secure:
             try:
-                addresses = local_addresses(max_age=0) if host != "127.0.0.1" else []
                 context = server_context(cfg.path.config, addresses)
             except (OSError, ValueError, ImportError) as error:
                 logger.error("WEB DASHBOARD: unable to set up HTTPS (%s)", error)
                 app_signal.error.emit(f"Web dashboard: unable to set up HTTPS ({error}).")
-                self._server.server_close()
-                self._server = None
+                server.server_close()
                 return
-            self._server.socket = context.wrap_socket(
-                self._server.socket, server_side=True, do_handshake_on_connect=False)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="Web dashboard")
+            server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+        DashboardHandler.secure = secure
+        self._server = server
+        self._key = key
+        self._thread = threading.Thread(target=server.serve_forever, daemon=True, name="Web dashboard")
         self._thread.start()
-        scheme = "https" if DashboardHandler.secure else "http"
+        scheme = "https" if secure else "http"
         logger.info("ENABLED: web dashboard on %s://%s:%s", scheme, host, port)
-        if host != "127.0.0.1" and not DashboardHandler.secure:
+        if host != "127.0.0.1" and not secure:
             logger.warning("WEB DASHBOARD: LAN access enabled, traffic is not encrypted (plain HTTP)")
 
     def disable(self):
-        """Stop server"""
+        """Stop server, end open connections"""
+        self._retry.stop()
         if self._server is None:
             return
-        self._server.shutdown()
-        self._server.server_close()
+        self._server.stop()
         self._server = None
         self._thread = None
+        self._key = None
         logger.info("DISABLED: web dashboard")
 
 

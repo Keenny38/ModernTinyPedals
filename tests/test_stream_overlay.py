@@ -384,10 +384,10 @@ def test_port_unavailable(ui_env, monkeypatch):
 def test_listening_tried_again_until_port_free(ui_env, monkeypatch):
     """Port held (Windows: connections of a stopped server, up to minutes): server started once free,
     error reported once"""
-    from tinypedal import app_signal
+    from tinypedal import app_signal, command_server
     from tinypedal.setting import cfg
 
-    monkeypatch.setattr(stream_overlay, "BIND_RETRY_MS", 20)
+    monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
     errors = []
     app_signal.error.connect(errors.append)
     control = stream_overlay.StreamOverlay()
