@@ -76,8 +76,10 @@ def pytest_unconfigure(config):
     import multiprocessing
     import threading
 
-    alive = [f"thread {thread.name}" for thread in threading.enumerate()
-             if thread is not threading.main_thread() and not thread.daemon]
+    threads = [thread for thread in threading.enumerate() if thread is not threading.main_thread()]
+    alive = [f"thread {thread.name}" for thread in threads if not thread.daemon]
+    # Daemon threads never hold exit, but a lingering one shows a worker a test (or the app) did not stop
+    alive += [f"daemon thread {thread.name}" for thread in threads if thread.daemon]
     alive += [f"process {child.name} (pid {child.pid})" for child in multiprocessing.active_children()]
     if alive:
         print("Still running at exit: " + ", ".join(alive), file=sys.__stderr__)
@@ -117,10 +119,18 @@ def offline_track_geometry(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def offline_game_images(monkeypatch):
-    """Car brand & circuit pictures never asked to a running game in tests"""
+    """Car brand & circuit pictures never asked to a running game in tests, fetch thread ended after each test
+
+    Thread of app cache (started by first lookup) lives as long as the app; tests replacing the cache
+    (monkeypatch, set up before this fixture: still replaced at teardown) would leave one thread each.
+    """
     from tinypedal.userfile import game_images
 
     monkeypatch.setattr(game_images, "fetch_from_game", lambda *args, **kwargs: (0, b""))
+    app_cache = game_images.images
+    yield
+    for cache in {id(cache): cache for cache in (game_images.images, app_cache)}.values():
+        assert cache.stop(), "game images fetch thread not ended"
 
 
 @pytest.fixture

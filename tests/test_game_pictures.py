@@ -99,6 +99,20 @@ def test_game_lists_read_and_logos_fetched_in_background(game):
     later.load_catalog()
     assert later.brand("Ferrari AF Corse #50") == "Ferrari" and later.track("Le Mans") == "lemanswec"
     assert later.brand_logo("Ferrari").endswith("Ferrari.svg")  # cached file, no game needed
+    assert later.stop()
+
+
+def test_stop_ends_fetch_thread_and_lookup_restarts_it(game):
+    _, cache = game
+    cache.brand_logo("Ferrari")
+    thread = cache._thread
+    assert thread is not None and thread.is_alive()
+    assert cache.stop()
+    assert not thread.is_alive() and cache._thread is None
+    assert cache.stop()  # no thread: nothing to do
+    cache.brand_logo("Ferrari")  # next lookup starts a new thread, queued fetch still done
+    assert cache._thread is not None and cache._thread is not thread
+    assert wait_for(lambda: os.path.isfile(cache.picture_file(gi.BRAND, "Ferrari")))
 
 
 def test_pictures_game_does_not_have_not_asked_again(game):

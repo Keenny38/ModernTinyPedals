@@ -251,6 +251,25 @@ class GameImages:
                     self._thread = threading.Thread(target=self._run, daemon=True, name="Game images")
                     self._thread.start()
 
+    def stop(self, timeout: float = 5.0) -> bool:
+        """End fetch thread once current job is done (next lookup starts a new one)
+
+        Returns:
+            True if thread ended within timeout.
+        """
+        with self._lock:  # start() never starts a second thread meanwhile (thread still set)
+            thread = self._thread
+            if thread is None:
+                return True
+            self._jobs.put(None)
+        thread.join(timeout)  # outside lock: current job may need it
+        with self._lock:
+            if thread.is_alive():
+                return False
+            if self._thread is thread:
+                self._thread = None
+        return True
+
     def request(self, kind: str, key: str):
         """Fetch picture in background, unless queued, game has none or game did not answer lately"""
         path = gi.image_path(kind, key)
@@ -267,6 +286,8 @@ class GameImages:
         while True:
             try:
                 job = self._jobs.get(timeout=QUEUE_WAIT)
+                if job is None:  # stop()
+                    return
             except queue.Empty:
                 job = None
             try:

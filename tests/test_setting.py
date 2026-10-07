@@ -360,6 +360,57 @@ def test_load_styles_discards_queued_style_saves(config):
     assert "Imported" in read_json(path)
 
 
+def test_styles_replaced_never_overwritten_by_saver(config, monkeypatch):
+    """Style saves in progress or queued during import: never written over imported styles (was: race)"""
+    import threading
+
+    config.load_user()
+    config.user.classes = {"Old": {}}
+    writing, release = threading.Event(), threading.Event()
+    written = []
+    save_file = setting_module.save_and_verify_json_file
+
+    def blocking_save(**kwargs):
+        written.append((kwargs["filename"], dict(kwargs["dict_user"])))
+        if kwargs["filename"] == config.filename.classes and not writing.is_set():
+            writing.set()
+            release.wait(5)  # saver blocked mid-write when import starts
+        save_file(**kwargs)
+
+    monkeypatch.setattr(setting_module, "save_and_verify_json_file", blocking_save)
+    config.save(delay=0, config_type=ConfigType.CLASSES)
+    assert writing.wait(5)
+    path = f"{config.path.settings}{config.filename.classes}"
+    entered, imported = threading.Event(), threading.Event()
+    written_while_paused = []
+
+    def run_import():
+        with config.styles_replaced(timeout=5):
+            entered.set()
+            config.save(delay=0, config_type=ConfigType.CLASSES)  # module thread saves old styles meanwhile
+            config.save(delay=0)  # other file waits too
+            count = len(written)
+            time.sleep(0.2)  # saver may not write anything while paused
+            written_while_paused.extend(written[count:])
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump({"Imported": {}}, file)
+        imported.set()
+
+    importer = threading.Thread(target=run_import)
+    importer.start()
+    assert not entered.wait(0.1)  # import waits for the style write in progress
+    release.set()
+    importer.join(10)
+    assert not importer.is_alive() and imported.is_set()
+    assert written_while_paused == []
+    assert config.flush(timeout=5)
+    wait_saved(config)
+    assert list(read_json(path)) == ["Imported"]
+    assert list(config.user.classes) == ["Imported"]
+    assert [name for name, _ in written].count(config.filename.classes) == 1  # old styles never saved again
+    assert config.filename.setting in [name for name, _ in written]  # paused save written afterwards
+
+
 def test_invalid_section_reset_alone(config):
     """A section that is not a dict resets that section only, rest of preset kept"""
     widget = next(name for name, value in config.default.setting.items() if "enable" in value)

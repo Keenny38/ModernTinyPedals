@@ -26,6 +26,8 @@ import logging
 import os
 import threading
 from collections import ChainMap
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from time import monotonic, sleep
 from types import MappingProxyType
@@ -211,6 +213,7 @@ class Setting:
         "_save_deadline",
         "_save_queue",
         "_save_lock",
+        "_save_pause",
         "_save_done",
         "_save_wake",
         "_setting_to_load",
@@ -227,6 +230,7 @@ class Setting:
         self._save_deadline = 0.0  # monotonic time saving thread starts writing files
         self._save_queue = {}
         self._save_lock = threading.Lock()  # guards save queue, deadline & is_saving
+        self._save_pause = threading.Lock()  # held by saving thread while writing a file, see styles_replaced
         self._save_done = threading.Event()
         self._save_done.set()
         self._save_wake = threading.Event()  # deadline changed: saving thread waits again
@@ -558,6 +562,27 @@ class Setting:
         logger.error("USERDATA: saving not finished after %ss, continue anyway", timeout)
         return False
 
+    @contextmanager
+    def styles_replaced(self, timeout: float = 10.0) -> Iterator[None]:
+        """Pause file writing while style files are replaced on disk (package import), then reload styles
+
+        Queued saves are written first. Saving thread never writes a file meanwhile (a write in progress
+        finishes first), saves queued meanwhile wait, queued style saves (older styles) are dropped on exit.
+        Lock order: _save_pause before _save_lock (as saving thread), save() never waits for _save_pause.
+        """
+        self.flush(timeout)  # never while paused: saving thread could not finish
+        paused = self._save_pause.acquire(timeout=timeout)
+        if not paused:
+            logger.error("USERDATA: saving not paused after %ss, continue anyway", timeout)
+        try:
+            yield
+        finally:
+            try:
+                self.load_styles(discard_queued=True)
+            finally:
+                if paused:
+                    self._save_pause.release()
+
     def __saving(self):
         """Saving thread"""
         # Wait until save delay passed, delay refreshed by each save() call meanwhile
@@ -574,28 +599,29 @@ class Setting:
         app_signal.saving.emit(True)
         try:
             while True:
-                with self._save_lock:
-                    if not self._save_queue:
-                        self.is_saving = False  # set within lock, so new task can start new thread
-                        self._save_done.set()
-                        break
-                    # Take next file out of queue before copying its data, so a change made while
-                    # saving queues the file again (saved once more) instead of being lost
-                    filename = next(iter(self._save_queue))
-                    filepath, dict_user = self._save_queue.pop(filename)
-                try:
-                    if filepath == self.path.settings:  # user & style presets
-                        create_versioned_backup(
-                            filename, filepath, max_count=self.application["number_of_automatic_backups"]
+                with self._save_pause:  # wait while style files replaced, see styles_replaced
+                    with self._save_lock:
+                        if not self._save_queue:
+                            self.is_saving = False  # set within lock, so new task can start new thread
+                            self._save_done.set()
+                            break
+                        # Take next file out of queue before copying its data, so a change made while
+                        # saving queues the file again (saved once more) instead of being lost
+                        filename = next(iter(self._save_queue))
+                        filepath, dict_user = self._save_queue.pop(filename)
+                    try:
+                        if filepath == self.path.settings:  # user & style presets
+                            create_versioned_backup(
+                                filename, filepath, max_count=self.application["number_of_automatic_backups"]
+                            )
+                        save_and_verify_json_file(
+                            dict_user=snapshot_dict(dict_user),
+                            filename=filename,
+                            filepath=filepath,
+                            max_attempts=saving_attempts,
                         )
-                    save_and_verify_json_file(
-                        dict_user=snapshot_dict(dict_user),
-                        filename=filename,
-                        filepath=filepath,
-                        max_attempts=saving_attempts,
-                    )
-                except Exception:  # never leave saving state locked, see is_saving
-                    logger.exception("USERDATA: unexpected error while saving %s", filename)
+                    except Exception:  # never leave saving state locked, see is_saving
+                        logger.exception("USERDATA: unexpected error while saving %s", filename)
         except BaseException:
             with self._save_lock:
                 self.is_saving = False
