@@ -29,11 +29,11 @@ import math
 import zlib
 from array import array
 from bisect import bisect_left, bisect_right
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from itertools import accumulate
 
 from ...userfile.corner_analysis import resample_sorted
-from ...userfile.lap_offset import aligned_lap
+from ...userfile.lap_offset import aligned_on, anchored, is_recorded
 from ...userfile.telemetry_lap import (
     LapData,
     compute_delta,
@@ -92,6 +92,49 @@ def channel_sources(channel: Channel) -> tuple[str, ...]:
     return channel.sources or (channel.column,)
 
 
+AlignedLap = tuple[LapData, LapData, LapData, float]  # lap aligned on: reference lap data, lap data, aligned, offset
+
+
+def align_laps(laps: Sequence[tuple[str, LapData]], reference_key: str, anchor: tuple[str, LapData] | None,
+               cache: Mapping[str, AlignedLap], compute: bool = True) -> tuple[dict[str, AlignedLap], str, int]:
+    """Laps (key, data) not recorded by the app aligned on reference lap (see lap_offset): aligned lap of each lap key,
+    key of lap recorded by the app the reference lap was aligned on first (empty: none) & samples of laps whose
+    offset was measured (or would be, not compute: aligned laps not in cache left out)
+
+    An imported reference lap is aligned first on a lap recorded by the app (first shown one, else anchor: main lap
+    of track), else laps recorded by the app would be shifted by its own distance offset. Results of cache kept
+    while laps stay the same (same lap data).
+    """
+    reference = next(((key, data) for key, data in laps if key == reference_key), laps[0] if laps else None)
+    aligned: dict[str, AlignedLap] = {}
+    work = 0
+    if reference is None:
+        return aligned, "", work
+
+    def align(key: str, base: LapData | None, data: LapData) -> LapData | None:
+        nonlocal work
+        cached = cache.get(key)
+        if cached is None or cached[0] is not base or cached[1] is not data:
+            if not is_recorded(data):  # offset measured (slow on a long track)
+                work += len(data)
+            if base is None or not compute:
+                return None
+            cached = (base, data, *aligned_on(base, data))
+        aligned[key] = cached
+        return cached[2]
+
+    reference_data: LapData | None = reference[1]
+    anchor = next(((key, data) for key, data in laps if key != reference[0] and is_recorded(data)), anchor)
+    anchor_key = ""
+    if anchor is not None and anchor[0] != reference[0] and anchored(reference[1], anchor[1]):
+        anchor_key = anchor[0]
+        reference_data = align(reference[0], anchor[1], reference[1])  # None: not measured yet (not compute)
+    for key, data in laps:
+        if key != reference[0]:
+            align(key, reference_data, data)
+    return aligned, anchor_key, work
+
+
 class TraceData:
     """Series, value ranges & axis conversion of displayed laps
 
@@ -139,7 +182,8 @@ class TraceData:
         self.placement_version = 0
         self.offsets: dict[str, float] = {}  # lap key: meters added along distance axis (aligned on braking point)
         self.auto_offsets: dict[str, float] = {}  # lap key: meters lap distance zero was moved by (imported lap)
-        self._aligned: dict[str, tuple[LapData, LapData, LapData, float]] = {}  # lap key: reference, lap, aligned
+        self._aligned: dict[str, AlignedLap] = {}  # lap key: reference (or anchor), lap, aligned lap, offset
+        self.anchor_key = ""  # lap recorded by the app imported reference lap is aligned on (empty: none)
         self.math: dict[str, str] = {}  # math channel column: expression
         self._math_names: dict[str, list[str] | None] = {}  # expression: channel names used (None: invalid)
 
@@ -194,28 +238,35 @@ class TraceData:
         """Factor turning lap distances into reference lap distances (1 unless lap length differs a bit)"""
         return self.scales.get(lap.key, 1.0)
 
-    def aligned_laps(self, laps: list[PlotLap], reference_key: str) -> list[PlotLap]:
+    def aligned_laps(self, laps: list[PlotLap], reference_key: str, anchor: tuple[str, LapData] | None = None
+                     ) -> list[PlotLap]:
         """Laps with compared laps not recorded by the app aligned on reference lap (distance zero at the line),
-        aligned lap data kept while reference & lap stay the same (series, corners & map lines kept)"""
-        reference = next((lap for lap in laps if lap.key == reference_key), laps[0] if laps else None)
-        result = []
-        aligned: dict[str, tuple[LapData, LapData, LapData, float]] = {}
-        for lap in laps:
-            if reference is None or lap is reference:
-                result.append(lap)
-                continue
-            cached = self._aligned.get(lap.key)
-            if cached is None or cached[0] is not reference.data or cached[1] is not lap.data:
-                data, offset = aligned_lap(reference.data, lap.data, distance_scale(reference.data, lap.data))
-                cached = (reference.data, lap.data, data, offset)
-            aligned[lap.key] = cached
-            result.append(lap if cached[2] is lap.data else lap._replace(data=cached[2]))
+        reference lap itself aligned first on a lap recorded by the app (shown, else anchor) when it is an imported
+        one, aligned lap data kept while reference & lap stay the same (series, corners & map lines kept)"""
+        aligned, self.anchor_key, _ = align_laps([(lap.key, lap.data) for lap in laps], reference_key, anchor,
+                                                 self._aligned)
         self._aligned = aligned
         self.auto_offsets = {key: value[3] for key, value in aligned.items() if value[3]}
-        return result
+        return [lap if lap.key not in aligned or aligned[lap.key][2] is lap.data
+                else lap._replace(data=aligned[lap.key][2]) for lap in laps]
 
-    def set_laps(self, laps: list[PlotLap], reference_key: str = ""):
-        laps = self.aligned_laps(laps, reference_key)
+    def alignment_work(self, laps: Sequence[tuple[str, LapData]], reference_key: str,
+                       anchor: tuple[str, LapData] | None = None) -> int:
+        """Samples of imported laps whose offset showing laps would measure (not aligned yet: slow on a long track)"""
+        return align_laps(laps, reference_key, anchor, self._aligned, compute=False)[2]
+
+    def aligned_snapshot(self) -> dict[str, AlignedLap]:
+        """Aligned laps of shown laps (copy, read by background thread, see keep_aligned)"""
+        return dict(self._aligned)
+
+    def keep_aligned(self, aligned: Mapping[str, AlignedLap]):
+        """Aligned laps measured beforehand (background thread, see align_laps): used by set_laps if laps match"""
+        self._aligned.update(aligned)
+
+    def set_laps(self, laps: list[PlotLap], reference_key: str = "", anchor: tuple[str, LapData] | None = None):
+        """Laps shown (reference_key: reference lap, anchor: lap recorded by the app an imported reference lap is
+        aligned on when no shown lap was recorded by the app, see aligned_laps)"""
+        laps = self.aligned_laps(laps, reference_key, anchor)
         previous = {lap.key: lap.data for lap in self.laps}
         previous_reference = self.reference.key if self.reference is not None else ""
         self.laps = laps

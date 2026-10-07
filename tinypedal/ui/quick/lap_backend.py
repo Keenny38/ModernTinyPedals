@@ -80,6 +80,7 @@ from ...userfile.lap_geometry import (  # noqa: F401  (limits_part & median_boun
 )
 from ...userfile.lap_library import is_foreign, track_of_folder
 from ...userfile.lap_marks import load_marks, remove_mark, set_mark
+from ...userfile.lap_offset import is_recorded
 from ...userfile.telemetry_lap import (
     LapData,
     LapFile,
@@ -163,7 +164,7 @@ from .lines import (
 from .math_channels import PRESETS as MATH_PRESETS
 from .math_channels import MathChannel
 from .models import DictListModel, FoldedListModel
-from .trace_data import TraceData
+from .trace_data import TraceData, align_laps
 
 logger = logging.getLogger(__name__)
 
@@ -657,14 +658,18 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._marks: dict[str, dict[str, dict]] = {}
         self._color_slots: dict[str, int] = {}  # lap color index of each shown lap, kept while shown
         self._failed: set[str] = set()  # checked laps that could not be read
-        # (main lap path, lap path): main lap & lap data checked, whether same circuit (imported lap, see
-        # same_imported_circuit; False: another circuit)
-        self._shape_checks: dict[tuple[str, str], tuple[LapData, LapData, bool | None]] = {}
+        # (main lap path, lap path): file stamps of both laps checked, whether same circuit (imported lap, see
+        # same_imported_circuit; False: another circuit), no lap data kept
+        self._shape_checks: dict[tuple[str, str], tuple[tuple[float, float], bool | None]] = {}
+        self._prepared = False  # shape checks & alignments of shown laps just measured in background (load_laps)
         self._compare_key = ""  # lap compared corner by corner & on gain map, first compared lap if not shown
         self._loader: threading.Thread | None = None
         self._exports = 0  # MoTeC & CSV export jobs running
         self._imports = 0  # MoTeC logs being imported
         self._loaded: dict[str, LapData | None] = {}
+        self._prepared_laps: list[tuple[dict, dict]] = []  # shape checks & aligned laps measured by loading thread
+        self._load_plan: tuple | None = None  # laps about to be shown compared by loading thread (see prepare_laps)
+        self._prepared_checks: dict[tuple[str, str], tuple[tuple[float, float], bool | None]] = {}
         self._load_total = 0
         self._load_message = ""  # status before loading started
         self._infos_track = ""  # track whose lap infos are read in background (shown once read)
@@ -680,6 +685,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._hidden = False  # page in background: lap files recorded meanwhile listed & read once shown
         self._refresh_pending = False  # lap files changed while hidden
         self._chosen_reference = ""  # reference lap picked by user (kept by live mode while on same circuit)
+        self._switched = False  # circuit of laps opened shown (see switch_circuit) until another track is loaded
         # Laps of another circuit opened: track folder shown (empty: added laps only), laps checked & reference lap
         # once that track is loaded (see switch_circuit)
         self._switch_to: tuple[str, set[str], str] | None = None
@@ -1339,6 +1345,9 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self.entries = [LapEntry(lap, info) for lap, info in zip(laps, self.track_infos(track, laps, indexed))]
         if switch is not None:  # laps opened (kept while track laps infos were read in background)
             self.checked, self.reference_key = set(switch[1]), switch[2]
+        elif self._switched and changed:  # circuit of laps opened left: reference picked there not carried over
+            self._chosen_reference = ""
+        self._switched = switch is not None or (self._switched and not changed)
         adopted = self.adopt_external()
         self.tracksChanged.emit()
         if changed or switch is not None:  # analysis of former circuit laps not carried over (distances)
@@ -1747,9 +1756,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         """Live mode: lap just recorded compared with reference lap picked by user if driven on same circuit, else with
         best lap of track (former best lap if new lap is best lap)"""
         reference = self.reference_key
-        listed = {entry.file.path for entry in self.all_entries()}
-        if not (reference and reference == self._chosen_reference and reference != new_lap.path and reference in listed
-                and self.same_circuit_paths(reference, new_lap.path)):
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        if not (reference and reference == self._chosen_reference and reference != new_lap.path and reference in infos
+                and not self.other_circuit((infos.get(new_lap.path, {}), new_lap.path), infos[reference], reference)
+                and not self.other_circuit(self.main_circuit(), infos[reference], reference)):
             best = [lap.path for lap in best_laps(laps, 2)]
             reference = next((path for path in best if path != new_lap.path), new_lap.path)
         self.checked = {new_lap.path, reference}
@@ -2611,17 +2621,22 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self._cache_mtime[path] = os.path.getmtime(path)
         except OSError:
             self._cache_mtime.pop(path, None)
-        limit = max(lap_viewer.LAP_CACHE_SIZE, len(self.checked))
+        limit = max(lap_viewer.LAP_CACHE_SIZE, len(self.checked) + 2)  # shown laps, main & anchor laps
         while len(self._lap_cache) > limit:
             oldest = next(iter(self._lap_cache))
             self._lap_cache.pop(oldest)
             self._cache_mtime.pop(oldest, None)
 
     def load_in_background(self, paths: list[str]):
-        """Read laps in a thread, charts updated once all are loaded (page stays responsive)"""
+        """Read laps in a thread, charts updated once all are loaded (page stays responsive), shape checks &
+        alignments of laps about to be shown measured there too (see prepare_laps)"""
         if self._loader is not None:
             return  # current selection shown once loaded (check_background_load)
+        plan, self._load_plan = self._load_plan, None
         results: dict[str, LapData | None] = {}
+        prepared: list[tuple[dict, dict]] = []
+        cached = {path: self._lap_cache.get(path) for path in (plan[0] + list(plan[1:3]) if plan else ())}
+        checks, aligned = dict(self._shape_checks), self.data.aligned_snapshot()
 
         def loading():
             for path in paths:
@@ -2633,7 +2648,13 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                 except Exception:  # any other failure: lap flagged unreadable, never loaded again in a loop
                     logger.exception("LAP VIEWER: unable to load %s", path)
                     results[path] = None
+            if plan is not None:
+                try:
+                    prepared.append(self.prepare_laps(plan, {**cached, **results}, checks, aligned))
+                except Exception:  # measured again when shown
+                    logger.exception("LAP VIEWER: unable to compare laps")
 
+        self._prepared_laps = prepared
         self._loaded = results
         self._loaded_paths = set(paths)
         self._load_total = len(paths)
@@ -2641,7 +2662,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._loader = threading.Thread(target=loading, daemon=True, name="Lap viewer loading")
         self._loader.start()
         self._load_timer.start()
-        self.set_status(trm(f"Loading {len(paths)} lap{'s' if len(paths) > 1 else ''}..."), False)
+        if paths:
+            self.set_status(trm(f"Loading {len(paths)} lap{'s' if len(paths) > 1 else ''}..."), False)
+        else:  # laps loaded: imported laps compared in background
+            self.set_status(tr("Reading laps..."), False)
 
     @Slot()
     def check_background_load(self):
@@ -2661,6 +2685,11 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             self.store_lap(path, lap)
         self._failed.update(failed)  # not read again by load_laps below (read again once checked again, refresh)
         self._loaded = {}
+        prepared, self._prepared_laps = self._prepared_laps, []
+        for checks, aligned in prepared:  # used by load_laps below if laps are still the same
+            self._prepared_checks.update(checks)  # laps found on another circuit told by drop_other_shapes
+            self.data.keep_aligned(aligned)
+            self._prepared = True
         if failed:
             self.set_status(trm(f"Unable to load lap: {html.escape(os.path.basename(failed[0]))}"))
         else:  # message shown before loading (new lap) shown again
@@ -2699,9 +2728,16 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         for path in ordered:  # unreadable lap checked again: read again (file may be readable now, antivirus lock)
             if path not in self._failed and path in self._lap_cache and self._lap_cache[path] is None:
                 del self._lap_cache[path]
-        missing = [path for path in ordered if path not in self._lap_cache]
-        if self._loader is not None or len(missing) >= lap_viewer.BACKGROUND_LOAD_COUNT:
+        main_path = self.main_circuit()[1]
+        anchor_path = self.track_anchor(ordered)
+        needed = [*ordered, *(path for path in (main_path, anchor_path) if path and path not in ordered)]
+        missing = [path for path in needed if path not in self._lap_cache]
+        prepared, self._prepared = self._prepared, False
+        if (self._loader is not None or len(missing) >= lap_viewer.BACKGROUND_LOAD_COUNT
+                or (not prepared and self.needs_preparing(ordered, main_path, anchor_path))):
             self.update_list_state(self.data.laps)
+            stamps = {path: self.shape_stamps(main_path, path) for path in ordered}
+            self._load_plan = (ordered, main_path, anchor_path, self.reference_key, stamps)
             self.load_in_background(missing)
             return
         entries = {entry.file.path: entry for entry in self.all_entries()}
@@ -2722,7 +2758,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
             for path, lap_data in loaded if lap_data is not None
         ]
         self.build_labels(laps)
-        self.data.set_laps(laps, self.reference_key)
+        anchor_data = self.read_lap(anchor_path) if anchor_path and anchor_path in self._lap_cache else None
+        self.data.set_laps(laps, self.reference_key, (anchor_path, anchor_data) if anchor_data is not None else None)
         self.apply_track_sectors()
         self.update_list_state(laps)
         self._warning = self.laps_warning(laps)
@@ -2772,7 +2809,98 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if all(names) and names[0].casefold() != names[1].casefold():
             return True
         checked = self._shape_checks.get((main_path, path))
-        return checked is not None and checked[2] is False
+        return checked is not None and checked[1] is False and checked[0] == self.shape_stamps(main_path, path)
+
+    def lap_stamp(self, path: str) -> float:
+        """File time of lap (loaded lap: time of file read), -1 if no file"""
+        stamp = self._cache_mtime.get(path)
+        if stamp is not None:
+            return stamp
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return -1.0
+
+    def shape_stamps(self, main_path: str, path: str) -> tuple[float, float]:
+        """File stamps of main lap & lap a shape check is valid for (see drop_other_shapes)"""
+        return self.lap_stamp(main_path), self.lap_stamp(path)
+
+    @staticmethod
+    def shape_check(main: LapData, lap_data: LapData, path: str) -> bool | None:
+        """Whether lap was driven on circuit of main lap from telemetry (see same_imported_circuit), None if unknown
+        or if its telemetry cannot be compared (damaged log: logged, lap kept)"""
+        if is_recorded(main) and is_recorded(lap_data):
+            return None
+        try:
+            return same_imported_circuit(main, lap_data)
+        except Exception:  # unexpected values in an imported log: lap kept, page never stuck
+            logger.exception("LAP VIEWER: unable to compare circuit of %s", path)
+            return None
+
+    @classmethod
+    def prepare_laps(cls, plan: tuple, laps: dict[str, LapData | None],
+                     checks: dict[tuple[str, str], tuple[tuple[float, float], bool | None]],
+                     aligned: dict) -> tuple[dict, dict]:
+        """Shape checks & alignments of laps about to be shown measured in background thread (slow on a long track:
+        page stays responsive), same as drop_other_shapes & TraceData.set_laps then find them done: new shape checks
+        & aligned laps (see align_laps)
+
+        plan: shown lap paths (reference first), main lap path, anchor lap path, reference lap path, file stamps of
+        each shown lap shape check (see shape_stamps). Never touches page state (thread).
+        """
+        ordered, main_path, anchor_path, reference_key, stamps = plan
+        main = laps.get(main_path)
+        found = {}
+        others = set()
+        for path in ordered:
+            lap_data = laps.get(path)
+            if main is None or lap_data is None or path == main_path:
+                continue
+            checked = checks.get((main_path, path))
+            if checked is None or checked[0] != stamps[path]:
+                checked = found[(main_path, path)] = (stamps[path], cls.shape_check(main, lap_data, path))
+            if checked[1] is False:
+                others.add(path)
+        shown = [(path, lap_data) for path in ordered if path not in others
+                 for lap_data in (laps.get(path),) if lap_data is not None]
+        anchor_data = laps.get(anchor_path) if anchor_path else None
+        anchor = (anchor_path, anchor_data) if anchor_data is not None else None
+        return found, align_laps(shown, reference_key, anchor, aligned)[0]
+
+    def needs_preparing(self, ordered: list[str], main_path: str, anchor_path: str) -> bool:
+        """Whether showing laps (all loaded) measures shape checks or lap offsets of imported laps long enough to
+        freeze the page (long track, many laps): done in background first (see prepare_laps)"""
+        cache = self._lap_cache
+        main = cache.get(main_path)
+        shown = []
+        work = 0
+        for path in ordered:
+            lap_data = cache.get(path)
+            if lap_data is None:
+                continue
+            if main is not None and path != main_path and not (is_recorded(main) and is_recorded(lap_data)):
+                checked = self._shape_checks.get((main_path, path))
+                if checked is None or checked[0] != self.shape_stamps(main_path, path):
+                    work += len(lap_data)
+                elif checked[1] is False:
+                    continue
+            shown.append((path, lap_data))
+        anchor_data = cache.get(anchor_path) if anchor_path else None
+        anchor = (anchor_path, anchor_data) if anchor_data is not None else None
+        work += self.data.alignment_work(shown, self.reference_key, anchor)
+        return work >= lap_viewer.BACKGROUND_PREPARE_SAMPLES
+
+    def track_anchor(self, paths: list[str]) -> str:
+        """Lap recorded by the app an imported reference lap is aligned on when no shown lap was recorded by the app
+        (see TraceData.aligned_laps): main lap, else newest lap of track recorded by the app, empty if not needed"""
+        infos = {entry.file.path: entry.info for entry in self.all_entries()}
+        if "combo" in infos.get(self.reference_key, {"combo": ""}) or any(
+                "combo" in infos.get(path, {}) for path in paths):
+            return ""
+        main_path = self.main_circuit()[1]
+        candidates = [main_path, *(entry.file.path for entry in self.entries)]
+        return next((path for path in candidates if path != self.reference_key and path not in self._failed
+                     and "combo" in infos.get(path, {})), "")
 
     def drop_other_shapes(self, loaded: list[tuple[str, LapData | None]]) -> list[tuple[str, LapData | None]]:
         """Loaded laps without imported laps found driven on another circuit than main lap from their telemetry
@@ -2784,14 +2912,19 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         if main is None:
             return loaded
         checks = {key: value for key, value in self._shape_checks.items() if key[0] == main_path}
+        prepared, self._prepared_checks = self._prepared_checks, {}
         others = []
         for path, lap_data in loaded:
             if lap_data is None or path == main_path:
                 continue
+            stamps = self.shape_stamps(main_path, path)
             found = checks.get((main_path, path))
-            if found is None or found[0] is not main or found[1] is not lap_data:
-                found = checks[(main_path, path)] = (main, lap_data, same_imported_circuit(main, lap_data))
-            if found[2] is False:
+            if found is None or found[0] != stamps:  # measured in background unless few samples (see prepare_laps)
+                found = prepared.get((main_path, path))
+                if found is None or found[0] != stamps:
+                    found = (stamps, self.shape_check(main, lap_data, path))
+                checks[(main_path, path)] = found
+            if found[1] is False:
                 others.append(path)
         self._shape_checks = checks
         if not others:
@@ -2912,6 +3045,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         self._edges_cache = ()
         self._edge_normals = ()
         self._g_points = []
+        self._shape_checks.clear()
 
     @Slot(float, float)
     def setChartView(self, start: float, end: float):

@@ -452,3 +452,55 @@ def test_laptime_format_rounded_before_split(seconds, short, full):
 
     assert sec2laptime(seconds) == short
     assert sec2laptime_full(seconds) == full
+
+
+def test_sector_best_s3_and_personal_best_ignored_from_invalid_lap(tele, tmp_path):
+    """Lap invalidated in S3 (shortcut): flag reset when line is crossed, before S3 of the finished lap is known"""
+    session, alltime = SectorData(), SectorData()
+    gen = module_sectors.record_sectors(session, alltime, f"{tmp_path}/")
+
+    def lap(start: float, s1: float, s2: float, invalid_s3: bool = False):
+        tele.update({"timing.start": start, "timing.current_laptime": 5.0, "lap.sector_index": 0})
+        gen.send(0)
+        tele.update({"lap.sector_index": 1, "timing.current_sector1": s1, "timing.current_laptime": s1 + 1})
+        gen.send(0)
+        tele.update({"lap.sector_index": 2, "timing.current_sector2": s1 + s2, "timing.current_laptime": s1 + s2 + 1})
+        gen.send(0)
+        if invalid_s3:
+            tele.update({"lap.invalidated": True, "timing.current_laptime": s1 + s2 + 5})
+            gen.send(0)
+
+    def cross(start: float, lap_time: float, s1: float, s2: float):
+        """Line crossed: new lap start time, last lap S3 known (invalid flag of finished lap may stay a moment)"""
+        tele.update({"timing.start": start, "timing.current_laptime": 0.5, "lap.sector_index": 0,
+                     "timing.last_laptime": lap_time, "timing.last_sector2": s1 + s2,
+                     "timing.current_sector1": -1.0, "timing.current_sector2": -1.0})
+        gen.send(0)
+        tele.update({"lap.invalidated": False, "timing.current_laptime": 2.0})
+        gen.send(0)
+
+    lap(0.0, 30.0, 30.0)
+    cross(90.0, 90.0, 30.0, 30.0)
+    assert alltime.sectorBestTB == pytest.approx([30.0, 30.0, 30.0])
+    lap(90.0, 30.0, 30.0, invalid_s3=True)
+    cross(170.0, 80.0, 30.0, 30.0)  # S3 of 20 s (cut): neither best S3 nor personal best
+    assert session.sectorPrev[2] == pytest.approx(20.0)
+    assert alltime.sectorBestTB == pytest.approx([30.0, 30.0, 30.0])
+    assert alltime.sectorBestPB == pytest.approx([30.0, 30.0, 30.0])
+    assert session.sectorBestPB == pytest.approx([30.0, 30.0, 30.0])
+    lap(170.0, 30.0, 30.0)  # clean lap after invalid one counts
+    cross(258.0, 88.0, 30.0, 30.0)
+    assert alltime.sectorBestTB == pytest.approx([30.0, 30.0, 28.0])
+    assert alltime.sectorBestPB == pytest.approx([30.0, 30.0, 28.0])
+    # Line crossed before game updates lap start time: flag of lap in progress used
+    tele.update({"lap.sector_index": 1, "timing.current_sector1": 30.0, "timing.current_laptime": 31.0})
+    gen.send(0)
+    tele.update({"lap.sector_index": 2, "timing.current_sector2": 60.0, "timing.current_laptime": 61.0})
+    gen.send(0)
+    tele.update({"lap.invalidated": True, "timing.current_laptime": 65.0})
+    gen.send(0)
+    tele.update({"lap.sector_index": 0, "timing.last_laptime": 75.0, "timing.last_sector2": 60.0,
+                 "timing.current_laptime": 75.0})
+    gen.send(0)
+    assert session.sectorPrev[2] == pytest.approx(15.0)
+    assert alltime.sectorBestTB[2] == pytest.approx(28.0)

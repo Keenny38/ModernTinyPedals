@@ -64,6 +64,9 @@ COLORBLIND_GAIN = QColor("#3B82F6")  # gain / loss colors told apart with red-gr
 COLORBLIND_LOSS = QColor("#F97316")
 RELEASE_DELAY = 180_000  # ms hidden (page in background) before loaded laps are released
 BACKGROUND_LOAD_COUNT = 1  # laps to read loaded in background from this count (window stays responsive)
+# Imported laps compared (circuit shape check, distance offset) in background from this many samples to compare
+# (about one Nordschleife lap at 10 Hz: a tenth of a second or more per lap)
+BACKGROUND_PREPARE_SAMPLES = 20000
 
 
 class Channel(NamedTuple):

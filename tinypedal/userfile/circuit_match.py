@@ -38,7 +38,7 @@ import re
 import unicodedata
 from collections.abc import Sequence
 
-from .lap_offset import column_on_grid, has_positions, is_recorded, speed_correlation
+from .lap_offset import has_positions, is_recorded, positions_on_grid, speed_correlation
 from .telemetry_lap import LapData, distance_scale, lap_end_distance, lap_length
 
 SHAPE_POINTS = 400  # driven line points compared (along lap distance)
@@ -91,10 +91,11 @@ def names_match(first: str, second: str) -> bool | None:
 
 
 def line_points(lap: LapData, count: int) -> list[complex]:
-    """World positions (x + z j) at count equal steps of lap distance from lap start to lap end"""
+    """World positions (x + z j) at count equal steps of lap distance from lap start to lap end (samples without a
+    finite position left out, see has_positions)"""
     end = lap_end_distance(lap)
     grid = [index * end / count for index in range(count)]
-    xs, zs = column_on_grid(lap, "pos_x", grid), column_on_grid(lap, "pos_z", grid)
+    xs, zs = positions_on_grid(lap, grid)
     return [complex(x, z) for x, z in zip(xs, zs)]
 
 

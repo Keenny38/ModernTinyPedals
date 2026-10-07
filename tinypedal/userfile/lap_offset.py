@@ -33,6 +33,7 @@ lap driven from the real line.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Sequence
 
@@ -40,6 +41,7 @@ from .corner_analysis import resample_sorted
 from .telemetry_lap import (
     LAP_END_METERS,
     LapData,
+    distance_scale,
     interpolate,
     lap_end_distance,
     lap_length,
@@ -63,7 +65,10 @@ POSITION_SAMPLE = 10.0  # meters between compared lap points matched on referenc
 POSITION_MATCH = 12.0  # meters, compared point on reference line if this close to it
 POSITION_MIN_SHARE = 0.8  # share of compared points on reference line (same circuit & coordinates)
 POSITION_SPREAD = 10.0  # meters, offsets of most points this close to their median (one offset all along)
+POSITION_MIN_FINITE = 0.9  # share of samples with a finite world position (logger gaps ignored), else no positions
 OFFSET_INFO = "distance_offset"  # lap info: meters added to lap distances (aligned lap)
+
+logger = logging.getLogger(__name__)
 
 
 def is_recorded(lap: LapData) -> bool:
@@ -89,10 +94,35 @@ def column_on_grid(lap: LapData, column: str, grid: Sequence[float], scale: floa
     return resample_sorted(distances, values, grid)
 
 
+def finite_positions(lap: LapData) -> tuple[Sequence[float], Sequence[float], Sequence[float]]:
+    """Distances (going forward) & world positions x, z of samples with a finite position (no GPS fix, logger gap:
+    NaN or infinite samples left out)"""
+    distances, xs = monotonic_distance(lap, "pos_x")
+    zs = monotonic_distance(lap, "pos_z")[1]
+    if math.isfinite(sum(xs)) and math.isfinite(sum(zs)):
+        return distances, xs, zs
+    kept = [index for index, (x, z) in enumerate(zip(xs, zs)) if math.isfinite(x) and math.isfinite(z)]
+    return [distances[index] for index in kept], [xs[index] for index in kept], [zs[index] for index in kept]
+
+
 def has_positions(lap: LapData) -> bool:
+    """Whether lap has world positions (moving, finite for most samples, see POSITION_MIN_FINITE)"""
     columns = lap.columns
-    return all(len(columns.get(name) or ()) == len(lap) and max(columns[name]) > min(columns[name])
-               for name in ("pos_x", "pos_z")) if len(lap) >= 2 else False
+    if len(lap) < 2 or any(len(columns.get(name) or ()) != len(lap) for name in ("pos_x", "pos_z")):
+        return False
+    distances, xs, zs = finite_positions(lap)
+    if len(distances) < 2 or len(xs) < POSITION_MIN_FINITE * len(lap):
+        return False
+    return max(xs) > min(xs) and max(zs) > min(zs)
+
+
+def positions_on_grid(lap: LapData, grid: Sequence[float], scale: float = 1.0) -> tuple[list[float], list[float]]:
+    """World positions x & z along lap distance (multiplied by scale) resampled at grid distances, samples without
+    a finite position left out (lap must have positions, see has_positions)"""
+    distances, xs, zs = finite_positions(lap)
+    if scale != 1.0:
+        distances = [distance * scale for distance in distances]
+    return resample_sorted(distances, xs, grid), resample_sorted(distances, zs, grid)
 
 
 def projected(grid: Sequence[float], xs: Sequence[float], zs: Sequence[float], index: int, x: float, z: float
@@ -118,7 +148,7 @@ def position_offset(reference: LapData, compare: LapData, scale: float, length: 
     if not has_positions(reference) or not has_positions(compare):
         return None
     grid = [index * POSITION_STEP for index in range(int(length / POSITION_STEP) + 1)]
-    xs, zs = column_on_grid(reference, "pos_x", grid), column_on_grid(reference, "pos_z", grid)
+    xs, zs = positions_on_grid(reference, grid)
     cells: dict[tuple[int, int], list[int]] = {}
     for index, (x, z) in enumerate(zip(xs, zs)):
         cells.setdefault((math.floor(x / POSITION_CELL), math.floor(z / POSITION_CELL)), []).append(index)
@@ -127,7 +157,7 @@ def position_offset(reference: LapData, compare: LapData, scale: float, length: 
     if len(points) < 10:
         return None
     own = [point / scale for point in points]
-    cxs, czs = column_on_grid(compare, "pos_x", own), column_on_grid(compare, "pos_z", own)
+    cxs, czs = positions_on_grid(compare, own)
     offsets = []
     for point, x, z in zip(points, cxs, czs):
         cell_x, cell_z = math.floor(x / POSITION_CELL), math.floor(z / POSITION_CELL)
@@ -288,3 +318,19 @@ def aligned_lap(reference: LapData, compare: LapData, scale: float = 1.0) -> tup
         return compare, 0.0
     shifted = shifted_lap(compare, offset / scale)
     return (shifted, offset) if shifted is not compare else (compare, 0.0)
+
+
+def aligned_on(reference: LapData, compare: LapData) -> tuple[LapData, float]:
+    """Compared lap aligned on reference lap (lap distances scaled to reference length, see distance_scale) & offset
+    applied, lap itself & 0 if not shifted or if its telemetry cannot be compared (damaged log: logged, lap kept)"""
+    try:
+        return aligned_lap(reference, compare, distance_scale(reference, compare))
+    except Exception:  # unexpected values in an imported log: lap shown as is, never the whole page stuck
+        logger.exception("LAP OFFSET: unable to align %s on %s", compare.name, reference.name)
+        return compare, 0.0
+
+
+def anchored(reference: LapData, anchor: LapData | None) -> bool:
+    """Whether reference lap (imported log) is aligned on anchor lap (recorded by the app: distance zero at the line)
+    before other laps are aligned on it"""
+    return anchor is not None and anchor is not reference and not is_recorded(reference) and is_recorded(anchor)

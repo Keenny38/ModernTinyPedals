@@ -55,14 +55,18 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from ...i18n import tr, trm
 from ...setting import cfg
 from ...userfile.lap_library import import_foreign_job
+from ...userfile.lap_offset import aligned_on, is_recorded
 from ...userfile.motec_ld import export_lap, export_lap_job, import_ld_job
 from ...userfile.telemetry_lap import (
     IMPORT_FOLDER,
     LapData,
     export_series_csv,
+    lap_end_distance,
     lap_folder_name,
+    lap_length,
     lap_stem,
     lap_time_of,
+    length_ratio,
     monotonic_distance,
     official_lap_time,
     same_circuit,
@@ -130,10 +134,30 @@ class LapExports(BackendBase):
         recorded = self.entries[0].info if self.entries else {}
         return self._track if same_circuit(LapData("", {}, recorded), LapData("", {}, entry.info)) else ""
 
+    def delta_best_lap(self, path: str, lap: LapData) -> tuple[LapData, float]:
+        """Lap used as delta best & factor bringing its distances to game track distance: imported lap aligned on a lap
+        recorded by the app (distance zero at the line: lap as shown, else aligned on reference or newest recorded lap
+        of track) & scaled to track length (driven distance), lap recorded by the app as is"""
+        if is_recorded(lap):
+            return lap, 1.0
+        shown = next((plot.data for plot in self.data.laps if plot.key == path), None)
+        entries = {entry.file.path: entry for entry in self.entries}
+        recorded = next((entry for entry in (entries.get(self.reference_key), *self.entries)
+                         if entry is not None and "combo" in entry.info and entry.file.path != path), None)
+        aligned = shown
+        if aligned is None:
+            anchor = self.read_lap(recorded.file.path) if recorded is not None else None
+            aligned = aligned_on(anchor, lap)[0] if anchor is not None else lap
+        length = lap_length(LapData("", {}, recorded.info)) if recorded is not None else lap_length(aligned)
+        return aligned, length_ratio(length, lap_end_distance(aligned)) if length > 0 else 1.0
+
     @staticmethod
-    def delta_best_rows(lap: LapData, lap_time: float) -> list[tuple[float, float]]:
-        """Distance & lap time rows of delta best file (same layout as module_delta: start, every meter, end)"""
+    def delta_best_rows(lap: LapData, lap_time: float, scale: float = 1.0) -> list[tuple[float, float]]:
+        """Distance & lap time rows of delta best file (same layout as module_delta: start, every meter, end), lap
+        distances multiplied by scale (game track distance)"""
         distances, times = monotonic_distance(lap)
+        if scale != 1.0:
+            distances = [distance * scale for distance in distances]
         rows = [(0.0, 0.0)]
         for distance, seconds in zip(distances, times):
             if distance > rows[-1][0] + 1.0 and seconds > rows[-1][1] and 0 < seconds < lap_time:
@@ -173,13 +197,15 @@ class LapExports(BackendBase):
             defaultButton=QMessageBox.StandardButton.No)
         if confirm != QMessageBox.StandardButton.Yes:
             return
-        if self.write_delta_best(target, lap, lap_time):
+        lap, scale = self.delta_best_lap(path, lap)
+        if self.write_delta_best(target, lap, lap_time, scale):
             self.set_status(trm(f"Delta best of {html.escape(name)}: {format_laptime(lap_time)} "
                                 "(used next time you drive)"))
 
-    def write_delta_best(self, target: str, lap: LapData, lap_time: float) -> bool:
-        """Write delta best file of lap, former file kept as backup (see backup_delta_best)"""
-        rows = self.delta_best_rows(lap, lap_time)
+    def write_delta_best(self, target: str, lap: LapData, lap_time: float, scale: float = 1.0) -> bool:
+        """Write delta best file of lap (distances multiplied by scale), former file kept as backup (see
+        backup_delta_best)"""
+        rows = self.delta_best_rows(lap, lap_time, scale)
         if len(rows) < 12:
             self.set_status(tr("This lap has no lap time: not usable as delta best."))
             return False
