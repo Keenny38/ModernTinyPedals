@@ -67,6 +67,8 @@ Source: "..\dist\{#AppFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 ; OpenXR layer copies made by the app (one folder per layer build, outside lib so updates never touch a DLL
 ; loaded by a game). A copy still loaded by a running game stays until removed by hand.
 Type: filesandordirs; Name: "{app}\openxr_layer"
+; Copies to an ASCII folder when the app folder has non-ASCII characters (OpenXR loader reads ANSI paths)
+Type: filesandordirs; Name: "{commonappdata}\ModernTinyPedals\openxr_layer"
 
 [Icons]
 ; Shortcut icon matches Windows light / dark mode at install time (white & gold icon when dark)
@@ -91,24 +93,27 @@ end;
 
 // VR overlay: the app copies its OpenXR layer from lib\openxr_layer_bundle to {app}\openxr_layer\<build>\ and
 // registers that TinyPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
-// Removed on uninstall: OpenXR games must never look for a layer whose files are gone.
+// Non-ASCII app folder: registered by its 8.3 short path, or copied to {commonappdata}\ModernTinyPedals\openxr_layer.
+// Removed on uninstall (after files are deleted): OpenXR games must never look for a layer whose files are gone.
 const
   OpenXRLayersKey = 'SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit';
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Names: TArrayOfString;
-  AppPath, Name: String;
+  AppPath, CopyPath, Name: String;
   I: Integer;
 begin
-  if CurUninstallStep <> usUninstall then
+  if CurUninstallStep <> usPostUninstall then
     exit;
   AppPath := Lowercase(AddBackslash(ExpandConstant('{app}')));
+  CopyPath := Lowercase(AddBackslash(ExpandConstant('{commonappdata}')) + 'ModernTinyPedals\openxr_layer\');
   if RegGetValueNames(HKCU, OpenXRLayersKey, Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
     begin
       Name := Lowercase(Names[I]);
-      if (Pos(AppPath, Name) = 1) and (Pos('tinypedalxrlayer.json', Name) > 0) then
+      if (Pos('tinypedalxrlayer.json', Name) > 0) and ((Pos(AppPath, Name) = 1) or (Pos(CopyPath, Name) = 1)
+          or not FileExists(Names[I])) then
         RegDeleteValue(HKCU, OpenXRLayersKey, Names[I]);
     end;
 end;

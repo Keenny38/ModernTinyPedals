@@ -39,6 +39,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import math
+import os
 import threading
 import zlib
 from collections.abc import Callable
@@ -61,6 +62,7 @@ STEAMVR_RETRY_MS = 5000  # SteamVR started after app: overlay created within thi
 OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per second (copied in game frame)
 OPENXR_MAX_TILES = 8  # tiles (quad layers) at most, room left for the game's layers (runtimes allow 16 or more)
 OPENXR_TILE_GAP = 32  # widgets closer than this (pixels) share a tile
+HEARTBEAT_INTERVAL_MS = 500  # app heartbeat for the OpenXR layer, whatever the update interval (layer timeout 2 s)
 
 
 class MirrorWindow(QWidget):
@@ -392,6 +394,9 @@ class VROverlay(QObject):
         super().__init__()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update_overlay)
+        self._heartbeat_timer = QTimer(self)  # app alive for the OpenXR layer (update interval may be longer)
+        self._heartbeat_timer.setInterval(HEARTBEAT_INTERVAL_MS)
+        self._heartbeat_timer.timeout.connect(self.__heartbeat)
         # SteamVR (OpenVR)
         self._openvr = None
         self._overlay = None
@@ -415,6 +420,9 @@ class VROverlay(QObject):
         self._xr_state: tuple | None = None  # last layer state logged
         self._xr_frames: tuple[int, int] | None = None  # (pid, frames_shown) of layer at last tick
         self._xr_shown_at: int | None = None  # tick (ms) when layer frames_shown last grew
+        self._xr_layer_present = False  # layer heartbeat recent (OpenXR game running): tiles written
+        self._xr_mismatch_reported: set[int] = set()  # game processes running a layer of another version
+        self._xr_errors_shown: set[str] = set()  # layer setup problems reported once
         # Mirror window
         self._mirror: MirrorWindow | None = None
         self._mirror_checksum: int | None = None
@@ -476,22 +484,37 @@ class VROverlay(QObject):
         if not vr_shared.WINDOWS:
             return False
         if self._xr is None:
+            try:  # entries of missing files make the OpenXR loader fail every OpenXR game: removed first
+                vr_shared.remove_missing_layers()
+            except Exception:
+                logger.debug("VR overlay: OpenXR layer registry cleanup failed", exc_info=True)
             manifest = vr_shared.find_layer_manifest()
             if manifest is None:
                 logger.info("VR overlay: OpenXR layer not found (from source: build native/openxr_layer)")
                 return False
-            manifest = vr_shared.prepare_layer(manifest)  # release: copy outside lib, rewritten by updates
-            if not vr_shared.register_layer(manifest):
+            installed = vr_shared.prepare_layer(manifest)  # release: copy outside lib, rewritten by updates
+            loadable = vr_shared.loadable_manifest(installed)  # ASCII path (OpenXR loader reads ANSI paths)
+            if loadable is None:
+                self.__report_once(f"VR overlay: OpenXR layer not usable from a folder with non-ASCII characters "
+                                   f"({os.path.dirname(installed)}), no ASCII folder writable for a copy: "
+                                   f"install the app in a folder with ASCII characters only")
                 return False
+            if not vr_shared.register_layer(loadable):
+                return False
+            vr_shared.remove_old_copies(installed, loadable)  # after registering: never an entry without DLL
             writer = vr_shared.SharedFrameWriter()
             if not writer.open():
                 return False
+            if writer.warning:
+                self.__report_once(writer.warning)
             self._xr = writer
             self._xr_checksum = self._xr_written_at = None
             self._xr_dirty = False
             self._xr_state = None
             self._xr_frames = self._xr_shown_at = None
-            logger.info("ENABLED: VR overlay (OpenXR layer %s)", manifest)
+            self._xr_layer_present = False
+            self._heartbeat_timer.start()
+            logger.info("ENABLED: VR overlay (OpenXR layer %s)", loadable)
         self._xr.set_placement(placement_from(setting))
         return True
 
@@ -504,7 +527,9 @@ class VROverlay(QObject):
             logger.debug("VR overlay: OpenXR layer unregister failed", exc_info=True)
 
     def __close_openxr(self):
+        self._heartbeat_timer.stop()
         writer, self._xr = self._xr, None
+        self._xr_layer_present = False
         self._xr_checksum = self._xr_written_at = None
         self._xr_dirty = False
         self._xr_drawing = False
@@ -513,9 +538,32 @@ class VROverlay(QObject):
             writer.close()
             logger.info("DISABLED: VR overlay (OpenXR layer)")
 
+    def __heartbeat(self):
+        """App alive for the layer every HEARTBEAT_INTERVAL_MS; OpenXR game started: tiles written now"""
+        writer = self._xr
+        if writer is None:
+            self._heartbeat_timer.stop()
+            return
+        now = vr_shared.tick_ms()
+        writer.heartbeat(now)
+        status = writer.layer_status()
+        if status is not None and status.recent(now) and not self._xr_layer_present:
+            self.update_overlay()
+
     def __update_openxr_status(self, now: int):
-        """Layer state of OpenXR game: logged on change, SteamVR overlay hidden while layer draws"""
+        """Layer state of OpenXR game: logged on change, SteamVR overlay hidden while layer draws.
+        Tiles written only while a layer runs (an OpenXR game): written at once when one appears,
+        hidden when it goes (nothing outdated shown by the next game)."""
         status = self._xr.layer_status() if self._xr is not None else None
+        present = status is not None and status.recent(now)
+        if present != self._xr_layer_present:
+            self._xr_layer_present = present
+            if present:
+                self._xr_dirty = True  # written on this tick, rate limit ignored
+                self._xr_written_at = None
+            elif self._xr is not None:
+                self._xr.hide()
+                self._xr_checksum = None
         frames = (status.pid, status.frames_shown) if status is not None else None
         last = self._xr_frames
         if frames is not None and last is not None and frames[0] == last[0] and frames[1] > last[1]:
@@ -538,6 +586,10 @@ class VROverlay(QObject):
                                    "(protocol %s, app %s), nothing drawn: restart the game "
                                    "(SteamVR overlay or mirror window still work)",
                                    status.pid, status.version, vr_shared.VERSION)
+                    if status.pid not in self._xr_mismatch_reported:
+                        self._xr_mismatch_reported.add(status.pid)
+                        app_signal.error.emit("VR overlay: restart the VR game to show the overlay in it "
+                                              "(game started before the app was updated)")
                 else:
                     logger.warning("VR overlay: OpenXR layer stopped in game (XrResult %s)", status.last_result)
             elif self._xr_drawing:
@@ -556,6 +608,9 @@ class VROverlay(QObject):
             self._xr_dirty = False
             writer.hide()
             self._xr_checksum = None
+            return
+        if not self._xr_layer_present:  # no OpenXR game: nothing composed (written once a layer appears)
+            self._xr_dirty = False
             return
         if self._xr_written_at is not None and 0 <= now - self._xr_written_at < OPENXR_MIN_INTERVAL_MS:
             self._xr_dirty = True  # written on a later tick
@@ -724,13 +779,18 @@ class VROverlay(QObject):
             hide = self._xr_drawing
             if hide != self._hidden_for_openxr:
                 self._hidden_for_openxr = hide
-                try:
-                    self.__steamvr_show(self._has_image and not hide)
-                except Exception as error:
-                    self.__steamvr_stopped(error)
-                    overlay = None
-                else:
-                    logger.info("VR overlay: SteamVR overlay %s", "hidden (OpenXR layer draws it)" if hide else "shown")
+                if hide:
+                    try:
+                        self.__steamvr_show(False)
+                    except Exception as error:
+                        self.__steamvr_stopped(error)
+                        overlay = None
+                    else:
+                        logger.info("VR overlay: SteamVR overlay hidden (OpenXR layer draws it)")
+                else:  # image not sent while hidden: composed & sent now, then shown
+                    self._compose_key = None
+                    self._checksum = None
+                    logger.info("VR overlay: SteamVR overlay shown")
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
         if self._xr_dirty:  # tiles held back by write rate limit
             self.__write_openxr(widgets, now)
@@ -739,6 +799,9 @@ class VROverlay(QObject):
             return  # no overlay window painted, moved, shown or hidden since last update
         self._compose_key = key
         self.__write_openxr(widgets, now)
+        if overlay is not None and self._hidden_for_openxr:
+            overlay = None  # hidden for OpenXR: no image sent (~4 MB), sent again once shown
+            self._checksum = None
         if self._mirror is None and overlay is None:
             return  # OpenXR layer only: whole canvas image not needed
         image = compose_widgets(widgets)
@@ -808,6 +871,14 @@ class VROverlay(QObject):
             self.__close_openxr()
         except Exception:
             logger.debug("VR overlay: OpenXR close failed", exc_info=True)
+
+    def __report_once(self, message: str):
+        """Problem reported to the user once (enable runs again on each reload), logged each time"""
+        if message in self._xr_errors_shown:
+            logger.warning(message)
+            return
+        self._xr_errors_shown.add(message)
+        self.__fail(message)
 
     @staticmethod
     def __fail(message: str):

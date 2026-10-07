@@ -389,13 +389,99 @@ def test_register_layer(tmp_path):
     assert values == {OTHER_LAYER: 0, os.path.abspath(manifest): 0}  # app moved: old entry replaced
     assert vr_shared.register_layer(manifest, reg)  # idempotent
     assert values == {OTHER_LAYER: 0, os.path.abspath(manifest): 0}
-    values[os.path.abspath(manifest)] = 1  # disabled by user (OpenXR tools): enabled again
-    vr_shared.register_layer(manifest, reg)
-    assert values[os.path.abspath(manifest)] == 0
     assert vr_shared.registered_layers(reg) == {os.path.abspath(manifest): 0}
     assert vr_shared.unregister_layer(reg) == 1
     assert values == {OTHER_LAYER: 0}  # other layers untouched
     assert vr_shared.unregister_layer(reg) == 0
+
+
+def test_register_respects_layer_disabled_by_user(tmp_path, caplog):
+    """Disabled in an OpenXR layer tool (value 1): never enabled again, also when the app moved"""
+    manifest = os.path.abspath(str(tmp_path / vr_shared.LAYER_MANIFEST))
+    reg = FakeWinreg({OTHER_LAYER: 0, manifest: 1})
+    with caplog.at_level("WARNING", logger="tinypedal.vr_shared"):
+        assert vr_shared.register_layer(manifest, reg)
+    assert reg.keys[vr_shared.REGISTRY_KEY] == {OTHER_LAYER: 0, manifest: 1}
+    assert any("disabled by user" in record.getMessage() for record in caplog.records)
+    moved = os.path.abspath(str(tmp_path / "new" / vr_shared.LAYER_MANIFEST))
+    assert vr_shared.register_layer(moved, reg)
+    assert reg.keys[vr_shared.REGISTRY_KEY] == {OTHER_LAYER: 0, moved: 1}
+
+
+def test_register_adds_new_entry_before_removing_old(tmp_path):
+    """Never a moment without a TinyPedal entry (game starting meanwhile keeps its overlay)"""
+    manifest = os.path.abspath(str(tmp_path / vr_shared.LAYER_MANIFEST))
+    old = r"C:\Old\openxr_layer\0123\TinyPedalXrLayer.json"
+    reg = FakeWinreg({old: 0})
+    calls = []
+    set_value, delete_value = reg.SetValueEx, reg.DeleteValue
+    reg.SetValueEx = lambda *args: calls.append("set") or set_value(*args)
+    reg.DeleteValue = lambda *args: calls.append("delete") or delete_value(*args)
+    assert vr_shared.register_layer(manifest, reg)
+    assert calls == ["set", "delete"] and reg.keys[vr_shared.REGISTRY_KEY] == {manifest: 0}
+
+
+def test_remove_missing_layers(tmp_path):
+    """Entries of missing manifest or DLL make the OpenXR loader fail every OpenXR game: removed"""
+    complete = make_layer(tmp_path / "complete")
+    no_dll = make_layer(tmp_path / "no_dll")
+    os.remove(os.path.join(os.path.dirname(no_dll), vr_shared.LAYER_DLL))
+    gone = str(tmp_path / "gone" / vr_shared.LAYER_MANIFEST)
+    disabled = str(tmp_path / "disabled" / vr_shared.LAYER_MANIFEST)  # skipped by loader, user choice kept
+    reg = FakeWinreg({OTHER_LAYER: 0, complete: 0, no_dll: 0, gone: 0, disabled: 1})
+    assert vr_shared.remove_missing_layers(reg) == 2
+    assert reg.keys[vr_shared.REGISTRY_KEY] == {OTHER_LAYER: 0, complete: 0, disabled: 1}
+    assert vr_shared.remove_missing_layers(reg) == 0
+    assert vr_shared.remove_missing_layers(FakeWinreg(key_exists=False)) == 0
+
+
+def test_loadable_manifest_ascii_path(tmp_path, monkeypatch):
+    """OpenXR loader opens manifests with ANSI APIs: non-ASCII path registered as 8.3 path or ASCII copy"""
+    ascii_manifest = make_layer(tmp_path / "layer")
+    assert vr_shared.loadable_manifest(ascii_manifest) == os.path.abspath(ascii_manifest)
+    manifest = make_layer(tmp_path / "Jérôme" / "openxr_layer")
+    folder = os.path.dirname(manifest)
+    # 8.3 short name of the folder, manifest file name kept (registry entry recognised by its name)
+    short = str(tmp_path / "JRME~1" / "OPENXR~1")
+    monkeypatch.setattr(vr_shared, "short_path", lambda path: short if path == folder else None)
+    assert vr_shared.loadable_manifest(manifest) == os.path.join(short, vr_shared.LAYER_MANIFEST)
+    # No 8.3 names (disabled on the volume): copied to the first writable ASCII folder
+    monkeypatch.setattr(vr_shared, "short_path", lambda path: path)
+    read_only = str(tmp_path / "read_only")
+    writable = str(tmp_path / "ProgramData" / "ModernTinyPedals")
+    real_mkdtemp = vr_shared.tempfile.mkdtemp
+
+    def mkdtemp(prefix, dir):
+        if dir.startswith(read_only):
+            raise PermissionError("access denied")
+        return real_mkdtemp(prefix=prefix, dir=dir)
+
+    monkeypatch.setattr(vr_shared.tempfile, "mkdtemp", mkdtemp)
+    copy = vr_shared.loadable_manifest(manifest, [str(tmp_path / "Jérôme" / "copies"), read_only, writable])
+    assert copy is not None and copy.isascii() and copy.startswith(writable)
+    assert os.path.basename(copy) == vr_shared.LAYER_MANIFEST
+    with open(os.path.join(os.path.dirname(copy), vr_shared.LAYER_DLL), "rb") as file:
+        assert file.read() == b"MZ v1"
+    assert os.path.isfile(os.path.join(folder, vr_shared.LAYER_DLL))  # source kept
+    assert not os.path.exists(tmp_path / "Jérôme" / "copies")  # non-ASCII folder never used
+    # Nowhere to copy: None (reported by the app)
+    assert vr_shared.loadable_manifest(manifest, [read_only]) is None
+    # Default folders: ASCII only, one subfolder per Windows user
+    monkeypatch.setenv("PROGRAMDATA", "C:\\ProgramData")
+    monkeypatch.setenv("PUBLIC", "C:\\Users\\Públic")
+    roots = vr_shared.ascii_layer_roots()
+    assert roots and roots[0].startswith("C:\\ProgramData") and all(root.isascii() for root in roots)
+
+
+def test_remove_old_copies_only_in_copy_folders(tmp_path):
+    root = tmp_path / "copies"
+    current = make_layer(root / "current")
+    make_layer(root / "old")
+    other = make_layer(tmp_path / "elsewhere" / "build")
+    make_layer(tmp_path / "elsewhere" / "sibling")
+    assert vr_shared.remove_old_copies(current, other, roots=[str(root)]) == 1
+    assert sorted(entry.name for entry in root.iterdir()) == ["current"]
+    assert (tmp_path / "elsewhere" / "sibling").is_dir()  # not a copy folder: untouched
 
 
 def test_register_creates_missing_key(tmp_path):
@@ -507,6 +593,9 @@ def test_prepare_layer(tmp_path, monkeypatch):
     make_layer(root / "previous_build", dll=b"MZ v0")
     installed = vr_shared.prepare_layer(bundle)
     assert installed.startswith(str(root)) and installed != bundle
+    # Older copy removed only once the new one is registered (remove_old_copies)
+    assert (root / "previous_build" / vr_shared.LAYER_DLL).is_file()
+    assert vr_shared.remove_old_copies(installed) == 1
     assert [entry.name for entry in root.iterdir()] == [os.path.basename(os.path.dirname(installed))]
     # Copy impossible (folder read only...): bundled layer registered, still works until next update
     def denied(*args, **kwargs):
@@ -525,6 +614,9 @@ def test_installer_never_closes_openxr_games():
     assert f'Type: filesandordirs; Name: "{{app}}\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
     assert re.search(r"^\[UninstallDelete\]$", script, re.MULTILINE)
     assert "RegDeleteValue(HKCU, OpenXRLayersKey" in script
+    # ASCII copies (non-ASCII app folder) removed too; entries of deleted files (8.3 paths) once files are gone
+    assert f'Name: "{{commonappdata}}\\ModernTinyPedals\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
+    assert "usPostUninstall" in script and "not FileExists(Names[I])" in script
     assert vr_shared.LAYER_INSTALL_FOLDER != "lib"
 
 
@@ -598,6 +690,8 @@ class Env:
         monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: manifest)
         monkeypatch.setattr(vr_shared, "register_layer", lambda path: self.registered.append(path) or True)
         monkeypatch.setattr(vr_shared, "unregister_layer", lambda: self.unregistered.append(1) or 0)
+        self.cleaned = []
+        monkeypatch.setattr(vr_shared, "remove_missing_layers", lambda: self.cleaned.append(1) or 0)
         monkeypatch.setattr(vr_shared, "tick_ms", lambda: self.now)
         monkeypatch.setattr(vr_overlay, "steamvr_running", lambda: self.steamvr)
         monkeypatch.setattr(vr_overlay, "SteamVRCheck", SyncSteamVRCheck)
@@ -657,6 +751,10 @@ def test_openxr_layer_receives_frames(env, monkeypatch):
         assert struct.unpack_from("<I", env.buffer, 0)[0] == vr_shared.MAGIC
         env.now += 50
         control.update_overlay()
+        assert env.frame()[:2] == (0, 0)  # no OpenXR game (layer silent): nothing composed nor written
+        write_layer_status(env.buffer, env.now)  # OpenXR game started
+        env.now += 10
+        control.update_overlay()  # written at once
         width, height, stride, _format, flags, _serial, width_m, distance, vertical, horizontal = env.frame()[:10]
         assert (width, height) == (60, 30) and stride == width * 4 and flags & vr_shared.FLAG_VISIBLE  # widget only
         canvas = vr_overlay.compose_widgets([widget])  # window frame size, transparent around widget
@@ -755,11 +853,11 @@ def test_steamvr_overlay_hidden_while_openxr_layer_draws(env, monkeypatch):
         env.now += 50
         write_layer_status(env.buffer, env.now, frames=15)
         control.update_overlay()
-        assert "showOverlay" not in log  # new image uploaded, overlay stays hidden
+        assert "showOverlay" not in log and "setOverlayRaw" not in log  # hidden: image not even sent
         env.now += vr_shared.LAYER_TIMEOUT_MS + 1  # game closed: layer silent
         log.clear()
         control.update_overlay()
-        assert log == ["showOverlay"] and control._visible
+        assert log == ["setOverlayRaw", "showOverlay"] and control._visible  # newest image sent, then shown
         # OpenGL game: layer cannot draw, SteamVR overlay kept
         write_layer_status(env.buffer, env.now, state=vr_shared.LAYER_UNSUPPORTED, api=4)
         log.clear()
@@ -796,7 +894,7 @@ def test_steamvr_overlay_kept_while_openxr_layer_draws_nothing(env, monkeypatch)
             write_layer_status(env.buffer, env.now, frames=10)
             env.now += 100
             control.update_overlay()
-        assert log == ["showOverlay"] and control._visible
+        assert log == ["setOverlayRaw", "showOverlay"] and control._visible
     finally:
         widget.close()
         control.disable()
@@ -896,6 +994,7 @@ def test_openxr_image_rate_limited_and_cropped(env, monkeypatch):
     monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget, other]))
     try:
         control.enable()
+        write_layer_status(env.buffer, env.now)  # OpenXR game running
         control.update_overlay()
         serial = env.frame()[5]
         width, height = env.frame()[:2]
@@ -1082,9 +1181,212 @@ def test_layer_version_mismatch_reported(env, monkeypatch, caplog):
             control.update_overlay()
         assert any("restart the game" in record.getMessage() for record in caplog.records)
         assert not control._xr_drawing
+        assert len(env.errors) == 1 and "restart the VR game" in env.errors[0]  # user told, once
+        env.now += 50
+        write_layer_status(env.buffer, env.now, state=vr_shared.LAYER_UNSUPPORTED, frames=0, version=3)
+        control.update_overlay()
+        env.now += 50
+        write_layer_status(env.buffer, env.now, state=vr_shared.LAYER_VERSION_MISMATCH, frames=0, version=3)
+        control.update_overlay()
+        assert len(env.errors) == 1  # same game process: not again
     finally:
         widget.close()
         control.disable()
+
+
+def _count_calls(monkeypatch, name):
+    calls = []
+    original = getattr(vr_overlay, name)
+    monkeypatch.setattr(vr_overlay, name, lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs))
+    return calls
+
+
+def test_openxr_tiles_only_while_layer_runs(env, monkeypatch):
+    """No OpenXR game: tiles neither composed nor written (app heartbeat kept); written at once when a layer
+    appears, hidden when it goes (next game never shows an outdated image)"""
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    composed = _count_calls(monkeypatch, "compose_tiles")
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        for _ in range(3):
+            widget.setStyleSheet(f"background: rgb({len(composed) * 10}, 0, 0);")
+            env.now += 100
+            control.update_overlay()
+        assert not composed and env.frame()[:2] == (0, 0)
+        assert struct.unpack_from("<Q", env.buffer, vr_shared.OFFSET_APP_HEARTBEAT)[0] == env.now
+        # Game starts: written on the next heartbeat tick, rate limit ignored
+        write_layer_status(env.buffer, env.now)
+        control._heartbeat_timer.timeout.emit()
+        assert len(composed) == 1 and env.frame()[:2] == (60, 30) and env.frame()[4] & vr_shared.FLAG_VISIBLE
+        # Game closed: hidden, nothing composed any more
+        env.now += vr_shared.LAYER_TIMEOUT_MS + 1
+        control.update_overlay()
+        assert env.frame()[4] & vr_shared.FLAG_VISIBLE == 0
+        widget.setStyleSheet("background: blue;")
+        env.now += 100
+        control.update_overlay()
+        assert len(composed) == 1
+        # Next game: newest image written at once
+        write_layer_status(env.buffer, env.now)
+        control.update_overlay()
+        assert len(composed) == 2 and env.frame()[4] & vr_shared.FLAG_VISIBLE
+        width = env.frame()[0]
+        pixel = env.buffer[vr_shared.DATA_OFFSET + (15 * width + 30) * 4:][:4]
+        assert pixel[2] == 255 and pixel[0] == 0  # blue
+    finally:
+        widget.close()
+        control.disable()
+
+
+def test_heartbeat_independent_of_update_interval(env, monkeypatch):
+    """Update interval up to 60 s, layer drops the overlay 2 s after the last heartbeat: heartbeat timer"""
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    cfg.user.config["vr_overlay"]["update_interval"] = 60000
+    control = VROverlay()
+    try:
+        control.enable()
+        assert control._timer.interval() == 60000
+        assert control._heartbeat_timer.isActive()
+        assert control._heartbeat_timer.interval() < vr_shared.APP_TIMEOUT_MS / 2
+        env.now += 1500
+        control._heartbeat_timer.timeout.emit()
+        assert struct.unpack_from("<Q", env.buffer, vr_shared.OFFSET_APP_HEARTBEAT)[0] == env.now
+    finally:
+        control.disable()
+    assert not control._heartbeat_timer.isActive()
+    assert struct.unpack_from("<Q", env.buffer, vr_shared.OFFSET_APP_HEARTBEAT)[0] == 0
+
+
+def test_steamvr_image_not_composed_while_hidden_for_openxr(env, monkeypatch):
+    """SteamVR overlay hidden (OpenXR layer draws), no mirror: whole canvas neither composed nor sent"""
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    env.steamvr = True
+    composed = _count_calls(monkeypatch, "compose_widgets")
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        write_layer_status(env.buffer, env.now, frames=9)
+        control.update_overlay()
+        write_layer_status(env.buffer, env.now, frames=12)
+        env.now += 50
+        control.update_overlay()
+        assert not control._visible
+        log.clear()
+        composed.clear()
+        for frames in (15, 18, 21):
+            widget.setStyleSheet(f"background: rgb(0, 0, {frames * 10});")
+            env.now += 100
+            write_layer_status(env.buffer, env.now, frames=frames)
+            control.update_overlay()
+        assert not composed and "setOverlayRaw" not in log
+        assert control._checksum is None  # sent again once shown
+    finally:
+        widget.close()
+        control.disable()
+
+
+def test_layer_cleanup_and_ascii_path_errors(env, monkeypatch, tmp_path):
+    """Registry entries of missing files removed even without layer; no ASCII path: reported once"""
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: None)
+    control = VROverlay()
+    control.enable()
+    assert env.cleaned and not env.registered and not control.openxr_active
+    control.disable()
+    manifest = make_layer(tmp_path / "Jérôme")
+    monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: manifest)
+    monkeypatch.setattr(vr_shared, "loadable_manifest", lambda path: None)
+    env.errors.clear()
+    for _ in range(2):  # reload
+        control.enable()
+        control.disable()
+    assert not env.registered and not control.openxr_active
+    assert len([error for error in env.errors if "ASCII" in error]) == 1
+
+
+def test_old_copies_removed_after_registration(env, monkeypatch, tmp_path):
+    """Old layer copy (maybe loaded by games) removed only once the new one is registered"""
+    bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
+    monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: bundle)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "tinypedal.exe"))
+    old = tmp_path / "app" / vr_shared.LAYER_INSTALL_FOLDER / "old_build"
+    make_layer(old, dll=b"MZ v0")
+    monkeypatch.setattr(vr_shared, "register_layer", lambda path: False)  # registry denied
+    control = VROverlay()
+    control.enable()
+    control.disable()
+    assert (old / vr_shared.LAYER_DLL).is_file()  # still registered: kept
+    monkeypatch.setattr(vr_shared, "register_layer", lambda path: env.registered.append(path) or True)
+    control.enable()
+    control.disable()
+    assert env.registered and not old.exists()
+
+
+class FakeMapping(bytearray):
+    def close(self):
+        pass
+
+
+def test_shared_memory_created_for_non_elevated_games(monkeypatch):
+    """Mapping created with an explicit DACL (current user, medium integrity) then mapped by name; default
+    security if impossible, with a warning when elevated (non elevated games could not open it)"""
+    import mmap
+
+    calls = []
+    monkeypatch.setattr(vr_shared, "WINDOWS", True)
+    monkeypatch.setattr(mmap, "mmap", lambda fileno, size, tagname=None: calls.append(("mmap", tagname))
+                        or FakeMapping(size))
+    monkeypatch.setattr(vr_shared, "create_mapping", lambda name, size: calls.append(("create", name, size)) or 77)
+    monkeypatch.setattr(vr_shared, "close_handle", lambda handle: calls.append(("close", handle)))
+    monkeypatch.setattr(vr_shared, "is_elevated", lambda: True)
+    monkeypatch.setattr(vr_shared, "tick_ms", lambda: 1000)
+    writer = vr_shared.SharedFrameWriter()
+    assert writer.open() and writer.warning is None
+    assert calls == [("create", vr_shared.MAPPING_NAME, vr_shared.MAPPING_SIZE), ("mmap", vr_shared.MAPPING_NAME),
+                     ("close", 77)]  # handle closed once mapped (mapping kept by the mmap)
+    writer.close()
+    assert "(ML;;NW;;;ME)" in vr_shared.MAPPING_SDDL and "{user}" in vr_shared.MAPPING_SDDL
+
+    def failing(name, size):
+        raise OSError("ConvertStringSecurityDescriptorToSecurityDescriptorW failed")
+
+    monkeypatch.setattr(vr_shared, "create_mapping", failing)
+    calls.clear()
+    writer = vr_shared.SharedFrameWriter()
+    assert writer.open() and calls == [("mmap", vr_shared.MAPPING_NAME)]  # default security fallback
+    assert writer.warning and "administrator" in writer.warning
+    writer.close()
+    monkeypatch.setattr(vr_shared, "is_elevated", lambda: False)
+    writer = vr_shared.SharedFrameWriter()
+    assert writer.open() and writer.warning is None  # not elevated: default security works
+    writer.close()
+
+
+def test_elevated_warning_reported(env, monkeypatch):
+    original = type(vr_shared.SharedFrameWriter())  # class (fixture replaced it by a factory)
+
+    def writer():
+        instance = original(env.buffer)
+        instance.warning = "VR overlay: app runs as administrator"
+        return instance
+
+    monkeypatch.setattr(vr_shared, "SharedFrameWriter", writer)
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    control = VROverlay()
+    for _ in range(2):
+        control.enable()
+        control.disable()
+    assert env.errors == ["VR overlay: app runs as administrator"]
 
 
 def test_fit_image():

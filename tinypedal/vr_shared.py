@@ -272,6 +272,104 @@ def tick_ms() -> int:
     return int(time.monotonic() * 1000)
 
 
+# Mapping security: current user, SYSTEM & administrators, writable by medium integrity processes (games not
+# run as administrator when the app is)
+MAPPING_SDDL = "D:(A;;GA;;;{user})(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NW;;;ME)"
+PAGE_READWRITE = 0x04
+
+
+def _current_user_sid() -> str:
+    """String SID of the process user (Windows)"""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi32.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD)]
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):  # TOKEN_QUERY
+        raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+    try:
+        size = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser: size needed
+        buffer = ctypes.create_string_buffer(max(size.value, 1))
+        if not advapi32.GetTokenInformation(token, 1, buffer, size, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+        sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]  # TOKEN_USER.User.Sid
+        text = wintypes.LPWSTR()
+        if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(text)):
+            raise ctypes.WinError(ctypes.get_last_error())  # type: ignore[attr-defined]
+        try:
+            return str(text.value)
+        finally:
+            kernel32.LocalFree(text)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def create_mapping(name: str, size: int) -> int | None:
+    """Handle of named shared memory of size bytes, created for the current user at medium integrity
+    (MAPPING_SDDL), or opened if it exists (kept by a layer since a previous app run). None if not created.
+    Windows only; closed with close_handle."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [("nLength", wintypes.DWORD), ("lpSecurityDescriptor", ctypes.c_void_p),
+                    ("bInheritHandle", wintypes.BOOL)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined]
+    advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    kernel32.CreateFileMappingW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                            wintypes.DWORD, wintypes.LPCWSTR]
+    kernel32.CreateFileMappingW.restype = wintypes.HANDLE
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    descriptor = ctypes.c_void_p()
+    sddl = MAPPING_SDDL.format(user=_current_user_sid())
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
+        logger.debug("VR overlay: security descriptor %s refused (error %s)", sddl, ctypes.get_last_error())  # type: ignore[attr-defined]
+        return None
+    try:
+        attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+        handle = kernel32.CreateFileMappingW(wintypes.HANDLE(-1), ctypes.byref(attributes), PAGE_READWRITE,
+                                             0, size, name)
+        if not handle:
+            logger.debug("VR overlay: CreateFileMappingW failed (error %s)", ctypes.get_last_error())  # type: ignore[attr-defined]
+            return None
+        return int(handle)
+    finally:
+        kernel32.LocalFree(descriptor)
+
+
+def close_handle(handle: int):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle(handle)
+
+
+def is_elevated() -> bool:
+    """App runs as administrator (Windows)"""
+    if not WINDOWS:
+        return False
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
 class SharedFrameWriter:
     """Write overlay frames for the OpenXR layer (seqlock: never a torn image)
 
@@ -288,6 +386,7 @@ class SharedFrameWriter:
         self._size = (0, 0, 0)  # width, height, stride of last atlas
         self._tiles: tuple[Tile, ...] = ()  # tiles of last atlas
         self._canvas = (0, 0)  # canvas width & height of last atlas
+        self.warning: str | None = None  # problem to report to the user (set by open)
 
     @property
     def is_open(self) -> bool:
@@ -300,11 +399,25 @@ class SharedFrameWriter:
                 return False
             import mmap
 
+            # Created with an explicit DACL first (app run as administrator, game not: default DACL of an
+            # elevated process would deny the game), then mapped by name (opens the existing mapping)
+            handle = None
+            try:
+                handle = create_mapping(MAPPING_NAME, MAPPING_SIZE)
+            except Exception:  # ctypes / Windows API error: default security (works unless elevated)
+                logger.debug("VR overlay: shared memory with explicit security not created", exc_info=True)
+            if handle is None and is_elevated():
+                self.warning = ("VR overlay: app runs as administrator, OpenXR games not run as administrator "
+                                "may not show the overlay: run the app without administrator rights")
+                logger.warning(self.warning)
             try:
                 self._mmap = mmap.mmap(-1, MAPPING_SIZE, tagname=MAPPING_NAME)  # type: ignore[call-arg, unused-ignore]
             except (OSError, ValueError) as error:
                 logger.warning("VR overlay: OpenXR shared memory not created: %s", error)
                 return False
+            finally:
+                if handle is not None:
+                    close_handle(handle)  # mapping kept by the mmap handle
             self._buffer = self._mmap
         buffer = self._buffer
         if len(buffer) < MAPPING_SIZE:
@@ -341,7 +454,7 @@ class SharedFrameWriter:
         self._buffer = None
 
     def heartbeat(self, now_ms: int | None = None):
-        """App alive: written every update tick (layer stops drawing APP_TIMEOUT_MS after the last one)"""
+        """App alive: written every update tick & every 500 ms (layer stops drawing APP_TIMEOUT_MS after the last one)"""
         if self._buffer is not None:
             struct.pack_into("<Q", self._buffer, OFFSET_APP_HEARTBEAT, tick_ms() if now_ms is None else now_ms)
 
@@ -529,18 +642,88 @@ def remove_old_layers(root: str, keep: str) -> int:
 
 def prepare_layer(manifest: str, root: str | None = None) -> str:
     """Manifest to register: copy of bundled layer outside lib folder in release (root default),
-    manifest unchanged from source or when copy fails"""
+    manifest unchanged from source or when copy fails. Older copies removed once the new one is
+    registered (remove_old_copies)."""
     if root is None:
         root = layer_install_root()
         if root is None:
             return manifest
     try:
-        installed = install_layer(manifest, root)
+        return install_layer(manifest, root)
     except OSError as error:
         logger.warning("VR overlay: OpenXR layer not copied to %s, registered from %s: %s", root, manifest, error)
         return manifest
-    remove_old_layers(root, os.path.dirname(installed))
-    return installed
+
+
+def short_path(path: str) -> str | None:
+    """8.3 short form of an existing path (Windows), None if unavailable"""
+    if not WINDOWS:
+        return None
+    import ctypes
+
+    function = ctypes.windll.kernel32.GetShortPathNameW  # type: ignore[attr-defined]
+    size = function(path, None, 0)
+    if not size:
+        return None
+    buffer = ctypes.create_unicode_buffer(size)
+    if not function(path, buffer, size):
+        return None
+    return str(buffer.value)
+
+
+def ascii_layer_roots() -> list[str]:
+    """Folders for a layer copy when its path is not ASCII: ASCII folders users can write without admin
+    rights (ProgramData, Public, system drive root), one subfolder per Windows user (removing older copies
+    never touches another user's registered copy)"""
+    user = hashlib.sha256(os.path.normcase(os.path.expanduser("~")).encode("utf-8")).hexdigest()[:12]
+    roots = []
+    for base in (os.environ.get("PROGRAMDATA"), os.environ.get("PUBLIC"), os.environ.get("SYSTEMDRIVE", "C:") + "\\"):
+        if base and base.isascii():
+            roots.append(os.path.join(base, "ModernTinyPedals", LAYER_INSTALL_FOLDER, user))
+    return roots
+
+
+def loadable_manifest(manifest: str, roots: Sequence[str] | None = None) -> str | None:
+    """Manifest path the OpenXR loader can open: it reads the registry & manifest with narrow (ANSI)
+    APIs, a non-ASCII path (C:\\Users\\Jérôme\\...) is silently ignored. Short (8.3) folder path, else layer
+    copied to an ASCII folder (roots, default ascii_layer_roots).
+
+    Returns:
+        ASCII manifest path, None if impossible.
+    """
+    manifest = os.path.abspath(manifest)
+    if manifest.isascii():
+        return manifest
+    folder = short_path(os.path.dirname(manifest))  # file name kept: registry entry found by its name
+    if folder is not None and folder.isascii():
+        return os.path.join(folder, LAYER_MANIFEST)
+    for root in ascii_layer_roots() if roots is None else roots:
+        if not root.isascii():
+            continue
+        try:
+            installed = install_layer(manifest, root)  # fails without write permission: next folder
+        except OSError as error:
+            logger.debug("VR overlay: OpenXR layer not copied to %s: %s", root, error)
+            continue
+        logger.info("VR overlay: OpenXR layer path not ASCII, copied to %s", installed)
+        return installed
+    return None
+
+
+def remove_old_copies(*manifests: str, roots: Sequence[str] | None = None) -> int:
+    """Once registered: other layer copies of the folders (roots, default install & ASCII roots) holding
+    manifests removed, returns number removed"""
+    if roots is None:
+        install_root = layer_install_root()
+        roots = [*([install_root] if install_root else []), *ascii_layer_roots()]
+    known = {os.path.normcase(os.path.abspath(root)) for root in roots}
+    removed = 0
+    for manifest in manifests:
+        folder = os.path.dirname(os.path.abspath(manifest))
+        root = os.path.dirname(folder)
+        if os.path.normcase(root) in known:
+            removed += remove_old_layers(root, folder)
+    return removed
 
 
 def is_layer_entry(name: str) -> bool:
@@ -580,7 +763,8 @@ def registered_layers(winreg_module: Any = None) -> dict[str, int]:
 
 
 def register_layer(manifest: str, winreg_module: Any = None) -> bool:
-    """Register layer for current user (enabled), removing TinyPedal entries of other folders
+    """Register layer for current user (enabled), removing TinyPedal entries of other folders.
+    Disabled by the user (value not 0, OpenXR layer tools): kept disabled.
 
     Returns:
         True if registered (or already was).
@@ -588,25 +772,56 @@ def register_layer(manifest: str, winreg_module: Any = None) -> bool:
     reg = _winreg(winreg_module)
     manifest = os.path.abspath(manifest)
     existing = registered_layers(reg)
+    disabled = next((value for value in existing.values() if value != 0), 0)
     try:
         key = reg.CreateKeyEx(reg.HKEY_CURRENT_USER, REGISTRY_KEY, 0, reg.KEY_READ | reg.KEY_SET_VALUE)
     except OSError as error:
         logger.warning("VR overlay: OpenXR layer not registered: %s", error)
         return False
     try:
+        if existing.get(manifest) != disabled:
+            reg.SetValueEx(key, manifest, 0, reg.REG_DWORD, disabled)  # new entry first: never none
+            logger.info("VR overlay: OpenXR layer registered %s", manifest)
         for name in existing:
             if ntpath.normcase(name) != ntpath.normcase(manifest):
                 reg.DeleteValue(key, name)  # app moved or other copy: one TinyPedal layer only
                 logger.info("VR overlay: removed OpenXR layer registration %s", name)
-        if existing.get(manifest) != 0:
-            reg.SetValueEx(key, manifest, 0, reg.REG_DWORD, 0)
-            logger.info("VR overlay: OpenXR layer registered %s", manifest)
+        if disabled:
+            logger.warning("VR overlay: OpenXR layer disabled by user (registry value %s), kept disabled: "
+                           "enable it again in your OpenXR layer tool to show the overlay in OpenXR games",
+                           disabled)
     except OSError as error:
         logger.warning("VR overlay: OpenXR layer not registered: %s", error)
         return False
     finally:
         reg.CloseKey(key)
     return True
+
+
+def remove_missing_layers(winreg_module: Any = None) -> int:
+    """Remove enabled TinyPedal entries whose manifest or DLL is missing (app moved or uninstalled by hand,
+    copy deleted): the OpenXR loader would fail xrCreateInstance in every OpenXR game. Returns number removed."""
+    reg = _winreg(winreg_module)
+    missing = [name for name, value in registered_layers(reg).items() if value == 0 and not (
+        os.path.isfile(name) and os.path.isfile(os.path.join(os.path.dirname(name), LAYER_DLL)))]
+    if not missing:
+        return 0
+    try:
+        key = reg.OpenKey(reg.HKEY_CURRENT_USER, REGISTRY_KEY, 0, reg.KEY_SET_VALUE)
+    except OSError:
+        return 0
+    removed = 0
+    try:
+        for name in missing:
+            try:
+                reg.DeleteValue(key, name)
+                removed += 1
+                logger.info("VR overlay: removed OpenXR layer registration of missing files %s", name)
+            except OSError:
+                logger.debug("VR overlay: cannot remove %s", name, exc_info=True)
+    finally:
+        reg.CloseKey(key)
+    return removed
 
 
 def unregister_layer(winreg_module: Any = None) -> int:
