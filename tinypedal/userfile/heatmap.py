@@ -169,10 +169,21 @@ def long_hex_color(color: str) -> str:
 
 
 def verify_heatmap(heatmap_dict: dict | None) -> bool:
-    """Verify color in heatmap"""
-    if not heatmap_dict:
+    """Verify heatmap: temperature keys (numbers) & colors
+
+    Style file edited by hand or imported from a package may hold anything: an invalid heatmap
+    falls back to default, instead of an error stopping every widget that loads it.
+    """
+    if not heatmap_dict or not isinstance(heatmap_dict, dict):
         return False
-    return all(is_hex_color(color) for color in heatmap_dict.values())
+    for temperature, color in heatmap_dict.items():
+        if not is_hex_color(color):
+            return False
+        try:
+            float(temperature)
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def load_heatmap_color(

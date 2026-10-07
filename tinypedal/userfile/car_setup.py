@@ -37,7 +37,9 @@ def set_car_setup_laptime(seconds: float) -> str:
     """Set car setup lap time"""
     if seconds >= FLOAT_INF:
         seconds = 0
-    return f"{seconds // 60:.0f}-{seconds % 60 - seconds % 1:02.0f}-{seconds % 1 * 1000:03.0f}"
+    # Rounded to milliseconds before split: 119.9996 is 2-00-000, not 1-59-1000
+    minutes, milliseconds = divmod(round(seconds * 1000), 60000)
+    return f"{minutes:.0f}-{milliseconds // 1000:02.0f}-{milliseconds % 1000:03.0f}"
 
 
 def set_car_setup_filename(*names: str) -> str:
