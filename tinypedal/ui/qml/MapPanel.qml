@@ -21,6 +21,7 @@ Item {
         anchors.margins: theme.em * 0.4
         anchors.topMargin: 0
         maxZoom: 40
+        flipY: false  // game trackmap & car positions (x, -z): y down like overlay & in-game track map, else mirrored
         minX: root.view.minX || 0
         minY: root.view.minY || 0
         maxX: root.view.maxX || 1
