@@ -293,6 +293,9 @@ class BaseDialog(QDialog):
     """
     MARGIN = UIScaler.pixel(6)
     EMBED_IN_APP = True
+    # Closed by language change unless opened from a page kept by it (input whose OK calls back the
+    # replaced view), see TabView.detach_pages
+    CLOSED_ON_LANGUAGE_CHANGE = False
     in_app_page = False  # set when shown as page
     shown_instead: BaseDialog | None = None  # same dialog already open as page, see shown_dialog
     modified_changed = Signal(bool)  # unsaved changes marker shown or cleared, see refresh_modified
@@ -596,10 +599,12 @@ class BaseEditor(BaseDialog):
 class TextInputDialog(BaseDialog):
     """Text input shown as page in app (replaces QInputDialog), on_accept(text) returns True to close
 
-    Opened from a dialog page, it is a page too (back to that page when closed).
+    Opened from a dialog page, it is a page too (back to that page when closed). Closed by a language
+    change unless opened from a page kept by it: on_accept targets the view being replaced.
     """
 
     EMBED_FROM_PAGE = True
+    CLOSED_ON_LANGUAGE_CHANGE = True
 
     def __init__(
         self, parent, title: str, label: str, on_accept: Callable[[str], bool], text: str = "",

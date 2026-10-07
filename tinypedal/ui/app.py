@@ -991,23 +991,41 @@ class TabView(QWidget):
     def detach_pages(self) -> tuple[list[str], list[DialogPage], DialogPage | None]:
         """Before view is rebuilt (language change): tool pages to reopen translated (paths),
         other pages (config, unsaved edits) taken out as they are, and shown page if taken out
+
+        Pages whose callbacks target replaced view are closed (user opens them again): pages opened
+        from a reopened tool page (lap library of lap viewer, its rename input...), and inputs
+        (CLOSED_ON_LANGUAGE_CHANGE: text input of preset list, lap note...) not opened from a kept
+        page. Kept, their OK went to deleted objects (RuntimeError, or nothing done). Pages with
+        unsaved changes are always kept (closing would ask to save).
         """
         tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
         self._closing_pages = True  # view replaced: its pages are not left for another one
         current = self._pages.currentWidget()
+        pages = [page for page in self.dialog_pages() if page.dialog is not None]
+        reopened: list[DialogPage] = []
+        closing: list[DialogPage] = []  # pages closed, opened again by user (not reopened)
+        for page in pages:  # openers listed before pages opened from them
+            dialog = page.dialog
+            is_modified = getattr(dialog, "is_modified", None)
+            if tools.get(type(dialog).__name__) and not (callable(is_modified) and is_modified()):
+                reopened.append(page)
+            elif not page.has_unsaved_changes() and (
+                    (page.opener is not None and (page.opener in reopened or page.opener in closing))
+                    or (page.opener is None and getattr(dialog, "CLOSED_ON_LANGUAGE_CHANGE", False))):
+                closing.append(page)
+        # Closed page shown: tool page it was opened from shown again once reopened
+        shown_page = current
+        while shown_page in closing and isinstance(shown_page, DialogPage):
+            shown_page = shown_page.opener
         paths: list[str] = []
         kept: list[DialogPage] = []
-        reopened: list[DialogPage] = []
         shown = None
-        for page in self.dialog_pages():
-            dialog = page.dialog
-            if dialog is None:
+        for page in pages:
+            if page in closing:
                 continue
-            is_modified = getattr(dialog, "is_modified", None)
-            path = tools.get(type(dialog).__name__)
-            if path and not (callable(is_modified) and is_modified()):
-                paths.append(f"*{path}" if page is current else path)
-                reopened.append(page)
+            if page in reopened:
+                path = tools[type(page.dialog).__name__]
+                paths.append(f"*{path}" if page is shown_page else path)
                 continue
             page.closed.disconnect(self.close_dialog_page)
             page.modified_changed.disconnect(self.refresh_open_pages)
@@ -1018,9 +1036,10 @@ class TabView(QWidget):
             kept.append(page)
             if page is current:
                 shown = page
-        # Reopened pages closed now (not only deleted with view): their close cleanup runs (backends
-        # released, loaders stopped), page left as it is (deleted with view, window size kept)
-        for page in reopened:
+        # Reopened & dependent pages closed now (not only deleted with view): their close cleanup runs
+        # (backends released, loaders stopped), pages opened from another one first. Page left as it is
+        # (deleted with view, window size kept)
+        for page in reversed([page for page in pages if page in reopened or page in closing]):
             page.closed.disconnect(self.close_dialog_page)
             if page.dialog is not None:
                 page.dialog.close()
@@ -1550,6 +1569,14 @@ class AppWindow(QMainWindow):
         tab_view.restore_pages(open_pages)  # tool pages reopened in new language
         if shown is not None:
             tab_view.show_page_widget(shown, bring_to_front=False)
+            # Kept pages shown page was opened from (editor of a name input...): back to them once it closes
+            openers: list[DialogPage] = []
+            opener = shown.opener
+            while opener is not None and opener in kept and opener not in openers:
+                openers.append(opener)
+                opener = opener.opener
+            for opener in reversed(openers):
+                tab_view.remember_shown(opener, shown)
         tab_view.track_pages = True
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:

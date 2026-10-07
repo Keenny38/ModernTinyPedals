@@ -862,3 +862,127 @@ def test_key_binding_page_kept_by_language_change_closes(window, monkeypatch):
         window.retranslate()  # back to English for other tests
         settle()
     assert not errors, errors
+
+
+def change_language(window, name: str):
+    cfg.application["language"] = name
+    window.last_language = name
+    window.retranslate()
+    settle()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # replaced view deleted
+    settle()
+
+
+def test_language_change_closes_input_of_app_page(window):
+    """Text input opened from an app page (preset share code...): closed by a language change, app page shown
+    again (was: kept, its OK called back the deleted preset list)"""
+    from tinypedal.ui._common import TextInputDialog
+    from tinypedal.ui.nav_rail import PAGE_INDEX
+
+    window.show()
+    view = window.centralWidget()
+    view.select_page(PAGE_INDEX["preset"])
+    view.preset_tab.import_share_code()
+    settle()
+    assert isinstance(view._pages.currentWidget().dialog, TextInputDialog)
+    language = cfg.application["language"]
+    try:
+        change_language(window, "Français")
+        new_view = window.centralWidget()
+        assert new_view.find_dialog_page("TextInputDialog") is None
+        assert new_view.current_index() == PAGE_INDEX["preset"]  # page input was opened from
+    finally:
+        change_language(window, language)
+
+
+@pytest.mark.parametrize("tool, backend_call", [
+    ("driver_stats_viewer.DriverStatsViewer", "changeSheetUrl"),
+    ("lap_viewer.LapViewer", "editNote"),
+])
+def test_language_change_closes_input_of_reopened_tool(window, tool, backend_call):
+    """Text input opened from a tool page reopened by a language change (sheet address, lap note): closed with it,
+    tool page shown again (was: kept, its OK called back the closed tool: RuntimeError, internal C++ object
+    already deleted, or note never shown)"""
+    import sys
+
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool(tool, window)
+    settle()
+    view = window.centralWidget()
+    name = tool.rsplit(".", 1)[-1]
+    backend = view.find_dialog_page(name).dialog.backend
+    call = getattr(backend, backend_call)
+    call("lap.tpl") if backend_call == "editNote" else call()
+    settle()
+    assert type(view._pages.currentWidget().dialog).__name__ == "TextInputDialog"
+    language = cfg.application["language"]
+    errors = []
+    excepthook = sys.excepthook
+    sys.excepthook = lambda *args: errors.append(args[1])
+    try:
+        change_language(window, "Français")
+        new_view = window.centralWidget()
+        assert new_view.find_dialog_page("TextInputDialog") is None
+        assert new_view._pages.currentWidget() is new_view.find_dialog_page(name)  # tool shown again
+    finally:
+        sys.excepthook = excepthook
+        change_language(window, language)
+    assert not errors, errors
+
+
+def test_language_change_closes_lap_library_of_reopened_lap_viewer(window):
+    """Lap library (and its rename input) opened from lap viewer: closed with it by a language change (was: kept,
+    adding laps went to the closed lap viewer)"""
+    from tinypedal.ui._common import TextInputDialog
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool("lap_viewer.LapViewer", window)
+    settle()
+    view = window.centralWidget()
+    view.find_dialog_page("LapViewer").dialog.backend.openLibrary()
+    settle()
+    library = view.find_dialog_page("LapLibrary").dialog
+    TextInputDialog(library, "Rename", "Imported log name:", lambda text: True, "old").show()
+    settle()
+    assert [type(page.dialog).__name__ for page in view.dialog_pages()] == ["LapViewer", "LapLibrary", "TextInputDialog"]
+    language = cfg.application["language"]
+    try:
+        change_language(window, "Français")
+        new_view = window.centralWidget()
+        assert [type(page.dialog).__name__ for page in new_view.dialog_pages()] == ["LapViewer"]
+        assert new_view._pages.currentWidget() is new_view.find_dialog_page("LapViewer")
+    finally:
+        change_language(window, language)
+
+
+def test_language_change_keeps_input_of_kept_page(window):
+    """Text input opened from a page kept by a language change (editor with unsaved changes): kept with it, its
+    OK still reaches that page"""
+    from tinypedal.ui._common import TextInputDialog
+    from tinypedal.ui.tools_view import open_tool
+
+    window.show()
+    open_tool("heatmap_editor.HeatmapEditor", window)
+    view = window.centralWidget()
+    editor = view.dialog_pages()[0].dialog
+    editor.set_modified()  # unsaved edits: page kept as it is
+    names = []
+    TextInputDialog(editor, "New", "Name:", lambda text: names.append((editor.objectName(), text)) or True).show()
+    settle()
+    language = cfg.application["language"]
+    try:
+        change_language(window, "Français")
+        new_view = window.centralWidget()
+        page = new_view.find_dialog_page("TextInputDialog")
+        assert page is not None and new_view._pages.currentWidget() is page
+        page.dialog.edit.setText("Dusk")
+        page.dialog.accepting()
+        assert names == [(editor.objectName(), "Dusk")]
+        settle()
+        assert new_view._pages.currentWidget() is new_view.find_dialog_page("HeatmapEditor")  # back to editor
+    finally:
+        editor.set_unmodified()
+        change_language(window, language)
