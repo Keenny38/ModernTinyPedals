@@ -375,3 +375,32 @@ def test_gear_drawn_as_steps(viewer):
     # Steps: 2 vertices per sample
     assert VertexStore.get(gear["series"][0]["key"]).vertex_count == 2 * VertexStore.get(
         speed["series"][0]["key"]).vertex_count
+
+
+def test_motec_export_many_same_file_name(viewer, laps, tmp_path):
+    """Same lap file name in two track/class folders: two distinct .ld files with their own lap, former exports kept"""
+    import shutil
+
+    from tinypedal.userfile.motec_ld import read_ld
+
+    backend = viewer.backend
+    other_folder = os.path.join(cfg.path.telemetry, "Laguna Seca - LMGT3")
+    os.makedirs(other_folder)
+    other = os.path.join(other_folder, os.path.basename(laps[1]))  # same name as lap 2, content of slower lap 3
+    shutil.copy2(laps[2], other)
+    target = tmp_path / "export"
+    os.makedirs(target)
+
+    def top_speed(filename) -> float:
+        channels = read_ld(str(filename))[1]
+        return max(max(channel.values) for channel in channels if channel.name == "Ground Speed")
+
+    assert backend.export_many([laps[1], other], str(target), background=False) == 2
+    stem = os.path.basename(laps[1]).split(".csv")[0]
+    first, second = target / f"{stem}.ld", target / f"{stem} (2).ld"
+    assert sorted(os.listdir(target)) == sorted([first.name, second.name])
+    assert read_ld(str(first))[0].venue == "Atlanta" and read_ld(str(second))[0].venue == "Laguna Seca"
+    assert top_speed(first) > top_speed(second)  # lap 2 faster than lap 3 on straights
+    before = first.read_bytes()
+    assert backend.export_many([laps[1]], str(target), background=False) == 1  # export again: former files kept
+    assert first.read_bytes() == before and (target / f"{stem} (3).ld").exists()

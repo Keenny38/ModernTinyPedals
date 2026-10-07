@@ -107,6 +107,21 @@ def backup_delta_best(target: str):
             os.remove(os.path.join(folder, old))
 
 
+def unique_export_name(folder: str, stem: str, ext: str, taken: set[str]) -> str:
+    """Path of a new file of folder for a batch export: <stem><ext>, else <stem> (2)<ext>, (3)... when that name is
+    already used by another file of the batch (same lap file name from two track/class folders, imported & recorded
+    lap) or by a file already in folder (former export kept, never overwritten), name reserved in taken (lowercase:
+    case-insensitive file systems)"""
+    number = 1
+    while True:
+        name = f"{stem}{ext}" if number == 1 else f"{stem} ({number}){ext}"
+        target = os.path.join(folder, name)
+        if name.lower() not in taken and not os.path.exists(target):
+            taken.add(name.lower())
+            return target
+        number += 1
+
+
 class LapExports(BackendBase):
     """Exports & imports of lap viewer page"""
 
@@ -366,7 +381,8 @@ class LapExports(BackendBase):
     def export_many(self, paths: list[str], folder: str, background: bool = True) -> int:
         """Export laps to folder (laps read from binary cache), one worker process job per lap if background
         (window stays responsive), returns count if not"""
-        jobs = [(path, os.path.join(folder, os.path.basename(lap_stem(path)) + ".ld"),
+        taken: set[str] = set()
+        jobs = [(path, unique_export_name(folder, os.path.basename(lap_stem(path)), ".ld", taken),
                  os.path.basename(os.path.dirname(path)).split(" - ")[0]) for path in paths]
         if not background:
             results = [export_lap_job(self.folder, path, target, venue) for path, target, venue in jobs]
