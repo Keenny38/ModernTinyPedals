@@ -44,6 +44,7 @@ from .telemetry_lap import INFO_PREFIX, is_lap_file, lap_number_of, lap_time_of,
 
 MAX_RATE = 50  # Hz, recorder samples at most this often
 MAX_LOG_SECONDS = 6 * 3600  # longer logs (or sizes made up by a broken file) read up to this time
+LINE_MATCH_SECONDS = 3.0  # lap number change matched to a line crossing this close (slow channel, logger delay)
 COMMENT_LAP_TIME_TOLERANCE = 1.0  # seconds, lap time of comment (lap name) used if this close to log lap time
 WHEELS = ("FL", "FR", "RL", "RR")
 
@@ -332,19 +333,24 @@ def read_log_laps(filename: str) -> tuple[LdInfo, Iterator[ImportedLap]]:
         return build_lap(info, filename, number, rate, columns, first, last, lap_time, start, finished)
 
     def laps() -> Iterator[ImportedLap]:
+        # Start line crossings: from lap distance going back to 0, else from lap time going back to 0 (odometer
+        # distance: rebased at the line, not at the late lap number change)
+        line = crossings or (lap_time_crossings(lap_time_channel) if lap_time_channel is not None else [])
         if lap_number_channel is not None:  # lap start & end at line crossing (between samples), else at lap change
             values = lap_number_channel.values
             frequency = lap_number_channel.frequency
-            starts = [(first_tick(index / frequency, rate), lap_number(values[index]))
+            starts = [(index / frequency, lap_number(values[index]))
                       for index in range(1, len(values)) if values[index] > values[index - 1]]
-            for (first, number), (last, _) in pairwise(starts):
+            for (change, number), (next_change, _) in pairwise(starts):
+                # Lap number changes up to a sample (logger rate) & a logger delay after the line: lap samples from
+                # line to line, else lap distance zero & lap time origin would be meters past the line
+                start_time = nearest(line, change, LINE_MATCH_SECONDS)
+                end_time = nearest(line, next_change, LINE_MATCH_SECONDS)
+                first, last = first_tick(start_time, rate), first_tick(end_time, rate)
                 if last > count:
                     break
-                start_time = nearest(crossings, first / rate)
-                lap_time = nearest(crossings, last / rate) - start_time
-                yield build(number, first, last, lap_time, start_time, rebase=not crossings)
+                yield build(number, first, last, end_time - start_time, start_time, rebase=not crossings)
             return
-        line = crossings or (lap_time_crossings(lap_time_channel) if lap_time_channel is not None else [])
         if not line:
             if lap_time_channel is not None:  # single lap file (exported by this app): whole log is one lap
                 yield single_lap()

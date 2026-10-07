@@ -33,7 +33,9 @@ from collections.abc import Collection, Sequence
 from itertools import accumulate
 
 from ...userfile.corner_analysis import resample_sorted
+from ...userfile.lap_offset import aligned_lap
 from ...userfile.telemetry_lap import (
+    LapData,
     compute_delta,
     delta_rate,
     delta_to_curve,
@@ -103,6 +105,9 @@ class TraceData:
     Delta is measured against reference lap, or against ideal lap (fastest clean shown lap in each mini-sector).
     Laps aligned on a braking point (offsets) are shifted along distance axis: same braking start on charts
     (deltas & time axis never shifted).
+    A compared lap not recorded by the app (imported log) whose distance zero is not at the start line is aligned on
+    reference lap first (see lap_offset): its lap data is replaced by the aligned lap (charts, delta, sectors,
+    corners & map all use it), auto_offsets tells meters added (reference distance), user alignment adds to it.
     Math channels (user expressions) are computed from recorded & computed channels of each lap, again when a
     computed input changes (delta, map placement).
     """
@@ -133,6 +138,8 @@ class TraceData:
         self.placements: dict[str, tuple[list[float], list[float], list[float]]] = {}
         self.placement_version = 0
         self.offsets: dict[str, float] = {}  # lap key: meters added along distance axis (aligned on braking point)
+        self.auto_offsets: dict[str, float] = {}  # lap key: meters lap distance zero was moved by (imported lap)
+        self._aligned: dict[str, tuple[LapData, LapData, LapData, float]] = {}  # lap key: reference, lap, aligned
         self.math: dict[str, str] = {}  # math channel column: expression
         self._math_names: dict[str, list[str] | None] = {}  # expression: channel names used (None: invalid)
 
@@ -187,7 +194,28 @@ class TraceData:
         """Factor turning lap distances into reference lap distances (1 unless lap length differs a bit)"""
         return self.scales.get(lap.key, 1.0)
 
+    def aligned_laps(self, laps: list[PlotLap], reference_key: str) -> list[PlotLap]:
+        """Laps with compared laps not recorded by the app aligned on reference lap (distance zero at the line),
+        aligned lap data kept while reference & lap stay the same (series, corners & map lines kept)"""
+        reference = next((lap for lap in laps if lap.key == reference_key), laps[0] if laps else None)
+        result = []
+        aligned: dict[str, tuple[LapData, LapData, LapData, float]] = {}
+        for lap in laps:
+            if reference is None or lap is reference:
+                result.append(lap)
+                continue
+            cached = self._aligned.get(lap.key)
+            if cached is None or cached[0] is not reference.data or cached[1] is not lap.data:
+                data, offset = aligned_lap(reference.data, lap.data, distance_scale(reference.data, lap.data))
+                cached = (reference.data, lap.data, data, offset)
+            aligned[lap.key] = cached
+            result.append(lap if cached[2] is lap.data else lap._replace(data=cached[2]))
+        self._aligned = aligned
+        self.auto_offsets = {key: value[3] for key, value in aligned.items() if value[3]}
+        return result
+
     def set_laps(self, laps: list[PlotLap], reference_key: str = ""):
+        laps = self.aligned_laps(laps, reference_key)
         previous = {lap.key: lap.data for lap in self.laps}
         previous_reference = self.reference.key if self.reference is not None else ""
         self.laps = laps
