@@ -30,6 +30,7 @@ import os
 import platform
 import sys
 import zipfile
+from contextlib import suppress
 from time import localtime, strftime
 
 from . import version_check
@@ -110,7 +111,24 @@ def read_log(path: str) -> str:
 
 
 def create_bug_report(zip_filename: str, session_log: str = "", description: str = "") -> list[str]:
-    """Create bug report zip, returns added file names"""
+    """Create bug report zip, returns added file names, raise OSError on error
+
+    Written to temporary file, then replaces target: no truncated zip left on error.
+    """
+    temp_name = f"{zip_filename}.part"
+    try:
+        added = write_bug_report(temp_name, session_log, description)
+        os.replace(temp_name, zip_filename)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_name)
+        raise
+    logger.info("BUG REPORT: created %s (%s files)", zip_filename, len(added))
+    return added
+
+
+def write_bug_report(zip_filename: str, session_log: str, description: str) -> list[str]:
+    """Write bug report zip, returns added file names"""
     added: list[str] = []
     config_path = cfg.path.config
     with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
@@ -138,9 +156,8 @@ def create_bug_report(zip_filename: str, session_log: str = "", description: str
         for name, data in settings.items():
             try:
                 add_text(f"settings/{name}", json.dumps(redact_setting(dict(data)), indent=4, default=str))
-            except (AttributeError, TypeError, ValueError) as error:
+            except (AttributeError, TypeError, ValueError, RuntimeError) as error:  # changed while copied
                 logger.warning("BUG REPORT: unable to add %s: %s", name, error)
-    logger.info("BUG REPORT: created %s (%s files)", zip_filename, len(added))
     return added
 
 

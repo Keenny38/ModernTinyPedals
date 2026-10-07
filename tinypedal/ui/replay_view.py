@@ -51,7 +51,7 @@ from .. import app_signal
 from ..api_control import api
 from ..const_api import API_LMU_NAME, API_RF2_NAME
 from ..i18n import tr, trm
-from ..replay import FILE_EXT, SPEEDS, ReplayFile, ReplayMismatch, list_replays, replay
+from ..replay import FILE_EXT, SPEEDS, ReplayFile, ReplayMismatch, list_replays, replay, same_file
 from ..replay_session import api_supported, section_filename, start_api_recording
 from ..setting import cfg
 from ._common import BaseDialog, UIScaler, singleton_dialog, translate_filter
@@ -535,7 +535,7 @@ class ReplayView(BaseDialog):
             self, tr("Save Section..."), default, translate_filter(f"Modern Tiny Pedals Replay (*{FILE_EXT})"))
         if not filename:
             return
-        if os.path.abspath(filename) == os.path.abspath(player.replay.filename):
+        if same_file(filename, player.replay.filename):
             QMessageBox.warning(self, tr("Error"), tr("Choose another file name than the open replay."))
             return
         if self.export.start(player.replay, filename, start, end):

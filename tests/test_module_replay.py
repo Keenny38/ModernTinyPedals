@@ -391,7 +391,7 @@ def test_recorder_module_saves_pending_lap_on_stop(ui_env, monkeypatch):
     while not module.closed and time.monotonic() < end:
         time.sleep(0.01)
     assert module.closed and sends[0] is not None
-    assert sends[-1] is None and waits  # pending lap flushed, then saving awaited
+    assert sends[-1] is module_recorder.MODULE_STOP and waits  # pending lap flushed, then saving awaited
 
 
 def test_wait_lap_saver():

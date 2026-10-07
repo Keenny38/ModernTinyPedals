@@ -89,44 +89,46 @@ class Realtime(DataModule):
             green_flag_laps=green_flag_laps,
         )
 
-        while not _event_wait(update_interval):
-            if realtime_state.active or vehicle_resets != realtime_state.resets:
-                vehicle_resets = realtime_state.resets
+        try:
+            while not _event_wait(update_interval):
+                if realtime_state.active or vehicle_resets != realtime_state.resets:
+                    vehicle_resets = realtime_state.resets
 
-                if not reset:
-                    reset = True
-                    update_interval = self.active_interval
-                    last_stamp = ()  # never skip first tick
+                    if not reset:
+                        reset = True
+                        update_interval = self.active_interval
+                        last_stamp = ()  # never skip first tick
 
-                # Skip while game data not updated since last tick
-                stamp = (data_stamp(), minfo.delta.lapDistance)  # consumption recorded at delta module position
-                if last_stamp == stamp:
-                    continue
-                last_stamp = stamp
+                    # Skip while game data not updated since last tick
+                    stamp = (data_stamp(), minfo.delta.lapDistance)  # consumption recorded at delta module position
+                    if last_stamp == stamp:
+                        continue
+                    last_stamp = stamp
 
-                # Calculate fuel
-                gen_fuel_usage.send(vehicle_resets)
+                    # Calculate fuel
+                    gen_fuel_usage.send(vehicle_resets)
 
-                # Calculate virtual energy if available
-                minfo.energy.available = (api.read.engine.virtual_energy() != 0)
-                if minfo.energy.available:
-                    gen_energy_usage.send(vehicle_resets)
+                    # Calculate virtual energy if available
+                    minfo.energy.available = (api.read.engine.virtual_energy() != 0)
+                    if minfo.energy.available:
+                        gen_energy_usage.send(vehicle_resets)
 
-                    # Update hybrid info
-                    minfo.hybrid.fuelEnergyRatio = calc.fuel_to_energy_ratio(
-                        minfo.fuel.estimatedConsumption,
-                        minfo.energy.estimatedConsumption,
-                    )
-                    minfo.hybrid.fuelEnergyBias = (
-                        minfo.fuel.estimatedLaps - minfo.energy.estimatedLaps
-                    )
+                        # Update hybrid info
+                        minfo.hybrid.fuelEnergyRatio = calc.fuel_to_energy_ratio(
+                            minfo.fuel.estimatedConsumption,
+                            minfo.energy.estimatedConsumption,
+                        )
+                        minfo.hybrid.fuelEnergyBias = (
+                            minfo.fuel.estimatedLaps - minfo.energy.estimatedLaps
+                        )
 
-            else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
-
-        self.save_on_stop(gen_fuel_usage, gen_energy_usage)
+                else:
+                    if reset:
+                        reset = False
+                        update_interval = self.idle_interval
+        finally:
+            # Also save on error exit, as restarted module reloads data from file
+            self.save_on_stop(gen_fuel_usage, gen_energy_usage)
 
 
 def detect_consumption_type(is_energy: bool) -> Callable:

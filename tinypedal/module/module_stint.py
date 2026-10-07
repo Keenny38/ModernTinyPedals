@@ -64,24 +64,26 @@ class Realtime(DataModule):
             filepath=self.cfg.path.fuel_delta,
         )
 
-        while not _event_wait(update_interval):
-            if realtime_state.active or vehicle_resets != realtime_state.resets:
-                vehicle_resets = realtime_state.resets
+        try:
+            while not _event_wait(update_interval):
+                if realtime_state.active or vehicle_resets != realtime_state.resets:
+                    vehicle_resets = realtime_state.resets
 
-                if not reset:
-                    reset = True
-                    update_interval = self.active_interval
+                    if not reset:
+                        reset = True
+                        update_interval = self.active_interval
 
-                # Update history
-                gen_consumption_history.send(vehicle_resets)
-                gen_stint_history.send(vehicle_resets)
+                    # Update history
+                    gen_consumption_history.send(vehicle_resets)
+                    gen_stint_history.send(vehicle_resets)
 
-            else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
-
-        self.save_on_stop(gen_consumption_history)
+                else:
+                    if reset:
+                        reset = False
+                        update_interval = self.idle_interval
+        finally:
+            # Also save on error exit, as restarted module reloads data from file
+            self.save_on_stop(gen_consumption_history)
 
 
 def prepend(dataset: deque, item) -> deque:

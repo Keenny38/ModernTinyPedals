@@ -76,9 +76,13 @@ def skip_inactive_frames() -> bool:
 
 
 def start_api_recording(auto: bool = False) -> str:
-    """Start recording current API to telemetry folder, return file name (empty if already recording)"""
+    """Start recording current API to telemetry folder, return file name (empty if already recording or failed)"""
     folder = cfg.path.telemetry or "."
-    os.makedirs(folder, exist_ok=True)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as error:  # missing drive, no permission: never stops caller (recorder module)
+        logger.error("RECORDER: cannot create replay folder %s: %s", folder, error)
+        return ""
     prefix = AUTO_PREFIX if auto else MANUAL_PREFIX
     filename = os.path.join(folder, time.strftime(f"{prefix}%Y-%m-%d-%H-%M-%S{FILE_EXT}"))
     sources = RecordingSources(
@@ -121,6 +125,8 @@ class AutoReplay:
                 if filename:
                     self.started = True
                     logger.info("RECORDER: automatic replay recording %s", os.path.basename(filename))
+                elif not replay.recording:  # failed: not retried every update until next driving
+                    self.user_stopped = True
             return
         self.user_stopped = False
         if self.started:

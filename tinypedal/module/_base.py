@@ -117,12 +117,21 @@ class DataModule:
         return self._done.wait(timeout)
 
     def save_on_stop(self, *generators) -> None:
-        """Save data not saved yet of data generators (run after update loop ended), unless discarded"""
+        """Save data not saved yet of data generators (run after update loop ended), unless discarded
+
+        Also run when update loop ended by error, before module restarts and reloads data from file.
+        """
         if self.discard:
             return
         for generator in generators:
-            if generator is not None:
+            if generator is None:
+                continue
+            try:
                 generator.send(MODULE_STOP)
+            except StopIteration:  # generator ended by error, already logged
+                pass
+            except Exception:  # save other generators data
+                logger.exception("%s: saving data on stop failed", self.module_name)
 
     def update_data(self):
         """Update module data, rewrite in child class"""

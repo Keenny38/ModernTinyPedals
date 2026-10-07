@@ -68,33 +68,35 @@ class Realtime(DataModule):
             podium_by_class=self.mcfg["enable_podium_by_class"]
         )
 
-        while not _event_wait(update_interval):
+        try:
+            while not _event_wait(update_interval):
 
-            # Ignore stats while in spectate or override mode
-            if not realtime_state.singleton or realtime_state.spectating or realtime_state.overriding:
-                if reset:
-                    reset = False  # make sure stats not saved
-                    update_interval = self.idle_interval
-                continue
+                # Ignore stats while in spectate or override mode
+                if not realtime_state.singleton or realtime_state.spectating or realtime_state.overriding:
+                    if reset:
+                        reset = False  # make sure stats not saved
+                        update_interval = self.idle_interval
+                    continue
 
-            if realtime_state.active or vehicle_resets != realtime_state.resets:
-                vehicle_resets = realtime_state.resets
+                if realtime_state.active or vehicle_resets != realtime_state.resets:
+                    vehicle_resets = realtime_state.resets
 
-                if not reset:
-                    reset = True
-                    update_interval = self.active_interval
+                    if not reset:
+                        reset = True
+                        update_interval = self.active_interval
 
-                gen_record_driver_stats.send(vehicle_resets)
+                    gen_record_driver_stats.send(vehicle_resets)
 
-                if self.cfg.telemetry["enable_auto_backup_car_setup"]:
-                    gen_auto_backup_car_setup.send(vehicle_resets)
+                    if self.cfg.telemetry["enable_auto_backup_car_setup"]:
+                        gen_auto_backup_car_setup.send(vehicle_resets)
 
-            else:
-                if reset:
-                    reset = False
-                    update_interval = self.idle_interval
-
-        self.save_on_stop(gen_record_driver_stats, gen_auto_backup_car_setup)
+                else:
+                    if reset:
+                        reset = False
+                        update_interval = self.idle_interval
+        finally:
+            # Also save on error exit, as restarted module reloads data from file
+            self.save_on_stop(gen_record_driver_stats, gen_auto_backup_car_setup)
 
 
 def stats_keys(vehicle_classification: str) -> tuple[str, str]:

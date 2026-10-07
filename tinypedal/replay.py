@@ -249,8 +249,22 @@ def read_header(file: BinaryIO) -> dict:
     frame_size = header.get("frame_size")
     if not isinstance(frame_size, int) or isinstance(frame_size, bool) or not 0 < frame_size <= MAX_FRAME_SIZE:
         raise ValueError("invalid replay header")
+    # Other fields read as numbers or text: wrong type (null, list...) is an invalid file, not a TypeError
+    if not (finite_number(header.get("created", 0.0)) and finite_number(header.get("rate", DEFAULT_RATE))
+            and isinstance(header.get("source", ""), str)):
+        raise ValueError("invalid replay header")
     header["format"] = version
     return header
+
+
+def finite_number(value: Any) -> bool:
+    """Whether value is a finite number (bool excluded)"""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # integer too large for float
+        return False
 
 
 def frame_header_of(header: dict) -> struct.Struct:
@@ -302,14 +316,23 @@ def read_replay_info(filename: str) -> ReplayInfo:
         summary = read_summary(file, frame_header_of(header))
         size = file.seek(0, os.SEEK_END)
     info = header.get("info")
+    duration = summary.get("duration", -1.0)
     return ReplayInfo(
         filename=filename,
         created=float(header.get("created", 0.0)),
         size=size,
-        duration=float(summary.get("duration", -1.0)),
+        duration=float(duration) if finite_number(duration) else -1.0,
         source=str(header.get("source", API_LMU_NAME)),
         info=info if isinstance(info, dict) else {},
     )
+
+
+def same_file(filename: str, other: str) -> bool:
+    """Whether both names point to same file (case, links), compared by name if either is missing"""
+    try:
+        return os.path.samefile(filename, other)
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.realpath(filename)) == os.path.normcase(os.path.realpath(other))
 
 
 def list_replays(folder: str) -> list[ReplayInfo]:
@@ -322,7 +345,7 @@ def list_replays(folder: str) -> list[ReplayInfo]:
     for name in names:
         try:
             replays.append(read_replay_info(os.path.join(folder, name)))
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):  # one bad file never hides the others
             continue
     replays.sort(key=lambda item: item.created, reverse=True)
     return replays
@@ -397,10 +420,11 @@ class ReplayFile:
             raise ValueError("invalid zone layout") from error
         if sum(size for _, size in self.layout) != self.frame_size:
             raise ValueError("invalid zone layout")
-        self.times: list[float] = []
-        self.keyframes: list[bool] = []
-        self._offsets: list[int] = []
-        self._sizes: list[int] = []
+        # Frame index in packed arrays (a long recording has hundreds of thousands of frames)
+        self.times = array("d")
+        self.keyframes = bytearray()  # 1 if keyframe
+        self._offsets = array("q")
+        self._sizes = array("q")
         self._crcs = array("I")  # payload CRC of each frame (format 2)
         self.rest_times: list[float] = []
         self.rest_data: list[dict] = []
@@ -433,7 +457,7 @@ class ReplayFile:
             if frame_type <= 1:
                 last_time = elapsed
                 self.times.append(elapsed)
-                self.keyframes.append(bool(frame_type))
+                self.keyframes.append(1 if frame_type else 0)
                 self._offsets.append(position)
                 self._sizes.append(size)
                 if has_crc:
@@ -603,18 +627,30 @@ class ReplayFile:
             rest.insert(0, (origin, self.rest_data[initial_rest]))
         markers = [marker for marker in self.markers if origin <= marker.time <= end_time]
         total = last - first + 1
-        with open(filename, "wb") as file:
-            writer = ReplayWriter(file, self.frame_size, self.rate, header)
-            for frame_time, frame in self.iter_frames(first, last):
-                writer.write(frame_time - origin, frame)
-                while rest and rest[0][0] <= frame_time:
-                    writer.write_rest(rest[0][0] - origin, rest.pop(0)[1])
-                while markers and markers[0].time <= frame_time:
-                    marker = markers.pop(0)
-                    writer.write_marker(marker.time - origin, marker.kind, marker.text)
-                if progress is not None and writer.frames % EXPORT_PROGRESS_STEP == 0:
-                    progress(writer.frames, total)
-            writer.finish()
+        if same_file(filename, self.filename):
+            raise ValueError("cannot replace open replay file")
+        # Written to temporary file, then replaces target: existing file never left truncated on error
+        temp_name = f"{filename}.part"
+        try:
+            with open(temp_name, "wb") as file:
+                writer = ReplayWriter(file, self.frame_size, self.rate, header)
+                for frame_time, frame in self.iter_frames(first, last):
+                    writer.write(frame_time - origin, frame)
+                    while rest and rest[0][0] <= frame_time:
+                        writer.write_rest(rest[0][0] - origin, rest.pop(0)[1])
+                    while markers and markers[0].time <= frame_time:
+                        marker = markers.pop(0)
+                        writer.write_marker(marker.time - origin, marker.kind, marker.text)
+                    if progress is not None and writer.frames % EXPORT_PROGRESS_STEP == 0:
+                        progress(writer.frames, total)
+                writer.finish()
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_name, filename)
+        except BaseException:
+            with suppress(OSError):
+                os.remove(temp_name)
+            raise
         return writer.frames
 
 

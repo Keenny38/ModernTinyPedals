@@ -53,7 +53,7 @@ from ..userfile.lap_cache import load_cached_lap, remove_cached_lap
 from ..userfile.lap_marks import kept_laps
 from ..userfile.telemetry_lap import INFO_PREFIX, best_laps, lap_bounds, lap_files, lap_folder_name
 from ..validator import generator_init
-from ._base import DataModule
+from ._base import MODULE_STOP, DataModule
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,7 @@ class Realtime(DataModule):
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval
+        waiting = False  # completed lap waiting for validation
 
         record_laps = mcfg["enable_lap_recording"]
         record_during_replay = mcfg["enable_lap_recording_during_replay"]
@@ -141,17 +142,19 @@ class Realtime(DataModule):
                         update_interval = self.active_interval
                     if vehicle_resets != realtime_state.resets:
                         vehicle_resets = realtime_state.resets
-                    gen_recorder.send(vehicle_resets)
+                    waiting = gen_recorder.send(vehicle_resets)
                 else:
                     if reset:
                         reset = False
                         update_interval = self.idle_interval
-                        gen_recorder.send(None)  # discard incomplete lap
+                        waiting = gen_recorder.send(None)  # discard incomplete lap
+                    elif waiting:  # completed lap left before validation: keep checking lap time
+                        waiting = gen_recorder.send(None)
         finally:
             # Module stopped (reload, quit): save completed lap still waiting for validation
-            if reset:
+            if reset or waiting:
                 with suppress(StopIteration):  # recorder ended by error, already logged
-                    gen_recorder.send(None)
+                    gen_recorder.send(MODULE_STOP)
             if not wait_lap_saver(LAP_SAVER_TIMEOUT):
                 logger.warning("RECORDER: lap saving not finished")
             if auto_replay is not None:
@@ -160,6 +163,7 @@ class Realtime(DataModule):
 
 LAP_SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Lap saver")
 LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for laps being saved when module stops
+PENDING_WAIT = 10.0  # seconds to validate completed lap after leaving track just after start line
 
 
 def wait_lap_saver(timeout: float | None = None) -> bool:
@@ -376,8 +380,9 @@ def lap_info(kind: str, rows: Sequence | LapSamples) -> dict:
         if len(rows[0]) >= wear + 4 and len(rows[-1]) >= wear + 4:  # tyre wear over lap (session view)
             info["wear_start"] = list(rows[0][wear:wear + 4])
             info["wear_end"] = list(rows[-1][wear:wear + 4])
-    if replay.player is not None:
-        info["replay"] = os.path.basename(replay.player.replay.filename)
+    player = replay.player  # read once: replay may be unloaded from GUI thread meanwhile
+    if player is not None:
+        info["replay"] = os.path.basename(player.replay.filename)
     setup = setup_id()
     if setup:
         info["setup"] = setup
@@ -423,6 +428,7 @@ def record_telemetry(
     compress: bool = False,
     timestamp: Callable[[], float] = time.time,
     saver: Callable[[PendingLap, SaveOptions, bool], None] = save_lap_now,
+    clock: Callable[[], float] = time.monotonic,
 ):
     """Record telemetry samples, save complete lap after crossing start line
 
@@ -430,6 +436,9 @@ def record_telemetry(
     recorded lap time, same as delta best), then saved, or marked "invalid".
     Send vehicle resets count to record sample, send None to discard current lap.
     Time going backward (replay looping or rewound) also discards current lap.
+    Completed lap left before validation (reset just after start line) keeps being verified
+    for up to PENDING_WAIT seconds on next sends (None included), MODULE_STOP saves it now.
+    Yields whether a completed lap is waiting for validation.
     """
     last_reset = None
     last_lap_start = None
@@ -438,31 +447,47 @@ def record_telemetry(
     started_in_pits = False
     rows = LapSamples()
     pending: PendingLap | None = None  # completed lap waiting for validation
+    pending_deadline = 0.0  # clock time limit to validate pending lap left before validation delay, 0 if not
     options = SaveOptions(filepath, max_saved_laps, save_invalid, keep_best, compress)
 
     while True:
-        reset = yield None
+        reset = yield pending is not None
 
+        stopping = reset is MODULE_STOP
+        if stopping:
+            reset = None
         elapsed = api.read.timing.elapsed() if reset is not None else last_elapsed
         rewound = elapsed < last_elapsed - 0.001
         if reset is None or reset != last_reset or rewound:  # discard incomplete lap
-            if pending is not None:  # left track before validation delay: check lap time now
-                save_pending(pending, options, saver, confirmed_lap(pending))
-                pending = None
+            if pending is not None and not pending_deadline:
+                # Left track before validation delay: game last lap time (scoring) may not be updated yet
+                pending_deadline = clock() + PENDING_WAIT
             last_reset = reset
             last_lap_start = None
             last_elapsed = float("-inf")
             lap_complete_start = False
             rows = LapSamples()
-            if reset is None:
-                continue
+
+        # Validate pending lap left before validation delay
+        if pending is not None and pending_deadline:
+            if confirmed_lap(pending):
+                save_pending(pending, options, saver, True)
+                pending = None
+            elif stopping or clock() >= pending_deadline:
+                save_pending(pending, options, saver, False)
+                pending = None
+            if pending is None:
+                pending_deadline = 0.0
+
+        if reset is None:
+            continue
 
         if elapsed == last_elapsed:
             continue  # game data not updated since last sample
         last_elapsed = elapsed
 
         # Validate pending lap
-        if pending is not None:
+        if pending is not None and not pending_deadline:
             timer = elapsed - pending.finish_time
             last_laptime = api.read.timing.last_laptime()
             if timer > 1 and last_laptime > 0 and abs(last_laptime - pending.lap_time) < 0.001:
@@ -487,6 +512,7 @@ def record_telemetry(
                     and (save_out_in or kind == LAP_KIND)):
                 if pending is not None:  # previous lap not verified in time
                     save_pending(pending, options, saver, False)
+                    pending_deadline = 0.0
                 pending = PendingLap(
                     combo_name=api.read.session.combo_name(),
                     lap_number=api.read.lap.completed_laps(),

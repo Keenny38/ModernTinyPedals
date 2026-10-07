@@ -284,7 +284,7 @@ def read_log_laps(filename: str) -> tuple[LdInfo, Iterator[ImportedLap]]:
 
     Raises OSError or ValueError if file cannot be read.
     """
-    info, channel_list = read_ld(filename, USED_NAMES)
+    info, channel_list = read_ld(filename, USED_NAMES, MAX_LOG_SECONDS)  # longer part never loaded
     channels = {channel.name.lower(): channel for channel in channel_list}
     sources = [(source, find_channel(channels, source.names)) for source in SOURCES]
     found = [(source, channel) for source, channel in sources if channel is not None]

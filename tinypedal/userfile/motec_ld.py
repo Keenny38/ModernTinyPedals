@@ -202,13 +202,18 @@ def header_time(date: str, clock: str) -> float:
     return 0.0
 
 
-def read_ld(filename: str, names: Collection[str] | None = None) -> tuple[LdInfo, list[Channel]]:
+def read_ld(
+    filename: str, names: Collection[str] | None = None, max_seconds: float = 0.0,
+) -> tuple[LdInfo, list[Channel]]:
     """Read MoTeC .ld file: float & integer channels (only channels named in names if set, any case), integers
     scaled to their unit
 
     Channels read one by one from file, samples kept packed (doubles): a game log has about 180 channels, an hour of
     them is millions of samples. Raises OSError or ValueError if not a readable .ld file. Channels of unknown type,
     or reaching past end of file, are skipped.
+
+    Args:
+        max_seconds: read channels up to this time only (memory bound of very long logs), 0 = whole channels.
     """
     wanted = {name.lower() for name in names} if names is not None else None
 
@@ -247,6 +252,8 @@ def read_ld(filename: str, names: Collection[str] | None = None) -> tuple[LdInfo
             typecode = raw_typecode(dtype_a, size)
             if not typecode or frequency <= 0 or data_ptr + count * size > file_size:
                 continue
+            if max_seconds > 0:
+                count = min(count, int(frequency * max_seconds) + 1)
             raw: array | tuple
             try:
                 data = read_at(data_ptr, count * size)
@@ -357,7 +364,7 @@ def import_ld_job(filename: str, folder: str) -> tuple[list[str], str]:
 
     try:
         return import_ld_file(filename, folder), ""
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, MemoryError) as error:  # memory: huge log (or sizes made up by a broken file)
         logger.error("MOTEC: unable to import %s: %s", filename, error)
         return [], error_text(error)
 

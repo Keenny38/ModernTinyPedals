@@ -186,8 +186,9 @@ def fetch_geometry(host: str, port: int, track: str, positions: Sequence[tuple[f
     for item in tracks:
         if not isinstance(item, dict) or not item.get("id"):
             continue
+        display = item.get("displayProperties")  # null or other type in unexpected answer
         names = {base_name(item.get("shortName", "")), base_name(item.get("name", "")),
-                 base_name(item.get("displayProperties", {}).get("shortName", ""))}
+                 base_name(display.get("shortName", "") if isinstance(display, dict) else "")}
         if wanted in names:
             candidates.setdefault(str(item.get("sceneDesc") or item["id"]), item)
     best: tuple[float, TrackGeometry] | None = None
@@ -204,7 +205,9 @@ def fetch_geometry(host: str, port: int, track: str, positions: Sequence[tuple[f
             error += abs(length - lap_length) / lap_length * 50
         try:
             game_length = float(str(item.get("length", "0")).split()[0]) * 1000
-        except ValueError:
+        except (ValueError, IndexError):  # not a number, or empty text
+            game_length = 0.0
+        if not math.isfinite(game_length) or game_length < 0:
             game_length = 0.0
         if best is None or error < best[0]:
             best = (error, TrackGeometry(layout, game_length or length, center, pit,
