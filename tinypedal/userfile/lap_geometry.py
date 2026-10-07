@@ -103,7 +103,7 @@ def map_line_indexes(lap: LapData) -> tuple[MapLine, list[int]] | None:
     indexes: list[int] = []
     last = -math.inf
     for index, (distance, x, y) in enumerate(zip(lap.distance, xs_column, ys_column)):
-        if not x and not y:
+        if (not x and not y) or not (math.isfinite(x) and math.isfinite(y)):  # not recorded, logger gap (NaN)
             continue
         if distance <= last:
             if last - distance > SAME_DISTANCE:  # distance went back: glitch

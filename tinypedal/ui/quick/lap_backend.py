@@ -661,7 +661,10 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         # (main lap path, lap path): file stamps of both laps checked, whether same circuit (imported lap, see
         # same_imported_circuit; False: another circuit), no lap data kept
         self._shape_checks: dict[tuple[str, str], tuple[tuple[float, float], bool | None]] = {}
-        self._prepared = False  # shape checks & alignments of shown laps just measured in background (load_laps)
+        # Selection (shown laps, main, anchor & reference lap) whose shape checks & alignments were just measured in
+        # background (load_laps), None if none: another selection picked meanwhile is measured in background too
+        self._prepared: tuple | None = None
+        self._preparing: tuple | None = None  # selection measured by loading thread
         self._compare_key = ""  # lap compared corner by corner & on gain map, first compared lap if not shown
         self._loader: threading.Thread | None = None
         self._exports = 0  # MoTeC & CSV export jobs running
@@ -2655,6 +2658,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
                     logger.exception("LAP VIEWER: unable to compare laps")
 
         self._prepared_laps = prepared
+        self._preparing = plan[:4] if plan is not None else None
         self._loaded = results
         self._loaded_paths = set(paths)
         self._load_total = len(paths)
@@ -2689,7 +2693,7 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         for checks, aligned in prepared:  # used by load_laps below if laps are still the same
             self._prepared_checks.update(checks)  # laps found on another circuit told by drop_other_shapes
             self.data.keep_aligned(aligned)
-            self._prepared = True
+            self._prepared = self._preparing
         if failed:
             self.set_status(trm(f"Unable to load lap: {html.escape(os.path.basename(failed[0]))}"))
         else:  # message shown before loading (new lap) shown again
@@ -2732,7 +2736,8 @@ class LapViewerBackend(MapView, CornerTable, SessionTab, LapExports, ChartTools,
         anchor_path = self.track_anchor(ordered)
         needed = [*ordered, *(path for path in (main_path, anchor_path) if path and path not in ordered)]
         missing = [path for path in needed if path not in self._lap_cache]
-        prepared, self._prepared = self._prepared, False
+        prepared = self._prepared == (ordered, main_path, anchor_path, self.reference_key)  # else picked meanwhile
+        self._prepared = None
         if (self._loader is not None or len(missing) >= lap_viewer.BACKGROUND_LOAD_COUNT
                 or (not prepared and self.needs_preparing(ordered, main_path, anchor_path))):
             self.update_list_state(self.data.laps)

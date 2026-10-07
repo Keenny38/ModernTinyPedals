@@ -214,10 +214,10 @@ def circuit_lap(track_length: float = 3000.0, start: float = 0.0, pace: float = 
     speeds.append(speed * 3.6)
     lap_time += (start + track_length - end) / speed
     columns = {"distance": [value - start for value in distances], "lap_time": times, "speed_kph": speeds}
-    if positions and turns:
-        columns["pos_x"], columns["pos_z"] = turned_positions(distances, track_length, turns)
+    if positions and turns:  # map plane: pos_x & pos_y (pos_z is elevation, like recorded laps)
+        columns["pos_x"], columns["pos_y"] = turned_positions(distances, track_length, turns)
     elif positions:
         radius = track_length / (2 * math.pi)
         columns["pos_x"] = [radius * math.cos(value / radius) for value in distances]
-        columns["pos_z"] = [radius * math.sin(value / radius) for value in distances]
+        columns["pos_y"] = [radius * math.sin(value / radius) for value in distances]
     return columns, lap_time

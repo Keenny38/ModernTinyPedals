@@ -38,11 +38,11 @@ def make_lap(number: int, turns=SPA, shift: float = 0.0, pace: float = 1.0, reco
     columns["distance"] = [value * scale for value in columns["distance"]]
     if positions:
         rotation = complex(math.cos(turn), math.sin(turn))
-        points = [complex(x, z) for x, z in zip(columns["pos_x"], columns["pos_z"])]
+        points = [complex(x, y) for x, y in zip(columns["pos_x"], columns["pos_y"])]
         points = [(point.conjugate() if mirrored else point) * rotation + complex(800.0, -350.0) * bool(turn)
                   for point in points]
         columns["pos_x"] = [point.real for point in points]
-        columns["pos_z"] = [point.imag for point in points]
+        columns["pos_y"] = [point.imag for point in points]
     if recorded:
         info = dict(RECORDED)
     else:
@@ -102,10 +102,10 @@ def test_short_off_track_excursion_kept():
     """Lap of the same circuit with a short trip off the line (gravel): still the same circuit"""
     reference = make_lap(1, recorded=True)
     imported = make_lap(2, shift=30.0)
-    xs, zs, distances = imported.columns["pos_x"], imported.columns["pos_z"], imported.distance
+    xs, ys, distances = imported.columns["pos_x"], imported.columns["pos_y"], imported.distance
     columns = dict(imported.columns)
     columns["pos_x"] = [x + (40.0 if 1500 < distance < 1560 else 0.0) for x, distance in zip(xs, distances)]
-    columns["pos_z"] = list(zs)
+    columns["pos_y"] = list(ys)
     assert same_shape(reference, LapData(imported.name, columns, imported.info)) is True
 
 
@@ -229,7 +229,6 @@ def test_imported_lap_of_other_circuit_alone_shown(track, tmp_path):
     backend, _ = track
     before = sorted(lap.key for lap in backend.data.laps)
     lap = make_lap(5, OTHER, turn=0.8, scale=1.04)
-    lap.columns["pos_y"] = list(lap.columns["pos_z"])  # map plane of track map
     other = write_lap(str(tmp_path / "logs"), lap)
     backend.add_external([other], [other])  # MoTeC import: lap infos alike (no game name), as reference
     wait_loaded(backend)

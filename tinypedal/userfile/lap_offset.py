@@ -67,6 +67,8 @@ POSITION_MIN_SHARE = 0.8  # share of compared points on reference line (same cir
 POSITION_SPREAD = 10.0  # meters, offsets of most points this close to their median (one offset all along)
 POSITION_MIN_FINITE = 0.9  # share of samples with a finite world position (logger gaps ignored), else no positions
 OFFSET_INFO = "distance_offset"  # lap info: meters added to lap distances (aligned lap)
+# World positions on the map plane (recorded laps & lap map: pos_z is elevation, see module_recorder)
+PLANE_COLUMNS = ("pos_x", "pos_y")
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +97,10 @@ def column_on_grid(lap: LapData, column: str, grid: Sequence[float], scale: floa
 
 
 def finite_positions(lap: LapData) -> tuple[Sequence[float], Sequence[float], Sequence[float]]:
-    """Distances (going forward) & world positions x, z of samples with a finite position (no GPS fix, logger gap:
-    NaN or infinite samples left out)"""
-    distances, xs = monotonic_distance(lap, "pos_x")
-    zs = monotonic_distance(lap, "pos_z")[1]
+    """Distances (going forward) & world positions x, z of samples with a finite position on the map plane (see
+    PLANE_COLUMNS; no GPS fix, logger gap: NaN or infinite samples left out)"""
+    distances, xs = monotonic_distance(lap, PLANE_COLUMNS[0])
+    zs = monotonic_distance(lap, PLANE_COLUMNS[1])[1]
     if math.isfinite(sum(xs)) and math.isfinite(sum(zs)):
         return distances, xs, zs
     kept = [index for index, (x, z) in enumerate(zip(xs, zs)) if math.isfinite(x) and math.isfinite(z)]
@@ -108,7 +110,7 @@ def finite_positions(lap: LapData) -> tuple[Sequence[float], Sequence[float], Se
 def has_positions(lap: LapData) -> bool:
     """Whether lap has world positions (moving, finite for most samples, see POSITION_MIN_FINITE)"""
     columns = lap.columns
-    if len(lap) < 2 or any(len(columns.get(name) or ()) != len(lap) for name in ("pos_x", "pos_z")):
+    if len(lap) < 2 or any(len(columns.get(name) or ()) != len(lap) for name in PLANE_COLUMNS):
         return False
     distances, xs, zs = finite_positions(lap)
     if len(distances) < 2 or len(xs) < POSITION_MIN_FINITE * len(lap):
