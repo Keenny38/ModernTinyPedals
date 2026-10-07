@@ -3,6 +3,7 @@
  * Writer below follows tinypedal/vr_shared.py (same layout, same seqlock order).
  */
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -28,6 +29,7 @@ struct Memory {
     std::vector<uint64_t> words = std::vector<uint64_t>(TPVR_MAPPING_SIZE / 8u, 0);
     uint8_t* data() { return reinterpret_cast<uint8_t*>(words.data()); }
     TpvrHeader& header() { return *reinterpret_cast<TpvrHeader*>(data()); }
+    TpvrTile& tile(uint32_t index) { return reinterpret_cast<TpvrTile*>(data() + TPVR_TILE_OFFSET)[index]; }
     size_t size() const { return words.size() * 8u; }
 };
 
@@ -55,6 +57,10 @@ void write_frame(Memory& memory, uint32_t width, uint32_t height, uint8_t value,
     header.distance_meters = 1.0f;
     header.vertical_offset_meters = -0.2f;
     header.horizontal_offset_meters = 0.0f;
+    header.canvas_width = width + 10u;  // one tile: whole atlas at (10, 0) of canvas
+    header.canvas_height = height;
+    header.tile_count = 1;
+    memory.tile(0) = TpvrTile{0, 0, width, height, 10, 0, {}};
     std::memset(memory.data() + TPVR_DATA_OFFSET, value, static_cast<size_t>(width) * height * 4u);
     header.sequence += 1;  // even: done
     header.app_heartbeat_ms = heartbeat;
@@ -73,6 +79,225 @@ void test_valid_frame() {
     CHECK(reader.take_pixels_changed());
     CHECK(!reader.take_pixels_changed());
     CHECK(reader.read(memory.data(), memory.size(), 1600) == tpvr::ReadResult::Unchanged);
+    CHECK(reader.info().canvas_width == 13 && reader.info().canvas_height == 2 && reader.info().tile_count == 1);
+    const tpvr::Tile& tile = reader.info().tiles[0];
+    CHECK(tile.atlas == (tpvr::Rect{0, 0, 3, 2}) && tile.canvas_x == 10 && tile.canvas_y == 0);
+}
+
+// Atlas 8 x 4 with 3 tiles placed on a 100 x 50 canvas
+void write_tiles(Memory& memory, uint32_t serial) {
+    write_frame(memory, 8, 4, 0, serial, TPVR_FLAG_VISIBLE, 1000);
+    TpvrHeader& header = memory.header();
+    header.sequence += 1;
+    header.canvas_width = 100;
+    header.canvas_height = 50;
+    header.tile_count = 3;
+    memory.tile(0) = TpvrTile{0, 0, 3, 4, 0, 0, {}};
+    memory.tile(1) = TpvrTile{4, 0, 2, 2, 90, 40, {}};
+    memory.tile(2) = TpvrTile{7, 0, 1, 1, 99, 49, {}};
+    header.sequence += 1;
+}
+
+void test_tiles() {
+    Memory memory;
+    init_header(memory);
+    write_tiles(memory, 1);
+    tpvr::FrameReader reader;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.drawable());
+    const tpvr::FrameInfo& info = reader.info();
+    CHECK(info.tile_count == 3 && info.canvas_width == 100 && info.canvas_height == 50);
+    CHECK(info.tiles[1].atlas == (tpvr::Rect{4, 0, 2, 2}) && info.tiles[1].canvas_x == 90 && info.tiles[1].canvas_y == 40);
+    CHECK(info.tiles[2].atlas == (tpvr::Rect{7, 0, 1, 1}) && info.tiles[2].canvas_x == 99);
+    // Hidden: tiles kept with pixels, shown again as they were
+    memory.header().sequence += 2;
+    memory.header().flags = 0;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(!reader.drawable() && reader.info().tile_count == 3);
+    memory.header().sequence += 2;
+    memory.header().flags = TPVR_FLAG_VISIBLE;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated);
+    CHECK(reader.drawable() && reader.info().tiles[1].canvas_x == 90);
+}
+
+void test_invalid_tiles() {
+    struct Case {
+        const char* name;
+        void (*change)(Memory&);
+    };
+    const Case cases[] = {
+        {"no tile", [](Memory& memory) { memory.header().tile_count = 0; }},
+        {"too many tiles", [](Memory& memory) { memory.header().tile_count = TPVR_MAX_TILES + 1u; }},
+        {"canvas 0", [](Memory& memory) { memory.header().canvas_width = 0; }},
+        {"canvas too big", [](Memory& memory) { memory.header().canvas_height = TPVR_MAX_CANVAS + 1u; }},
+        {"tile empty", [](Memory& memory) { memory.tile(1).width = 0; }},
+        {"tile outside atlas", [](Memory& memory) { memory.tile(1).atlas_x = 7; }},
+        {"tile below atlas", [](Memory& memory) { memory.tile(0).height = 5; }},
+        {"tile atlas wraps", [](Memory& memory) { memory.tile(2).atlas_x = 0xFFFFFFFFu; }},
+        {"tile outside canvas", [](Memory& memory) { memory.tile(2).canvas_x = 100; }},
+        {"tile canvas wraps", [](Memory& memory) { memory.tile(1).canvas_y = 0xFFFFFFFFu; }},
+        {"unused tile garbage ok", nullptr},
+    };
+    for (const Case& item : cases) {
+        Memory memory;
+        init_header(memory);
+        write_tiles(memory, 1);
+        memory.tile(5) = TpvrTile{0xFFFFFFFFu, 1, 1, 1, 1, 1, {}};  // beyond tile_count: ignored
+        if (item.change != nullptr) {
+            item.change(memory);
+        }
+        tpvr::FrameReader fresh;
+        const tpvr::ReadResult result = fresh.read(memory.data(), memory.size(), 1000);
+        const bool expected_valid = item.change == nullptr;
+        const bool ok = expected_valid ? (result == tpvr::ReadResult::Updated && fresh.drawable())
+                                       : (result == tpvr::ReadResult::Invalid && !fresh.drawable());
+        if (!ok) {
+            std::printf("tile case wrong: %s\n", item.name);
+        }
+        CHECK(ok);
+    }
+}
+
+void test_version_mismatch() {
+    Memory memory;
+    init_header(memory);
+    write_frame(memory, 2, 2, 1, 1, TPVR_FLAG_VISIBLE, 1000);
+    tpvr::FrameReader reader;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated && reader.drawable());
+    memory.header().version = TPVR_VERSION - 1u;  // older app started again while the game runs
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::VersionMismatch);
+    CHECK(!reader.drawable() && reader.pixels().empty());  // previous frame dropped
+    CHECK(tpvr::app_alive(memory.data(), memory.size(), 1000));  // mapping kept open
+    CHECK(reader.read(memory.data(), memory.size(), 1000 + TPVR_APP_TIMEOUT_MS + 1) == tpvr::ReadResult::AppGone);
+    memory.header().version = TPVR_VERSION + 1u;  // newer app
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::VersionMismatch);
+    tpvr::LayerStatus status;
+    status.state = TPVR_LAYER_VERSION_MISMATCH;
+    tpvr::write_layer_status(memory.data(), memory.size(), status, 1234);  // layer fields at same offsets
+    CHECK(memory.header().layer_state == TPVR_LAYER_VERSION_MISMATCH && memory.header().layer_version == TPVR_VERSION);
+    CHECK(memory.header().layer_heartbeat_ms == 1234);
+    memory.header().version = TPVR_VERSION;
+    memory.header().sequence += 2;
+    CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Updated && reader.drawable());
+}
+
+tpvr::FrameInfo tile_info(uint32_t count) {
+    // Tile i: 10 x 5 pixels at atlas (11 * i, 0), on canvas at (100 * i, 20 * i)
+    tpvr::FrameInfo info;
+    info.width = 11u * count;
+    info.height = 5;
+    info.canvas_width = 100u * count;
+    info.canvas_height = 20u * count + 5u;
+    info.tile_count = count;
+    info.width_meters = 1.0f;
+    for (uint32_t index = 0; index < count; ++index) {
+        info.tiles[index].atlas = tpvr::Rect{11u * index, 0, 10, 5};
+        info.tiles[index].canvas_x = 100u * index;
+        info.tiles[index].canvas_y = 20u * index;
+    }
+    return info;
+}
+
+void test_plan_layout() {
+    const tpvr::FrameInfo info = tile_info(4);
+    const tpvr::TileLayout same = tpvr::plan_layout(info, 16, 4096, 4096);
+    CHECK(!same.merged && same.width == info.width && same.height == 5 && same.quads.size() == 4 && same.copies.empty());
+    CHECK(same.quads[2].image == (tpvr::Rect{22, 0, 10, 5}) && same.quads[2].canvas_x == 200 && same.quads[2].canvas_y == 40);
+    CHECK(same.canvas_width == 400 && same.canvas_height == 85);
+    CHECK(tpvr::plan_layout(info, 4, 4096, 4096) == same);
+    CHECK(tpvr::plan_layout(info, 0, 4096, 4096).empty());
+    CHECK(tpvr::plan_layout(info, 4, 40, 4096).empty());  // atlas wider than swapchain allows
+    CHECK(tpvr::plan_layout(tpvr::FrameInfo{}, 4, 4096, 4096).empty());
+
+    // 2 quads for 4 tiles: closest tiles merged, each group image holds its tiles at their canvas offsets
+    const tpvr::TileLayout merged = tpvr::plan_layout(info, 2, 4096, 4096);
+    CHECK(merged.merged && merged.quads.size() == 2 && merged.copies.size() == 4);
+    if (merged.quads.size() == 2) {
+        // Tiles (0, 1) & (2, 3): 110 x 25 boxes, side by side 1 pixel apart
+        CHECK(merged.quads[0].image == (tpvr::Rect{0, 0, 110, 25}) && merged.quads[0].canvas_x == 0 &&
+              merged.quads[0].canvas_y == 0);
+        CHECK(merged.quads[1].image == (tpvr::Rect{111, 0, 110, 25}) && merged.quads[1].canvas_x == 200 &&
+              merged.quads[1].canvas_y == 40);
+        CHECK(merged.width == 221 && merged.height == 25);
+        CHECK(merged.copies[1].atlas == (tpvr::Rect{11, 0, 10, 5}) && merged.copies[1].x == 100 && merged.copies[1].y == 20);
+        CHECK(merged.copies[3].x == 111 + 100 && merged.copies[3].y == 20);
+    }
+    CHECK(tpvr::plan_layout(info, 2, 4096, 4096) != same);
+    // One quad: everything merged; rows wrap at max width, empty when too tall
+    const tpvr::TileLayout one = tpvr::plan_layout(info, 1, 4096, 4096);
+    CHECK(one.merged && one.quads.size() == 1 && one.quads[0].image == (tpvr::Rect{0, 0, 310, 65}));
+    const tpvr::TileLayout rows = tpvr::plan_layout(info, 2, 150, 4096);
+    CHECK(rows.quads.size() == 2 && rows.width == 110 && rows.height == 51 && rows.quads[1].image.y == 26);
+    CHECK(tpvr::plan_layout(info, 2, 150, 50).empty());
+    CHECK(tpvr::plan_layout(info, 1, 300, 4096).empty());  // merged image wider than allowed
+}
+
+void test_compose_layout() {
+    const tpvr::FrameInfo info = tile_info(3);
+    std::vector<uint8_t> atlas(static_cast<size_t>(info.width) * info.height * 4u);
+    for (size_t index = 0; index < atlas.size(); ++index) {
+        atlas[index] = static_cast<uint8_t>(index % 251u + 1u);  // never 0
+    }
+    const tpvr::TileLayout layout = tpvr::plan_layout(info, 1, 4096, 4096);
+    std::vector<uint8_t> out(7, 0xEE);
+    tpvr::compose_layout(layout, atlas.data(), info.width, info.height, out);
+    CHECK(out.size() == static_cast<size_t>(layout.width) * layout.height * 4u);
+    // Each canvas pixel: tile pixel where a tile is, transparent elsewhere
+    int wrong = 0;
+    for (uint32_t y = 0; y < layout.height; ++y) {
+        for (uint32_t x = 0; x < layout.width; ++x) {
+            const uint32_t canvas_x = layout.quads[0].canvas_x + x;
+            const uint32_t canvas_y = layout.quads[0].canvas_y + y;
+            uint32_t expected[4] = {0, 0, 0, 0};
+            for (uint32_t index = 0; index < info.tile_count; ++index) {
+                const tpvr::Tile& tile = info.tiles[index];
+                if (canvas_x >= tile.canvas_x && canvas_x < tile.canvas_x + tile.atlas.width && canvas_y >= tile.canvas_y &&
+                    canvas_y < tile.canvas_y + tile.atlas.height) {
+                    const size_t offset = ((static_cast<size_t>(tile.atlas.y) + canvas_y - tile.canvas_y) * info.width +
+                                           tile.atlas.x + canvas_x - tile.canvas_x) * 4u;
+                    for (int channel = 0; channel < 4; ++channel) {
+                        expected[channel] = atlas[offset + static_cast<size_t>(channel)];
+                    }
+                }
+            }
+            const uint8_t* pixel = out.data() + (static_cast<size_t>(y) * layout.width + x) * 4u;
+            for (int channel = 0; channel < 4; ++channel) {
+                wrong += pixel[channel] != expected[channel] ? 1 : 0;
+            }
+        }
+    }
+    CHECK(wrong == 0);
+    // Copy outside atlas skipped (never read out of bounds)
+    tpvr::TileLayout bad = layout;
+    bad.copies[0].atlas.x = info.width;
+    tpvr::compose_layout(bad, atlas.data(), info.width, info.height, out);
+    CHECK(out[0] == 0 && out[3] == 0);
+    tpvr::compose_layout(layout, nullptr, info.width, info.height, out);
+    CHECK(out.size() == static_cast<size_t>(layout.width) * layout.height * 4u && out[0] == 0);
+}
+
+bool close_to(float value, float expected) { return std::fabs(value - expected) < 1e-5f; }
+
+void test_quad_placement() {
+    // Canvas 200 x 100 pixels, 2 m wide (0.01 m per pixel), center at (0.5, -0.25, -1.5)
+    tpvr::FrameInfo info;
+    info.width_meters = 2.0f;
+    info.distance_meters = 1.5f;
+    info.vertical_offset_meters = -0.25f;
+    info.horizontal_offset_meters = 0.5f;
+    tpvr::LayoutQuad whole{tpvr::Rect{0, 0, 200, 100}, 0, 0};
+    tpvr::QuadPlacement placement = tpvr::quad_placement(info, 200, 100, whole);
+    CHECK(close_to(placement.x, 0.5f) && close_to(placement.y, -0.25f) && close_to(placement.z, -1.5f));
+    CHECK(close_to(placement.width, 2.0f) && close_to(placement.height, 1.0f));
+    tpvr::LayoutQuad top_left{tpvr::Rect{7, 3, 50, 20}, 0, 0};  // image position does not matter
+    placement = tpvr::quad_placement(info, 200, 100, top_left);
+    CHECK(close_to(placement.x, 0.5f - 0.75f) && close_to(placement.y, -0.25f + 0.4f));
+    CHECK(close_to(placement.width, 0.5f) && close_to(placement.height, 0.2f));
+    tpvr::LayoutQuad bottom_right{tpvr::Rect{0, 0, 10, 10}, 190, 90};
+    placement = tpvr::quad_placement(info, 200, 100, bottom_right);
+    CHECK(close_to(placement.x, 0.5f + 0.95f) && close_to(placement.y, -0.25f - 0.45f) && close_to(placement.width, 0.1f));
+    placement = tpvr::quad_placement(info, 0, 100, whole);
+    CHECK(placement.width == 0.0f);
 }
 
 void test_placement_only_change_keeps_pixels() {
@@ -135,6 +360,10 @@ void test_invalid_headers() {
         Memory memory;
         init_header(memory);
         memory.header().version = 99;
+        memory.header().app_heartbeat_ms = 1000;
+        CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::VersionMismatch);
+        CHECK(!reader.drawable());
+        memory.header().magic = 0;
         CHECK(reader.read(memory.data(), memory.size(), 1000) == tpvr::ReadResult::Invalid);
     }
     {
@@ -263,6 +492,12 @@ void test_convert_pixels() {
 
 int main() {
     test_valid_frame();
+    test_tiles();
+    test_invalid_tiles();
+    test_version_mismatch();
+    test_plan_layout();
+    test_compose_layout();
+    test_quad_placement();
     test_placement_only_change_keeps_pixels();
     test_writer_busy();
     test_heartbeat();

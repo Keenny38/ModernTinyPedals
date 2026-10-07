@@ -15,7 +15,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import app_signal, vr_overlay
+from tinypedal import app_signal, vr_overlay, vr_shared
 from tinypedal.setting import cfg
 from tinypedal.vr_overlay import VROverlay
 
@@ -164,6 +164,55 @@ def test_update_uploads_rgba_frame(vr_setting, monkeypatch):
     finally:
         widget.close()
         control.disable()
+
+
+def test_steamvr_keeps_whole_canvas_image_openxr_tiles_match(vr_setting, monkeypatch):
+    """SteamVR overlay: one image of the whole canvas (as before). OpenXR tiles: same pixels, each placed
+    where its part of that image is shown by the SteamVR overlay (same meters per pixel & center)"""
+    setting, _ = vr_setting
+    setting.update(overlay_width_meters=0.9, distance_meters=1.2, vertical_offset_meters=-0.1,
+                   horizontal_offset_meters=0.05, enable_attach_to_headset=False)
+    log = []
+    monkeypatch.setitem(sys.modules, "openvr", fake_openvr(log))
+    widgets = []
+    for x, y, color in ((10, 10, "red"), (700, 400, "blue")):
+        widget = FakeOverlayWindow()
+        widget.setGeometry(x, y, 60, 30)
+        widget.setStyleSheet(f"background: {color};")
+        widget.show()
+        widgets.append(widget)
+    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: widgets))
+    control = VROverlay()
+    try:
+        control.enable()
+        log.clear()
+        control.update_overlay()
+        raw = [entry for entry in log if entry[0] == "setOverlayRaw"]
+        assert len(raw) == 1
+        image = vr_overlay.compose_widgets(widgets)
+        assert (raw[0][3], raw[0][4]) == (image.width(), image.height())  # whole canvas, gap included
+        assert image.width() > 750 and image.height() > 420
+    finally:
+        control.disable()
+    frame = vr_overlay.compose_tiles(widgets)
+    assert frame is not None and frame.canvas == (image.width(), image.height()) and len(frame.tiles) == 2
+    placement = vr_overlay.placement_from(setting)
+    meters_per_pixel = placement.width_meters / image.width()
+    for tile in frame.tiles:
+        assert frame.atlas.copy(tile.atlas_x, tile.atlas_y, tile.width, tile.height) == image.copy(
+            tile.canvas_x, tile.canvas_y, tile.width, tile.height)  # same pixels as SteamVR image part
+        quad = vr_shared.tile_placement(placement, frame.canvas, tile)
+        # Center of the part in the SteamVR overlay (centered on its transform, y up)
+        center_x = placement.horizontal_offset_meters + (
+            tile.canvas_x + tile.width / 2 - image.width() / 2) * meters_per_pixel
+        center_y = placement.vertical_offset_meters - (
+            tile.canvas_y + tile.height / 2 - image.height() / 2) * meters_per_pixel
+        assert quad.horizontal_offset_meters == pytest.approx(center_x)
+        assert quad.vertical_offset_meters == pytest.approx(center_y)
+        assert quad.width_meters == pytest.approx(tile.width * meters_per_pixel)
+        assert quad.distance_meters == placement.distance_meters and not quad.attach_to_headset
+    for widget in widgets:
+        widget.close()
 
 
 def test_reload_starts_overlay_again(vr_setting, monkeypatch):

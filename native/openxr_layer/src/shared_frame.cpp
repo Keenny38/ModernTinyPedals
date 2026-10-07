@@ -32,7 +32,8 @@ void store_u64(uint8_t* base, size_t offset, uint64_t value) {
     *reinterpret_cast<volatile uint64_t*>(base + offset) = value;
 }
 
-bool header_valid(const uint8_t* base, size_t size) {
+// Header of any protocol version: magic, header_size, heartbeat & layer fields at known offsets
+bool header_compatible(const uint8_t* base, size_t size) {
     if (base == nullptr || size < TPVR_DATA_OFFSET) {
         return false;
     }
@@ -40,7 +41,6 @@ bool header_valid(const uint8_t* base, size_t size) {
         return false;  // mapped views are page aligned, never expected
     }
     return load_u32(base, offsetof(TpvrHeader, magic)) == TPVR_MAGIC &&
-           load_u32(base, offsetof(TpvrHeader, version)) == TPVR_VERSION &&
            load_u32(base, offsetof(TpvrHeader, header_size)) == TPVR_HEADER_SIZE;
 }
 
@@ -58,10 +58,38 @@ bool finite_in(float value, float low, float high) {
     return std::isfinite(value) && value >= low && value <= high;
 }
 
+// Canvas & tile table of a visible frame copied to info (atlas size from header, checked by caller)
+bool tiles_valid(const TpvrHeader& header, const TpvrTile* tiles, FrameInfo& info) {
+    if (header.canvas_width < 1 || header.canvas_width > TPVR_MAX_CANVAS || header.canvas_height < 1 ||
+        header.canvas_height > TPVR_MAX_CANVAS || header.tile_count < 1 || header.tile_count > TPVR_MAX_TILES) {
+        return false;
+    }
+    info.canvas_width = header.canvas_width;
+    info.canvas_height = header.canvas_height;
+    info.tile_count = header.tile_count;
+    for (uint32_t index = 0; index < header.tile_count; ++index) {
+        const TpvrTile& tile = tiles[index];
+        // 64-bit sums: no wrap around
+        const uint64_t right = static_cast<uint64_t>(tile.atlas_x) + tile.width;
+        const uint64_t bottom = static_cast<uint64_t>(tile.atlas_y) + tile.height;
+        const uint64_t canvas_right = static_cast<uint64_t>(tile.canvas_x) + tile.width;
+        const uint64_t canvas_bottom = static_cast<uint64_t>(tile.canvas_y) + tile.height;
+        if (tile.width < 1 || tile.height < 1 || right > header.width || bottom > header.height ||
+            canvas_right > header.canvas_width || canvas_bottom > header.canvas_height) {
+            return false;
+        }
+        Tile& out = info.tiles[index];
+        out.atlas = Rect{tile.atlas_x, tile.atlas_y, tile.width, tile.height};
+        out.canvas_x = tile.canvas_x;
+        out.canvas_y = tile.canvas_y;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool app_alive(const uint8_t* base, size_t size, uint64_t now_ms) {
-    return header_valid(base, size) && heartbeat_recent(load_u64(base, offsetof(TpvrHeader, app_heartbeat_ms)), now_ms);
+    return header_compatible(base, size) && heartbeat_recent(load_u64(base, offsetof(TpvrHeader, app_heartbeat_ms)), now_ms);
 }
 
 void FrameReader::reset() {
@@ -74,7 +102,7 @@ void FrameReader::reset() {
 }
 
 ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) {
-    if (!header_valid(base, size)) {
+    if (!header_compatible(base, size)) {
         alive_ = false;
         has_frame_ = false;
         return ReadResult::Invalid;
@@ -82,6 +110,14 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
     if (!heartbeat_recent(load_u64(base, offsetof(TpvrHeader, app_heartbeat_ms)), now_ms)) {
         alive_ = false;
         return ReadResult::AppGone;
+    }
+    if (load_u32(base, offsetof(TpvrHeader, version)) != TPVR_VERSION) {
+        // Other app version: layout unknown, nothing read (frame of the previous app dropped)
+        alive_ = true;
+        has_frame_ = false;
+        pixels_.clear();
+        info_ = FrameInfo{};
+        return ReadResult::VersionMismatch;
     }
     alive_ = true;
     const uint64_t sequence = load_u64(base, offsetof(TpvrHeader, sequence));
@@ -95,6 +131,8 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
 
     TpvrHeader header;
     std::memcpy(&header, base, sizeof(header));
+    TpvrTile tiles[TPVR_MAX_TILES];
+    std::memcpy(tiles, base + TPVR_TILE_OFFSET, sizeof(tiles));  // inside view: size >= TPVR_DATA_OFFSET
 
     // Validate copy (never the shared memory again: app may change it meanwhile)
     const bool visible = (header.flags & TPVR_FLAG_VISIBLE) != 0;
@@ -114,6 +152,9 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
                  finite_in(info.vertical_offset_meters, -100.0f, 100.0f) &&
                  finite_in(info.horizontal_offset_meters, -100.0f, 100.0f);
     bool copy_pixels = false;
+    if (valid && visible) {
+        valid = tiles_valid(header, tiles, info);
+    }
     if (valid && visible) {
         const uint64_t row_bytes = static_cast<uint64_t>(header.width) * 4u;
         const uint64_t data_offset = header.data_offset;
@@ -159,6 +200,10 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
         info.height = info_.height;
         info.pixel_format = info_.pixel_format;
         info.image_serial = info_.image_serial;
+        info.canvas_width = info_.canvas_width;
+        info.canvas_height = info_.canvas_height;
+        info.tile_count = info_.tile_count;
+        info.tiles = info_.tiles;
     }
     info_ = info;
     has_frame_ = true;
@@ -166,7 +211,7 @@ ReadResult FrameReader::read(const uint8_t* base, size_t size, uint64_t now_ms) 
 }
 
 void write_layer_status(uint8_t* base, size_t size, const LayerStatus& status, uint64_t now_ms) {
-    if (!header_valid(base, size)) {
+    if (!header_compatible(base, size)) {
         return;
     }
     store_u32(base, offsetof(TpvrHeader, layer_pid), status.pid);
@@ -264,6 +309,199 @@ void convert_pixels(const uint8_t* pixels, uint32_t width, uint32_t height, uint
     if (out_height > height) {
         std::memset(out.data() + out_row * height, 0, out_row * (out_height - height));  // bottom border
     }
+}
+
+bool operator==(const Rect& left, const Rect& right) {
+    return left.x == right.x && left.y == right.y && left.width == right.width && left.height == right.height;
+}
+
+bool operator==(const TileLayout& left, const TileLayout& right) {
+    if (left.merged != right.merged || left.width != right.width || left.height != right.height ||
+        left.canvas_width != right.canvas_width || left.canvas_height != right.canvas_height ||
+        left.quads.size() != right.quads.size() || left.copies.size() != right.copies.size()) {
+        return false;
+    }
+    for (size_t index = 0; index < left.quads.size(); ++index) {
+        const LayoutQuad& a = left.quads[index];
+        const LayoutQuad& b = right.quads[index];
+        if (!(a.image == b.image) || a.canvas_x != b.canvas_x || a.canvas_y != b.canvas_y) {
+            return false;
+        }
+    }
+    for (size_t index = 0; index < left.copies.size(); ++index) {
+        const LayoutCopy& a = left.copies[index];
+        const LayoutCopy& b = right.copies[index];
+        if (!(a.atlas == b.atlas) || a.x != b.x || a.y != b.y) {
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace {
+
+struct Group {
+    uint32_t left = 0;  // canvas bounding box (right & bottom exclusive)
+    uint32_t top = 0;
+    uint32_t right = 0;
+    uint32_t bottom = 0;
+    std::vector<uint32_t> tiles;
+    uint64_t area() const { return static_cast<uint64_t>(right - left) * (bottom - top); }
+};
+
+uint64_t union_area(const Group& a, const Group& b) {
+    const uint64_t width = std::max(a.right, b.right) - std::min(a.left, b.left);
+    const uint64_t height = std::max(a.bottom, b.bottom) - std::min(a.top, b.top);
+    return width * height;
+}
+
+}  // namespace
+
+TileLayout plan_layout(const FrameInfo& info, uint32_t max_quads, uint32_t max_width, uint32_t max_height) {
+    TileLayout layout;
+    const uint32_t count = std::min<uint32_t>(info.tile_count, TPVR_MAX_TILES);
+    if (count == 0 || max_quads == 0) {
+        return layout;
+    }
+    layout.canvas_width = info.canvas_width;
+    layout.canvas_height = info.canvas_height;
+    if (count <= max_quads) {
+        if (info.width > max_width || info.height > max_height) {
+            return TileLayout{};  // atlas bigger than swapchain allows
+        }
+        layout.width = info.width;
+        layout.height = info.height;
+        for (uint32_t index = 0; index < count; ++index) {
+            const Tile& tile = info.tiles[index];
+            layout.quads.push_back(LayoutQuad{tile.atlas, tile.canvas_x, tile.canvas_y});
+        }
+        return layout;
+    }
+    // Too many tiles: closest groups merged first (smallest bounding box growth)
+    std::vector<Group> groups;
+    groups.reserve(count);
+    for (uint32_t index = 0; index < count; ++index) {
+        const Tile& tile = info.tiles[index];
+        Group group;
+        group.left = tile.canvas_x;
+        group.top = tile.canvas_y;
+        group.right = tile.canvas_x + tile.atlas.width;  // validated: within canvas (<= TPVR_MAX_CANVAS)
+        group.bottom = tile.canvas_y + tile.atlas.height;
+        group.tiles.push_back(index);
+        groups.push_back(group);
+    }
+    while (groups.size() > max_quads) {
+        size_t best_first = 0;
+        size_t best_second = 1;
+        uint64_t best_growth = UINT64_MAX;
+        for (size_t first = 0; first < groups.size(); ++first) {
+            for (size_t second = first + 1; second < groups.size(); ++second) {
+                const uint64_t merged = union_area(groups[first], groups[second]);
+                const uint64_t parts = groups[first].area() + groups[second].area();
+                const uint64_t growth = merged > parts ? merged - parts : 0;
+                if (growth < best_growth) {
+                    best_growth = growth;
+                    best_first = first;
+                    best_second = second;
+                }
+            }
+        }
+        Group& target = groups[best_first];
+        const Group& source = groups[best_second];
+        target.left = std::min(target.left, source.left);
+        target.top = std::min(target.top, source.top);
+        target.right = std::max(target.right, source.right);
+        target.bottom = std::max(target.bottom, source.bottom);
+        target.tiles.insert(target.tiles.end(), source.tiles.begin(), source.tiles.end());
+        groups.erase(groups.begin() + static_cast<std::ptrdiff_t>(best_second));
+    }
+    // Groups packed in rows (tallest first), 1 pixel apart (no bilinear bleeding between quads)
+    std::vector<size_t> order(groups.size());
+    for (size_t index = 0; index < order.size(); ++index) {
+        order[index] = index;
+    }
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return groups[a].bottom - groups[a].top > groups[b].bottom - groups[b].top;
+    });
+    std::vector<Rect> places(groups.size());
+    uint64_t x = 0;
+    uint64_t y = 0;
+    uint64_t row_height = 0;
+    uint64_t width = 0;
+    for (size_t index : order) {
+        const Group& group = groups[index];
+        const uint32_t group_width = group.right - group.left;
+        const uint32_t group_height = group.bottom - group.top;
+        if (group_width > max_width) {
+            return TileLayout{};
+        }
+        if (x != 0 && x + group_width > max_width) {
+            y += row_height + 1u;
+            x = 0;
+            row_height = 0;
+        }
+        places[index] = Rect{static_cast<uint32_t>(x), static_cast<uint32_t>(y), group_width, group_height};
+        width = std::max<uint64_t>(width, x + group_width);
+        row_height = std::max<uint64_t>(row_height, group_height);
+        x += group_width + 1u;
+    }
+    const uint64_t height = y + row_height;
+    if (height > max_height) {
+        return TileLayout{};
+    }
+    layout.merged = true;
+    layout.width = static_cast<uint32_t>(width);
+    layout.height = static_cast<uint32_t>(height);
+    for (size_t index = 0; index < groups.size(); ++index) {
+        const Group& group = groups[index];
+        const Rect& place = places[index];
+        layout.quads.push_back(LayoutQuad{place, group.left, group.top});
+        for (uint32_t tile_index : group.tiles) {
+            const Tile& tile = info.tiles[tile_index];
+            layout.copies.push_back(
+                LayoutCopy{tile.atlas, place.x + (tile.canvas_x - group.left), place.y + (tile.canvas_y - group.top)});
+        }
+    }
+    return layout;
+}
+
+void compose_layout(const TileLayout& layout, const uint8_t* atlas, uint32_t atlas_width, uint32_t atlas_height,
+                    std::vector<uint8_t>& out) {
+    out.assign(static_cast<size_t>(layout.width) * layout.height * 4u, 0);
+    if (atlas == nullptr) {
+        return;
+    }
+    for (const LayoutCopy& copy : layout.copies) {
+        const Rect& source = copy.atlas;
+        if (static_cast<uint64_t>(source.x) + source.width > atlas_width ||
+            static_cast<uint64_t>(source.y) + source.height > atlas_height ||
+            static_cast<uint64_t>(copy.x) + source.width > layout.width ||
+            static_cast<uint64_t>(copy.y) + source.height > layout.height) {
+            continue;
+        }
+        const size_t row_bytes = static_cast<size_t>(source.width) * 4u;
+        for (uint32_t row = 0; row < source.height; ++row) {
+            const uint8_t* from = atlas + ((static_cast<size_t>(source.y) + row) * atlas_width + source.x) * 4u;
+            uint8_t* to = out.data() + ((static_cast<size_t>(copy.y) + row) * layout.width + copy.x) * 4u;
+            std::memcpy(to, from, row_bytes);
+        }
+    }
+}
+
+QuadPlacement quad_placement(const FrameInfo& info, uint32_t canvas_width, uint32_t canvas_height, const LayoutQuad& quad) {
+    QuadPlacement placement;
+    if (canvas_width == 0 || canvas_height == 0) {
+        return placement;
+    }
+    const double scale = static_cast<double>(info.width_meters) / canvas_width;  // meters per pixel
+    const double center_x = quad.canvas_x + quad.image.width / 2.0 - canvas_width / 2.0;
+    const double center_y = quad.canvas_y + quad.image.height / 2.0 - canvas_height / 2.0;
+    placement.x = static_cast<float>(info.horizontal_offset_meters + center_x * scale);
+    placement.y = static_cast<float>(info.vertical_offset_meters - center_y * scale);  // canvas y down, VR y up
+    placement.z = -info.distance_meters;
+    placement.width = static_cast<float>(quad.image.width * scale);
+    placement.height = static_cast<float>(quad.image.height * scale);
+    return placement;
 }
 
 }  // namespace tpvr

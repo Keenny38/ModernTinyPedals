@@ -2,7 +2,9 @@
  * Integration test of TinyPedalXrLayer.dll (Windows, or Wine): a fake OpenXR runtime below the layer,
  * the app side written like tinypedal/vr_shared.py, real D3D11 / D3D12 / Vulkan devices when available
  * (an API without a device is skipped). Checks the layer loads & negotiates like the OpenXR loader does,
- * appends the overlay quad, uploads correct pixels, and stays a pure pass-through when it should.
+ * appends one quad per tile (one swapchain, imageRect per tile) placed like the app's canvas, uploads correct
+ * pixels, merges tiles when the runtime has too few layer slots, and stays a pure pass-through when it should
+ * (app of another protocol version included).
  *
  *   layer_harness <path to TinyPedalXrLayer.dll>
  */
@@ -11,6 +13,7 @@
 
 #include <dxgi1_4.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -41,10 +44,28 @@ T fake_handle(uintptr_t value) {
 // -----------------------------------------------------------------------------------------------------------
 // App side (same as tinypedal/vr_shared.py)
 
+struct CanvasRect {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+};
+
+// Canvas pixel (x, y) = (x * 10, y * 10, 100, 200), RGBA straight alpha
+void canvas_pixel(uint32_t x, uint32_t y, int* rgba) {
+    rgba[0] = static_cast<int>(x * 10u % 256u);
+    rgba[1] = static_cast<int>(y * 10u % 256u);
+    rgba[2] = 100;
+    rgba[3] = 200;
+}
+
 struct App {
     HANDLE mapping = nullptr;
     uint8_t* view = nullptr;
     uint32_t serial = 0;
+    uint32_t canvas_width = 0;
+    uint32_t canvas_height = 0;
+    std::vector<CanvasRect> tiles;
 
     bool open() {
         mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, TPVR_MAPPING_SIZE, TPVR_MAPPING_NAME);
@@ -80,13 +101,19 @@ struct App {
 
     void heartbeat() { header().app_heartbeat_ms = GetTickCount64(); }
 
-    // Image: pixel (x, y) = (x * 10, y * 10, 100, 200), RGBA straight alpha
-    void write(uint32_t width, uint32_t height, bool visible, bool attach) {
+    // Canvas parts (tiles) packed side by side in the atlas, 1 pixel apart (transparent)
+    void write_tiles(const std::vector<CanvasRect>& rects, uint32_t width, uint32_t height, bool visible, bool attach) {
         TpvrHeader& h = header();
         h.sequence += 1;
-        h.width = width;
-        h.height = height;
-        h.stride = width * 4u;
+        uint32_t atlas_width = 0;
+        uint32_t atlas_height = 0;
+        for (const CanvasRect& rect : rects) {
+            atlas_width += (atlas_width != 0 ? 1u : 0u) + rect.width;
+            atlas_height = std::max(atlas_height, rect.height);
+        }
+        h.width = atlas_width;
+        h.height = atlas_height;
+        h.stride = atlas_width * 4u;
         h.pixel_format = TPVR_FORMAT_RGBA8_STRAIGHT;
         h.flags = (visible ? TPVR_FLAG_VISIBLE : 0u) | (attach ? TPVR_FLAG_ATTACH_TO_HEADSET : 0u);
         h.image_serial = ++serial;
@@ -94,18 +121,38 @@ struct App {
         h.distance_meters = 1.25f;
         h.vertical_offset_meters = -0.25f;
         h.horizontal_offset_meters = 0.125f;
+        h.canvas_width = width;
+        h.canvas_height = height;
+        h.tile_count = static_cast<uint32_t>(rects.size());
         uint8_t* pixels = view + TPVR_DATA_OFFSET;
-        for (uint32_t y = 0; y < height; ++y) {
-            for (uint32_t x = 0; x < width; ++x) {
-                uint8_t* pixel = pixels + (static_cast<size_t>(y) * width + x) * 4u;
-                pixel[0] = static_cast<uint8_t>(x * 10u);
-                pixel[1] = static_cast<uint8_t>(y * 10u);
-                pixel[2] = 100;
-                pixel[3] = 200;
+        std::memset(pixels, 0, static_cast<size_t>(atlas_width) * atlas_height * 4u);
+        auto* table = reinterpret_cast<TpvrTile*>(view + TPVR_TILE_OFFSET);
+        uint32_t atlas_x = 0;
+        for (size_t index = 0; index < rects.size(); ++index) {
+            const CanvasRect& rect = rects[index];
+            table[index] = TpvrTile{atlas_x, 0, rect.width, rect.height, rect.x, rect.y, {}};
+            for (uint32_t y = 0; y < rect.height; ++y) {
+                for (uint32_t x = 0; x < rect.width; ++x) {
+                    uint8_t* pixel = pixels + (static_cast<size_t>(y) * atlas_width + atlas_x + x) * 4u;
+                    int rgba[4];
+                    canvas_pixel(rect.x + x, rect.y + y, rgba);
+                    for (int channel = 0; channel < 4; ++channel) {
+                        pixel[channel] = static_cast<uint8_t>(rgba[channel]);
+                    }
+                }
             }
+            atlas_x += rect.width + 1u;
         }
+        canvas_width = width;
+        canvas_height = height;
+        tiles = rects;
         h.sequence += 1;
         heartbeat();
+    }
+
+    // One tile: whole canvas (width x height)
+    void write(uint32_t width, uint32_t height, bool visible, bool attach) {
+        write_tiles({CanvasRect{0, 0, width, height}}, width, height, visible, attach);
     }
 };
 
@@ -139,9 +186,12 @@ struct Runtime {
     uintptr_t next_handle = 0x1000;
     int spaces_alive = 0;
     bool refuse_extra_layers = false;
+    uint32_t max_layers = 16;
+    bool limit_error = false;  // more layers than max_layers submitted
+    bool rect_error = false;  // imageRect outside swapchain
     int end_frame_calls = 0;
     std::vector<uint32_t> submitted_counts;
-    XrCompositionLayerQuad last_quad = {};
+    std::vector<XrCompositionLayerQuad> quads;  // quads of last frame with overlay
     XrSpace view_space = XR_NULL_HANDLE;
     XrSpace local_space = XR_NULL_HANDLE;
     bool order_error = false;
@@ -192,7 +242,7 @@ XRAPI_ATTR XrResult XRAPI_CALL rt_xrCreateSession(XrInstance, const XrSessionCre
 XRAPI_ATTR XrResult XRAPI_CALL rt_xrDestroySession(XrSession) { return XR_SUCCESS; }
 
 XRAPI_ATTR XrResult XRAPI_CALL rt_xrGetSystemProperties(XrInstance, XrSystemId, XrSystemProperties* properties) {
-    properties->graphicsProperties.maxLayerCount = 16;
+    properties->graphicsProperties.maxLayerCount = runtime.max_layers;
     properties->graphicsProperties.maxSwapchainImageWidth = 4096;
     properties->graphicsProperties.maxSwapchainImageHeight = 4096;
     return XR_SUCCESS;
@@ -375,19 +425,38 @@ XRAPI_ATTR XrResult XRAPI_CALL rt_xrDestroySpace(XrSpace) {
 XRAPI_ATTR XrResult XRAPI_CALL rt_xrEndFrame(XrSession, const XrFrameEndInfo* info) {
     ++runtime.end_frame_calls;
     runtime.submitted_counts.push_back(info->layerCount);
-    if (info->layerCount > 1) {
-        if (runtime.refuse_extra_layers) {
-            return XR_ERROR_LAYER_INVALID;
-        }
-        const auto* last = info->layers[info->layerCount - 1];
-        if (last->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
-            runtime.last_quad = *reinterpret_cast<const XrCompositionLayerQuad*>(last);
-            auto found = runtime.swapchains.find(runtime.last_quad.subImage.swapchain);
-            if (found == runtime.swapchains.end() || found->second->last_released < 0) {
-                runtime.order_error = true;  // swapchain never released
-            }
+    if (info->layerCount > runtime.max_layers) {
+        runtime.limit_error = true;
+        return XR_ERROR_LAYER_LIMIT_EXCEEDED;
+    }
+    std::vector<XrCompositionLayerQuad> quads;
+    for (uint32_t index = 0; index < info->layerCount; ++index) {
+        if (info->layers[index]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
+            quads.push_back(*reinterpret_cast<const XrCompositionLayerQuad*>(info->layers[index]));
         }
     }
+    if (quads.empty()) {
+        return XR_SUCCESS;
+    }
+    if (runtime.refuse_extra_layers) {
+        return XR_ERROR_LAYER_INVALID;
+    }
+    for (const XrCompositionLayerQuad& quad : quads) {
+        auto found = runtime.swapchains.find(quad.subImage.swapchain);
+        if (found == runtime.swapchains.end() || found->second->last_released < 0) {
+            runtime.order_error = true;  // swapchain never released
+            continue;
+        }
+        const XrRect2Di& rect = quad.subImage.imageRect;
+        const XrSwapchainCreateInfo& created = found->second->info;
+        if (rect.offset.x < 0 || rect.offset.y < 0 || rect.extent.width <= 0 || rect.extent.height <= 0 ||
+            static_cast<uint32_t>(rect.offset.x + rect.extent.width) > created.width ||
+            static_cast<uint32_t>(rect.offset.y + rect.extent.height) > created.height) {
+            runtime.rect_error = true;
+            return XR_ERROR_SWAPCHAIN_RECT_INVALID;
+        }
+    }
+    runtime.quads = quads;
     return XR_SUCCESS;
 }
 
@@ -826,14 +895,18 @@ bool load_layer(const char* path, Layer& layer) {
 
 // -----------------------------------------------------------------------------------------------------------
 
-// Game frame with one projection layer, or none (loading, session not visible)
+// Game frame with layer_count projection layers (usually one), or none (loading, session not visible)
 uint32_t end_frame(Layer& layer, XrSession session, uint32_t layer_count = 1) {
     static const XrCompositionLayerProjection projection = [] {
         XrCompositionLayerProjection value = {};
         value.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
         return value;
     }();
-    const XrCompositionLayerBaseHeader* layers[] = {reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection)};
+    const XrCompositionLayerBaseHeader* layers[16];
+    for (auto*& entry : layers) {
+        entry = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
+    }
+    layer_count = std::min<uint32_t>(layer_count, 16);
     XrFrameEndInfo info = {};
     info.type = XR_TYPE_FRAME_END_INFO;
     info.displayTime = 1;
@@ -846,7 +919,10 @@ uint32_t end_frame(Layer& layer, XrSession session, uint32_t layer_count = 1) {
 }
 
 FakeSwapchain* quad_swapchain() {
-    auto found = runtime.swapchains.find(runtime.last_quad.subImage.swapchain);
+    if (runtime.quads.empty()) {
+        return nullptr;
+    }
+    auto found = runtime.swapchains.find(runtime.quads.back().subImage.swapchain);
     return found != runtime.swapchains.end() ? found->second : nullptr;
 }
 
@@ -905,6 +981,156 @@ void check_pixels(const std::vector<uint8_t>& pixels, uint32_t swapchain_width, 
     CHECK(wrong == 0);
 }
 
+XrSession create_session(Layer& layer, const void* binding);
+void destroy_session(Layer& layer, XrSession session);
+
+bool close_to(double value, double expected, double tolerance = 1e-4) { return std::fabs(value - expected) <= tolerance; }
+
+// Quads of last frame against the app's canvas: each placed where its canvas part is (same scale & center
+// as the whole canvas), its imageRect pixels equal to the canvas (transparent between tiles, format order &
+// color encoding), transparent pixels around it (no bilinear bleeding), every tile shown by exactly one quad.
+void check_quads(const App& app, size_t expected_quads, bool attach, bool bgra, bool linear) {
+    const std::vector<XrCompositionLayerQuad>& quads = runtime.quads;
+    CHECK(quads.size() == expected_quads);
+    FakeSwapchain* swapchain = quad_swapchain();
+    CHECK(swapchain != nullptr);
+    if (swapchain == nullptr || quads.empty()) {
+        return;
+    }
+    const std::vector<uint8_t> pixels = read_released(swapchain);
+    CHECK(!pixels.empty());
+    if (pixels.empty()) {
+        return;
+    }
+    const uint32_t swapchain_width = swapchain->info.width;
+    const uint32_t swapchain_height = swapchain->info.height;
+    const double scale = 0.5 / app.canvas_width;  // meters per canvas pixel
+    std::vector<int> shown(app.tiles.size(), 0);
+    int wrong = 0;
+    for (const XrCompositionLayerQuad& quad : quads) {
+        CHECK(quad.subImage.swapchain == quads[0].subImage.swapchain);  // one swapchain
+        CHECK(quad.space == (attach ? runtime.view_space : runtime.local_space));
+        CHECK(quad.layerFlags ==
+              (XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT));
+        CHECK(quad.pose.orientation.w == 1.0f && quad.pose.position.z == -1.25f);
+        const XrRect2Di& rect = quad.subImage.imageRect;
+        CHECK(close_to(quad.size.width, rect.extent.width * scale) && close_to(quad.size.height, rect.extent.height * scale));
+        // Canvas position from pose: center of rect relative to canvas center, y up
+        const double left = (quad.pose.position.x - 0.125) / scale + app.canvas_width / 2.0 - rect.extent.width / 2.0;
+        const double top = app.canvas_height / 2.0 - (quad.pose.position.y + 0.25) / scale - rect.extent.height / 2.0;
+        const long canvas_x = std::lround(left);
+        const long canvas_y = std::lround(top);
+        CHECK(close_to(left, static_cast<double>(canvas_x), 0.01) && close_to(top, static_cast<double>(canvas_y), 0.01));
+        for (size_t index = 0; index < app.tiles.size(); ++index) {
+            const CanvasRect& tile = app.tiles[index];
+            if (static_cast<long>(tile.x) >= canvas_x && static_cast<long>(tile.y) >= canvas_y &&
+                static_cast<long>(tile.x + tile.width) <= canvas_x + rect.extent.width &&
+                static_cast<long>(tile.y + tile.height) <= canvas_y + rect.extent.height) {
+                ++shown[index];
+            }
+        }
+        for (int32_t y = -1; y <= rect.extent.height; ++y) {
+            for (int32_t x = -1; x <= rect.extent.width; ++x) {
+                const int32_t image_x = rect.offset.x + x;
+                const int32_t image_y = rect.offset.y + y;
+                if (image_x < 0 || image_y < 0 || image_x >= static_cast<int32_t>(swapchain_width) ||
+                    image_y >= static_cast<int32_t>(swapchain_height)) {
+                    continue;
+                }
+                const uint8_t* pixel = pixels.data() + (static_cast<size_t>(image_y) * swapchain_width + image_x) * 4u;
+                const bool inside = x >= 0 && y >= 0 && x < rect.extent.width && y < rect.extent.height;
+                int expected[4] = {0, 0, 0, 0};
+                if (inside) {
+                    const long point_x = canvas_x + x;
+                    const long point_y = canvas_y + y;
+                    for (const CanvasRect& tile : app.tiles) {
+                        if (point_x >= static_cast<long>(tile.x) && point_x < static_cast<long>(tile.x + tile.width) &&
+                            point_y >= static_cast<long>(tile.y) && point_y < static_cast<long>(tile.y + tile.height)) {
+                            canvas_pixel(static_cast<uint32_t>(point_x), static_cast<uint32_t>(point_y), expected);
+                            if (linear) {
+                                for (int channel = 0; channel < 3; ++channel) {
+                                    expected[channel] =
+                                        static_cast<int>(std::lround(srgb_to_linear(expected[channel]) * 255.0));
+                                }
+                            }
+                        }
+                    }
+                }
+                const int red = bgra ? pixel[2] : pixel[0];
+                const int blue = bgra ? pixel[0] : pixel[2];
+                const bool same = expected[3] == 0 ? pixel[3] == 0
+                                                   : red == expected[0] && pixel[1] == expected[1] &&
+                                                         blue == expected[2] && pixel[3] == expected[3];
+                if (!same && wrong++ == 0) {
+                    std::printf("  quad at %d,%d: pixel %d,%d = %d %d %d %d, expected %d %d %d %d\n", rect.offset.x,
+                                rect.offset.y, x, y, red, pixel[1], blue, pixel[3], expected[0], expected[1], expected[2],
+                                expected[3]);
+                }
+            }
+        }
+    }
+    CHECK(wrong == 0);
+    for (int count : shown) {
+        CHECK(count == 1);
+    }
+}
+
+// Tiles of a 300 x 200 canvas: widgets far apart (corners & middle)
+const std::vector<CanvasRect> kTiles = {
+    {0, 0, 30, 12}, {250, 180, 50, 20}, {120, 90, 16, 8}, {280, 0, 20, 20}, {0, 150, 40, 50}};
+
+// One quad per tile, merged when the runtime has fewer layer slots, game with many layers, too many tiles
+void run_tiles(Layer& layer, App& app, const void* binding, bool bgra, bool linear) {
+    app.write_tiles(kTiles, 300, 200, true, false);
+    XrSession session = create_session(layer, binding);
+    CHECK(end_frame(layer, session) == 1 + kTiles.size());
+    check_quads(app, kTiles.size(), false, bgra, linear);
+    FakeSwapchain* swapchain = quad_swapchain();
+    const int acquired = swapchain != nullptr ? swapchain->acquire_count : 0;
+    CHECK(acquired == 1);  // one swapchain image upload for all tiles
+    if (swapchain != nullptr) {
+        CHECK(swapchain->info.width == 192 && swapchain->info.height == 64);  // atlas 160 x 50 (+ border)
+    }
+    // Unchanged: same quads, no upload
+    app.heartbeat();
+    CHECK(end_frame(layer, session) == 1 + kTiles.size());
+    CHECK(swapchain != nullptr && swapchain->acquire_count == acquired);
+
+    // Game with 13 layers, 16 allowed: 3 quads for 5 tiles (closest merged), uploaded again
+    CHECK(end_frame(layer, session, 13) == 16);
+    check_quads(app, 3, false, bgra, linear);
+    // 15 layers: one quad for the whole canvas
+    CHECK(end_frame(layer, session, 15) == 16);
+    check_quads(app, 1, false, bgra, linear);
+    // 16 layers: no slot left, game frame unchanged
+    CHECK(end_frame(layer, session, 16) == 16);
+    // One layer again: merged quads kept for a while (no upload every frame of a game changing its layer
+    // count; split again after 1 s, or at once with the next image)
+    const uint32_t count = end_frame(layer, session);
+    CHECK(count == 2 || count == 1 + kTiles.size());  // 1 + tiles: slow machine, more than 1 s since merge
+    app.write_tiles(kTiles, 300, 200, true, true);
+    CHECK(end_frame(layer, session) == 1 + kTiles.size());
+    check_quads(app, kTiles.size(), true, bgra, linear);
+    destroy_session(layer, session);
+
+    // Runtime with 4 layers: 3 quads for the overlay, from first frame
+    runtime.max_layers = 4;
+    session = create_session(layer, binding);
+    CHECK(end_frame(layer, session) == 4);
+    check_quads(app, 3, true, bgra, linear);
+    // All 16 tiles (most allowed): merged into 3 quads
+    std::vector<CanvasRect> many;
+    for (uint32_t index = 0; index < TPVR_MAX_TILES; ++index) {
+        many.push_back(CanvasRect{index % 4u * 70u, index / 4u * 45u, 30u + index, 20u});
+    }
+    app.write_tiles(many, 300, 200, true, false);
+    CHECK(end_frame(layer, session) == 4);
+    check_quads(app, 3, false, bgra, linear);
+    destroy_session(layer, session);
+    runtime.max_layers = 16;
+    CHECK(!runtime.limit_error && !runtime.rect_error && !runtime.order_error);
+}
+
 XrSession create_session(Layer& layer, const void* binding) {
     XrSessionCreateInfo info = {};
     info.type = XR_TYPE_SESSION_CREATE_INFO;
@@ -935,7 +1161,8 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     // First image read during a frame without layers (session starting): uploaded on next frame with layers
     CHECK(end_frame(layer, session, 0) == 0);
     CHECK(end_frame(layer, session) == 2);  // overlay quad appended
-    const XrCompositionLayerQuad& quad = runtime.last_quad;
+    CHECK(runtime.quads.size() == 1);
+    const XrCompositionLayerQuad quad = runtime.quads.empty() ? XrCompositionLayerQuad{} : runtime.quads.back();
     CHECK(quad.type == XR_TYPE_COMPOSITION_LAYER_QUAD);
     CHECK(quad.space == runtime.local_space);  // seated placement
     CHECK(quad.layerFlags == (XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT));
@@ -965,8 +1192,8 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     // New image, attached to headset
     app.write(20, 10, true, true);
     CHECK(end_frame(layer, session) == 2);
-    CHECK(runtime.last_quad.space == runtime.view_space);
-    CHECK(runtime.last_quad.subImage.imageRect.extent.width == 20);
+    CHECK(runtime.quads.back().space == runtime.view_space);
+    CHECK(runtime.quads.back().subImage.imageRect.extent.width == 20);
     CHECK(swapchain->acquire_count == 2);
     check_pixels(read_released(swapchain), swapchain->info.width, 20, 10, bgra, linear);
 
@@ -975,7 +1202,7 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     CHECK(end_frame(layer, session, 0) == 0);
     CHECK(swapchain->acquire_count == 2);
     CHECK(end_frame(layer, session) == 2);
-    CHECK(runtime.last_quad.subImage.imageRect.extent.width == 24);
+    CHECK(runtime.quads.back().subImage.imageRect.extent.width == 24);
     CHECK(swapchain->acquire_count == 3);
     check_pixels(read_released(swapchain), swapchain->info.width, 24, 10, bgra, linear);
 
@@ -1012,6 +1239,21 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     CHECK(end_frame(layer, session) == 2);
     header.sequence += 1;
 
+    // App of another protocol version (older app started again while the game runs, or game started with an
+    // older layer): nothing drawn, mismatch reported with the layer's version
+    for (uint32_t version : {TPVR_VERSION - 1u, TPVR_VERSION + 1u}) {
+        header.version = version;
+        header.sequence += 2;
+        app.heartbeat();
+        CHECK(end_frame(layer, session) == 1);
+        CHECK(header.layer_state == TPVR_LAYER_VERSION_MISMATCH && header.layer_version == TPVR_VERSION);
+    }
+    header.version = TPVR_VERSION;
+    app.write(100, 40, true, true);
+    CHECK(end_frame(layer, session) == 2);
+    CHECK(header.layer_state == TPVR_LAYER_ACTIVE);
+    check_quads(app, 1, true, bgra, linear);
+
     // Runtime refuses the quad: frame submitted again unchanged, overlay stopped for session
     runtime.refuse_extra_layers = true;
     const size_t calls = runtime.submitted_counts.size();
@@ -1024,6 +1266,8 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
 
     destroy_session(layer, session);
     CHECK(header.layer_heartbeat_ms == 0);  // no session any more
+
+    run_tiles(layer, app, binding, bgra, linear);
 }
 
 }  // namespace

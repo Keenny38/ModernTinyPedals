@@ -29,6 +29,9 @@ Registration is kept while `enable_vr_overlay` is on, also when the app is close
 soon as the app runs. Turning the option off removes the registration; the installer removes it on uninstall.
 
 Shared memory layout: native/openxr_layer/include/tinypedal_vr_shared.h (kept in sync, see tests).
+Protocol version 2: only the visible parts of the overlay canvas (desktop layout of all widgets) are sent,
+as tiles packed in an atlas image; the layer shows each tile as its own quad, where it is on the canvas.
+A layer of another version (game started before an app update) draws nothing and reports the mismatch.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ import struct
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
@@ -49,9 +53,13 @@ logger = logging.getLogger(__name__)
 # Shared memory protocol (tinypedal_vr_shared.h)
 MAPPING_NAME = "TinyPedalVROverlay"
 MAGIC = 0x52565054  # "TPVR"
-VERSION = 1
+VERSION = 2
 HEADER_SIZE = 256
 DATA_OFFSET = 4096
+TILE_OFFSET = 256
+TILE_SIZE = 32
+MAX_TILES = 16
+MAX_CANVAS = 16384
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAPPING_SIZE = DATA_OFFSET + MAX_IMAGE_BYTES
 MAX_DIMENSION = 4096
@@ -67,6 +75,7 @@ LAYER_IDLE = 0
 LAYER_ACTIVE = 1
 LAYER_UNSUPPORTED = 2
 LAYER_FAILED = 3
+LAYER_VERSION_MISMATCH = 4
 
 GRAPHICS_API_NAMES = {0: "none", 1: "D3D11", 2: "D3D12", 3: "Vulkan", 4: "OpenGL", 5: "other"}
 
@@ -74,9 +83,11 @@ GRAPHICS_API_NAMES = {0: "none", 1: "D3D11", 2: "D3D12", 3: "Vulkan", 4: "OpenGL
 OFFSET_MAGIC = 0  # magic, version, header_size, mapping_size: 4 x uint32
 OFFSET_SEQUENCE = 16
 OFFSET_APP_HEARTBEAT = 24
-OFFSET_FRAME = 32  # "<6I4f3I": width, height, stride, pixel_format, flags, image_serial,
-                   # 4 placement floats, data_offset, data_capacity, app_pid
+OFFSET_FRAME = 32  # "<6I4f3I": atlas width, height, stride, pixel_format, flags, image_serial,
+                   # 4 canvas placement floats, data_offset, data_capacity, app_pid
+OFFSET_CANVAS = 84  # "<3I": canvas_width, canvas_height, tile_count
 OFFSET_LAYER = 128  # written by layer
+TILE_FORMAT = "<6I8x"  # atlas_x, atlas_y, width, height, canvas_x, canvas_y
 LAYER_FORMAT = "<QIIIiQI"  # heartbeat, pid, state, graphics_api, last_result, frames_shown, version
 
 # Layer files & registration
@@ -101,6 +112,18 @@ class Placement(NamedTuple):
     attach_to_headset: bool
 
 
+class Tile(NamedTuple):
+    """Part of the canvas: width x height pixels at (atlas_x, atlas_y) of the atlas, shown 1:1 at
+    (canvas_x, canvas_y) of the canvas"""
+
+    atlas_x: int
+    atlas_y: int
+    width: int
+    height: int
+    canvas_x: int
+    canvas_y: int
+
+
 class LayerStatus(NamedTuple):
     """State written back by the layer of the last OpenXR game frame"""
 
@@ -119,6 +142,11 @@ class LayerStatus(NamedTuple):
     def drawing(self, now_ms: int) -> bool:
         """An OpenXR game shows the overlay (supported graphics API, no error)"""
         return self.recent(now_ms) and self.state == LAYER_ACTIVE
+
+    @property
+    def version_mismatch(self) -> bool:
+        """Layer in game speaks another protocol version (game started before app update): draws nothing"""
+        return self.state == LAYER_VERSION_MISMATCH or (self.version not in (0, VERSION))
 
     @property
     def graphics_name(self) -> str:
@@ -141,6 +169,96 @@ def cropped_placement(placement: Placement, crop: tuple[int, int, int, int] | No
         horizontal_offset_meters=placement.horizontal_offset_meters + (x + (width - canvas_width) / 2) * scale,
         vertical_offset_meters=placement.vertical_offset_meters - (y + (height - canvas_height) / 2) * scale,
     )
+
+
+def tile_placement(placement: Placement, canvas: tuple[int, int], tile: Tile) -> Placement:
+    """Placement of a tile: same position & scale as on the canvas placed by placement (layer's quad_placement)"""
+    return cropped_placement(placement, (tile.canvas_x, tile.canvas_y, canvas[0], canvas[1]), tile.width, tile.height)
+
+
+def pack_atlas(sizes: Sequence[tuple[int, int]], max_width: int = MAX_DIMENSION, max_height: int = MAX_DIMENSION,
+               padding: int = 1) -> tuple[list[tuple[int, int]], int, int] | None:
+    """Positions of (width, height) rectangles in rows (tallest first), padding pixels apart, so bilinear
+    filtering of one tile never reads another one
+
+    Returns:
+        (positions in sizes order, atlas width, atlas height), None if they do not fit in max size.
+    """
+    positions: list[tuple[int, int]] = [(0, 0)] * len(sizes)
+    x = y = row_height = width = 0
+    for index in sorted(range(len(sizes)), key=lambda item: -sizes[item][1]):
+        item_width, item_height = sizes[index]
+        if item_width > max_width:
+            return None
+        if x and x + item_width > max_width:
+            y += row_height + padding
+            x = row_height = 0
+        positions[index] = (x, y)
+        width = max(width, x + item_width)
+        row_height = max(row_height, item_height)
+        x += item_width + padding
+    height = y + row_height
+    if height > max_height:
+        return None
+    return positions, width, height
+
+
+Rect = tuple[int, int, int, int]  # x, y, width, height
+
+
+def union_rect(first: Rect, second: Rect) -> Rect:
+    left, top = min(first[0], second[0]), min(first[1], second[1])
+    right = max(first[0] + first[2], second[0] + second[2])
+    bottom = max(first[1] + first[3], second[1] + second[3])
+    return left, top, right - left, bottom - top
+
+
+def _near(first: Rect, second: Rect, gap: int) -> bool:
+    """Rectangles overlap, or are less than gap pixels apart"""
+    return (first[0] < second[0] + second[2] + gap and second[0] < first[0] + first[2] + gap
+            and first[1] < second[1] + second[3] + gap and second[1] < first[1] + first[3] + gap)
+
+
+def cluster_rects(rects: Sequence[Rect], gap: int, max_count: int) -> list[list[int]]:
+    """Group rectangles (widgets) into at most max_count tiles: rectangles less than gap pixels apart share a
+    tile, tile bounding boxes never overlap, then closest tiles merged (smallest added area) while too many
+
+    Returns:
+        Groups of rectangle indexes (increasing, so widgets keep their stacking order), ordered by first index.
+    """
+    groups = [([index], rect) for index, rect in enumerate(rects)]
+
+    def merge(first: int, second: int):
+        indexes = sorted(groups[first][0] + groups[second][0])
+        groups[first] = (indexes, union_rect(groups[first][1], groups[second][1]))
+        del groups[second]
+
+    def merge_near(distance: int):
+        merged = True
+        while merged:
+            merged = False
+            for first in range(len(groups)):
+                for second in range(first + 1, len(groups)):
+                    if _near(groups[first][1], groups[second][1], distance):
+                        merge(first, second)
+                        merged = True
+                        break
+                if merged:
+                    break
+
+    merge_near(gap)
+    while len(groups) > max(max_count, 1):
+        best = None
+        for first in range(len(groups)):
+            for second in range(first + 1, len(groups)):
+                union = union_rect(groups[first][1], groups[second][1])
+                growth = union[2] * union[3] - sum(group[1][2] * group[1][3] for group in (groups[first], groups[second]))
+                if best is None or growth < best[0]:
+                    best = (growth, first, second)
+        assert best is not None
+        merge(best[1], best[2])
+        merge_near(0)  # merged box may cover another tile
+    return sorted((group[0] for group in groups), key=lambda indexes: indexes[0])
 
 
 def tick_ms() -> int:
@@ -167,8 +285,9 @@ class SharedFrameWriter:
         self._serial = 0
         self._flags = 0
         self._placement = Placement(0.8, 1.0, -0.2, 0.0, False)
-        self._size = (0, 0, 0)  # width, height, stride of last image
-        self._crop: tuple[int, int, int, int] | None = None  # x, y, canvas width & height of last image
+        self._size = (0, 0, 0)  # width, height, stride of last atlas
+        self._tiles: tuple[Tile, ...] = ()  # tiles of last atlas
+        self._canvas = (0, 0)  # canvas width & height of last atlas
 
     @property
     def is_open(self) -> bool:
@@ -235,21 +354,42 @@ class SharedFrameWriter:
 
     def write_image(self, pixels: Any, width: int, height: int, stride: int,
                     crop: tuple[int, int, int, int] | None = None):
-        """Show new image: RGBA8 rows (straight alpha, sRGB colors), stride bytes per row
+        """Show new image (one tile): RGBA8 rows (straight alpha, sRGB colors), stride bytes per row
 
         Args:
-            crop: image is the (x, y) part of a canvas_width x canvas_height image (transparent around):
-                (x, y, canvas_width, canvas_height). Placement (set for whole canvas) adjusted, so the
-                image is shown where it is on the canvas.
+            crop: image is the (x, y) part of a canvas_width x canvas_height canvas (transparent around):
+                (x, y, canvas_width, canvas_height), shown where it is on the canvas. None: whole canvas.
 
         Raises:
-            ValueError: image too big for shared memory (caller scales it down first).
+            ValueError: image too big for shared memory (caller scales it down first), or crop outside canvas.
+        """
+        x, y, canvas_width, canvas_height = crop if crop is not None else (0, 0, width, height)
+        self.write_tiles(pixels, width, height, stride, [Tile(0, 0, width, height, x, y)], (canvas_width, canvas_height))
+
+    def write_tiles(self, pixels: Any, width: int, height: int, stride: int, tiles: Sequence[Tile],
+                    canvas: tuple[int, int]):
+        """Show new atlas: RGBA8 rows (straight alpha, sRGB colors), stride bytes per row, of which tiles
+        are shown on a canvas_width x canvas_height canvas (placed in VR by placement)
+
+        Raises:
+            ValueError: atlas too big for shared memory (caller scales it down first), tiles outside atlas or
+                canvas, or too many tiles.
         """
         if not (0 < width <= MAX_DIMENSION and 0 < height <= MAX_DIMENSION and stride >= width * 4
                 and stride * height <= MAX_IMAGE_BYTES):
             raise ValueError(f"VR overlay image too big for OpenXR layer: {width}x{height}")
+        canvas_width, canvas_height = canvas
+        if not (0 < canvas_width <= MAX_CANVAS and 0 < canvas_height <= MAX_CANVAS):
+            raise ValueError(f"VR overlay canvas too big for OpenXR layer: {canvas_width}x{canvas_height}")
+        if not 0 < len(tiles) <= MAX_TILES:
+            raise ValueError(f"VR overlay: {len(tiles)} tiles for OpenXR layer (1 to {MAX_TILES})")
+        for tile in tiles:
+            if (min(tile) < 0 or tile.width < 1 or tile.height < 1
+                    or tile.atlas_x + tile.width > width or tile.atlas_y + tile.height > height
+                    or tile.canvas_x + tile.width > canvas_width or tile.canvas_y + tile.height > canvas_height):
+                raise ValueError(f"VR overlay tile outside atlas or canvas: {tile}")
         if self._buffer is not None:
-            self.__write((pixels, width, height, stride, crop), visible=True)
+            self.__write((pixels, width, height, stride, tuple(Tile(*tile) for tile in tiles), canvas), visible=True)
 
     def hide(self):
         """Nothing shown (all overlays hidden)"""
@@ -270,7 +410,7 @@ class SharedFrameWriter:
             sequence += 1
         struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 1)
         if image is not None:
-            pixels, width, height, stride, crop = image
+            pixels, width, height, stride, tiles, canvas = image
             view = memoryview(pixels).cast("B")
             size = stride * height
             if len(view) < size:
@@ -279,10 +419,11 @@ class SharedFrameWriter:
             buffer[DATA_OFFSET:DATA_OFFSET + size] = view[:size]
             self._serial = (self._serial + 1) & 0xFFFFFFFF
             self._size = (width, height, stride)
-            self._crop = crop
+            self._tiles = tiles
+            self._canvas = canvas
         width, height, stride = self._size
-        placement = cropped_placement(self._placement, self._crop, width, height)
-        self._flags = (FLAG_VISIBLE if visible and width else 0) | (
+        placement = self._placement  # of the whole canvas: each tile placed by the layer (tile_placement)
+        self._flags = (FLAG_VISIBLE if visible and width and self._tiles else 0) | (
             FLAG_ATTACH_TO_HEADSET if placement.attach_to_headset else 0)
         struct.pack_into(
             "<6I4f", buffer, OFFSET_FRAME,
@@ -290,6 +431,9 @@ class SharedFrameWriter:
             placement.width_meters, placement.distance_meters,
             placement.vertical_offset_meters, placement.horizontal_offset_meters,
         )
+        struct.pack_into("<3I", buffer, OFFSET_CANVAS, *self._canvas, len(self._tiles))
+        for index, tile in enumerate(self._tiles):
+            struct.pack_into(TILE_FORMAT, buffer, TILE_OFFSET + index * TILE_SIZE, *tile)
         struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 2)
 
 

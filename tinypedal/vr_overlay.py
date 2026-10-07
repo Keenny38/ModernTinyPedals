@@ -19,14 +19,17 @@
 """
 VR overlay
 
-Compose all visible overlay widgets into one image (same layout as on desktop), then:
-- OpenXR layer (Windows): image written to shared memory, drawn in every OpenXR game on any runtime
+Visible overlay widgets keep their desktop layout (the canvas: bounding box of all widgets) in VR:
+- OpenXR layer (Windows): only the visible parts of the canvas, one tile per group of nearby widgets, packed
+  in an atlas written to shared memory, drawn as one quad per tile in every OpenXR game on any runtime
   (SteamVR, Meta / Air Link, Virtual Desktop, WMR, Pimax, Varjo...) by the app's own OpenXR API layer
-  (native/openxr_layer, bundled in the release, see vr_shared.py). Nothing to install.
+  (native/openxr_layer, bundled in the release, see vr_shared.py). Nothing to install. Widgets spread over
+  the screen cost no bandwidth nor GPU copy for the empty space between them.
 - SteamVR overlay: OpenVR games (rFactor 2, Le Mans Ultimate in SteamVR mode...). Requires the "openvr"
   package (bundled in the release, from source: pip install openvr); created once SteamVR runs (never
   starts SteamVR), hidden while the OpenXR layer draws the overlay (OpenXR game on SteamVR runtime).
-  Both placed the same way: fixed in seated space or attached to headset.
+  Shows the whole canvas composed into one image. Both placed the same way: fixed in seated space or
+  attached to headset.
 - VR mirror window: one desktop window showing the composed image, for window capture overlays such as
   OpenKneeboard, OVR Toolkit, XSOverlay or Desktop+.
 """
@@ -35,6 +38,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import math
 import threading
 import zlib
 from collections.abc import Callable
@@ -55,6 +59,8 @@ MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window captu
 STEAMVR_PROCESSES = ("vrserver.exe", "vrserver")  # SteamVR server (Windows, Linux)
 STEAMVR_RETRY_MS = 5000  # SteamVR started after app: overlay created within this delay
 OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per second (copied in game frame)
+OPENXR_MAX_TILES = 8  # tiles (quad layers) at most, room left for the game's layers (runtimes allow 16 or more)
+OPENXR_TILE_GAP = 32  # widgets closer than this (pixels) share a tile
 
 
 class MirrorWindow(QWidget):
@@ -168,15 +174,7 @@ def compose_widgets(widgets: list) -> QImage | None:
     bounds = QRect()
     for widget in visible:
         bounds = bounds.united(widget.frameGeometry())
-    image = QImage(bounds.width(), bounds.height(), QImage.Format.Format_RGBA8888)
-    image.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(image)
-    for widget in visible:
-        window = window_image(widget)
-        if window is not None:
-            painter.setOpacity(widget.windowOpacity())
-            painter.drawImage(widget.frameGeometry().topLeft() - bounds.topLeft(), window)
-    painter.end()
+    image = compose_group(visible, bounds.topLeft(), (bounds.width(), bounds.height()))
     pixels = image.width() * image.height()
     if pixels > MAX_PIXELS:
         scale = (MAX_PIXELS / pixels) ** 0.5
@@ -218,6 +216,91 @@ def content_rect(image: QImage) -> QRect:
         return QRect()
     left, right = columns
     return QRect(left, top, right - left + 1, bottom - top + 1)
+
+
+class TileFrame(NamedTuple):
+    """Visible parts of the canvas for the OpenXR layer: atlas image (RGBA8888) & its tiles"""
+
+    atlas: QImage
+    tiles: tuple[vr_shared.Tile, ...]
+    canvas: tuple[int, int]  # width, height (same scale as atlas)
+    checksum: int
+
+
+def compose_group(widgets: list, origin: QPoint, size: tuple[int, int]) -> QImage:
+    """Widgets (stacking order kept) composed into a transparent image of size, origin at its top left"""
+    image = QImage(size[0], size[1], QImage.Format.Format_RGBA8888)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    for widget in widgets:
+        window = window_image(widget)
+        if window is not None:
+            painter.setOpacity(widget.windowOpacity())
+            painter.drawImage(widget.frameGeometry().topLeft() - origin, window)
+    painter.end()
+    return image
+
+
+def compose_tiles(widgets: list, max_tiles: int = OPENXR_MAX_TILES, gap: int = OPENXR_TILE_GAP) -> TileFrame | None:
+    """Visible overlay widgets as tiles of the canvas (bounding box of all widgets, desktop layout):
+    one tile per group of nearby widgets, cropped to its visible pixels, packed in an atlas.
+    Scaled down (canvas too) when the atlas is bigger than the shared memory allows.
+
+    Returns:
+        None if nothing visible.
+    """
+    visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
+    if not visible:
+        return None
+    geometries = [widget.frameGeometry() for widget in visible]
+    bounds = QRect()
+    for geometry in geometries:
+        bounds = bounds.united(geometry)
+    rects = [(rect.x() - bounds.x(), rect.y() - bounds.y(), rect.width(), rect.height()) for rect in geometries]
+    parts: list[tuple[QImage, int, int]] = []  # image, canvas x & y
+    for group in vr_shared.cluster_rects(rects, gap, min(max_tiles, vr_shared.MAX_TILES)):
+        box = rects[group[0]]
+        for index in group[1:]:
+            box = vr_shared.union_rect(box, rects[index])
+        image = compose_group([visible[index] for index in group],
+                              bounds.topLeft() + QPoint(box[0], box[1]), (box[2], box[3]))
+        rect = content_rect(image)
+        if rect.isEmpty():
+            continue
+        if rect != image.rect():  # transparent margins not sent
+            image = image.copy(rect)
+        parts.append((image, box[0] + rect.x(), box[1] + rect.y()))
+    if not parts:
+        return None
+    # Scale: atlas within shared memory (MAX_PIXELS) & largest image, canvas within layer limit
+    area = sum(image.width() * image.height() for image, _, _ in parts)
+    scale = min(1.0, math.sqrt(MAX_PIXELS / area), vr_shared.MAX_CANVAS / max(bounds.width(), bounds.height()))
+    while True:
+        sizes = [(max(round(image.width() * scale), 1), max(round(image.height() * scale), 1)) for image, _, _ in parts]
+        packed = vr_shared.pack_atlas(sizes)
+        if packed is not None and packed[1] * packed[2] * 4 <= vr_shared.MAX_IMAGE_BYTES:
+            break
+        scale *= 0.9  # rows waste space: smaller until it fits (1 pixel tiles always do)
+    positions, atlas_width, atlas_height = packed
+    canvas = (min(max(round(bounds.width() * scale), 1), vr_shared.MAX_CANVAS),
+              min(max(round(bounds.height() * scale), 1), vr_shared.MAX_CANVAS))
+    atlas = QImage(atlas_width, atlas_height, QImage.Format.Format_RGBA8888)
+    atlas.fill(Qt.GlobalColor.transparent)  # padding between tiles transparent
+    painter = QPainter(atlas)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+    tiles = []
+    for (image, x, y), (width, height), (atlas_x, atlas_y) in zip(parts, sizes, positions):
+        if (width, height) != (image.width(), image.height()):
+            image = image.scaled(width, height, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation)
+        painter.drawImage(atlas_x, atlas_y, image)
+        canvas_x = min(round(x * scale), canvas[0] - width)  # rounding never moves a tile off canvas
+        canvas_y = min(round(y * scale), canvas[1] - height)
+        tiles.append(vr_shared.Tile(atlas_x, atlas_y, width, height, max(canvas_x, 0), max(canvas_y, 0)))
+    painter.end()
+    layout = repr((tiles, canvas)).encode()
+    checksum = zlib.crc32(memoryview(atlas.constBits())[:atlas.sizeInBytes()], zlib.crc32(layout))  # type: ignore[arg-type]
+    return TileFrame(atlas, tuple(tiles), canvas, checksum)
 
 
 class ImageFrame(NamedTuple):
@@ -326,7 +409,7 @@ class VROverlay(QObject):
         # OpenXR layer
         self._xr: vr_shared.SharedFrameWriter | None = None
         self._xr_checksum: int | None = None
-        self._xr_pending: tuple[QImage, int | None] | None = None  # image waiting for next write slot
+        self._xr_dirty = False  # widgets changed since last tiles written (waiting for next write slot)
         self._xr_written_at: int | None = None  # tick (ms) of last image written
         self._xr_drawing = False
         self._xr_state: tuple | None = None  # last layer state logged
@@ -404,8 +487,8 @@ class VROverlay(QObject):
             if not writer.open():
                 return False
             self._xr = writer
-            self._xr_checksum = None
-            self._xr_pending = self._xr_written_at = None
+            self._xr_checksum = self._xr_written_at = None
+            self._xr_dirty = False
             self._xr_state = None
             self._xr_frames = self._xr_shown_at = None
             logger.info("ENABLED: VR overlay (OpenXR layer %s)", manifest)
@@ -422,8 +505,8 @@ class VROverlay(QObject):
 
     def __close_openxr(self):
         writer, self._xr = self._xr, None
-        self._xr_checksum = None
-        self._xr_pending = self._xr_written_at = None
+        self._xr_checksum = self._xr_written_at = None
+        self._xr_dirty = False
         self._xr_drawing = False
         self._xr_frames = self._xr_shown_at = None
         if writer is not None:
@@ -450,47 +533,47 @@ class VROverlay(QObject):
                 elif status.state == vr_shared.LAYER_UNSUPPORTED:
                     logger.warning("VR overlay: OpenXR game uses %s, not supported by OpenXR layer "
                                    "(SteamVR overlay or mirror window still work)", status.graphics_name)
+                elif status.version_mismatch:
+                    logger.warning("VR overlay: OpenXR game (process %s) runs the layer of another app version "
+                                   "(protocol %s, app %s), nothing drawn: restart the game "
+                                   "(SteamVR overlay or mirror window still work)",
+                                   status.pid, status.version, vr_shared.VERSION)
                 else:
                     logger.warning("VR overlay: OpenXR layer stopped in game (XrResult %s)", status.last_result)
             elif self._xr_drawing:
                 logger.info("VR overlay: OpenXR game closed")
         self._xr_drawing = drawing
 
-    def __write_openxr(self, image: QImage | None, checksum: int | None, now: int):
-        """Image for OpenXR layer: copied by the layer in the game's frame, so written at most every
-        OPENXR_MIN_INTERVAL_MS (newest image kept meanwhile), cropped to its visible pixels"""
+    def __write_openxr(self, widgets: list, now: int):
+        """Tiles for OpenXR layer: copied by the layer in the game's frame, so written at most every
+        OPENXR_MIN_INTERVAL_MS (composed from the newest widget state once the interval passed), only when
+        changed. Hidden at once when no widget is visible."""
         writer = self._xr
         if writer is None:
+            self._xr_dirty = False
             return
-        self._xr_pending = None
-        if image is None:
+        if not any(widget.isVisible() and widget.width() > 0 for widget in widgets):
+            self._xr_dirty = False
             writer.hide()
             self._xr_checksum = None
             return
-        if checksum == self._xr_checksum:
-            return
         if self._xr_written_at is not None and 0 <= now - self._xr_written_at < OPENXR_MIN_INTERVAL_MS:
-            self._xr_pending = (image, checksum)
+            self._xr_dirty = True  # written on a later tick
+            return
+        self._xr_dirty = False
+        frame = compose_tiles(widgets)
+        if frame is None:  # nothing visible
+            writer.hide()
+            self._xr_checksum = None
+            return
+        if frame.checksum == self._xr_checksum:
             return
         self._xr_written_at = now
-        self._xr_checksum = checksum
-        image = fit_image(image, vr_shared.MAX_DIMENSION)
-        if image.format() != QImage.Format.Format_RGBA8888:
-            image = image.convertToFormat(QImage.Format.Format_RGBA8888)
-        rect = content_rect(image)
-        if rect.isEmpty():  # nothing visible
-            writer.hide()
-            return
-        canvas_width, canvas_height = image.width(), image.height()
-        width_meters = placement_from(cfg.user.config["vr_overlay"]).width_meters
-        if rect.width() * width_meters / canvas_width < 0.02:  # layer refuses quads under 1 cm wide
-            rect = image.rect()
-        if rect != image.rect():  # transparent margins not copied (layer copies image in game frame)
-            image = image.copy(rect)
-        view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
+        self._xr_checksum = frame.checksum
+        atlas = frame.atlas
+        view = memoryview(atlas.constBits())[:atlas.sizeInBytes()]  # type: ignore[arg-type]
         try:
-            writer.write_image(view, image.width(), image.height(), image.bytesPerLine(),
-                               crop=(rect.x(), rect.y(), canvas_width, canvas_height))
+            writer.write_tiles(view, atlas.width(), atlas.height(), atlas.bytesPerLine(), frame.tiles, frame.canvas)
         except (ValueError, TypeError, BufferError) as error:
             self._xr_checksum = None
             logger.warning("VR overlay: OpenXR image not written: %s", error)
@@ -648,20 +731,22 @@ class VROverlay(QObject):
                     overlay = None
                 else:
                     logger.info("VR overlay: SteamVR overlay %s", "hidden (OpenXR layer draws it)" if hide else "shown")
-        if self._xr_pending is not None:  # image held back by write rate limit
-            self.__write_openxr(*self._xr_pending, now)
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
+        if self._xr_dirty:  # tiles held back by write rate limit
+            self.__write_openxr(widgets, now)
         key = compose_key(widgets)
         if key is not None and key == self._compose_key:
             return  # no overlay window painted, moved, shown or hidden since last update
         self._compose_key = key
+        self.__write_openxr(widgets, now)
+        if self._mirror is None and overlay is None:
+            return  # OpenXR layer only: whole canvas image not needed
         image = compose_widgets(widgets)
         checksum = image_checksum(image) if image is not None else None
         if self._mirror is not None:
             if checksum != self._mirror_checksum:
                 self._mirror_checksum = checksum
                 self._mirror.set_image(image)
-        self.__write_openxr(image, checksum, now)
         if overlay is None:
             return
         try:

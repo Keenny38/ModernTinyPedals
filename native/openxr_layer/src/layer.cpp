@@ -3,15 +3,17 @@
  * Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Implicit OpenXR API layer: draws the app's overlay image (shared memory, see tinypedal_vr_shared.h)
- * as a quad layer after the game's layers, in every OpenXR game and on every runtime (SteamVR, Meta,
+ * Implicit OpenXR API layer: draws the app's overlay tiles (shared memory, see tinypedal_vr_shared.h)
+ * as quad layers after the game's layers (one swapchain, one quad per tile), in every OpenXR game and on every runtime (SteamVR, Meta,
  * Virtual Desktop, WMR, Pimax, Varjo...).
  *
  * Safety rules (a layer error would crash the game or break its VR):
  * - every OpenXR call of the game is forwarded unchanged, except xrEndFrame which may get one more layer;
- * - nothing is done unless the app is running and writing frames (heartbeat), or the API is unsupported;
+ * - nothing is done unless the app is running and writing frames (heartbeat) of the same protocol version,
+ *   or the API is unsupported;
  * - any failure stops the overlay for the session (pure pass-through), no exception leaves a hook;
- * - xrEndFrame retried without the overlay when the runtime refuses the added layer.
+ * - xrEndFrame retried without the overlay when the runtime refuses the added layers;
+ * - never more layers than the runtime allows (maxLayerCount): tiles merged when slots are missing.
  */
 
 #include "xr_includes.h"
@@ -179,22 +181,26 @@ struct SessionData {
     const FormatCandidate* format = nullptr;
     bool pending = false;  // image acquired, not waited yet (wait timed out)
     uint32_t pending_index = 0;
-    bool stale = false;  // reader pixels newer than last upload
+    bool stale = false;  // reader pixels or layout newer than last upload
     uint32_t upload_failures = 0;  // in a row
-    uint32_t pending_width = 0;  // image being uploaded
-    uint32_t pending_height = 0;
+    TileLayout layout;  // quads planned for current frame data & layer slots
+    uint32_t layout_slots = 0;  // layer slots layout was planned for
+    uint64_t layout_ms = 0;  // tick of last plan
+    bool layout_dirty = true;  // frame data read since last plan (tiles or canvas may have changed)
+    TileLayout pending_layout;  // image being uploaded
     uint32_t pending_format = 0;
-    bool image_valid = false;  // a released image holds the overlay (shown_* size & format)
-    uint32_t shown_width = 0;
-    uint32_t shown_height = 0;
+    bool image_valid = false;  // a released image holds the overlay (shown_layout & format)
+    TileLayout shown_layout;
     uint32_t shown_format = 0;
+    std::vector<uint8_t> merged;  // merged tiles image (too few layer slots)
     std::vector<uint8_t> upload;
     uint32_t upload_width = 0;
     uint32_t upload_height = 0;
     FrameReader reader;
     uint64_t mapping_generation = 0;
+    bool version_mismatch = false;  // app writes another protocol version
     // Submitted layers (kept until next frame)
-    XrCompositionLayerQuad quad = {};
+    std::vector<XrCompositionLayerQuad> quads;
     std::vector<const XrCompositionLayerBaseHeader*> layers;
     uint64_t frames_shown = 0;
 };
@@ -251,6 +257,7 @@ void destroy_swapchain(SessionData& session) {
     session.swapchain_width = session.swapchain_height = 0;
     session.pending = false;
     session.image_valid = false;
+    session.shown_layout = TileLayout{};
 }
 
 void destroy_resources(SessionData& session) {
@@ -368,23 +375,28 @@ bool ensure_swapchain(SessionData& session, uint32_t width, uint32_t height) {
     return true;
 }
 
-// Newer pixels: converted, then copied into the next swapchain image (acquire, wait, upload, release).
-// A wait that times out is finished on a later frame (last released image shown meanwhile); pixels changed
-// meanwhile are uploaded on the frame after.
+// Newer pixels or layout: atlas (or merged tiles) converted, then copied into the next swapchain image
+// (acquire, wait, upload, release). A wait that times out is finished on a later frame (last released image
+// shown meanwhile); pixels changed meanwhile are uploaded on the frame after.
 void update_image(SessionData& session) {
     if (!session.pending && session.stale) {
         const FrameInfo& info = session.reader.info();
-        if (!ensure_swapchain(session, info.width, info.height)) {
+        const TileLayout& layout = session.layout;
+        if (layout.empty() || !ensure_swapchain(session, layout.width, layout.height)) {
             session.image_valid = false;
             return;
         }
         session.stale = false;
-        session.upload_width = std::min(info.width + 1u, session.swapchain_width);
-        session.upload_height = std::min(info.height + 1u, session.swapchain_height);
-        convert_pixels(session.reader.pixels().data(), info.width, info.height, session.upload_width,
-                       session.upload_height, session.format->bgra, !session.format->srgb, session.upload);
-        session.pending_width = info.width;
-        session.pending_height = info.height;
+        const uint8_t* pixels = session.reader.pixels().data();
+        if (layout.merged) {
+            compose_layout(layout, pixels, info.width, info.height, session.merged);
+            pixels = session.merged.data();
+        }
+        session.upload_width = std::min(layout.width + 1u, session.swapchain_width);
+        session.upload_height = std::min(layout.height + 1u, session.swapchain_height);
+        convert_pixels(pixels, layout.width, layout.height, session.upload_width, session.upload_height,
+                       session.format->bgra, !session.format->srgb, session.upload);
+        session.pending_layout = layout;
         session.pending_format = info.pixel_format;
         XrSwapchainImageAcquireInfo acquire{};
         acquire.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
@@ -427,8 +439,7 @@ void update_image(SessionData& session) {
         return;
     }
     if (uploaded) {
-        session.shown_width = session.pending_width;
-        session.shown_height = session.pending_height;
+        session.shown_layout = session.pending_layout;
         session.shown_format = session.pending_format;
     } else {
         // GPU busy: tried again on next frame
@@ -436,7 +447,28 @@ void update_image(SessionData& session) {
     }
 }
 
-// Prepare frame end info with overlay quad appended. False: submit game's frame unchanged.
+constexpr uint64_t kUnmergeDelayMs = 1000;  // tiles merged for lack of layer slots: split again at most this often
+
+// Quads planned again for new frame data, fewer layer slots than planned quads, or (at most every
+// kUnmergeDelayMs, no upload every frame for a game changing its layer count) more slots for merged tiles
+void update_layout(SessionData& session, uint32_t slots, uint64_t now) {
+    const bool shrink = slots < session.layout.quads.size();
+    const bool grow = (session.layout.merged || session.layout.empty()) && slots > session.layout_slots &&
+                      now - session.layout_ms >= kUnmergeDelayMs;
+    if (!session.layout_dirty && !shrink && !grow) {
+        return;
+    }
+    TileLayout layout = plan_layout(session.reader.info(), slots, session.max_width, session.max_height);
+    session.layout_dirty = false;
+    session.layout_slots = slots;
+    session.layout_ms = now;
+    if (layout != session.layout) {
+        session.layout = std::move(layout);
+        session.stale = true;  // uploaded on this frame or a later one
+    }
+}
+
+// Prepare frame end info with overlay quads appended. False: submit game's frame unchanged.
 bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameEndInfo& patched) {
     const uint64_t now = now_ms();
     bool drawable = false;
@@ -445,16 +477,24 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
         if (generation != session.mapping_generation) {
             session.mapping_generation = generation;  // new mapping: sequence & serial start over
             session.reader.reset();
+            session.layout_dirty = true;
         }
         if (session.graphics && !session.failed) {
-            session.reader.read(view, size, now);
+            const ReadResult result = session.reader.read(view, size, now);
+            session.version_mismatch = result == ReadResult::VersionMismatch;
+            if (result == ReadResult::Updated) {
+                session.layout_dirty = true;  // planned on the next frame drawing the overlay
+            }
             drawable = session.reader.drawable();
             pixels_changed = session.reader.take_pixels_changed();
         }
         LayerStatus status;
         status.pid = GetCurrentProcessId();
         status.graphics_api = session.graphics_api;
-        status.state = session.failed ? TPVR_LAYER_FAILED : session.graphics ? TPVR_LAYER_ACTIVE : TPVR_LAYER_UNSUPPORTED;
+        status.state = session.failed                ? TPVR_LAYER_FAILED
+                       : !session.graphics           ? TPVR_LAYER_UNSUPPORTED
+                       : session.version_mismatch    ? TPVR_LAYER_VERSION_MISMATCH
+                                                     : TPVR_LAYER_ACTIVE;
         status.last_result = session.last_result;
         status.frames_shown = session.frames_shown;
         write_layer_status(view, size, status, now);
@@ -465,8 +505,13 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
     if (!drawable || session.failed) {
         return false;
     }
-    if (frame.layerCount == 0 || frame.layers == nullptr || frame.layerCount + 1u > session.max_layers) {
+    if (frame.layerCount == 0 || frame.layers == nullptr || frame.layerCount >= session.max_layers) {
         return false;  // game shows nothing (loading), or no room for one more layer
+    }
+    const uint32_t slots = std::min<uint32_t>(session.max_layers - frame.layerCount, TPVR_MAX_TILES);
+    update_layout(session, slots, now);
+    if (session.layout.empty()) {
+        return false;  // nothing fits (merged tiles bigger than swapchain allows)
     }
     if (!ensure_spaces(session)) {
         return false;
@@ -474,30 +519,39 @@ bool prepare_overlay(SessionData& session, const XrFrameEndInfo& frame, XrFrameE
     if (session.stale || session.pending) {
         update_image(session);
     }
-    if (session.failed || !session.image_valid || session.swapchain == XR_NULL_HANDLE || session.shown_width == 0) {
-        return false;
+    const TileLayout& shown = session.shown_layout;
+    if (session.failed || !session.image_valid || session.swapchain == XR_NULL_HANDLE || shown.empty() ||
+        shown.quads.size() > slots) {
+        return false;  // nothing uploaded yet, or image of more quads than slots left (new layout uploading)
     }
     const FrameInfo& info = session.reader.info();
-    XrCompositionLayerQuad& quad = session.quad;
-    quad = XrCompositionLayerQuad{};
-    quad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-    quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    XrCompositionLayerFlags flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     if (session.shown_format == TPVR_FORMAT_RGBA8_STRAIGHT) {
-        quad.layerFlags |= XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+        flags |= XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
     }
-    quad.space = info.attach_to_headset ? session.view_space : session.local_space;
-    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-    quad.subImage.swapchain = session.swapchain;
-    quad.subImage.imageRect.offset = {0, 0};
-    quad.subImage.imageRect.extent = {static_cast<int32_t>(session.shown_width), static_cast<int32_t>(session.shown_height)};
-    quad.subImage.imageArrayIndex = 0;
-    quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
-    quad.pose.position = {info.horizontal_offset_meters, info.vertical_offset_meters, -info.distance_meters};
-    quad.size.width = info.width_meters;
-    quad.size.height = info.width_meters * static_cast<float>(session.shown_height) / static_cast<float>(session.shown_width);
+    session.quads.clear();
+    for (const LayoutQuad& tile : shown.quads) {
+        const QuadPlacement placement = quad_placement(info, shown.canvas_width, shown.canvas_height, tile);
+        XrCompositionLayerQuad quad{};
+        quad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+        quad.layerFlags = flags;
+        quad.space = info.attach_to_headset ? session.view_space : session.local_space;
+        quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quad.subImage.swapchain = session.swapchain;
+        quad.subImage.imageRect.offset = {static_cast<int32_t>(tile.image.x), static_cast<int32_t>(tile.image.y)};
+        quad.subImage.imageRect.extent = {static_cast<int32_t>(tile.image.width), static_cast<int32_t>(tile.image.height)};
+        quad.subImage.imageArrayIndex = 0;
+        quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+        quad.pose.position = {placement.x, placement.y, placement.z};
+        quad.size.width = placement.width;
+        quad.size.height = placement.height;
+        session.quads.push_back(quad);
+    }
 
     session.layers.assign(frame.layers, frame.layers + frame.layerCount);
-    session.layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad));
+    for (const XrCompositionLayerQuad& quad : session.quads) {
+        session.layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad));
+    }
     patched = frame;
     patched.layerCount = static_cast<uint32_t>(session.layers.size());
     patched.layers = session.layers.data();

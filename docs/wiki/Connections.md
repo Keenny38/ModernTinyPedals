@@ -100,6 +100,8 @@ How the OpenXR layer is installed and removed:
 - Turning the option off, or uninstalling the app, removes it. Moving the app folder is handled at the next start.
 - To keep it out of one game, set the environment variable `DISABLE_TINYPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
 - If an OpenXR game misbehaves with the option on, turn it off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
+- After an app update, restart an OpenXR game that was already running: it keeps the layer it started with, which draws nothing for a newer app (`Help` > `Show Log` says so). The SteamVR overlay and the mirror window still work meanwhile.
+- Overlays far apart on your desktop cost nothing more in VR: only the overlays themselves are sent to the game, not the empty space between them.
 - From source: build the layer with CMake (`native/openxr_layer/CMakeLists.txt`), and `pip install openvr` for SteamVR.
 
 ### VR mirror window

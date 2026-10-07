@@ -27,7 +27,7 @@ HEADER = os.path.join(LAYER_DIR, "include", "tinypedal_vr_shared.h")
 
 
 def c_header():
-    """#define values & TpvrHeader field offsets (from offset comments) of the layer header"""
+    """#define values, TpvrHeader & TpvrTile field offsets (from offset comments) of the layer header"""
     with open(HEADER, encoding="utf-8") as file:
         text = file.read()
     defines = {}
@@ -37,18 +37,21 @@ def c_header():
             defines[name] = value.strip('"')
         else:
             defines[name] = eval(re.sub(r"TPVR_\w+", lambda m: str(defines[m[0]]), value))
-    fields = {name: int(offset) for name, offset in re.findall(r"^\s+\w+ (\w+)(?:\[\d+\])?;\s+/\* (\d+)", text, re.M)}
-    return defines, fields
+    structs = {}
+    for body, name in re.findall(r"^typedef struct \w+ \{(.*?)^\} (\w+);", text, re.M | re.S):
+        structs[name] = {field: int(offset)
+                         for field, offset in re.findall(r"^\s+\w+ (\w+)(?:\[\d+\])?;\s+/\* (\d+)", body, re.M)}
+    return defines, structs["TpvrHeader"], structs["TpvrTile"]
 
 
 def test_protocol_matches_layer_header():
-    defines, fields = c_header()
+    defines, fields, tile_fields = c_header()
     assert defines["TPVR_MAPPING_NAME"] == vr_shared.MAPPING_NAME
     assert defines["TPVR_MAGIC"] == vr_shared.MAGIC == struct.unpack("<I", b"TPVR")[0]
     for name in ("VERSION", "HEADER_SIZE", "DATA_OFFSET", "MAX_IMAGE_BYTES", "MAPPING_SIZE", "MAX_DIMENSION",
                  "APP_TIMEOUT_MS", "LAYER_TIMEOUT_MS", "FORMAT_RGBA8_STRAIGHT", "FORMAT_RGBA8_PREMULTIPLIED",
                  "FLAG_VISIBLE", "FLAG_ATTACH_TO_HEADSET", "LAYER_IDLE", "LAYER_ACTIVE", "LAYER_UNSUPPORTED",
-                 "LAYER_FAILED"):
+                 "LAYER_FAILED", "LAYER_VERSION_MISMATCH", "TILE_OFFSET", "TILE_SIZE", "MAX_TILES", "MAX_CANVAS"):
         assert defines[f"TPVR_{name}"] == getattr(vr_shared, name), name
     assert fields["sequence"] == vr_shared.OFFSET_SEQUENCE
     assert fields["app_heartbeat_ms"] == vr_shared.OFFSET_APP_HEARTBEAT
@@ -63,6 +66,17 @@ def test_protocol_matches_layer_header():
     assert [fields[name] for name in ("layer_heartbeat_ms", "layer_pid", "layer_state", "layer_graphics_api",
                                       "layer_last_result", "layer_frames_shown", "layer_version")] == layer_offsets
     assert struct.calcsize(vr_shared.LAYER_FORMAT) == 36
+    # Version 2: canvas & tile table
+    assert vr_shared.VERSION == 2
+    assert [fields[name] for name in ("canvas_width", "canvas_height", "tile_count")] == [
+        vr_shared.OFFSET_CANVAS, vr_shared.OFFSET_CANVAS + 4, vr_shared.OFFSET_CANVAS + 8]
+    assert fields["reserved_app"] == vr_shared.OFFSET_CANVAS + 12 and fields["layer_heartbeat_ms"] == 128
+    assert list(tile_fields) == ["atlas_x", "atlas_y", "width", "height", "canvas_x", "canvas_y", "reserved"]
+    assert list(tile_fields.values()) == [0, 4, 8, 12, 16, 20, 24]
+    assert struct.calcsize(vr_shared.TILE_FORMAT) == vr_shared.TILE_SIZE
+    assert list(vr_shared.Tile._fields) == list(tile_fields)[:6]
+    assert vr_shared.HEADER_SIZE <= vr_shared.TILE_OFFSET
+    assert vr_shared.TILE_OFFSET + vr_shared.MAX_TILES * vr_shared.TILE_SIZE <= vr_shared.DATA_OFFSET
 
 
 def test_layer_manifest():
@@ -99,6 +113,17 @@ def frame_fields(buffer):
     return struct.unpack_from("<6I4f3I", buffer, vr_shared.OFFSET_FRAME)
 
 
+def canvas_fields(buffer):
+    """canvas width, height, tile count"""
+    return struct.unpack_from("<3I", buffer, vr_shared.OFFSET_CANVAS)
+
+
+def tile_table(buffer):
+    count = canvas_fields(buffer)[2]
+    return [vr_shared.Tile(*struct.unpack_from(vr_shared.TILE_FORMAT, buffer, vr_shared.TILE_OFFSET + index * 32))
+            for index in range(count)]
+
+
 def sequence(buffer):
     return struct.unpack_from("<Q", buffer, vr_shared.OFFSET_SEQUENCE)[0]
 
@@ -107,7 +132,7 @@ def test_writer_header_and_frames():
     buffer = SeqlockBuffer()
     writer = vr_shared.SharedFrameWriter(buffer)
     assert writer.open() and writer.is_open
-    assert struct.unpack_from("<4I", buffer, 0) == (vr_shared.MAGIC, 1, 256, vr_shared.MAPPING_SIZE)
+    assert struct.unpack_from("<4I", buffer, 0) == (vr_shared.MAGIC, vr_shared.VERSION, 256, vr_shared.MAPPING_SIZE)
     assert sequence(buffer) % 2 == 0
     fields = frame_fields(buffer)
     assert fields[10:12] == (vr_shared.DATA_OFFSET, vr_shared.MAX_IMAGE_BYTES) and fields[12] == os.getpid()
@@ -127,6 +152,8 @@ def test_writer_header_and_frames():
     assert flags == vr_shared.FLAG_VISIBLE | vr_shared.FLAG_ATTACH_TO_HEADSET
     assert rest[:4] == pytest.approx([0.6, 1.5, -0.3, 0.1])
     assert bytes(buffer[vr_shared.DATA_OFFSET:vr_shared.DATA_OFFSET + 64]) == pixels[:64]
+    assert canvas_fields(buffer) == (4, 2, 1)  # no crop: one tile, the whole canvas
+    assert tile_table(buffer) == [vr_shared.Tile(0, 0, 4, 2, 0, 0)]
 
     writer.write_image(pixels, 4, 2, 32)
     assert frame_fields(buffer)[5] == serial + 1  # image serial changes with every image
@@ -158,6 +185,104 @@ def test_writer_rejects_too_big_image():
     assert sequence(writer._buffer) % 2 == 0  # never left odd
 
 
+@pytest.mark.parametrize("tiles, canvas", [
+    ([], (10, 10)),  # no tile
+    ([vr_shared.Tile(0, 0, 1, 1, 0, 0)] * (vr_shared.MAX_TILES + 1), (10, 10)),  # too many
+    ([vr_shared.Tile(3, 0, 2, 2, 0, 0)], (10, 10)),  # outside atlas (4 x 4)
+    ([vr_shared.Tile(0, 0, 4, 4, 7, 0)], (10, 10)),  # outside canvas
+    ([vr_shared.Tile(0, 0, 0, 4, 0, 0)], (10, 10)),  # empty
+    ([vr_shared.Tile(0, 0, 1, 1, -1, 0)], (10, 10)),  # negative
+    ([vr_shared.Tile(0, 0, 1, 1, 0, 0)], (0, 10)),  # no canvas
+    ([vr_shared.Tile(0, 0, 1, 1, 0, 0)], (vr_shared.MAX_CANVAS + 1, 10)),  # canvas too big
+])
+def test_writer_rejects_bad_tiles(tiles, canvas):
+    buffer = bytearray(vr_shared.MAPPING_SIZE)
+    writer = vr_shared.SharedFrameWriter(buffer)
+    writer.open()
+    seq = sequence(buffer)
+    with pytest.raises(ValueError):
+        writer.write_tiles(b"\0" * 64, 4, 4, 16, tiles, canvas)
+    assert sequence(buffer) == seq  # nothing written
+
+
+def test_writer_tile_table():
+    """Atlas & tile table written in the seqlock, placement of the whole canvas (tiles placed by the layer)"""
+    buffer = SeqlockBuffer()
+    writer = vr_shared.SharedFrameWriter(buffer)
+    writer.open()
+    placement = vr_shared.Placement(1.0, 1.5, -0.2, 0.1, False)
+    writer.set_placement(placement)
+    tiles = [vr_shared.Tile(0, 0, 3, 2, 0, 0), vr_shared.Tile(4, 0, 2, 1, 90, 40), vr_shared.Tile(4, 2, 1, 1, 99, 49)]
+    before = sequence(buffer)
+    writer.write_tiles(bytes(range(96)), 6, 4, 24, tiles, (100, 50))
+    assert sequence(buffer) == before + 2 and buffer.pixel_writes == [before + 1]
+    width, height, stride, _format, flags, _serial, *rest = frame_fields(buffer)
+    assert (width, height, stride, flags) == (6, 4, 24, vr_shared.FLAG_VISIBLE)
+    assert rest[:4] == pytest.approx(list(placement[:4]))  # canvas placement, not cropped
+    assert canvas_fields(buffer) == (100, 50, 3) and tile_table(buffer) == tiles
+    # Placement change: table kept
+    writer.set_placement(placement._replace(distance_meters=2.0))
+    assert tile_table(buffer) == tiles and frame_fields(buffer)[7] == 2.0
+    # Fewer tiles: count shrinks (stale entries beyond it ignored by the layer)
+    writer.write_tiles(bytes(range(96)), 6, 4, 24, tiles[:1], (100, 50))
+    assert canvas_fields(buffer) == (100, 50, 1) and tile_table(buffer) == tiles[:1]
+    writer.hide()
+    assert frame_fields(buffer)[4] == 0 and canvas_fields(buffer)[2] == 1
+
+
+def test_tile_placement_matches_canvas():
+    """Each tile shown where it is on the canvas placed by the settings (0.01 m per pixel here)"""
+    placement = vr_shared.Placement(1.0, 1.5, -0.2, 0.1, True)
+    whole = vr_shared.tile_placement(placement, (100, 50), vr_shared.Tile(7, 3, 100, 50, 0, 0))
+    assert whole == placement  # atlas position irrelevant
+    corner = vr_shared.tile_placement(placement, (100, 50), vr_shared.Tile(0, 0, 10, 10, 90, 40))
+    assert corner[:4] == pytest.approx((0.1, 1.5, -0.2 - 0.2, 0.1 + 0.45)) and corner.attach_to_headset
+    left = vr_shared.tile_placement(placement, (100, 50), vr_shared.Tile(0, 0, 20, 50, 0, 0))
+    assert left[:4] == pytest.approx((0.2, 1.5, -0.2, 0.1 - 0.4))
+
+
+def test_pack_atlas():
+    positions, width, height = vr_shared.pack_atlas([(30, 12), (50, 20), (16, 8)])
+    assert positions == [(51, 0), (0, 0), (82, 0)]  # tallest first, 1 pixel apart
+    assert (width, height) == (98, 20)
+    # Rows wrap at max width, never overlap
+    sizes = [(40, 10), (40, 30), (40, 20), (40, 5)]
+    positions, width, height = vr_shared.pack_atlas(sizes, max_width=100)
+    assert positions == [(0, 31), (0, 0), (41, 0), (41, 31)] and (width, height) == (81, 41)
+    boxes = [(x, y, x + w, y + h) for (x, y), (w, h) in zip(positions, sizes)]
+    for first in range(len(boxes)):
+        for second in range(first + 1, len(boxes)):
+            a, b = boxes[first], boxes[second]
+            assert a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]  # at least 1 pixel apart
+    assert vr_shared.pack_atlas([(101, 1)], max_width=100) is None
+    assert vr_shared.pack_atlas(sizes, max_width=100, max_height=40) is None
+    assert vr_shared.pack_atlas([]) == ([], 0, 0)
+
+
+def test_cluster_rects():
+    rects = [(0, 0, 100, 50), (110, 0, 50, 50), (1000, 800, 40, 40), (0, 900, 60, 20), (1050, 800, 10, 10)]
+    assert vr_shared.cluster_rects(rects, 32, 8) == [[0, 1], [2, 4], [3]]  # near widgets share a tile
+    assert vr_shared.cluster_rects(rects, 0, 8) == [[0], [1], [2], [3], [4]]
+    two = vr_shared.cluster_rects(rects, 0, 2)
+    assert len(two) == 2 and sorted(index for group in two for index in group) == [0, 1, 2, 3, 4]
+    # Tile bounding boxes never overlap: overlapping widgets always in one tile
+    overlapping = [(0, 0, 50, 50), (40, 40, 50, 50), (200, 0, 10, 10)]
+    assert vr_shared.cluster_rects(overlapping, 0, 8) == [[0, 1], [2]]
+    for count in range(1, 6):
+        groups = vr_shared.cluster_rects(rects, 0, count)
+        assert len(groups) <= count
+        boxes = []
+        for group in groups:
+            box = rects[group[0]]
+            for index in group[1:]:
+                box = vr_shared.union_rect(box, rects[index])
+            boxes.append(box)
+        for first in range(len(boxes)):
+            for second in range(first + 1, len(boxes)):
+                assert not vr_shared._near(boxes[first], boxes[second], 0)
+    assert vr_shared.cluster_rects([], 32, 8) == []
+
+
 def test_writer_reopen_continues_sequence():
     """App started again while the game (layer) keeps the shared memory: sequence & serial continue"""
     buffer = bytearray(vr_shared.MAPPING_SIZE)
@@ -184,8 +309,10 @@ def test_writer_unavailable_off_windows(monkeypatch):
     writer.close()
 
 
-def write_layer_status(buffer, heartbeat, state=vr_shared.LAYER_ACTIVE, api=1, result=0, frames=9):
-    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, 4321, state, api, result, frames, 1)
+def write_layer_status(buffer, heartbeat, state=vr_shared.LAYER_ACTIVE, api=1, result=0, frames=9,
+                       version=vr_shared.VERSION):
+    struct.pack_into(vr_shared.LAYER_FORMAT, buffer, vr_shared.OFFSET_LAYER, heartbeat, 4321, state, api, result, frames,
+                     version)
 
 
 def test_layer_status():
@@ -201,6 +328,11 @@ def test_layer_status():
     write_layer_status(buffer, 5000, state=vr_shared.LAYER_UNSUPPORTED, api=4)
     status = writer.layer_status()
     assert status.recent(5000) and not status.drawing(5000) and status.graphics_name == "OpenGL"
+    assert not status.version_mismatch
+    # Game started with the layer of another app version: nothing drawn, mismatch reported
+    write_layer_status(buffer, 5000, state=vr_shared.LAYER_VERSION_MISMATCH, version=3)
+    status = writer.layer_status()
+    assert status.version_mismatch and not status.drawing(5000) and status.version == 3
 
 
 # Registry (winreg mocked)
@@ -530,10 +662,14 @@ def test_openxr_layer_receives_frames(env, monkeypatch):
         canvas = vr_overlay.compose_widgets([widget])  # window frame size, transparent around widget
         rect = vr_overlay.content_rect(canvas)
         assert (rect.width(), rect.height()) == (60, 30) and canvas.width() > 60
-        expected = vr_shared.cropped_placement(vr_shared.Placement(0.8, 1.0, -0.2, 0.0, False),
-                                               (rect.x(), rect.y(), canvas.width(), canvas.height()), 60, 30)
-        assert expected.width_meters == pytest.approx(0.8 * 60 / canvas.width())  # same scale as canvas
-        assert (width_m, distance, vertical, horizontal) == pytest.approx(expected[:4])
+        placement = vr_shared.Placement(0.8, 1.0, -0.2, 0.0, False)
+        assert (width_m, distance, vertical, horizontal) == pytest.approx(placement[:4])  # whole canvas
+        assert canvas_fields(env.buffer) == (canvas.width(), canvas.height(), 1)
+        tiles = tile_table(env.buffer)
+        assert tiles == [vr_shared.Tile(0, 0, 60, 30, rect.x(), rect.y())]
+        # Shown by the layer where the widget is on the canvas, same scale as before
+        expected = vr_shared.tile_placement(placement, (canvas.width(), canvas.height()), tiles[0])
+        assert expected.width_meters == pytest.approx(0.8 * 60 / canvas.width())
         pixel = env.buffer[vr_shared.DATA_OFFSET + (15 * width + 30) * 4:][:4]  # inside the red widget
         assert pixel[0] == 255 and pixel[3] == 255
         assert struct.unpack_from("<Q", env.buffer, vr_shared.OFFSET_APP_HEARTBEAT)[0] == env.now
@@ -763,7 +899,11 @@ def test_openxr_image_rate_limited_and_cropped(env, monkeypatch):
         control.update_overlay()
         serial = env.frame()[5]
         width, height = env.frame()[:2]
-        assert (width, height) == (340, 220)  # both widgets: margins cropped
+        assert (width, height) == (101, 30)  # one tile per widget (far apart), 1 pixel apart in the atlas
+        tiles = tile_table(env.buffer)
+        assert [(tile.width, tile.height) for tile in tiles] == [(60, 30), (40, 20)]
+        assert tiles[1].atlas_x == 61 and tiles[1].canvas_x - tiles[0].canvas_x == 300  # desktop layout kept
+        assert tiles[1].canvas_y - tiles[0].canvas_y == 200
         widget.setStyleSheet("background: blue;")
         env.now += 20
         control.update_overlay()
@@ -776,7 +916,7 @@ def test_openxr_image_rate_limited_and_cropped(env, monkeypatch):
         other.hide()
         env.now += 20
         control.update_overlay()
-        assert env.frame()[:2] == (340, 220)  # rate limited
+        assert env.frame()[:2] == (101, 30)  # rate limited
         env.now += vr_overlay.OPENXR_MIN_INTERVAL_MS
         control.update_overlay()
         assert env.frame()[:2] == (60, 30)  # widget only
@@ -855,6 +995,98 @@ def test_steamvr_running(monkeypatch):
     assert not vr_overlay.steamvr_running()
 
 
+def make_colored(x, y, width, height, color):
+    widget = FakeOverlayWindow()
+    widget.setGeometry(x, y, width, height)
+    widget.setStyleSheet(f"background: {color};")
+    widget.show()
+    return widget
+
+
+def atlas_pixel(frame, x, y):
+    return frame.atlas.pixelColor(x, y).getRgb()
+
+
+def test_compose_tiles_one_tile_per_widget_group():
+    widgets = [make_colored(10, 10, 60, 30, "red"), make_colored(1500, 900, 40, 20, "blue"),
+               make_colored(100, 10, 20, 20, "green")]  # 30 px from the red one: same tile
+    try:
+        frame = vr_overlay.compose_tiles(widgets)
+        assert frame is not None and len(frame.tiles) == 2
+        canvas = vr_overlay.compose_widgets(widgets)  # same canvas as the SteamVR image (before its scaling)
+        bounds = widgets[0].frameGeometry().united(widgets[1].frameGeometry())
+        assert frame.canvas == (bounds.width(), bounds.height())
+        assert canvas is not None
+        red_green, blue = sorted(frame.tiles, key=lambda tile: tile.canvas_x)
+        assert (red_green.width, red_green.height) == (110, 30)  # cropped to visible pixels of both widgets
+        assert (blue.width, blue.height) == (40, 20)
+        assert blue.canvas_x - red_green.canvas_x == 1490 and blue.canvas_y - red_green.canvas_y == 890
+        assert frame.atlas.width() * frame.atlas.height() < 200 * 40  # not the 1530 x 910 canvas
+        # Tile pixels: widget colors at their place, transparent gap between red & green
+        assert atlas_pixel(frame, red_green.atlas_x + 5, red_green.atlas_y + 5) == (255, 0, 0, 255)
+        assert atlas_pixel(frame, red_green.atlas_x + 100, red_green.atlas_y + 5)[1] > 100  # green
+        assert atlas_pixel(frame, red_green.atlas_x + 75, red_green.atlas_y + 5)[3] == 0
+        assert atlas_pixel(frame, blue.atlas_x + 5, blue.atlas_y + 5) == (0, 0, 255, 255)
+        for tile in frame.tiles:  # 1 transparent pixel around each tile in the atlas
+            if tile.atlas_x + tile.width < frame.atlas.width():
+                assert atlas_pixel(frame, tile.atlas_x + tile.width, tile.atlas_y)[3] == 0
+        assert vr_overlay.compose_tiles(widgets).checksum == frame.checksum  # unchanged
+        widgets[1].setStyleSheet("background: yellow;")
+        assert vr_overlay.compose_tiles(widgets).checksum != frame.checksum
+        assert len(vr_overlay.compose_tiles(widgets, max_tiles=1).tiles) == 1
+    finally:
+        for widget in widgets:
+            widget.close()
+    assert vr_overlay.compose_tiles(widgets) is None  # nothing visible
+
+
+def test_compose_tiles_bounded_and_scaled():
+    widgets = [make_colored(index % 4 * 300, index // 4 * 200, 50, 40, "red") for index in range(12)]
+    big = make_colored(0, 700, 3000, 600, "blue")  # 1.8 M pixels: scaled down to fit shared memory
+    try:
+        frame = vr_overlay.compose_tiles(widgets)
+        assert frame is not None and len(frame.tiles) == vr_overlay.OPENXR_MAX_TILES  # 12 widgets, 8 tiles
+        frame = vr_overlay.compose_tiles([*widgets, big])
+        atlas = frame.atlas
+        assert atlas.bytesPerLine() * atlas.height() <= vr_shared.MAX_IMAGE_BYTES
+        assert max(atlas.width(), atlas.height()) <= vr_shared.MAX_DIMENSION
+        bounds = big.frameGeometry()
+        for widget in widgets:
+            bounds = bounds.united(widget.frameGeometry())
+        scale = frame.canvas[0] / bounds.width()
+        assert scale < 0.8 and frame.canvas[1] == pytest.approx(bounds.height() * scale, abs=1)
+        for tile in frame.tiles:  # layer limits: within atlas & canvas
+            assert tile.atlas_x + tile.width <= atlas.width() and tile.atlas_y + tile.height <= atlas.height()
+            assert tile.canvas_x + tile.width <= frame.canvas[0] and tile.canvas_y + tile.height <= frame.canvas[1]
+        writer = vr_shared.SharedFrameWriter(bytearray(vr_shared.MAPPING_SIZE))
+        writer.open()
+        view = memoryview(atlas.constBits())[:atlas.sizeInBytes()]
+        writer.write_tiles(view, atlas.width(), atlas.height(), atlas.bytesPerLine(), frame.tiles, frame.canvas)
+    finally:
+        for widget in [*widgets, big]:
+            widget.close()
+
+
+def test_layer_version_mismatch_reported(env, monkeypatch, caplog):
+    """Game started with the layer of an older app: nothing drawn by it, user told to restart the game,
+    SteamVR overlay kept"""
+    monkeypatch.delitem(sys.modules, "openvr", raising=False)
+    monkeypatch.setattr("builtins.__import__", _no_openvr_import())
+    control = VROverlay()
+    widget = make_widget(monkeypatch)
+    try:
+        control.enable()
+        control.update_overlay()
+        write_layer_status(env.buffer, env.now, state=vr_shared.LAYER_VERSION_MISMATCH, frames=0, version=3)
+        with caplog.at_level("WARNING", logger="tinypedal.vr_overlay"):
+            control.update_overlay()
+        assert any("restart the game" in record.getMessage() for record in caplog.records)
+        assert not control._xr_drawing
+    finally:
+        widget.close()
+        control.disable()
+
+
 def test_fit_image():
     image = QImage(5000, 100, QImage.Format.Format_RGBA8888)
     fitted = fit_image(image, 4096)
@@ -881,6 +1113,16 @@ int main(int argc, char** argv) {
     std::printf("%d %d %u %u %u %d %.3f %.3f %.3f %.3f %lu\n", result, reader.drawable() ? 1 : 0, info.width,
                 info.height, info.pixel_format, info.attach_to_headset ? 1 : 0, info.width_meters, info.distance_meters,
                 info.vertical_offset_meters, info.horizontal_offset_meters, sum);
+    // Quads the layer submits with argv[3] layer slots: image rect, canvas position, pose & size (meters)
+    const uint32_t slots = argc > 3 ? static_cast<uint32_t>(std::strtoul(argv[3], nullptr, 10)) : 16u;
+    const tpvr::TileLayout layout = tpvr::plan_layout(info, slots, 4096, 4096);
+    std::printf("%u %u %u %d\n", info.canvas_width, info.canvas_height, info.tile_count, layout.merged ? 1 : 0);
+    for (const tpvr::LayoutQuad& quad : layout.quads) {
+        const tpvr::QuadPlacement placement = tpvr::quad_placement(info, layout.canvas_width, layout.canvas_height, quad);
+        std::printf("%u %u %u %u %u %u %.6f %.6f %.6f %.6f %.6f\n", quad.image.x, quad.image.y, quad.image.width,
+                    quad.image.height, quad.canvas_x, quad.canvas_y, placement.x, placement.y, placement.z,
+                    placement.width, placement.height);
+    }
     return 0;
 }
 """
@@ -920,6 +1162,34 @@ def test_cpp_reader_reads_python_frames(tmp_path):
     stale = subprocess.run([str(program), str(dump), str(5000 + vr_shared.APP_TIMEOUT_MS + 1)],
                            capture_output=True, text=True, check=True, timeout=30)
     assert stale.stdout.split()[:2] == ["4", "0"]  # AppGone: nothing drawn
+
+    # Tiles: each quad where Python places the tile (tile_placement), merged when slots are missing
+    placement = vr_shared.Placement(0.6, 1.25, -0.25, 0.125, False)
+    writer.set_placement(placement)
+    tiles = [vr_shared.Tile(0, 0, 30, 12, 0, 0), vr_shared.Tile(31, 0, 20, 10, 280, 190),
+             vr_shared.Tile(52, 0, 8, 6, 140, 60)]
+    atlas = bytes([0x40, 0x20, 0x10, 0x80]) * (60 * 12)
+    writer.write_tiles(atlas, 60, 12, 240, tiles, (300, 200))
+    writer.heartbeat(5000)
+    dump.write_bytes(bytes(buffer))
+    lines = subprocess.run([str(program), str(dump), "5100"], capture_output=True, text=True, check=True,
+                           timeout=30).stdout.splitlines()
+    assert lines[0].split()[:6] == ["0", "1", "60", "12", "1", "0"]
+    assert lines[1].split() == ["300", "200", "3", "0"]  # canvas, tiles, not merged
+    assert len(lines) == 2 + len(tiles)
+    for tile, line in zip(tiles, lines[2:]):
+        values = line.split()
+        assert [int(value) for value in values[:6]] == [tile.atlas_x, tile.atlas_y, tile.width, tile.height,
+                                                        tile.canvas_x, tile.canvas_y]  # imageRect = atlas rect
+        expected = vr_shared.tile_placement(placement, (300, 200), tile)
+        x, y, z, width, height = (float(value) for value in values[6:])
+        assert (x, y, z) == pytest.approx((expected.horizontal_offset_meters, expected.vertical_offset_meters,
+                                           -expected.distance_meters), abs=1e-5)
+        assert (width, height) == pytest.approx((expected.width_meters, expected.width_meters * tile.height / tile.width),
+                                                abs=1e-5)
+    merged = subprocess.run([str(program), str(dump), "5100", "2"], capture_output=True, text=True, check=True,
+                            timeout=30).stdout.splitlines()
+    assert merged[1].split() == ["300", "200", "3", "1"] and len(merged) == 4  # 2 quads for 3 tiles
 
 
 def test_release_build_bundles_layer_where_app_finds_it():
