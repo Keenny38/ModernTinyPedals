@@ -45,6 +45,7 @@ import json
 import logging
 import select
 import socket
+import socketserver
 import struct
 import sys
 import threading
@@ -109,9 +110,16 @@ class LocalHTTPServer(ThreadingHTTPServer):
     if sys.platform == "win32":
         allow_reuse_address = False
 
-        def server_bind(self):
+    def server_bind(self):
+        """Bind without host name lookup: HTTPServer looks up server_name (getfqdn, never used here),
+        which blocks the GUI thread with a slow DNS, and raises UnicodeDecodeError (not OSError) for a
+        non ASCII Windows computer name"""
+        if sys.platform == "win32":
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-            super().server_bind()
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
 
     def __init__(self, *args, **kwargs):
         self.stopping = threading.Event()  # long running handlers (stream) end when set

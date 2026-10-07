@@ -109,7 +109,9 @@ class HotkeyControl:
 
         get_key_state = get_key_state_function()
         refresh_keystate(get_key_state)
-        last_key_codes: tuple[int, ...] = ()
+        # Keys held at start are no new press: a hotkey reloading preset (thread started again by reload)
+        # and still held once reloaded would run again, and again (preset cycled while key held)
+        last_key_codes = tuple(_key for _key in available_key_codes if get_key_state(_key))
 
         while not _event_wait(0.2):
             # Close & disable if no commands

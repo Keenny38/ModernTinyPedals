@@ -551,12 +551,12 @@ class WebDashboard:
                 server.server_close()
                 return
             server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
-        self._retry.listening()
         DashboardHandler.secure = secure
         self._server = server
         self._key = key
         self._thread = threading.Thread(target=server.serve_forever, daemon=True, name="Web dashboard")
         self._thread.start()
+        self._retry.listening()  # after server set: settings card refreshed by its signal reads it running
         scheme = "https" if secure else "http"
         logger.info("ENABLED: web dashboard on %s://%s:%s", scheme, host, port)
         if lan and not secure:

@@ -646,3 +646,40 @@ def test_https_certificate_follows_lan_addresses_without_restart(ui_env, monkeyp
     app_signal.addresses.emit()  # disabled: nothing updated
     time.sleep(0.1)
     assert not tls_cert.covers(cert_file, ["192.0.2.12"])
+
+
+def test_listening_signal_sees_server_running(ui_env, monkeypatch):
+    """Settings card refreshed by "listening again" signal reads server running (signal sent once started)"""
+    import socket
+
+    from tinypedal import app_signal, command_server
+
+    monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
+    server = WebDashboard()
+    seen = []
+
+    def on_listening():
+        seen.append(server.running)
+
+    errors = []
+    app_signal.error.connect(errors.append)
+    app_signal.servers.connect(on_listening)
+    busy = socket.socket()
+    try:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen()
+        port = busy.getsockname()[1]
+        cfg.user.config["web_dashboard"].update(
+            enable_web_dashboard=True, web_dashboard_port=port, access_code="TESTCODE", enable_https=False)
+        server.enable()
+        assert not server.running
+        busy.close()
+        end = time.monotonic() + 3
+        while not seen and time.monotonic() < end:
+            process_events(0.02)
+        assert seen == [True]
+    finally:
+        busy.close()
+        server.disable()
+        app_signal.servers.disconnect(on_listening)
+        app_signal.error.disconnect(errors.append)

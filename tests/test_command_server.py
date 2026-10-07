@@ -586,3 +586,20 @@ def test_keep_alive_idle_not_bounded_by_request_deadline(local_server, monkeypat
         assert client.sock is sock  # same connection
     finally:
         client.close()
+
+
+def test_server_bind_without_host_name_lookup(monkeypatch):
+    """Listening never looks up host name (slow DNS blocks GUI thread, non ASCII Windows name raises)"""
+    from http.server import BaseHTTPRequestHandler
+
+    def getfqdn(name=""):
+        raise UnicodeDecodeError("utf-8", b"\xcf", 0, 1, "invalid continuation byte")
+
+    monkeypatch.setattr(socket, "getfqdn", getfqdn)
+    for host in ("127.0.0.1", "0.0.0.0"):
+        httpd = command_server.LocalHTTPServer((host, 0), BaseHTTPRequestHandler)
+        try:
+            assert httpd.server_port == httpd.server_address[1] > 0
+            assert httpd.server_name == host
+        finally:
+            httpd.server_close()

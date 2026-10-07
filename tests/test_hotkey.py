@@ -354,3 +354,36 @@ def test_hotkey_control_old_thread_never_marks_new_stopped(ui_env, monkeypatch):
     assert len(running) == 2
     control.disable()
     assert control._stopped()
+
+
+def test_hotkey_held_across_restart_not_run_again(ui_env, monkeypatch):
+    """Key still held when hotkey thread starts again (reload run by that hotkey) is no new press,
+    so a held "load next preset" key never cycles presets on every reload"""
+    from types import SimpleNamespace
+
+    from tinypedal import hotkey_control
+    from tinypedal.setting import cfg
+
+    key = 65
+    monkeypatch.setitem(cfg.user.shortcuts, "overlay_lock", {"bind": "held"})
+    monkeypatch.setattr(hotkey_control, "load_hotkey", lambda bind: (key,) if bind == "held" else ())
+    monkeypatch.setattr(hotkey_control, "COMMANDS_GENERAL", (("overlay_lock", lambda: "overlay_lock"),))
+    for group in ("COMMANDS_PRESET", "COMMANDS_MODULE", "COMMANDS_WIDGET"):
+        monkeypatch.setattr(hotkey_control, group, ())
+    ran: list[str] = []
+    monkeypatch.setattr(hotkey_control, "app_signal", SimpleNamespace(hotkey=SimpleNamespace(
+        emit=lambda func: ran.append(func()))))
+    monkeypatch.setattr(hotkey_control, "refresh_keystate", lambda func: None)
+    pressed = {key}  # held since before thread started
+    monkeypatch.setattr(hotkey_control, "get_key_state_function",
+                        lambda: lambda code: -32768 if code in pressed else 0)
+    states = iter([{key}, {key}, set(), {key}])
+    stop_after = StopAfter(4)
+
+    def wait(timeout=None):
+        pressed.clear()
+        pressed.update(next(states, set()))
+        return stop_after.wait(timeout)
+
+    hotkey_control.HotkeyControl()._HotkeyControl__update_loop(SimpleNamespace(wait=wait))
+    assert ran == ["overlay_lock"]  # only pressed again after release
