@@ -222,6 +222,42 @@ def item_texts(view) -> set[str]:
     return texts
 
 
+def deleted_with_window(setups, unload: bool) -> list[str]:
+    """QML warnings while a shown spectate page is deleted with its window (app quit)"""
+    from PySide6.QtCore import qInstallMessageHandler
+    from PySide6.QtWidgets import QWidget
+
+    from tinypedal.ui.app import AppWindow
+    from tinypedal.ui.spectate_view import SpectateList
+
+    reader = Reader()
+    window = QWidget()
+    page = SpectateList(window)
+    page.backend._reader = lambda: reader
+    window.resize(900, 600)
+    window.show()
+    page.show()
+    for _ in range(10):
+        QCoreApplication.processEvents()
+    messages: list[str] = []
+    previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
+    try:
+        if unload:
+            AppWindow.unload_quick_views(window)  # type: ignore[arg-type]
+        window.hide()
+        window.deleteLater()
+        flush()
+    finally:
+        qInstallMessageHandler(previous)
+    return [text for text in messages if "Cannot read property" in text]
+
+
+def test_rail_page_deleted_with_window(setups):
+    """Rail pages get no close event at quit: backend deleted first, QML read a null backend"""
+    assert deleted_with_window(setups, unload=False)  # issue shown without unloading
+    assert not deleted_with_window(setups, unload=True)
+
+
 def test_qml_page(setups):
     from tinypedal.ui.spectate_view import SpectateList
 

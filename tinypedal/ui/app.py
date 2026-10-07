@@ -26,7 +26,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -1862,8 +1862,20 @@ class AppWindow(QMainWindow):
         tray_icon = self.findChild(QSystemTrayIcon)
         if tray_icon is not None:  # tray is optional (not supported on some desktops)
             tray_icon.hide()  # workaround tray icon not removed after exited
+        self.unload_quick_views()
         QApplication.quit()
         return True
+
+    def unload_quick_views(self):
+        """QML of every page unloaded while backends still exist
+
+        Rail pages (spectate, presets...) never get a close event: deleted with the window, their
+        backend (created first) went before their QML view, whose bindings then read a null backend.
+        """
+        from PySide6.QtQuickWidgets import QQuickWidget
+
+        for view in self.findChildren(QQuickWidget):
+            view.setSource(QUrl())
 
     def closeEvent(self, event):
         """Minimize to tray, else quit: window kept (with tray icon & pages) if quit is cancelled"""
