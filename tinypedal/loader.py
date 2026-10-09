@@ -88,6 +88,8 @@ def start():
     if not safe_mode.state.enabled:
         vroverlay().enable()
         streamoverlay.enable()
+    else:
+        vroverlay().disable()  # OpenXR layer left registered (0.22.3) removed in safe mode too
     # 4 Check for updates
     if cfg.application["check_for_updates_on_startup"]:
         update_checker.check(False)

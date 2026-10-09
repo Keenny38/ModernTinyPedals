@@ -3,6 +3,13 @@
 Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.22.4 (2026-10-09)
+
+### Overlay VR
+
+- **Couche OpenXR désactivée par défaut** : en 0.22.3, activer `Activer l'overlay VR` inscrivait la couche OpenXR de l'app, que chaque jeu OpenXR charge. Le Mans Ultimate en fait partie (sa VR passe par OpenXR avec OpenComposite intégré), et il pouvait ne plus démarrer en VR (« Unable to start the game in VR mode »). La couche est maintenant expérimentale, derrière sa propre option `Couche OpenXR (expérimental)` (désactivée par défaut). Chaque démarrage retire une couche restée inscrite par la 0.22.3, aussi en mode sans échec, et fermer l'app la retire aussi : les jeux lancés sans l'app ne la chargent jamais.
+- **SteamVR ne reste plus bloqué sur un écran gris foncé quand tu le quittes** : l'overlay SteamVR de l'app ne répondait jamais à la demande de fermeture de SteamVR, qui l'attendait avant de se fermer. L'app répond maintenant tout de suite, retire son overlay et ne se reconnecte qu'une fois SteamVR complètement fermé puis relancé.
+
 ## 0.22.3 (2026-10-08)
 
 ### Overlays

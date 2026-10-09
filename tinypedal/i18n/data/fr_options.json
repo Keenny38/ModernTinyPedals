@@ -1100,6 +1100,7 @@
     "enable_vehicle_info": "Activer infos véhicule",
     "enable_vr_mirror_window": "Fenêtre miroir VR (OpenKneeboard, OVR Toolkit...)",
     "enable_vr_overlay": "Activer l'overlay VR",
+    "enable_openxr_layer": "Couche OpenXR (expérimental)",
     "enable_weather_info": "Activer infos météo",
     "enable_web_dashboard": "Activer le tableau de bord web",
     "enable_wheel_suspension_motion": "Roues et disques suivent les suspensions",

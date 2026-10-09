@@ -140,7 +140,7 @@ CATEGORIES = (
     Category("stream_overlay", "Stream Overlay", "\ue93e",
              "Overlays in OBS, Streamlabs, XSplit or vMix: addresses on the Stream Overlays page"),
     Category("vr_overlay", "VR Overlay", "\ue7f4", "Experimental: overlays in your VR headset, OpenXR & SteamVR games", (
-        ("VR Overlay", ("enable_vr_overlay", "enable_attach_to_headset", "update_interval")),
+        ("VR Overlay", ("enable_vr_overlay", "enable_openxr_layer", "enable_attach_to_headset", "update_interval")),
         ("Placement", (
             "overlay_width_meters", "distance_meters", "vertical_offset_meters", "horizontal_offset_meters")),
         ("Mirror Window", ("enable_vr_mirror_window", "mirror_background_color")),

@@ -43,6 +43,7 @@ import os
 import threading
 import zlib
 from collections.abc import Callable
+from contextlib import suppress
 from typing import NamedTuple
 
 from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer
@@ -439,6 +440,7 @@ class VROverlay(QObject):
         self._heartbeat_timer.timeout.connect(self.__heartbeat)
         # SteamVR (OpenVR)
         self._openvr = None
+        self._system = None  # openvr IVRSystem: SteamVR events (quit)
         self._overlay = None
         self._handle = None
         self._buffer = None
@@ -450,6 +452,7 @@ class VROverlay(QObject):
         self._steamvr_check: SteamVRCheck | None = None  # process check running in background
         self._steamvr_report = False  # first check after enable: report problems as error
         self._steamvr_error_shown = False
+        self._steamvr_quitting = False  # SteamVR asked to quit: never connected again until its process is gone
         self._hidden_for_openxr = False  # SteamVR overlay hidden: OpenXR layer draws in headset
         # OpenXR layer
         self._xr: vr_shared.SharedFrameWriter | None = None
@@ -505,7 +508,12 @@ class VROverlay(QObject):
             if self._mirror.isHidden():
                 self._mirror.show()
         if setting["enable_vr_overlay"]:
-            openxr = self.__enable_openxr(setting)
+            # OpenXR layer: experimental, off by default (loaded by every OpenXR game, LMU too via OpenComposite)
+            openxr = bool(setting.get("enable_openxr_layer", False)) and self.__enable_openxr(setting)
+            if not openxr:
+                self.__close_openxr()
+                if vr_shared.WINDOWS:
+                    self.__unregister_openxr()
             self.__enable_steamvr(setting, report=not openxr)
         else:
             self.__close_openxr()
@@ -760,6 +768,11 @@ class VROverlay(QObject):
             return
         self._steamvr_check = None
         report, self._steamvr_report = self._steamvr_report, False
+        if self._steamvr_quitting:  # SteamVR still closing (vrserver alive): connecting would keep it open
+            if not check.running:
+                self._steamvr_quitting = False
+                logger.info("VR overlay: SteamVR closed, waiting for SteamVR")
+            return
         if check.running:
             self.__start_steamvr(cfg.user.config["vr_overlay"], report)
         elif report and not self._steamvr_error_shown and self._xr is None:
@@ -771,7 +784,7 @@ class VROverlay(QObject):
         import openvr
 
         try:
-            openvr.init(openvr.VRApplication_Overlay)
+            self._system = openvr.init(openvr.VRApplication_Overlay)
             self._openvr = openvr
             self._overlay = openvr.IVROverlay()
             self._handle = self._overlay.createOverlay("tinypedal.overlay", "Modern Tiny Pedals")
@@ -824,7 +837,7 @@ class VROverlay(QObject):
             except Exception:
                 logger.debug("VR overlay: shutdown failed", exc_info=True)
         was_running = self._handle is not None
-        self._openvr = self._overlay = self._handle = self._buffer = None
+        self._openvr = self._system = self._overlay = self._handle = self._buffer = None
         self._checksum = None
         self._visible = False
         self._hidden_for_openxr = False
@@ -851,6 +864,8 @@ class VROverlay(QObject):
         if self._xr is not None:
             self._xr.heartbeat(now)
             self.__update_openxr_status(now)
+        if self._system is not None:
+            self.__steamvr_events()
         if self._steamvr_wanted and self._overlay is None:
             self.__poll_steamvr(now)
         overlay = self._overlay
@@ -908,6 +923,26 @@ class VROverlay(QObject):
         except Exception as error:  # SteamVR closed, or openvr error
             self.__steamvr_stopped(error)
 
+    def __steamvr_events(self):
+        """SteamVR events: quit asked (SteamVR closed from headset or desktop) acknowledged & overlay released at
+        once, else SteamVR waits for the app (grey screen in headset) & games cannot start it again"""
+        openvr, system = self._openvr, self._system
+        if openvr is None or system is None:
+            return
+        try:
+            event = openvr.VREvent_t()
+            while system.pollNextEvent(event):
+                if event.eventType == openvr.VREvent_Quit:
+                    with suppress(Exception):
+                        system.acknowledgeQuit_Exiting()
+                    logger.info("VR overlay: SteamVR quitting, overlay released")
+                    self._steamvr_quitting = True
+                    self.__release_steamvr()
+                    self._steamvr_retry_at = vr_shared.tick_ms() + STEAMVR_RETRY_MS
+                    return
+        except Exception as error:
+            self.__steamvr_stopped(error)
+
     def __steamvr_stopped(self, error: Exception):
         """SteamVR closed or failed: overlay released, started again once SteamVR runs again.
         OpenXR layer & mirror window (sharing timer) kept updating."""
@@ -932,8 +967,8 @@ class VROverlay(QObject):
     def disable(self, close_mirror: bool = False):
         """Stop VR overlay & mirror window updates
 
-        OpenXR layer stays registered (inactive without app heartbeat), shared memory released: layer stops
-        drawing at once.
+        OpenXR layer unregistered (games started after are never given it, registered again by enable()),
+        shared memory released: layer stops drawing at once.
 
         Args:
             close_mirror: close mirror window too, else kept open (reload: enable() uses it again,
@@ -951,6 +986,8 @@ class VROverlay(QObject):
             self.__close_openxr()
         except Exception:
             logger.debug("VR overlay: OpenXR close failed", exc_info=True)
+        if vr_shared.WINDOWS:
+            self.__unregister_openxr()
 
     def __report_once(self, message: str):
         """Problem reported to the user once (enable runs again on each reload), logged each time"""

@@ -730,7 +730,7 @@ def env(ui_env, monkeypatch, tmp_path):
     environment = Env(monkeypatch, tmp_path)
     monkeypatch.setattr(vr_shared, "SharedFrameWriter", lambda: original(environment.buffer))
     setting = cfg.user.config["vr_overlay"]
-    setting.update(enable_vr_overlay=True, enable_vr_mirror_window=False, update_interval=50)
+    setting.update(enable_vr_overlay=True, enable_openxr_layer=True, enable_vr_mirror_window=False, update_interval=50)
     app_signal.error.connect(environment.errors.append)
     yield environment
     app_signal.error.disconnect(environment.errors.append)
@@ -828,6 +828,31 @@ def test_option_off_unregisters_layer(env):
     control = VROverlay()
     control.enable()
     assert env.unregistered and not env.registered and not control.running
+
+
+def test_openxr_layer_off_by_default_unregistered(env):
+    """0.22.3 registered the layer with enable_vr_overlay alone (loaded by every OpenXR game, LMU too): now
+    experimental, off by default, and every start without it removes a layer left registered"""
+    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+
+    assert GLOBAL_DEFAULT["vr_overlay"]["enable_openxr_layer"] is False
+    cfg.user.config["vr_overlay"]["enable_openxr_layer"] = False
+    control = VROverlay()
+    try:
+        control.enable()
+        assert env.unregistered and not env.registered and control._xr is None
+    finally:
+        control.disable()
+
+
+def test_disable_unregisters_layer(env):
+    """App closed: OpenXR games started afterwards never load the layer"""
+    control = VROverlay()
+    control.enable()
+    assert env.registered and control._xr is not None
+    env.unregistered.clear()
+    control.disable()
+    assert env.unregistered and control._xr is None
 
 
 def test_steamvr_started_only_once_running(env, monkeypatch):

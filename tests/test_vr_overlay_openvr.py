@@ -253,3 +253,74 @@ def test_pyinstaller_hook_bundles_openvr_library(monkeypatch):
     assert pattern("Windows", 64) == "libopenvr_api_64.dll"
     assert pattern("Linux", 64) == "libopenvr_api_64.so"
     assert pattern("Darwin", 64) == "libopenvr_api_32.dylib"
+
+
+class FakeEvent:
+    eventType = 0
+
+
+class FakeSystem:
+    """IVRSystem: events queued by the test"""
+
+    def __init__(self, log):
+        self.log = log
+        self.events: list[int] = []
+
+    def pollNextEvent(self, event):
+        if not self.events:
+            return False
+        event.eventType = self.events.pop(0)
+        return True
+
+    def acknowledgeQuit_Exiting(self):
+        self.log.append(("acknowledgeQuit_Exiting",))
+
+
+def test_steamvr_quit_acknowledged_and_never_reconnected_while_closing(vr_setting, monkeypatch):
+    """SteamVR closed from headset: quit acknowledged & overlay released at once (SteamVR no longer waits for
+    the app, grey screen), not connected again while vrserver still runs, connected once SteamVR is back"""
+    log = []
+    module = fake_openvr(log)
+    system = FakeSystem(log)
+    module.VREvent_t = FakeEvent
+    module.VREvent_Quit = 700
+
+    def init(app_type):
+        log.append(("init", app_type))
+        return system
+
+    module.init = init
+    monkeypatch.setitem(sys.modules, "openvr", module)
+    process = {"running": True}
+
+    class Check:  # vrserver process state set by the test
+        def __init__(self):
+            self.running = process["running"]
+
+        def done(self):
+            return True
+
+    monkeypatch.setattr(vr_overlay, "SteamVRCheck", Check)
+    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: []))
+    control = VROverlay()
+    try:
+        control.enable()
+        assert control._handle == 42
+        system.events = [1, 700]  # other event, then quit
+        log.clear()
+        control.update_overlay()
+        assert log == [("acknowledgeQuit_Exiting",), ("destroyOverlay", 42), ("shutdown",)]
+        assert control._handle is None and control.running  # still waiting for SteamVR
+        log.clear()
+        control._steamvr_retry_at = 0
+        control.update_overlay()  # vrserver still running (closing): no connection
+        assert log == []
+        process["running"] = False
+        control._steamvr_retry_at = 0
+        control.update_overlay()  # SteamVR gone
+        process["running"] = True
+        control._steamvr_retry_at = 0
+        control.update_overlay()  # SteamVR started again: overlay back
+        assert ("init", 2) in log and control._handle == 42
+    finally:
+        control.disable()

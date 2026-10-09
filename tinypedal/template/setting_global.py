@@ -91,6 +91,7 @@ GLOBAL_DEFAULT = {
     },
     "vr_overlay": {
         "enable_vr_overlay": False,
+        "enable_openxr_layer": False,  # experimental: OpenXR games (layer loaded by every OpenXR game)
         "enable_attach_to_headset": False,
         "update_interval": 50,
         "overlay_width_meters": 0.8,

@@ -1020,13 +1020,16 @@ Access token included in every source address. A random token is generated if em
 **VR overlay options can be accessed from `Config` menu in main window. Disabled by default, not yet tested on every headset.**
 
 Shows all visible widgets (same layout as on desktop) in your VR headset, with nothing else to install:
-- **OpenXR games** (any runtime: SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...): drawn by the app's own OpenXR layer, loaded by the game (Windows, games using Direct3D 11, Direct3D 12 or Vulkan; OpenGL games are not supported). Start the app before or after the game, either works.
+- **OpenXR games** (any runtime: SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...), only with `enable_openxr_layer` (experimental, off by default): drawn by the app's own OpenXR layer, loaded by the game (Windows, games using Direct3D 11, Direct3D 12 or Vulkan; OpenGL games are not supported). Start the app before the game.
 - **SteamVR games** (OpenVR): shown as a SteamVR overlay once SteamVR runs. The app never starts SteamVR itself.
 
 The VR overlay is hidden automatically when all widgets are hidden, and only sends a new image when widgets have changed.
 
     enable_vr_overlay
-Enable VR overlay in OpenXR and SteamVR games. On Windows, this registers the app's OpenXR layer for your user account (no admin rights). It does nothing while the app is closed, and is removed when this option is turned off or the app is uninstalled. To turn it off for one game, set the `DISABLE_TINYPEDAL_XR_LAYER` environment variable to `1`. Games run as administrator do not load it.
+Enable VR overlay: SteamVR overlay once SteamVR runs, and in OpenXR games with `enable_openxr_layer`.
+
+    enable_openxr_layer
+Experimental, disabled by default: show the VR overlay in OpenXR games with the app's own OpenXR layer (needs `enable_vr_overlay`). On Windows, the layer is registered for your user account (no admin rights) while the app runs with both options on, and removed when the app is closed, when an option is turned off or when the app is uninstalled: start the app before the game. Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite): if a game no longer starts in VR, turn this option off. To keep it out of one game, set the `DISABLE_TINYPEDAL_XR_LAYER` environment variable to `1`. Games run as administrator do not load it.
 
     enable_attach_to_headset
 Attach overlay to headset (follows head movement), otherwise overlay is fixed in seated space.

@@ -3,6 +3,13 @@
 All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.22.4 (2026-10-09)
+
+### VR overlay
+
+- **OpenXR layer off by default**: in 0.22.3, turning on `enable_vr_overlay` registered the app's OpenXR layer, which every OpenXR game loads. Le Mans Ultimate is one of them (its VR goes through OpenXR with the built-in OpenComposite), and it could fail to start in VR ("Unable to start the game in VR mode"). The layer is now experimental, behind its own `enable_openxr_layer` option (off by default). Every start removes a layer left registered by 0.22.3, also in safe mode, and closing the app removes it too: games started without the app never load it.
+- **SteamVR no longer stuck on a dark grey screen when you quit it**: the SteamVR overlay of the app never answered SteamVR's quit request, so SteamVR waited for it before closing. The app now answers at once, releases its overlay and only connects again once SteamVR has fully closed and started again.
+
 ## 0.22.3 (2026-10-08)
 
 ### Overlays

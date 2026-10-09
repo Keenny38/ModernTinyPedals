@@ -88,18 +88,18 @@ Good to know:
 
 `Config` > `VR Overlay (Experimental)` > `enable_vr_overlay` shows all visible overlays in your headset, with the same layout as on your desktop. Nothing else to install: everything is included in the Windows release.
 
-- **OpenXR games**, on any runtime (SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...): the app comes with its own OpenXR layer, a small DLL that OpenXR games load when they start. It draws the overlays over the game image. Games using Direct3D 11 (Le Mans Ultimate, rFactor 2 and most sim racing games), Direct3D 12 or Vulkan are supported; OpenGL games are not.
+- **OpenXR games**, on any runtime (SteamVR, Meta Quest Link / Air Link, Virtual Desktop, Windows Mixed Reality, Pimax, Varjo...), **experimental and off by default** (`enable_openxr_layer`): the app comes with its own OpenXR layer, a small DLL that OpenXR games load when they start. It draws the overlays over the game image. Games using Direct3D 11 (Le Mans Ultimate, rFactor 2 and most sim racing games), Direct3D 12 or Vulkan are supported; OpenGL games are not.
 - **SteamVR games** (OpenVR): shown as a SteamVR overlay as soon as SteamVR runs. The app never starts SteamVR, so Meta or Virtual Desktop users without SteamVR are not bothered. When an OpenXR game runs on SteamVR, only the OpenXR layer draws the overlays (no double image).
-- Start the app before or after the game, either works. Overlays disappear from the headset within 2 seconds when the app is closed.
+- OpenXR games: start the app before the game. Overlays disappear from the headset within 2 seconds when the app is closed.
 - `enable_attach_to_headset` makes it follow your head; otherwise it is fixed in front of your seated position (recentering the view in the game moves it too).
 - `overlay_width_meters`, `distance_meters`, `vertical_offset_meters` and `horizontal_offset_meters` place it. `update_interval` sets the refresh (default `50` ms).
 
 How the OpenXR layer is installed and removed:
 
-- Turning `enable_vr_overlay` on registers the layer for your Windows user account only (registry key `HKEY_CURRENT_USER\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, no admin rights). It stays registered while the option is on, also when the app is closed: it then does nothing at all.
-- Turning the option off, or uninstalling the app, removes it. Moving the app folder is handled at the next start.
+- With `enable_vr_overlay` and `enable_openxr_layer` on, the app registers the layer for your Windows user account only (registry key `HKEY_CURRENT_USER\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, no admin rights) while it runs.
+- Closing the app, turning an option off, or uninstalling the app removes it. Since 0.22.4 every start removes it unless `enable_openxr_layer` is on (0.22.3 registered it with `enable_vr_overlay` alone).
 - To keep it out of one game, set the environment variable `DISABLE_TINYPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
-- If an OpenXR game misbehaves with the option on, turn it off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
+- Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite). If an OpenXR game misbehaves or no longer starts in VR, turn `enable_openxr_layer` off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
 - After an app update, restart an OpenXR game that was already running: it keeps the layer it started with, which draws nothing for a newer app (`Help` > `Show Log` says so). The SteamVR overlay and the mirror window still work meanwhile.
 - Overlays far apart on your desktop cost nothing more in VR: only the overlays themselves are sent to the game, not the empty space between them.
 - From source: build the layer with CMake (`native/openxr_layer/CMakeLists.txt`), and `pip install openvr` for SteamVR.
