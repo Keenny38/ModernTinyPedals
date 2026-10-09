@@ -1,4 +1,4 @@
 cryptography>=43
 psutil>=6.1
-PySide6>=6.8,<7
+PySide6>=6.8,<6.12  # 6.12.0: refcount error on Python 3.11 (fatal "deallocating True or False")
 pyxdg; sys_platform == 'linux'
