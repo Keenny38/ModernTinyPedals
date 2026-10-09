@@ -301,7 +301,7 @@ def test_steamvr_quit_acknowledged_and_never_reconnected_while_closing(vr_settin
             return True
 
     monkeypatch.setattr(vr_overlay, "SteamVRCheck", Check)
-    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: []))
+    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(list))
     control = VROverlay()
     try:
         control.enable()
