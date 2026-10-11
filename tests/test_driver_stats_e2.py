@@ -8,7 +8,7 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tests.test_driver_stats_viewer import OREGA, SPA, STATS, write_stats
+from tests.test_driver_stats_viewer import OREGA, SPA, STATS, settle, write_stats
 from tests.test_lap_viewer_e2 import lap_info, write_lap
 from tinypedal.setting import cfg
 from tinypedal.ui.quick import stint_analysis as sa
@@ -57,7 +57,8 @@ def test_history_export_and_friend_comparison(tmp_path):
     target = tmp_path / "Max.json"
     sa.write_history_json(str(target), document)
     friend = sa.load_friend(str(target))
-    assert friend["name"] == "Max" and len(friend["sessions"]) == 2 and friend["classes"] == {OREGA: "LMP2_ELMS"}
+    assert friend["name"] == "Max" and friend["classes"] == {OREGA: "LMP2_ELMS"}
+    assert "sessions" not in friend  # not compared: not kept
     faster = json.loads(target.read_text(encoding="utf-8"))
     faster["stats"][SPA][OREGA]["pb"] = 120.9
     faster["driver"] = "Max V."
@@ -115,6 +116,7 @@ def stats_page(ui_env, monkeypatch):
     host = BaseDialog(None)
     page = DriverStatsBackend(host)
     page.warnings = warnings
+    settle(page)  # lap time reference, results & friend's file read in background
     yield page
     page.release()
     host.close()

@@ -324,3 +324,83 @@ def test_logging_level_0_console_and_unwritable_log_file(tmp_path, capsys):
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
             handler.close()
+
+
+def test_error_throttle_warns_once_per_interval(monkeypatch, caplog):
+    """Error of a repeated path: warning (visible at INFO level) then debug until interval passed"""
+    import logging
+
+    from tinypedal import log_handler
+
+    now = [100.0]
+    monkeypatch.setattr(log_handler, "monotonic", lambda: now[0])
+    throttle = log_handler.ErrorThrottle(interval=60)
+    logger = logging.getLogger("test_error_throttle")
+    with caplog.at_level(logging.DEBUG, logger=logger.name):
+        results = []
+        for step in (0, 30, 31):
+            now[0] += step
+            try:
+                raise KeyError("x")
+            except KeyError:
+                results.append(throttle.log(logger, "error %s", step))
+    assert results == [True, False, True]
+    assert [record.levelno for record in caplog.records] == [logging.WARNING, logging.DEBUG, logging.WARNING]
+    assert all(record.exc_info for record in caplog.records)
+
+
+def test_logging_without_console(tmp_path, monkeypatch):
+    """Windowed executable (stdout & stderr None): no console handler failing on every record"""
+    import logging
+    import sys
+
+    from tinypedal.log_handler import BoundedLogStream, set_logging_level
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    stream = BoundedLogStream()
+    logger = logging.getLogger("test_log_no_console")
+    try:
+        set_logging_level(logger, f"{tmp_path}/", "test.log", log_stream=stream, log_level=1)
+        assert all(getattr(handler, "stream", "") is not None for handler in logger.handlers)
+        logger.warning("still kept")
+        assert "still kept" in stream.getvalue()
+    finally:
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+
+
+def test_time_interp_without_earlier_sample():
+    # Car taking over another car's index (no earlier sample of its own): never extrapolated from old position
+    assert calc.time_interp_coordinate(100, -5000, 50, 3000, 10.0, 0.0, 10.2) == (100, 50)
+    assert calc.time_interp_coordinate(100, 90, 50, 50, 10.0, 10.5, 10.2) == (100, 50)  # out of order
+    # Normal case: extrapolated by one step
+    assert calc.time_interp_coordinate(100, 90, 50, 50, 10.0, 9.8, 10.2) == (110, 50)
+
+
+def test_vehicle_history_reset_forgets_previous_car_time():
+    from tinypedal.module.module_vehicles import reset_vehicle_history
+    from tinypedal.module_info import VehicleDataSet
+
+    data = VehicleDataSet()
+    data.elapsedTime = 123.4
+    reset_vehicle_history(data)
+    assert data.elapsedTime == 0.0
+
+
+def test_energy_available_kept_by_reset():
+    from tinypedal.module_info import FuelInfo
+
+    energy = FuelInfo()
+    assert energy.available is False
+    energy.available = True
+    energy.reset()  # vehicle reset: never flickers to fuel mode
+    assert energy.available is True
+
+
+def test_lap_filename_never_60_seconds():
+    from tinypedal.module.module_recorder import lap_filename
+
+    assert " 2m00.000s" in lap_filename(1, 119.9996, timestamp=0)
+    assert " 1m59.999s" in lap_filename(1, 119.999, timestamp=0)

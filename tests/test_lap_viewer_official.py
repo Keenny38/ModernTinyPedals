@@ -194,6 +194,7 @@ def test_official_circuit_from_game(viewer, monkeypatch):  # noqa: F811
     while backend._limits_job is not None:
         backend._limits_job.join()
         backend.check_limits_job()
+    backend.wait_jobs()  # lap placement measured in background, then charts & map built again
     track = backend.currentTrack
     assert backend._geometry is not None and backend.trackMap["official"] and backend.trackMap["layout"] == "ATL"
     assert track_geometry.load_geometry(cfg.path.telemetry, track) is not None  # saved: works without game
@@ -209,7 +210,8 @@ def test_official_circuit_from_game(viewer, monkeypatch):  # noqa: F811
     assert "Braking points spread" in card["spread"] or card["spread"] == ""
     assert len(backend._pit) == 2  # pit lane parts not joined
     backend._limits, backend._limits_track = None, ""
-    backend.start_limits(track)  # same laps & base: read from cache
+    backend.start_limits(track)  # same laps & base: read from cache (in background)
+    backend.wait_jobs()
     assert backend._limits is not None and backend._limits_job is None
 
 

@@ -330,6 +330,7 @@ Item {
             activeFocusOnTab: true
             model: backend.replayRows
             boundsBehavior: Flickable.StopAtBounds
+            reuseItems: true  // rows scrolled out fed again with other replays (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Keys.onUpPressed: { backend.moveReplaySelection(-1); root.showSelected() }
             Keys.onDownPressed: { backend.moveReplaySelection(1); root.showSelected() }
@@ -383,7 +384,12 @@ Item {
                 required property string trackLogo
                 readonly property bool selected: key === backend.selectedReplay
                 readonly property color tone: root.sessionColor(session)
-                readonly property bool hot: (selected && backend.checkedCount <= 1) || rowArea.containsMouse || watchButton.hovered
+                readonly property bool watchHovered: watchLoader.item !== null && watchLoader.item.hovered
+                readonly property bool hot: (selected && backend.checkedCount <= 1) || rowArea.containsMouse || watchHovered
+                // Reused row: fed other replay values at once, no color animation from the old replay
+                property bool live: true
+                ListView.onPooled: { live = false; opacity = 1 }  // add transition may have been running
+                ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 3.4)
@@ -392,9 +398,9 @@ Item {
                      : rowArea.containsMouse ? theme.hover : "transparent"
                 border.width: selected && backend.checkedCount > 1 ? 1 : 0
                 border.color: theme.accent
-                Behavior on color { ColorAnimation { duration: 110 } }
-                ToolTip.visible: rowArea.containsMouse && !watchButton.hovered && row.tip !== ""
-                ToolTip.text: row.tip
+                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
+                ToolTip.visible: rowArea.containsMouse && !watchHovered && row.tip !== ""
+                ToolTip.text: rowArea.containsMouse ? row.tip : ""
                 ToolTip.delay: 900
 
                 MouseArea {
@@ -444,8 +450,9 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: backend.toggleProtected(row.key)
                             ToolTip.visible: containsMouse
-                            ToolTip.text: row.isProtected ? i18n.tr("Protected from deletion & clean up (click: unprotect)")
-                                                        : i18n.tr("Protect From Deletion")
+                            ToolTip.text: !containsMouse ? ""
+                                : row.isProtected ? i18n.tr("Protected from deletion & clean up (click: unprotect)")
+                                : i18n.tr("Protect From Deletion")
                             ToolTip.delay: 500
                         }
                     }
@@ -488,7 +495,7 @@ Item {
                     }
                     ColumnLayout {
                         spacing: 1
-                        visible: !watchButton.visible || root.width > theme.em * 34
+                        visible: !watchLoader.active || root.width > theme.em * 34
                         Text {
                             Layout.alignment: Qt.AlignRight
                             text: row.date
@@ -503,16 +510,19 @@ Item {
                             font.features: { "tnum": 1 }
                         }
                     }
-                    TpButton {
-                        id: watchButton
-                        visible: row.hot
-                        accent: true
-                        glyph: ""  // play
-                        text: root.width > theme.em * 30 ? i18n.tr("Watch") : ""
-                        tip: i18n.tr("Open replay in the game (double click)")
-                        enabled: backend.gameState !== "offline"
-                        implicitHeight: Math.round(theme.em * 2.1)
-                        onClicked: backend.watchReplay(row.key)
+                    Loader {  // watch button made only for the selected or hovered row
+                        id: watchLoader
+                        active: row.hot
+                        visible: active
+                        sourceComponent: TpButton {
+                            accent: true
+                            glyph: ""  // play
+                            text: root.width > theme.em * 30 ? i18n.tr("Watch") : ""
+                            tip: hovered ? i18n.tr("Open replay in the game (double click)") : ""
+                            enabled: backend.gameState !== "offline"
+                            implicitHeight: Math.round(theme.em * 2.1)
+                            onClicked: backend.watchReplay(row.key)
+                        }
                     }
                 }
             }

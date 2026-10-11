@@ -1,7 +1,199 @@
 # Changelog
 
-All notable changes to **Modern Tiny Pedals**, newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
+All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
+
+## 0.23.0 (2026-10-11)
+
+### New name: NeoPedal
+
+- **The app is now called NeoPedal**, everywhere: window, menus, installer, Start menu, Task Manager, web dashboard, VR overlay and documentation. It stays a modified version of TinyPedal, with the same license and credits.
+- **Settings separate from the original TinyPedal**: the global config folder is now `%APPDATA%\NeoPedal` (Linux: `~/.config/NeoPedal` and `~/.local/share/NeoPedal`). Until now the app shared `%APPDATA%\TinyPedal` with the original TinyPedal, so each app could change the other's settings, and both can now be used side by side.
+- **Your settings come along**: update from the app as usual. On first start, your `TinyPedal` folder (config, shortcuts, driver stats, language packs, Black box incidents) is copied once to the new one and left unchanged, so the original TinyPedal keeps working. If the copy fails, the app uses the old folder for this run and tries again next time. Presets and data next to the executable do not move, the install folder is kept and the shortcuts are renamed.
+- **Your choice**: after the copy, the app asks once whether to keep the imported settings or start with default settings (the imported ones are set aside, never deleted). Later, `Config` > `TinyPedal Settings` imports them again or starts over with default settings, each time keeping a backup of the current settings.
+
+### New overlay, new columns and track map colors
+
+- **New `Speed Delta` overlay**: your speed difference to four reference laps at the same place of the lap (all time best, session best, stint best and last lap), positive when you are faster, smoothed (`speed_delta_smoothing_samples`). Each reference can be shown or hidden, with its own prefix and colors. A dash while there is no reference lap yet, on an out lap or in the pit lane before the start line. Off by default: turn it on in the `Overlays` page.
+
+![New Speed Delta overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
+
+- **Relative: `Gap Trend` column** (modern design, `column_gap_trend`, on): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
+- **Standings: class header** (modern design, `show_class_header`, on): in multi-class split mode, or with one class shown, each class starts with its name in a colored pill; the class column goes and the position badge shows the place in class.
+- **Standings: class order** (`class_order`, both designs): classes of multi-class split mode in the order you choose (Hypercar, LMP2, LMP3, GT3... by default), set in `Overlay Options` by dragging them or with the arrows (`Default Order` puts the default back). Classes found in no list come after, fastest first, as before. `maximum_vehicles_per_split_others` now takes any value, `0` hides the other classes.
+
+![Standings: class header and class order](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
+
+- **Track map: sector performance and nearby cars** (modern design): each sector of the road is colored by your last time there (purple session best, green faster than your best lap, amber slower; `show_sector_performance`), and cars less than 1 s ahead or behind get a ring (`show_nearby_vehicle_highlight`, `nearby_vehicle_threshold`). Both on by default.
+
+![Track map: sector performance colors and nearby cars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
+
+- **Black box**: suspension motion is magnified 8 times by default (`suspension_motion_scale`) so it can be seen; presets still at 1 get 8 once, another value you chose is kept. The overlay is a bit taller (about 15 %) to leave room for the wheel travel; set the scale back to 1 for the previous size.
+
+![Black box: suspension motion 8x by default](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-black-box-suspension-scale.png)
+
+- **Chat**: messages fade out at the end of their display time also in the garage and menus (they stayed on screen while overlays were paused). Modern design: your own name in the accent color, game notices dimmed.
+
+### Race results, replays and driver stats
+
+- **Watch the replay of a session**: `Race Results` shows a `Watch Replay` button when LMU saved the replay of the session, and a camera icon in the session list. The replay opens in the game through `Game Replays` (game state checked, confirmation, playback controls there). The replay is found from the time it was saved next to the results file, so the icons show even while the game is closed.
+- **Game version of your lap times**: every session recorded in `Driver Stats Viewer` now keeps the game version (LMU). The personal best line shows it (`PB 1:09.984 set on 03/10/2026 · Version 1.42`), and so does each session of the list. Older sessions take it from the game results file of the session.
+- **Race results in `Driver Stats Viewer`**: sessions are linked to the game results files. The list shows your class position (`P3/12`) and a mark when you had contacts or penalties; the tooltip adds position, gap, contacts, penalties, track limits points, online or single player and the server. Click a session to open it in `Race Results`.
+- **Driver card** (All Tracks): name, country, team and number of your game profile, your Steam profile picture (read from Steam's own cache, nothing downloaded), and your races in the results files: wins, podiums, average class finish, clean races, contacts per race.
+- **Complete your lap times**: personal, qualifying and race bests that are missing from your stats, or slower than a best lap in an LMU results file, are offered with `Complete...`. The confirmation lists every change, a backup is made first and Ctrl+Z undoes it. Laps invalidated by track limits have no time in LMU results, and in team races only your own laps count.
+- **`Game Replays` track map follows the cars like the Broadcast Director**: with the game on this computer, cars are placed where the game shows them, 10 times a second, and glide smoothly from one place to the next, in a session or a replay (paused, slow motion, fast forward). Before, they moved by estimate along the track between game answers every 2 to 5 seconds, which is still the case when the game data can't be read.
+
+### Telemetry viewer
+
+- **New `Simple View`**: a `Simple View` / `Advanced View` switch in the toolbar shows, in place of the charts, every shown channel at the cursor drawn like overlays. A `Pedals & Steering Wheel` card per lap, side by side (throttle, brake, clutch, steering wheel turned by its real angle, gear, speed), then `Timing`, `Engine`, `Tyres` (four wheels colored cold to hot), `Brakes`, `Chassis`, `Electronics`, `Track` and `Math Channels`. Values of the main lap (click its card), other laps as marks of their color. The chosen view is kept per folder.
+- **Same channels in both views**: one `Show` menu, in place of `Channels`, picks what both views show (a channel charted in the advanced view is a gauge or tile in the simple view), by group or channel, with search, presets and every chart option (smoothing, gain/loss window, min / max band, delta vs ideal lap, math channels). Channels of one wheel are found with the search.
+- **One playback bar under both views**: back, play, forward, A-B loop and speed moved under the charts, with a bar to drag along the lap and the cursor position. It stays at the same place in the simple view, where the charts are hidden.
+
+![Lap viewer: Simple / Advanced view switch, one Show menu and one playback bar](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-lap-viewer-simple-advanced-views.png)
+
+- Recorded laps now keep the steering wheel rotation, so the wheel turns by its real angle.
+- Long laps no longer freeze the page: charts, map, delta best and MoTeC export are made in the background, side tabs open without a stall.
+
+### Race calculator
+
+- **New `Live` tab: every value the game gives**, next to the value of the calculator, with where it comes from: race length, formation laps and start time of day (LMU session settings or the track clock), number of drivers (LMU team), lap time, fuel, energy and tyre wear per lap, tank capacity, compound on the car, fuel, energy and tread on the grid, pit lane time from the stops of the session, **refuel and energy rates, tyre and driver change times and what is done while refuelling** (LMU pit stop times of the series), tyre allocation and rain from the forecast (as a rain scenario). Fill a value in with its arrow, or `Fill In All`; a switch per row leaves a value out.
+- **`Load Live` and `Follow Live` take every followed value**, not only the laps: pit stop times, tyre rules, drivers, formation, start time, rain forecast... LMU garage screens are read in the background (every 10 s while the tab is shown or inputs follow live).
+- **Race in progress** read from the game: lap, race time and time left, fuel, energy, tread, stops, safety car or full course yellow (also in the `Live Race` status), penalties, class position, pending repair and the game's next stop time.
+- **Tyres available**: the tyres the LMU pit menu offers, new compounds and used tyres of each wheel with their tread. `Add Used Tyres to Stock` puts them in the tyre plan stock with their own tread (a used tyre starts the stint at 84 %, not as new).
+- **`Driver Change While Refuelling`**: the driver change counts only when longer than the service, as in LMU.
+- **Faster**: a pit stop plan of a 10 hour race with safety car, rain and fuel effect is calculated about 2.5 times faster (saving target and strategy comparison included), and a saving target the calculator used to miss is now found.
+
+### Broadcast Director (LMU)
+
+![Broadcast Director: cars, camera desk with the director queue, race events and car sheet](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-director.png)
+
+- **In the navigation bar for everyone** (`Broadcast`), in place of `Spectate`: the bar of every user is set once to the new default (Home, Overlays, Stats, Results, Replays, Broadcast, Telemetry, Race, Preset). `Spectate` stays in the command palette, `Config` in the gear button under the bar and `Ctrl+,`; both can be put back with `Customize Navigation Bar...`.
+- **New `Broadcast Director` tool** to cast a race, live (driving or spectating an online race) or in a replay. Three columns:
+  - **Cars**: every car by place, with class place, number, team, interval to the car ahead in class (`+0.8`, `+2 Laps`, measured on track, so it also works for cars laps behind), and marks for battles, contacts and pit lane. A double click (or the camera button) puts a car on air.
+  - **Camera desk**: the car on air, why it was chosen and for how long, and every camera of the game (driving, onboard, trackside groups) in one click. Replay controls come up while a replay is open.
+  - **Commentator screen**: race events with their time, battles with gap and trend, class leaders and best laps, pit stops with time in the pit lane and stint length, and a sheet of the selected car with intervals ahead and behind, contacts, penalties and your own notes on the driver (kept between sessions).
+- **Director**: battles (two cars of a class within 1 s, adjustable), overtakes, lead changes, contacts, stopped cars, pit stops, fastest laps, finishes, retirements and penalties are found for every car. In `Assisted` mode they are listed by interest and taken in one click (or Enter). In `Automatic` mode the director cuts by itself, with a camera suited to each story: a shortest and longest shot, urgent events first, a car just shown not shown again at once, cars in turn when nothing happens. A car chosen by hand (or in the game) holds the director for 20 s. Automatic mode is never on when the page opens.
+- Click an event in a replay: the replay goes there a few seconds before, with the camera on the car.
+- Optional: overlays (and stream sources) follow the car on air, through spectate mode.
+- **More stories**: slow cars (much slower than usual at that place of the track, learned from the other cars), yellow flags in a sector (with the slowest car there), full course yellow and green flag, and the race start (leader followed through the first lap).
+- **Live timing**: intervals and battle gaps turn amber under 0.5 s and red under 0.3 s, sectors of each car colored as on TV (purple best of the class, green personal best, yellow slower), places gained or lost in the class since the start, time stopped in the pit box next to the time in the pit lane, weather in the header (full course yellow, air and track temperatures, rain, wet track).
+- **Lap history** of any car (right-click, or `Laps` in its sheet): every lap seen with its sectors colored, pit laps, energy used and class place. The sheet adds the energy used per lap over 3 and 5 laps and the laps left.
+- **Incidents not seen yet** are marked and counted until shown on air or looked at; **instant replay** of an event in a live session (replay a few seconds before, then back to live by itself), also as online spectator; **CSV export** of every event.
+- **Lock** the car on air so the automatic director waits.
+- **Broadcast graphics made for the director**: one browser source (1920 x 1080) for OBS, Streamlabs, XSplit or vMix, given by the page (`Graphics`, `Copy Address`) and fed by it only: standings tower (overall, each class in turn, or the class of the car on air), driver card on each cut, battle card, banners (fastest lap, penalties, flags, lead changes, heavy contacts...), pit lane radar, replay mark, session clock and weather. Each graphic on or off, `Hide Graphics` at once.
+
+![Broadcast graphics: standings tower, fastest lap banner, battle card, pit lane radar, session clock](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-graphics.png)
+
+- **Pit radar**: while the car on air is in the pit lane, the cars near it show with their distance, `Alongside` in red, on the page and on the graphics.
+- **Contact severity**: a contact that costs a car most of its speed (or stops it) comes first, a touch both cars drive away from is a minor story. Measured from the speed of the cars, so it also works as online spectator, in replays and from another computer.
+- **Car logos and pictures** of the game in the car list, on air card and car sheet; **tyres** of every car (front and rear, colored as on TV) with the game on this computer; **weather forecast** of the session (click the weather in the header).
+- **Direct from another computer** (`Game computer` in the settings), and an optional **events log**: every event written to a CSV file as it happens, for race control.
+- **Faster**: an answer of the game costs about 3 ms of the interface instead of 40 ms after hours of racing (0.5 ms while the page is hidden), with one connection to the game kept open.
+- **Find a car** by number or name (`Enter` puts it on air), `1` to `6` take that suggestion, a bar shows when the automatic director may cut, battle gaps tell their change per lap, cars in the pit lane show their time there as it goes, and a setting keeps the director cutting when another app also moves the game camera.
+- New hotkeys, also for the remote control and Stream Deck: `director_next_car`, `director_previous_car` (with the page closed they move the game camera), `director_auto`, `director_take_best`, `director_lock`.
+
+#### More broadcast graphics, layout editor and timing table
+
+- **Instant replay graphics**: a contact replayed shows both cars, a flag or a stopped car shows the driver card all along the replay, and banners (fastest lap, penalty...) wait until 5 s after the replay so viewers see them live.
+- **Onboard**: speed, gear, rpm, throttle and brake of the car on air, ten times a second (game on this computer: shared memory, also as online spectator), energy left, in three styles (`Dash`, `Cockpit`, `Helmet`).
+- **Qualifying lap**: outside races, the lap of the car on air with its time running, sectors colored, gap to the pole of its class at the last sector and its state (out lap, improving, in pits).
+- **Battle train**: up to 6 cars of a class following each other, as cards, kept 10 s after the train breaks up.
+- **Track map**: the circuit of the game with every car in its class color, the car on air bigger with its number, the car of a yellow flag in gold.
+- **On demand** (`Graphics` > `On Demand`, one at a time until clicked again): **starting grid** (pages of 8 cars with their qualifying lap and car picture), **event card** (track, conditions, forecast, session length), **classification** captured when you want (gap to the leader, laps, best lap, pit stops, retired cars) and **championship standings** imported from a CSV file (driver, points, and team, class if you want; several championships, one class or all, medals for the first three).
+- **Standings tower**: lap times shown a few seconds as each car completes a lap (purple for the fastest of its class), tyres and penalties.
+- **Style**: panel opacity and °C / °F for the graphics.
+- **Layout editor**: `Graphics` > `Style & Layout` > `Edit Layout` opens the graphics in your browser with sample data: drag a graphic to move it, mouse wheel to resize it, double click to put it back, chips to show the graphics sharing a place, then `Save`: every graphics source of this computer follows at once. `Reset Layout` puts them all back.
+- **Timing table** (`Timing` above the car list): race, qualifying and pits views, each with its own columns (drag a title to move it, right click to show or hide columns), sectors and laps colored, battles with their trend, car on air in red, slow cars in amber, tyres, energy and penalties.
+
+#### Broadcast graphics, part 3
+
+- **Faster sources**: the graphics source gets only what changed since its last answer, the standings tower moves each row (overtakes slide) instead of drawing it again, and onboard and map positions come ten times a second, the onboard values easing and cars gliding between them. Qualifying times of the grid are read in background, the championship graphic is made once.
+- **Automatic graphics**: starting grid during the formation lap, event card at the start of each session, classification at the chequered flag (kept up to date while cars finish), each one on or off; your own choice always wins.
+- **New hotkeys** for the graphics (Stream Deck, remote control): `director_starting_grid`, `director_event_card`, `director_classification`, `director_championship`, `director_hide_graphics`, `director_next_layout`.
+- **Banners**: the most important first, the same news never twice in 30 seconds, 4 waiting at most.
+- **Track map**: no panel any more (a shadow keeps it readable), sectors under yellow drawn in gold, cars in the pit lane faded, rotation and dot size.
+- **Onboard**: shift lights and the car ahead with its gap.
+- **Standings tower**: gaps to the car ahead or to the leader, classes apart in overall, fastest lap tag, pit stops.
+- **Layout editor**: snapping to the other graphics and to the middle with guides, arrows to move by one pixel, `Ctrl+Z` to undo, position and size shown; the stream layout editor gets undo, arrows and position too.
+- **Director**: incidents already shown are less wanted, an overtake coming (very close and closing fast) is shown from the bonnet camera of the car behind, cars climbing through the field are followed more.
+- **Sources with some graphics only** (`only=tower,map`) to split the graphics over several OBS scenes or sources, each with its own **layout preset** (`Default`, `Pre-race`, `Race`, `Post-race`), switched in one click or with a hotkey.
+- **League branding**: accent color, event or league name, league logo and sponsors pictures shown in turn.
+- **Message** of race control or commentators as a lower third, and a **countdown** before the start.
+- **Driver history** in the car sheet: races, class wins and podiums, best finish on this track, last races, and races with the cars ahead and behind, from the race results files.
+
+### Smoother and lighter
+
+- **Preset load without a freeze**: loading or reloading a preset (also the auto-load when entering the track) no longer blocks the window and the overlays while modules stop and save (laps, replays): it ends in the background, a load asked meanwhile waits its turn, and quitting during a load is clean.
+- **Overlays react to the game sooner, with less CPU**: data modules wake when the game writes new data (100 ms at most) instead of checking at a fixed rate, and do nearly nothing while the game is paused or in menus (LMU and rFactor 2).
+- **Less drawing while you drive**: Black box and the modern driver tables (Relative, Standings, Rivals) redraw only what changed; the VR overlay sends only the overlays that changed since the last frame; saving a recorded lap is written in small steps instead of freezing overlays for 100 ms or more; brand logos are read in the background (initials meanwhile), so a new car never stutters a table.
+- **No more stalls in pages**: reading files and heavy work moved off the interface in `Driver Stats Viewer` (an action on a 50,000 session history took 0.15 to 1 s, now under 50 ms), `Race Results`, the telemetry viewer, `Track Map Viewer`, presets, preset backups and comparison, the `Overlays` page previews, modules and bug report. Heavy pages build in steps instead of freezing when they open.
+- **Faster lists**: each telemetry folder keeps an index of its laps, so lap files are opened only when they changed; `Driver Stats Viewer` reads only what was added to the history since last time; race results files are read once for `Race Results` and `Driver Stats Viewer`; `Overlay Options` lists and the search across every overlay scroll and open faster.
+- **Started hidden in the tray**: pages reopened at startup are built when you first show the window, and tool pages you did not open yourself are released while it stays hidden.
+- Shorter memory cleanup pauses while driving: what is loaded at startup is set aside from Python's garbage collection, and the cleanup after a preset load waits until you stop driving.
+- `Race Results` position charts are smoother (drawn by the graphics card, with smooth edges).
+- The performance monitor also shows interface stalls (over 50 ms) and garbage collection pauses.
+
+### For scripts and tools
+
+- Release files are now named `NeoPedal-<version>-…`: older versions still find their update. The GitHub repository keeps its address.
+- The executable now carries its Windows file details (NeoPedal, version, copyright), shown in Task Manager and the file properties.
+- Linux: `TinyPedal.sh` reads `~/.config/NeoPedal/launcher.conf`, and `~/.config/TinyPedal/launcher.conf` when there is none.
+- The update check now also follows GitHub redirects, so the repository can be renamed later without stopping updates.
+- The remote control accepts the new `X-NeoPedal` header; `X-TinyPedal` still works.
+
+### Recorded data
+
+- **Pit lane data kept on preset load**: pit entry, pit exit and pit speed limit measured while driving were lost when a preset was loaded afterwards (also by auto-load when entering the track), and the next save wrote the old values back to `tracks.json`. Your corrections in `Track Info Editor` are no longer overwritten by values kept from your last stint either: only values measured again are saved.
+- **Saved while you drive**: fuel and virtual energy reference laps, best sectors and consumption history are also saved every 5 minutes on track, not only when you go back to the garage, so a crash or power cut during a long stint no longer loses them.
+- Starting a replay recording again within the same second no longer overwrites the previous one (`-2` is added to the name).
+- Hybrid: battery drain down to 0% and regen from 0% are counted. Driven distance in driver stats ignores position jumps again. Recorded lap names never show `1m60.000s`.
+- Track notes saved as `CSV UTF-8` by Excel are read.
+
+### Overlays
+
+- **Previews with real-looking values**: the pictures of the `Overlays` page, of `Overlay Options` and of the setup wizard now show a simulated race (a GT3 mid race at Road Atlanta, in a 20 car multi-class field) instead of empty overlays, so you see what each overlay really shows: speed, gear, fuel, tyres, delta, map, radar... Your game data, presets and running overlays are never touched, even while you race.
+- **Bigger preview in `Overlay Options`**: zoom the live preview from 50 % to 300 % (buttons, Ctrl+wheel, double click for actual size or fit), and widen the preview panel with the button at its bottom right. A zoomed overlay is drawn at that size, as the global overlay scale does, so text and lines stay sharp.
+- **No more fake chat in game**: modern `Chat` drew a sample conversation ("N. Fischer joined the session"...) whenever overlays were unlocked, the default, so it showed in the garage and when joining a server as if it were real. The sample, like those of `Spotter`, `Race Notifications` and `Pit Lane Helper`, is now drawn only in edit mode (right-click an overlay > `Edit Mode`), to place the overlay. Modern `Flag`, `Race Notifications` and `Spotter` no longer show their picture sample (every flag, sample messages) while waiting for game data either.
+- **Chat scroll direction**: the `show_newest_message_at_top` switch is replaced by a `scroll_direction` choice: `Upward` (newest message at bottom, the default) or `Downward` (newest message at top). Your presets keep their current order.
+- **Black box**: `enable_required_modules` turns on the needed modules only when the overlay starts, no longer when its preview is drawn in `Overlay Options` (it could start modules and save them as enabled before you applied anything). Color fades end on the right color, and long incident recordings draw faster.
+- Brake wear, aero damage and suspension damage of your own car are no longer shown while you spectate another car.
+- A car taking another car's place is no longer drawn far away for a moment (radar, relative).
+- Virtual energy readings no longer switch to fuel for a moment on each reset.
+- Classic `RPM LEDs`: blinking no longer depends on how often the overlay is drawn, and it now also blinks while the RPM stays above the critical value, like the modern design.
+- Brand logos loaded while the game is paused show at once in driver tables.
+
+### Stream overlay
+
+- **Stream a race you spectate**: while you spectate a session or watch a replay (no car driven), overlays were hidden by auto hide, so every stream source stayed empty. They are now shown and updated as long as a `Layout` or overlay source is on air (`Show overlays while spectating`, on by default), and hidden again a few seconds after the last source stops. Laps, fuel and stats are still only recorded while you drive.
+- **Layout in 16:9 for ultrawide and triple screens**: the `Layout` source now shows the centre of your screen in 16:9 by default (`Format` on the `Stream Overlays` page), for a 1920 x 1080 browser source. On a 5120 x 1440 screen the whole screen was squeezed into the top of the source. `Whole screen` keeps the previous layout (copy the address again after changing the format).
+- The `Stream Overlays` page tells why sources are empty when no overlay is shown (auto hide outside sessions, visibility options).
+- **Layout editor**: `Edit Layout` next to the `Layout` source opens it in your browser, the whole screen shown with the 16:9 frame: drag overlays where you want them on the stream (for example those on the sides of an ultrawide screen), resize them with the mouse wheel, `Save`. Their place on your screen does not change; each format (16:9, whole screen) has its own places.
+
+### VR overlay
+
+- The app's heartbeat could be read as "app closed" by the OpenXR layer, so the overlay could vanish for one frame. After an error while writing a frame, the layer no longer stays on the last frame.
+- OpenXR layer (experimental): a frame error of the game itself (tracking loss) no longer turns the overlay off for the whole session, and a game quitting without closing its VR session no longer risks a hang or crash on exit.
+
+### App
+
+- **New hotkey `show_main_window`**: brings the main window in front of the game and focuses it, even when it is hidden in the tray or minimized (`Hotkey` page; also a remote control command).
+- **Pages already open**: `View Map` in `Driver Stats Viewer` and `Compare with Loaded Preset` showed the open page on the previous track or preset; they now show the one you asked for. `Overlay Options` opens faster when it is already open.
+- `Overlay Options` and `Config` follow a language change while they are open (their texts stayed in the previous language).
+- After a failed restart, quitting asks again to save pages with unsaved changes.
+- A page could be released (window hidden or minimized for a minute) while one of its confirmation dialogs was still open: possible crash.
+- Changes in `Driver Stats Viewer` waiting for a reload to finish are saved even if you close the page.
+- No more short freeze about 5 seconds after a preset auto-load on track.
+- Editors (brakes, tyre compounds, brands, classes, track info): adding from the session and `Batch Replace` are one undo step, and the last added row is selected.
+- `Driver Stats Viewer`: `Undo` and `Redo` wait while an edit is being saved. Race calculator timeline: stints and stops slide to their new place when the plan changes.
+
+### Web dashboard, updates and files
+
+- **Updates checked while the app runs**: besides the check at startup, the app checks again every 12 hours (`number_of_hours_between_update_checks` in `Config` > `Application`, `0` = startup only), never while driving. A version found this way opens what's new only if the main window is the active window; otherwise the notice waits in the window (or a tray message), and a notice you dismissed does not come back for the same version.
+- HTTPS certificate files are written safely and made again if they don't match, instead of HTTPS failing until you delete them by hand.
+- The downloaded installer is deleted when you decline the install or it fails to start.
+- A damaged or encrypted `Preset Package (.zip)` is reported as invalid instead of doing nothing, and an oversized package description is never read.
+- Errors of the web dashboard, stream overlay and `Race Results` are now written to the log file (they were hidden).
+- Game data: out of range values from the game (`1e999`) no longer stop reading standings, chat, replays or tyre usage. rFactor 2: a copy of shared memory taken while the game was writing it is no longer used. Game data requests that stop late no longer reset the new data.
 
 ## 0.22.4 (2026-10-09)
 

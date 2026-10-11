@@ -1,6 +1,10 @@
 # Overlays
 
-Modern Tiny Pedals has **87 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+NeoPedal has **88 overlays** (called widgets in the settings files). Turn them on and configure them on the `Overlays` page: see [Getting Started](Getting-Started.md#configure-an-overlay). Every option is described in the [settings reference](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#widgets).
+
+The pictures of the `Overlays` page, of `Overlay Options` and of the setup wizard show each overlay on a **simulated race**: a GT3 mid race at Road Atlanta, in a 20 car multi-class field. Your game data, presets and running overlays are never touched by these pictures, even while you race. In `Overlay Options`, the live preview is drawn with your unsaved values: zoom it from 50 % to 300 % (buttons under it, Ctrl+wheel, double click to switch between actual size and fit) and widen the panel with the button at its bottom right. A zoomed overlay is drawn at that size, as the global overlay scale does, so text stays sharp.
+
+On the game screen, overlays show only real game data. The sample content of `Chat`, `Spotter`, `Race Notifications` and `Pit Lane Helper` is drawn only in edit mode (right-click an overlay > `Edit Mode`), to place the overlay.
 
 ![Standings, before and after the modern design](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-05-design-classements.png)
 
@@ -18,7 +22,7 @@ Every overlay has a **modern design**:
 - **flag** items as chips in flag colors (caption above value, only while active), **chat** feed with a color per sender and new messages highlighted, **elevation** profile with the driven part in accent color and the car as a dot, **race notifications** with an icon per message and a bar shrinking with the time left, **steering meter** growing from center with a thumb, **RPM LEDs** keeping a faint tint of their color zone while unlit, **spotter** bars glowing toward the screen center.
 - **Black box** keeping its layout and options, in the Barlow font, theme colors and cards with a hairline border.
 
-The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them. In the Overlay Options page, Relative, Standings and Rivals list their columns in one `Columns` list, from left to right as the overlay draws them: switch each column on or off there, drag it or use the arrows to move it. Sections follow for the rows, the classes and number of cars (Standings), then the options of each column, dimmed while the column is hidden. The live preview shows a sample race with fictional drivers.
+The modern design reads fewer options than the classic layout: the Overlay Options page only shows the options it uses. Display order options (`display_order_*`) apply to the modern rows and columns once you change one of them. In the Overlay Options page, Relative, Standings and Rivals list their columns in one `Columns` list, from left to right as the overlay draws them: switch each column on or off there, drag it or use the arrows to move it. Sections follow for the rows, the classes and number of cars (Standings), then the options of each column, dimmed while the column is hidden. The live preview of these three shows a sample race made with your list options.
 
 The **classic layout** is still available:
 
@@ -48,7 +52,7 @@ The window of the app has the same four themes (`window_color_theme` in `Config`
 
 ## Visibility by session and pit
 
-- **Auto hide** (tray menu `Auto Hide`, on by default) hides every overlay when you are not driving.
+- **Auto hide** (tray menu `Auto Hide`, on by default) hides every overlay when you are not driving. While you spectate a session or watch a replay, overlays are shown as long as a stream overlay source is on air (`Show overlays while spectating`, see [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix)).
 - Each overlay has a `visibility_context` option: `Always` (default), `Race`, `Qualifying & Race`, `Practice & Qualifying`, `On Track` or `In Pits`.
 - Overlays fade in and out when they appear or hide (`enable_fade_animation` in `Config` > `Overlay Style`).
 
@@ -78,6 +82,29 @@ The **Telemetry Compare** overlay (off by default, `Driver Inputs` category) com
 - `reference_lap_source`: `Viewer` (default) uses the lap set as reference in the Telemetry Viewer for the track and class (with a double-click or the flag button), `Best` the fastest valid recorded lap, `Last` the last recorded lap. Without a lap set in the viewer, the fastest valid lap is used. The reference lap is checked again every few seconds: a new best lap, or a reference changed in the viewer, is used while you drive.
 - Laps come from the [Recorder module](Telemetry-Viewer.md#lap-recording): drive a few laps first, `No reference lap` is shown until the track and class have one. The `Delta` module (on by default) keeps the charts moving smoothly between position updates of the game.
 
+## Speed Delta
+
+The **Speed Delta** overlay (off by default, `Timing` category) shows your speed difference to four reference laps at the same place of the lap: all time best, session best, stint best and last lap. It is positive when you are faster (green in the modern design, red when slower) and smoothed over `speed_delta_smoothing_samples` samples (`10` by default).
+
+- Each reference can be shown or hidden (`show_all_time_best`, `show_session_best`, `show_stint_best`, `show_last_lap`), with its own prefix (`prefix_*`) and colors.
+- A dash is shown while there is no reference lap yet, on an out lap, or in the pit lane before the start line.
+
+![New Speed Delta overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
+
+## Relative, Standings and Track Map
+
+- **Relative: `Gap Trend` column** (modern design, `column_gap_trend`, on by default): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
+- **Standings: class header** (modern design, `show_class_header`, on by default): in multi-class split mode, or with one class shown (`enable_single_class_exclusive_mode`), each class starts with its name in a colored pill; the class column is left out and the position badge shows the place in class.
+- **Standings: class order** (`class_order`, both designs): the order of the classes in multi-class split mode (Hypercar, LMP2, LMP3, GT3... by default). In `Overlay Options`, drag the classes or use the arrows; `Default Order` puts the default order back. Classes found in no list come after, fastest first.
+- **Standings: other classes**: `maximum_vehicles_per_split_others` takes any value from `0`; `0` hides the other classes.
+
+![Standings: class header and class order](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
+
+- **Track map: sector performance** (modern design, `show_sector_performance`, on by default): each sector of the road is colored by your last time there: purple for the session best, green faster than your best lap, amber slower.
+- **Track map: nearby cars** (modern design, `show_nearby_vehicle_highlight`, on by default): cars less than `nearby_vehicle_threshold` (`1.0` s) ahead or behind get a ring.
+
+![Track map: sector performance colors and nearby cars](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
+
 ## List of overlays
 
 Overlays are grouped by the categories of the `Overlays` page filter. Names are as shown in the app.
@@ -94,12 +121,13 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Lap Time History | Recent lap times |
 | Pit Stop Estimate | Estimated pit stop duration and refuelling |
 | Race Plan | Next stop of the [Race Calculator](Race-Calculator.md#race-plan-overlay) plan |
-| Relative | Cars around you on track, with class, tyres, pit status and gaps |
+| Relative | Cars around you on track, with class, tyres, pit status, gaps and gap trend |
 | Relative Finish Order | Estimated finish order between the leader and you, with refuelling estimate |
 | Rivals | Cars ahead and behind you in your class |
 | Sectors | Sector times and gaps |
 | Session | Clock, session name, time left, lap, position |
-| Standings | Classification with selectable columns |
+| Speed Delta | Speed difference to the best, session best, stint best and last lap at the same place of the lap, see [above](#speed-delta) |
+| Standings | Classification with selectable columns, class headers and class order |
 | Stint History | Previous stints |
 | Stint Timer | Stint time and driving time of each driver (race aid) |
 | Timing | Lap times, invalid lap indicator |
@@ -186,7 +214,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Overlay | Shows |
 |---|---|
 | Black Box | All-in-one view of the car, see [below](#black-box) |
-| Chat | In-game chat of LMU, newest messages at the bottom |
+| Chat | In-game chat of LMU; `scroll_direction`: `Upward` (newest message at the bottom, default) or `Downward` (newest at the top); messages fade out at the end of their display time, also in the garage and menus |
 | Elevation | Elevation profile of the track |
 | Flag | Flags, pit state, warnings, start lights |
 | Heading | Yaw angle, slip angle, heading |
@@ -196,7 +224,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Race Notifications | Short race messages (race aid) |
 | Radar | Cars around you, seen from above |
 | Spotter | Side bars while a car is alongside (race aid) |
-| Track Map | Track map with every car |
+| Track Map | Track map with every car; sector performance colors and a ring on nearby cars (modern design) |
 | Track Notes | Corner and section names, notes |
 | Traffic | Nearest cars closing in: slower car ahead, faster car behind |
 | Weather | Weather; wind in LMU |
@@ -215,7 +243,7 @@ Track Map, Navigation and Elevation need at least one complete, valid lap on the
 
 The **Black box** is an all-in-one view of the four wheels and the car. Its modern design keeps the same layout and options, drawn in the Barlow font and the theme colors (`enable_classic_layout` brings the classic look back):
 
-- tyres at each corner seen from above, with temperatures, pressures, wear, wheel lock and spin outlines, steering and suspension movement, without overlaps even at full lock;
+- tyres at each corner seen from above, with temperatures, pressures, wear, wheel lock and spin outlines, steering and suspension movement, without overlaps even at full lock. Suspension movement is magnified 8 times by default (`suspension_motion_scale`) so it can be seen, which makes the overlay about 15 % taller; set it to `1` for the previous size;
 - brakes, suspension, damage panel, fuel and energy gauges, battery, RPM LEDs, gear and speed;
 - chips for ABS, TC, brake bias and engine map;
 - an **event log and incident recorder**: contacts (with the name of the other driver, or the wall, in LMU), penalties and track limits.

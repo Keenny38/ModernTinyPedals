@@ -1,9 +1,10 @@
-; Modern Tiny Pedals Windows installer (Inno Setup 6)
+; NeoPedal Windows installer (Inno Setup 6)
 ;
 ; Build after PyInstaller (python build_pyinstaller.py -c):
 ;   iscc /DAppVersion=0.10.0 installer\tinypedal.iss
 ;
-; Installs per user in %LOCALAPPDATA%\Programs\Modern Tiny Pedals (no admin rights),
+; Installs per user in %LOCALAPPDATA%\Programs\NeoPedal (no admin rights; updates keep the folder of an
+; older install, such as Programs\Modern Tiny Pedals),
 ; because the app keeps presets & user data next to the executable.
 ; Updating keeps all user files; uninstalling only removes installed files, and the OpenXR layer registration
 ; the app adds for the VR overlay (HKCU, see tinypedal/vr_shared.py).
@@ -11,8 +12,8 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
-#define AppName "Modern Tiny Pedals"
-; PyInstaller output folder (dist\TinyPedal), internal name kept for user data
+#define AppName "NeoPedal"
+; PyInstaller output folder (dist\TinyPedal) & executable: internal name kept, found by older updaters
 #define AppFolder "TinyPedal"
 #define AppExe "tinypedal.exe"
 #define RepoUrl "https://github.com/Keenny38/ModernTinyPedals"
@@ -32,7 +33,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 LicenseFile=..\LICENSE.txt
 OutputDir=..\dist
-OutputBaseFilename=ModernTinyPedals-{#AppVersion}-windows-setup
+OutputBaseFilename=NeoPedal-{#AppVersion}-windows-setup
 SetupIconFile=..\images\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2/max
@@ -57,6 +58,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Program files of previous version: lib is rebuilt by each release (Python, Qt & QML modules change),
 ; stale files would pile up. User data (presets, telemetry...) is next to the executable, not in lib.
 Type: filesandordirs; Name: "{app}\lib"
+; Shortcuts named "Modern Tiny Pedals" before the NeoPedal name (Start menu folder keeps its name on update)
+Type: files; Name: "{group}\Modern Tiny Pedals.lnk"
+Type: files; Name: "{userdesktop}\Modern Tiny Pedals.lnk"
+Type: files; Name: "{group}\{cm:UninstallProgram,Modern Tiny Pedals}.lnk"
 ; Example speed plugin, shipped until 0.21: removed from the app (plugins added by user are kept)
 Type: filesandordirs; Name: "{app}\plugins\example_speed"
 

@@ -461,3 +461,32 @@ def test_classic_acceleration_with_few_speed_ranges(widgets, ranges):
     assert len(widget.timers) == len(widget.bars_speed_range) == len(widget.bars_timer_delta) == ranges
     widget.timerEvent(None)
     widget.grab()
+
+
+# --- Classic RPM LED: blink state toggled in paint, extra paints (expose, capture) changed blink rate
+def test_classic_rpm_led_flicker_set_per_update_not_per_paint(widgets, monkeypatch):
+    widget = widgets("rpm_led", modern=False, show_rpm_flickering_above_critical=True, show_speed_limiter_flash=True)
+    reader(monkeypatch, "engine", "rpm_max", 8000.0)
+    reader(monkeypatch, "engine", "rpm", 7990.0)  # above critical
+    reader(monkeypatch, "engine", "gear", 3)
+    reader(monkeypatch, "engine", "gear_max", 6)
+    reader(monkeypatch, "switch", "speed_limiter", 0)
+    widget.timerEvent(None)
+    flicker = widget.flicker
+    for _ in range(3):  # extra paints: blink state kept
+        widget.grab()
+        assert widget.flicker == flicker
+    widget.timerEvent(None)  # rpm unchanged: still blinks once per update
+    assert widget.flicker != flicker
+    reader(monkeypatch, "engine", "rpm", 3000.0)
+    widget.timerEvent(None)
+    assert not widget.flicker
+    reader(monkeypatch, "switch", "speed_limiter", 1)  # limiter flash: interval timing, read once per update
+    sends = []
+    flash = widget.warn_flash
+    monkeypatch.setattr(widget, "warn_flash", type("Spy", (), {"send": lambda self, value: (
+        sends.append(value), flash.send(value))[1]})())
+    widget.timerEvent(None)
+    widget.grab()
+    widget.grab()
+    assert sends == [True]

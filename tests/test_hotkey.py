@@ -387,3 +387,38 @@ def test_hotkey_held_across_restart_not_run_again(ui_env, monkeypatch):
 
     hotkey_control.HotkeyControl()._HotkeyControl__update_loop(SimpleNamespace(wait=wait))
     assert ran == ["overlay_lock"]  # only pressed again after release
+
+
+def test_show_main_window(monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    shown = []
+
+    class Window:
+        def bring_to_front(self):
+            shown.append(self)
+
+    window = Window()
+    monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [object(), window, Window()]))
+    command.hotkey_show_main_window()
+    assert shown == [window]  # main window only, once
+    assert "show_main_window" in dict(command.COMMANDS_GENERAL)
+
+
+def test_main_window_brought_to_front(ui_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from tinypedal.ui import app as app_module
+
+    calls = []
+    window = SimpleNamespace(show_app=lambda: calls.append("show"), raise_=lambda: calls.append("raise"))
+    monkeypatch.setattr(app_module, "force_foreground", lambda widget: calls.append("foreground"))
+    app_module.AppWindow.bring_to_front(window)  # type: ignore[arg-type]
+    assert calls == ["show", "raise", "foreground"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows foreground lock only")
+def test_force_foreground_no_op_off_windows():
+    from tinypedal.ui import app as app_module
+
+    app_module.force_foreground(None)  # never reads window

@@ -394,6 +394,7 @@ def test_trash_move_list_restore_purge(tmp_path):
     assert os.path.isdir(entry.folder) and entry.name == "race"
     listed = preset_trash.list_trash(settings)
     assert len(listed) == 1 and listed[0].references == {"tracks": ["Spa"]}
+    assert preset_trash.count_trash(settings) == 1
     # Name used meanwhile: restored with free name
     (tmp_path / "RACE.json").write_text("{}", encoding="utf-8")
     assert preset_trash.free_preset_name(settings, "race.json") == "race (2).json"
@@ -405,6 +406,7 @@ def test_trash_move_list_restore_purge(tmp_path):
     # Purge by age, invalid entries too
     old = preset_trash.move_to_trash(settings, "race (2).json")
     (tmp_path / "trash" / "broken").mkdir()
+    assert preset_trash.count_trash(settings) == 1  # entry without info file not counted
     assert preset_trash.purge_trash(settings, 30) == 0  # recent
     assert preset_trash.purge_trash(settings, 30, now=time.time() + 31 * 86400) == 2
     assert not os.path.exists(old.folder)
@@ -804,7 +806,7 @@ def test_file_filters_translated_and_mapped_back(french):
 
     notes_filter = set_notes_filter(NOTESTYPE_TRACK)
     shown = translate_filter(notes_filter)
-    assert "Notes de piste Modern Tiny Pedals (*.tptn)" in shown and "Tous les fichiers (*.*)" in shown
+    assert "Notes de piste NeoPedal (*.tptn)" in shown and "Tous les fichiers (*.*)" in shown
     for original, translated in zip(notes_filter.split(";;"), shown.split(";;")):
         assert original_filter(notes_filter, translated) == original
     assert original_filter(notes_filter, "unknown") == "unknown"

@@ -85,6 +85,7 @@ def test_restore_backup_list_restore_delete(presets, monkeypatch):
     try:
         names = [dialog.listbox_backup.item(row).text() for row in range(dialog.listbox_backup.count())]
         assert len(names) == 2  # broken backup listed too (shown in red)
+        assert dialog.is_checking()  # listed at once, files checked in background (restore checks if not yet)
         dialog.restore()  # nothing selected
         assert presets
         rows = {dialog.listbox_backup.item(row).text(): row for row in range(dialog.listbox_backup.count())}

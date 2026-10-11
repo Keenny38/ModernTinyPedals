@@ -1,5 +1,5 @@
 /*
- * Modern Tiny Pedals - OpenXR overlay layer
+ * NeoPedal - OpenXR overlay layer
  * Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
@@ -205,9 +205,11 @@ struct SessionData {
     uint64_t frames_shown = 0;
 };
 
-std::mutex g_mutex;
-std::unordered_map<XrInstance, std::shared_ptr<InstanceData>> g_instances;
-std::unordered_map<XrSession, std::shared_ptr<SessionData>> g_sessions;
+// Never destroyed: a game exiting without xrDestroySession / xrDestroyInstance would otherwise run the graphics
+// backend destructors (GPU waits, Release / vkDestroy* on a device maybe gone) under the loader lock at unload
+std::mutex& g_mutex = *new std::mutex;
+auto& g_instances = *new std::unordered_map<XrInstance, std::shared_ptr<InstanceData>>;
+auto& g_sessions = *new std::unordered_map<XrSession, std::shared_ptr<SessionData>>;
 // Fallbacks for a handle unknown to the layer (its state could not be stored): call forwarded unchanged
 std::atomic<PFN_xrGetInstanceProcAddr> g_next_get_instance_proc_addr{nullptr};
 std::atomic<PFN_xrEndFrame> g_next_end_frame{nullptr};
@@ -597,11 +599,16 @@ XRAPI_ATTR XrResult XRAPI_CALL hook_xrEndFrame(XrSession session, const XrFrameE
     if (result == XR_ERROR_LAYER_INVALID || result == XR_ERROR_LAYER_LIMIT_EXCEEDED ||
         result == XR_ERROR_SWAPCHAIN_RECT_INVALID || result == XR_ERROR_VALIDATION_FAILURE ||
         result == XR_ERROR_HANDLE_INVALID || result == XR_ERROR_POSE_INVALID) {
-        // Overlay refused (layer, space or swapchain): frame submitted again as the game made it
-        data->failed = true;
-        data->last_result = static_cast<int32_t>(result);
-        log_result("xrEndFrame with overlay", result);
-        return next(session, frameEndInfo);
+        // Frame submitted again as the game made it: overlay stopped only if the game frame alone is accepted
+        // (overlay refused: layer, space or swapchain), else the game's own error (tracking loss...) is returned
+        // and the overlay kept for next frames
+        const XrResult game_result = next(session, frameEndInfo);
+        if (XR_SUCCEEDED(game_result)) {
+            data->failed = true;
+            data->last_result = static_cast<int32_t>(result);
+            log_result("xrEndFrame with overlay", result);
+        }
+        return game_result;
     }
     return result;
 }

@@ -28,7 +28,7 @@ def script_texts(page: str) -> dict:
 
 def test_page_in_english(ui_env):
     page = dashboard_html()
-    assert '<html lang="en">' in page and "<title>Modern Tiny Pedals Dashboard</title>" in page
+    assert '<html lang="en">' in page and "<title>NeoPedal Dashboard</title>" in page
     assert "@@" not in page and ">Current lap<" in page
     assert script_texts(page)["waiting"] == "Waiting for session…"
     assert '<html lang="en">' in login_html() and 'placeholder="Access code"' in login_html()
@@ -36,7 +36,7 @@ def test_page_in_english(ui_env):
 
 def test_page_in_french(ui_env, french):
     page = dashboard_html()
-    assert '<html lang="fr">' in page and "<title>Tableau de bord Modern Tiny Pedals</title>" in page
+    assert '<html lang="fr">' in page and "<title>Tableau de bord NeoPedal</title>" in page
     assert ">Tour en cours<" in page and ">Delta officiel<" in page and "@@" not in page
     texts = script_texts(page)
     assert texts["expired"] == "Session expirée" and texts["energy"] == "Énergie · tours restants"

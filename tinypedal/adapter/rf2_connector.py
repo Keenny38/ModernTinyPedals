@@ -46,6 +46,7 @@ from pyRfactor2SharedMemory.rF2MMap import (
 from .. import app_signal
 from ..replay import ReplayMMap, ReplayPlayer
 from ..thread_guard import run_supervised
+from .data_notify import notifier
 
 logger = logging.getLogger(__name__)
 STOP_TIMEOUT = 3.0  # seconds to wait for update thread to stop
@@ -179,14 +180,22 @@ class MMapDataSet:
         self.ffb.close()
         self.rule.close()
 
-    def update_mmap(self) -> None:
-        """Update mmap data"""
-        self.scor.update()
-        self.tele.update()
+    def update_mmap(self) -> bool | None:
+        """Update mmap data
+
+        Returns:
+            True if scoring or telemetry copy updated, False if neither (copies unchanged),
+            None if unknown (direct access, replay).
+        """
+        scor_copied = self.scor.update()
+        tele_copied = self.tele.update()
         if self.replaying:  # live ext, ffb & rule use direct access, replay copies every zone
             self.ext.update()
             self.ffb.update()
             self.rule.update()
+        if scor_copied is None or tele_copied is None:
+            return None
+        return scor_copied or tele_copied
 
     def zones(self) -> tuple:
         """Mmap instances in replay frame order"""
@@ -213,7 +222,7 @@ class SyncData:
         error: why shared memory could not be opened, empty if opened.
         last_update: monotonic time of last game data change, 0 if none.
         tele_map: (scoring data, telemetry data, telemetry index per scoring index of vehicles in session),
-            rebuilt every update tick.
+            rebuilt on every update tick with new data.
     """
 
     __slots__ = (
@@ -280,13 +289,14 @@ class SyncData:
             False, if no valid player scoring index found.
             True, set player data.
         """
-        # Update scoring index
+        # Update scoring index, from cached vehicle wrappers (same data as scoring array)
         scoring = self.dataset.scor.data
+        veh_total = scoring.mScoringInfo.mNumVehicles
+        scor_rows = self.scoring_rows(scoring)
         if self.override_player_index:
-            scor_idx = local_scoring_index_by_id(
-                self.player_slot_id, scoring.mVehicles, scoring.mScoringInfo.mNumVehicles)
+            scor_idx = local_scoring_index_by_id(self.player_slot_id, scor_rows, veh_total)
         else:
-            scor_idx = local_scoring_index(scoring.mVehicles, scoring.mScoringInfo.mNumVehicles)
+            scor_idx = local_scoring_index(scor_rows, veh_total)
         if scor_idx == INVALID_INDEX:
             return False  # index not found, not synced
         self.player_scor_index = scor_idx
@@ -296,7 +306,9 @@ class SyncData:
         return True  # found index, synced
 
     @staticmethod
-    def __update_tele_indexes(veh_total: int, tele_data: rF2data.rF2Telemetry, tele_indexes: dict) -> None:
+    def __update_tele_indexes(
+        veh_total: int, tele_data: rF2data.rF2Telemetry, tele_indexes: dict, tele_rows: Sequence | None = None,
+    ) -> None:
         """Update telemetry player index dictionary for quick reference
 
         Telemetry index can be different from scoring index.
@@ -305,8 +317,10 @@ class SyncData:
         Args:
             tele_data: Telemetry data.
             tele_indexes: Telemetry mID:index reference dictionary.
+            tele_rows: cached telemetry vehicle wrappers of tele_data (telemetry_rows), telemetry array if None.
         """
-        for tele_idx, veh_info in zip(range(veh_total), tele_data.mVehicles):
+        vehicles = tele_data.mVehicles if tele_rows is None else tele_rows
+        for tele_idx, veh_info in zip(range(veh_total), vehicles):
             tele_indexes[veh_info.mID] = tele_idx
 
     def sync_tele_index(self, scor_idx: int) -> int:
@@ -344,7 +358,7 @@ class SyncData:
         return rows[1]
 
     def __update_tele_map(self) -> None:
-        """Map telemetry index of every scoring index in session, once per update tick"""
+        """Map telemetry index of every scoring index in session, once per update tick with new data"""
         scor_data = self.dataset.scor.data
         get_index = self._tele_indexes.get
         veh_total = min(max(scor_data.mScoringInfo.mNumVehicles, 0), MAX_VEHICLES)
@@ -370,10 +384,12 @@ class SyncData:
         self.error = ""
         self._updating = True
         self._tele_indexes = default_tele_indexes()
+        tele_data = self.dataset.tele.data
         self.__update_tele_indexes(
-            self.dataset.tele.data.mNumVehicles,
-            self.dataset.tele.data,
+            tele_data.mNumVehicles,
+            tele_data,
             self._tele_indexes,
+            self.telemetry_rows(tele_data),
         )
         self.__update_tele_map()
         if not self.__sync_player_data():
@@ -426,10 +442,17 @@ class SyncData:
 
     def __update(self, event: threading.Event) -> None:
         """Run update loop, restart after unexpected error"""
-        if not run_supervised(lambda: self.__update_loop(event), "sharedmemory (rF2) update", event) and not event.is_set():
-            # Stopped after repeated errors: hide overlays instead of showing frozen values
-            self.paused = True
-            self.synced = False
+        notifier.attach()  # data modules wait for notified new data while thread runs
+        try:
+            if (
+                not run_supervised(lambda: self.__update_loop(event), "sharedmemory (rF2) update", event)
+                and not event.is_set()
+            ):
+                # Stopped after repeated errors: hide overlays instead of showing frozen values
+                self.paused = True
+                self.synced = False
+        finally:
+            notifier.detach()  # data modules woken, back to polling
 
     def __update_loop(self, event: threading.Event) -> None:
         """Update synced player data"""
@@ -438,6 +461,7 @@ class SyncData:
         self.resets = 0
 
         _event_wait = event.wait
+        _notify = notifier.notify
         freezed_timestamp = 0  # store freezed timestamp
         last_session_timestamp = 0  # store last timestamp
         last_update_time = 0.0
@@ -446,23 +470,39 @@ class SyncData:
         last_slot_id = INVALID_INDEX
         reset_counter = 0
         update_delay = 0.5  # longer delay while inactive
+        last_data: Any = None  # data structures of last index update
+        last_tele_data: Any = None
+        data_synced: bool | None = None  # result of last player sync, None: sync on next tick
+        last_sync_key: tuple = ()  # player index override setting of last player sync
+        last_signature: tuple = ()  # data read by modules, notified on change
 
         while not _event_wait(update_delay):
-            self.dataset.update_mmap()
-            session_timestamp = self.dataset.scor.data.mScoringInfo.mCurrentET
-            if session_timestamp < last_session_timestamp:  # session changed: forget slot ids of previous session
-                self._tele_indexes = default_tele_indexes()
-            self.__update_tele_indexes(
-                self.dataset.tele.data.mNumVehicles,
-                self.dataset.tele.data,
-                self._tele_indexes,
-            )
-            self.__update_tele_map()
+            copied = self.dataset.update_mmap()
+            scor_data = self.dataset.scor.data
+            tele_data = self.dataset.tele.data
+            session_timestamp = scor_data.mScoringInfo.mCurrentET
+            # Data copies unchanged since last tick: index maps & player sync would give same result
+            new_data = copied is not False or scor_data is not last_data or tele_data is not last_tele_data
+            if new_data:
+                last_data = scor_data
+                last_tele_data = tele_data
+                if session_timestamp < last_session_timestamp:  # session changed: forget slot ids of previous session
+                    self._tele_indexes = default_tele_indexes()
+                self.__update_tele_indexes(
+                    tele_data.mNumVehicles,
+                    tele_data,
+                    self._tele_indexes,
+                    self.telemetry_rows(tele_data),
+                )
+                self.__update_tele_map()
 
             # Update player data & index
             if not data_freezed:
-                # Get player data
-                data_synced = self.__sync_player_data()
+                # Get player data, again only after new data or player index override change
+                sync_key = (self.override_player_index, self.player_slot_id)
+                if new_data or data_synced is None or last_sync_key != sync_key:
+                    last_sync_key = sync_key
+                    data_synced = self.__sync_player_data()
                 # Pause if local player index no longer exists, 5 tries
                 if data_synced:
                     reset_counter = 0
@@ -496,6 +536,7 @@ class SyncData:
                 if freezed_timestamp != last_session_timestamp:
                     update_delay = 0.01
                     self.paused = data_freezed = False
+                    data_synced = None  # player synced again on resume
                     logger.info(
                         "sharedmemory: UPDATING: resumed, data timestamp %s",
                         last_session_timestamp,
@@ -509,11 +550,26 @@ class SyncData:
                 update_delay = 0.5
                 self.paused = data_freezed = True
                 self.synced = False
+                data_synced = None
                 freezed_timestamp = last_session_timestamp
                 logger.info(
                     "sharedmemory: UPDATING: paused, data timestamp %s",
                     freezed_timestamp,
                 )
+
+            # Notify data modules once data they read changed (data stamp, state)
+            signature = (
+                session_timestamp,
+                self.player_tele.mElapsedTime,
+                self.player_scor_index,
+                scor_data.mScoringInfo.mNumVehicles,
+                self.resets,
+                self.paused,
+                self.synced,
+            )
+            if last_signature != signature:
+                last_signature = signature
+                _notify()
 
         logger.info("sharedmemory: UPDATING: thread stopped")
 

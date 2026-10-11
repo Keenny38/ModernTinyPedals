@@ -29,6 +29,7 @@ of the garage repair & refuel screen (/rest/garage/UIScreen/RepairAndRefuel).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
 from typing import Any, NamedTuple
@@ -66,6 +67,19 @@ class TyreAllocation(NamedTuple):
     new_left: int  # new tyres not used yet
 
 
+def _finite(value: Any) -> float:
+    """Float of json value
+
+    Raises:
+        ValueError: not a number, NaN or infinite (json reads 1e999 as inf).
+        OverflowError: int too large for float.
+    """
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"not a finite number: {value}")
+    return number
+
+
 def parse_usage(data: Any) -> list[UsageLap]:
     """Laps of every driver in lap order, entries not understood left out"""
     laps: list[UsageLap] = []
@@ -76,17 +90,17 @@ def parse_usage(data: Any) -> list[UsageLap]:
             continue
         for entry in entries:
             try:
-                tyres = [float(tread) for tread in entry.get("tyres") or ()]
+                tyres = [_finite(tread) for tread in entry.get("tyres") or ()]
                 laps.append(UsageLap(
                     driver=str(driver),
                     stint=int(entry["stint"]),
                     lap=int(entry["lap"]),
-                    fuel=float(entry.get("fuel") or 0.0),
-                    energy=float(entry.get("ve") or 0.0),
+                    fuel=_finite(entry.get("fuel") or 0.0),
+                    energy=_finite(entry.get("ve") or 0.0),
                     tread=sum(tyres) / len(tyres) if tyres else 0.0,
                     pit=bool(entry.get("pit")),
                 ))
-            except (AttributeError, KeyError, TypeError, ValueError):
+            except (AttributeError, KeyError, OverflowError, TypeError, ValueError):  # json: 1e999 is inf
                 continue
     laps.sort(key=lambda usage: usage.lap)
     return laps
@@ -159,7 +173,7 @@ def tyre_allocation(data: Any) -> TyreAllocation | None:
     try:
         maximum = int(data["tireInventory"]["maxAvailableTires"])
         new_left = int(data["tireInvGarageOptions"]["newTiresRemaining"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, OverflowError, TypeError, ValueError):
         return None
     if maximum <= 0:
         return None
@@ -169,6 +183,6 @@ def tyre_allocation(data: Any) -> TyreAllocation | None:
 def tank_capacity(data: Any) -> float:
     """Fuel tank capacity (liters) of garage repair & refuel screen, 0 if not given"""
     try:
-        return max(float(data["fuelInfo"]["maxFuel"]), 0.0)
-    except (KeyError, TypeError, ValueError):
+        return max(_finite(data["fuelInfo"]["maxFuel"]), 0.0)
+    except (KeyError, OverflowError, TypeError, ValueError):
         return 0.0

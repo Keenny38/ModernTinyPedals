@@ -96,10 +96,10 @@ class FileFilter:
     # Specific
     CONSUMPTION = qfile_filter(FileExt.CONSUMPTION, "Consumption History")
     GPLINI = qfile_filter(FileExt.INI, "GPL Pace Notes")
-    TPPN = qfile_filter(FileExt.TPPN, "Modern Tiny Pedals Pace Notes")
-    TPTN = qfile_filter(FileExt.TPTN, "Modern Tiny Pedals Track Notes")
-    TYRESTRATEGY = qfile_filter(FileExt.TYRESTRATEGY, "Modern Tiny Pedals Tyre Strategy")
-    RACEPLAN = qfile_filter(FileExt.RACEPLAN, "Modern Tiny Pedals Race Plan")
+    TPPN = qfile_filter(FileExt.TPPN, "NeoPedal Pace Notes")
+    TPTN = qfile_filter(FileExt.TPTN, "NeoPedal Track Notes")
+    TYRESTRATEGY = qfile_filter(FileExt.TYRESTRATEGY, "NeoPedal Tyre Strategy")
+    RACEPLAN = qfile_filter(FileExt.RACEPLAN, "NeoPedal Race Plan")
 
 
 class ImageFile:

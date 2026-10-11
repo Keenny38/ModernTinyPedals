@@ -26,21 +26,21 @@ def release_body(assets, body=""):
 def test_parse_installer():
     base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
     found = update.parse_installer(release_body([
-        ("ModernTinyPedals-2.60.0-source.zip", base + "ModernTinyPedals-2.60.0-source.zip", f"sha256:{'cd' * 32}"),
-        ("ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip", f"sha256:{DIGEST.upper()}"),
+        ("NeoPedal-2.60.0-source.zip", base + "NeoPedal-2.60.0-source.zip", f"sha256:{'cd' * 32}"),
+        ("NeoPedal-2.60.0-setup.zip", base + "NeoPedal-2.60.0-setup.zip", f"sha256:{DIGEST.upper()}"),
     ]))
     assert found == update.InstallerAsset(
-        "ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip", DIGEST)
+        "NeoPedal-2.60.0-setup.zip", base + "NeoPedal-2.60.0-setup.zip", DIGEST)
 
 
 def test_parse_installer_hash_from_release_notes():
     """No asset digest: hash from SHA256 list of release notes"""
     base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v2.60.0/"
-    notes = (f"### SHA256\n\n- `{'cd' * 32}  ModernTinyPedals-2.60.0-source.zip`\n"
-             f"- `{DIGEST}  ModernTinyPedals-2.60.0-setup.zip`\n")
+    notes = (f"### SHA256\n\n- `{'cd' * 32}  NeoPedal-2.60.0-source.zip`\n"
+             f"- `{DIGEST}  NeoPedal-2.60.0-setup.zip`\n")
     found = update.parse_installer(release_body([
-        ("ModernTinyPedals-2.60.0-source.zip", base + "ModernTinyPedals-2.60.0-source.zip"),
-        ("ModernTinyPedals-2.60.0-setup.zip", base + "ModernTinyPedals-2.60.0-setup.zip"),
+        ("NeoPedal-2.60.0-source.zip", base + "NeoPedal-2.60.0-source.zip"),
+        ("NeoPedal-2.60.0-setup.zip", base + "NeoPedal-2.60.0-setup.zip"),
     ], notes))
     assert found is not None and found.sha256 == DIGEST
 
@@ -49,8 +49,8 @@ def test_parse_installer_of_older_release():
     """Releases before setup.zip: installer attached itself"""
     base = "https://github.com/Keenny38/ModernTinyPedals/releases/download/v0.19.3/"
     found = update.parse_installer(release_body([
-        ("ModernTinyPedals-0.19.3-windows.zip", base + "ModernTinyPedals-0.19.3-windows.zip", f"sha256:{'cd' * 32}"),
-        ("ModernTinyPedals-0.19.3-windows-setup.exe", base + "ModernTinyPedals-0.19.3-windows-setup.exe",
+        ("NeoPedal-0.19.3-windows.zip", base + "NeoPedal-0.19.3-windows.zip", f"sha256:{'cd' * 32}"),
+        ("NeoPedal-0.19.3-windows-setup.exe", base + "NeoPedal-0.19.3-windows-setup.exe",
          f"sha256:{DIGEST}"),
     ]))
     assert found is not None and found.name.endswith("-windows-setup.exe") and found.sha256 == DIGEST
@@ -125,16 +125,16 @@ def test_download_installer_verifies_hash(file_server, tmp_path, valid):
 def test_download_setup_zip_extracts_installer(file_server, tmp_path, valid):
     files, base = file_server
     installer = b"MZ installer" * 1000
-    archive = setup_zip({"ModernTinyPedals-2.60.0-windows-setup.exe": installer})
-    files["/ModernTinyPedals-2.60.0-setup.zip"] = archive
+    archive = setup_zip({"NeoPedal-2.60.0-windows-setup.exe": installer})
+    files["/NeoPedal-2.60.0-setup.zip"] = archive
     digest = hashlib.sha256(archive if valid else b"other").hexdigest()
-    asset = update.InstallerAsset("ModernTinyPedals-2.60.0-setup.zip", f"{base}/ModernTinyPedals-2.60.0-setup.zip", digest)
+    asset = update.InstallerAsset("NeoPedal-2.60.0-setup.zip", f"{base}/NeoPedal-2.60.0-setup.zip", digest)
     if valid:
         path = update.download_installer(asset, str(tmp_path))
-        assert path == str(tmp_path / "ModernTinyPedals-2.60.0-windows-setup.exe")
+        assert path == str(tmp_path / "NeoPedal-2.60.0-windows-setup.exe")
         with open(path, "rb") as file:
             assert file.read() == installer
-        assert [item.name for item in tmp_path.iterdir()] == ["ModernTinyPedals-2.60.0-windows-setup.exe"]  # ZIP removed
+        assert [item.name for item in tmp_path.iterdir()] == ["NeoPedal-2.60.0-windows-setup.exe"]  # ZIP removed
     else:
         with pytest.raises(ValueError):
             update.download_installer(asset, str(tmp_path))

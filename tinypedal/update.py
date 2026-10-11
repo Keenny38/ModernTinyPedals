@@ -34,13 +34,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 import zipfile
 from collections.abc import Callable
 from contextlib import suppress
 from typing import NamedTuple
 
-from . import app_signal, version
+from . import app_signal, realtime_state, version
 from .async_request import get_response, set_header_get
 from .const_app import APP_NAME, FORK_REPO_NAME
 from .const_common import DATE_NA, VERSION_NA
@@ -89,21 +90,56 @@ def release_url() -> str:
     return f"https://github.com/{update_repository() or FORK_REPO_NAME}/releases"
 
 
-def request_latest_release(repo: str):
-    """Setup request for latest release data from github Rest API"""
+API_HOST = "api.github.com"
+API_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+MAX_RELEASE_SIZE = 4 * 1024 * 1024
+
+
+class GitHubApiRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow redirects inside GitHub API only
+
+    Renamed repository: GitHub answers "301 Moved Permanently" to /repositories/<id>/...
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(f"https://{API_HOST}/"):
+            return None  # refused: raises HTTPError
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_api_following_redirects(uri_path: str, timeout: float) -> bytes:
+    """Body of GitHub API GET request, redirects followed, empty if failed"""
+    request = urllib.request.Request(
+        f"https://{API_HOST}{uri_path}",
+        headers={"User-Agent": f"{APP_NAME}/{version.__version__}", **API_HEADERS},
+    )
+    try:
+        with urllib.request.build_opener(GitHubApiRedirect).open(request, timeout=timeout) as response:
+            return response.read(MAX_RELEASE_SIZE)
+    except (OSError, ValueError, http.client.HTTPException):
+        return b""
+
+
+async def request_latest_release(repo: str) -> bytes:
+    """Latest release data from github Rest API
+
+    Direct request first; if it gives nothing (offline, or repository renamed: raw request
+    never follows redirects), again with redirects followed.
+    """
     uri_path = f"/repos/{repo}/releases/latest"
-    host = "api.github.com"
     port = 443
     timeout = 5
     user_agent = f"User-Agent: {APP_NAME}/{version.__version__}"
     request_header = set_header_get(
         uri_path,
-        host,
+        API_HOST,
         user_agent,
-        "Accept: application/vnd.github+json",
-        "X-GitHub-Api-Version: 2022-11-28",
+        *(f"{name}: {value}" for name, value in API_HEADERS.items()),
     )
-    return get_response(request_header, host, port, timeout, ssl=True)
+    data = await get_response(request_header, API_HOST, port, timeout, ssl=True)
+    if not data:
+        data = await asyncio.to_thread(fetch_api_following_redirects, uri_path, timeout)
+    return data
 
 
 class InstallerAsset(NamedTuple):
@@ -279,8 +315,13 @@ def is_portable_copy() -> bool:
 APP_EXECUTABLE = "tinypedal.exe"  # installer/tinypedal.iss AppExe
 INSTALLER_APP_ID = "{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}"  # installer/tinypedal.iss AppId
 # Start menu shortcut of app, written by installer at every install (installer/tinypedal.iss Icons)
-START_MENU_SHORTCUT = os.path.join(
-    "Microsoft", "Windows", "Start Menu", "Programs", "Modern Tiny Pedals", "Modern Tiny Pedals.lnk")
+START_MENU_FOLDER = os.path.join("Microsoft", "Windows", "Start Menu", "Programs")
+START_MENU_SHORTCUT = os.path.join(START_MENU_FOLDER, "NeoPedal", "NeoPedal.lnk")
+# Installed as "Modern Tiny Pedals": updates keep the Start menu folder (Inno Setup UsePreviousGroup)
+LEGACY_START_MENU_SHORTCUTS = (
+    os.path.join(START_MENU_FOLDER, "Modern Tiny Pedals", "NeoPedal.lnk"),
+    os.path.join(START_MENU_FOLDER, "Modern Tiny Pedals", "Modern Tiny Pedals.lnk"),
+)
 
 
 def is_install_folder(folder: str) -> bool:
@@ -355,9 +396,10 @@ def installed_app_folder() -> str:
     candidates = [registry_install_folder()]
     appdata = os.environ.get("APPDATA", "")
     if appdata:
-        target = shortcut_target(os.path.join(appdata, START_MENU_SHORTCUT))
-        if os.path.basename(target).lower() == APP_EXECUTABLE:
-            candidates.append(os.path.dirname(target))
+        for shortcut in (START_MENU_SHORTCUT, *LEGACY_START_MENU_SHORTCUTS):
+            target = shortcut_target(os.path.join(appdata, shortcut))
+            if os.path.basename(target).lower() == APP_EXECUTABLE:
+                candidates.append(os.path.dirname(target))
     for folder in candidates:
         if is_install_folder(folder):
             return os.path.normpath(folder)
@@ -445,6 +487,19 @@ def download_installer(
     finally:
         with suppress(OSError):
             os.remove(path)
+
+
+def discard_installer(path: str) -> None:
+    """Remove installer downloaded by download_installer (not run: declined or failed to start),
+    never left in temporary folder"""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        logger.warning("UPDATES: unable to remove downloaded installer: %s", error)
 
 
 MAX_INSTALLER_SIZE = 1 << 30  # extracted installer size limit
@@ -643,6 +698,8 @@ class UpdateChecker:
         "_is_checking",
         "_update_available",
         "_manual_checking",
+        "_scheduled_checking",
+        "_last_check_time",
         "_last_checked_version",
         "_last_checked_date",
         "_disabled",
@@ -655,6 +712,8 @@ class UpdateChecker:
         self._is_checking = False
         self._update_available = False
         self._manual_checking = False
+        self._scheduled_checking = False
+        self._last_check_time: float | None = None  # time.monotonic of last check, None if none yet
         self._last_checked_version = VERSION_NA
         self._last_checked_date = DATE_NA
         self._disabled = False
@@ -665,6 +724,10 @@ class UpdateChecker:
     def is_manual(self) -> bool:
         """Is manual checking"""
         return self._manual_checking
+
+    def is_scheduled(self) -> bool:
+        """Is automatic checking while app runs (see check_due)"""
+        return self._scheduled_checking
 
     def is_updates(self) -> bool:
         """Is updates available"""
@@ -689,9 +752,18 @@ class UpdateChecker:
         """Release date of latest release (last check)"""
         return self._last_checked_date
 
-    def check(self, manual: bool):
-        """Run update check in separated thread"""
+    def check(self, manual: bool, scheduled: bool = False):
+        """Run update check in separated thread
+
+        Args:
+            manual: asked by user, result shown even if no update.
+            scheduled: automatic check while app runs (see check_due), never turns a running check automatic.
+        """
+        if scheduled and self._is_checking:
+            return
         self._manual_checking = manual
+        self._scheduled_checking = scheduled
+        self._last_check_time = time.monotonic()
         repo = update_repository()
         self._disabled = not repo
         if self._disabled:  # no repository set, skip checking
@@ -708,6 +780,24 @@ class UpdateChecker:
     def is_checking(self) -> bool:
         """Is checking (background thread running)"""
         return self._is_checking
+
+    def check_due(self, now: float | None = None) -> bool:
+        """Automatic check while app runs, True if started
+
+        Due once number_of_hours_between_update_checks passed since last check (startup, manual or
+        automatic). Off with check_for_updates_on_startup off or 0 hours; not while driving (next call).
+        """
+        hours = cfg.application["number_of_hours_between_update_checks"]
+        if not cfg.application["check_for_updates_on_startup"] or hours <= 0:
+            return False
+        if self._is_checking or realtime_state.active:
+            return False
+        if now is None:
+            now = time.monotonic()
+        if self._last_check_time is not None and now - self._last_check_time < hours * 3600:
+            return False
+        self.check(False, scheduled=True)
+        return True
 
     def __checking(self, repo: str):
         """Fetch version info from github Rest API"""

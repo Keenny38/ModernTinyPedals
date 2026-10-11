@@ -27,8 +27,10 @@ from time import localtime, strftime, time
 from .. import calculation as calc
 from .. import realtime_state
 from ..api_control import api
+from ..const_api import API_LMU_NAME
 from ..const_common import FLOAT_INF
 from ..module_info import StatsInfo, minfo
+from ..process.results_index import game_version_text
 from ..userfile.brands import select_brand_name
 from ..userfile.car_setup import (
     rename_car_setup_file,
@@ -65,7 +67,7 @@ class Realtime(DataModule):
             output=minfo.stats,
             filepath=self.cfg.path.config,
             vehicle_classification=self.mcfg["vehicle_classification"],
-            max_moved_distance=1500 * update_interval,
+            max_moved_distance=1500 * self.active_interval,  # per update while driving (teleport filter)
             podium_by_class=self.mcfg["enable_podium_by_class"]
         )
 
@@ -118,6 +120,13 @@ def stats_keys(vehicle_classification: str) -> tuple[str, str]:
     return api.read.session.track_name(), name
 
 
+def live_game_version() -> str:
+    """Version of game driven ("1.42"), "" if unknown: LMU shared memory only (rF2 gives plugin version)"""
+    if api.name != API_LMU_NAME:
+        return ""
+    return game_version_text(api.read.state.version())
+
+
 def finish_position(podium_by_class: bool) -> int:
     """Get finish position"""
     # Overall position
@@ -162,6 +171,7 @@ def record_driver_stats(
     loaded_stats = default_stats
     key_list = ("", "")
     vehicle_class = ""
+    game_version = ""
     session_type = 0
     finish_place = 0
     finish_state = 0
@@ -241,6 +251,7 @@ def record_driver_stats(
                         best=driver_stats.pb, valid=driver_stats.valid, invalid=driver_stats.invalid,
                         meters=driver_stats.meters, seconds=driver_stats.seconds,
                         position=finish_place, finish=finish_state, time=time(), vehicle_class=vehicle_class,
+                        game_version=game_version,
                     ))
                 delayed_save = False
 
@@ -253,6 +264,7 @@ def record_driver_stats(
             driver_stats = DriverStats()
             key_list = stats_keys(vehicle_classification)
             vehicle_class = api.read.vehicle.class_name()
+            game_version = live_game_version()
             loaded_stats = load_driver_stats(
                 key_list=key_list,
                 filepath=filepath,

@@ -26,10 +26,11 @@ hidden window's graphics resources freed: everything is built again when shown.
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Slot
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 RELEASE_DELAY_MS = 60_000  # window hidden or minimized this long: pages released
 DESTROY_DELAY_MS = 1_000  # released pages deleted meanwhile, then hidden window's graphics freed
@@ -109,6 +110,15 @@ class LazyPage(QWidget):
             refresh()
 
 
+def _weak_callback(callback: Callable[[], object] | None) -> Callable[[], Callable[[], object] | None]:
+    """Bound method held weakly (no reference cycle with the view owning this object)"""
+    if callback is None:
+        return lambda: None
+    if hasattr(callback, "__self__"):
+        return weakref.WeakMethod(callback)  # type: ignore[arg-type]
+    return lambda: callback
+
+
 class PageRelease(QObject):
     """Frees memory while main window stays hidden (tray) or minimized
 
@@ -119,11 +129,18 @@ class PageRelease(QObject):
     Args:
         parent: main view, its window watched.
         pages: pages released.
+        release_others: called before pages are released (tool pages closed, reopened by shown).
+        shown: called once window is shown again (after show event).
     """
 
-    def __init__(self, parent: QWidget, pages: Iterable[LazyPage], delay_ms: int = RELEASE_DELAY_MS):
+    def __init__(
+        self, parent: QWidget, pages: Iterable[LazyPage], delay_ms: int = RELEASE_DELAY_MS,
+        release_others: Callable[[], object] | None = None, shown: Callable[[], object] | None = None,
+    ):
         super().__init__(parent)
         self._pages = tuple(pages)
+        self._release_others = _weak_callback(release_others)
+        self._shown = _weak_callback(shown)
         self._window = parent.window()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -149,12 +166,32 @@ class PageRelease(QObject):
                     self._timer.start()
             else:
                 self._timer.stop()
+                if self._shown() is not None:  # shown or restored from minimized
+                    QTimer.singleShot(0, self, self.window_shown)  # once show is done
         return False
+
+    def window_shown(self):
+        """Window shown again: shown callback (pages released or deferred reopened)"""
+        callback = self._shown()
+        if callback is not None and not self.window_away():
+            callback()
+
+    @staticmethod
+    def dialog_running() -> bool:
+        """Modal dialog or popup running (its nested event loop runs this timer): page or window it was
+        opened from (its QML handler still on the call stack) never deleted under it"""
+        return QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None
 
     def release(self):
         """Release pages, then window graphics once pages are deleted"""
         if not self.window_away():
             return
+        if self.dialog_running():
+            self._timer.start()  # tried again later
+            return
+        release_others = self._release_others()
+        if release_others is not None:
+            release_others()
         for page in self._pages:
             page.release()
         self._destroy_timer.start()
@@ -163,6 +200,9 @@ class PageRelease(QObject):
         """Native window of hidden window destroyed (created again by Qt when shown)"""
         window = self._window
         if window.isVisible() or not window.testAttribute(Qt.WidgetAttribute.WA_WState_Created):
+            return
+        if self.dialog_running():
+            self._destroy_timer.start()
             return
         if any(child.inherits("QQuickWidget") for child in window.findChildren(QWidget)):
             return  # Qt Quick page left open (tool page): keeps its graphics

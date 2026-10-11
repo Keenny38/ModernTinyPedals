@@ -6,9 +6,9 @@ import QtQuick.Layouts
 // while the tab is shown), usage per lap of each stint & driver, average of selected stints filled in
 Item {
     id: tab
-    readonly property var team: backend.team
-    readonly property var selection: backend.teamSelection
-    readonly property var rows: team.rows || []
+    readonly property var team: backend.teamInfo  // columns, drivers, count, canFill (rows: backend.teamRows)
+    readonly property bool busy: backend.teamBusy
+    readonly property int count: team.count || 0
     readonly property var columns: team.columns || []
 
     function modeOf(modifiers) {
@@ -22,9 +22,9 @@ Item {
         glyph: ""  // people
         actions: [
             TpButton {
-                enabled: !tab.team.busy
+                enabled: !tab.busy
                 glyph: ""  // refresh
-                text: tab.team.busy ? i18n.tr("Asking game...") : i18n.tr("Refresh")
+                text: tab.busy ? i18n.tr("Asking game...") : i18n.tr("Refresh")
                 tip: i18n.tr("Ask game again")
                 onClicked: backend.refreshTeam()
             }
@@ -38,7 +38,7 @@ Item {
         }
         Row {  // header
             Layout.fillWidth: true
-            visible: tab.rows.length > 0
+            visible: tab.count > 0
             Repeater {
                 model: tab.columns
                 Text {
@@ -60,31 +60,34 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: theme.em * 8
-            visible: tab.rows.length > 0
+            visible: tab.count > 0
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: tab.rows
+            model: backend.teamRows  // synced in place: scroll position & rows kept at each refresh
             ScrollBar.vertical: ScrollBar {}
             delegate: Rectangle {
                 id: stintRow
-                required property var modelData
                 required property int index
-                readonly property bool selected: tab.selection.indexOf(modelData.index) >= 0
+                required property var model
+                readonly property int stint: model.number  // of the stint (sent back when clicked)
+                readonly property bool usable: model.enabled
+                readonly property bool selected: model.selected
+                readonly property var cells: model.cells || []
                 width: list.width
                 height: Math.round(theme.em * 1.75)
                 radius: theme.em * 0.3
-                opacity: modelData.enabled ? 1 : 0.5
+                opacity: usable ? 1 : 0.5
                 color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, theme.dark ? 0.3 : 0.2)
-                     : stintArea.containsMouse && modelData.enabled ? theme.hover
+                     : stintArea.containsMouse && usable ? theme.hover
                      : index % 2 ? (theme.dark ? Qt.rgba(1, 1, 1, 0.035) : Qt.rgba(0, 0, 0, 0.03)) : "transparent"
                 Row {
                     Repeater {
-                        model: stintRow.modelData.cells
+                        model: stintRow.cells.length
                         Text {
-                            required property var modelData
+                            required property int index
                             width: list.width / Math.max(tab.columns.length, 1)
                             height: stintRow.height
-                            text: modelData
+                            text: stintRow.cells[index]
                             color: theme.text
                             font.features: { "tnum": 1 }
                             horizontalAlignment: Text.AlignHCenter
@@ -97,15 +100,15 @@ Item {
                     id: stintArea
                     anchors.fill: parent
                     hoverEnabled: true
-                    enabled: stintRow.modelData.enabled
-                    onClicked: function(mouse) { backend.selectStint(stintRow.modelData.index, tab.modeOf(mouse.modifiers)) }
+                    enabled: stintRow.usable
+                    onClicked: function(mouse) { backend.selectStint(stintRow.stint, tab.modeOf(mouse.modifiers)) }
                 }
             }
         }
         Text {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: tab.rows.length === 0
+            visible: tab.count === 0
             text: i18n.tr("No team stint from game yet: LMU running with the car on track needed.")
             color: theme.dimText
             horizontalAlignment: Text.AlignHCenter
@@ -127,7 +130,7 @@ Item {
             Layout.fillWidth: true
             Text {
                 Layout.fillWidth: true
-                text: tab.team.status || ""
+                text: backend.teamStatus
                 color: theme.dimText
                 font.pointSize: theme.fontPoint * 0.9
                 elide: Text.ElideRight

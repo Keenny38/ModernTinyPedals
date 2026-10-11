@@ -312,8 +312,7 @@ class RestAPIConnector:
                     update_interval = 0.5
 
         # Reset to default on close
-        reset_to_default(self._dataset, state.active_tasks)
-        self._reset_status("idle")
+        self._reset_if_current(event, state)
 
     def run_tasks(self, event: threading.Event, state: TaskState):
         """Run tasks, blocks until leaving track or stopped"""
@@ -326,6 +325,16 @@ class RestAPIConnector:
         if not self._data_received:  # nothing answered: resolve host again next time
             forget_hostname(self._cfg["url_host"], self._cfg["url_port"])
         # Reset when finished
+        self._reset_if_current(event, state)
+
+    def _reset_if_current(self, event: threading.Event, state: TaskState):
+        """Reset data & status to idle, unless a newer thread took over (stop timed out, then start)
+
+        Data set & status are shared: a thread finishing late must not wipe what the new one fetched.
+        """
+        if event is not self._event:
+            state.active_tasks.clear()
+            return
         reset_to_default(self._dataset, state.active_tasks)
         self._reset_status("idle")
 

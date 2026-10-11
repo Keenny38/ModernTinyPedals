@@ -43,6 +43,7 @@ def open_page(parent):
     page = LapViewerBackend(parent, cfg.path.telemetry)
     page.refresh()
     wait_loaded(page)
+    page.wait_jobs()  # lap infos index saved in background
     return page
 
 
@@ -170,12 +171,12 @@ def test_lap_infos_index(sessions, monkeypatch):
     """J60: lap infos read once, then from track index while lap files stay the same (damaged index ignored)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import lap_backend
+    from tinypedal.userfile import lap_cache
 
     parent = QWidget()
     pages = []
     calls: list[str] = []
-    reading = lap_backend.read_lap_info
+    reading = lap_cache.read_lap_info  # lap infos read in background
 
     def counted(path: str) -> dict:
         calls.append(path)
@@ -186,7 +187,7 @@ def test_lap_infos_index(sessions, monkeypatch):
         index = os.path.join(cfg.path.telemetry, ".lap_cache", "info", f"{TRACK}.json")
         assert os.path.isfile(index)
         infos = [entry.info for entry in pages[0].entries]
-        monkeypatch.setattr(lap_backend, "read_lap_info", counted)
+        monkeypatch.setattr(lap_cache, "read_lap_info", counted)
         pages.append(open_page(parent))
         assert not calls and [entry.info for entry in pages[1].entries] == infos
         changed = save(2, 60.2, BASE + 7200 + 140, BASE + 7200, vehicle="Cadillac")  # same file written again

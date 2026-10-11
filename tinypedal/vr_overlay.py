@@ -41,13 +41,15 @@ import logging
 import math
 import os
 import threading
+import weakref
 import zlib
+from array import array
 from collections.abc import Callable
 from contextlib import suppress
 from typing import NamedTuple
 
-from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap, QTransform
+from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_signal, vr_shared
@@ -57,7 +59,7 @@ from .setting import cfg
 logger = logging.getLogger(__name__)
 
 MAX_PIXELS = 1024 * 1024  # setOverlayRaw data size limit, image is scaled down above this
-MIRROR_TITLE = "Modern Tiny Pedals VR"  # window title to select in window capture apps
+MIRROR_TITLE = "NeoPedal VR"  # window title to select in window capture apps
 STEAMVR_PROCESSES = ("vrserver.exe", "vrserver")  # SteamVR server (Windows, Linux)
 STEAMVR_RETRY_MS = 5000  # SteamVR started after app: overlay created within this delay
 OPENXR_MIN_INTERVAL_MS = 66  # OpenXR layer image written at most ~15 times per second (copied in game frame)
@@ -119,7 +121,7 @@ class MirrorWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.background = QColor("#000000")
         self.set_background(background)
-        self.pixmap = QPixmap()
+        self.image: QImage | None = None  # composed image, drawn as is (updated in place by its composer)
         self.resize(640, 360)
         self.restore_position()
         # Position saved once moving stops
@@ -159,18 +161,31 @@ class MirrorWindow(QWidget):
         if self.isVisible():
             self._save_timer.start()
 
-    def set_image(self, image: QImage | None):
-        """Show image, empty (background only) if None"""
-        self.pixmap = QPixmap.fromImage(image) if image is not None else QPixmap()
-        if not self.pixmap.isNull() and self.size() != self.pixmap.size():
-            self.resize(self.pixmap.size())
-        self.update()
+    def set_image(self, image: QImage | None, dirty: QRegion | None = None):
+        """Show image (kept & drawn in paint events, no pixmap copy), empty (background only) if None.
+
+        Args:
+            dirty: part of the same image changed since last call (only that part painted again), None: whole.
+        """
+        partial = image is self.image
+        self.image = image
+        if image is not None and not image.isNull() and self.size() != image.size():
+            self.resize(image.size())
+            partial = False
+        if partial and dirty is not None:
+            self.update(dirty)
+        else:
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), self.background)
-        if not self.pixmap.isNull():
-            painter.drawPixmap(0, 0, self.pixmap)
+        rect = event.rect()
+        painter.fillRect(rect, self.background)
+        image = self.image
+        if image is not None:
+            part = rect.intersected(image.rect())
+            if not part.isEmpty():
+                painter.drawImage(part.topLeft(), image, part)
 
     def closeEvent(self, event):
         """Closing window turns mirror off until next reload, so window is not shown again unexpectedly"""
@@ -182,9 +197,10 @@ class MirrorWindow(QWidget):
         super().closeEvent(event)
 
 
-def window_image(widget: QWidget) -> QImage | None:
-    """Overlay window as last painted: backing store copy (no repaint) once window painted (paint serial
-    counted, see widget._base.PaintCounter), else rendered again (grab)"""
+def window_source(widget: QWidget) -> tuple[QImage, QRect] | None:
+    """Overlay window as last painted: image & its part showing the window (device pixels). Backing store itself
+    (no copy, no repaint) once window painted (paint serial counted, see widget._base.PaintCounter), else window
+    rendered again (grab). Backing store only valid until the window paints again: drawn at once."""
     if getattr(widget, "paint_serial", None) is not None:
         store = widget.backingStore()
         device = store.paintDevice() if store is not None else None
@@ -192,9 +208,29 @@ def window_image(widget: QWidget) -> QImage | None:
             ratio = device.devicePixelRatio()
             width, height = round(widget.width() * ratio), round(widget.height() * ratio)
             if 0 < width <= device.width() and 0 < height <= device.height():
-                return device.copy(0, 0, width, height)
+                return device, QRect(0, 0, width, height)
     pixmap = widget.grab()
-    return pixmap.toImage() if not pixmap.isNull() else None
+    if pixmap.isNull():
+        return None
+    image = pixmap.toImage()
+    return image, image.rect()
+
+
+def draw_window(painter: QPainter, widget: QWidget, target: QRect):
+    """Window as last painted drawn into target rect (painter coordinates), with window opacity. Scaled to target
+    size first when it differs (pixels averaged as QImage.scaled: even thin lines & text, unlike bilinear)."""
+    source = window_source(widget)
+    if source is None:
+        return
+    image, rect = source
+    if rect.size() != target.size():
+        if rect != image.rect():  # window part of the backing store (top left), read in place
+            image = QImage(image.constBits(), rect.width(), rect.height(), image.bytesPerLine(), image.format())
+        image = image.scaled(target.width(), target.height(), Qt.AspectRatioMode.IgnoreAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+        rect = image.rect()
+    painter.setOpacity(widget.windowOpacity())
+    painter.drawImage(target, image, rect)
 
 
 def compose_key(widgets: list) -> tuple | None:
@@ -209,55 +245,177 @@ def compose_key(widgets: list) -> tuple | None:
     return tuple(key)
 
 
+def canvas_size(width: int, height: int) -> tuple[int, int]:
+    """Size of the composed image of a canvas: scaled down to MAX_PIXELS keeping aspect (as QImage.scaled)"""
+    pixels = width * height
+    if pixels <= MAX_PIXELS:
+        return width, height
+    scale = (MAX_PIXELS / pixels) ** 0.5
+    size = QSize(width, height).scaled(
+        max(int(width * scale), 1), max(int(height * scale), 1), Qt.AspectRatioMode.KeepAspectRatio)
+    return max(size.width(), 1), max(size.height(), 1)
+
+
+class RowChecksum:
+    """Checksum of an image's pixels kept per band of rows: only bands drawn since the last value read again
+    (change detection of an image updated in place, same value for same pixels & size)"""
+
+    BAND_ROWS = 16
+
+    def __init__(self):
+        self._bands: list[int] = []  # crc32 of each band of rows
+        self._shape: tuple[int, int, int] | None = None  # width, height & bytes per line of the image read
+        self._stale: set[int] = set()  # bands drawn since
+
+    def reset(self):
+        """Whole image read next time"""
+        self._shape = None
+
+    def drawn(self, top: int, bottom: int):
+        """Rows top to bottom (excluded) drawn"""
+        self._stale.update(range(max(top, 0) // self.BAND_ROWS, -(-bottom // self.BAND_ROWS)))
+
+    def value(self, image: QImage, seed: int) -> int:
+        rows, height, stride = self.BAND_ROWS, image.height(), image.bytesPerLine()
+        count = -(-height // rows)
+        shape = (image.width(), height, stride)
+        if shape != self._shape:
+            self._shape, self._bands, self._stale = shape, [0] * count, set(range(count))
+        if self._stale:
+            view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
+            for band in self._stale:
+                if band < count:
+                    self._bands[band] = zlib.crc32(view[band * rows * stride:min(band * rows + rows, height) * stride])
+            self._stale = set()
+        return zlib.crc32(array("I", self._bands).tobytes(), seed)
+
+
+class CanvasComposer:
+    """Visible overlay windows (desktop layout) composed straight at the size sent (canvas_size) into one RGBA
+    image kept between updates: only windows painted since last time drawn again, whole image when windows,
+    their place, size or opacity change. Checksum read only where drawn (RowChecksum)."""
+
+    def __init__(self):
+        self.image: QImage | None = None
+        self.dirty: QRegion | None = None  # part of image drawn by last compose, None if unchanged
+        self.version = 0  # counts images drawn (each compose drawing something, each reset)
+        self._layout: tuple | None = None  # canvas & windows drawn in image
+        self._serials: list[int | None] = []  # paint serial of each window when drawn
+        self._checksum = RowChecksum()
+
+    def reset(self):
+        """Image released, next one drawn whole"""
+        self.image = self._layout = self.dirty = None
+        self._serials = []
+        self._checksum.reset()
+        self.version += 1
+
+    def checksum(self) -> int | None:
+        """Checksum of image pixels & size (None if no image), only rows drawn since last call read"""
+        image = self.image
+        if image is None:
+            return None
+        return self._checksum.value(image, image.width() << 16 | image.height())
+
+    def compose(self, widgets: list) -> QImage | None:
+        """Image of visible widgets (updated in place, valid until next call), None if nothing visible.
+        Part drawn in dirty."""
+        visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
+        if not visible:
+            self.reset()
+            return None
+        geometries = [widget.frameGeometry() for widget in visible]
+        bounds = QRect()
+        for geometry in geometries:
+            bounds = bounds.united(geometry)
+        width, height = canvas_size(bounds.width(), bounds.height())
+        layout = (bounds.getRect(), width, height, tuple(  # weak: new window never taken for a closed one
+            (weakref.ref(widget), geometry.topLeft(), widget.size(), widget.windowOpacity())
+            for widget, geometry in zip(visible, geometries)))
+        serials = [getattr(widget, "paint_serial", None) for widget in visible]
+        image = self.image
+        clip = None
+        if image is not None and layout == self._layout:
+            clip = QRegion()
+            for index, (serial, last) in enumerate(zip(serials, self._serials)):
+                if serial is None or serial != last:  # painted since (or not counted)
+                    target = self.target(geometries[index], visible[index], bounds, image)
+                    clip += target
+                    self._checksum.drawn(target.top(), target.bottom() + 1)
+            if clip.isEmpty():
+                self.dirty = None
+                return image
+        elif image is None or (image.width(), image.height()) != (width, height):
+            image = self.image = QImage(width, height, QImage.Format.Format_RGBA8888)
+        self._layout, self._serials = layout, serials
+        self.version += 1
+        if clip is None:
+            image.fill(Qt.GlobalColor.transparent)
+            self.dirty = QRegion(image.rect())
+            self._checksum.drawn(0, image.height())
+        else:  # its rows marked drawn above
+            self.dirty = clip.intersected(image.rect())
+        painter = QPainter(image)
+        if clip is not None:  # changed windows' rects cleared, all windows there drawn again in order
+            painter.setClipRegion(clip)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(clip.boundingRect(), Qt.GlobalColor.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        for widget, geometry in zip(visible, geometries):
+            target = self.target(geometry, widget, bounds, image)
+            if clip is None or clip.intersects(target):
+                draw_window(painter, widget, target)
+        painter.end()
+        return image
+
+    @staticmethod
+    def target(geometry: QRect, widget: QWidget, bounds: QRect, image: QImage) -> QRect:
+        """Rect of a window in the image (canvas scaled to image size), edges rounded to pixels"""
+        scale_x, scale_y = image.width() / bounds.width(), image.height() / bounds.height()
+        x, y = geometry.x() - bounds.x(), geometry.y() - bounds.y()
+        left, top = round(x * scale_x), round(y * scale_y)
+        return QRect(left, top, max(round((x + widget.width()) * scale_x) - left, 1),
+                     max(round((y + widget.height()) * scale_y) - top, 1))
+
+
+_composer = CanvasComposer()  # SteamVR overlay & mirror window image (one VR overlay control per app)
+
+
 def compose_widgets(widgets: list) -> QImage | None:
-    """Compose visible overlay widgets into one RGBA image, keeping desktop layout"""
-    visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
-    if not visible:
-        return None
-    bounds = QRect()
-    for widget in visible:
-        bounds = bounds.united(widget.frameGeometry())
-    image = compose_group(visible, bounds.topLeft(), (bounds.width(), bounds.height()))
-    pixels = image.width() * image.height()
-    if pixels > MAX_PIXELS:
-        scale = (MAX_PIXELS / pixels) ** 0.5
-        image = image.scaled(
-            max(int(image.width() * scale), 1),
-            max(int(image.height() * scale), 1),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-    return image
+    """Compose visible overlay widgets into one RGBA image, keeping desktop layout, scaled down to MAX_PIXELS.
+    Same image updated in place by the next call (copy it to keep it)."""
+    return _composer.compose(widgets)
 
 
-def _row_span(image: QImage) -> tuple[int, int] | None:
-    """First & last row of 8 bit image with a non zero byte, None if all zero"""
-    bits = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
-    stride, width, height = image.bytesPerLine(), image.width(), image.height()
-    zero = bytes(width)
-    first = 0
-    while first < height and bits[first * stride:first * stride + width] == zero:
-        first += 1
-    if first == height:
-        return None
-    last = height - 1
-    while bits[last * stride:last * stride + width] == zero:
-        last -= 1
-    return first, last
+def _alpha_rows(image: QImage) -> tuple[bytes, int]:
+    """Alpha bytes of image, row after row (no padding), & row width"""
+    alpha = image.convertToFormat(QImage.Format.Format_Alpha8)
+    width, stride = alpha.width(), alpha.bytesPerLine()
+    bits = memoryview(alpha.constBits())[:alpha.sizeInBytes()]  # type: ignore[arg-type]
+    if stride == width:
+        return bits.tobytes(), width
+    return b"".join(bits[row * stride:row * stride + width] for row in range(alpha.height())), width
 
 
 def content_rect(image: QImage) -> QRect:
-    """Bounding rect of visible (not fully transparent) pixels, empty if none"""
-    alpha = image.convertToFormat(QImage.Format.Format_Alpha8)
-    rows = _row_span(alpha)
-    if rows is None:
+    """Bounding rect of visible (not fully transparent) pixels, empty if none (rows & columns found by stripping
+    zero alpha bytes, no rotated copy)"""
+    alpha, width = _alpha_rows(image)
+    first = len(alpha) - len(alpha.lstrip(b"\0"))
+    if width == 0 or first == len(alpha):
         return QRect()
-    top, bottom = rows
-    band = alpha.copy(0, top, alpha.width(), bottom - top + 1)
-    columns = _row_span(band.transformed(QTransform().rotate(90)))  # rows of rotated image: columns
-    if columns is None:
-        return QRect()
-    left, right = columns
+    last = len(alpha.rstrip(b"\0")) - 1
+    top, bottom = first // width, last // width
+    left, right = width, -1
+    for row in range(top, bottom + 1):
+        line = alpha[row * width:(row + 1) * width]
+        start = width - len(line.lstrip(b"\0"))
+        if start == width:
+            continue
+        left = min(left, start)
+        right = max(right, len(line.rstrip(b"\0")) - 1)
+        if left == 0 and right == width - 1:
+            break
     return QRect(left, top, right - left + 1, bottom - top + 1)
 
 
@@ -276,83 +434,212 @@ def compose_group(widgets: list, origin: QPoint, size: tuple[int, int]) -> QImag
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
     for widget in widgets:
-        window = window_image(widget)
-        if window is not None:
-            painter.setOpacity(widget.windowOpacity())
-            painter.drawImage(widget.frameGeometry().topLeft() - origin, window)
+        draw_window(painter, widget, QRect(widget.frameGeometry().topLeft() - origin, widget.size()))
     painter.end()
     return image
+
+
+def image_part(image: QImage, rect: QRect) -> QImage:
+    """Part of an image read in place (no copy), valid while image kept & unchanged"""
+    if rect == image.rect():
+        return image
+    view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
+    offset = rect.y() * image.bytesPerLine() + rect.x() * image.depth() // 8
+    return QImage(view[offset:], rect.width(), rect.height(), image.bytesPerLine(), image.format())
+
+
+class TileGroup:
+    """Image of one group of nearby widgets (one tile), kept between updates. Visible part found per band of
+    rows, only bands drawn since read again."""
+
+    __slots__ = ("key", "image", "serials", "bands", "rect", "version")
+
+    BAND_ROWS = 16
+
+    def __init__(self, key: tuple, image: QImage, serials: list[int | None]):
+        self.key = key  # image size, windows drawn (place in image, opacity)
+        self.image = image
+        self.serials = serials  # paint serial of each window when drawn
+        self.bands: list[tuple[int, int, int, int] | None] = []  # visible part of each band (left, top, right, bottom)
+        self.rect = QRect()  # visible part (content_rect)
+        self.version = 0  # counts redraws
+        self.drawn(0, image.height())
+
+    def drawn(self, top: int, bottom: int):
+        """Rows top to bottom (excluded) drawn: visible part of their bands found again"""
+        image, rows = self.image, self.BAND_ROWS
+        height = image.height() if not image.isNull() else 0
+        count = -(-height // rows)
+        if len(self.bands) != count:
+            self.bands = [None] * count
+        for band in range(max(top, 0) // rows, min(-(-bottom // rows), count)):
+            band_top = band * rows
+            rect = content_rect(image_part(image, QRect(0, band_top, image.width(), min(rows, height - band_top))))
+            self.bands[band] = None if rect.isEmpty() else (
+                rect.left(), band_top + rect.top(), rect.right(), band_top + rect.bottom())
+        boxes = [box for box in self.bands if box is not None]
+        if not boxes:
+            self.rect = QRect()
+            return
+        left, right = min(box[0] for box in boxes), max(box[2] for box in boxes)
+        self.rect = QRect(left, boxes[0][1], right - left + 1, boxes[-1][3] - boxes[0][1] + 1)
+
+
+class TileComposer:
+    """Visible overlay widgets as tiles of the canvas for the OpenXR layer, kept between updates (as
+    CanvasComposer): groups computed again only when windows move or resize, each group image only drawn again
+    where its windows painted since, atlas kept while packed the same with only changed tiles drawn in it,
+    checksum read only where drawn"""
+
+    def __init__(self):
+        self._clusters: tuple[tuple, list[list[int]]] | None = None  # groups (cluster_rects) & their input
+        self._groups: list[TileGroup] = []
+        self._atlas: QImage | None = None
+        self._drawn: list[tuple] = []  # what each atlas tile shows: place & size, group, its version & part
+        self._checksum = RowChecksum()
+        self._frame: TileFrame | None = None
+
+    def reset(self):
+        """Images released, next ones drawn whole"""
+        self._clusters = self._atlas = self._frame = None
+        self._groups = []
+        self._drawn = []
+        self._checksum.reset()
+
+    def compose(self, widgets: list, max_tiles: int, gap: int) -> TileFrame | None:
+        """Tiles of visible widgets (atlas updated in place, valid until next call), None if nothing visible"""
+        visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
+        if not visible:
+            self.reset()
+            return None
+        geometries = [widget.frameGeometry() for widget in visible]
+        bounds = QRect()
+        for geometry in geometries:
+            bounds = bounds.united(geometry)
+        rects = tuple((rect.x() - bounds.x(), rect.y() - bounds.y(), rect.width(), rect.height())
+                      for rect in geometries)
+        cluster_key = (rects, gap, min(max_tiles, vr_shared.MAX_TILES))
+        if self._clusters is None or self._clusters[0] != cluster_key:
+            self._clusters = cluster_key, vr_shared.cluster_rects(rects, gap, cluster_key[2])
+        groups = []
+        parts: list[tuple[TileGroup, int, int]] = []  # group, canvas x & y of its visible part
+        for members in self._clusters[1]:
+            box = rects[members[0]]
+            for index in members[1:]:
+                box = vr_shared.union_rect(box, rects[index])
+            group = self.__group([visible[index] for index in members], [geometries[index] for index in members],
+                                 bounds.topLeft() + QPoint(box[0], box[1]), (box[2], box[3]))
+            groups.append(group)
+            if not group.rect.isEmpty():  # transparent margins not sent
+                parts.append((group, box[0] + group.rect.x(), box[1] + group.rect.y()))
+        self._groups = groups
+        if not parts:
+            return None
+        # Scale: atlas within shared memory (MAX_PIXELS) & largest image, canvas within layer limit
+        area = sum(group.rect.width() * group.rect.height() for group, _, _ in parts)
+        scale = min(1.0, math.sqrt(MAX_PIXELS / area), vr_shared.MAX_CANVAS / max(bounds.width(), bounds.height()))
+        while True:
+            sizes = [(max(round(group.rect.width() * scale), 1), max(round(group.rect.height() * scale), 1))
+                     for group, _, _ in parts]
+            packed = vr_shared.pack_atlas(sizes)
+            if packed is not None and packed[1] * packed[2] * 4 <= vr_shared.MAX_IMAGE_BYTES:
+                break
+            scale *= 0.9  # rows waste space: smaller until it fits (1 pixel tiles always do)
+        positions, atlas_width, atlas_height = packed
+        canvas = (min(max(round(bounds.width() * scale), 1), vr_shared.MAX_CANVAS),
+                  min(max(round(bounds.height() * scale), 1), vr_shared.MAX_CANVAS))
+        tiles = []
+        drawn = []
+        for (group, x, y), (width, height), (atlas_x, atlas_y) in zip(parts, sizes, positions):
+            canvas_x = min(round(x * scale), canvas[0] - width)  # rounding never moves a tile off canvas
+            canvas_y = min(round(y * scale), canvas[1] - height)
+            tiles.append(vr_shared.Tile(atlas_x, atlas_y, width, height, max(canvas_x, 0), max(canvas_y, 0)))
+            drawn.append((atlas_x, atlas_y, width, height, group, group.version, group.rect.getRect()))
+        atlas = self._atlas
+        if (atlas is None or (atlas.width(), atlas.height()) != (atlas_width, atlas_height)
+                or [item[:4] for item in drawn] != [item[:4] for item in self._drawn]):
+            if atlas is None or (atlas.width(), atlas.height()) != (atlas_width, atlas_height):
+                atlas = self._atlas = QImage(atlas_width, atlas_height, QImage.Format.Format_RGBA8888)
+            atlas.fill(Qt.GlobalColor.transparent)  # padding between tiles transparent
+            self._checksum.drawn(0, atlas_height)
+            changed = list(range(len(drawn)))
+        else:  # same places: tiles drawn again where their group changed (drawn whole, source mode)
+            changed = [index for index, (new, old) in enumerate(zip(drawn, self._drawn)) if new != old]
+        self._drawn = drawn
+        frame = self._frame
+        if not changed and frame is not None and frame.tiles == tuple(tiles) and frame.canvas == canvas:
+            return frame
+        if changed:
+            painter = QPainter(atlas)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            for index in changed:
+                atlas_x, atlas_y, width, height, group, _, _ = drawn[index]
+                image, rect = group.image, group.rect
+                if (width, height) != (rect.width(), rect.height()):  # visible part scaled (read in place)
+                    painter.drawImage(atlas_x, atlas_y, image_part(image, rect).scaled(
+                        width, height, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                else:  # visible part drawn from group image (no copy)
+                    painter.drawImage(QPoint(atlas_x, atlas_y), image, rect)
+                self._checksum.drawn(atlas_y, atlas_y + height)
+            painter.end()
+        layout = repr((tiles, canvas)).encode()
+        frame = self._frame = TileFrame(atlas, tuple(tiles), canvas, self._checksum.value(atlas, zlib.crc32(layout)))
+        return frame
+
+    def __group(self, widgets: list, geometries: list[QRect], origin: QPoint, size: tuple[int, int]) -> TileGroup:
+        """Image of a group, drawn again where its windows painted since (whole if windows changed)"""
+        targets = [QRect(geometry.topLeft() - origin, widget.size()) for widget, geometry in zip(widgets, geometries)]
+        key = (size, tuple((weakref.ref(widget), target.getRect(), widget.windowOpacity())  # weak: as CanvasComposer
+                           for widget, target in zip(widgets, targets)))
+        serials = [getattr(widget, "paint_serial", None) for widget in widgets]
+        group = next((group for group in self._groups if group.key == key), None)
+        if group is None:
+            return TileGroup(key, compose_group(widgets, origin, size), serials)
+        clip = QRegion()
+        for target, serial, last in zip(targets, serials, group.serials):
+            if serial is None or serial != last:  # painted since (or not counted)
+                clip += target
+        group.serials = serials
+        if clip.isEmpty():
+            return group
+        painter = QPainter(group.image)  # changed windows' rects cleared, all windows there drawn again in order
+        painter.setClipRegion(clip)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(clip.boundingRect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        for widget, target in zip(widgets, targets):
+            if clip.intersects(target):
+                draw_window(painter, widget, target)
+        painter.end()
+        bounds = clip.boundingRect()
+        group.drawn(bounds.top(), bounds.bottom() + 1)
+        group.version += 1
+        return group
+
+
+_tile_composer = TileComposer()  # OpenXR layer tiles
 
 
 def compose_tiles(widgets: list, max_tiles: int = OPENXR_MAX_TILES, gap: int = OPENXR_TILE_GAP) -> TileFrame | None:
     """Visible overlay widgets as tiles of the canvas (bounding box of all widgets, desktop layout):
     one tile per group of nearby widgets, cropped to its visible pixels, packed in an atlas.
     Scaled down (canvas too) when the atlas is bigger than the shared memory allows.
+    Same atlas updated in place by the next call (TileComposer).
 
     Returns:
         None if nothing visible.
     """
-    visible = [widget for widget in widgets if widget.isVisible() and widget.width() > 0]
-    if not visible:
-        return None
-    geometries = [widget.frameGeometry() for widget in visible]
-    bounds = QRect()
-    for geometry in geometries:
-        bounds = bounds.united(geometry)
-    rects = [(rect.x() - bounds.x(), rect.y() - bounds.y(), rect.width(), rect.height()) for rect in geometries]
-    parts: list[tuple[QImage, int, int]] = []  # image, canvas x & y
-    for group in vr_shared.cluster_rects(rects, gap, min(max_tiles, vr_shared.MAX_TILES)):
-        box = rects[group[0]]
-        for index in group[1:]:
-            box = vr_shared.union_rect(box, rects[index])
-        image = compose_group([visible[index] for index in group],
-                              bounds.topLeft() + QPoint(box[0], box[1]), (box[2], box[3]))
-        rect = content_rect(image)
-        if rect.isEmpty():
-            continue
-        if rect != image.rect():  # transparent margins not sent
-            image = image.copy(rect)
-        parts.append((image, box[0] + rect.x(), box[1] + rect.y()))
-    if not parts:
-        return None
-    # Scale: atlas within shared memory (MAX_PIXELS) & largest image, canvas within layer limit
-    area = sum(image.width() * image.height() for image, _, _ in parts)
-    scale = min(1.0, math.sqrt(MAX_PIXELS / area), vr_shared.MAX_CANVAS / max(bounds.width(), bounds.height()))
-    while True:
-        sizes = [(max(round(image.width() * scale), 1), max(round(image.height() * scale), 1)) for image, _, _ in parts]
-        packed = vr_shared.pack_atlas(sizes)
-        if packed is not None and packed[1] * packed[2] * 4 <= vr_shared.MAX_IMAGE_BYTES:
-            break
-        scale *= 0.9  # rows waste space: smaller until it fits (1 pixel tiles always do)
-    positions, atlas_width, atlas_height = packed
-    canvas = (min(max(round(bounds.width() * scale), 1), vr_shared.MAX_CANVAS),
-              min(max(round(bounds.height() * scale), 1), vr_shared.MAX_CANVAS))
-    atlas = QImage(atlas_width, atlas_height, QImage.Format.Format_RGBA8888)
-    atlas.fill(Qt.GlobalColor.transparent)  # padding between tiles transparent
-    painter = QPainter(atlas)
-    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-    tiles = []
-    for (image, x, y), (width, height), (atlas_x, atlas_y) in zip(parts, sizes, positions):
-        if (width, height) != (image.width(), image.height()):
-            image = image.scaled(width, height, Qt.AspectRatioMode.IgnoreAspectRatio,
-                                 Qt.TransformationMode.SmoothTransformation)
-        painter.drawImage(atlas_x, atlas_y, image)
-        canvas_x = min(round(x * scale), canvas[0] - width)  # rounding never moves a tile off canvas
-        canvas_y = min(round(y * scale), canvas[1] - height)
-        tiles.append(vr_shared.Tile(atlas_x, atlas_y, width, height, max(canvas_x, 0), max(canvas_y, 0)))
-    painter.end()
-    layout = repr((tiles, canvas)).encode()
-    checksum = zlib.crc32(memoryview(atlas.constBits())[:atlas.sizeInBytes()], zlib.crc32(layout))  # type: ignore[arg-type]
-    return TileFrame(atlas, tuple(tiles), canvas, checksum)
+    return _tile_composer.compose(widgets, max_tiles, gap)
 
 
 class ImageFrame(NamedTuple):
-    """Raw RGBA frame for SteamVR"""
+    """Raw RGBA frame for SteamVR: buffer over the image pixels (valid while image kept & unchanged)"""
 
     buffer: ctypes.Array
     width: int
     height: int
     checksum: int
+    image: QImage | None = None
 
 
 def image_checksum(image: QImage) -> int:
@@ -362,12 +649,13 @@ def image_checksum(image: QImage) -> int:
 
 
 def image_frame(image: QImage, checksum: int | None = None) -> ImageFrame:
-    """Copy image pixels once into ctypes buffer, with checksum for change detection"""
-    view = memoryview(image.constBits())[:image.sizeInBytes()]  # type: ignore[arg-type]
-    buffer = (ctypes.c_ubyte * len(view)).from_buffer_copy(view)
+    """ctypes buffer over image pixels (no copy, image detached first if shared), with checksum for change
+    detection. Same bytes & size (sizeInBytes) as the copy made before."""
     if checksum is None:
         checksum = image_checksum(image)
-    return ImageFrame(buffer, image.width(), image.height(), checksum)
+    size = image.sizeInBytes()
+    buffer = (ctypes.c_ubyte * size).from_buffer(memoryview(image.bits()))  # type: ignore[arg-type]
+    return ImageFrame(buffer, image.width(), image.height(), checksum, image)
 
 
 def overlay_transform(distance: float, vertical: float, horizontal: float) -> list[list[float]]:
@@ -443,7 +731,8 @@ class VROverlay(QObject):
         self._system = None  # openvr IVRSystem: SteamVR events (quit)
         self._overlay = None
         self._handle = None
-        self._buffer = None
+        self._buffer = None  # pixels sent last (ctypes buffer over _buffer_image), kept until next frame
+        self._buffer_image: QImage | None = None
         self._checksum: int | None = None
         self._visible = False
         self._has_image = False  # last composed image not empty (SteamVR overlay shown unless hidden for OpenXR)
@@ -468,6 +757,7 @@ class VROverlay(QObject):
         # Mirror window
         self._mirror: MirrorWindow | None = None
         self._mirror_checksum: int | None = None
+        self._mirror_version: int | None = None  # composer version of the mirror's image (partial repaint)
         self._compose_key: tuple | None = None  # overlay windows state of last composed image
 
     @property
@@ -504,7 +794,7 @@ class VROverlay(QObject):
             logger.info("ENABLED: VR mirror window")
         else:
             self._mirror.set_background(background)
-            self._mirror_checksum = None  # image sent again
+            self._mirror_checksum = self._mirror_version = None  # image sent again
             if self._mirror.isHidden():
                 self._mirror.show()
         if setting["enable_vr_overlay"]:
@@ -582,6 +872,7 @@ class VROverlay(QObject):
         self._xr_drawing = False
         self._xr_layers.clear()
         self._xr_tiles_visible = False
+        _tile_composer.reset()  # tile images released
         if writer is not None:
             writer.close()
             logger.info("DISABLED: VR overlay (OpenXR layer)")
@@ -787,7 +1078,7 @@ class VROverlay(QObject):
             self._system = openvr.init(openvr.VRApplication_Overlay)
             self._openvr = openvr
             self._overlay = openvr.IVROverlay()
-            self._handle = self._overlay.createOverlay("tinypedal.overlay", "Modern Tiny Pedals")
+            self._handle = self._overlay.createOverlay("tinypedal.overlay", "NeoPedal")
             self._overlay.setOverlayWidthInMeters(self._handle, max(float(setting["overlay_width_meters"]), 0.05))
             self.__set_transform(openvr, self._overlay, setting)
             self._overlay.showOverlay(self._handle)
@@ -837,7 +1128,7 @@ class VROverlay(QObject):
             except Exception:
                 logger.debug("VR overlay: shutdown failed", exc_info=True)
         was_running = self._handle is not None
-        self._openvr = self._system = self._overlay = self._handle = self._buffer = None
+        self._openvr = self._system = self._overlay = self._handle = self._buffer = self._buffer_image = None
         self._checksum = None
         self._visible = False
         self._hidden_for_openxr = False
@@ -887,24 +1178,34 @@ class VROverlay(QObject):
                     self._checksum = None
                     logger.info("VR overlay: SteamVR overlay shown")
         widgets = [widget for widget in QApplication.topLevelWidgets() if hasattr(widget, "widget_name")]
-        if self._xr_dirty:  # tiles held back by write rate limit
+        xr_checked = self._xr_dirty
+        if xr_checked:  # tiles held back by write rate limit
             self.__write_openxr(widgets, now)
         key = compose_key(widgets)
         if key is not None and key == self._compose_key:
             return  # no overlay window painted, moved, shown or hidden since last update
         self._compose_key = key
-        self.__write_openxr(widgets, now)
+        if not xr_checked:  # already composed from current widgets on this tick (or held back again)
+            self.__write_openxr(widgets, now)
         if overlay is not None and self._hidden_for_openxr:
             overlay = None  # hidden for OpenXR: no image sent (~4 MB), sent again once shown
             self._checksum = None
         if self._mirror is None and overlay is None:
             return  # OpenXR layer only: whole canvas image not needed
         image = compose_widgets(widgets)
-        checksum = image_checksum(image) if image is not None else None
-        if self._mirror is not None:
-            if checksum != self._mirror_checksum:
+        composer = _composer if image is not None and image is _composer.image else None
+        if composer is not None:  # only rows drawn since last time read
+            checksum = composer.checksum()
+        else:
+            checksum = image_checksum(image) if image is not None else None
+        mirror = self._mirror
+        if mirror is not None:
+            if checksum != self._mirror_checksum or mirror.image is not image:
                 self._mirror_checksum = checksum
-                self._mirror.set_image(image)
+                # Only the part drawn since the mirror's last image painted again (else whole window)
+                partial = composer is not None and self._mirror_version == composer.version - 1
+                mirror.set_image(image, composer.dirty if partial and composer is not None else None)
+            self._mirror_version = composer.version if composer is not None else None
         if overlay is None:
             return
         try:
@@ -917,7 +1218,7 @@ class VROverlay(QObject):
             if checksum != self._checksum:  # skip unchanged image
                 frame = image_frame(image, checksum)
                 self._checksum = frame.checksum
-                self._buffer = frame.buffer  # keep reference until next frame
+                self._buffer, self._buffer_image = frame.buffer, frame.image  # keep reference until next frame
                 overlay.setOverlayRaw(self._handle, frame.buffer, frame.width, frame.height, 4)
             self.__steamvr_show(not self._hidden_for_openxr)
         except Exception as error:  # SteamVR closed, or openvr error
@@ -956,7 +1257,7 @@ class VROverlay(QObject):
     def disable_mirror(self):
         """Close VR mirror window"""
         mirror, self._mirror = self._mirror, None
-        self._mirror_checksum = None
+        self._mirror_checksum = self._mirror_version = None
         if mirror is not None:
             mirror.hide()
             mirror.deleteLater()
@@ -982,6 +1283,7 @@ class VROverlay(QObject):
         self._steamvr_check = None  # background check result ignored
         self._has_image = False
         self.__release_steamvr()
+        _composer.reset()  # canvas image released
         try:
             self.__close_openxr()
         except Exception:

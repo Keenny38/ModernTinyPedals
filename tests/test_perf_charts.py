@@ -1,4 +1,4 @@
-"""Results positions & stats charts: hover and reveal frames repaint only the small hover layer"""
+"""Results positions & stats charts: hover, pick, reveal & resize frames repaint nothing heavy"""
 
 import time
 
@@ -24,6 +24,7 @@ class FakeResults(QObject):
         super().__init__()
         self._positions = positions
         self._selected = ""
+        self.views = []  # plot sizes lines were asked for
 
     @Property(dict, notify=positionsChanged)
     def positions(self):
@@ -38,13 +39,18 @@ class FakeResults(QObject):
         self._selected = key
         self.driverChanged.emit()
 
+    @Slot(float, float, float, float, float)
+    def setChartView(self, width, height, thin, thick, wide):
+        self.views.append((width, height))
+
 
 def positions_data(cars=20, laps=40):
     series = []
     for car in range(cars):
-        points = [[lap, (car + lap) % cars + 1] for lap in range(laps + 1)]
+        places = [(car + lap) % cars + 1 for lap in range(laps + 1)]
         series.append({"key": str(car), "name": f"Car {car}", "number": str(car), "color": "#4488CC",
-                       "player": car == 3, "points": points})
+                       "player": car == 3, "places": places, "last": [laps, places[-1]], "thin": f"thin{car}",
+                       "thick": f"thick{car}", "wide": f"wide{car}" if car == 3 else ""})
     return {"series": series, "laps": laps, "places": cars}
 
 
@@ -123,35 +129,53 @@ def paint_counter(root, name):
     return Count()
 
 
-def test_positions_hover_repaints_top_layer_only(chart_view):
+def items_of(root):
+    """Visual items under root (Repeater delegates included)"""
+    found, todo = [], list(root.childItems())
+    while todo:
+        item = todo.pop()
+        found.append(item)
+        todo.extend(item.childItems())
+    return found
+
+
+def shapes(root):
+    """GpuShape items of chart: key, visible"""
+    return {item.property("key"): item.isVisible() for item in items_of(root)
+            if item.metaObject().className().startswith("GpuShape") and item.property("key")}
+
+
+def test_positions_lines_on_gpu(chart_view):
+    """No canvas: lines built once plot size settles (resize frames only scale them), hover & pick show lines"""
     make, _ = chart_view
     backend = FakeResults(positions_data())
     view = make("ResultsPositions { }", backend)
     settle(0.9)  # reveal animation done
     chart = view.rootObject()
-    low = paint_counter(chart, "positionsDimLow")
-    high = paint_counter(chart, "positionsDimHigh")
-    top = paint_counter(chart, "positionsTop")
-    wait_for(lambda: low[0] >= 1, view)
-    assert low[0] >= 1 and high[0] == 0  # only the layer shown is painted
-    low_start, top_start = low[0], top[0]
+    assert not [item for item in items_of(chart) if "Canvas" in item.metaObject().className()]
+    plot = (round(chart.property("plotWidth")), round(chart.property("plotHeight")))
+    assert backend.views and backend.views[-1] == plot
+    lines = shapes(chart)
+    assert lines["thin0"] and not lines.get("thin3") and lines["wide3"]  # player drawn wide, not dimmed
     # nearest car from place table: car 0 is P1 at lap 0
     plot_x, plot_y = chart.property("plotX"), chart.property("plotY")
     assert chart.nearest(plot_x, plot_y) == 0
     assert chart.nearest(plot_x, plot_y - 1000) == -1
     chart.setProperty("hovered", 5)
-    wait_for(lambda: top[0] > top_start and high[0] >= 1, view)
-    assert top[0] > top_start and high[0] == 1  # dim layer of hover painted once
-    for index in (6, 7, 8):
-        chart.setProperty("hovered", index)
-        settle(0.02)
-    chart.setProperty("hovered", -1)
-    settle()
-    assert high[0] == 1 and low[0] == low_start  # other cars never painted again on hover
+    settle(0.05)
+    assert shapes(chart).get("thick5")
     backend.selectEntry("2")
-    wait_for(lambda: high[0] >= 2, view)
-    assert chart.property("picked") == 2 and high[0] == 2  # car picked: dim lines painted without it
-    assert low[0] == low_start  # dim level of nothing highlighted not needed while a car is picked
+    settle(0.05)
+    lines = shapes(chart)
+    assert chart.property("picked") == 2 and lines.get("thick2") is not None and not lines["thin2"]
+    asked = len(backend.views)
+    for width in range(700, 900, 25):  # resize frames: lines scaled, not built again
+        view.resize(width, 520)
+        settle(0.01)
+    assert len(backend.views) <= asked + 2  # 8 frames
+    settle(0.5)
+    plot = (round(chart.property("plotWidth")), round(chart.property("plotHeight")))
+    assert backend.views[-1] == plot and len(backend.views) <= asked + 3  # once size settled
 
 
 def test_stats_chart_hover_and_reveal(chart_view):
@@ -164,16 +188,23 @@ def test_stats_chart_hover_and_reveal(chart_view):
     chart = view.rootObject()
     chart.setProperty("chartData", data)
     data_paints = paint_counter(chart, "statsData")
-    hover_paints = paint_counter(chart, "statsHover")
+    hover = chart.findChild(QObject, "statsHover")
+    dot = chart.findChild(QObject, "statsHoverDot")
     settle(0.8)  # reveal animation: no data repaint per frame
     wait_for(lambda: data_paints[0] >= 1, view)
     assert 1 <= data_paints[0] <= 2
     plot_x, plot_width = chart.property("plotX"), chart.property("plotWidth")
     assert chart.nearest(plot_x + plot_width * 4 / 9 + 1) == 4
     assert chart.nearest(-1000) == -1
-    painted, hovered = data_paints[0], hover_paints[0]
-    chart.setProperty("hovered", 4)
+    painted = data_paints[0]
+    assert not hover.property("visible")
+    chart.setProperty("hovered", 4)  # new personal best: accent dot
     settle()
-    chart.setProperty("hovered", 5)
-    wait_for(lambda: hover_paints[0] >= hovered + 2, view)
-    assert data_paints[0] == painted and hover_paints[0] == hovered + 2
+    assert hover.property("visible") and hover.property("stroke") > 0
+    chart.setProperty("hovered", 5)  # guide & dot moved, nothing painted
+    settle()
+    center = dot.property("x") + dot.property("width") / 2
+    assert abs(center - chart.px(points[5]["x"])) < 0.5 and hover.property("stroke") == 0
+    chart.setProperty("hovered", -1)
+    settle()
+    assert not hover.property("visible") and data_paints[0] == painted

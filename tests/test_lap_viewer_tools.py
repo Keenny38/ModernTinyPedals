@@ -207,7 +207,7 @@ def test_unavailable_channels_greyed(viewer):  # noqa: F811
 def test_cursor_state_and_differences(viewer):  # noqa: F811
     backend = viewer.backend
     state = backend.cursorState(500.0)
-    assert set(state) == {"title", "values", "map", "g"} and state["title"] == "500 m"
+    assert set(state) == {"title", "values", "map", "g", "inputs", "dashboard"} and state["title"] == "500 m"
     speed = state["values"][backend.visible.index("speed_kph")]
     assert len(speed) == len(backend.data.laps) and speed[0]["diff"] == "" and speed[1]["diff"]
     beyond = backend.cursorValues(5000.0)[0]  # past end of laps: one empty entry per lap (QML items kept)
@@ -588,16 +588,19 @@ def test_track_limits_job_and_cache(viewer, laps):  # noqa: F811
     save(5, 71.5, BASE + 500)
     backend.refresh()  # 3 clean laps with positions: track limits guessed in background
     wait_loaded(viewer)
+    backend.wait_jobs()  # cache read in background
     assert backend._limits is not None or backend._limits_job is not None
     while backend._limits_job is not None:
         backend._limits_job.join()
         backend.check_limits_job()
+    backend.wait_jobs()  # lap placement measured in background, then charts & map built again
     assert backend.hasLimits and backend.trackMap["limits"]
     cache = backend.limits_cache_path(backend.currentTrack)
     assert os.path.exists(cache)
     assert any(point["kind"] == "trackout" for point in backend.trackMap["points"])
     backend._limits, backend._limits_track = None, ""
-    backend.start_limits(backend.currentTrack)  # same laps: read from cache, no thread
+    backend.start_limits(backend.currentTrack)  # same laps: read from cache, no worker job
+    backend.wait_jobs()
     assert backend._limits is not None and backend._limits_job is None
     assert backend.limitsSource == "estimated"  # laps without game track edges
     backend.setMapOption("limits", False)

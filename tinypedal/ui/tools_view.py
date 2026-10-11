@@ -51,6 +51,7 @@ TOOL_SECTIONS = (
         ("Track Map Viewer", "\ue707", "track_map_viewer.TrackMapViewer"),  # map pin
         ("Lap Telemetry Viewer", "\ue9d2", "lap_viewer.LapViewer"),  # area chart
         ("Game Replays", "\ue714", "game_replays.GameReplays"),  # video
+        ("Broadcast Director", "\ue9e9", "broadcast_director.BroadcastDirector"),  # sliders (mixing desk)
         ("Race Results", "\ue7c1", "race_results_viewer.RaceResultsViewer"),  # flag
         ("Stream Overlays", "\ue93e", "stream_overlay_view.StreamOverlaysView"),  # streaming
     )),
@@ -97,6 +98,10 @@ TOOL_KEYWORDS = {
     "race_results_viewer.RaceResultsViewer": (
         "results classification standings finish position grid laps sectors incidents penalties session "
         "resultats classement arrivee grille tours secteurs incidents penalites"
+    ),
+    "broadcast_director.BroadcastDirector": (
+        "lmu broadcast director cast casting camera cameras spectator stream commentator commentary battle "
+        "auto director tv production regie realisateur spectateur commentateur commentaires bagarre diffusion"
     ),
     "game_replays.GameReplays": (
         "lmu replay incident contact crash watch rediffusion incidents contacts accrochage revoir"

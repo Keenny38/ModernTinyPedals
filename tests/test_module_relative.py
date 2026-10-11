@@ -157,6 +157,7 @@ FIELD = [  # class, place, time into lap (s), in pits, in garage, best, last
     ("GT3", 5, 95.0, False, True, 0.0, 0.0),  # 4 in garage
 ]
 SLOT_IDS: dict[int, int] = {}  # slot id of index if not same as index
+SCORING_TIME = {"elapsed": 0.0}  # session elapsed time of scoring data
 
 
 @pytest.fixture
@@ -174,7 +175,8 @@ def field(ui_env, monkeypatch):
     timing = SimpleNamespace(
         estimated_laptime=lambda: 100.0, estimated_time_into=lambda index=0: FIELD[index][2],
         best_laptime=lambda index=0: FIELD[index][5], last_laptime=lambda index=0: FIELD[index][6])
-    monkeypatch.setattr(api, "read", SimpleNamespace(vehicle=vehicle, timing=timing))
+    session = SimpleNamespace(elapsed=lambda: SCORING_TIME["elapsed"])
+    monkeypatch.setattr(api, "read", SimpleNamespace(vehicle=vehicle, timing=timing, session=session))
     monkeypatch.setattr(realtime_state, "paused", False)
 
 
@@ -235,6 +237,33 @@ def test_standings_split_by_class_fastest_class_first():
     assert lists == [[2, 3, -1], [0, 1, -1]]  # hypercars (faster) first, gap after each class
 
 
+def test_class_order_option():
+    from tinypedal.module.module_relative import class_key, class_order_rank, standings_index_from_all_classes
+
+    assert class_key(" LMP2 ELMS ") == class_key("lmp2_elms") == "lmp2elms"
+    assert class_order_rank("Hypercar, LMP2 ELMS,, lmp2, Hypercar") == {"hypercar": 0, "lmp2elms": 1, "lmp2": 2}
+    assert class_order_rank("") == {}
+    classes = [entry("GT3", 5, 0, best=101.0), entry("LMP2", 3, 1, best=98.0),
+               entry("Hypercar", 1, 2, best=95.0), entry("DPi", 2, 3, best=96.0)]
+    order = class_order_rank("GT3, LMP2_ELMS, Hypercar")  # LMP2_ELMS absent: skipped
+    lists = list(standings_index_from_all_classes(1, classes, "GT3", 1, 3, 5, order))
+    assert lists == [[0, -1], [2, -1], [3, -1], [1, -1]]  # GT3, Hypercar, then unlisted fastest first
+    assert list(standings_index_from_all_classes(1, classes, "GT3", 1, 3, 5)) == [
+        [2, -1], [3, -1], [1, -1], [0, -1]]  # no order: fastest class first
+
+
+@pytest.mark.parametrize(("others", "shown"), [(1, [2]), (0, []), (5, [2, 3])])
+def test_other_class_count_not_raised_by_minimum_top(others, shown):
+    """Cars of a class player is not in: exactly the count asked (0: class hidden), even below minimum top"""
+    from tinypedal.module.module_relative import other_class_vehicles, standings_index_from_all_classes
+
+    classes = [entry("GT3", 3, 0, best=101.0), entry("GT3", 4, 1, best=101.0),
+               entry("HY", 1, 2, best=95.0), entry("HY", 2, 3, best=95.0)]
+    lists = list(standings_index_from_all_classes(3, classes, "GT3", 1, other_class_vehicles(others), 5))
+    assert lists == [[*shown, -1], [0, 1, -1]]  # player class keeps its own limits
+    assert other_class_vehicles(-2) == 0
+
+
 @pytest.mark.parametrize(("option", "value"), [
     ("enable_single_class_exclusive_mode", True),
     ("enable_multi_class_split_mode", True),
@@ -258,3 +287,56 @@ def test_module_loop_outputs_standings(field, option, value):
     else:
         assert 2 in standings
     assert minfo.relative.drawOrder[-1] == 2
+
+
+def test_module_loop_skips_ticks_without_new_scoring(field, monkeypatch):
+    """Tick skipped while scoring data & settings unchanged, except relative delta update every second"""
+    from tinypedal.module import module_relative
+    from tinypedal.setting import cfg
+
+    runs: list[bool] = []  # relative delta updated, per run
+    original = module_relative.get_vehicles_info
+
+    def counting(*args):
+        runs.append(args[3])
+        return original(*args)
+
+    clock = [0.0]
+    monkeypatch.setattr(module_relative, "get_vehicles_info", counting)
+    monkeypatch.setattr(module_relative, "monotonic", lambda: clock[0])
+    monkeypatch.setitem(SCORING_TIME, "elapsed", 5.0)
+    module = module_relative.Realtime(cfg, "module_relative")
+
+    def new_scoring():
+        SCORING_TIME["elapsed"] += 0.2
+
+    def new_setting():
+        cfg.version_update += 1
+
+    steps = iter((  # (clock, change before tick, expected run: relative delta updated or None if skipped)
+        (10.0, None, True),  # first tick
+        (10.1, None, None),
+        (10.2, new_scoring, False),
+        (10.3, None, None),
+        (11.05, None, True),  # same data, relative delta due
+        (11.1, None, None),
+        (11.2, new_setting, False),
+        (11.3, None, None),
+    ))
+    expected: list[bool] = []
+
+    def wait(interval):
+        step = next(steps, None)
+        if step is None:
+            return True
+        clock[0], change, run = step
+        if change is not None:
+            change()
+        if run is not None:
+            expected.append(run)
+        return False
+
+    monkeypatch.setattr(cfg, "version_update", cfg.version_update)
+    module._event.wait = wait
+    module.update_data()
+    assert runs == expected == [True, False, True, False]

@@ -76,11 +76,26 @@ def viewer(ui_env, monkeypatch):
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+def wait_library(library, timeout: float = 10.0):
+    """Process events until imported laps are listed (read in background)"""
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    end = time.monotonic() + timeout
+    while library.is_refreshing() and time.monotonic() < end:
+        QApplication.processEvents()
+        time.sleep(0.005)
+    assert not library.is_refreshing()
+
+
 def open_library(viewer):
     from tinypedal.ui.lap_library import LapLibrary
 
     viewer.backend.openLibrary()
-    return next(widget for widget in viewer.findChildren(LapLibrary) if widget.isVisible())
+    library = next(widget for widget in viewer.findChildren(LapLibrary) if widget.isVisible())
+    wait_library(library)
+    return library
 
 
 def test_library_lists_and_adds_to_viewer(viewer):
@@ -112,6 +127,7 @@ def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
     library.rename()
     assert not inputs[0]._on_accept("bad/name") and warnings
     assert inputs[0]._on_accept("Spa best")
+    wait_library(library)
     assert library.tree.topLevelItem(0).text(library.COL_NAME) == "Spa best"
     assert all("Spa best" in entry.file.path for entry in viewer.backend.external)
     assert all(os.path.exists(path) for path in viewer.backend.ordered_checked())
@@ -120,9 +136,11 @@ def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
     library.tree.clearSelection()
     library.tree.topLevelItem(0).child(0).setSelected(True)
     library.delete()
+    wait_library(library)
     assert len(viewer.backend.external) == 1 and library.tree.topLevelItem(0).childCount() == 1
     library.tree.topLevelItem(0).setSelected(True)
     library.delete()
+    wait_library(library)
     assert not viewer.backend.external and library.tree.topLevelItemCount() == 0
     assert library.label_empty.isVisibleTo(library)
     library.close()
@@ -144,6 +162,7 @@ def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
     library.import_logs()
     assert not library.button_import.isEnabled()  # import running in background
     viewer.backend.wait_jobs()  # imports are lap viewer page jobs
+    wait_library(library)
     assert library.button_import.isEnabled()
     names = [item.text(library.COL_NAME) for item in library.top_items()]
     assert names == ["Monza run", "Spa race"] and warnings  # broken log reported

@@ -31,7 +31,7 @@ from ..const_common import (
 )
 from ..formatter import random_color_class, shorten_driver_name
 from ..module_info import minfo
-from ..userfile.custom_image import cached_brand_logo
+from ..userfile.custom_image import BrandLogos
 from ..userfile.heatmap import select_compound_color, select_compound_symbol
 from ._base import Overlay
 from ._painter import MultiCompounds
@@ -74,7 +74,8 @@ class Realtime(Overlay):
         self.veh_range = max(self.max_veh_front + self.max_veh_behind, min_base_veh * 2) + 1
 
         # Empty dataset
-        self.pixmap_brandlogo = {}
+        self.brand_logos = BrandLogos(self, self.cfg.path.brand_logo, self.brd_width, self.brd_height,
+                                      self.brand_logo_arrived)
         self.row_visible = [False] * self.veh_range
 
         # Driver position
@@ -1162,13 +1163,14 @@ class Realtime(Overlay):
 
     def set_brand_logo(self, brand_name: str):
         """Set brand logo"""
-        return cached_brand_logo(
-            self.pixmap_brandlogo,
-            filepath=self.cfg.path.brand_logo,
-            filename=brand_name,
-            max_width=self.brd_width,
-            max_height=self.brd_height,
-        )
+        return self.brand_logos.get(brand_name)
+
+    def brand_logo_arrived(self, brand_name: str, pixmap):
+        """Brand logo read in background: drawn in cells showing brand"""
+        for target in self.bars_brd:
+            if target.last is not None and target.last[0] == brand_name and target.last[-1]:
+                target.image = pixmap
+                target.update()
 
     def set_class_style(self, class_name: str):
         """Compare vehicle class name with user defined dictionary"""

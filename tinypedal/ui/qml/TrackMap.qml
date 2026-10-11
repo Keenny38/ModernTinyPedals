@@ -20,6 +20,7 @@ FocusScope {
     signal expandToggled()
 
     readonly property var info: backend.trackMap
+    readonly property var cornerInfo: backend.mapCorners  // corner & sector labels: compared lap changes only them
     readonly property bool hasMap: info.road !== undefined
     readonly property bool chartZoomed: chart ? chart.zoomed : false
     readonly property string mode: backend.mapMode
@@ -48,6 +49,7 @@ FocusScope {
     readonly property real trackMargin: 60  // meters kept around followed vehicles
     property real trackZoom: 1  // zoom while following, changed with wheel
     readonly property var comparedLaps: backend.comparedLaps  // read once (list built by backend)
+    readonly property var mapLegend: backend.mapLegend  // read once (dict built by backend on every read)
     // Shown cursor positions: none while hidden (no item updated on every cursor move)
     readonly property var cursorPoints: visible && chart ? chart.cursorMap : []
     // Map scale corner labels were placed for: overlaps only depend on scale (moving the map changes none),
@@ -62,7 +64,7 @@ FocusScope {
     }
     // Corner labels shown: highest time delta first, labels overlapping a shown one hidden
     readonly property var labelShown: {
-        var corners = info.corners || []
+        var corners = cornerInfo.corners || []
         var order = corners.map(function(corner, index) { return index })
         order.sort(function(a, b) { return (corners[b].priority || 0) - (corners[a].priority || 0) })
         var placed = []
@@ -103,6 +105,9 @@ FocusScope {
     function shownKinds() {
         return ["brake", "apex", "exit", "trackout", "lock", "spin", "offtrack", "limit"].filter(function(kind) { return root.pointShown(kind) })
     }
+    // Kinds hovered points are picked among: told to backend only when they change (not on every hover)
+    readonly property string kindsShown: shownKinds().join(",")
+    onKindsShownChanged: backend.setMapKinds(shownKinds())
     function hasEvents(kind) {
         var events = info.events || []
         for (var i = 0; i < events.length; i++) if (events[i].kind === kind) return true
@@ -135,19 +140,22 @@ FocusScope {
         if (range.length === 2 && chart) chart.zoomRange(range, 0.15)
         backend.setSelectedCorner(row)
     }
-    // Mouse over map, at most once per frame: driving point tooltip, else chart cursor on line (scrub)
+    // Mouse over map, at most once per frame: driving point tooltip, else chart cursor on line (scrub), one backend
+    // call for all of it (cursor state given to charts)
     function handleHover() {
         if (hoverPosition === null) return
         var x = hoverPosition[0], y = hoverPosition[1]
         if (rulerMode) return
-        var point = backend.mapPointAt(x, y, theme.em * 0.8 * canvas.metersPerPixel, shownKinds())
-        hoverPoint = point.tip !== undefined ? point : null
-        if (!chart || chart.playing) return
-        var position = backend.mapPick(x, y, theme.em * 1.2 * canvas.metersPerPixel)
+        var scrub = !!chart && !chart.playing
+        var hover = backend.mapHover(x, y, theme.em * 0.8 * canvas.metersPerPixel, theme.em * 1.2 * canvas.metersPerPixel,
+                                     highlightKey, scrub)
+        hoverPoint = hover.point.tip !== undefined ? hover.point : null
+        if (!scrub) return
+        var position = hover.x
         if (position >= 0) {
             scrubbing = true
-            chart.setCursor(position, "map")
-            placement = hoverPoint === null ? backend.placementAt(position, highlightKey) : ({})
+            chart.applyCursor(position, "map", hover.cursor)
+            placement = hover.placement
         } else if (scrubbing) {
             scrubbing = false
             placement = ({})
@@ -183,7 +191,7 @@ FocusScope {
             if (visible && chart && chart.hasCursor) chart.fetchCursor()  // cursor positions skipped while hidden
         }
     }
-    Component.onCompleted: { labelScale = canvas.mapScale; reportShown() }
+    Component.onCompleted: { labelScale = canvas.mapScale; reportShown(); backend.setMapKinds(shownKinds()) }
     Component.onDestruction: if (reportedShown) backend.setMapShown(false)
     function exportPicture(copy) {
         canvas.grabToImage(function(result) {
@@ -200,8 +208,9 @@ FocusScope {
     // View centered on followed vehicles (highlighted lap only if any), zoomed out if needed to keep all of them,
     // eased toward target each update: smooth camera
     function trackVehicles(frameTime) {
-        var points = (chart.cursorMap || []).filter(function(point) {
-            return point && (highlightKey === "" || point.lap === highlightKey)
+        var lines = info.lines || []
+        var points = (chart.cursorMap || []).filter(function(point, index) {
+            return point && (highlightKey === "" || (lines[index] && lines[index].lap === highlightKey))
         })
         if (points.length === 0 || canvas.width <= 0) return true
         var x0 = points[0].x, x1 = x0, y0 = points[0].y, y1 = y0
@@ -234,8 +243,9 @@ FocusScope {
         function onTargetEndChanged() { followTimer.restart(); viewTimer.restart() }
         function onCursorMapChanged() { if (root.tracking && !camera.running) camera.start() }
     }
-    Timer { id: followTimer; interval: 10; onTriggered: if (root.visible) root.followChart() }
+    Timer { id: followTimer; interval: 33; onTriggered: if (root.visible) root.followChart() }  // once per 2 frames at most
     onInfoChanged: { followTimer.restart(); hoverPoint = null; card = ({}) }  // map built again: zoomed part shown again
+    onCornerInfoChanged: card = ({})  // corner card of former compared lap
     onVisibleChanged: {
         reportShown()
         if (visible) { followTimer.restart(); viewTimer.restart() }
@@ -485,53 +495,50 @@ FocusScope {
                 color: theme.dimText
             }
 
-            // Pit lane (official circuit)
-            GpuShape {
-                visible: root.options.pit === true
-                key: root.info.pit || ""
-                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.22 : 0.25)
-                revision: backend.revision
+            // Circuit shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+            Item {
                 transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            // Circuit: road (between track limits if guessed), edge, sector lines
-            GpuShape {
-                key: root.info.edge || ""
-                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, root.info.limits ? (theme.dark ? 0.35 : 0.4) : (theme.dark ? 0.16 : 0.22))
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            GpuShape {
-                key: root.info.road || ""
-                color: theme.dark ? Qt.lighter(theme.base, 1.45) : Qt.darker(theme.base, 1.07)
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            GpuShape {
-                key: root.info.marks || ""
-                color: theme.accent
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            // Braking points range of shown laps in each corner
-            GpuShape {
-                visible: root.options.spread === true
-                key: root.info.spread || ""
-                color: Qt.rgba(0.94, 0.27, 0.27, 0.3)
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            // Chart markers A-B range & selected corner along reference line
-            GpuShape {
-                key: root.info.rangeKey || ""
-                color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.28)
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            GpuShape {
-                key: root.info.selectedKey || ""
-                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.16)
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
+                // Pit lane (official circuit)
+                GpuShape {
+                    visible: root.options.pit === true
+                    key: root.info.pit || ""
+                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.22 : 0.25)
+                    revision: backend.revision
+                }
+                // Circuit: road (between track limits if guessed), edge, sector lines
+                GpuShape {
+                    key: root.info.edge || ""
+                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, root.info.limits ? (theme.dark ? 0.35 : 0.4) : (theme.dark ? 0.16 : 0.22))
+                    revision: backend.revision
+                }
+                GpuShape {
+                    key: root.info.road || ""
+                    color: theme.dark ? Qt.lighter(theme.base, 1.45) : Qt.darker(theme.base, 1.07)
+                    revision: backend.revision
+                }
+                GpuShape {
+                    key: root.info.marks || ""
+                    color: theme.accent
+                    revision: backend.revision
+                }
+                // Braking points range of shown laps in each corner
+                GpuShape {
+                    visible: root.options.spread === true
+                    key: root.info.spread || ""
+                    color: Qt.rgba(0.94, 0.27, 0.27, 0.3)
+                    revision: backend.revision
+                }
+                // Chart markers A-B range & selected corner along reference line
+                GpuShape {
+                    key: root.info.rangeKey || ""
+                    color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.28)
+                    revision: backend.revision
+                }
+                GpuShape {
+                    key: root.info.selectedKey || ""
+                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.16)
+                    revision: backend.revision
+                }
             }
             // Distance marks, placed from map origin in an item moved with the map: moving the map moves one item,
             // not every label (same place on screen as canvas.screenX / screenY)
@@ -555,79 +562,76 @@ FocusScope {
                     }
                 }
             }
-            // Driving direction
-            GpuShape {
-                visible: root.options.arrows === true
-                key: root.info.arrowsKey || ""
-                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
-                revision: backend.revision
+            // Lines & zones: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+            Item {
                 transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            // Driving lines: faded when zoomed (zoomed part drawn over), or under colored line
-            // (lap rows kept: showing one more lap only adds its shapes)
-            Repeater {
-                model: backend.mapLaps
+                // Driving direction
                 GpuShape {
-                    key: model.key
-                    color: model.color
+                    visible: root.options.arrows === true
+                    key: root.info.arrowsKey || ""
+                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
                     revision: backend.revision
-                    opacity: (root.mode === "laps" ? (root.chartZoomed ? 0.3 : 0.95)
-                              : root.mode === "gain" || root.mode === "line" ? (model.reference ? 0.45 : 0) : 0.12)
-                             * root.lapOpacity(model.lap)
+                }
+                // Driving lines: faded when zoomed (zoomed part drawn over), or under colored line
+                // (lap rows kept: showing one more lap only adds its shapes)
+                Repeater {
+                    model: backend.mapLaps
+                    GpuShape {
+                        key: model.key
+                        color: model.color
+                        revision: backend.revision
+                        opacity: (root.mode === "laps" ? (root.chartZoomed ? 0.3 : 0.95)
+                                  : root.mode === "gain" || root.mode === "line" ? (model.reference ? 0.45 : 0) : 0.12)
+                                 * root.lapOpacity(model.lap)
+                        visible: opacity > 0
+                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                    }
+                }
+                GpuShape {
+                    key: root.info.colored || ""
+                    opacity: root.mode === "laps" ? 0 : 1
                     visible: opacity > 0
                     Behavior on opacity { NumberAnimation { duration: 250 } }
-                    transform: Matrix4x4 { matrix: canvas.matrix }
-                }
-            }
-            GpuShape {
-                key: root.info.colored || ""
-                opacity: root.mode === "laps" ? 0 : 1
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 250 } }
-                revision: backend.revision
-                transform: Matrix4x4 { matrix: canvas.matrix }
-            }
-            Repeater {
-                model: backend.mapLaps
-                GpuShape {
-                    key: model.highlight
-                    color: model.color
-                    visible: root.chartZoomed && root.mode === "laps"
-                    opacity: root.lapOpacity(model.lap)
                     revision: backend.revision
-                    transform: Matrix4x4 { matrix: canvas.matrix }
                 }
-            }
-            // Braking & throttle application zones over lines: highlighted lap, else reference lap
-            Repeater {
-                model: backend.mapLaps
-                Item {
-                    readonly property var lap: model
-                    visible: root.options.zones === true && (root.highlightKey !== "" ? lap.lap === root.highlightKey : lap.reference)
+                Repeater {
+                    model: backend.mapLaps
                     GpuShape {
-                        key: lap.brakeZones
-                        color: Qt.rgba(0.94, 0.27, 0.27, 0.45)
+                        key: model.highlight
+                        color: model.color
+                        visible: root.chartZoomed && root.mode === "laps"
+                        opacity: root.lapOpacity(model.lap)
                         revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: lap.throttleZones
-                        color: root.options.colorblind === true ? Qt.rgba(0.23, 0.51, 0.96, 0.45) : Qt.rgba(0.13, 0.77, 0.37, 0.45)
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
                     }
                 }
-            }
+                // Braking & throttle application zones over lines: highlighted lap, else reference lap
+                Repeater {
+                    model: backend.mapLaps
+                    Item {
+                        readonly property var lap: model
+                        visible: root.options.zones === true && (root.highlightKey !== "" ? lap.lap === root.highlightKey : lap.reference)
+                        GpuShape {
+                            key: lap.brakeZones
+                            color: Qt.rgba(0.94, 0.27, 0.27, 0.45)
+                            revision: backend.revision
+                        }
+                        GpuShape {
+                            key: lap.throttleZones
+                            color: root.options.colorblind === true ? Qt.rgba(0.23, 0.51, 0.96, 0.45) : Qt.rgba(0.13, 0.77, 0.37, 0.45)
+                            revision: backend.revision
+                        }
+                    }
+                }
 
-            // Cursor trail: last seconds of each lap, fading in
-            Repeater {
-                model: backend.mapLaps
-                GpuShape {
-                    key: model.trail
-                    visible: root.options.trail === true && root.chart !== undefined && root.chart !== null && root.chart.hasCursor
-                    opacity: root.lapOpacity(model.lap)
-                    revision: backend.trailRevision
-                    transform: Matrix4x4 { matrix: canvas.matrix }
+                // Cursor trail: last seconds of each lap, fading in
+                Repeater {
+                    model: backend.mapLaps
+                    GpuShape {
+                        key: model.trail
+                        visible: root.options.trail === true && root.chart !== undefined && root.chart !== null && root.chart.hasCursor
+                        opacity: root.lapOpacity(model.lap)
+                        revision: backend.trailRevision
+                    }
                 }
             }
 
@@ -661,7 +665,7 @@ FocusScope {
 
             // Sector times: reference lap time, gap of compared lap
             Repeater {
-                model: root.options.sectors === true ? (root.info.sectors || []) : []
+                model: root.options.sectors === true ? (root.cornerInfo.sectors || []) : []
                 Rectangle {
                     readonly property real anchorX: canvas.screenX(modelData.x)
                     readonly property real anchorY: canvas.screenY(modelData.y)
@@ -694,26 +698,27 @@ FocusScope {
             }
 
             // Driving points & wheel slips: GPU markers, one shape per lap & kind (outline under fill)
-            Repeater {
-                model: backend.mapLaps
-                Item {
-                    readonly property var lap: model
-                    opacity: root.lapOpacity(lap.lap)
-                    Repeater {
-                        model: lap.shapes
-                        Item {
-                            visible: root.pointShown(modelData.kind)
-                            GpuShape {
-                                key: modelData.outline
-                                color: theme.window
-                                revision: backend.revision
-                                transform: Matrix4x4 { matrix: canvas.matrix }
-                            }
-                            GpuShape {
-                                key: modelData.fill
-                                color: lap.color
-                                revision: backend.revision
-                                transform: Matrix4x4 { matrix: canvas.matrix }
+            Item {
+                transform: Matrix4x4 { matrix: canvas.matrix }
+                Repeater {
+                    model: backend.mapLaps
+                    Item {
+                        readonly property var lap: model
+                        opacity: root.lapOpacity(lap.lap)
+                        Repeater {
+                            model: lap.shapes
+                            Item {
+                                visible: root.pointShown(modelData.kind)
+                                GpuShape {
+                                    key: modelData.outline
+                                    color: theme.window
+                                    revision: backend.revision
+                                }
+                                GpuShape {
+                                    key: modelData.fill
+                                    color: lap.color
+                                    revision: backend.revision
+                                }
                             }
                         }
                     }
@@ -743,7 +748,7 @@ FocusScope {
 
             // Corners: number & time lost / gained. Hover: every lap in corner, click: zoom & select in corner table
             Repeater {
-                model: root.info.corners || []
+                model: root.cornerInfo.corners || []
                 Rectangle {
                     readonly property real anchorX: canvas.screenX(modelData.x)
                     readonly property bool selected: modelData.row >= 0 && modelData.row === backend.selectedCorner
@@ -801,11 +806,13 @@ FocusScope {
                     id: car
                     readonly property var point: root.cursorPoints[index] || null
                     readonly property real size: theme.em * (model.reference ? 1.15 : 0.95)  // reference lap larger
+                    readonly property color lapColor: model.color  // positions at cursor carry no color nor lap
+                    readonly property string lapKey: model.lap
                     visible: point !== null
                     x: point ? canvas.screenX(point.x) : 0
                     y: point ? canvas.screenY(point.y) : 0
                     z: 4
-                    opacity: point ? root.lapOpacity(point.lap) : 1
+                    opacity: point ? root.lapOpacity(lapKey) : 1
                     Item {
                         rotation: car.point ? car.point.angle + 90 : 0
                         Rectangle {
@@ -814,7 +821,7 @@ FocusScope {
                             width: car.size
                             height: car.size
                             radius: car.size / 2
-                            color: car.point ? car.point.color : "transparent"
+                            color: car.point ? car.lapColor : "transparent"
                             border.width: 2
                             border.color: theme.window
                         }
@@ -822,7 +829,7 @@ FocusScope {
                             x: -width / 2
                             y: -car.size / 2 - height * 0.62
                             text: "▲"
-                            color: car.point ? car.point.color : "transparent"
+                            color: car.point ? car.lapColor : "transparent"
                             style: Text.Outline
                             styleColor: theme.window
                             font.pixelSize: car.size * 0.75
@@ -833,7 +840,7 @@ FocusScope {
                         x: -width / 2
                         y: car.size * 0.75
                         text: car.point ? car.point.slip || "" : ""
-                        color: car.point ? car.point.color : theme.text
+                        color: car.point ? car.lapColor : theme.text
                         style: Text.Outline
                         styleColor: theme.window
                         font.pointSize: theme.fontPoint * 0.72
@@ -849,12 +856,12 @@ FocusScope {
                         radius: height / 2
                         color: Qt.rgba(theme.window.r, theme.window.g, theme.window.b, 0.85)
                         border.width: 1
-                        border.color: car.point ? car.point.color : "transparent"
+                        border.color: car.point ? car.lapColor : "transparent"
                         Text {
                             id: gapText
                             anchors.centerIn: parent
                             text: car.point ? car.point.gap : ""
-                            color: car.point ? car.point.color : theme.text
+                            color: car.point ? car.lapColor : theme.text
                             font.pointSize: theme.fontPoint * 0.75
                             font.weight: Font.DemiBold
                             font.features: { "tnum": 1 }
@@ -1138,12 +1145,12 @@ FocusScope {
                 }
             }
             Row {
-                visible: backend.mapLegend.low !== undefined && (root.mode === "speed" || root.mode === "elevation")
+                visible: root.mapLegend.low !== undefined && (root.mode === "speed" || root.mode === "elevation")
                 spacing: theme.em * 0.4
-                Text { text: backend.mapLegend.low || ""; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: root.mapLegend.low || ""; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
                 Rectangle {
                     id: legendBar
-                    readonly property var colors: backend.mapLegend.colors || ["#3B82F6", "#EF4444"]
+                    readonly property var colors: root.mapLegend.colors || ["#3B82F6", "#EF4444"]
                     width: theme.em * 7
                     height: theme.em * 0.5
                     radius: height / 2
@@ -1156,7 +1163,7 @@ FocusScope {
                     }
                 }
                 Text {
-                    text: (backend.mapLegend.high || "") + " " + (backend.mapLegend.unit || "")
+                    text: (root.mapLegend.high || "") + " " + (root.mapLegend.unit || "")
                     color: theme.text
                     font.pointSize: theme.fontPoint * 0.85
                 }
@@ -1198,16 +1205,16 @@ FocusScope {
             }
             // Mini-sectors won by each lap, ideal lap
             Repeater {
-                model: root.mode === "minisectors" ? (backend.mapLegend.mini || []) : []
+                model: root.mode === "minisectors" ? (root.mapLegend.mini || []) : []
                 Row {
                     spacing: theme.em * 0.3
                     Rectangle { width: theme.em * 0.6; height: width; radius: width / 2; color: modelData.color; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: modelData.label + "  " + modelData.count + "/" + (backend.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontPoint * 0.85; font.features: { "tnum": 1 } }
+                    Text { text: modelData.label + "  " + modelData.count + "/" + (root.mapLegend.sectors || 0); color: theme.text; font.pointSize: theme.fontPoint * 0.85; font.features: { "tnum": 1 } }
                 }
             }
             Text {
-                visible: root.mode === "minisectors" && (backend.mapLegend.ideal || "") !== ""
-                text: i18n.tr("Ideal of shown laps:") + " " + (backend.mapLegend.ideal || "")
+                visible: root.mode === "minisectors" && (root.mapLegend.ideal || "") !== ""
+                text: i18n.tr("Ideal of shown laps:") + " " + (root.mapLegend.ideal || "")
                 color: theme.gold
                 font.pointSize: theme.fontPoint * 0.85
                 font.weight: Font.DemiBold
@@ -1221,12 +1228,12 @@ FocusScope {
                 onActivated: function(index) { backend.setConsistencyScope(scopes[index]) }
             }
             Row {
-                visible: root.mode === "consistency" && backend.mapLegend.low !== undefined
+                visible: root.mode === "consistency" && root.mapLegend.low !== undefined
                 spacing: theme.em * 0.4
-                Text { text: (backend.mapLegend.low || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: (root.mapLegend.low || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
                 Rectangle {
                     id: spreadBar
-                    readonly property var colors: backend.mapLegend.colors || ["#22C55E", "#FACC15", "#EF4444"]
+                    readonly property var colors: root.mapLegend.colors || ["#22C55E", "#FACC15", "#EF4444"]
                     width: theme.em * 7
                     height: theme.em * 0.5
                     radius: height / 2
@@ -1238,11 +1245,11 @@ FocusScope {
                         GradientStop { position: 1; color: spreadBar.colors[spreadBar.colors.length - 1] }
                     }
                 }
-                Text { text: (backend.mapLegend.high || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
+                Text { text: (root.mapLegend.high || "") + " s"; color: theme.text; font.pointSize: theme.fontPoint * 0.85 }
             }
             Text {
                 visible: root.mode === "consistency"
-                text: backend.mapLegend.text || ""
+                text: root.mapLegend.text || ""
                 color: theme.dimText
                 font.pointSize: theme.fontPoint * 0.85
                 HoverHandler { id: spreadHover }
@@ -1274,7 +1281,7 @@ FocusScope {
                               : i18n.tr("Laps recorded before this version: track edges guessed from where laps drove")
             }
             Text {
-                visible: root.mode === "elevation" && backend.mapLegend.low === undefined
+                visible: root.mode === "elevation" && root.mapLegend.low === undefined
                 text: i18n.tr("Elevation not recorded")
                 color: theme.dimText
                 font.pointSize: theme.fontPoint * 0.85

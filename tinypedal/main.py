@@ -36,6 +36,7 @@ from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
 from .log_handler import BoundedLogStream, set_logging_level
 from .setting import cfg
+from .userfile.folder_migration import log_migration_report
 
 logger = logging.getLogger(__package__)
 UI_FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans")  # app UI, not overlays
@@ -90,8 +91,8 @@ def single_instance_check(is_single_instance: bool):
         return
     # Show warning to console and popup dialog
     warning_text = (
-        "Modern Tiny Pedals is already running.\n\n"
-        "Only one Modern Tiny Pedals may be run at a time.\n"
+        "NeoPedal is already running.\n\n"
+        "Only one NeoPedal may be run at a time.\n"
         "Check system tray for hidden icon."
     )
     logger.warning(warning_text)
@@ -103,7 +104,7 @@ def single_instance_check(is_single_instance: bool):
 
 def get_version():
     """Get version info"""
-    logger.info("Modern Tiny Pedals: %s", VERSION)
+    logger.info("NeoPedal: %s", VERSION)
     logger.info("Python: %s", version_check.python())
     logger.info("Qt: %s", version_check.qt())
     logger.info("PySide: %s", version_check.pyside())
@@ -208,9 +209,9 @@ def ask_safe_mode() -> bool:
     answer = QMessageBox.question(
         None,
         f"{APP_NAME} v{VERSION}",
-        tr("Modern Tiny Pedals did not finish starting last time.\n\n"
+        tr("NeoPedal did not finish starting last time.\n\n"
            "Start in safe mode? Plugins and overlays are not started, so settings can be fixed, "
-           "then Modern Tiny Pedals restarted normally (Window menu, Restart Modern Tiny Pedals)."),
+           "then NeoPedal restarted normally (Window menu, Restart NeoPedal)."),
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.Yes,
     )
@@ -237,6 +238,7 @@ def start_app(cli_args):
     unset_environment()
     set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
     get_version()
+    log_migration_report()  # legacy user folder copy, done before logging was set
     # load global config (language packs first, else a pack language is reset to English)
     load_ui_language_packs()
     cfg.load_global()

@@ -50,7 +50,9 @@ from ...module_control import ModuleControl
 from ...setting import cfg
 from ...template.widget import WIDGET_OPTION_UI
 from ...template.widget.black_box_ui import OptionUI, theme_color
+from ...widget._style import OVERLAY_SCALE_RANGE
 from ..module_view import sort_key
+from ..widget_preview import set_showing
 from .models import DictListModel
 from .option_kinds import (
     KIND_BOOL,
@@ -102,8 +104,20 @@ NAV_ROLES = (
 ROW_OPTION = "option"
 ROW_HEADER = "header"
 ROW_ORDER = "order"
+# Options holding an ordered list of names (text, names separated by commas), edited as an order list:
+# option key -> (help text, names offered besides those listed)
+LIST_OPTIONS = {
+    "class_order": (
+        "Classes in multi-class split mode, top first: drag them, or use the arrows. "
+        "Classes found in no list come after, fastest first.",
+        lambda: list(cfg.user.classes),
+    ),
+}
 MAX_ROWS = 400  # options shown at once (search in every overlay): more asks for a narrower search
 PREVIEW_DELAY_MS = 250  # preview rendered once edits pause
+PREVIEW_SCALE_MAX = 3.0  # zoomed preview drawn up to this size (sharp), scaled up above
+PREVIEW_SCALE_STEP = 0.25  # zoom rounded up to a step: not drawn again for every few pixels
+KEEP_HIDDEN_BYTES = 1 << 20  # bigger picture (zoomed) released while page is hidden
 INFO_DELAY_MS = 100  # header of selected overlay (customized count) told once edits pause
 WARM_INTERVAL_MS = 0  # options of other overlays read one per event loop tick
 # Options always different from default (moved, switched on): not counted as customized
@@ -251,7 +265,10 @@ class OverlayOptionsBackend(QObject):
         self._preview_state = PREVIEW_OFF
         self._preview_url = ""
         self._preview_size = (0, 0)
-        self._preview_values: dict | None = None
+        self._preview_scale = 1.0  # size of picture shown, relative to overlay size
+        self._preview_zoom = 1.0  # size asked by page (zoomed preview), see setPreviewScale
+        self._preview_signature: object = None  # inputs of picture shown (see render_preview)
+        self._preview_bytes = 0  # size of picture in store
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(PREVIEW_DELAY_MS)
@@ -508,8 +525,47 @@ class OverlayOptionsBackend(QObject):
         invalid = self._invalid.get(oid)
         return trm(tr(invalid[1])) if invalid else ""
 
+    def list_items(self, name: str, key: str, value: Any = None) -> list[str]:
+        """Names of list option in order: those of value (current value if None), then names offered not listed"""
+        from ...module.module_relative import class_key
+
+        if value is None:
+            value = self.value(name, key)
+        items: list[str] = []
+        seen: set[str] = set()
+        offered = LIST_OPTIONS[key][1]() if key in LIST_OPTIONS else []
+        for item in [*str(value).split(","), *offered]:
+            item = item.strip()
+            if item and class_key(item) not in seen:
+                seen.add(class_key(item))
+                items.append(item)
+        return items
+
+    def _list_row(self, name: str, key: str) -> dict:
+        """Order list row of a list option (see LIST_OPTIONS)"""
+        oid = option_id(name, key)
+        items = self.list_items(name, key)
+        saved = self.list_items(name, key, self.saved(name, key))
+        default = self.default(name, key)
+        row = self._blank_row(oid, name, ROW_ORDER)
+        row.update(
+            option=key,
+            kind=ROW_ORDER,
+            label=option_label(key),
+            help=tr(LIST_OPTIONS[key][0]),
+            orders=[{
+                "key": item, "label": item, "changed": index >= len(saved) or saved[index] != item,
+                "toggle": "", "checked": True,
+            } for index, item in enumerate(items)],
+            modified=default is not None and items != self.list_items(name, key, default),
+            changed=self.is_changed(name, key),
+        )
+        return row
+
     def _option_row(self, name: str, key: str, layout: OverlayLayout, values: Mapping[str, Any],
                     overrides: Mapping[str, bool]) -> dict:
+        if key in LIST_OPTIONS:
+            return self._list_row(name, key)
         oid = option_id(name, key)
         kind = self.kind(key)
         value = self.value(name, key)
@@ -834,6 +890,11 @@ class OverlayOptionsBackend(QObject):
     def previewHeight(self) -> int:
         return self._preview_size[1]
 
+    @Property(float, notify=previewChanged)
+    def previewScale(self) -> float:
+        """Size of picture (previewWidth & previewHeight) relative to overlay size"""
+        return self._preview_scale
+
     # Navigation & filters
     @Slot(str)
     def selectOverlay(self, name: str):
@@ -844,7 +905,7 @@ class OverlayOptionsBackend(QObject):
             self.filterChanged.emit()
         if name != self._overlay:
             self._overlay = name
-            self._preview_values = None
+            self._preview_signature = None
             self._preview_url = ""
             self._preview_state = PREVIEW_LOADING if self._preview_enabled else PREVIEW_OFF
             self.previewChanged.emit()
@@ -1184,6 +1245,37 @@ class OverlayOptionsBackend(QObject):
         keys.insert(max(0, min(len(keys), position)), key)
         self._set_orders(name, keys)
 
+    @Slot(str, str, str, int)
+    def moveListItem(self, name: str, key: str, item: str, offset: int):
+        """Move name of list option up (-1) or down (+1)"""
+        items = self.list_items(name, key) if key in LIST_OPTIONS and name in self._names else []
+        if item not in items:
+            return
+        index = items.index(item)
+        target = max(0, min(len(items) - 1, index + offset))
+        if target != index:
+            items.insert(target, items.pop(index))
+            with self._step():
+                self._set(option_id(name, key), ", ".join(items))
+
+    @Slot(str, str, str, int)
+    def placeListItem(self, name: str, key: str, item: str, position: int):
+        """Name of list option moved to position (dragged)"""
+        items = self.list_items(name, key) if key in LIST_OPTIONS and name in self._names else []
+        if item not in items:
+            return
+        items.remove(item)
+        items.insert(max(0, min(len(items), position)), item)
+        with self._step():
+            self._set(option_id(name, key), ", ".join(items))
+
+    @Slot(str, str)
+    def resetList(self, name: str, key: str):
+        """List option back to default order"""
+        if key in LIST_OPTIONS and name in self._names:
+            with self._step():
+                self._reset_keys(name, (key,))
+
     @Slot(str)
     def resetOrder(self, name: str):
         section = self._order_section(name)
@@ -1311,7 +1403,6 @@ class OverlayOptionsBackend(QObject):
         self._count_shared()
         self._sort_names()  # names or language changed
         self.namesChanged.emit()
-        self._preview_values = None
         self.update_all()
         self.overlayChanged.emit()
         self.stateChanged.emit()
@@ -1372,18 +1463,43 @@ class OverlayOptionsBackend(QObject):
         else:
             self._preview_timer.stop()
             self._warm_timer.stop()
+            self.drop_big_preview()
+        set_showing(self, active)
+
+    def drop_big_preview(self):
+        """Hidden: zoomed picture (MBs) released, drawn again once shown (same inputs: picture reused if still
+        kept), small one kept shown"""
+        if self._preview_bytes <= KEEP_HIDDEN_BYTES:
+            return
+        STORE.discard(self._preview_key)
+        self._preview_bytes = 0
+        self._preview_signature = None
+        self._preview_url = ""
+        self._preview_state = PREVIEW_LOADING if self._preview_enabled else PREVIEW_OFF
+        self.previewChanged.emit()
 
     @Slot(bool)
     def setPreviewEnabled(self, enabled: bool):
         if enabled == self._preview_enabled:
             return
         self._preview_enabled = enabled
-        self._preview_values = None
+        self._preview_signature = None
         if not enabled:
             self._preview_timer.stop()
             self._preview_state = PREVIEW_OFF
             self._preview_url = ""
         self.previewChanged.emit()
+        self.schedule_preview(now=True)
+
+    @Slot(float)
+    def setPreviewScale(self, zoom: float):
+        """Preview shown zoomed: overlay drawn at that size (sharp text & lines, as global overlay
+        scale does), rounded up to a step, up to PREVIEW_SCALE_MAX"""
+        drawn = self._preview_zoom
+        # Picture scaled a little by page: kept (fit zoom moves with size of picture drawn)
+        if drawn - 2 * PREVIEW_SCALE_STEP <= zoom <= drawn + 0.05 or preview_zoom(zoom) == drawn:
+            return
+        self._preview_zoom = preview_zoom(zoom)  # drawn again at new size
         self.schedule_preview(now=True)
 
     def schedule_preview(self, now: bool = False):
@@ -1405,25 +1521,34 @@ class OverlayOptionsBackend(QObject):
                 self.previewChanged.emit()
             return
         values = self.values(name)
-        if values == self._preview_values and self._preview_state in (PREVIEW_READY, PREVIEW_UNAVAILABLE):
+        zoom = self._preview_zoom
+        # Same values, overlay style, zoom & shared inputs (page shown again, edit undone): picture kept
+        signature = preview_signature(name, values, zoom)
+        if signature == self._preview_signature and self._preview_state in (PREVIEW_READY, PREVIEW_UNAVAILABLE):
             return
-        self._preview_values = values
-        image = render_overlay(name, values)
+        self._preview_signature = signature
+        image = render_overlay(name, values, zoom)
         if image is None:
             self._preview_state = PREVIEW_UNAVAILABLE
             self._preview_url = ""
             self._preview_size = (0, 0)
+            self._preview_bytes = 0
+            STORE.discard(self._preview_key)
         else:
             ratio = image.devicePixelRatio() or 1
             self._preview_state = PREVIEW_READY
             self._preview_url = STORE.put(self._preview_key, image)
+            self._preview_bytes = image.sizeInBytes()
             self._preview_size = (round(image.width() / ratio), round(image.height() / ratio))
+            self._preview_scale = drawn_scale(cfg.user.config["overlay_style"].get("overlay_scale", 1.0), zoom)
         self.previewChanged.emit()
 
     def close(self):
         self._preview_timer.stop()
         self._warm_timer.stop()
         self._info_timer.stop()
+        STORE.discard(self._preview_key)
+        set_showing(self, False)
 
 
 def edited_ids(before: tuple[dict, dict], after: tuple[dict, dict]) -> set[str]:
@@ -1434,18 +1559,43 @@ def edited_ids(before: tuple[dict, dict], after: tuple[dict, dict]) -> set[str]:
     return edited
 
 
-def render_overlay(name: str, values: dict):
-    """Overlay picture with values (QImage), None if it cannot be drawn"""
-    from ..widget_preview import render_widget
+def preview_zoom(zoom: float) -> float:
+    """Size an overlay preview is drawn at for a zoom: rounded up to a step, 1 to PREVIEW_SCALE_MAX"""
+    if not zoom > 1:  # also nan
+        return 1.0
+    steps = -(-zoom // PREVIEW_SCALE_STEP)  # ceil
+    return min(steps * PREVIEW_SCALE_STEP, PREVIEW_SCALE_MAX)
+
+
+def drawn_scale(overlay_scale: float, zoom: float) -> float:
+    """Size of an overlay drawn zoomed, relative to its size: global overlay scale times zoom is
+    limited to the range of overlay scale"""
+    low, high = OVERLAY_SCALE_RANGE
+    base = min(max(overlay_scale, low), high)
+    return min(max(overlay_scale * zoom, low), high) / base
+
+
+def render_overlay(name: str, values: dict, zoom: float = 1.0):
+    """Overlay picture with values (QImage) drawn at zoom, None if it cannot be drawn; same inputs as a picture
+    drawn before (any page): that picture"""
+    from ..widget_preview import render_image
 
     try:
-        pixmap = render_widget(cfg, name, values)
+        return render_image(cfg, name, values, zoom)
     except Exception as error:  # never break the page
         logger.debug("Overlay options preview error: %s: %s", name, error, exc_info=True)
         return None
-    if pixmap.isNull():
-        return None
-    return pixmap.toImage()
+
+
+def preview_signature(name: str, values: dict, zoom: float) -> object:
+    """Inputs of overlay picture (see widget_preview.preview_key)"""
+    from ..widget_preview import preview_key
+
+    try:
+        return preview_key(cfg, name, values, zoom)
+    except Exception:  # never break the page: drawn again
+        logger.debug("Overlay options preview inputs error: %s", name, exc_info=True)
+        return object()
 
 
 def choice_values(kind: OptionKind) -> tuple[str, ...]:

@@ -38,6 +38,7 @@ class RealtimeState:
         active: whether is active (driving or overriding) state.
         paused: whether data stopped updating.
         resets: number of player vehicle resets.
+        shown: whether overlays are shown & updated (active, or spectating while streamed, see overlay_control).
         hidden: whether overlay is hidden.
         editing: whether overlay edit mode is on (toolbar & outlines shown, see widget._edit_mode).
         session_type: session type of player, for widget visibility context.
@@ -51,6 +52,7 @@ class RealtimeState:
         "active",
         "paused",
         "resets",
+        "shown",
         "hidden",
         "editing",
         "session_type",
@@ -64,6 +66,7 @@ class RealtimeState:
         self.active: bool = False
         self.paused: bool = True
         self.resets: int = 0
+        self.shown: bool = False
         self.hidden: bool = False
         self.editing: bool = False
         self.session_type: int = -1  # 0 testday, 1 practice, 2 qualify, 3 warmup, 4 race, -1 unknown

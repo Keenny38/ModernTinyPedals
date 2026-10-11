@@ -242,6 +242,23 @@ def test_hybrid_state_guessed_when_game_reports_none(tele):
     assert output.motorState == 1
 
 
+def test_hybrid_drain_to_empty_and_regen_from_empty_counted(tele):
+    output = HybridInfo()
+    gen = module_hybrid.calc_motor(output, min_delta_distance=5)
+    elapsed = drive_hybrid(tele, gen, [4, 2, 0], [2] * 3)  # last step down to exactly 0%
+    assert output.batteryDrain == pytest.approx(4.0)
+    drive_hybrid(tele, gen, [0, 3], [3] * 2, elapsed=elapsed)  # first step out of 0%
+    assert output.batteryRegen == pytest.approx(3.0)
+
+
+def test_hybrid_inactive_timer_started_at_elapsed_zero(tele):
+    output = HybridInfo()
+    gen = module_hybrid.calc_motor(output, min_delta_distance=5)
+    drive_hybrid(tele, gen, [80, 78], [2] * 2, elapsed=-2.0)  # deploying until elapsed time 0
+    drive_hybrid(tele, gen, [78, 78, 78], [1] * 3, elapsed=-1.0)  # motor off at elapsed time 0.0
+    assert output.motorInactiveTimer == pytest.approx(2.0)
+
+
 # --- Forces
 def test_transient_max_holds_then_resets():
     gen = module_force.transient_max(reset_delay=2)

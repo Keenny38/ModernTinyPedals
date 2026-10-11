@@ -30,7 +30,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from typing import IO, TextIO
 
-from ..const_app import APP_ID, PLATFORM
+from ..const_app import PLATFORM
+from .folder_migration import user_folder_id
 
 logger = logging.getLogger(__name__)
 
@@ -130,40 +131,42 @@ def set_relative_path(filepath: str) -> str:
     return output_path
 
 
-def set_global_config_path(filepath: str) -> str:
+def set_global_config_path() -> str:
     """Set path for global configurable user files, create if not exist
+
+    Legacy "TinyPedal" folder copied first, see folder_migration.
 
     Default to APPDATA folder (AppData/Roaming) on Windows.
     Default to XDG_CONFIG_HOME ($HOME/.config) on Linux.
     """
     if PLATFORM.WINDOWS:
-        return set_user_data_path(f"{os.getenv('APPDATA', '.')}\\{filepath}\\")
+        return set_user_data_path(f"{os.getenv('APPDATA', '.')}\\{user_folder_id('config')}\\")
     # Linux
     from xdg import BaseDirectory as BD
-    return BD.save_config_path(filepath) + "/"
+    return BD.save_config_path(user_folder_id("config")) + "/"
 
 
 def set_default_config_path(filepath: str) -> str:
     """Set path for default configurable user files
 
-    Default to TinyPedal local folder (./) on Windows.
+    Default to app local folder (./) on Windows.
     Default to XDG_CONFIG_HOME ($HOME/.config) on Linux.
     """
     if PLATFORM.WINDOWS:
         return filepath
     # Linux
     from xdg import BaseDirectory as BD
-    return BD.save_config_path(APP_ID, filepath)
+    return BD.save_config_path(user_folder_id("config"), filepath)
 
 
 def set_default_data_path(filepath: str) -> str:
     """Set path for default non-configurable data files
 
-    Default to TinyPedal local folder (./) on Windows.
+    Default to app local folder (./) on Windows.
     Default to XDG_DATA_HOME ($HOME/.local/share) on Linux.
     """
     if PLATFORM.WINDOWS:
         return filepath
     # Linux
     from xdg import BaseDirectory as BD
-    return BD.save_data_path(APP_ID, filepath)
+    return BD.save_data_path(user_folder_id("data"), filepath)

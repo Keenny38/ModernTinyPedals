@@ -201,6 +201,23 @@ def test_close_all_signals_every_module_before_waiting(monkeypatch):
     assert {call[0] for call in calls[2:]} == {"wait"}
 
 
+def test_close_waits_longest_stop_timeout_of_modules(monkeypatch):
+    """Recorder waits for laps being saved when stopping: never started again before it finished"""
+    from tinypedal import module_control
+    from tinypedal.const_file import ConfigType
+    from tinypedal.module.module_recorder import Realtime as Recorder
+    from tinypedal.thread_guard import STOP_TIMEOUT
+
+    timeouts = []
+    monkeypatch.setattr(module_control, "wait_all_stopped", lambda targets, timeout=None: timeouts.append(timeout))
+    control = module_control.ModuleControl(SimpleNamespace(__all__=["module_a", "module_b"]), ConfigType.MODULE)
+    stopped = SimpleNamespace(stop=lambda discard=False: None, closed=True)
+    slow = SimpleNamespace(stop=lambda discard=False: None, closed=True, STOP_TIMEOUT=Recorder.STOP_TIMEOUT)
+    control._active_modules.update(module_a=stopped, module_b=slow)
+    control.close()
+    assert timeouts == [Recorder.STOP_TIMEOUT] and Recorder.STOP_TIMEOUT > STOP_TIMEOUT
+
+
 def test_data_module_wait_closed(ui_env):
     from tinypedal.module._base import DataModule
     from tinypedal.setting import cfg

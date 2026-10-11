@@ -45,6 +45,7 @@ from ._common import (
     CompactButton,
     TableBatchReplace,
     UIScaler,
+    column_texts,
     run_after_saving,
     table_item,
 )
@@ -176,24 +177,28 @@ class TyreCompoundEditor(BaseEditor):
     def add_compound(self):
         """Add new compound"""
         start_index = row_index = self.table_compounds.rowCount()
-        # Add all missing vehicle name from active session
-        veh_total = api.read.vehicle.total_vehicles()
-        for index in range(veh_total):
-            compounds = set(api.read.tyre.compound_class(index))
-            for compound in compounds:
-                if not self.is_value_in_table(compound, self.table_compounds):
-                    self.add_compound_entry(
-                        row_index,
-                        compound,
-                        set_predefined_compound_symbol(compound),
-                    )
-                    self.table_compounds.setCurrentCell(row_index, 0)
-                    row_index += 1
-        # Add new name entry
-        if start_index == row_index:
-            new_compound_name = self.new_name_increment("New Compound Name", self.table_compounds)
-            self.add_compound_entry(row_index, new_compound_name)
-            self.table_compounds.setCurrentCell(row_index, 0)
+        listed = column_texts(self.table_compounds, 0)
+        with self.batch_edit():  # one undo step
+            # Add all missing vehicle name from active session
+            veh_total = api.read.vehicle.total_vehicles()
+            for index in range(veh_total):
+                compounds = set(api.read.tyre.compound_class(index))
+                for compound in compounds:
+                    if compound not in listed:
+                        self.add_compound_entry(
+                            row_index,
+                            compound,
+                            set_predefined_compound_symbol(compound),
+                        )
+                        listed.add(compound)
+                        row_index += 1
+            if start_index != row_index:
+                self.table_compounds.setCurrentCell(row_index - 1, 0)  # last added
+            # Add new name entry
+            else:
+                new_compound_name = self.new_name_increment("New Compound Name", self.table_compounds)
+                self.add_compound_entry(row_index, new_compound_name)
+                self.table_compounds.setCurrentCell(row_index, 0)
 
     def add_compound_entry(
         self, row_index: int, compound_name: str, symbol_name: str = "?", color: str = "#AAAAAA",

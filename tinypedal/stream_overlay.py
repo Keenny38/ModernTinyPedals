@@ -21,10 +21,14 @@ Stream overlays: overlays as browser sources of OBS Studio, Streamlabs, XSplit, 
 
     GET /?token=<token>                             sources page (links to every source, to test in a browser)
     GET /overlay/<name>?token=<token>               one overlay, top left (browser source size: overlay size)
-    GET /layout?token=<token>                       every stream overlay at its place on screen (size of screen)
+    GET /layout?token=<token>[&crop=16:9][&edit=1]  every stream overlay at its place on screen (size of screen,
+                                                    or its centre part in aspect ratio: 1920x1080 source), or at
+                                                    the place given in the layout editor (edit=1, in a browser)
     GET /results?token=<token>                      results of last race (game results files), pages & classes cycled
-    GET /api/frames?token=&view=<name|layout>&seq=<n>&codec=<zraw|png>
+    GET /api/frames?token=&view=<name|layout>&seq=<n>&codec=<zraw|png>[&crop=16:9]
                                                     overlay images changed since frame <n> (waits up to 1 s)
+    POST /api/layout?token=&crop=<16:9|>            places of the layout editor (JSON {name: [x, y, scale]})
+    GET /director, /api/director[/live|/track|/brand/<file>], POST /api/director/layout   broadcast graphics
     GET /api/results?token=&session=<race|qualifying|any>   last session results (JSON)
     GET /fonts/<name>.ttf                           bundled fonts (results page)
 
@@ -34,8 +38,10 @@ encoded in server threads: raw RGBA compressed with zlib ("zraw", browser inflat
 without DecompressionStream.
 
 Frames bundle: 4 bytes header length (big endian), header JSON {"seq", "canvas": [width, height],
-"overlays": [{"name", "x", "y", "w", "h", "opacity", "size"}]}, then image data of each overlay in header order
-("size" bytes, 0: unchanged since frame "seq" asked). Positions & sizes in screen pixels.
+"overlays": [{"name", "x", "y", "w", "h", "opacity", "size"}], "places" (layout only)}, then image data of each
+overlay in header order ("size" bytes, 0: unchanged since frame "seq" asked). Positions & sizes in screen pixels.
+"places": overlays placed by the layout editor, {name: [x, y, scale]}, x & y fractions of the layout area (whole
+screen, or its centre part of the crop aspect ratio), one set of places per area.
 
 Per overlay "stream_visibility" option: on screen & stream, stream only (window fully transparent on screen
 while overlays are locked), screen only. Listens on 127.0.0.1 unless LAN access is enabled (streaming PC);
@@ -51,6 +57,7 @@ import os
 import re
 import secrets
 import struct
+import sys
 import threading
 import time
 import zlib
@@ -65,13 +72,16 @@ from PySide6.QtWidgets import QApplication, QWidget
 from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_file import ConfigType, FontFile
 from .i18n import current_language, tr
+from .log_handler import ErrorThrottle
 from .process import results_file as rf
 from .process import results_text as rt
 from .setting import cfg
+from .stream_director import MAX_LAYOUT_BODY, PlacementStore
 from .userfile.custom_image import brand_logo_file
 from .userfile.game_images import images
 
 logger = logging.getLogger(__name__)
+request_errors = ErrorThrottle()  # frames asked many times a second: warning once a minute
 
 STREAM_VISIBILITY = ("Screen & Stream", "Stream Only", "Screen Only")  # per overlay option choices
 LAYOUT = "layout"  # view of every overlay
@@ -80,6 +90,7 @@ WAIT_SECONDS = 1.0  # frames request waits this long for a new frame
 MAX_VIEWS = 256  # views remembered as watched (bounded)
 CODECS = ("zraw", "png")
 VIEW_NAME = re.compile(r"^[a-z0-9_]{1,64}$")
+CROP = re.compile(r"^([0-9]{1,2}):([0-9]{1,2})$")  # layout area: centre part of screen in this aspect ratio
 FONT_NAME = re.compile(r"^[A-Za-z0-9-]{1,64}\.ttf$")
 # Game picture (car brand & circuit logos cached from game, own brand logos): /pictures/<kind>/<file>
 PICTURE_PATH = re.compile(r"^(own|[a-z_]{1,32})/[A-Za-z0-9 ._=-]{1,96}\.(svg|png|webp)$")
@@ -88,6 +99,14 @@ OWN_LOGOS = "own"  # pictures of brand logo folder
 RESULT_KINDS = {"race": ("R",), "qualifying": ("Q",), "any": ("P", "Q", "W", "R")}
 RESULTS_SCANNED = 60  # newest results files looked at for last session of a kind
 TOKEN_BYTES = 18  # access token: 24 url-safe characters
+
+
+def layout_section(crop: str) -> str:
+    """Places of layout editor kept for each layout area: "16:9" (centre part), "screen" (whole screen)"""
+    return crop if CROP.match(crop) else "screen"
+
+
+stream_layout = PlacementStore("stream_layout.json", pattern=VIEW_NAME)  # places of overlays on layout sources
 
 
 def stream_visibility(wcfg) -> str:
@@ -330,6 +349,12 @@ class FrameStore:
             self.seq += 1
             self._condition.notify_all()
 
+    def bump(self):
+        """Same frames, new number (layout places changed): waiting requests answered at once"""
+        with self._condition:
+            self.seq += 1
+            self._condition.notify_all()
+
     def publish(self, images: dict[str, QImage], shown: list[Placement], canvas: tuple[int, int]):
         """New images, places of overlays shown: frames requests waiting get them (nothing if nothing changed)"""
         with self._condition:
@@ -346,7 +371,8 @@ class FrameStore:
             self._canvas = canvas
             self._condition.notify_all()
 
-    def bundle(self, view: str, after: int, codec: str, timeout: float = WAIT_SECONDS) -> bytes:
+    def bundle(self, view: str, after: int, codec: str, timeout: float = WAIT_SECONDS,
+               places: dict | None = None) -> bytes:
         """Frames of view newer than "after" (see module doc), waits for a new frame up to timeout"""
         with self._condition:
             if after > self.seq:  # server started again since
@@ -367,7 +393,10 @@ class FrameStore:
                 "w": frame.image.width(), "h": frame.image.height(), "opacity": placement.opacity, "size": len(data),
             })
             payloads.append(data)
-        header = json.dumps({"seq": seq, "canvas": list(canvas), "overlays": entries}).encode("utf-8")
+        head: dict[str, Any] = {"seq": seq, "canvas": list(canvas), "overlays": entries}
+        if places is not None:
+            head["places"] = places
+        header = json.dumps(head).encode("utf-8")
         return struct.pack(">I", len(header)) + header + b"".join(payloads)
 
 
@@ -535,7 +564,7 @@ class StreamHandler(BoundedRequestHandler):
     """Stream overlay request handler"""
 
     protocol_version = "HTTP/1.1"  # frames asked again and again on same connection
-    server_version = "TinyPedal"
+    server_version = "NeoPedal"
     timeout = 60  # idle connection closed
     token = ""
     store: FrameStore
@@ -544,7 +573,7 @@ class StreamHandler(BoundedRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
-        query = parse_qs(url.query)
+        query = parse_qs(url.query, keep_blank_values=True)
         if path.startswith("/fonts/"):
             self.send_font(path[7:])
             return
@@ -568,6 +597,36 @@ class StreamHandler(BoundedRequestHandler):
             self.send_html(source_html(path[9:], overlay_label(path[9:])))
         elif path == "/results":
             self.send_html(results_html())
+        elif path == "/director":  # broadcast graphics of the Broadcast Director page
+            from .stream_director import director_html
+
+            self.send_html(director_html(page_language(), tr("Broadcast Director")))
+        elif path in ("/api/director", "/api/director/live"):
+            from .stream_director import answer, answer_live, demo_answer, preset_of
+
+            try:
+                after = max(int(query.get("v", ["0"])[0]), 0)
+            except ValueError:
+                after = 0
+            if path.endswith("/live"):
+                body = answer_live(after)
+            else:
+                preset = preset_of(query["preset"][0]) if "preset" in query else None
+                body = demo_answer(preset) if query.get("demo", [""])[0] == "1" else answer(after, preset)
+            self.send_body(200, body, "application/json")
+        elif path.startswith("/api/director/brand/"):  # league logo & sponsors (config folder)
+            from .stream_director import brand_file, brand_type
+
+            brand = brand_file(path[len("/api/director/brand/"):])
+            if not brand:
+                self.send_body(404, b"not found", "text/plain")
+                return
+            with open(brand, "rb") as file:
+                self.send_body(200, file.read(), brand_type(brand), cache=True)
+        elif path == "/api/director/track":
+            from .stream_director import track_outline
+
+            self.send_body(200, track_outline.body(), "application/json")
         elif path == "/api/frames":
             view = query.get("view", [LAYOUT])[0]
             if view != LAYOUT and not VIEW_NAME.match(view):
@@ -579,7 +638,8 @@ class StreamHandler(BoundedRequestHandler):
             except ValueError:
                 after = 0
             self.store.touch(view)
-            body = self.store.bundle(view, after, codec if codec in CODECS else CODECS[0])
+            places = stream_layout.get(layout_section(query.get("crop", [""])[0])) if view == LAYOUT else None
+            body = self.store.bundle(view, after, codec if codec in CODECS else CODECS[0], places=places)
             self.send_body(200, body, "application/octet-stream")
         elif path.startswith("/pictures/"):
             self.send_picture(path[10:])
@@ -589,6 +649,45 @@ class StreamHandler(BoundedRequestHandler):
             self.send_body(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json")
         else:
             self.send_body(404, b"not found", "text/plain")
+
+    def do_POST(self):
+        """Layout editors (browser): places of overlays on layout sources, places of broadcast graphics"""
+        url = urlparse(self.path)
+        query = parse_qs(url.query, keep_blank_values=True)
+        if not self.authorized(query.get("token", [""])[0]):
+            self.close_connection = True  # body left unread
+            self.send_body(403, b'{"ok":false}', "application/json")
+            return
+        try:  # never read more than a layout (negative length reads until connection closed)
+            declared = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            declared = -1
+        if not 0 <= declared <= MAX_LAYOUT_BODY:
+            self.close_connection = True  # body length unknown or too long: never read as next request
+            self.send_body(413 if declared > 0 else 400, b'{"ok":false}', "application/json")
+            return
+        body = self.rfile.read(declared)
+        try:
+            if url.path == "/api/director/layout":
+                from .stream_director import preset_of, save_layout
+
+                preset = preset_of(query["preset"][0]) if "preset" in query else None
+                if "preset" in query and preset is None:
+                    self.send_body(400, b'{"ok":false}', "application/json")
+                    return
+                placements = save_layout(body, preset)
+            elif url.path == "/api/layout":
+                data = json.loads(body.decode("utf-8")) if body.strip() else {}
+                placements = stream_layout.set(layout_section(query.get("crop", [""])[0]), data)
+                self.store.bump()
+            else:
+                self.send_body(404, b'{"ok":false}', "application/json")
+                return
+        except (UnicodeDecodeError, ValueError):
+            self.send_body(400, b'{"ok":false}', "application/json")
+            return
+        logger.info("STREAM OVERLAY: layout saved (%s, %d places)", url.path, len(placements))
+        self.send_body(200, json.dumps({"ok": True, "places": len(placements)}).encode("utf-8"), "application/json")
 
     def authorized(self, token: str) -> bool:
         return bool(token) and bool(self.token) and hmac.compare_digest(token.encode("utf-8"), self.token.encode("utf-8"))
@@ -640,7 +739,10 @@ class StreamServer(LocalHTTPServer):
     """
 
     def handle_error(self, request, client_address):
-        logger.debug("STREAM OVERLAY: request from %s failed", client_address[0], exc_info=True)
+        if isinstance(sys.exc_info()[1], OSError):  # client gone: expected
+            logger.debug("STREAM OVERLAY: request from %s failed", client_address[0], exc_info=True)
+        else:  # error of a handler
+            request_errors.log(logger, "STREAM OVERLAY: request from %s failed", client_address[0])
 
 
 class StreamOverlay:
@@ -755,6 +857,16 @@ class StreamOverlay:
         """Overlays (and "layout") shown by a source now"""
         return self.store.watched_overlays() if self.running else set()
 
+    def on_air(self) -> bool:
+        """Layout or overlay source shown now & overlays kept shown while spectating (any thread)
+
+        Spectating, replay: game not "active" (no car driven), overlays hidden (auto hide) & paused, so
+        sources would stay empty. Overlay control shows & updates them while this is true (game data
+        updating), data modules still follow the real active state (no lap, fuel, stats of a car not driven).
+        """
+        return (self.running and bool(self.setting().get("show_overlays_while_spectating", True))
+                and bool(self.store.watched()))
+
 
 streamoverlay = StreamOverlay()
 
@@ -771,7 +883,7 @@ def page_language() -> str:
 
 
 def forbidden_html() -> str:
-    text = escape(tr("Invalid address: copy it again from the Stream Overlays page of Modern Tiny Pedals."))
+    text = escape(tr("Invalid address: copy it again from the Stream Overlays page of NeoPedal."))
     return (f'<!doctype html><html lang="{escape(page_language())}"><head><meta charset="utf-8"><title>403</title>'
             f'</head><body style="font-family:sans-serif;color:#ddd;background:#111">{text}</body></html>')
 
@@ -781,7 +893,10 @@ def index_html(token: str) -> str:
     from .template.setting_widget import WIDGET_FILENAME
 
     link_token = quote(token)
-    links = [(tr("Layout"), f"/layout?token={link_token}"), (tr("Race Results"), f"/results?token={link_token}")]
+    # Broadcast Director graphics (/director) left out: given by that page only, for its own use
+    links = [(tr("Layout"), f"/layout?token={link_token}"),
+             (tr("Layout 16:9 (screen centre)"), f"/layout?token={link_token}&crop=16:9"),
+             (tr("Race Results"), f"/results?token={link_token}")]
     setting = cfg.user.setting
     for name in WIDGET_FILENAME:
         wcfg = setting.get(name)
@@ -800,7 +915,24 @@ def source_html(view: str, title: str) -> str:
     return (SOURCE_HTML
             .replace("@@lang@@", escape(page_language()))
             .replace("@@title@@", escape(title))
-            .replace("@@view@@", json.dumps(view)))
+            .replace("@@view@@", json.dumps(view))
+            .replace("@@labels@@", json.dumps(editor_labels(view), ensure_ascii=True).replace("</", "<\\/")))
+
+
+def editor_labels(view: str) -> dict[str, Any]:
+    """Texts of the layout editor (layout source opened with edit=1), overlay names of the app language"""
+    if view != LAYOUT:
+        return {}
+    from .template.setting_widget import WIDGET_FILENAME
+
+    return {
+        "save": tr("Save"), "reset": tr("Reset"), "resetAll": tr("Reset All"), "saved": tr("Layout saved"),
+        "notSaved": tr("Layout not saved"), "undo": tr("Undo"),
+        "hint": tr("Drag an overlay to move it, mouse wheel to resize it, double click: back to its place on screen. "
+                   "Only overlays shown now can be placed.") + "  "
+        + tr("Arrows: move by one pixel, Ctrl+Z: undo, H: hide these bars"),
+        "names": {name: overlay_label(name) for name in WIDGET_FILENAME},
+    }
 
 
 def results_html() -> str:
@@ -810,23 +942,47 @@ def results_html() -> str:
 
 
 # One overlay or whole layout: images of frames bundle drawn on a canvas (transparent page).
-# Query: fit=1 scales canvas to page (default for layout), scale=<factor> (overlay).
+# Query: fit=1 scales canvas to page (default for layout), scale=<factor> (overlay), crop=<w>:<h> (layout: centre
+# part of screen in that aspect ratio, e.g. 16:9 of an ultrawide screen for a 1920x1080 source).
 SOURCE_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-8"><title>@@title@@</title>
 <style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}
-canvas{display:block}.fit{width:100vw;height:100vh;object-fit:contain;object-position:left top}</style></head>
-<body><canvas id="c" width="0" height="0"></canvas><script>
+canvas{display:block}.fit{width:100vw;height:100vh;object-fit:contain;object-position:left top}
+body.edit{background:#11141a;font:500 13px "Segoe UI",sans-serif;color:#e9ecf1}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;display:none;background:#1b1f27}
+body.edit #stage{display:block}
+#area{position:absolute;outline:3px solid #facc15;box-shadow:0 0 0 100000px rgba(0,0,0,.45);pointer-events:none;z-index:2}
+.item{position:absolute;cursor:move;outline:2px dashed rgba(250,204,21,.6);transform-origin:0 0}
+.item.sel{outline:3px solid #facc15;z-index:3}
+.item span{position:absolute;left:0;top:-26px;padding:2px 8px;border-radius:4px;background:#facc15;color:#111;font:600 13px "Segoe UI",sans-serif;
+white-space:nowrap;transform-origin:0 100%}
+#toolbar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:none;align-items:center;gap:8px;padding:8px 12px;
+border-radius:10px;background:rgba(15,17,23,.96);box-shadow:0 4px 24px rgba(0,0,0,.6);z-index:10}
+body.edit #toolbar{display:flex}
+body.edit.bare #toolbar{display:none}
+#toolbar button{font:600 13px "Segoe UI",sans-serif;padding:6px 14px;border-radius:6px;border:1px solid #3a4150;background:#262b36;color:#fff;cursor:pointer}
+#toolbar button.main{background:#e5383b;border-color:#e5383b}
+#toolbar span{color:#aab2c0;max-width:520px}
+#toolbar b{color:#facc15;font-weight:600;min-width:150px}</style></head>
+<body><canvas id="c" width="0" height="0"></canvas><div id="stage"><div id="area"></div></div>
+<div id="toolbar"><button class="main" id="save"></button><button id="undo"></button><button id="reset"></button><button id="resetAll"></button><b id="place"></b><span id="hint"></span></div>
+<script>
 "use strict";
 const VIEW=@@view@@;
+const LABELS=@@labels@@;
 const query=new URLSearchParams(location.search);
 const token=query.get("token")||"";
 const scale=Math.max(parseFloat(query.get("scale")||"1")||1,0.1);
 const fit=(query.get("fit")||(VIEW==="layout"?"1":"0"))==="1";
 const codec=("DecompressionStream" in window)?"zraw":"png";
+const cropText=query.get("crop")||"";
+const crop=/^([0-9]{1,2}):([0-9]{1,2})$/.exec(cropText);
+const aspect=crop&&+crop[1]>0&&+crop[2]>0?crop[1]/crop[2]:0;
+const edit=VIEW==="layout"&&query.get("edit")==="1";
 const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d");
 if(fit)canvas.className="fit";
 const images=new Map();
-let seq=0,shown=[],size=[0,0];
+let seq=0,shown=[],size=[0,0],places={},editPlaces=null,selected=null,undo=[],wheelUndo=0;
 const sleep=ms=>new Promise(done=>setTimeout(done,ms));
 async function inflate(bytes){
   const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
@@ -836,27 +992,118 @@ async function decode(entry,bytes){
   if(codec==="png")return createImageBitmap(new Blob([bytes],{type:"image/png"}));
   return createImageBitmap(new ImageData(await inflate(bytes),entry.w,entry.h));
 }
+function area(){
+  // Part of screen shown by layout: whole screen, or its centre in crop aspect ratio
+  let [width,height]=size,x=0,y=0;
+  if(aspect&&width>0&&height>0){
+    if(width/height>aspect){const part=Math.round(height*aspect);x=Math.round((width-part)/2);width=part}
+    else{const part=Math.round(width/aspect);y=Math.round((height-part)/2);height=part}
+  }
+  return [x,y,width,height];
+}
+// Place of an overlay in the area: given by the layout editor, else its place on screen
+function placeOf(entry,box,list){
+  const [left,top,width,height]=box,place=(list||places)[entry.name];
+  if(place)return [place[0]*width,place[1]*height,place[2]];
+  return [entry.x-left,entry.y-top,1];
+}
 function draw(){
+  if(edit){drawEditor();return}
   const layout=VIEW==="layout";
   const first=shown[0];
-  const width=Math.round((layout?size[0]:(first?first.w:0))*(layout?1:scale));
-  const height=Math.round((layout?size[1]:(first?first.h:0))*(layout?1:scale));
+  const box=area();
+  const width=Math.round(layout?box[2]:(first?first.w:0)*scale);
+  const height=Math.round(layout?box[3]:(first?first.h:0)*scale);
   if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height}
   ctx.clearRect(0,0,canvas.width,canvas.height);
   for(const entry of shown){
     const image=images.get(entry.name);
     if(!image)continue;
     ctx.globalAlpha=entry.opacity;
-    if(layout)ctx.drawImage(image,entry.x,entry.y);
+    if(layout){const [x,y,size]=placeOf(entry,box);ctx.drawImage(image,x,y,entry.w*size,entry.h*size)}
     else ctx.drawImage(image,0,0,entry.w*scale,entry.h*scale);
   }
   ctx.globalAlpha=1;
+}
+// Layout editor: whole screen shown, layout area framed; overlays dragged, resized with the wheel, saved
+function drawEditor(){
+  canvas.style.display="none";
+  const stage=document.getElementById("stage"),box=area();
+  if(!editPlaces)editPlaces={...places};
+  const [width,height]=size;if(!width||!height)return;
+  const factor=Math.min(innerWidth/width,(innerHeight-70)/height);
+  stage.style.width=width+"px";stage.style.height=height+"px";stage.style.transform="scale("+factor+")";
+  const frame=document.getElementById("area");
+  frame.style.left=box[0]+"px";frame.style.top=box[1]+"px";frame.style.width=box[2]+"px";frame.style.height=box[3]+"px";
+  const names=new Set();
+  for(const entry of shown){
+    names.add(entry.name);
+    let item=stage.querySelector('[data-name="'+entry.name+'"]');
+    if(!item){item=document.createElement("div");item.className="item";item.dataset.name=entry.name;
+      const view=document.createElement("canvas");const label=document.createElement("span");label.textContent=entry.label||entry.name;
+      item.append(view,label);stage.append(item);setupItem(item,entry.name,factor)}
+    const view=item.firstChild,image=images.get(entry.name);
+    if(image&&(view.width!==entry.w||view.height!==entry.h||item.dataset.seq!==String(seq))){
+      view.width=entry.w;view.height=entry.h;const draw2=view.getContext("2d");draw2.clearRect(0,0,entry.w,entry.h);draw2.drawImage(image,0,0);item.dataset.seq=String(seq)}
+    const [x,y,size]=placeOf(entry,box,editPlaces);
+    item.style.left=(box[0]+x)+"px";item.style.top=(box[1]+y)+"px";item.style.transform="scale("+size+")";
+    item.lastChild.style.transform="scale("+(1/size/factor)+")";
+    item.classList.toggle("sel",selected===entry.name);
+  }
+  showPlace();
+  for(const item of [...stage.querySelectorAll(".item")])if(!names.has(item.dataset.name))item.remove();
+}
+function entryOf(name){return shown.find(entry=>entry.name===name)}
+function remember(){undo.push(JSON.stringify(editPlaces||{}));if(undo.length>100)undo.shift()}
+function showPlace(){const entry=selected&&entryOf(selected);if(!entry){document.getElementById("place").textContent="";return}
+  const [x,y,size]=placeOf(entry,area(),editPlaces);
+  document.getElementById("place").textContent=entry.label+"  "+Math.round(x)+", "+Math.round(y)+"  "+Math.round(size*100)+"%"}
+function setupItem(item,name,factor){
+  let drag=null;
+  item.addEventListener("pointerdown",event=>{event.preventDefault();selected=name;const entry=entryOf(name);if(!entry)return;remember();
+    const box=area(),[x,y,size]=placeOf(entry,box,editPlaces);
+    drag={x:event.clientX,y:event.clientY,start:[x,y,size],factor:parseFloat(document.getElementById("stage").style.transform.slice(6))||factor};
+    item.setPointerCapture(event.pointerId);drawEditor()});
+  item.addEventListener("pointermove",event=>{if(!drag)return;const box=area();
+    let x=drag.start[0]+(event.clientX-drag.x)/drag.factor,y=drag.start[1]+(event.clientY-drag.y)/drag.factor;
+    if(!event.shiftKey){x=Math.round(x/4)*4;y=Math.round(y/4)*4}
+    editPlaces[name]=[x/box[2],y/box[3],drag.start[2]];drawEditor()});
+  item.addEventListener("pointerup",()=>{drag=null});
+  item.addEventListener("wheel",event=>{event.preventDefault();selected=name;const entry=entryOf(name);if(!entry)return;
+    if(Date.now()-wheelUndo>800)remember();wheelUndo=Date.now();
+    const box=area(),[x,y,size]=placeOf(entry,box,editPlaces);
+    const next=Math.min(Math.max(size*(event.deltaY<0?1.05:1/1.05),.3),3);editPlaces[name]=[x/box[2],y/box[3],Math.round(next*1000)/1000];drawEditor()},{passive:false});
+  item.addEventListener("dblclick",()=>{remember();delete editPlaces[name];drawEditor()});
+}
+if(edit){
+  document.body.classList.add("edit");
+  document.getElementById("save").textContent=LABELS.save;document.getElementById("reset").textContent=LABELS.reset;
+  document.getElementById("resetAll").textContent=LABELS.resetAll;document.getElementById("hint").textContent=LABELS.hint;
+  document.getElementById("undo").textContent=LABELS.undo;
+  const back=()=>{if(undo.length){editPlaces=JSON.parse(undo.pop());drawEditor()}};
+  document.getElementById("undo").onclick=back;
+  document.getElementById("reset").onclick=()=>{if(selected){remember();delete editPlaces[selected];drawEditor()}};
+  document.getElementById("resetAll").onclick=()=>{remember();editPlaces={};drawEditor()};
+  // Arrows move the overlay chosen by one pixel of the layout (Shift: 10), Ctrl+Z undoes
+  addEventListener("keydown",event=>{
+    if((event.ctrlKey||event.metaKey)&&(event.key==="z"||event.key==="Z")){event.preventDefault();back();return}
+    const moves={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},entry=selected&&entryOf(selected);
+    if(!entry||!moves[event.key])return;
+    event.preventDefault();remember();const box=area(),[x,y,size]=placeOf(entry,box,editPlaces),step=event.shiftKey?10:1;
+    editPlaces[selected]=[(x+moves[event.key][0]*step)/box[2],(y+moves[event.key][1]*step)/box[3],size];drawEditor()});
+  document.getElementById("save").onclick=async()=>{
+    const hint=document.getElementById("hint");
+    try{const response=await fetch("/api/layout?crop="+encodeURIComponent(cropText)+"&token="+encodeURIComponent(token),
+      {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(editPlaces||{})});
+      hint.textContent=response.ok?LABELS.saved:LABELS.notSaved;if(response.ok)places={...editPlaces}}catch(error){hint.textContent=LABELS.notSaved}};
+  addEventListener("resize",()=>drawEditor());
+  addEventListener("keydown",event=>{if(event.key==="h"||event.key==="H")document.body.classList.toggle("bare")});
 }
 async function run(){
   for(;;){
     try{
       const response=await fetch("/api/frames?view="+encodeURIComponent(VIEW)+"&seq="+seq+"&codec="+codec+
-        "&token="+encodeURIComponent(token),{cache:"no-store"});
+        (cropText?"&crop="+encodeURIComponent(cropText):"")+"&token="+encodeURIComponent(token),{cache:"no-store"});
       if(!response.ok){await sleep(response.status===403?5000:1000);continue}
       const data=new Uint8Array(await response.arrayBuffer());
       const length=new DataView(data.buffer).getUint32(0);
@@ -874,7 +1121,8 @@ async function run(){
       await Promise.all(jobs);
       const names=new Set(head.overlays.map(entry=>entry.name));
       for(const [name,image] of images){if(!names.has(name)){image.close();images.delete(name)}}
-      shown=head.overlays;size=head.canvas;
+      shown=head.overlays;size=head.canvas;if(head.places)places=head.places;
+      for(const entry of shown)entry.label=(LABELS.names||{})[entry.name]||entry.name;
       seq=head.overlays.some(entry=>!images.has(entry.name))?0:head.seq;
       draw();
     }catch(error){seq=0;await sleep(1000)}

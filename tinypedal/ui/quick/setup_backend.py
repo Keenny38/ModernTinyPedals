@@ -34,9 +34,10 @@ import threading
 import weakref
 from collections import deque
 from contextlib import suppress
+from time import perf_counter
 from typing import NamedTuple
 
-from PySide6.QtCore import Property, QObject, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QSize, QTimer, Signal, Slot
 from PySide6.QtGui import QImage, QPalette
 
 from ... import regex_pattern as rxp
@@ -50,9 +51,10 @@ from ...module_control import wctrl
 from ...setting import cfg
 from ...validator import is_allowed_filename
 from ..setup_wizard import DEFAULT_STARTER, STARTER_WIDGETS, UNIT_SYSTEMS, UNITS_KEEP, SetupChoices
+from ..widget_preview import set_showing
 from . import Translator
 from .models import DictListModel
-from .overlay_backend import CATEGORY_COLORS, widget_category
+from .overlay_backend import CATEGORY_COLORS, RENDER_BUDGET, widget_category
 from .preview_provider import STORE
 
 logger = logging.getLogger(__name__)
@@ -60,10 +62,10 @@ logger = logging.getLogger(__name__)
 # Steps: key, sidebar label, title, subtitle, glyph (Segoe Fluent Icons / MDL2 Assets)
 STEP_WELCOME, STEP_GAME, STEP_UNITS, STEP_LOOK, STEP_OVERLAYS, STEP_READY = range(6)
 STEPS = (
-    ("welcome", "Welcome", "Welcome to Modern Tiny Pedals",
+    ("welcome", "Welcome", "Welcome to NeoPedal",
      "A few questions to get you started. Every choice can be changed later.", "\uE774"),  # globe
     ("game", "Game", "Which game do you play?",
-     "Modern Tiny Pedals reads telemetry from the selected game.", "\uE804"),  # car
+     "NeoPedal reads telemetry from the selected game.", "\uE804"),  # car
     ("units", "Units", "Units",
      "How overlays show speed, temperature, fuel, pressure and weight.", "\uEC48"),  # gauge
     ("look", "Appearance", "Appearance",
@@ -187,26 +189,15 @@ class StyleSetting:
 
 
 def render_overlay(name: str, setting: dict, style: dict) -> QImage | None:
-    """Overlay picture with widget setting & overlay style, None if it cannot be drawn"""
-    from ...widget._painter import OverlayStyle
-    from ..widget_preview import render_widget
+    """Overlay picture with widget setting & overlay style, None if it cannot be drawn; same inputs as a picture
+    drawn before (any page): that picture"""
+    from ..widget_preview import render_image
 
-    shared = OverlayStyle.corner_scale, OverlayStyle.depth_effects  # set by widget: running overlays keep theirs
     try:
-        pixmap = render_widget(StyleSetting(cfg, style), name, dict(setting))  # type: ignore[arg-type]
+        return render_image(StyleSetting(cfg, style), name, setting, max_size=PREVIEW_MAX)  # type: ignore[arg-type]
     except Exception as error:  # never break the wizard
         logger.debug("SETUP: preview error: %s: %s", name, error, exc_info=True)
         return None
-    finally:
-        OverlayStyle.corner_scale, OverlayStyle.depth_effects = shared
-    if pixmap.isNull():
-        return None
-    ratio = pixmap.devicePixelRatio() or 1
-    limit = PREVIEW_MAX * ratio
-    if pixmap.width() > limit.width() or pixmap.height() > limit.height():
-        pixmap = pixmap.scaled(limit, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        pixmap.setDevicePixelRatio(ratio)
-    return pixmap.toImage()
 
 
 def read_preset(filename: str) -> dict:
@@ -275,6 +266,7 @@ class SetupBackend(QObject):
         loaded = cfg.filename.setting
         names = cfg.preset_files()
         self._presets = sorted(names, key=lambda name: f"{name}{FileExt.JSON}" != loaded)
+        self._existing: tuple[object, frozenset[str]] = (None, frozenset())  # see existing_presets
         self._preset_index = 0
         self._new_preset = True
         self._name_edited = False
@@ -326,6 +318,8 @@ class SetupBackend(QObject):
         self._step = step
         if step >= STEP_LOOK:
             self.start_previews()
+        if step == STEP_OVERLAYS:
+            self.existing_presets(again=True)
         self.stepChanged.emit()
         self.navigationChanged.emit()
 
@@ -580,14 +574,25 @@ class SetupBackend(QObject):
             return self.tr("Enter a preset name")
         if not is_allowed_filename(name):
             return self.tr("This name is reserved, choose another one")
-        if name.lower() in {preset.lower() for preset in cfg.preset_files()}:
+        if name.lower() in self.existing_presets():
             return self.tr("A preset with this name already exists")
         return ""
+
+    def existing_presets(self, again: bool = False) -> frozenset[str]:
+        """Preset names (lower case), read again only if preset folder changed (checked while typing)"""
+        folder = cfg.path.settings
+        try:
+            state: object = (folder, os.stat(folder).st_mtime_ns)
+        except OSError:
+            state = None
+        if again or state is None or state != self._existing[0]:
+            self._existing = (state, frozenset(preset.lower() for preset in cfg.preset_files(by_date=False)))
+        return self._existing[1]
 
     def default_name(self) -> str:
         """Name proposed for new preset, in wizard language, not used by a preset yet"""
         name = self.tr("my overlay")
-        existing = {preset.lower() for preset in cfg.preset_files()}
+        existing = self.existing_presets(again=True)
         number = 1
         proposed = name
         while proposed.lower() in existing:
@@ -745,6 +750,7 @@ class SetupBackend(QObject):
         """Render pictures from now on (Appearance step reached)"""
         if not self._rendering:
             self._rendering = True
+            set_showing(self, True)
             self._wake()
 
     def stop_previews(self):
@@ -752,6 +758,7 @@ class SetupBackend(QObject):
         self._timer.stop()
         self._queue.clear()
         self._queued.clear()
+        set_showing(self, False)
 
     def pending(self) -> int:
         return len(self._queue)
@@ -761,13 +768,15 @@ class SetupBackend(QObject):
             self._timer.start()
 
     def _render_next(self):
+        """Render queued pictures for a few ms (at least one; pictures drawn before by any page are reused)"""
+        deadline = perf_counter() + RENDER_BUDGET
+        while self._queue and self._rendering:
+            key = self._queue.popleft()
+            self._queued.discard(key)
+            self.render_now(key)
+            if perf_counter() >= deadline:
+                break
         if not self._queue or not self._rendering:
-            self._timer.stop()
-            return
-        key = self._queue.popleft()
-        self._queued.discard(key)
-        self.render_now(key)
-        if not self._queue:
             self._timer.stop()
 
     def render_now(self, key: tuple):

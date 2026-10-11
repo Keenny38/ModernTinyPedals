@@ -19,11 +19,13 @@
 """
 Chat Widget, modern design
 
-Chat feed card, newest message at bottom: sender name in its own color (same color for a sender
-all race), message wrapped to card width, optional time. Messages just sent are highlighted
-with an accent edge, messages fade out at the end of display duration. Card grows with lines
-shown, nothing drawn without message (unless overlay unlocked, or before first update: picture
-of Overlays page).
+Chat feed card, newest message at bottom (card growing upward) or at top (growing downward): sender name in its own color (same color for a sender
+all race, accent for messages of player), messages without sender (game notices) dimmed,
+message wrapped to card width, optional time. Messages just sent are highlighted with an accent
+edge, messages fade out at the end of display duration, also while not driving (overlay updates paused:
+messages shown keep fading out, card gone once none left). Card grows with lines shown, nothing drawn
+without message; a sample conversation is drawn faded in overlay edit mode (placement) and in overlay
+pictures, never while merely unlocked (it would pass for real messages in game).
 """
 
 from __future__ import annotations
@@ -32,20 +34,23 @@ from time import localtime, strftime, time
 from typing import NamedTuple
 from zlib import crc32
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QTimer
 from PySide6.QtGui import QPainter
 
 from ...api_control import api
-from ...i18n import tr_overlay as tr
 from .._race_aids import HiddenPreview
-from ..chat import MAX_LINES
+from ..chat import MAX_LINES, SAMPLE_PLAYER, sample_messages, stack_blocks
 from .base import LEFT, ModernOverlay
 from .draw import accent_edge, panel, rounded
 
 FADE_TIME = 1.0  # seconds of fade out at end of display
 FADE_STEPS = 8
-NAME_TOKENS = ("accent", "positive", "warning", "best", "orange", "blue", "lap_behind", "caution")
+NAME_TOKENS = ("positive", "warning", "best", "orange", "caution")  # other senders, no blue (accent: player)
 NEW_ALPHA = 36  # background tint of new message lines
+EXPIRE_MS = 125  # messages fading out checked at this interval while overlay updates are paused
+PLACEMENT_OPACITY = 0.5  # sample conversation drawn in edit mode without message
+# Kind of message line
+OTHER, OWN, NOTICE = 0, 1, 2
 
 
 class Line(NamedTuple):
@@ -54,10 +59,11 @@ class Line(NamedTuple):
     time: str  # first line of message only
     name: str  # first line of message only
     text: str
-    name_color: int  # NAME_TOKENS index
+    name_color: int  # NAME_TOKENS index (other senders)
     new: bool
     step: int  # opacity step
     first: bool  # first line of message
+    kind: int = OTHER  # OTHER, OWN (player), NOTICE (no sender)
 
 
 def split_sender(message: str) -> tuple[str, str]:
@@ -73,7 +79,7 @@ class Realtime(HiddenPreview, ModernOverlay):
 
     options = (
         "font_size", "number_of_lines", "line_width", "maximum_display_duration", "new_message_duration",
-        "show_message_time",
+        "show_message_time", "scroll_direction",
     )
 
     def __init__(self, config, widget_name):
@@ -84,6 +90,7 @@ class Realtime(HiddenPreview, ModernOverlay):
         self.max_duration = float(wcfg["maximum_display_duration"])
         self.new_duration = max(float(wcfg["new_message_duration"]), 0.0)
         self.show_time = bool(wcfg["show_message_time"])
+        self.newest_at_top = wcfg["scroll_direction"] == "Downward"
         self.add_font("name", 1.0, "bold")
         self.pad = unit * 0.45
         self.line_h = unit * 1.3
@@ -95,7 +102,12 @@ class Realtime(HiddenPreview, ModernOverlay):
         width = self.pad * 2 + self.edge + self.time_w + self.text_w
         self.set_size(width, self.line_h * self.line_count + self.pad * 2)
         self.wrap_cache: dict[tuple, tuple[str, ...]] = {}
-        self.preview = (Line("", "", tr("Chat"), 0, False, FADE_STEPS, True),)
+        self.player_name = ""  # messages of player: sender name in accent color
+        self._sample: tuple[Line, ...] | None = None
+        self._messages: tuple = ()  # last messages read, kept fading out while updates are paused
+        self._expire_timer = QTimer(self)
+        self._expire_timer.setInterval(EXPIRE_MS)
+        self._expire_timer.timeout.connect(self.expire)
 
     # Data
     def wrap(self, name: str, text: str) -> tuple[str, ...]:
@@ -125,10 +137,17 @@ class Realtime(HiddenPreview, ModernOverlay):
         self.wrap_cache[key] = lines
         return lines
 
-    def read_lines(self, messages, now: float) -> tuple[Line, ...]:
-        """Lines shown, oldest at top, newest messages kept when lines run out"""
-        lines: list[Line] = []
-        max_duration = self.max_duration
+    def read_lines(self, messages, now: float, max_duration: float | None = None) -> tuple[Line, ...]:
+        """Lines shown, oldest at top (newest at top if option set), newest messages kept when lines run out
+
+        Args:
+            max_duration: seconds a message stays shown (0 or less: always), display duration option if None.
+        """
+        blocks: list[list[Line]] = []  # newest message first
+        total = 0
+        if max_duration is None:
+            max_duration = self.max_duration
+        own = self.player_name.casefold()
         for sent, message in reversed(messages):
             age = now - sent
             if 0 < max_duration < age:
@@ -137,44 +156,88 @@ class Realtime(HiddenPreview, ModernOverlay):
             left = max_duration - age
             step = FADE_STEPS if max_duration <= 0 or left >= FADE_TIME else max(round(left / FADE_TIME * FADE_STEPS), 1)
             stamp = strftime("%H:%M", localtime(sent)) if self.show_time else ""
-            color = crc32(name.encode("utf-8")) % len(NAME_TOKENS) if name else 0
+            if not name:
+                kind, color = NOTICE, 0
+            elif own and name.strip().casefold() == own:
+                kind, color = OWN, 0
+            else:
+                kind, color = OTHER, crc32(name.encode("utf-8")) % len(NAME_TOKENS)
             new = age < self.new_duration
             wrapped = self.wrap(name, text)
-            lines[:0] = [
-                Line(stamp if index == 0 else "", name if index == 0 else "", part, color, new, step, index == 0)
+            blocks.append([
+                Line(stamp if index == 0 else "", name if index == 0 else "", part, color, new, step, index == 0, kind)
                 for index, part in enumerate(wrapped)
-            ]
-            if len(lines) >= self.line_count:
+            ])
+            total += len(wrapped)
+            if total >= self.line_count:
                 break
-        return tuple(lines[-self.line_count:])
+        return stack_blocks(blocks, self.line_count, self.newest_at_top)
+
+    def sample(self) -> tuple[Line, ...]:
+        """Sample conversation (made once), player SAMPLE_PLAYER"""
+        if self._sample is None:
+            player, self.player_name = self.player_name, SAMPLE_PLAYER
+            now = time()
+            self._sample = self.read_lines(sample_messages(now), now, 0.0)
+            self.player_name = player
+        return self._sample
+
+    def show_sample(self):
+        """Sample conversation (overlay pictures)"""
+        self.refresh(self.sample())
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
-        self.refresh(self.read_lines(api.read.session.chat_messages(), time()))
+        self._expire_timer.stop()
+        self.player_name = api.read.vehicle.driver_name().strip()
+        self._messages = api.read.session.chat_messages()
+        self.refresh(self.read_lines(self._messages, time()))
+
+    def stop(self):
+        """Stop and close widget: fading out stopped too (started by update pause while stopping)"""
+        timer = self._expire_timer
+        super().stop()
+        timer.stop()
+
+    def post_update(self):
+        """Overlay updates paused (not driving): messages shown still fade out at end of display duration"""
+        if self.state and self.max_duration > 0:
+            self._expire_timer.start()
+
+    def expire(self):
+        """Messages shown read again at current time (updates paused), stopped once none left"""
+        lines = self.read_lines(self._messages, time())
+        self.refresh(lines)
+        if not lines:
+            self._expire_timer.stop()
 
     # Paint
     def paintEvent(self, event):
-        """Draw while a message is shown (or overlay unlocked, or not updated yet)"""
-        if self.state is None:
-            self.state = ()
+        """Draw while a message is shown, or sample conversation in overlay edit mode (placement)"""
+        if self.state:
             super().paintEvent(event)
-            self.state = None
-        elif self.state or self.previewing():
+        elif self.previewing():
+            state, self.state = self.state, ()  # not updated yet (None): sample too
             super().paintEvent(event)
+            self.state = state
 
     def paint(self, painter: QPainter):
         theme = self.theme
-        lines = self.state or self.preview
+        lines = self.state
+        placement = not lines
+        if placement:
+            lines = self.sample()
         pad = self.pad
         line_h = self.line_h
         height = line_h * len(lines) + pad * 2
-        card = QRectF(0, self.height() - height, self.width(), height)
+        card = QRectF(0, 0 if self.newest_at_top else self.height() - height, self.width(), height)
         panel(painter, card, theme, self.radius(0.5), self.depth_effects)
         text_left = pad + self.edge + self.time_w
         top = card.top() + pad
+        base_opacity = PLACEMENT_OPACITY if placement else 1.0
         for index, line in enumerate(lines):
             row = QRectF(pad, top + line_h * index, card.width() - pad * 2, line_h)
-            painter.setOpacity(line.step / FADE_STEPS)
+            painter.setOpacity(base_opacity * line.step / FADE_STEPS)
             if line.new:
                 rounded(painter, row, 0, theme.tint(theme.accent, NEW_ALPHA))
                 accent_edge(painter, row, theme.accent, self.edge, self.edge / 2)
@@ -183,9 +246,11 @@ class Realtime(HiddenPreview, ModernOverlay):
                                theme.text_muted, LEFT)
             left = text_left
             if line.name:
-                self.draw_text(painter, QRectF(left, row.top(), self.text_w, line_h), line.name, "name",
-                               getattr(theme, NAME_TOKENS[line.name_color]), LEFT)
+                name_color = theme.accent if line.kind == OWN else getattr(theme, NAME_TOKENS[line.name_color])
+                self.draw_text(painter, QRectF(left, row.top(), self.text_w, line_h), line.name, "name", name_color,
+                               LEFT)
                 left += self.advance("name", line.name) + self.space_w
+            text_color = theme.text_dim if line.kind == NOTICE else theme.text
             self.draw_text(painter, QRectF(left, row.top(), text_left + self.text_w - left, line_h), line.text, "value",
-                           theme.text, LEFT)
+                           text_color, LEFT)
         painter.setOpacity(1.0)

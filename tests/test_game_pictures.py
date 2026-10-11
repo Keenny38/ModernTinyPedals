@@ -79,6 +79,15 @@ def wait_for(condition, seconds: float = 5.0):
     return condition()
 
 
+def settled(lookup):
+    """Answer of lookup once readable copies made in background (logo loader) are ready"""
+    from tinypedal.userfile.custom_image import LOGO_LOADER
+
+    lookup()
+    assert LOGO_LOADER.wait()
+    return lookup()
+
+
 # --- Cache & game lists
 def test_game_lists_read_and_logos_fetched_in_background(game):
     fake, cache = game
@@ -293,6 +302,7 @@ def test_page_urls_and_notifier(game, monkeypatch):
     assert wait_for(lambda: os.path.isfile(cache.picture_file(gi.BRAND_DARK, "BMW")))  # asked meanwhile
     assert gp.brand_logo_url(brand="BMW").endswith("brand_dark/BMW.svg")  # dark logo of game (red: kept)
     logos = gp.LogoCache()
+    settled(lambda: logos.track("Le Mans", ""))
     assert logos.track("Le Mans", "") == gp.track_logo_url("Le Mans") != url  # dark copy on light theme
     notifier = gp.notifier()
     cache.add_listener(notifier._picture_arrived)
@@ -308,9 +318,9 @@ def test_logo_cache_follows_theme(game, monkeypatch):
     _, cache = game
     assert cache.fetch_picture(gi.TRACK_LOGO, "lemanswec")
     logos = gp.LogoCache()
-    dark_url = logos.track("Le Mans", "")
+    dark_url = settled(lambda: logos.track("Le Mans", ""))
     monkeypatch.setattr(gp, "light_theme", lambda: True)
-    light_url = logos.track("Le Mans", "")
+    light_url = settled(lambda: logos.track("Le Mans", ""))
     assert light_url == gp.track_logo_url("Le Mans") != dark_url
     monkeypatch.setattr(gp, "light_theme", lambda: False)
     assert logos.track("Le Mans", "") == dark_url

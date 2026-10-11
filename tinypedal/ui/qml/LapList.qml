@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQml.Models
 
 // Recorded laps grouped by session: click to compare (Shift+click: every lap between), flag (or double-click)
 // to set reference lap, click a sector time: zoom charts on sector, search by vehicle, session, conditions, note.
@@ -214,263 +215,279 @@ Card {
                 }
             }
 
-            delegate: Item {
-                id: row
-                required property int index
-                required property string kind
-                required property string session
-                required property string path
-                required property string title
-                required property string time
-                required property string s1
-                required property string s2
-                required property string s3
-                required property bool best1
-                required property bool best2
-                required property bool best3
-                required property string info
-                required property string note
-                required property bool checked
-                required property bool reference
-                required property string color
-                required property bool dim
-                required property bool fastest
-                required property int count
-                required property bool error
-                required property string gap
-                required property string tip
-                required property bool open  // session expanded
-                required property string hint  // lap of another circuit than reference lap: never compared
-                required property string logo  // session: car brand logo of game
+            // One delegate per row type (session header, lap): a row only builds the items it shows
+            delegate: DelegateChooser {
+                role: "kind"
+                DelegateChoice {  // Session header
+                    roleValue: "session"
+                    Item {
+                        id: row
+                        required property int index
+                        required property string kind
+                        required property string session
+                        required property string path
+                        required property string title
+                        required property string time
+                        required property string info
+                        required property int count
+                        required property bool open  // session expanded
+                        required property string logo  // car brand logo of game
+                        // Reused row (ListView.reuseItems, one pool per row type): fed other values at once, no animation
+                        property bool live: true
+                        ListView.onPooled: { live = false; opacity = 1 }  // remove transition may have faded it out
+                        ListView.onReused: live = true
+                        width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                        height: Math.round(theme.em * 2.6)
 
-                readonly property bool isSession: kind === "session"
-                // Reused row (ListView.reuseItems): fed other lap values at once, no animation from the old lap
-                property bool live: true
-                ListView.onPooled: { live = false; opacity = 1 }  // remove transition may have faded it out
-                ListView.onReused: live = true
-                width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
-                height: isSession ? Math.round(theme.em * 2.6) : Math.round(theme.em * 3.1)
-
-                // Session header
-                Item {
-                    visible: row.isSession
-                    anchors.fill: parent
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.topMargin: row.index > 0 ? theme.em * 0.35 : 0
-                        radius: theme.em * 0.45
-                        color: headerArea.containsMouse ? theme.hover : "transparent"
-                        Behavior on color { enabled: row.live; ColorAnimation { duration: 100 } }
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: theme.em * 0.3
-                            anchors.rightMargin: theme.em * 0.5
-                            spacing: theme.em * 0.4
-                            Icon {
-                                glyph: ""  // chevron right
-                                size: theme.em * 0.75
-                                color: theme.dimText
-                                rotation: row.open ? 90 : 0
-                                Behavior on rotation { enabled: row.live; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-                            }
-                            Text {
-                                text: row.title
-                                color: theme.text
-                                font.weight: Font.DemiBold
-                            }
-                            GameLogo {  // car brand logo of game
-                                source: row.isSession ? row.logo : ""
-                                boxWidth: theme.em * 2.0
-                                boxHeight: theme.em * 1.1
-                            }
-                            Text {
-                                text: row.info
-                                visible: text !== ""
-                                color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.85
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            Rectangle {
-                                radius: height / 2
-                                color: theme.hover
-                                implicitWidth: countText.implicitWidth + theme.em * 0.9
-                                implicitHeight: countText.implicitHeight + theme.em * 0.15
-                                Text {
-                                    id: countText
-                                    anchors.centerIn: parent
-                                    text: row.count
-                                    color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.85
-                                }
-                            }
-                            Text {
-                                text: row.time
-                                color: theme.dimText
-                                font.features: { "tnum": 1 }
-                            }
-                        }
-                        MouseArea {
-                            id: headerArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            onClicked: function(mouse) {
-                                if (mouse.button === Qt.RightButton) {
-                                    root.menuSession = row.session
-                                    sessionMenu.popup(headerArea, mouse.x, mouse.y)
-                                } else {
-                                    backend.toggleSession(row.session)
-                                    root.keysToChart()
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Lap
-                Rectangle {
-                    visible: !row.isSession
-                    anchors.fill: parent
-                    anchors.topMargin: 1
-                    anchors.bottomMargin: 1
-                    radius: theme.em * 0.45
-                    color: row.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, lapArea.containsMouse ? 0.16 : 0.10)
-                         : lapArea.containsMouse ? theme.hover : "transparent"
-                    Behavior on color { enabled: row.live; ColorAnimation { duration: 120 } }
-                    ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.hint !== "" || row.error)
-                    ToolTip.text: !lapArea.containsMouse ? ""  // text made when hovered only
-                        : row.error ? i18n.tr("Unable to read this lap file") : [row.hint, row.tip].filter(Boolean).join("\n")
-                    ToolTip.delay: 700
-
-                    // Lap color bar when shown in charts
-                    Rectangle {
-                        width: 3
-                        radius: 1.5
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        anchors.margins: theme.em * 0.4
-                        color: row.color || "transparent"
-                        scale: row.color ? 1 : 0
-                        Behavior on scale { enabled: row.live; NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
-                    }
-
-                    MouseArea {
-                        id: lapArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: function(mouse) {
-                            if (mouse.button === Qt.RightButton) {
-                                root.openLapMenu(row.path, lapArea, mouse.x, mouse.y)
-                            } else if ((mouse.modifiers & Qt.ShiftModifier) && root.anchorPath !== "") {
-                                backend.selectRange(root.anchorPath, row.path, !row.checked)
-                                root.keysToChart()
-                            } else {
-                                backend.toggleLap(row.path)
-                                root.anchorPath = row.path
-                                root.keysToChart()
-                            }
-                        }
-                        onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.setReference(row.path) }
-                    }
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: theme.em * 1.0
-                        anchors.rightMargin: theme.em * 0.4
-                        spacing: theme.em * 0.5
-                        opacity: row.hint !== "" ? 0.5 : 1  // other circuit: dimmed
-
-                        // Check box (warning if lap file unreadable)
                         Rectangle {
-                            implicitWidth: theme.em * 1.15
-                            implicitHeight: implicitWidth
-                            radius: theme.em * 0.3
-                            color: row.error ? theme.warning : row.checked ? (row.color || theme.accent) : "transparent"
-                            border.width: row.checked || row.error ? 0 : 1.5
-                            border.color: theme.dimText
-                            Behavior on color { enabled: row.live; ColorAnimation { duration: 150 } }
-                            Icon {
-                                anchors.centerIn: parent
-                                glyph: row.error ? "" : ""  // warning, check mark
-                                size: theme.em * 0.75
-                                color: "white"
-                                opacity: row.checked || row.error ? 1 : 0
-                                Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 0
+                            anchors.fill: parent
+                            anchors.topMargin: row.index > 0 ? theme.em * 0.35 : 0
+                            radius: theme.em * 0.45
+                            color: headerArea.containsMouse ? theme.hover : "transparent"
+                            Behavior on color { enabled: row.live; ColorAnimation { duration: 100 } }
                             RowLayout {
-                                spacing: theme.em * 0.35
-                                Text {
-                                    text: (row.fastest ? "★ " : "") + row.title
-                                    color: row.fastest ? theme.gold : theme.text
-                                    font.weight: row.reference ? Font.Bold : Font.Normal
-                                }
-                                Rectangle {
-                                    visible: row.reference
-                                    radius: theme.em * 0.25
-                                    color: theme.accent
-                                    implicitWidth: refText.implicitWidth + theme.em * 0.6
-                                    implicitHeight: refText.implicitHeight + 2
-                                    Text {
-                                        id: refText
-                                        anchors.centerIn: parent
-                                        text: i18n.tr("REF")
-                                        color: "white"
-                                        font.pointSize: theme.fontPoint * 0.75
-                                        font.weight: Font.Bold
-                                    }
-                                }
-                                Item { Layout.fillWidth: true }
-                                Text {
-                                    visible: row.gap !== ""
-                                    text: row.gap
+                                anchors.fill: parent
+                                anchors.leftMargin: theme.em * 0.3
+                                anchors.rightMargin: theme.em * 0.5
+                                spacing: theme.em * 0.4
+                                Icon {
+                                    glyph: ""  // chevron right
+                                    size: theme.em * 0.75
                                     color: theme.dimText
-                                    font.pointSize: theme.fontPoint * 0.8
-                                    font.features: { "tnum": 1 }
+                                    rotation: row.open ? 90 : 0
+                                    Behavior on rotation { enabled: row.live; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                                 }
                                 Text {
-                                    text: row.time
-                                    color: row.dim ? theme.dimText : theme.text
-                                    font.features: { "tnum": 1 }
+                                    text: row.title
+                                    color: theme.text
                                     font.weight: Font.DemiBold
                                 }
-                            }
-                            RowLayout {
-                                spacing: theme.em * 0.6
-                                // Three sectors: fixed texts (no array & Repeater per row)
-                                SectorText { value: row.s1; best: row.best1; sector: 1; chart: root.chart }
-                                SectorText { value: row.s2; best: row.best2; sector: 2; chart: root.chart }
-                                SectorText { value: row.s3; best: row.best3; sector: 3; chart: root.chart }
+                                GameLogo {  // car brand logo of game
+                                    source: row.logo
+                                    boxWidth: theme.em * 2.0
+                                    boxHeight: theme.em * 1.1
+                                }
                                 Text {
-                                    text: row.note === "" ? row.info
-                                        : (row.info !== "" ? row.info + " · " : "") + "“" + row.note + "”"
+                                    text: row.info
+                                    visible: text !== ""
                                     color: theme.dimText
                                     font.pointSize: theme.fontPoint * 0.85
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
                                 }
+                                Rectangle {
+                                    radius: height / 2
+                                    color: theme.hover
+                                    implicitWidth: countText.implicitWidth + theme.em * 0.9
+                                    implicitHeight: countText.implicitHeight + theme.em * 0.15
+                                    Text {
+                                        id: countText
+                                        anchors.centerIn: parent
+                                        text: row.count
+                                        color: theme.dimText
+                                        font.pointSize: theme.fontPoint * 0.85
+                                    }
+                                }
+                                Text {
+                                    text: row.time
+                                    color: theme.dimText
+                                    font.features: { "tnum": 1 }
+                                }
+                            }
+                            MouseArea {
+                                id: headerArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        root.menuSession = row.session
+                                        sessionMenu.popup(headerArea, mouse.x, mouse.y)
+                                    } else {
+                                        backend.toggleSession(row.session)
+                                        root.keysToChart()
+                                    }
+                                }
                             }
                         }
+                    }
+                }
+                DelegateChoice {  // Lap
+                    Item {
+                        id: row
+                        required property int index
+                        required property string kind
+                        required property string session
+                        required property string path
+                        required property string title
+                        required property string time
+                        required property string s1
+                        required property string s2
+                        required property string s3
+                        required property bool best1
+                        required property bool best2
+                        required property bool best3
+                        required property string info
+                        required property string note
+                        required property bool checked
+                        required property bool reference
+                        required property string color
+                        required property bool dim
+                        required property bool fastest
+                        required property bool error
+                        required property string gap
+                        required property string tip
+                        required property string hint  // lap of another circuit than reference lap: never compared
+                        // Reused row (ListView.reuseItems, one pool per row type): fed other values at once, no animation
+                        property bool live: true
+                        ListView.onPooled: { live = false; opacity = 1 }  // remove transition may have faded it out
+                        ListView.onReused: live = true
+                        width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                        height: Math.round(theme.em * 3.1)
 
-                        // Set as reference
-                        TpButton {
-                            glyph: ""  // flag
-                            flat: true
-                            implicitHeight: theme.em * 1.9
-                            tip: i18n.tr("Set as Reference")
-                            opacity: row.reference ? 1 : (lapArea.containsMouse || hovered ? 0.8 : 0)
-                            checked: row.reference
-                            Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
-                            onClicked: backend.setReference(row.path)
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.topMargin: 1
+                            anchors.bottomMargin: 1
+                            radius: theme.em * 0.45
+                            color: row.checked ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, lapArea.containsMouse ? 0.16 : 0.10)
+                                 : lapArea.containsMouse ? theme.hover : "transparent"
+                            Behavior on color { enabled: row.live; ColorAnimation { duration: 120 } }
+                            ToolTip.visible: lapArea.containsMouse && (row.tip !== "" || row.hint !== "" || row.error)
+                            ToolTip.text: !lapArea.containsMouse ? ""  // text made when hovered only
+                                : row.error ? i18n.tr("Unable to read this lap file") : [row.hint, row.tip].filter(Boolean).join("\n")
+                            ToolTip.delay: 700
+
+                            // Lap color bar when shown in charts
+                            Rectangle {
+                                width: 3
+                                radius: 1.5
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.margins: theme.em * 0.4
+                                color: row.color || "transparent"
+                                scale: row.color ? 1 : 0
+                                Behavior on scale { enabled: row.live; NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
+                            }
+
+                            MouseArea {
+                                id: lapArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        root.openLapMenu(row.path, lapArea, mouse.x, mouse.y)
+                                    } else if ((mouse.modifiers & Qt.ShiftModifier) && root.anchorPath !== "") {
+                                        backend.selectRange(root.anchorPath, row.path, !row.checked)
+                                        root.keysToChart()
+                                    } else {
+                                        backend.toggleLap(row.path)
+                                        root.anchorPath = row.path
+                                        root.keysToChart()
+                                    }
+                                }
+                                onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) backend.setReference(row.path) }
+                            }
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: theme.em * 1.0
+                                anchors.rightMargin: theme.em * 0.4
+                                spacing: theme.em * 0.5
+                                opacity: row.hint !== "" ? 0.5 : 1  // other circuit: dimmed
+
+                                // Check box (warning if lap file unreadable)
+                                Rectangle {
+                                    implicitWidth: theme.em * 1.15
+                                    implicitHeight: implicitWidth
+                                    radius: theme.em * 0.3
+                                    color: row.error ? theme.warning : row.checked ? (row.color || theme.accent) : "transparent"
+                                    border.width: row.checked || row.error ? 0 : 1.5
+                                    border.color: theme.dimText
+                                    Behavior on color { enabled: row.live; ColorAnimation { duration: 150 } }
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        glyph: row.error ? "" : ""  // warning, check mark
+                                        size: theme.em * 0.75
+                                        color: "white"
+                                        opacity: row.checked || row.error ? 1 : 0
+                                        Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    RowLayout {
+                                        spacing: theme.em * 0.35
+                                        Text {
+                                            text: (row.fastest ? "★ " : "") + row.title
+                                            color: row.fastest ? theme.gold : theme.text
+                                            font.weight: row.reference ? Font.Bold : Font.Normal
+                                        }
+                                        Rectangle {
+                                            visible: row.reference
+                                            radius: theme.em * 0.25
+                                            color: theme.accent
+                                            implicitWidth: refText.implicitWidth + theme.em * 0.6
+                                            implicitHeight: refText.implicitHeight + 2
+                                            Text {
+                                                id: refText
+                                                anchors.centerIn: parent
+                                                text: i18n.tr("REF")
+                                                color: "white"
+                                                font.pointSize: theme.fontPoint * 0.75
+                                                font.weight: Font.Bold
+                                            }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            visible: row.gap !== ""
+                                            text: row.gap
+                                            color: theme.dimText
+                                            font.pointSize: theme.fontPoint * 0.8
+                                            font.features: { "tnum": 1 }
+                                        }
+                                        Text {
+                                            text: row.time
+                                            color: row.dim ? theme.dimText : theme.text
+                                            font.features: { "tnum": 1 }
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+                                    RowLayout {
+                                        spacing: theme.em * 0.6
+                                        // Three sectors: fixed texts (no array & Repeater per row)
+                                        SectorText { value: row.s1; best: row.best1; sector: 1; chart: root.chart }
+                                        SectorText { value: row.s2; best: row.best2; sector: 2; chart: root.chart }
+                                        SectorText { value: row.s3; best: row.best3; sector: 3; chart: root.chart }
+                                        Text {
+                                            text: row.note === "" ? row.info
+                                                : (row.info !== "" ? row.info + " · " : "") + "“" + row.note + "”"
+                                            color: theme.dimText
+                                            font.pointSize: theme.fontPoint * 0.85
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+
+                                // Set as reference
+                                TpButton {
+                                    glyph: ""  // flag
+                                    flat: true
+                                    implicitHeight: theme.em * 1.9
+                                    tip: i18n.tr("Set as Reference")
+                                    opacity: row.reference ? 1 : (lapArea.containsMouse || hovered ? 0.8 : 0)
+                                    checked: row.reference
+                                    Behavior on opacity { enabled: row.live; NumberAnimation { duration: 120 } }
+                                    onClicked: backend.setReference(row.path)
+                                }
+                            }
                         }
                     }
                 }

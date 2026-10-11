@@ -23,6 +23,7 @@ Stint module
 from __future__ import annotations
 
 from collections import deque
+from time import monotonic
 
 from .. import calculation as calc
 from .. import realtime_state
@@ -36,7 +37,7 @@ from ..userfile.consumption_history import (
 )
 from ..userfile.heatmap import select_compound_symbol
 from ..validator import generator_init
-from ._base import MODULE_STOP, DataModule
+from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, DataModule
 
 
 class Realtime(DataModule):
@@ -99,9 +100,29 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
     """Update consumption history"""
     last_reset = None  # reset check
     delayed_save = False
+    next_checkpoint = 0.0  # monotonic time of next save while driving
 
     combo_name = ""
     readable = True  # history file readable at load, False if not accessible (never saved over)
+
+    def save_data():
+        """History saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
+        nonlocal delayed_save, readable, next_checkpoint
+        next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
+        if not readable:  # not accessible at load: laps of file kept, added to recorded laps
+            saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
+            if readable:
+                output.consumptionDataSet = deque(merge_consumption_history(
+                    output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
+                ), output.consumptionDataSet.maxlen)
+                output.consumptionDataVersion += 1
+        if readable:
+            save_consumption_history_file(
+                dataset=output.consumptionDataSet,
+                filepath=filepath,
+                filename=combo_name,
+            )
+        delayed_save = False
 
     while True:
         reset = yield None
@@ -110,20 +131,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
         if last_reset != reset:
             # Save data
             if delayed_save:
-                if not readable:  # not accessible at load: laps of file kept, added to recorded laps
-                    saved_laps, readable = read_consumption_history_file(filepath=filepath, filename=combo_name)
-                    if readable:
-                        output.consumptionDataSet = deque(merge_consumption_history(
-                            output.consumptionDataSet, saved_laps, output.consumptionDataSet.maxlen,
-                        ), output.consumptionDataSet.maxlen)
-                        output.consumptionDataVersion += 1
-                if readable:
-                    save_consumption_history_file(
-                        dataset=output.consumptionDataSet,
-                        filepath=filepath,
-                        filename=combo_name,
-                    )
-                delayed_save = False
+                save_data()
 
             # Delay reset until driving (module stopping: data saved only)
             if reset is MODULE_STOP or not realtime_state.active:
@@ -140,6 +148,7 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             # New data set (copy on write), as GUI may be iterating current one
             output.consumptionDataSet = deque(dataset, output.consumptionDataSet.maxlen)
             output.consumptionDataVersion += 1
+            next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
 
         # Update at start of lap
         if (
@@ -171,6 +180,8 @@ def record_consumption_history(output: HistoryInfo, filepath: str):
             )
             output.consumptionDataVersion += 1
             delayed_save = True
+            if monotonic() >= next_checkpoint:  # checkpoint while driving (crash, power loss)
+                save_data()
 
 
 @generator_init

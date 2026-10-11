@@ -1,6 +1,6 @@
 # Connections
 
-Modern Tiny Pedals can be driven by other programs, stream live telemetry, show a dashboard on a phone or tablet, put overlays in your stream (OBS, Streamlabs, XSplit, vMix), display overlays in VR, and replay sessions without the game. Everything on this page is **off by default**.
+NeoPedal can be driven by other programs, stream live telemetry, show a dashboard on a phone or tablet, put overlays in your stream (OBS, Streamlabs, XSplit, vMix), display overlays in VR, and replay sessions without the game. Everything on this page is **off by default**.
 
 ## Remote control
 
@@ -14,12 +14,12 @@ The server only listens on `127.0.0.1` (this computer):
 | Request | Effect |
 |---|---|
 | `GET http://127.0.0.1:8337/commands` | Lists the available commands (JSON) |
-| `POST http://127.0.0.1:8337/command/<name>` | Runs a command. The request must include an `X-TinyPedal` header (any value) |
+| `POST http://127.0.0.1:8337/command/<name>` | Runs a command. The request must include an `X-NeoPedal` header (any value; `X-TinyPedal`, used by older versions, is still accepted) |
 
-Commands are the same as the hotkeys: `overlay_visibility`, `overlay_lock`, `overlay_auto_hide`, `reload_preset`, `load_next_preset`, `restart_api`, `spectate_next_driver`, `cycle_deltabest_source`, `black_box_next_incident`, `preset_1` to `preset_10`, `widget_<name>` to toggle an overlay (for example `widget_relative`), `module_<name>` to toggle a module, and more. Example:
+Commands are the same as the hotkeys: `overlay_visibility`, `overlay_lock`, `overlay_auto_hide`, `reload_preset`, `load_next_preset`, `restart_api`, `spectate_next_driver`, `cycle_deltabest_source`, `black_box_next_incident`, `show_main_window` (main window in front of the game), the [Broadcast Director](Broadcast-Director.md#hotkeys) commands (`director_next_car`, `director_lock`...), `preset_1` to `preset_10`, `widget_<name>` to toggle an overlay (for example `widget_relative`), `module_<name>` to toggle a module, and more. Example:
 
 ```bash
-curl -X POST -H "X-TinyPedal: 1" http://127.0.0.1:8337/command/overlay_lock
+curl -X POST -H "X-NeoPedal: 1" http://127.0.0.1:8337/command/overlay_lock
 ```
 
 Requests without the header, or with another host name than `127.0.0.1` or `localhost`, are refused, so web pages cannot send commands from your browser.
@@ -64,7 +64,7 @@ Sources:
 
 | Source | What it shows | Browser source size |
 |---|---|---|
-| `Layout` | Every overlay shown on stream, at its place on your screen | Size of the screen shown on the page (smaller sizes are scaled to fit) |
+| `Layout` | Every overlay shown on stream, at its place on your screen. `Format`: `16:9 (screen centre)` (default) shows the centre of the screen in 16:9 (ultrawide or triple screen: overlays outside that part are not shown unless you place them inside with the layout editor), `Whole screen` the whole screen as before 0.23.0. Copy the address again after changing the format | 16:9: 1920 x 1080. `Whole screen`: size of the screen shown on the page (smaller sizes are scaled to fit) |
 | One per overlay | That overlay alone, at top left (`&scale=1.5` in the address enlarges it) | Size of the overlay shown on the page |
 | `Race Results` | Classification of the last race, with classes and pages cycling | 1920 x 1080 |
 
@@ -77,7 +77,9 @@ Sources:
 Good to know:
 
 - Overlay images are only captured while a source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change, up to `Images per second` (15, 30 or 60).
-- Overlays hidden by auto hide (no session) are hidden on stream too.
+- **Layout editor**: `Edit Layout` next to the `Layout` source opens it in your browser, the whole screen shown with the 16:9 frame: drag overlays to their place on the stream (for example those on the sides of an ultrawide screen), mouse wheel to resize, arrows to move by one pixel, `Ctrl+Z` to undo, then `Save`. Their place on your screen does not change; each format (16:9, whole screen) has its own places, and `Reset` / `Reset All` put them back.
+- Overlays hidden by auto hide (no session) are hidden on stream too. While you **spectate** a session or watch a replay (no car driven), they are shown and updated as long as a `Layout` or overlay source is on air (`Show overlays while spectating` in the `Server` part of the page, on by default), and hidden again a few seconds after the last source stops. Laps, fuel and stats are still only recorded while you drive. When no overlay is shown, the page tells why (auto hide outside sessions, visibility options).
+- The [Broadcast Director](Broadcast-Director.md#broadcast-graphics) has its own graphics source, served by the same server but not listed on this page.
 - Every address contains an **access token**. If an address was shown on stream by mistake, click `New Access Token`: addresses copied before stop working, copy them again. The token is kept when the app restarts (up to 0.22.1 a new one was made at each start: copy the addresses once more after updating).
 - `Another computer (LAN)` lets a streaming PC on your local network show the sources (dual PC setup): the page then lists the addresses to use from that PC. Windows Firewall may ask you to allow the app the first time.
 - `Sources Page` opens every source in your browser, to test them.
@@ -138,8 +140,12 @@ The `Replays` entry of the navigation bar (or `Tools` > `Game Replays`) controls
 - **Timeline**: every incident on a line covering the whole session, with the replay position. Click an incident to jump to it, click anywhere else to move the replay there. Mouse wheel zooms, drag moves the zoomed part, double-click or `Whole session` shows everything again.
 - **Jump to Incident** (or double-click, `Enter`, the arrows of the panel for the previous / next incident) moves the replay `Seconds Before` the incident, camera on your car if it is involved, else on the first car. Right-click an incident to choose the car or to see only one driver's incidents. In a live session the button becomes **Replay This Moment**: the replay of the session opens at that moment, and `Back to Live` returns to the session.
 - **Drivers**: standings of the session or replay, by position: class position, car number, driver and car, laps, best lap (purple: fastest of its class), last lap, gap to the leader (practice & qualifying: best lap behind the best lap of the leader, as in game), pit stops, virtual energy (cars of your team only), status (garage, in pits, finished, retired) and number of incidents (click it to see that driver's incidents). Class chips show one class only, your car is highlighted, the car followed by the camera is marked. Double-click a driver (or its camera button) to put the camera on their car. Right-click: `Go to Lap...` moves the replay to the start of a lap of that car.
-- **Map**: the track and pit lane of the session or replay with every car (class color and number, your car with a white ring, the car followed by the camera with a blue one); cars glide between updates. Click a car to put the camera on it. Mouse wheel zooms, drag moves, double-click shows the whole track.
+- **Map**: the track and pit lane of the session or replay with every car (class color and number, your car with a white ring, the car followed by the camera with a blue one). With the game on this computer, cars follow their real place 10 times a second, like the Broadcast Director track map; otherwise they glide along the track between updates. Click a car to put the camera on it. Mouse wheel zooms, drag moves, double-click shows the whole track.
 
 The page asks the game only while it is shown, on one connection per update: every 2 seconds with a replay open, 5 seconds otherwise, 15 seconds when the game is not running; standings only while `Drivers` or `Map` is shown, while a replay is open, or when the incidents change. `Refresh` (`F5`) asks again at once. Seconds before, sort, filters, the tab shown and protected replays are kept for next time.
+
+### Broadcast director (Le Mans Ultimate)
+
+`Broadcast` in the navigation bar (or `Tools` > `Broadcast Director`) casts a race: live, driving or spectating an online race, or in a replay. Cars with live timing, every game camera in one click, an assisted or automatic director, a commentator screen, and its own **broadcast graphics** as a browser source (1920 x 1080) served by the stream overlay server, placed with a layout editor in your browser. See [Broadcast Director](Broadcast-Director.md).
 
 All options: [Remote Control](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#remote-control), [Web Dashboard](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#web-dashboard), [VR Overlay](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#vr-overlay), [Session recorder](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#session-recorder) and [Game replays](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#game-replays).

@@ -157,7 +157,8 @@ TpPage {
                     Text {
                         Layout.fillWidth: true
                         visible: page.loadedInfo.found === true
-                        text: (page.loadedInfo.changedText || "") + "  ·  " + i18n.trm((page.loadedInfo.overlays || 0) + " overlays")
+                        text: page.loadedInfo.pending === true ? (page.loadedInfo.changedText || "")  // content read meanwhile
+                            : (page.loadedInfo.changedText || "") + "  ·  " + i18n.trm((page.loadedInfo.overlays || 0) + " overlays")
                               + "  ·  " + i18n.trm((page.loadedInfo.modules || 0) + " modules")
                         color: theme.dimText
                         font.pointSize: theme.fontPoint * 0.85
@@ -228,6 +229,7 @@ TpPage {
                     anchors.fill: parent
                     clip: true
                     model: backend.presets
+                    reuseItems: true  // rows reset their transient state when pooled (see PresetRow)
                     boundsBehavior: Flickable.StopAtBounds
                     highlightFollowsCurrentItem: false
                     keyNavigationEnabled: true

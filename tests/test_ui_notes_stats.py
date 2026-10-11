@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
+from tests.test_driver_stats_viewer import settle
 from tinypedal.setting import cfg
 from tinypedal.ui._common import BaseEditor
 
@@ -192,15 +193,19 @@ def test_stats_viewer_display_units(stats_viewer, monkeypatch):
 
 def test_stats_viewer_reset_lap_time(stats_viewer, dialogs):
     stats_viewer.resetLapTime("GT3", "rb")  # no lap time
+    settle(stats_viewer)
     assert dialogs
     stats_viewer.resetLapTime("GT3", "pb")
+    settle(stats_viewer)
     assert load_stats()["Spa"]["GT3"]["pb"] > 9999
 
 
 def test_stats_viewer_remove_vehicle_and_track(stats_viewer):
     stats_viewer.selectRow("LMP2")
     stats_viewer.removeVehicle()
+    settle(stats_viewer)
     assert list(load_stats()["Spa"]) == ["GT3"]
     stats_viewer.deleteTrack("")
+    settle(stats_viewer)
     assert "Spa" not in load_stats()
     assert stats_viewer.selected_stats_key == "Monza"

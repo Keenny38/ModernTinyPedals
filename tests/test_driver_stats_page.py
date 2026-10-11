@@ -16,6 +16,7 @@ from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
     dialogs,
     item_texts,
     page,
+    settle,
     window,
 )
 from tinypedal.setting import cfg
@@ -156,12 +157,15 @@ def test_open_session_and_delete_selected(backend):  # noqa: F811
     backend.openSession("Removed", "Car")  # track without stats: nothing
     assert backend.currentTrack == SPA
     backend.deleteSelected()  # vehicle of track
+    settle(backend)
     assert "Hyper - Ferrari" not in backend.stats_temp[SPA]
     backend.showAllTracks()
     backend.selectRow("Monza")
     backend.deleteSelected()  # track of All Tracks
+    settle(backend)
     assert "Monza" not in backend.stats_temp
     backend.undo()
+    settle(backend)
     assert "Monza" in backend.stats_temp
 
 

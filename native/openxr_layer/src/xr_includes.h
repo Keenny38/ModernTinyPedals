@@ -1,5 +1,5 @@
 /*
- * Modern Tiny Pedals - OpenXR overlay layer
+ * NeoPedal - OpenXR overlay layer
  * Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
  * SPDX-License-Identifier: GPL-3.0-or-later
  *

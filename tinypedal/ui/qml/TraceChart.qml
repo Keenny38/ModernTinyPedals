@@ -42,7 +42,12 @@ FocusScope {
     property var cursorPanels: []
     property var cursorMap: []  // map position of each lap at cursor (TrackMap)
     property var cursorG: []  // G circle position of each lap at cursor (GCircle)
+    property var cursorInputs: []  // pedals & steering of each lap at cursor (SimpleView)
+    property var cursorDashboard: []  // channel values of each lap at cursor (SimpleView)
     readonly property bool zoomed: targetEnd - targetStart < maxX - 1
+    // Simple view over charts: everything but lap chips hidden (chips shared by both views, same place), keys kept
+    property bool chartsShown: true
+    readonly property real legendBottom: legendRow.y + legendRow.height
     readonly property real labelWidth: theme.em * 7
     readonly property real gap: theme.em * 0.35
     property var panels: backend.panels
@@ -52,6 +57,10 @@ FocusScope {
     readonly property var sectors: backend.sectorLines
     readonly property var marks: backend.cornerMarks
     readonly property real pinX: backend.pinnedX
+    readonly property var legendLaps: backend.legend  // shown laps (changed with chart: passage times built again)
+    readonly property var alignInfo: backend.alignment  // corner laps are aligned on, empty if none
+    readonly property var overviewInfo: backend.overview  // zoom navigator line of reference lap
+    readonly property bool hasCornerRanges: backend.cornerCount > 0  // no list built
     property int movingFrom: -1
     property int movingTo: -1
     property var lineOffsets: [[0, 0], [0.5, 0.5]]
@@ -80,7 +89,7 @@ FocusScope {
     property int historyIndex: -1
     property bool browsingHistory: false
     // Time of each shown lap between markers A & B (passage), fastest flagged
-    readonly property var passage: hasRange && backend.legend.length > 0 ? backend.passageTimes(markerA, markerB) : []
+    readonly property var passage: hasRange && legendLaps.length > 0 ? backend.passageTimes(markerA, markerB) : []
     readonly property real minPanelHeight: theme.em * 3.2
     readonly property real totalWeight: {
         var sum = 0
@@ -132,10 +141,16 @@ FocusScope {
     }
     function updateAutoscale() {
         var views = {}
+        var fitted = false
         for (var i = 0; i < panels.length; i++) {
             var column = panels[i].column
-            if (panels[i].autoscale) views[column] = backend.autoscaleAxis(column, targetStart, targetEnd)
+            if (panels[i].autoscale) {
+                views[column] = backend.autoscaleAxis(column, targetStart, targetEnd)
+                fitted = true
+            }
         }
+        // No panel fitted to visible part: axes left as they are (no new object, no axisOf run again everywhere)
+        if (!fitted && Object.keys(yViews).length === 0) return
         yViews = views
     }
     Timer { id: autoscaleTimer; interval: 40; onTriggered: chart.updateAutoscale() }
@@ -254,6 +269,8 @@ FocusScope {
             cursorPanels = []
             cursorMap = []
             cursorG = []
+            cursorInputs = []
+            cursorDashboard = []
             return
         }
         if (cursorSource === "mouse") cursorPending = true
@@ -261,13 +278,25 @@ FocusScope {
     }
     function fetchCursor() {
         if (isNaN(cursorX)) return
-        var state = backend.cursorState(cursorX)
+        applyState(backend.cursorState(cursorX))
+    }
+    // Cursor set with its state already asked (map hover: one backend call)
+    function applyCursor(x, source, state) {
+        cursorSource = source || "mouse"
+        cursorX = x
+        cursorPending = false
+        if (state) applyState(state)
+        else fetchCursor()
+    }
+    function applyState(state) {
         cursorTitle = state.title
         cursorPanels = state.values.map(cursorPanel)
         cursorValues = state.values
-        // Map & G circle positions empty while hidden: not set again (their items not updated every move)
+        // Map, G circle & simple view empty while hidden: not set again (their items not updated every move)
         if (state.map.length > 0 || cursorMap.length > 0) cursorMap = state.map
         if (state.g.length > 0 || cursorG.length > 0) cursorG = state.g
+        if (state.inputs.length > 0 || cursorInputs.length > 0) cursorInputs = state.inputs
+        if (state.dashboard.length > 0 || cursorDashboard.length > 0) cursorDashboard = state.dashboard
     }
     function cursorPanel(values) {
         var rows = []
@@ -356,10 +385,16 @@ FocusScope {
             var values = panel.values
             var texts = []
             for (var i = 0; i < values.length && texts.length < 4; i++)
-                if (values[i].text !== "") texts.push("<font color='" + values[i].color + "'>" + values[i].text + "</font>")
+                if (values[i].text !== "") texts.push("<font color='" + seriesColor(panelIndex, i) + "'>" + values[i].text + "</font>")
             panel.compact = texts.join(" ")
         }
         return panel.compact
+    }
+    // Color of a series of a panel (cursor values carry none: same order as panel series)
+    function seriesColor(panelIndex, seriesIndex) {
+        var info = panels[panelIndex]
+        var series = info ? info.series[seriesIndex] : undefined
+        return series ? series.color : theme.text
     }
     function lapOpacity(lapKey) { return highlightKey === "" || lapKey === highlightKey ? 1 : 0.18 }
     function niceStep(span, count) {
@@ -680,7 +715,7 @@ FocusScope {
     // Laps aligned on braking point of a corner: corner, click to put laps back at their place
     Rectangle {
         parent: legendRow
-        visible: backend.alignment.label !== undefined
+        visible: chart.alignInfo.label !== undefined
         height: theme.em * 1.8
         width: alignText.implicitWidth + theme.em * 0.9
         radius: height / 2
@@ -695,7 +730,7 @@ FocusScope {
         Text {
             id: alignText
             anchors.centerIn: parent
-            text: "↔ " + i18n.tr("Aligned on braking") + " " + (backend.alignment.label || "") + "  ×"
+            text: "↔ " + i18n.tr("Aligned on braking") + " " + (chart.alignInfo.label || "") + "  ×"
             color: theme.accent
             font.pointSize: theme.fontPoint * 0.9
             font.weight: Font.DemiBold
@@ -738,134 +773,23 @@ FocusScope {
         Action { text: i18n.tr("Hide Lap"); enabled: !chipMenu.reference; onTriggered: backend.setLapChecked(chipMenu.lapKey, false) }
     }
 
-    // Header: cursor position, playback, zoom
+    // Header: cursor position, zoom (playback: PlaybackBar under charts)
     Item {
         id: header
+        visible: chart.chartsShown
         anchors { left: parent.left; right: parent.right; top: legendRow.bottom; leftMargin: chart.labelWidth }
         anchors.topMargin: legendRow.height > 0 ? theme.em * 0.3 : 0
         height: theme.em * 2
-        Row {
-            id: playRow
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: theme.em * 0.2
-            visible: backend.legend.length > 0
-            // Back / forward in time, held: repeated (rewind / fast forward)
-            TpButton {
-                glyph: ""  // rewind
-                flat: true
-                implicitHeight: theme.em * 1.8
-                enabled: backend.referenceLapTime > 0
-                autoRepeat: true
-                tip: i18n.tr("2 s back (hold: rewind)")
-                onClicked: chart.skipTime(-chart.skipStep)
-            }
-            TpButton {
-                glyph: chart.playing ? "" : ""  // pause, play
-                flat: true
-                implicitHeight: theme.em * 1.8
-                tip: chart.hasRange ? i18n.tr("Play passage between markers A and B (Space)")
-                                    : i18n.tr("Play lap: cursor follows reference lap at real speed (Space)")
-                onClicked: chart.togglePlay()
-            }
-            TpButton {
-                glyph: ""  // fast forward
-                flat: true
-                implicitHeight: theme.em * 1.8
-                enabled: backend.referenceLapTime > 0
-                autoRepeat: true
-                tip: i18n.tr("2 s forward (hold: fast forward)")
-                onClicked: chart.skipTime(chart.skipStep)
-            }
-            TpButton {
-                visible: chart.hasRange
-                glyph: "\uE8EE"  // repeat
-                flat: true
-                implicitHeight: theme.em * 1.8
-                checked: chart.playLoop
-                tip: i18n.tr("Play only passage between markers A and B, again and again") + " (L)"
-                onClicked: chart.playLoop = !chart.playLoop
-            }
-            // Playback speed: slider on speed steps, value clicked: normal speed again
-            Slider {
-                id: speedSlider
-                anchors.verticalCenter: parent.verticalCenter
-                width: theme.em * 6.5
-                height: theme.em * 1.8
-                leftPadding: theme.em * 0.5
-                rightPadding: theme.em * 0.5
-                from: 0
-                to: chart.playSpeeds.length - 1
-                stepSize: 1
-                snapMode: Slider.SnapAlways
-                focusPolicy: Qt.NoFocus
-                value: chart.playSpeeds.indexOf(chart.playSpeed)
-                onMoved: chart.playSpeed = chart.playSpeeds[Math.round(value)]
-                ToolTip.visible: hovered && !pressed
-                ToolTip.text: i18n.tr("Playback speed") + " (, .)"
-                ToolTip.delay: 600
-                background: Item {
-                    x: speedSlider.leftPadding
-                    width: speedSlider.availableWidth
-                    height: speedSlider.height
-                    Rectangle {  // track, filled up to speed
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width
-                        height: 3
-                        radius: 1.5
-                        color: theme.border
-                        Rectangle {
-                            width: speedSlider.visualPosition * parent.width
-                            height: parent.height
-                            radius: parent.radius
-                            color: theme.accent
-                        }
-                    }
-                    Repeater {  // one notch per speed step, normal speed marked
-                        model: chart.playSpeeds
-                        Rectangle {
-                            x: index / (chart.playSpeeds.length - 1) * parent.width - width / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: modelData === 1 ? 2 : 1
-                            height: modelData === 1 ? theme.em * 0.8 : theme.em * 0.45
-                            color: index <= speedSlider.value ? theme.accent : theme.border
-                        }
-                    }
-                }
-                handle: Rectangle {
-                    x: speedSlider.leftPadding + speedSlider.visualPosition * (speedSlider.availableWidth - width)
-                    y: (speedSlider.height - height) / 2
-                    width: theme.em * 0.95
-                    height: width
-                    radius: width / 2
-                    color: speedSlider.pressed ? Qt.darker(theme.accent, 1.15) : theme.accent
-                    border.width: 2
-                    border.color: theme.base
-                    scale: speedSlider.pressed || speedSlider.hovered ? 1.15 : 1
-                    Behavior on scale { NumberAnimation { duration: 120 } }
-                }
-            }
-            TpButton {
-                text: chart.playSpeed + "×"
-                flat: true
-                implicitHeight: theme.em * 1.8
-                implicitWidth: theme.em * 3.2
-                checked: chart.playSpeed !== 1
-                tip: i18n.tr("Back to normal speed")
-                onClicked: chart.playSpeed = 1
-            }
-        }
         Text {
-            anchors.left: playRow.right
-            anchors.leftMargin: theme.em * 0.5
+            anchors.left: parent.left
             anchors.right: zoomRow.left
             anchors.verticalCenter: parent.verticalCenter
             elide: Text.ElideRight
-            text: chart.hasCursor ? chart.cursorTitle
-                : panels.length ? i18n.tr("Wheel: zoom · drag: move · click: keep position · right-click: menu · [ ]: corners · A/B: markers")
+            // Cursor position: in playback bar under charts
+            text: !chart.hasCursor && panels.length
+                ? i18n.tr("Wheel: zoom · drag: move · click: keep position · right-click: menu · [ ]: corners · A/B: markers")
                 : ""
-            color: chart.hasCursor ? theme.text : theme.dimText
-            font.weight: chart.hasCursor ? Font.DemiBold : Font.Normal
-            font.features: { "tnum": 1 }
+            color: theme.dimText
         }
         Row {
             id: zoomRow
@@ -892,7 +816,7 @@ FocusScope {
 
     Text {
         anchors.centerIn: scroller
-        visible: panels.length === 0 || backend.legend.length === 0
+        visible: chart.chartsShown && (panels.length === 0 || chart.legendLaps.length === 0)
         text: backend.loading ? "" : i18n.tr("Select recorded laps to compare.")
         color: theme.dimText
     }
@@ -901,7 +825,7 @@ FocusScope {
     Flow {
         id: passageRow
         anchors { left: parent.left; right: parent.right; top: header.bottom; leftMargin: chart.labelWidth }
-        visible: chart.passage.length > 0
+        visible: chart.chartsShown && chart.passage.length > 0
         height: visible ? implicitHeight : 0
         spacing: theme.em * 0.5
         Text {
@@ -943,7 +867,7 @@ FocusScope {
         id: marksStrip
         anchors { left: parent.left; right: parent.right; top: passageRow.bottom; leftMargin: chart.labelWidth }
         height: visible ? theme.em * 1.35 : 0
-        visible: backend.legend.length > 0 && (chart.sectors.length > 0 || chart.marks.length > 0)
+        visible: chart.chartsShown && chart.legendLaps.length > 0 && (chart.sectors.length > 0 || chart.marks.length > 0)
         clip: true
         Text {
             visible: chart.sectors.length > 0 && chart.xOf(0) >= -theme.em
@@ -1016,7 +940,7 @@ FocusScope {
         contentHeight: chart.contentHeight
         interactive: false
         clip: true
-        visible: backend.legend.length > 0
+        visible: chart.chartsShown && chart.legendLaps.length > 0
         ScrollBar.vertical: ScrollBar { policy: scroller.contentHeight > scroller.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
 
         // Channel names: drag to reorder, lower edge: resize (double-click: reset heights)
@@ -1445,7 +1369,7 @@ FocusScope {
                                 Text {
                                     id: valueText
                                     text: parent.entry ? parent.entry.text : ""
-                                    color: parent.entry ? parent.entry.color : theme.text
+                                    color: bubble.info.series[index] ? bubble.info.series[index].color : theme.text
                                     font.pointSize: theme.fontPoint * 0.85
                                     font.weight: Font.DemiBold
                                     font.features: { "tnum": 1 }
@@ -1557,10 +1481,10 @@ FocusScope {
         MenuSeparator {}
         Action {
             text: i18n.tr("Align Laps on Braking Point Here")
-            enabled: chart.hasCursor && backend.cornerRanges.length > 0 && backend.legend.length > 1 && !backend.timeAxis
+            enabled: chart.hasCursor && chart.hasCornerRanges && chart.legendLaps.length > 1 && !backend.timeAxis
             onTriggered: backend.alignBrakingAt(chart.cursorX)
         }
-        Action { text: i18n.tr("Stop Aligning Laps"); enabled: backend.alignment.label !== undefined; onTriggered: backend.alignBraking(-1) }
+        Action { text: i18n.tr("Stop Aligning Laps"); enabled: chart.alignInfo.label !== undefined; onTriggered: backend.alignBraking(-1) }
         MenuSeparator {}
         Action { text: i18n.tr("Copy Values"); enabled: chart.hasCursor; onTriggered: backend.copyValues(chart.cursorX) }
         Action { text: i18n.tr("Copy Picture"); onTriggered: chart.pictureRequested(true) }
@@ -1594,7 +1518,7 @@ FocusScope {
         id: overview
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: chart.labelWidth }
         height: visible ? theme.em * 2.6 : 0
-        visible: scroller.visible && backend.overview.key !== undefined
+        visible: scroller.visible && chart.overviewInfo.key !== undefined
 
         Rectangle {
             anchors.fill: parent
@@ -1606,17 +1530,17 @@ FocusScope {
         Item {
             id: overviewPlot
             readonly property real sx: width / chart.maxX
-            readonly property real sy: height / Math.max((backend.overview.high || 1) - (backend.overview.low || 0), 1e-9)
+            readonly property real sy: height / Math.max((chart.overviewInfo.high || 1) - (chart.overviewInfo.low || 0), 1e-9)
             anchors.fill: parent
             anchors.margins: 3
             clip: true
             GpuShape {
-                key: backend.overview.key || ""
+                key: chart.overviewInfo.key || ""
                 color: theme.dimText
                 revision: backend.revision
                 transform: Matrix4x4 {
                     matrix: Qt.matrix4x4(overviewPlot.sx, 0, 0, 0,
-                                         0, -overviewPlot.sy, 0, overviewPlot.height + (backend.overview.low || 0) * overviewPlot.sy,
+                                         0, -overviewPlot.sy, 0, overviewPlot.height + (chart.overviewInfo.low || 0) * overviewPlot.sy,
                                          0, 0, 1, 0, 0, 0, 0, 1)
                 }
             }

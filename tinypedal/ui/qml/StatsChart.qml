@@ -35,7 +35,6 @@ Item {
     function paintAll() {
         gridCanvas.requestPaint()
         dataCanvas.requestPaint()
-        hoverCanvas.requestPaint()
     }
 
     onChartDataChanged: {
@@ -43,11 +42,10 @@ Item {
         paintAll()
         revealAnimation.restart()
     }
-    // Layers: grid & limits, data (painted once per data / size / theme, revealed by a clip), hovered session.
-    // Mouse moves & reveal frames paint nothing but the small hover layer.
+    // Layers: grid & limits, data (painted once per data / size / theme, revealed by a clip), hovered session
+    // (guide line & dot items: mouse moves & reveal frames paint nothing).
     onWidthChanged: paintAll()
     onHeightChanged: paintAll()
-    onHoveredChanged: hoverCanvas.requestPaint()
     // Colors painted: canvas painted again when light / dark theme switches (theme copy has no changed signal)
     readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border]
     onPaintColorsChanged: paintAll()
@@ -151,28 +149,36 @@ Item {
             }
         }
 
-        // Hovered session: guide line & bigger dot
-        Canvas {
-            id: hoverCanvas
+        // Hovered session: guide line & bigger dot (moved, never painted)
+        Item {
+            id: hoverMark
             objectName: "statsHover"
-            property int paints: 0  // times painted (tests)
+            readonly property var point: chart.points.length >= 2 && chart.hovered >= 0
+                                         && chart.hovered < chart.points.length ? chart.points[chart.hovered] : null
+            readonly property real stroke: hoverMark.point && hoverMark.point.clipped ? 1.2
+                                           : hoverMark.point && hoverMark.point.newPb ? Math.max(1.5, theme.em * 0.1) : 0
             width: chart.width
             height: chart.height
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                paints++
-                var points = chart.points
-                if (points.length < 2 || chart.hovered < 0 || chart.hovered >= points.length) return
-                var point = points[chart.hovered]
-                var hx = Math.round(chart.px(point.x)) + 0.5
-                ctx.strokeStyle = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.35)
-                ctx.lineWidth = 1
-                ctx.beginPath()
-                ctx.moveTo(hx, chart.plotY)
-                ctx.lineTo(hx, chart.plotY + chart.plotHeight)
-                ctx.stroke()
-                chart.paintDot(ctx, point, true, theme.accent, Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.5))
+            visible: point !== null
+            Rectangle {  // guide line
+                x: hoverMark.point ? Math.round(chart.px(hoverMark.point.x)) : 0
+                y: chart.plotY
+                width: 1
+                height: chart.plotHeight
+                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.35)
+            }
+            Rectangle {  // dot: outline centered on circle as painted dots
+                objectName: "statsHoverDot"
+                width: theme.em * 0.84 + hoverMark.stroke
+                height: width
+                radius: width / 2
+                x: hoverMark.point ? chart.px(hoverMark.point.x) - width / 2 : 0
+                y: hoverMark.point ? chart.py(hoverMark.point.y) - height / 2 : 0
+                color: !hoverMark.point || hoverMark.point.clipped ? "transparent"
+                       : hoverMark.point.newPb ? theme.accent : theme.text
+                border.width: hoverMark.stroke
+                border.color: hoverMark.point && hoverMark.point.clipped
+                              ? Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.5) : theme.base
             }
         }
     }

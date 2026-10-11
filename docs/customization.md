@@ -1,12 +1,12 @@
 **Note: following guide is updated to match latest released version.**
 
-Modern Tiny Pedals offers a wide range of customization options for `widget` and `module` controls, which can be accessed from corresponding tabs in main window.
+NeoPedal offers a wide range of customization options for `widget` and `module` controls, which can be accessed from corresponding tabs in main window.
 
 # Global user configuration
-Modern Tiny Pedals stores global user configuration in `config.json` file, which is used for none-preset specific options.
+NeoPedal stores global user configuration in `config.json` file, which is used for none-preset specific options.
 
 * For Windows, `config.json` is stored under `username\AppData\Roaming\TinyPedal` folder.
-* For Linux, `config.json` is stored under `home/username/.config/TinyPedal` folder.
+* For Linux, `config.json` is stored under `home/username/.config/NeoPedal` folder.
 
 Available settings:
 
@@ -21,13 +21,13 @@ Reload or Restart:
 
 * To reload all presets, select `Reload` from `Overlay` menu in main window.
 * To restart game API, select `Restart API` from `API` menu in main window.
-* To restart Modern Tiny Pedals, select `Restart TinyPedal` from `Window` menu in main window.
+* To restart NeoPedal, select `Restart TinyPedal` from `Window` menu in main window.
 
 [**`Back to Top`**](#)
 
 
 # Preset management
-Modern Tiny Pedals stores all customization options in `JSON` format preset files, and can be managed from `Preset` tab in main window.
+NeoPedal stores all customization options in `JSON` format preset files, and can be managed from `Preset` tab in main window.
 
 All user preset files, by default, are located in `TinyPedal\settings` folder. Those `JSON` files can also be manually edited with text editor.
 
@@ -45,7 +45,7 @@ Click `Trash` button to restore or permanently delete deleted presets. See [Pres
 
 * Lock Preset
 
-    Lock selected preset, which prevents any changes that made through Modern Tiny Pedals from saving to locked preset file. APP `version` tag will be attached to the preset that is locked with.
+    Lock selected preset, which prevents any changes that made through NeoPedal from saving to locked preset file. APP `version` tag will be attached to the preset that is locked with.
 
     Note, this feature does not prevent user from modifying or deleting locked preset file by other means. Locked preset file info is stored in `config.lock` file in [Global User Configuration](#global-user-configuration) folder.
 
@@ -95,13 +95,13 @@ Click `Trash` button to restore or permanently delete deleted presets. See [Pres
 
 
 ## Saving JSON file
-Modern Tiny Pedals automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Config` dialog, or `Restart` APP.
+NeoPedal automatically saves setting when user makes changes to widget position, or has toggled widget visibility, auto-hide, overlay-lock, etc. Changes will only take effect after `Reload` preset, or clicked `Save` or `Apply` button in `Config` dialog, or `Restart` APP.
 
 [**`Back to Top`**](#)
 
 
 ## Backup JSON file
-Modern Tiny Pedals will automatically create backup file with time stamp suffix if old setting file fails to load, and new default `JSON` with same filename will be generated.
+NeoPedal will automatically create backup file with time stamp suffix if old setting file fails to load, and new default `JSON` with same filename will be generated.
 
 A newer released version will auto-update old setting and add new setting after loading. It may still be a good idea to manually backup files before upgrading to newer version.
 
@@ -263,7 +263,7 @@ Shortcuts preset can be customized by accessing [Hotkey Tab](#hotkey) in main wi
 
 
 # User files
-Modern Tiny Pedals generates and saves user session data in specific folders defined in `User path`. Session data can be reset by accessing `Reset data` menu from `Overlay` menu in main window; or, delete data file from corresponding folder.
+NeoPedal generates and saves user session data in specific folders defined in `User path`. Session data can be reset by accessing `Reset data` menu from `Overlay` menu in main window; or, delete data file from corresponding folder.
 
 [**`Back to Top`**](#)
 
@@ -281,7 +281,7 @@ Data recording is handled by [Stats Module](#stats-module).
 ## Delta best
 Delta best data is stored as `CSV` format (.csv extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
-Session best and stint best laps of last session are stored as `JSON` format (.session extension) in the same folder, so they are kept when Modern Tiny Pedals restarts or preset is reloaded during the session.
+Session best and stint best laps of last session are stored as `JSON` format (.session extension) in the same folder, so they are kept when NeoPedal restarts or preset is reloaded during the session.
 
 Data recording is handled by [Delta Module](#delta-module).
 
@@ -361,11 +361,11 @@ To allow `auto notes loading` function to work, track notes file name must match
 
 
 ## Brand logo
-Modern Tiny Pedals supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
+NeoPedal supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
 
 With Le Mans Ultimate, real car brand logos, circuit logos, car pictures and circuit pictures are taken from the game itself: the app asks them to the game running on your computer (its local web server, same address as the [Le Mans Ultimate API](#le-mans-ultimate-api) Rest API access, which must be enabled) and keeps them in the `game_image_path` folder, so they are shown everywhere (brand logo column of Relative, Standings & Rivals, Home, Race Results, Driver Stats, Spectate, Replays, Race Calculator, Telemetry Viewer, Track Map Viewer and stream overlay of race results), also while the game is not running. Nothing is shipped with the app. A brand logo of your own in the brand logo folder is always shown first; its file name may be one word of a longer brand name (`Corvette.png` for `Chevrolet Corvette`, `Ford.png` for `Ford Mustang`). Logos too close to the background color are shown with a readable copy (kept in `game_image_path`): black logos get light on dark overlays and pages, white logos get dark on light themes, colored parts are kept.
 
-Note: Modern Tiny Pedals does not provide brand logo image assets, it is up to user to prepare images (or to run Le Mans Ultimate once with the app open, see above). Maximum `PNG` file size is limited to `5MB`.
+Note: NeoPedal does not provide brand logo image assets, it is up to user to prepare images (or to run Le Mans Ultimate once with the app open, see above). Maximum `PNG` file size is limited to `5MB`.
 
 How to prepare brand logo image:
 1. Brand logo image should have all transparent borders cropped. For example, in `GIMP` this can be done by selecting `Image` > `Crop to Content`.
@@ -402,21 +402,21 @@ Set logging output level. Supported values are:
 
 Log location:
   * On windows, `tinypedal.log` is located under `username\AppData\Roaming\TinyPedal` folder.
-  * On Linux, `tinypedal.log` is located under `home/username/.config/TinyPedal` folder.
+  * On Linux, `tinypedal.log` is located under `home/username/.config/NeoPedal` folder.
 
 Default logging output level is set on `1` if argument is not set.
 
 Usage: `python .\run.py -l 2` or `.\tinypedal.exe --log-level 2`
 
     -s, --single-instance
-Set running mode. `0` allows running multiple instances (copies) of Modern Tiny Pedals. `1` allows only single instance (default).
+Set running mode. `0` allows running multiple instances (copies) of NeoPedal. `1` allows only single instance (default).
 
-To run multiple copies of Modern Tiny Pedals at same time: `python .\run.py -s 0` or `.\tinypedal.exe --single-instance 0`
+To run multiple copies of NeoPedal at same time: `python .\run.py -s 0` or `.\tinypedal.exe --single-instance 0`
 
 Single instance mode saves `pid.log` file in the same folder as `tinypedal.log`, which is used for instance identification.
 
     --safe-mode
-Start in safe mode: plugins are not loaded, overlays (widgets & VR overlay) are not started, so settings can be fixed in the main window (a widget can still be turned on by hand). Window title and a notice show safe mode; `Restart Normally` in the notice, or `Restart Modern Tiny Pedals` in `Window` menu, starts normally again.
+Start in safe mode: plugins are not loaded, overlays (widgets & VR overlay) are not started, so settings can be fixed in the main window (a widget can still be turned on by hand). Window title and a notice show safe mode; `Restart Normally` in the notice, or `Restart NeoPedal` in `Window` menu, starts normally again.
 
 Usage: `python .\run.py --safe-mode` or `.\tinypedal.exe --safe-mode`
 
@@ -700,7 +700,7 @@ Enable automatically checking for updates on startup, and display notification m
 
 Click on the notification message will bring up a menu, where user can click `View Updates On GitHub` to open `Latest Releases` page in web browser, show what is new in the update (release notes page), or `Dismiss` the message.
 
-Note, this option is checked only once per startup, and notification message will only be displayed if new updates is available. If main window is hidden in tray at startup, a tray message is shown instead of opening the window over the game.
+Note, notification message will only be displayed if new updates is available. If main window is hidden in tray at startup, a tray message is shown instead of opening the window over the game. While the app runs, updates are checked again every `number_of_hours_between_update_checks` hours.
 
 With the Windows installer version, notification menu also offers `Download And Install`, which downloads the setup ZIP of the new version, checks its SHA256 hash (detects a corrupt download; the hash comes from the same release page, so it does not prove who published the file), extracts the installer, checks its digital signature when the installer is signed (an invalid signature is refused), then installs it. A portable copy (ZIP published until version 0.19) opens the release page instead, as the installer would install a separate copy without your presets and data: install the setup into the folder of the portable copy to keep them, later updates then install from the app. What's new notes are shown in the app language when translated (French), in English otherwise.
 
@@ -709,6 +709,9 @@ While downloading, notification message and what's new page show progress (perce
 `Skip This Version` (notification menu, or what's new page) hides the notice of this version: it is not shown again at startup, a newer version is. `Check for Updates` from `Help` menu still shows it. See `skipped_update_version`.
 
 User can also manually check for updates any time by accessing `Check for Updates` option from `Help` menu in main window.
+
+    number_of_hours_between_update_checks
+Check for updates again while the app runs, every this many hours since last check (at startup, by hand or automatic), for an app left open for days. Not checked while driving (checked once stopped). A new version found this way opens what's new only if the main window is the active window, otherwise the notification message waits in the main window (tray message if hidden in tray); a dismissed message is not shown again for the same version. Requires `check_for_updates_on_startup` enabled. Set `0` to check only at startup. Default is `12` hours, maximum `168` (one week).
 
     minimize_to_tray
 Minimize to tray when user clicks `X` close button.
@@ -720,7 +723,7 @@ Remember main window last position.
 Remember main window last size, and whether it was maximized.
 
     enable_high_dpi_scaling
-Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default.
+Enable window dialog and overlay widget auto-scaling under high DPI screen resolution. This option requires restarting NeoPedal to take effect. This option is enabled by default.
 
 High DPI scaling mode can be quickly toggled via `Scale` button on main window status bar.
 
@@ -810,7 +813,7 @@ Set number of days deleted presets are kept in preset trash (`trash` folder insi
 Update version hidden by `Skip This Version` (kept by app, not shown in config dialog): its notice is not shown again at startup, a newer version is. Stored as one number (major * 1000000 + minor * 1000 + patch), `0` if none.
 
     rail_items
-Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: Home, Overlays, Driver Stats Viewer, Race Results, Game Replays, Telemetry, Spectate, Race Calculator and Preset (`home,widget,driver_stats_viewer,race_results_viewer,game_replays,lap_viewer,spectate,race_calculator,preset`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.3).
+Entries of the navigation bar of main window, in order, separated by comma: pages (`home`, `widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and tools (dialog module name, for example `lap_viewer`, `driver_stats_viewer`, `race_calculator`; former `fuel_calculator` & `tyre_strategy_planner` entries open race calculator). Easier to set by right-clicking the navigation bar, `Customize Navigation Bar...`: check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. `Ctrl+1` to `Ctrl+9` open the first 9 entries. Entries keep their size: when window is too short, they scroll (mouse wheel or thin scroll bar) above the quick buttons, selected entry scrolled into view, a fade with an arrow shows that entries are hidden above or below. Pages left out stay in command palette (`Ctrl+K`). Default: Home, Overlays, Driver Stats Viewer, Race Results, Game Replays, Broadcast Director, Telemetry, Race Calculator and Preset (`home,widget,driver_stats_viewer,race_results_viewer,game_replays,broadcast_director,lap_viewer,race_calculator,preset`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.8; Spectate stays in `Tools` and the command palette, Config in the gear button under the bar, the `Config` menu and `Ctrl+,`).
 
     home_quick_access
 Quick access buttons of home page, in order, separated by comma: tools (dialog module name, for example `lap_viewer`, `race_calculator`), pages (`widget`, `module`, `preset`, `spectate`, `pacenotes`, `hotkey`, `tools`) and actions (`command_palette`, `bug_report`, `check_updates`). Easier to set with `Customize...` next to `Quick Access` on home page (or right-click the buttons): check entries to show, drag or `Up` / `Down` to reorder, `Reset` for default. Empty: no quick access button. Default: Telemetry viewer, Race calculator, Driver stats viewer, Layout editor, Widget performance, Game replays, then the Overlays, Module, Preset, Spectate, Hotkey and Tools pages, Config, then Create bug report and Check for updates (`lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,game_replays,widget,module,preset,spectate,hotkey,tools,app_settings,bug_report,check_updates`). Existing configs were set to this default once, by the update that introduced it (setting version 2.50.3).
@@ -837,7 +840,7 @@ Set `false` to disable translucent background.
 Set `true` to enable main application window position correction, which is used to correct window-off-screen issue with multi-screen. Overlays left outside every screen (monitor unplugged, preset made on another computer) are also shown on the nearest screen at startup, their saved position kept (not done while VR overlay is enabled). This option is enabled by default.
 
     enable_x11_platform_plugin_override
-Set Qt platform plugin type to `X11` via environment variable on Linux. This option may help work around some issues with overlay dragging and position on `Wayland`. This option requires restarting Modern Tiny Pedals to take effect. This option is enabled by default on Linux.
+Set Qt platform plugin type to `X11` via environment variable on Linux. This option may help work around some issues with overlay dragging and position on `Wayland`. This option requires restarting NeoPedal to take effect. This option is enabled by default on Linux.
 
     background_color_global
 Sets global background color for all widgets.
@@ -869,10 +872,10 @@ Colorblind safe variant of overlay theme (Okabe-Ito palette): red / green pairs 
 Use modern fonts while a `Modern` overlay theme is selected. Modern design widgets draw labels and names in `modern_design_font_name`, and values (times, gaps, speeds, temperatures, fuel...) in `modern_font_name`, a monospace font that keeps digits steady and aligned. Classic layout widgets (`enable_classic_layout` enabled) replace their default font with `modern_font_name`; width of text bar is calculated from digit width to avoid clipping numbers. Disable to draw every widget, modern design included, in its own `font_name` option. Default is enabled.
 
     modern_font_name
-Set font of values (numbers) of modern design widgets, and of every text of classic layout widgets, see `enable_modern_font`. Default is `JetBrains Mono`, which is bundled with Modern Tiny Pedals (`fonts` folder), and works on all platforms. Values are sized to the height of the text beside them. Ligatures are disabled.
+Set font of values (numbers) of modern design widgets, and of every text of classic layout widgets, see `enable_modern_font`. Default is `JetBrains Mono`, which is bundled with NeoPedal (`fonts` folder), and works on all platforms. Values are sized to the height of the text beside them. Ligatures are disabled.
 
     modern_design_font_name
-Set font of labels, names and other text of modern design widgets (see [Modern design](#modern-design)), while `enable_modern_font` is enabled (values use `modern_font_name`). Default is `Barlow Semi Condensed`, which is bundled with Modern Tiny Pedals (`fonts` folder) along with `Barlow`.
+Set font of labels, names and other text of modern design widgets (see [Modern design](#modern-design)), while `enable_modern_font` is enabled (values use `modern_font_name`). Default is `Barlow Semi Condensed`, which is bundled with NeoPedal (`fonts` folder) along with `Barlow`.
 
     corner_radius_scale
 Set bar corner radius, relative to shorter side of each bar. Value range in `0.0` to `0.5`, `0` for square corners. Default is `0.05`.
@@ -899,13 +902,13 @@ User folders can be opened in File Manager via `Open Folder` sub-menu from `Conf
 
 **Notes to relative and absolute path**
 
-User path that sets inside Modern Tiny Pedals root folder will be automatically converted to relative path. Relative path is not considered global path, and does not share data between multiple copies of Modern Tiny Pedals. This is done to retain portability and compatibility with old version.
+User path that sets inside NeoPedal root folder will be automatically converted to relative path. Relative path is not considered global path, and does not share data between multiple copies of NeoPedal. This is done to retain portability and compatibility with old version.
 
-To share user path across multiple copies of Modern Tiny Pedals, user must set path to place outside Modern Tiny Pedals APP root folder.
+To share user path across multiple copies of NeoPedal, user must set path to place outside NeoPedal APP root folder.
 
 **Default user path**
 
-* On windows, all user paths are set inside Modern Tiny Pedals root folder as relative paths:
+* On windows, all user paths are set inside NeoPedal root folder as relative paths:
 
         brandlogo/
         deltabest/
@@ -917,17 +920,17 @@ To share user path across multiple copies of Modern Tiny Pedals, user must set p
         telemetry/
         gameimage/
 
-* On Linux, all user paths are set outside Modern Tiny Pedals root folder as absolute paths:
+* On Linux, all user paths are set outside NeoPedal root folder as absolute paths:
 
-        home/username/.config/TinyPedal/brandlogo/
-        home/username/.config/TinyPedal/settings/
-        home/username/.config/TinyPedal/pacenotes/
-        home/username/.config/TinyPedal/tracknotes/
-        home/username/.local/share/TinyPedal/deltabest/
-        home/username/.local/share/TinyPedal/trackmap/
-        home/username/.local/share/TinyPedal/carsetups/
-        home/username/.local/share/TinyPedal/telemetry/
-        home/username/.local/share/TinyPedal/gameimage/
+        home/username/.config/NeoPedal/brandlogo/
+        home/username/.config/NeoPedal/settings/
+        home/username/.config/NeoPedal/pacenotes/
+        home/username/.config/NeoPedal/tracknotes/
+        home/username/.local/share/NeoPedal/deltabest/
+        home/username/.local/share/NeoPedal/trackmap/
+        home/username/.local/share/NeoPedal/carsetups/
+        home/username/.local/share/NeoPedal/telemetry/
+        home/username/.local/share/NeoPedal/gameimage/
 
 **Telemetry path**
 
@@ -946,7 +949,7 @@ To share user path across multiple copies of Modern Tiny Pedals, user must set p
 Remote control allows other programs (Stream Deck, Companion, SimHub, button box software) to run any hotkey command through a local HTTP server that only listens on `127.0.0.1`:
 
 * `GET http://127.0.0.1:8337/commands` lists available commands.
-* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-TinyPedal` header (any value).
+* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-NeoPedal` header (any value; `X-TinyPedal` also accepted).
 * `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). `?fields=speed,gear,rpm` only sends these fields, `?changes=1` only sends fields changed since last message (nothing if none changed). Client can change both at any time by sending a text message such as `{"fields": ["speed", "gear"], "changes": true}` (`"fields": null` for every field). Browser pages from other sites are refused (`Origin` check).
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
@@ -973,7 +976,7 @@ The page is in the app language, and shows speed, temperatures and fuel in the u
 Enable web dashboard server.
 
     enable_lan_access
-Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow Modern Tiny Pedals the first time.
+Allow devices on local network (phone, tablet) to open the dashboard. When disabled, the dashboard is only available on this computer (`127.0.0.1`). Windows firewall may ask to allow NeoPedal the first time.
 
     enable_https
 Serve the dashboard over HTTPS with a self-signed certificate, so the access code and data are encrypted on the local network. The certificate is created in the config folder and reused (a new one is made when this computer gets a new address). The browser warns once about the self-signed certificate: `Web Dashboard Address...` shows its SHA-256 fingerprint to check before accepting it. Disabled by default.
@@ -992,23 +995,26 @@ Access code required to open the dashboard. A random code is generated if empty.
 
 Shows widgets in streaming software (OBS Studio, Streamlabs, XSplit, vMix, Twitch Studio...) as browser sources: a transparent page, no chroma key needed, drawn exactly as on screen (also while the game runs in exclusive fullscreen). `Stream Overlays` page gives the addresses to copy into a `Browser` source:
 
-* `Layout`: every widget shown on stream, at its place on screen. Set the browser source size to the screen size shown on the page (smaller sizes are scaled to fit).
+* `Layout`: every widget shown on stream, at its place on screen. Format `16:9` (default, `&crop=16:9` in the address) shows the centre of the screen in 16:9, for a 1920 x 1080 browser source: on an ultrawide or triple screen (5120 x 1440...), widgets outside that centre part are not shown. Format `Whole screen` shows the whole screen: set the browser source size to the screen size shown on the page (smaller sizes are scaled to fit). `Edit Layout` places widgets on the layout apart from their place on screen (browser editor: drag, mouse wheel to resize, `Save`), kept for each format in `stream_layout.json` of the config folder.
 * One address per widget: the widget alone, at top left. Set the browser source size to the widget size shown on the page (`&scale=1.5` in the address enlarges it).
 * `Race Results`: classification of the last race (from game results files, see [Race results](#race-results)), cars of every class (`&class=all`), one class after another (`&class=cycle`) or one class (`&class=<name>`), `&rows=` cars per page and `&cycle=` seconds per page, `&session=qualifying` or `&session=any` for other sessions. A 1920 x 1080 source fits it.
 
-Widget images are only captured while a browser source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change. Each widget can be shown on screen and stream, on stream only, or on screen only, see `stream_visibility` in [Common terms and keywords](#common-terms-and-keywords).
+Widget images are only captured while a browser source is shown, copied from what is already drawn on screen (no extra drawing), and only sent again when they change. Widgets hidden on screen (`auto_hide` while not driving) are not on stream either: the page tells why when no widget is shown, see `show_overlays_while_spectating` to stream a session you watch. Each widget can be shown on screen and stream, on stream only, or on screen only, see `stream_visibility` in [Common terms and keywords](#common-terms-and-keywords).
 
     enable_stream_overlay
 Enable stream overlay server.
 
     enable_lan_access
-Allow another computer on local network (dual PC streaming setup) to show browser sources. When disabled, sources are only available on this computer (`127.0.0.1`). Windows firewall may ask to allow Modern Tiny Pedals the first time.
+Allow another computer on local network (dual PC streaming setup) to show browser sources. When disabled, sources are only available on this computer (`127.0.0.1`). Windows firewall may ask to allow NeoPedal the first time.
 
     stream_overlay_port
 Set server port. Default is `8339`.
 
     frame_rate
 Set maximum frame rate of widget images sent to browser sources. Default is `30`. Widgets not changing are not sent again.
+
+    show_overlays_while_spectating
+Show and update widgets while spectating a session or watching a replay (game not driven), as long as a `Layout` or widget browser source is shown, so the stream is not empty. Widgets are hidden again a few seconds after the last source stops. Data modules (laps, fuel, stats...) still run only while driving. Default is enabled.
 
     access_token
 Access token included in every source address. A random token is generated if empty. Generate a new one from `Stream Overlays` page when an address has been shared by mistake (shown on stream): addresses copied before stop working.
@@ -1186,7 +1192,7 @@ Enable `Manually Select Pace Notes File` check box to disable auto-file-name mat
 ## Hotkey
 **Hotkey control panel can be accessed from `Hotkey` tab in main window.**
 
-Note, hotkey bindings are non-exclusive in Modern Tiny Pedals, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. Currently global hotkey feature is not supported on Linux.
+Note, hotkey bindings are non-exclusive in NeoPedal, which means they will not interfere with other programs. Hotkey history can be view in [Show Log](#console-log) dialog from `Help` menu. Currently global hotkey feature is not supported on Linux.
 
 Click `Enabled` or `Disabled` button to toggle global hotkey on and off. Note, global hotkey can also be enabled by setting `enable_global_hotkey` option to `true` in [Application](#application) dialog.
 
@@ -1230,6 +1236,36 @@ Enable or disable spectate mode.
     spectate_next_driver, spectate_previous_driver
 Spectate next or previous driver relative to current driver (by driver's overall standing).
 
+    director_next_car, director_previous_car
+Put the next or previous car (by overall standing) on air in the Broadcast Director page (LMU). With the page closed, the game camera moves to the next or previous car.
+
+    director_auto
+Turn automatic cuts of the Broadcast Director page on or off (page open).
+
+    director_take_best
+Cut to the best story suggested by the Broadcast Director page (page open).
+
+    director_lock
+Keep the car on air in the Broadcast Director page: the director does not cut until pressed again (page open).
+
+    director_starting_grid
+Show or hide the starting grid on the broadcast graphics (Broadcast Director page open).
+
+    director_event_card
+Show or hide the event card on the broadcast graphics (page open).
+
+    director_classification
+Capture the classification now and show it on the broadcast graphics, or hide it when shown (page open).
+
+    director_championship
+Show or hide the championship standings chosen on the broadcast graphics (page open).
+
+    director_hide_graphics
+Hide every broadcast graphic at once, or show them again (page open).
+
+    director_next_layout
+Use the next layout preset of the broadcast graphics: default, pre-race, race, post-race (page open).
+
     pace_notes_playback
 Enable or disable pace notes playback.
 
@@ -1242,11 +1278,14 @@ Show the next older incident in the Black box incident recorder (back to the new
     black_box_open_incident_folder
 Open the `blackbox` folder of the configuration folder, where the Black box incident recorder saves incidents. Also in the Black box right click menu (`Open Incident Folder`) while incident file export is enabled.
 
+    show_main_window
+Show NeoPedal main window in front of the game and focus it, also when hidden in tray or minimized. A fullscreen game may minimize when the window comes in front.
+
     restart_application
-Restart Modern Tiny Pedals.
+Restart NeoPedal.
 
     quit_application
-Quit Modern Tiny Pedals.
+Quit NeoPedal.
 
 ### Preset keybinding
 
@@ -1570,7 +1609,7 @@ To restore all heatmap settings back to default, just delete `heatmap.json` pres
 ## Track map viewer
 **Track map viewer can be accessed from `Tools` menu in main window.**
 
-To load a track map, click `Load Map` button. Map file name, length and number of nodes are displayed alongside if file is successfully loaded. Note, only track map files (.svg extension) that generated from Modern Tiny Pedals [Mapping Module](#mapping-module) are supported. Map is drawn by the graphics card: road (map width in meters, never thinner than a few pixels), road outline, a line colored by sector (`S1`, `S2`, `S3`, with their length above map), start line and sector lines.
+To load a track map, click `Load Map` button. Map file name, length and number of nodes are displayed alongside if file is successfully loaded. Note, only track map files (.svg extension) that generated from NeoPedal [Mapping Module](#mapping-module) are supported. Map is drawn by the graphics card: road (map width in meters, never thinner than a few pixels), road outline, a line colored by sector (`S1`, `S2`, `S3`, with their length above map), start line and sector lines.
 
 To customize map display, click `Config` button (widths are meters on map, colors of start & sector lines, curve section, osculating circle, distance circles, center mark and position marker).
 
@@ -1644,7 +1683,7 @@ To create or open track notes, click `File` and select `New Track Notes` or `Ope
 
 To save notes file, click `Save`. Note, notes file name should exactly match with track name from track map file name for `auto notes loading` function to work. The editor will try to retrieve track name automatically in an active session, or from an opened track map in `Track Map Viewer`.
 
-To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `TinyPedal` notes file formats are supported for used in Modern Tiny Pedals.
+To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `TinyPedal` notes file formats are supported for used in NeoPedal.
 
 To hide map viewer, click `Hide Map`. To show map viewer, click `Show Map`.
 
@@ -1686,7 +1725,7 @@ Select track, then check laps to compare in lap list (one color per lap). Fastes
 
 When the lap viewer page stays in background for 3 minutes, loaded laps are released from memory (several MB each), and loaded again with the same zoom when the page is shown.
 
-Charts show values along lap distance, time delta of each lap against reference lap, and sector limits of reference lap. `Channels` selects shown charts: delta, speed, pedals, gear, steering, RPM, fuel, accelerations, TC & ABS activity, battery, elevation, and per wheel tyre temperature, pressure & wear, brake temperature, wheel speed, ride height and suspension (laps recorded by older versions only have the first channels). Speed, temperatures, tyre pressures and fuel follow the units setting (km/h or mph, °C or °F, kPa, psi or bar, liters or gallons); pedals and steering are shown in percent. `Time Gain/Loss` chart shows where time is lost (positive) or gained against reference lap, in seconds per 100 m (delta slope over 40 m). Distance (or time) is marked below charts, and each chart shows its highest & lowest values. Gear is drawn as steps. Corners are named with official corner numbers of the circuit (`T1`, `T10a`..., `V1` in French) on charts, track map and `Corners` tab, for Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (F1 layout), Monza, Bahrain, Portimão, Lusail, Road Atlanta, Laguna Seca and Long Beach; Le Mans corners are named (Dunlop, Tertre Rouge, Mulsanne, Arnage, Porsche Curves...). Official corners are placed on the apex of matching bends of the track (reference lap line, or track map file), every one is shown on track map, even flat out ones, and a corner found on speed covering several of them is named `T5-6`. Other circuits and layouts (other length) keep corners numbered in lap order (`T1`, `T2`...) from `Corners` tab. `Time axis` (saved) draws charts along lap time instead of lap distance, the zoomed part of lap is kept. Move mouse over charts to read values at a given distance: values of each lap are shown next to cursor in each chart, and above charts, colored like their lap. Charts are drawn by the graphics card: zoom & move are smooth and animated. Mouse wheel zooms, drag moves, `Shift` + drag zooms to selected area, and double-click (or `Reset`) resets zoom. Whole lap navigator below charts (reference lap speed) shows zoomed part: click or drag it to move. Keyboard: `+` / `-` zoom, `Left` / `Right` move, `Home` resets. Drag a channel name (left of charts) up or down to reorder channels, order is kept.
+Charts show values along lap distance, time delta of each lap against reference lap, and sector limits of reference lap. `Simple View` / `Advanced View` (saved) shows the channels at cursor drawn like overlays, or the charts. `Show` selects shown channels, same in both views (also chart options): delta, speed, pedals, gear, steering, RPM, fuel, accelerations, TC & ABS activity, battery, elevation, and per wheel tyre temperature, pressure & wear, brake temperature, wheel speed, ride height and suspension (laps recorded by older versions only have the first channels). Speed, temperatures, tyre pressures and fuel follow the units setting (km/h or mph, °C or °F, kPa, psi or bar, liters or gallons); pedals and steering are shown in percent. `Time Gain/Loss` chart shows where time is lost (positive) or gained against reference lap, in seconds per 100 m (delta slope over 40 m). Distance (or time) is marked below charts, and each chart shows its highest & lowest values. Gear is drawn as steps. Corners are named with official corner numbers of the circuit (`T1`, `T10a`..., `V1` in French) on charts, track map and `Corners` tab, for Silverstone, Imola, Spa-Francorchamps, Circuit of the Americas, Interlagos, Paul Ricard (F1 layout), Monza, Bahrain, Portimão, Lusail, Road Atlanta, Laguna Seca and Long Beach; Le Mans corners are named (Dunlop, Tertre Rouge, Mulsanne, Arnage, Porsche Curves...). Official corners are placed on the apex of matching bends of the track (reference lap line, or track map file), every one is shown on track map, even flat out ones, and a corner found on speed covering several of them is named `T5-6`. Other circuits and layouts (other length) keep corners numbered in lap order (`T1`, `T2`...) from `Corners` tab. `Time axis` (saved) draws charts along lap time instead of lap distance, the zoomed part of lap is kept. Move mouse over charts to read values at a given distance: values of each lap are shown next to cursor in each chart, colored like their lap, and cursor position in playback bar under charts (play, speed, A-B loop, position bar to drag along lap). Charts are drawn by the graphics card: zoom & move are smooth and animated. Mouse wheel zooms, drag moves, `Shift` + drag zooms to selected area, and double-click (or `Reset`) resets zoom. Whole lap navigator below charts (reference lap speed) shows zoomed part: click or drag it to move. Keyboard: `+` / `-` zoom, `Left` / `Right` move, `Home` resets. Drag a channel name (left of charts) up or down to reorder channels, order is kept.
 
 `Track Map` tab shows driving line of each lap and car position of each lap at cursor, over the circuit (from track map file of [Mapping module](#mapping-module) when recorded, else from reference lap line, start line checkered, sector limits marked). Line colors (saved): `Laps` (color of each lap, zoomed part highlighted), `Gain / Loss` (first compared lap against reference lap: red where it loses time, green where it gains, grey where even, rate of time difference over 40 meters, full color at 0.2 s per 100 m), `Speed` (reference lap, slowest blue to fastest red, scale below map) or `Pedals` (reference lap: throttle green, brake red, both amber, coasting grey). `Follow zoom` (saved) zooms map on the part of lap zoomed in charts. `Braking points` (saved) marks where each lap starts braking. Corner labels show time lost or gained by first compared lap in each corner, click one to zoom charts on it. Mouse wheel zooms track map around mouse (`+`, `-` and whole map buttons too, scale bar at bottom right), drag moves zoomed view, double-click resets. Click the driving line to show that point in charts (cursor moved there, view moved if it was outside). `G Circle` tab shows lateral vs longitudinal acceleration of each lap (zoomed part only when zoomed). `Corners` tab compares first compared lap with reference lap, corner by corner: corners are found on reference lap speed (speed minimum between two speed peaks, at least 10 km/h apart), each row shows time lost (red) or gained (green) from braking to top speed with a bar, minimum speed of both laps, and below: braking point (positive = brakes later) full throttle point (negative = full throttle earlier), and driving: seconds of trail braking (braking while turning), coasting (no pedal) and throttle & brake overlap of both laps (red when compared lap coasts or overlaps more). Click a corner to zoom charts on it. Two last rows show time lost on straights (between corners) and total lap difference, corners and straights add up to it. `Corner detection` sets the speed drop & rise counted as a corner (default 10 km/h, lower finds more corners), saved for next time. With reference lap only, the rows show its own corner times, minimum speeds and points.
 
@@ -1702,7 +1741,7 @@ Lap list: fastest valid lap of each session is starred, `Clean only` (saved) hid
 
 Requires `Le Mans Ultimate`, `rFactor 2` or `Le Mans Ultimate (legacy)` API. Click `Start Recording` while in game, and `Stop Recording` when done, or enable `enable_auto_replay_recording` in [Recorder module](#recorder-module). Recordings are saved as `.tpreplay` files in `telemetry` user path (roughly 7 MB per minute). Frames outside driving are skipped (see `enable_replay_skip_inactive_frames`). Recordings keep track, vehicle and session, lap changes, and incidents detected by Black box incident recorder. REST API data is recorded when it changes.
 
-Replays of telemetry folder are listed with date, track, vehicle, session, duration and size. Double-click one (or `Open`), or use `Open Replay...` to pick a file elsewhere: Modern Tiny Pedals reads from it instead of the game until `Back to Game` is clicked. Frames are read from file when needed, so long replays use little memory.
+Replays of telemetry folder are listed with date, track, vehicle, session, duration and size. Double-click one (or `Open`), or use `Open Replay...` to pick a file elsewhere: NeoPedal reads from it instead of the game until `Back to Game` is clicked. Frames are read from file when needed, so long replays use little memory.
 
 Replay can be paused, sped up or slowed down, looped, and moved with the position slider, which shows lap changes (top ticks) and incidents (red bottom ticks). `Go to lap` jumps to a lap, `◀ Incident` / `Incident ▶` jump to 3 seconds before previous or next incident, and `|◀` / `▶|` move one frame. Keyboard: `Space` play/pause, `Left` / `Right` 5 seconds, `Shift` + `Left` / `Right` one frame.
 
@@ -1725,6 +1764,38 @@ Replay can be paused, sped up or slowed down, looped, and moved with the positio
 - Timeline: incidents along the whole session (session length from the game), replay position, drawn at once (long races). Click an incident to jump to it, click elsewhere to move the replay to that time; wheel: zoom, drag: move, double-click: whole session.
 - `Jump to Incident` (or double-click, `Enter`, previous / next incident arrows) moves the replay open in the game `Seconds Before` the incident, camera on the player car if involved, else on the first car. Right-click: camera on the other car, or incidents of one driver only. In a live session: `Replay This Moment` opens the replay of the session there (game toggle, state read first), `Back to Live` returns. Export button: incidents shown copied to the clipboard (tab separated) or saved as CSV. Incidents & standings of the session left stay shown (`Last Session`).
 - The game is asked only while the page is shown: every 2 seconds while a replay is open, 5 seconds otherwise, 15 seconds while the game does not answer. One connection per answer, one background thread. Standings are asked with each answer while `Drivers` or `Map` is shown or a replay is open, otherwise only when incidents change; track map once per track. Replays list asked again when a session ends (replay saved). `Refresh` (`F5`) asks everything at once. Seconds before, sort, filters, tab and protected replays are kept (`game_replays.json` in the config folder).
+
+[**`Back to Top`**](#)
+
+
+## Broadcast director
+**Broadcast director casts a race of Le Mans Ultimate: cars of the session, game cameras, an automatic director and a commentator screen, live (driving or spectating) or in a replay, which can be accessed from `Tools` page in main window.** Everything goes through the game Rest API: the game must be running, with Rest API access enabled in [Le Mans Ultimate API](#le-mans-ultimate-api).
+
+- Game state: `LIVE` or `REPLAY` with the session time (moving between answers), track and session, full course yellow, air and track temperatures (temperature unit of Units settings), rain and wet track; click them for the forecast of the session (start, 25 %, 50 %, 75 %, finish: temperature, rain chance, sky), asked to the game every minute. `Refresh` (`F5`) asks the game at once.
+- Cars: every car by overall place with class place, class color, number, driver, team, places gained or lost in its class since the start (races, from the qualifying places of the game), interval to the car ahead in its class (time, or laps when a lap or more behind, measured from track position and speed: the game gives no time gap to cars laps behind the leader; red under 0.3 s, amber under 0.5 s), sectors of the lap (as they complete, else of the last lap: purple best of the class, green personal best, yellow slower; times in tooltip), car brand logo, tyres front and rear (S, M, H, W circles colored as on TV; read in the shared memory, so only with the game on this computer), status (garage, in pits, finished, retired, disqualified), battle and contact marks. Class chips show one class, the search field finds cars by number (from its start: `7` finds #7 and #77) or by driver, team, car or class (accents and case ignored); `Enter` puts the first car found on air. Click: car sheet; double-click or camera button: car on air; right-click: `Lap History`. Previous / next car by place (`Left` / `Right`, not while typing).
+- On air: car followed by the game camera, why it was chosen (story of the director, operator cut, chosen in the game), how long it has been shown, game camera. A car chosen in the game itself (or by another app) is followed as an operator cut, or only followed (the director keeps cutting) with `Pause the director when the camera changes in the game` off: useful when another app also moves the game camera. In `Automatic` mode a thin bar fills while the shortest shot goes by. Lock button (`director_lock`): the car stays on air, the director does not cut until unlocked.
+- Cameras: every camera of the game camera menu in one click, by group (`Driving`, `Onboard`, `Trackside` with `Cycle All` and groups 1 to 4), the camera shown highlighted; arrows step to the previous or next angle of a group. The car on air keeps its camera when another car is put on air.
+- Replay (replay open in the game): back 10 seconds, play / pause (`Space`), play slowly, forward 10 seconds.
+- Modes: `Manual` (operator cuts only), `Assisted` (stories worth showing listed by interest, click one, `1` to `6` for the one at that place, or `Take Best` / `Enter` to put it on air, shown at least the shortest shot) and `Automatic` (the director cuts by itself; listed as `Director Queue`). The page always opens in `Assisted` mode, even if left in `Automatic`.
+- Stories: battles (two running cars next to each other in a class, same lap, closer than the battle gap; races only), overtakes and lead changes (class place kept 1 second, not when the other car pitted or stopped; races only), contacts between cars and with walls (game incidents list; severity from the speed the cars lost in the 5 seconds after it, compared with their speed just before: heavy over 40 %, or when a car then stops or crawls, comes first; light under 12 % is a minor story; works live, in replays and from another computer, unlike impacts of the shared memory, which the game does not update for other cars while spectating online), cars stopped on track (under 3 m/s for 3 seconds, not when a third of the field stops: grid, red flag), slow cars (under 45 % of the usual speed at that place of the track for 3 seconds, the usual speed of every 50 m of the lap learned from the cars going there; not under full course yellow, not right after the same car was told stopped), yellow flags in a sector (with the slowest car of that sector), full course yellow and green flag again, the race start (leader followed until the end of the first lap), pit entries and exits (with time in pit lane and time stopped in the pit box), new fastest laps of a class, finishes (first of each class: win), retirements, disqualifications and penalties. Each story has an interest (contact, lead change, stopped or slow car and win first), fading with its age, more for the front of a class; closing battles score higher. A car just shown is less wanted for 25 seconds. With nothing happening, cars are shown in turn (leaders a little more), each twice the shortest shot.
+- Director cuts: a shot lasts at least `Shortest shot` (default 8 seconds) unless an urgent story comes (contact, stopped car, lead change, win, after 2.5 seconds), and at most `Longest shot` (default 30 seconds) on the same story. After the shortest shot, another story cuts in when clearly more interesting. An operator cut (car, camera, event of the feed) holds the director 20 seconds. Cameras of each kind of story are used in turn (`Director cameras`): `Mixed` (battles: trackside, swingman, roof, bonnet; contacts and pit stops: trackside; fastest laps: onboard), `Trackside`, `Onboard` or `Keep Camera` (car changes only).
+- Events: every story with its session time, newest first, `All` / `Incidents` / `Positions` / `Pit` filter. Incidents nobody looked at yet (contacts, walls, stopped and slow cars, yellow flags, retirements, penalties) are marked with a dot and counted on the tab, until shown on air, clicked or `Mark every incident as seen`. Click an event: camera on its car; in a replay, the replay goes `Seconds before an event` (default 5) before it. Replay button: in a live session, instant replay: the game opens the replay of the session that long before the event, camera on the car, plays it and goes back to live `Instant replay: seconds after the event` (default 5) after it (`Back to Live` at any time); the director waits meanwhile. While the replay of a live session plays, the game keeps telling live standings: the car list keeps the live order. Export button: every event saved as CSV (session time, kind, event, detail, class, cars). Contacts listed before the page opened are shown dimmed.
+- Battles: class place, cars, gap (red under 0.3 s, amber under 0.5 s) with its trend (closing, opening, and the change per lap) and duration; click: car behind on air. Classes: leader, best lap and its driver, battles of each class. Pit stops: cars that pitted, in pit lane first, then latest stop: stops, lap, time in pit lane and time stopped of last stop, laps since (stint, unknown until the car is seen leaving the pits unless it never stopped); cars in the pit lane show their time there and their time stopped as it goes.
+- Car sheet: car picture and brand logo of the game, class and overall place (with places gained), tyres, laps, current stint, interval to the cars ahead and behind in class, best and last lap, pit stops, contacts, penalties, sectors, virtual energy (else fuel) left with the energy used per lap over the last 3 and 5 laps of the stint and the laps it lasts (cars of other teams: only while spectating), and a note of the commentator on the driver (kept by driver name).
+- Lap history (`Laps` of the car sheet, right-click a car): every lap seen while the page watched, newest first: lap time and sectors colored (purple best of the class, green personal best, yellow slower), pit lane laps (`P`), energy used, class place at the end of the lap.
+- `Overlays follow the car on air`: spectate mode on the car on air, so overlays and stream overlays show it (off by default). Turning it off turns spectate mode off too: overlays show your own car again.
+- The game is asked about once a second while the page is open, also while another page is shown (the director keeps cutting, the lists of the page are made again only once it is shown), every 5 seconds while the game is in its menus or not answering. One connection kept from answer to answer, one background thread; the work of an answer takes a few milliseconds even after hours of racing (best sectors kept as laps come, contacts merged only when their list changes, texts and lap rows made once). Mode, shot lengths, battle gap, cameras, replay seconds, overlays following and notes are kept (`broadcast_director.json` in the config folder).
+- Game computer (settings): address of the computer running LMU, empty for this one (its Rest API port is the one of the app settings). Directing from a second computer: the game camera, standings and events come from that computer; tyres are not shown (shared memory of this computer).
+- Events log (settings, off by default): every live event written as it happens to one CSV file per session in the `broadcast_logs` folder of the config folder (time, session time, kind, event, detail, class, cars), for race control. The folder button opens it.
+- Pit radar: while the car on air is in the pit lane, the cars of the pit lane near it (ahead or behind, `Alongside` under 6 m) show on the on air card and on the broadcast graphics.
+- Broadcast graphics (`Graphics` button): TV graphics made for this page only, as one browser source of the [Stream overlay](#stream-overlay) server (`/director`, 1920 x 1080, transparent; not listed with the other sources: copy its address with `Copy Address`). The page publishes what is on air about once a second and at each cut, only while a source shows it. Graphics, each one on or off: standings tower (overall, each class in turn every 10 seconds, or the class of the car on air; car on air highlighted, pit lane tag, places gained, close intervals in red; `Cars shown`), driver card on each cut (class place in class color, number, name, team, brand logo, best and last lap, laps, places gained, story chip; car picture optional; shown `cardSeconds` seconds, 0: always; `Show Driver Card` shows it again), battle card while a battle is on air (both drivers, gap and its change per lap; takes the place of the driver card), banners (fastest lap, penalty, flags, full course yellow and green flag, lead change, win, retirement, stopped and slow cars, heavy contacts; one after the other), pit radar (cars near the car on air in the pit lane, range from 30 to 400 m), replay mark during replays and instant replays, session clock (time left, else time gone) with temperatures and full course yellow. `Hide Graphics` hides everything at once. Query of the source: `scale=<factor>` (size), `animate=0` (no animation), `once=1` (asked once: screenshots), `only=<graphics>` (some graphics only, e.g. `only=tower,map`: graphics split over several sources or scenes), `preset=<pre|race|post>` (layout preset of this source).
+- More graphics: battle train (up to 6 cars of a class within the battle gap, kept 10 s), instant replay graphics (contact: both cars; flag, stopped car: driver card; banners held until 5 s after the replay), onboard of the car on air (shift lights, speed, gear, rpm, throttle, brake, energy, car ahead; `Dash`, `Cockpit`, `Helmet`; ten times a second from the shared memory of the game on this computer, speed only from another computer), qualifying lap outside races (lap time running, sectors, gap to the pole of the class at the last sector, out lap / improving / in pits), track map without panel (racing line of the game, cars in class colors, cars in the pit lane faded, sectors under yellow in gold, car of a yellow flag in gold; rotation and dot size), standings tower options (lap time a few seconds after each lap, tyres, penalties, fastest lap tag, pit stops, gaps to the car ahead or to the leader, classes apart in overall). Banners: most important first, the same news not twice in 30 seconds, 4 waiting at most.
+- On demand (`Graphics` > `On Demand`, one at a time): starting grid (pages of 8 cars, qualifying lap of the last qualifying results file of the track, car picture), event card (track logo, conditions, forecast, session length), classification captured when wanted, championship standings imported from a CSV file (driver or team and points columns, team, class and number if any, English or French titles, comma, semicolon or tab; several championships, one class or all, medals; kept in `broadcast_championships.json`), message (lower third: title and text), countdown (minutes and text). Automatic: starting grid during the formation lap, event card for 20 seconds at the start of each session, classification at the chequered flag (kept up to date while cars finish); an operator choice always wins.
+- Style & layout: panel opacity, temperatures (app setting, °C, °F), league accent color, event or league name, league logo (copied to `broadcast_branding` of the config folder), sponsors pictures shown in turn (`broadcast_branding/sponsors`), layout presets (`Default`, `Pre-race`, `Race`, `Post-race`: preset in use for every source without its own), `Edit Layout` (graphics in your browser with sample data: drag to move, snapped to the other graphics and the middle, mouse wheel to resize, arrows: one pixel, `Ctrl+Z`: undo, chips show the graphics sharing a place, `H` hides the bars, then `Save` for the preset chosen; `broadcast_layout.json`), and the address of a source with some graphics only.
+- The graphics source gets only the parts of the state that changed since its last answer; onboard and track map positions come five times a second (cars glide between them).
+- Timing table, car sheet history: race history of each driver from the race results files (races, class wins and podiums, best class finish on this track, last races) and races with the cars ahead and behind (who finished ahead), read in background.
+- Director: incidents already shown are half as wanted, a battle about to become an overtake (under 0.35 s and closing fast) comes first among battles and is shown from the bonnet camera of the car behind (`Mixed` cameras), cars climbing through the field (3 class places gained or more) are more wanted.
+- Hotkeys: `director_next_car`, `director_previous_car`, `director_auto`, `director_take_best`, `director_lock`, `director_starting_grid`, `director_event_card`, `director_classification`, `director_championship`, `director_hide_graphics`, `director_next_layout` (see [General keybinding](#general-keybinding)).
 
 [**`Back to Top`**](#)
 
@@ -1772,7 +1843,7 @@ Select `Preset A` and `Preset B`. Widget positions can be ignored. Select one or
 ## Plugin manager
 **Plugin manager lists widget plugins, which can be accessed from `Tools` menu in main window.**
 
-Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting Modern Tiny Pedals (`Reload Code`), and new plugins can be installed from `.zip` package (`Install...`). See [Widget plugins](#widget-plugins) section for details.
+Shows each plugin loading status and error message. Plugins can be enabled or disabled, code can be reloaded without restarting NeoPedal (`Reload Code`), and new plugins can be installed from `.zip` package (`Install...`). See [Widget plugins](#widget-plugins) section for details.
 
 [**`Back to Top`**](#)
 
@@ -1780,7 +1851,7 @@ Shows each plugin loading status and error message. Plugins can be enabled or di
 ## Other tools
 * `Find Option...` (`Config` menu, `Ctrl+F`): search any option in all widgets, modules and global settings, in English or in current language. Double-click a result to open its page: Overlay Options page at a widget option, config dialog filtered on a module option.
 * `Setup Wizard` (`Help` menu): first launch setup (language, game, units, themes, preset, starter overlays).
-* `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of Modern Tiny Pedals, modules and game connection.
+* `Widget Performance` (`Help` menu): update & paint time of each widget, and CPU & memory usage of NeoPedal, modules and game connection.
 * `Create Bug Report...` (`Help` menu): creates a `.zip` file with logs, settings and system info to attach to a bug report. User folder name, access codes and repository names are removed.
 
 [**`Back to Top`**](#)
@@ -2316,7 +2387,7 @@ Set warning threshold for estimated brake lifespan in minutes. Default is `5` la
 ## Chat
 **This widget displays chat messages of the game (LMU, Rest API `enable_race_info` option), newest at bottom.** Long messages are wrapped on several lines, newest messages kept when lines run out.
 
-Modern design: one card growing with lines shown, sender name in its own color (same color for a sender all race), messages just sent highlighted with an accent edge, messages fading out at the end of `maximum_display_duration`. While overlay is unlocked, an empty card is shown so it can be placed.
+Modern design: one card growing with lines shown, sender name in its own color (same color for a sender all race, accent color for your own messages), game notices without sender (driver joined...) dimmed, messages just sent highlighted with an accent edge, messages fading out at the end of `maximum_display_duration`. Nothing is shown without message. In overlay edit mode, a faded sample conversation is shown so it can be placed and sized (not while overlay is merely unlocked, so it is never mistaken for real messages in game).
 
     number_of_lines
 Set number of message lines. Value range in `1` to `20`. Default is `5`.
@@ -2325,10 +2396,13 @@ Set number of message lines. Value range in `1` to `20`. Default is `5`.
 Set width of message lines, value in chars. Longer messages are wrapped. Default is `40`.
 
     maximum_display_duration
-Set duration (seconds) each message stays shown after it was sent. Set to `0` to always show last messages. Default is `30`.
+Set duration (seconds) each message stays shown after it was sent, also while not driving (garage, menus): the overlay disappears once its last message is older. Set to `0` to always show last messages. Default is `30`.
 
     new_message_duration
 Set duration (seconds) a new message is shown in `font_color_new_message`. Default is `5`.
+
+    scroll_direction
+Direction messages scroll: `Upward` (newest message at bottom, older messages pushed up) or `Downward` (newest message at top, older messages pushed down, chat read from top to bottom; modern design card then grows downward from overlay top). Default is `Upward`.
 
     show_message_time
 Show time of day each message was sent.
@@ -2528,7 +2602,7 @@ No delta is shown (a dash) on an out lap, that is a lap started in pit lane or g
 Show deltabest against personal all time best lap time.
 
     show_session_deltabest
-Show deltabest against current personal session best lap time. Session best lap is kept when Modern Tiny Pedals restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.
+Show deltabest against current personal session best lap time. Session best lap is kept when NeoPedal restarts or preset is reloaded during the same session, and reset when a new session starts. Until a first pit stop, session best and stint best are the same lap.
 
     show_stint_deltabest
 Show deltabest against current personal stint best lap time. Note: stint deltabest will be reset if vehicle stops in pit lane (pit stop, or back to garage), or when a new session starts.
@@ -3677,7 +3751,7 @@ Show filtered pedal input if available. Note, some vehicles may not provide filt
 ## Pit lane helper
 **This widget displays pit lane info while approaching pit lane and in pit lane.**
 
-Widget is shown while car is in pit lane, and while approaching pit lane entry with pit stop requested (or speed limiter on). Nothing is shown otherwise, unless `show_always` is enabled. While overlay is unlocked, widget is always shown for positioning.
+Widget is shown while car is in pit lane, and while approaching pit lane entry with pit stop requested (or speed limiter on). Nothing is shown otherwise, unless `show_always` is enabled. In overlay edit mode, widget is always shown for positioning.
 
 Pit speed limit is learned by `Mapping module` while driving through pit lane with speed limiter on, and saved per track. Speed is shown in loss color above pit speed limit, and in gain color below. Speed limiter state is shown in warning color while approaching pit lane without speed limiter, and in loss color while driving in pit lane without speed limiter. Pit box distance requires pit box position from game (LMU), its bar fills up while car approaches pit box. Planned services (pit stop time, refuel, repair) are read from game pit menu through Rest API (LMU), `enable_vehicle_info` must be enabled in LMU API setting.
 
@@ -3756,7 +3830,7 @@ Show number of vehicles that requested for pit stop, and number of vehicles curr
 ## Race notifications
 **This widget displays short race messages that fade out after a few seconds.**
 
-Messages: position gained or lost (overall and in class, once new position is held for 1 second), new penalty, new fastest lap in player class (driver name and lap time), blue flag, full course yellow start and end, lap invalidated by game (LMU, track limits). Position, fastest lap and full course yellow messages are shown in race only. Same message is not repeated while it is shown. Nothing is shown while there is no message, unless overlay is unlocked.
+Messages: position gained or lost (overall and in class, once new position is held for 1 second), new penalty, new fastest lap in player class (driver name and lap time), blue flag, full course yellow start and end, lap invalidated by game (LMU, track limits). Position, fastest lap and full course yellow messages are shown in race only. Same message is not repeated while it is shown. Nothing is shown while there is no message, unless overlay edit mode is on.
 
 Modern design: each message is a card with an icon in message color (arrow for positions, flag, stopwatch for fastest lap, penalty mark, cross for lap invalidated), title above detail, and a thin bar shrinking with the time left.
 
@@ -3980,6 +4054,9 @@ Modern design columns, shown in this order: overall position, class pill with po
 
     column_brand_logo, column_average_laptime, column_speed_trap, column_lift_and_coast_time
 Modern design columns: brand logo after vehicle name (on by default: own logo of brand logo folder, else logo taken from the game, brand initials until found; width follows `brand_logo_width`), then, off by default, average lap time of recent laps after best lap time, speed trap (fastest speed at speed trap line, in speed unit) and lift and coast time (highlighted above `lift_and_coast_highlight_threshold`) after stint laps. Overlay Options page lists columns in one Columns list, from left to right: each column switched on or off there, and moved by drag or arrows. With `show_compound_for_each_wheel`, tyre compounds of each wheel are shown in a 2x2 grid when left and right compounds of an axle differ. With `show_class_style_for_position_in_class`, position in class part of class pill is in class color.
+
+    column_gap_trend
+Modern design column after relative time gap (on by default): gap change per lap to each car, averaged over about 30 seconds. Arrow up when the gap grows, down when it shrinks; green when you gain (closing on a car ahead, pulling away from a car behind), red when you lose; dash while steady (under 0.05 s per lap), unknown or in pit lane.
 
     show_player_highlighted
 Highlight player row with customizable specific color.
@@ -4453,6 +4530,32 @@ Set visualized maximum slip ratio display range (percentage), value range in `10
 [**`Back to Top`**](#)
 
 
+## Speed delta
+**This widget displays speed difference against multiple lap time sources, at the same point of the lap.**
+
+Speed difference is your speed minus the speed of the reference lap at the same lap distance, smoothed (`speed_delta_smoothing_samples`): positive when faster. Speed of the reference lap is taken from the lap recorded by [Delta module](#delta-module) (distance over time between its points around the same lap distance), so it needs no extra recording. Modern design shows it green when faster, red when slower. No speed difference is shown (a dash) while the reference lap does not exist yet, on an out lap or in pit lane before start line, like [Deltabest extended](#deltabest-extended).
+
+    layout
+2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
+
+    decimal_places
+Set amount of decimal places. Default is `1`.
+
+    speed_delta_display_range
+Set maximum display range of speed difference, in speed unit. Default is `99.9`.
+
+    speed_delta_smoothing_samples
+Set smoothing of speed difference, in overlay updates (exponential moving average): higher is steadier but slower to follow changes, `1` is no smoothing. Default is `10`.
+
+    show_speed_unit
+Show speed unit after each reading (speed unit of Units settings). Default is enabled.
+
+    show_all_time_best, show_session_best, show_stint_best, show_last_lap
+Show speed difference against personal all time best lap, current session best lap, current stint best lap (reset when vehicle stops in pit lane), last lap.
+
+[**`Back to Top`**](#)
+
+
 ## Speedometer
 **This widget displays conditional speed info.**
 
@@ -4486,7 +4589,7 @@ Set cooldown duration (seconds) before resetting minimum or maximum speed value.
 ## Spotter
 **This widget displays two slim side bars, lit while a car is alongside.**
 
-Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Once a side is free again, its bar flashes in clear color (green), like a spotter calling "clear". A car coming up behind on a side, not alongside yet, lights the bottom of the bar, brighter as it gets closer. Car positions come from `Vehicles module`, same as Radar widget. Nothing is shown while no car is alongside, unless overlay is unlocked, or `show_bar_background` is enabled.
+Place widget so that its bars sit at left and right screen edges (see `horizontal_gap`). Lit part of a bar is the part of player car overlapped by the car alongside: top of bar is front of car, bottom of bar is rear of car. Bar is shown in critical color while car alongside is close sideways. Once a side is free again, its bar flashes in clear color (green), like a spotter calling "clear". A car coming up behind on a side, not alongside yet, lights the bottom of the bar, brighter as it gets closer. Car positions come from `Vehicles module`, same as Radar widget. Nothing is shown while no car is alongside, unless overlay edit mode is on, or `show_bar_background` is enabled.
 
 Modern design: bars with rounded ends glowing toward screen center, lit part going from warning to loss color as the car alongside gets closer sideways.
 
@@ -4546,8 +4649,14 @@ Enable single-class exclusive mode, which displays vehicles from player's class 
     enable_multi_class_split_mode
 Enable multi-class split mode, which splits and displays each vehicle class in separated groups. This mode will only take effect when there is more than one vehicle class present in a session, otherwise it will automatically fall back to normal single class mode.
 
+    class_order
+Set order of vehicle classes in multi-class split mode: class names separated by commas, first one shown at top. Case, spaces and underscores are left out when names are compared (`LMP2 ELMS` matches `LMP2_ELMS`). Classes not listed are shown after, fastest class first. Leave empty to show every class fastest first. Default is `Hypercar, Hyper, LMP2 ELMS, LMP2, LMP3, GT3, LMGT3, GTE`.
+
+    show_class_header
+Show class name above the vehicles of each class (modern design), in multi-class split mode or single-class exclusive mode, instead of class column next to each driver. Position column then shows position in class. Enabled by default.
+
     minimum_top_vehicles
-Set minimum amount top place vehicles to display. This value has higher priority over other `maximum_vehicles` settings. Default is `3`, which always shows top 3 vehicles if present.
+Set minimum amount top place vehicles to display: top of player's class in split mode, top of all vehicles otherwise. This value has higher priority over `maximum_vehicles_per_split_player`, `maximum_vehicles_exclusive_mode` and `maximum_vehicles_combined_mode`, not over `maximum_vehicles_per_split_others`. Default is `3`, which always shows top 3 vehicles if present.
 
     maximum_vehicles_exclusive_mode
 Set maximum amount vehicles to display in exclusive mode, which takes effect when `enable_single_class_exclusive_mode` is enabled.
@@ -4562,7 +4671,7 @@ Set maximum amount vehicles to display in split mode, which takes effect when in
 Set maximum amount vehicles to display for class where player is in. Default is `7`. Note that, if player is not in first place, then at least one opponent ahead of player will always be displayed, even if this value sets lower.
 
     maximum_vehicles_per_split_others
-Set maximum amount vehicles to display for classes where player is not in. Default is `3`.
+Set amount of top vehicles to display for each class where player is not in, `0` hides those classes. Not raised by `minimum_top_vehicles`. Default is `3`.
 
     split_gap
 Set split gap between each class.
@@ -4922,7 +5031,7 @@ Show current suspension position (millimeter) relative to static position instea
 Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by `update_interval` setting.
 
     show_tinypedal_performance
-Show Modern Tiny Pedals's CPU utilization (percent) and memory usage (MB).
+Show NeoPedal's CPU utilization (percent) and memory usage (MB).
 
     average_samples
 Set number of samples for average CPU utilization calculation. Lower value may result more fluctuated reading. Set `1` to disable averaging.
@@ -5044,6 +5153,15 @@ Enable time scaled countdown, which scales with session track clock time scale m
 
 ## Track map
 **This widget displays track map and standings. Note: at least one complete and valid lap is required to generate track map.**
+
+    show_sector_performance
+Modern design: road of each sector colored by your last time in it, in current session: purple when it is your session best sector, green when faster than that sector of your best lap, amber when slower. Sectors not timed yet keep road color. Default is enabled.
+
+    show_nearby_vehicle_highlight
+Modern design: ring around cars close to you on track, within `nearby_vehicle_threshold` seconds ahead or behind (cars in pit lane left out). Default is enabled.
+
+    nearby_vehicle_threshold
+Set time gap (seconds) of cars ringed by `show_nearby_vehicle_highlight`. Default is `1.0`.
 
     display_orientation
 Set track map display orientation in degrees. For example, a `270` value will rotate map by `270` degrees clockwise. Default value is `0`, which always displays track map `North Up` in game's coordinate system.
@@ -5815,7 +5933,7 @@ Show each suspension (coilover seen from the side) right beside the brake bar. I
 Move tyre and brake disc with the suspension wheel mount (enabled by default). Disable to keep them fixed, suspension travel then only shows on the coilover.
 
     suspension_motion_scale
-Magnify suspension motion, `1.0` (default) is real scale. Real suspension travel is small next to a tyre, `3` to `5` makes small movements easier to see.
+Magnify suspension motion, `1.0` is real scale (default `8.0`). Real suspension travel is small next to a tyre, magnifying makes small movements easy to see.
 
     suspension_spring_color, suspension_compression_color, suspension_rebound_color, suspension_low_speed_threshold, suspension_velocity_scale
 Spring color at rest, tinted toward compression color while compressing and rebound color while extending, by damper speed (smoothed over 60 ms) in two zones like a real damper: low speed, up to `suspension_low_speed_threshold` mm/s (default `50`, body roll & pitch), gives a light tint; high speed (kerbs & bumps) goes on to the full color at `suspension_velocity_scale` mm/s (default `150`).
@@ -6142,14 +6260,14 @@ Set number of samples for reducing data fluctuation. Lower value may result more
 
 
 # Widget plugins
-**Custom widgets can be added without changing Modern Tiny Pedals code.**
+**Custom widgets can be added without changing NeoPedal code.**
 
-Each plugin is a folder in `plugins` folder (next to Modern Tiny Pedals), named with lowercase letters, digits or `_`:
+Each plugin is a folder in `plugins` folder (next to NeoPedal), named with lowercase letters, digits or `_`:
 
     plugins/<name>/setting.json   default options of the widget
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 
-Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping Modern Tiny Pedals; error details are shown in [Plugin manager](#plugin-manager) and log.
+Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping NeoPedal; error details are shown in [Plugin manager](#plugin-manager) and log.
 
 Minimal example, a speed widget (`plugins/speed/setting.json` holds `{"enable": false, "font_color": "#FFFFFF", "background_color": "#222222"}`):
 

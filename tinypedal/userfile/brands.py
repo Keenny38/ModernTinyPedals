@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from ..api_control import api
 from ..const_file import ConfigType
+from ..demo_state import demo_reader
 from ..regex_pattern import rex_lmu_brand_extract
 from ..setting import cfg
 
@@ -49,8 +50,9 @@ def select_brand_name(index: int | None = None, vehicle_name: str = "") -> str:
     """Select brand name from brands preset, returns empty string if not found"""
     brand_name = cfg.user.brands.get(vehicle_name)
     if brand_name is None:
-        brand_name = extract_lmu_brand_name(api.read.vehicle.vehicle_model(index), "")
-        if brand_name:  # save brand name if valid
+        demo = demo_reader()  # overlay picture on simulated race: its car, never saved
+        brand_name = extract_lmu_brand_name((api.read if demo is None else demo).vehicle.vehicle_model(index), "")
+        if brand_name and demo is None:  # save brand name if valid
             cfg.user.brands[vehicle_name] = brand_name
             cfg.save(config_type=ConfigType.BRANDS)
     return brand_name

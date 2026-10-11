@@ -55,6 +55,7 @@ from .math_channels import (
     parse_channels,
     saved_channels,
 )
+from .trace_data import TraceData
 
 ALIGN_MAX_OFFSET = 250.0  # meters, a lap braking farther from reference lap braking point is not shifted
 ALIGN_SEARCH = 200.0  # meters before corner start (reference lap braking) braking of other laps is looked for
@@ -193,6 +194,14 @@ class ChartTools(BackendBase):
         return [{"value": value, "text": format_axis_value(channel, value, high - low)}
                 for value in (first + index * step for index in range(10)) if value <= high]
 
+    @Slot(str, list, float, result=list)
+    def axisLabels(self, column: str, values: list, span: float) -> list[str]:
+        """Texts of axis values (zoomed XY axis, values worked out in QML like axisTicks) for a range of span"""
+        channel = CHANNEL_MAP.get(column)
+        if channel is None:
+            return ["" for _ in values]
+        return [format_axis_value(channel, float(value), span) for value in values]
+
     @Slot(str, float, float, result=dict)
     def autoscaleAxis(self, column: str, start: float, end: float) -> dict:
         """Panel value range fitting shown laps between axis positions (autoscaled panel)"""
@@ -310,9 +319,10 @@ class ChartTools(BackendBase):
         offset = self.data.offsets.get(key, 0.0)
         return distance_text(offset, 1, sign=True) if offset else ""
 
-    def shift_key(self, lap_key: str, channel: Channel) -> str:
-        """Part of series vertex key telling lap offset (aligned laps drawn again)"""
-        offset = self.data.offsets.get(lap_key, 0.0)
-        if not offset or self.data.time_axis or channel.column in DELTA_CHANNELS:
+    def shift_key(self, lap_key: str, channel: Channel, data: TraceData | None = None) -> str:
+        """Part of series vertex key telling lap offset (aligned laps drawn again), trace data of page by default"""
+        data = data or self.data
+        offset = data.offsets.get(lap_key, 0.0)
+        if not offset or data.time_axis or channel.column in DELTA_CHANNELS:
             return ""
         return f"|o{offset:g}"

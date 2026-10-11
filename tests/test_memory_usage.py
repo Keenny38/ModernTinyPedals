@@ -283,6 +283,32 @@ def test_pages_released_while_window_hidden(ui_env, counting):
         flush_deleted()
 
 
+def test_pages_kept_while_modal_dialog_runs(ui_env, counting, monkeypatch):
+    """Message box opened from a page (its handler on the call stack): page & window released after it"""
+    from PySide6.QtWidgets import QApplication
+
+    from tinypedal.ui.lazy_page import LazyPage, PageRelease
+
+    window = QWidget()
+    lazy = LazyPage(window, counting)
+    try:
+        window.show()
+        QCoreApplication.processEvents()
+        release = PageRelease(window, [lazy], delay_ms=10)
+        window.hide()
+        monkeypatch.setattr(QApplication, "activeModalWidget", staticmethod(lambda: window))
+        release.release()
+        assert lazy.page is not None and release._timer.isActive()  # tried again later
+        release.destroy_window()
+        assert window.testAttribute(Qt.WidgetAttribute.WA_WState_Created) and release._destroy_timer.isActive()
+        monkeypatch.setattr(QApplication, "activeModalWidget", staticmethod(lambda: None))
+        release.release()
+        assert lazy.page is None
+    finally:
+        window.deleteLater()
+        flush_deleted()
+
+
 def test_hidden_window_kept_with_qt_quick_page_open(ui_env):
     from tinypedal.ui.lazy_page import PageRelease
 
@@ -333,6 +359,78 @@ def test_only_shown_page_built_at_startup(app_window):
     assert view._lazy_pages["hotkey"].page is not None
 
 
+@pytest.fixture
+def tray_window(ui_env, monkeypatch):
+    """Main window started hidden in tray, brake editor page left open at last quit"""
+    from tinypedal.ui import app as app_module
+
+    monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
+    cfg.application["show_setup_wizard_at_startup"] = False
+    cfg.application["show_at_startup"] = False
+    cfg.application["minimize_to_tray"] = True
+    cfg.application["remember_open_pages"] = True
+    cfg.application["open_pages"] = "*brake_editor.BrakeEditor"
+    cfg.application["last_page_index"] = app_module.PAGE_INDEX["module"]
+    window = app_module.AppWindow()
+    yield window
+    view = window.centralWidget()
+    for page in view.dialog_pages():
+        page.dialog.set_unmodified()
+        page.dialog.close()
+    window.hide()
+    cfg.application["last_page_index"] = 0
+    cfg.application["open_pages"] = ""
+    tray = window.findChild(QSystemTrayIcon)
+    if tray:
+        tray.hide()
+    for signal in (app_signal.hotkey, app_signal.refresh, app_signal.quitapp, app_signal.reload, app_signal.updates):
+        with suppress(RuntimeError, TypeError):
+            signal.disconnect()
+    window.deleteLater()
+    QCoreApplication.processEvents()
+
+
+def process_events(times: int = 5):
+    for _ in range(times):
+        QCoreApplication.processEvents()
+
+
+def test_started_in_tray_pages_built_once_shown_and_released_when_hidden(tray_window):
+    view = tray_window.centralWidget()
+    process_events()  # startup pages restored (deferred)
+    assert all(page.page is None for page in view._lazy_pages.values())  # nothing built while game starts
+    assert not view.dialog_pages()
+    assert view.open_page_paths() == ["*brake_editor.BrakeEditor"]  # still remembered (quit from tray)
+    tray_window.save_open_pages()
+    assert cfg.application["open_pages"] == "*brake_editor.BrakeEditor"
+
+    tray_window.show()
+    process_events()
+    assert [page.title for page in view.dialog_pages()] == ["Brake Editor"]
+    assert view._pages.currentWidget() is view.dialog_pages()[0]
+    assert view._lazy_pages["module"].page is not None  # page shown behind tool page at startup
+
+    # Hidden for a while: restored tool page released too, reopened when shown again
+    tray_window.hide()
+    view._page_release.release()
+    flush_deleted()
+    assert not view.dialog_pages() and all(page.page is None for page in view._lazy_pages.values())
+    assert cfg.application["open_pages"] == "*brake_editor.BrakeEditor"
+    tray_window.show()
+    process_events()
+    assert [page.title for page in view.dialog_pages()] == ["Brake Editor"]
+    assert view._pages.currentWidget() is view.dialog_pages()[0]
+
+    # Unsaved changes, or page opened by user: kept as they are
+    editor = view.dialog_pages()[0].dialog
+    editor.set_modified()
+    tray_window.hide()
+    assert not view.release_tool_pages() and view.dialog_pages()
+    editor.set_unmodified()
+    view.dialog_pages()[0].restored = False
+    assert not view.release_tool_pages() and view.dialog_pages()
+
+
 def test_ui_font_family_set_on_app_font_not_style_sheet(ui_env):
     from tinypedal.main import UI_FONT_FAMILIES, set_app_font
     from tinypedal.ui import set_style_window
@@ -357,12 +455,12 @@ def test_text_cache_follows_texts_drawn(ui_env, bundled_fonts, monkeypatch):
         monkeypatch.setattr(base, "TEXT_CACHE_PER_DRAW", 2)
         widget._text_cache.clear()
         widget._last_texts_drawn = 1  # few texts drawn: few kept
-        for value in range(10):
-            widget.static_text("value", str(value))
+        for value in range(10):  # labels (values have their own cache, see test_paint_caches)
+            widget.static_text("value", f"Lap {value}")
         assert len(widget._text_cache) == 4
         widget._last_texts_drawn = 3  # more texts drawn per paint: more kept
         for value in range(10, 20):
-            widget.static_text("value", str(value))
+            widget.static_text("value", f"Lap {value}")
         assert len(widget._text_cache) == 6
         assert widget.text_cache_size() == 6
         widget._last_texts_drawn = 10_000

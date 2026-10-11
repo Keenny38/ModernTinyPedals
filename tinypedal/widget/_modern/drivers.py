@@ -94,6 +94,8 @@ class DriverTable(TableMixin, ModernOverlay):
 
     # Column keys in display order (widget defines)
     COLUMNS: tuple[str, ...] = ()
+    # Class shown by a header above each class group (widget sets): no class column, position in class
+    class_headers = False
 
     def setup_table(self):
         """Columns from options"""
@@ -101,6 +103,8 @@ class DriverTable(TableMixin, ModernOverlay):
         self.add_font("tiny", 0.5, "bold", caps=True)  # per wheel compound letters
         columns = []
         for key in self.COLUMNS:
+            if key == "class" and self.class_headers:
+                continue
             if self.wcfg.get(f"column_{key}", False):
                 column = self.column_of(key)
                 if column is not None:
@@ -186,7 +190,8 @@ class DriverTable(TableMixin, ModernOverlay):
             if key == "position":
                 fill = theme.accent if player else theme.surface_raised
                 color = style.on_accent if player else theme.text
-                cells.append(Cell(BADGE, f"{veh.positionOverall}", "strong", color, fill))
+                position = veh.positionInClass if self.class_headers else veh.positionOverall
+                cells.append(Cell(BADGE, f"{position}", "strong", color, fill))
             elif key == "class":
                 pos_fill = class_color.darker(150) if wcfg.get("show_class_style_for_position_in_class", False) else None
                 cells.append(Cell(CLASS, alias, color=pos_fill, fill=class_color, extra=f"{veh.positionInClass}"))
@@ -248,6 +253,10 @@ class DriverTable(TableMixin, ModernOverlay):
             return Cell(TEXT, pit_time_text(veh.inPit, veh.pitTimer.elapsed), "dim", theme.accent)
         best = self.wcfg.get("show_highlighted_fastest_last_laptime", True) and veh.isClassFastestLastLap
         return Cell(TEXT, laptime_text(veh.lastLapTime, veh.isValidLap), "dim", theme.best if best else theme.text_dim)
+
+    def refresh(self, state: Any):
+        """Repaint rows that changed"""
+        self.refresh_rows(state)
 
     def paint_static(self, painter: QPainter):
         panel(painter, QRectF(self.rect()), self.theme, self.radius(0.5), self.depth_effects)

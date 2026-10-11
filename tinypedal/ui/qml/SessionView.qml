@@ -8,7 +8,22 @@ import QtQuick.Layouts
 Item {
     id: root
     property var chart
-    readonly property var session: backend.sessionData
+    // Sessions, shown session & its laps read once per change, only while tab is shown (hidden: once shown again)
+    property var sessionState: ({})
+    property bool stale: true
+    function refresh() {
+        if (!visible) { stale = true; return }
+        stale = false
+        sessionState = backend.sessionState
+    }
+    onVisibleChanged: if (visible && stale) refresh()
+    Component.onCompleted: refresh()
+    Connections {
+        target: backend
+        function onSessionChanged() { root.refresh() }
+    }
+    readonly property var sessions: sessionState.sessions || []
+    readonly property var session: sessionState.data || ({})
     readonly property var laps: session.laps || []
     readonly property var trend: session.trend || ({})
     property int hoverIndex: -1
@@ -29,6 +44,27 @@ Item {
         deviation = valid.length > 1 ? Math.sqrt(deviation / (valid.length - 1)) : 0
         for (var k = 0; k < laps.length; k++) if (laps[k].fuel >= 0) { fuel += laps[k].fuel; fuelCount++ }
         return {"count": valid.length, "mean": mean, "deviation": deviation, "fuel": fuel, "fuelCount": fuelCount}
+    }
+    // Lap point of chart: shown laps in their color, best lap gold, invalid hollow
+    component LapPoint: Item {
+        property var lap: ({})
+        property real best: 0
+        property real grow: 1
+        readonly property real size: theme.em * (lap.shown ? 0.85 : 0.6) * grow
+        readonly property color tone: lap.shown ? lap.color
+            : (lap.valid && lap.time <= best + 1e-6 ? theme.gold : theme.text)
+        visible: lap.time > 0
+        opacity: lap.outlier ? 0.4 : 1
+        Rectangle {
+            x: -width / 2
+            y: -height / 2
+            width: parent.size
+            height: parent.size
+            radius: width / 2
+            color: parent.lap.valid ? parent.tone : "transparent"
+            border.width: parent.lap.valid ? 1.5 : 2
+            border.color: parent.lap.valid ? theme.window : parent.tone
+        }
     }
     function timeText(seconds) {
         if (!(seconds > 0)) return "—"
@@ -51,9 +87,9 @@ Item {
             }
             Layout.fillWidth: true
             implicitHeight: Math.round(theme.em * 2.2)
-            model: backend.sessions.map(function(item) { return item.title })
-            currentIndex: backend.sessions.map(function(item) { return item.key }).indexOf(backend.sessionKey)
-            onActivated: function(index) { backend.setSession(backend.sessions[index].key) }
+            model: root.sessions.map(function(item) { return item.title })
+            currentIndex: root.sessions.map(function(item) { return item.key }).indexOf(root.sessionState.key)
+            onActivated: function(index) { backend.setSession(root.sessions[index].key) }
             background: Rectangle {
                 radius: theme.em * 0.5
                 color: sessionBox.hovered ? theme.hover : theme.raised
@@ -223,37 +259,35 @@ Item {
                         color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.3)
                     }
                 }
-                // Lap points: shown laps in their color, best lap gold, invalid hollow
+                // Lap points: shown laps in their color, best lap gold, invalid hollow (hovered one drawn larger on top)
                 Repeater {
                     model: root.laps.length
-                    Item {
-                        readonly property var lap: root.laps[index]
-                        readonly property real size: theme.em * (lap.shown ? 0.85 : 0.6) * (index === root.hoverIndex ? 1.3 : 1)
-                        readonly property color tone: lap.shown ? lap.color
-                            : (lap.valid && lap.time <= root.session.best + 1e-6 ? theme.gold : theme.text)
-                        visible: lap.time > 0
-                        opacity: lap.outlier ? 0.4 : 1
+                    LapPoint {
+                        id: point
+                        lap: root.laps[index]
+                        best: root.session.best || 0
                         x: chartCanvas.xAt(index)
                         y: chartCanvas.yAt(lap.time)
-                        Rectangle {
-                            x: -width / 2
-                            y: -height / 2
-                            width: parent.size
-                            height: parent.size
-                            radius: width / 2
-                            color: parent.lap.valid ? parent.tone : "transparent"
-                            border.width: parent.lap.valid ? 1.5 : 2
-                            border.color: parent.lap.valid ? theme.window : parent.tone
-                        }
-                        Text {  // track limits / off track count
-                            visible: parent.lap.limits > 0 || parent.lap.offtrack > 0
-                            x: -width / 2
-                            y: -parent.size / 2 - height
-                            text: parent.lap.limits > 0 ? "✕" + parent.lap.limits : "◇" + parent.lap.offtrack
-                            color: parent.lap.limits > 0 ? theme.warning : theme.dimText
-                            font.pointSize: theme.fontPoint * 0.68
+                        Loader {  // track limits / off track count: made only for laps with some
+                            active: point.lap.limits > 0 || point.lap.offtrack > 0
+                            sourceComponent: Text {
+                                x: -width / 2
+                                y: -point.size / 2 - height
+                                text: point.lap.limits > 0 ? "✕" + point.lap.limits : "◇" + point.lap.offtrack
+                                color: point.lap.limits > 0 ? theme.warning : theme.dimText
+                                font.pointSize: theme.fontPoint * 0.68
+                            }
                         }
                     }
+                }
+                LapPoint {  // hovered lap: one item follows hover (lap points never bound to it)
+                    readonly property bool hovering: root.hoverIndex >= 0 && root.hoverIndex < root.laps.length
+                    visible: hovering && lap.time > 0
+                    lap: hovering ? root.laps[root.hoverIndex] : ({})
+                    best: root.session.best || 0
+                    grow: 1.3
+                    x: chartCanvas.xAt(Math.max(root.hoverIndex, 0))
+                    y: chartCanvas.yAt(lap.time || 0)
                 }
                 // Fuel & tyre wear used each lap
                 Repeater {

@@ -278,7 +278,8 @@ def test_tyre_wear_unknown_when_tyres_changed_during_lap(ui_env, tmp_path):
     group = [LapEntry(LapFile(f"{lap_name(number, 70.0)}.csv", f"p{number}", True, 70.0), info)
              for number, info in enumerate(infos, 1)]
     page = types.SimpleNamespace(
-        session_key=lambda: "s", session_groups=lambda: [("s", "Session", group)], data=types.SimpleNamespace(laps=[]),
+        session_key=lambda groups=None: "s", session_groups=lambda: [("s", "Session", group)],
+        data=types.SimpleNamespace(laps=[]),
         _session_extra={"p2": (1.0, {"wear": -39.5})}, reference_key="", _session_busy=False,
         session_trend=SessionTab.session_trend)
     rows = SessionTab.session_data(page)["laps"]

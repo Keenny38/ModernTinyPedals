@@ -26,7 +26,11 @@ Item {
     readonly property bool current: GridView.isCurrentItem && GridView.view.activeFocus
     readonly property real pad: Math.round(theme.em * 0.75)
     readonly property color edge: card.needed ? theme.warning : card.failed ? theme.loss : theme.accent
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
+
+    GridView.onPooled: recycling = true
+    GridView.onReused: recycling = false
 
     width: GridView.view.cellWidth
     height: GridView.view.cellHeight
@@ -72,8 +76,8 @@ Item {
         border.color: card.needed || card.failed || card.active ? card.edge
                     : area.containsMouse ? Qt.lighter(theme.border, 1.3)
                     : theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border
-        Behavior on color { ColorAnimation { duration: 150 } }
-        Behavior on border.color { ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
 
         // Card background click (buttons above get their own clicks)
         MouseArea {
@@ -101,13 +105,13 @@ Item {
             radius: theme.em * 0.6
             color: card.active ? Qt.rgba(card.edge.r, card.edge.g, card.edge.b, theme.dark ? 0.22 : 0.14)
                  : theme.dark ? Qt.lighter(theme.base, 1.25) : Qt.darker(theme.base, 1.05)
-            Behavior on color { ColorAnimation { duration: 150 } }
+            Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
             Icon {
                 anchors.centerIn: parent
                 glyph: card.glyph
                 size: theme.em * 1.3
                 color: card.active ? card.edge : theme.dimText
-                Behavior on color { ColorAnimation { duration: 150 } }
+                Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
             }
             Text {  // no icon font: first letter
                 anchors.centerIn: parent
@@ -159,7 +163,8 @@ Item {
                         acceptedButtons: Qt.NoButton
                     }
                     ToolTip.visible: intervalArea.containsMouse
-                    ToolTip.text: i18n.trm("Updated every " + card.interval + " ms (" + card.idleInterval + " ms when not driving)")
+                    ToolTip.text: intervalArea.containsMouse  // built only while hovered
+                        ? i18n.trm("Updated every " + card.interval + " ms (" + card.idleInterval + " ms when not driving)") : ""
                     ToolTip.delay: 400
                 }
             }
@@ -257,8 +262,9 @@ Item {
                     hoverEnabled: true
                     acceptedButtons: Qt.NoButton
                 }
-                ToolTip.visible: usersArea.containsMouse && card.usersTip() !== ""
-                ToolTip.text: card.usersTip()
+                readonly property string tip: usersArea.containsMouse ? card.usersTip() : ""  // built only while hovered
+                ToolTip.visible: tip !== ""
+                ToolTip.text: tip
                 ToolTip.delay: 300
             }
         }

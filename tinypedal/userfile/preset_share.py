@@ -59,7 +59,7 @@ def decode_preset(code: str) -> dict[str, dict]:
     """
     code = "".join(code.split())  # line breaks added by chat apps
     if not code.startswith(SHARE_PREFIX):
-        raise ValueError("not a Modern Tiny Pedals share code")
+        raise ValueError("not a NeoPedal share code")
     try:
         compressed = base64.urlsafe_b64decode(code[len(SHARE_PREFIX):].encode("ascii"))
         decompressor = zlib.decompressobj()

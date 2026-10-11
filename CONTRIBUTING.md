@@ -1,8 +1,8 @@
-# Contributing to Modern Tiny Pedals
+# Contributing to NeoPedal
 
-Thank you for your interest in **Modern Tiny Pedals**! Every contribution is welcome: bug report, idea, translation or code.
+Thank you for your interest in **NeoPedal**! Every contribution is welcome: bug report, idea, translation or code.
 
-Modern Tiny Pedals is a modified version of [TinyPedal](https://github.com/TinyPedal/TinyPedal) (see [NOTICE.md](NOTICE.md)). Report here what concerns this project; a problem that also exists in the original TinyPedal can be reported to both projects.
+NeoPedal is a modified version of [TinyPedal](https://github.com/TinyPedal/TinyPedal) (see [NOTICE.md](NOTICE.md)). Report here what concerns this project; a problem that also exists in the original TinyPedal can be reported to both projects.
 
 Before opening an issue, check the [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki), especially [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting), and search the [existing issues](https://github.com/Keenny38/ModernTinyPedals/issues?q=is%3Aissue) to avoid duplicates.
 

@@ -31,6 +31,7 @@ from collections import deque
 from collections.abc import Callable
 from math import ceil
 from statistics import median
+from time import monotonic
 
 from .. import calculation as calc
 from .. import realtime_state
@@ -41,7 +42,7 @@ from ..const_file import FileExt
 from ..module_info import FuelInfo, minfo
 from ..userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 from ..validator import generator_init, valid_delta_raw
-from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp, round6
+from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp, round6
 
 # Consumption estimate method in use (FuelInfo.consumptionMethod)
 METHOD_GAME = "game"  # game estimate, no lap of car & track recorded yet
@@ -53,6 +54,7 @@ MEDIAN_MIN_LAPS = 3  # green flag laps needed before median replaces last valid 
 class Realtime(DataModule):
     """Fuel usage data"""
 
+    WAKE_ON_DERIVED = True  # stamp includes delta module position
     __slots__ = ()
 
     def __init__(self, config, module_name):
@@ -60,7 +62,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         vehicle_resets = None
         waiting_fuel = waiting_energy = False  # completed lap waiting for validation
@@ -213,6 +215,7 @@ def calc_consumption(
     last_reset = None  # reset check
     sent_reset = None  # last reset value sent
     delayed_save = False
+    next_checkpoint = 0.0  # monotonic time of next save while driving
     pending: PendingLap | None = None  # lap just completed waiting for validation
 
     combo_name = ""
@@ -231,6 +234,18 @@ def calc_consumption(
         delayed_save = True
         if use_median:  # only green flag laps are validated with median
             green_laps.append(used_last_valid)
+
+    def save_data():
+        """Reference lap saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
+        nonlocal delayed_save, next_checkpoint
+        save_fuel_delta_file(
+            filepath=filepath,
+            filename=combo_name,
+            extension=extension,
+            dataset=delta_array_last,
+        )
+        delayed_save = False
+        next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
 
     def resolve_pending(final: bool = False):
         """Validate lap waiting for validation after player left track"""
@@ -266,13 +281,7 @@ def calc_consumption(
 
             # Save data
             if delayed_save:
-                save_fuel_delta_file(
-                    filepath=filepath,
-                    filename=combo_name,
-                    extension=extension,
-                    dataset=delta_array_last,
-                )
-                delayed_save = False
+                save_data()
 
             # Delay reset until driving (module stopping: data saved only)
             if reset is MODULE_STOP or not realtime_state.active:
@@ -283,6 +292,7 @@ def calc_consumption(
             output.reset()
             recording = False
             delayed_save = False
+            next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
             is_pit_lap = 0  # whether pit in or pit out lap
             is_yellow_lap = False  # lap under full course yellow or safety car (median only)
             is_invalid_lap = False  # lap invalidated by game, track limits (median only)
@@ -326,6 +336,10 @@ def calc_consumption(
             pos_recorded = 0.0  # last recorded vehicle position
             pos_last = 0.0  # last checked vehicle position
             pos_synced_last = 0.0  # estimated vehicle position
+
+        # Checkpoint while driving (crash, power loss)
+        if delayed_save and monotonic() >= next_checkpoint:
+            save_data()
 
         # Read telemetry
         capacity, amount_curr = telemetry_func()

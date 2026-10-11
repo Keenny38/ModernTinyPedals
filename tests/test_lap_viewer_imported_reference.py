@@ -128,6 +128,7 @@ def test_delta_best_of_imported_lap_aligned_and_scaled(track, tmp_path, monkeypa
         assert imported not in [lap.key for lap in backend.data.laps]
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
     backend.exportDeltaBest(imported)
+    backend.wait_jobs()  # lap read, then delta best written in background
     target = backend.delta_best_file(backend.delta_best_track(imported))
     with open(target, encoding="utf-8") as file:
         rows = [tuple(map(float, line.split(","))) for line in file.read().split() if line[0].isdigit()]

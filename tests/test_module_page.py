@@ -2,6 +2,7 @@
 
 import dis
 import sys
+import time
 from types import CodeType, MappingProxyType
 
 import pytest
@@ -208,7 +209,7 @@ def test_dependencies_found_without_importing():
     assert "fuel" in dependencies.overlays["module_fuel"]
     assert {"relative", "standings"} <= set(dependencies.overlays["module_relative"])
     assert "relative" in dependencies.overlays["module_vehicles"]
-    assert dependencies.overlays["module_sectors"] == ("sectors",)
+    assert dependencies.overlays["module_sectors"] == ("sectors", "track_map")  # track map: sector colors
     assert dependencies.overlays["module_recorder"] == ()  # telemetry for the viewer, no overlay
     assert "module_delta" in dependencies.needs["module_stint"]
     assert "module_stint" in dependencies.modules["module_delta"]
@@ -321,8 +322,13 @@ def test_dependencies_loaded_later(ui_env, monkeypatch):
     try:
         assert not backend.dependenciesReady and backend.rows_model.rows[0]["userTotal"] == 0
         backend.loadDependenciesLater()
-        flush()
+        backend.loadDependenciesLater()  # already reading: not read twice
+        assert not backend.dependenciesReady  # read in background, UI thread not blocked
+        deadline = time.monotonic() + 5
+        while not backend.dependenciesReady and time.monotonic() < deadline:
+            flush()
         assert backend.dependenciesReady and len(calls) == 1
+        assert any(row["userTotal"] for row in backend.rows_model.rows)
         backend.loadDependenciesLater()
         flush()
         assert len(calls) == 1

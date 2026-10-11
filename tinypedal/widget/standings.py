@@ -26,7 +26,7 @@ from ..api_control import api
 from ..const_common import MAX_SECONDS, TEXT_NOLAPTIME, TEXT_PLACEHOLDER
 from ..formatter import random_color_class, shorten_driver_name
 from ..module_info import minfo
-from ..userfile.custom_image import cached_brand_logo
+from ..userfile.custom_image import BrandLogos
 from ..userfile.heatmap import select_compound_color, select_compound_symbol
 from ._base import Overlay
 from ._painter import DeltaLapTime, MultiCompounds
@@ -81,7 +81,8 @@ class Realtime(Overlay):
         else:
             max_display_vehicles = self.wcfg["maximum_vehicles_combined_mode"]
         self.veh_range = min(max(int(max_display_vehicles), 5), 126)
-        self.pixmap_brandlogo = {}
+        self.brand_logos = BrandLogos(self, self.cfg.path.brand_logo, self.brd_width, self.brd_height,
+                                      self.brand_logo_arrived)
         self.row_visible = [False] * self.veh_range
 
         # Driver position
@@ -1207,13 +1208,14 @@ class Realtime(Overlay):
 
     def set_brand_logo(self, brand_name: str):
         """Set brand logo"""
-        return cached_brand_logo(
-            self.pixmap_brandlogo,
-            filepath=self.cfg.path.brand_logo,
-            filename=brand_name,
-            max_width=self.brd_width,
-            max_height=self.brd_height,
-        )
+        return self.brand_logos.get(brand_name)
+
+    def brand_logo_arrived(self, brand_name: str, pixmap):
+        """Brand logo read in background: drawn in cells showing brand"""
+        for target in self.bars_brd:
+            if target.last is not None and target.last[0] == brand_name:
+                target.image = pixmap
+                target.update()
 
     def set_class_style(self, class_name: str):
         """Compare vehicle class name with user defined dictionary"""

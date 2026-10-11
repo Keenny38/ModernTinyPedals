@@ -23,7 +23,9 @@ Track drawn as road with dark edge (readable over any background, optional panel
 start line, sector marks in accent. Cars as dots with position, filled with class color (multi
 class) or race status color, player larger with ring, proximity ring around player. Safety car
 pill, pit out prediction rings (accent: estimated stop) with stop duration badges. Temporary
-circle map until track is recorded.
+circle map until track is recorded. Sector performance: road of each sector colored by player's last
+time in it (purple: session best sector, green: faster than sector of best lap, amber: slower). Cars
+close to player on track (time gap within threshold) ringed.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from ...api_control import api
+from ...const_common import MAX_SECONDS
 from ...module_info import minfo
 from ..track_map import TrackMapMixin
 from .base import CENTER, ModernOverlay
@@ -42,6 +45,34 @@ from .draw import panel, readable_on, rounded
 from .rows import class_style
 
 CHECKER_SQUARES = 4  # squares across road per row of start line
+SECTOR_BEST, SECTOR_FASTER, SECTOR_SLOWER = "best", "positive", "warning"  # theme colors of sector performance
+SAME_TIME = 0.0005  # seconds: sector time this close to best sector is best sector
+
+
+def sector_performance(sectors) -> tuple[str | None, ...]:
+    """Theme color of each sector by player's last time in it (session sectors), None if no time yet:
+    session best sector, faster than sector of personal best lap, slower"""
+    colors: list[str | None] = []
+    for last, best, delta in zip(sectors.sectorPrev, sectors.sectorBestTB, sectors.deltaSectorBestPB):
+        if not 0 < last < MAX_SECONDS:
+            colors.append(None)
+        elif last <= best + SAME_TIME:
+            colors.append(SECTOR_BEST)
+        elif delta < 0:
+            colors.append(SECTOR_FASTER)
+        else:
+            colors.append(SECTOR_SLOWER)
+    return tuple(colors)
+
+
+def nearby_vehicles(threshold: float) -> frozenset[int]:
+    """Indexes of cars within threshold seconds ahead of or behind player on track"""
+    if threshold <= 0:
+        return frozenset()
+    relative = minfo.relative
+    return frozenset(
+        [index for gap, index in relative.relativeAhead if 0 < gap <= threshold]
+        + [index for gap, index in relative.relativeBehind if -threshold <= gap < 0])
 
 
 class Realtime(TrackMapMixin, ModernOverlay):
@@ -57,6 +88,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         "pitout_duration_minimum", "pitout_duration_increment", "enable_auto_pitout_prediction",
         "auto_prediction_additional_pitstop_time", "enable_fixed_pitout_prediction",
         *(f"fixed_pitstop_duration_{index}" for index in range(1, 11)), "show_pitstop_duration",
+        "show_sector_performance", "show_nearby_vehicle_highlight", "nearby_vehicle_threshold",
     )
 
     def __init__(self, config, widget_name):
@@ -78,6 +110,11 @@ class Realtime(TrackMapMixin, ModernOverlay):
         self.show_safety_car = bool(wcfg["show_safety_car"])
         self.show_prediction = bool(wcfg["show_pitout_prediction"])
         self.safety_car_text = self.user_text("safety_car_text", "SC")
+        self.show_sector_performance = bool(wcfg["show_sector_performance"])
+        self.nearby_threshold = (max(float(wcfg["nearby_vehicle_threshold"]), 0.0)
+                                 if wcfg["show_nearby_vehicle_highlight"] else 0.0)
+        self.sector_colors: tuple[str | None, ...] = ()
+        self.nearby: frozenset[int] = frozenset()
 
         # Car dots: fit 2 digit position
         base = max(self.text_width("place", "88") + unit * 0.45, unit * 1.2) / 2
@@ -104,6 +141,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         self.pen_proximity = QPen(theme.tint(theme.text, 90), max(unit * 0.08, 1.0))
         self.pen_proximity.setDashPattern((3.0, 3.0))
         width = max(unit * 0.14, 1.5)
+        self.pen_nearby = QPen(theme.warning, width)
         self.pen_prediction = QPen(theme.negative, width)
         self.pen_auto_prediction = QPen(theme.positive, width)
 
@@ -115,6 +153,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
         self.safety_rect = QRectF(-safety_w / 2, -self.dot_safety, safety_w, self.dot_safety * 2)
 
         self.map_paths: tuple[QPainterPath, ...] = ()
+        self.sector_paths: tuple[QPainterPath, ...] = ()
         self.update_map(-1)
 
     def update_map(self, data):
@@ -122,13 +161,23 @@ class Realtime(TrackMapMixin, ModernOverlay):
         if self.last_modified != data:
             self.last_modified = data
             raw_data = minfo.mapping.coordinates if data != -1 else None
-            _, map_full_path = self.create_map_path(raw_data)
+            sector_paths, map_full_path = self.create_map_path(raw_data)
             self.map_paths = (map_full_path,)
+            self.sector_paths = tuple(sector_paths) if self.map_scaled else ()
             self.redraw_static()
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
         self.update_map(minfo.mapping.lastModified)
+        if self.show_sector_performance:
+            colors = sector_performance(minfo.sectors.sessionBest)
+            if colors != self.sector_colors:  # player completed a sector
+                self.sector_colors = colors
+                self.redraw_static()
+        nearby = nearby_vehicles(self.nearby_threshold)
+        if nearby != self.nearby:
+            self.nearby = nearby
+            self.update()
         self.refresh(minfo.vehicles.dataSetVersion)
 
     def paint_static(self, painter: QPainter):
@@ -140,6 +189,8 @@ class Realtime(TrackMapMixin, ModernOverlay):
             painter.setPen(pen)
             for path in self.map_paths:
                 painter.drawPath(path)
+        if self.show_sector_performance:
+            self.draw_sector_performance(painter)
         if self.map_scaled:
             sectors = minfo.mapping.sectors
             if self.wcfg["show_sector_line"] and isinstance(sectors, tuple):
@@ -153,6 +204,18 @@ class Realtime(TrackMapMixin, ModernOverlay):
                 self.draw_start_line(painter, QPointF(x1, y1), degrees(atan2(y2 - y1, x2 - x1)))
         elif self.wcfg["show_start_line"]:
             self.draw_start_line(painter, QPointF(self.area_margin, self.area_size * 0.5), 90.0)
+
+    def draw_sector_performance(self, painter: QPainter):
+        """Road of each sector timed in its sector performance color"""
+        theme = self.theme
+        for path, color in zip(self.sector_paths, self.sector_colors):
+            if color is None:
+                continue
+            pen = QPen(getattr(theme, color), self.road)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawPath(path)
 
     def draw_start_line(self, painter: QPainter, pos: QPointF, direction: float):
         """Checkered line across road at pos, road heading direction (degrees)"""
@@ -186,7 +249,7 @@ class Realtime(TrackMapMixin, ModernOverlay):
             if data.isPlayer:
                 player = (data, pos_x, pos_y)
                 continue
-            self.draw_car(painter, data, pos_x, pos_y)
+            self.draw_car(painter, data, pos_x, pos_y, index in self.nearby and not data.inPit)
         if player is not None:  # player on top
             data, pos_x, pos_y = player
             if on_map and self.show_proximity:
@@ -213,10 +276,15 @@ class Realtime(TrackMapMixin, ModernOverlay):
             return color
         return status_color(self.colors, veh_info)
 
-    def draw_car(self, painter: QPainter, data, pos_x: float, pos_y: float):
-        """Car dot with position"""
+    def draw_car(self, painter: QPainter, data, pos_x: float, pos_y: float, nearby: bool = False):
+        """Car dot with position, ringed if close to player"""
         color = self.car_color(data)
         center = QPointF(pos_x, pos_y)
+        if nearby:
+            ring = self.dot + max(self.unit * 0.22, 2.0)
+            painter.setPen(self.pen_nearby)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(center, ring, ring)
         if data.isPlayer:
             radius = self.dot_player
             painter.setPen(Qt.PenStyle.NoPen)

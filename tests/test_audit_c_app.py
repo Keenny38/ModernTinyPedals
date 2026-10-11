@@ -129,6 +129,13 @@ def test_restart_asks_unsaved_pages(window, answers, monkeypatch):
     assert window.restart_app() is True
     assert restarts and "brake_editor.BrakeEditor" in restarts[0]  # page reopened after restart
     assert not window.centralWidget().dialog_pages()
+    # Relaunch failed (restart returned): app goes on, pages opened now asked to save on quit again
+    assert window.centralWidget().track_pages
+    editor = open_editor_page(window, "brake_editor.BrakeEditor")
+    editor.set_modified()
+    answers.reply = QMessageBox.StandardButton.Cancel
+    assert window.close_pages_for_quit() is False
+    editor.set_unmodified()
 
 
 # Item 2: config pages registered, preset load guarded, save into loaded preset

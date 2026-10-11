@@ -67,6 +67,9 @@ BACKGROUND_LOAD_COUNT = 1  # laps to read loaded in background from this count (
 # Imported laps compared (circuit shape check, distance offset) in background from this many samples to compare
 # (about one Nordschleife lap at 10 Hz: a tenth of a second or more per lap)
 BACKGROUND_PREPARE_SAMPLES = 20000
+# Chart series (each channel of each lap) built in background from this many samples to compute (smoothing, channel
+# shown, reference lap changed...: about one 100 s lap of 6 channels at 50 Hz), charts shown keep former settings
+BACKGROUND_CHART_SAMPLES = 30000
 
 
 class Channel(NamedTuple):

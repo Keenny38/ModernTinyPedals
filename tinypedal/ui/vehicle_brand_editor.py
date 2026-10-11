@@ -52,6 +52,7 @@ from ._common import (
     CompactButton,
     TableBatchReplace,
     UIScaler,
+    column_texts,
     run_after_saving,
     table_item,
     translate_filter,
@@ -279,19 +280,22 @@ class VehicleBrandEditor(BaseEditor):
     def add_brand(self):
         """Add new brand"""
         start_index = row_index = self.table_brands.rowCount()
-        # Add all missing vehicle name from active session
-        veh_total = api.read.vehicle.total_vehicles()
-        for index in range(veh_total):
-            veh_name = api.read.vehicle.vehicle_name(index)
-            brand_name = extract_lmu_brand_name(api.read.vehicle.vehicle_model(index), "Unknown")
-            if not self.is_value_in_table(veh_name, self.table_brands):
-                self.add_vehicle_entry(row_index, veh_name, brand_name)
-                row_index += 1
-        # Add new name entry
-        if start_index == row_index:
-            new_brand_name = self.new_name_increment("New Vehicle Name", self.table_brands)
-            self.add_vehicle_entry(row_index, new_brand_name, "Unknown")
-            self.table_brands.setCurrentCell(row_index, 0)
+        listed = column_texts(self.table_brands, 0)
+        with self.batch_edit():  # one undo step
+            # Add all missing vehicle name from active session
+            veh_total = api.read.vehicle.total_vehicles()
+            for index in range(veh_total):
+                veh_name = api.read.vehicle.vehicle_name(index)
+                if veh_name not in listed:
+                    brand_name = extract_lmu_brand_name(api.read.vehicle.vehicle_model(index), "Unknown")
+                    self.add_vehicle_entry(row_index, veh_name, brand_name)
+                    listed.add(veh_name)
+                    row_index += 1
+            # Add new name entry
+            if start_index == row_index:
+                new_brand_name = self.new_name_increment("New Vehicle Name", self.table_brands)
+                self.add_vehicle_entry(row_index, new_brand_name, "Unknown")
+                self.table_brands.setCurrentCell(row_index, 0)
 
     def add_vehicle_entry(self, row_index: int, veh_name: str, brand_name: str):
         """Add new brand entry to table"""

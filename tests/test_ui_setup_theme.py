@@ -1,5 +1,9 @@
 """Option finder & preset comparison tests (headless), setup wizard tests: test_setup_wizard.py"""
 
+import time
+
+from PySide6.QtCore import QCoreApplication
+
 from tinypedal.setting import cfg
 
 
@@ -59,9 +63,20 @@ def test_preset_compare_dialog(ui_env, monkeypatch):
     monkeypatch.setattr(type(cfg), "is_loaded", lambda self, name: False)
     dialog = preset_compare.PresetCompare(None, preset_a="default.json", preset_b="other.json")
     try:
+        assert dialog.is_loading() and dialog.table.rowCount() == 0  # presets read in background
+        deadline = time.monotonic() + 5
+        while dialog.is_loading() and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
         rows = [dialog.table.item(row, 0).data(0x0100) for row in range(dialog.table.rowCount())]
         assert ("speedometer", "font_size") in rows
         row = rows.index(("speedometer", "font_size"))
+        dialog.edit_filter.setText("zzzz")
+        assert not dialog.table.isRowHidden(row)  # applied once typing pauses
+        dialog.filter_now()
+        assert dialog.table.isRowHidden(row)
+        dialog.edit_filter.setText("speedometer FONT")
+        dialog.filter_now()
+        assert not dialog.table.isRowHidden(row)
         dialog.table.selectRow(row)
         dialog.copy_selected(to_a=True)
         assert dialog.presets["default.json"]["speedometer"]["font_size"] == 99

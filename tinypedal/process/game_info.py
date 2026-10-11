@@ -33,6 +33,7 @@ Game info of LMU Rest API: chat, contacts between cars, pit entry, setup name, r
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, NamedTuple
 
@@ -120,6 +121,19 @@ class Standing(NamedTuple):
     y: float = 0.0
     energy: float = -1.0  # virtual energy left (0 to 1), -1 if hidden (other teams) or none
     fuel: float = -1.0  # fuel left (0 to 1), -1 if hidden or none
+    speed: float = 0.0  # m/s
+    distance: float = 0.0  # lap distance (meters into lap)
+    sector: int = 0  # sector driven (1 to 3), 0 if unknown
+    pit_state: str = "NONE"  # NONE, REQUEST, ENTERING, STOPPED, EXITING
+    grid: int = 0  # qualifying place (starting grid), 0 if unknown
+    # Sector times (seconds, -1 if none), sector 2 time includes sector 1 (as the game gives them)
+    last_sector1: float = -1.0
+    last_sector2: float = -1.0
+    current_sector1: float = -1.0
+    current_sector2: float = -1.0
+    best_sector1: float = -1.0  # sectors of best lap
+    best_sector2: float = -1.0
+    blue: bool = False  # blue flag shown to car
 
 
 def parse_chat(data: Any, default: tuple) -> tuple[ChatMessage, ...]:
@@ -131,8 +145,8 @@ def parse_chat(data: Any, default: tuple) -> tuple[ChatMessage, ...]:
         try:
             text = str(entry["message"]).strip()
             if text:
-                messages.append(ChatMessage(float(entry["timestamp"]) * CHAT_TIME_SCALE, text))
-        except (KeyError, TypeError, ValueError):
+                messages.append(ChatMessage(_finite(entry["timestamp"]) * CHAT_TIME_SCALE, text))
+        except (KeyError, OverflowError, TypeError, ValueError):
             continue
     messages.sort(key=lambda message: message.time)
     return tuple(messages)
@@ -145,8 +159,8 @@ def parse_contacts(data: Any, default: tuple) -> tuple[Contact, ...]:
     contacts = []
     for entry in data:
         try:
-            contacts.append(Contact(float(entry["et"]), str(entry["player"]), str(entry["contactWith"])))
-        except (KeyError, TypeError, ValueError):
+            contacts.append(Contact(_finite(entry["et"]), str(entry["player"]), str(entry["contactWith"])))
+        except (KeyError, OverflowError, TypeError, ValueError):
             continue
     contacts.sort(key=lambda contact: contact.time)
     return tuple(contacts)
@@ -187,12 +201,12 @@ def parse_replays(data: Any) -> list[GameReplay]:
                 event=str(metadata.get("eventTitle") or ""),
                 session=str(metadata.get("session") or ""),
                 track=str(metadata.get("sceneDesc") or ""),
-                time=float(entry.get("timestamp") or 0),
+                time=_finite(entry.get("timestamp") or 0),
                 size=int(entry.get("size") or 0),
                 event_type=str(metadata.get("eventType") or ""),
                 folder=str(entry.get("replayDirectory") or ""),
             ))
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except (AttributeError, KeyError, OverflowError, TypeError, ValueError):  # json: 1e999 is inf
             continue
     replays.sort(key=lambda replay: replay.time, reverse=True)
     return replays
@@ -213,16 +227,81 @@ def parse_cars(standings: Any) -> dict[str, CarInfo]:
 
 
 def _number(value: Any, kind: type = float) -> Any:
-    """Number of json value, 0 if not a number"""
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value == value:
-        return kind(value)
+    """Number of json value, 0 if not a finite number (json reads 1e999 as inf)"""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            if math.isfinite(value):
+                return kind(value)
+        except OverflowError:  # int too large for float
+            pass
     return kind(0)
+
+
+def _finite(value: Any) -> float:
+    """Float of json value
+
+    Raises:
+        ValueError: not a number, NaN or infinite (json reads 1e999 as inf).
+        OverflowError: int too large for float.
+    """
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"not a finite number: {value}")
+    return number
 
 
 def _fraction(value: Any) -> float:
     """Fraction left (0 to 1) of game, -1 if not given: game sends 0 for cars of other teams (hidden)"""
     number = _number(value)
     return min(number, 1.0) if number > 0 else -1.0
+
+
+def _time(value: Any) -> float:
+    """Time (seconds) of json value, -1 if none (game sends -1 or 0)"""
+    number = _number(value)
+    return number if number > 0 else -1.0
+
+
+def _sector(value: Any) -> int:
+    """Sector driven of watch standings ("SECTOR2" -> 2), 0 if unknown"""
+    text = str(value or "")
+    return int(text[-1]) if text.startswith("SECTOR") and text[-1:] in ("1", "2", "3") else 0
+
+
+class SessionState(NamedTuple):
+    """Session state of watch session info: phase, flags, weather"""
+
+    phase: int = -1  # game phase: 0 before, 3 formation, 4 countdown, 5 green, 6 full course yellow, 7 stopped, 8 over
+    yellow: str = "NONE"  # full course yellow state: NONE, or the phase the game names
+    sector_flags: tuple[bool, ...] = ()  # yellow flag in sector 1 to 3
+    air: float = -999.0  # ambient temperature (Celsius), -999 if unknown
+    track: float = -999.0  # track temperature (Celsius)
+    rain: float = -1.0  # rain (0 to 1), -1 if unknown
+    wetness: float = -1.0  # average wetness of racing line (0 to 1)
+
+
+def parse_session_state(info: Any) -> SessionState:
+    """Phase, flags & weather of watch session info"""
+    if not isinstance(info, dict):
+        return SessionState()
+    phase = info.get("gamePhase")
+    flags = info.get("sectorFlag")
+
+    def value(name: str, default: float) -> float:
+        number = info.get(name)
+        if isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number):
+            return float(number)
+        return default
+
+    return SessionState(
+        phase=phase if isinstance(phase, int) and not isinstance(phase, bool) else -1,
+        yellow=str(info.get("yellowFlagState") or "NONE").upper(),
+        sector_flags=tuple("YELLOW" in str(flag).upper() for flag in flags) if isinstance(flags, list) else (),
+        air=value("ambientTemp", -999.0),
+        track=value("trackTemp", -999.0),
+        rain=value("raining", -1.0),
+        wetness=value("averagePathWetness", -1.0),
+    )
 
 
 def parse_standings(standings: Any) -> list[Standing]:
@@ -234,6 +313,7 @@ def parse_standings(standings: Any) -> list[Standing]:
         try:
             pit_state = str(car.get("pitState") or "NONE")
             position = car.get("carPosition") if isinstance(car.get("carPosition"), dict) else {}
+            velocity = car.get("carVelocity") if isinstance(car.get("carVelocity"), dict) else {}
             into_lap = car.get("timeIntoLap")
             cars.append(Standing(
                 slot=int(car["slotID"]),
@@ -256,14 +336,26 @@ def parse_standings(standings: Any) -> list[Standing]:
                 player=car.get("player") is True,
                 garage=car.get("inGarageStall") is True,
                 lap_start=max(_number(car.get("lapStartET")), 0.0),
-                into_lap=_number(into_lap) if isinstance(into_lap, (int, float)) and into_lap >= 0 else -1.0,
+                into_lap=_number(into_lap) if isinstance(into_lap, (int, float)) and 0 <= into_lap < math.inf else -1.0,
                 estimated=max(_number(car.get("estimatedLapTime")), 0.0),
                 x=_number(position.get("x")),
                 y=-_number(position.get("z")),
                 energy=_fraction(car.get("veFraction")),
                 fuel=_fraction(car.get("fuelFraction")),
+                speed=max(_number(velocity.get("velocity")), 0.0),
+                distance=max(_number(car.get("lapDistance")), 0.0),
+                sector=_sector(car.get("sector")),
+                pit_state=pit_state,
+                grid=max(_number(car.get("qualification"), int), 0),
+                last_sector1=_time(car.get("lastSectorTime1")),
+                last_sector2=_time(car.get("lastSectorTime2")),
+                current_sector1=_time(car.get("currentSectorTime1")),
+                current_sector2=_time(car.get("currentSectorTime2")),
+                best_sector1=_time(car.get("bestLapSectorTime1")),
+                best_sector2=_time(car.get("bestLapSectorTime2")),
+                blue=car.get("flag") == "BLUE",
             ))
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except (AttributeError, KeyError, OverflowError, TypeError, ValueError):  # json: 1e999 is inf
             continue
     cars.sort(key=lambda car: (car.position <= 0, car.position))
     return cars

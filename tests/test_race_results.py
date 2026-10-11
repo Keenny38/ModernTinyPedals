@@ -531,6 +531,22 @@ def test_backend_load_failed(backend, monkeypatch):
     assert not backend.request.busy and backend.sessionCount == 3
 
 
+def test_backend_session_failure_logged(backend, caplog):
+    """Session not read: file gone stays debug, not a results file info, unexpected error warning + traceback"""
+    import logging
+
+    with caplog.at_level(logging.DEBUG, logger="tinypedal.ui.quick.results_backend"):
+        for error in (FileNotFoundError("gone"), ValueError("not a results file"), KeyError("bug")):
+            try:
+                raise error
+            except Exception as raised:
+                backend.reading = "session.xml"
+                backend.session_failed(raised)
+    records = [record for record in caplog.records if "not read" in record.getMessage()]
+    assert [record.levelno for record in records] == [logging.DEBUG, logging.INFO, logging.WARNING]
+    assert records[2].exc_info is not None and not backend.reading
+
+
 def test_backend_without_folder(ui_env, monkeypatch, tmp_path):
     from tinypedal.ui.quick.results_backend import RaceResultsBackend
 

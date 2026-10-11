@@ -43,7 +43,7 @@ from ...module_control import mctrl, wctrl
 from ...setting import cfg
 from .._common import run_after_saving
 from ..module_view import sort_key
-from ..option_finder import OptionEntry, build_index, reload_function, search_options
+from ..option_finder import OptionEntry, cached_index, reload_function, search_options
 from .models import DictListModel
 from .option_kinds import KIND_BOOL, KIND_COLOR, display_text, value_kind
 
@@ -113,7 +113,7 @@ class FinderBackend(QObject):
     def __init__(self, parent, open_option: Callable[[OptionEntry], Any]):
         super().__init__(parent)
         self._open_option = open_option
-        self.entries = build_index()
+        self.entries = cached_index()  # rebuilt only when preset, saved settings or language changed
         self._by_key = {entry_key(entry): entry for entry in self.entries}
         self.model = DictListModel(ROLES, self)
         self._search = ""

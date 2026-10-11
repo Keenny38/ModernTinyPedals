@@ -36,7 +36,7 @@ from typing import Any
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPolygonF
 
-from .. import overlay_signal
+from .. import overlay_signal, realtime_state
 from ._common import FontMetrics
 
 CENTER = Qt.AlignmentFlag.AlignCenter
@@ -159,24 +159,27 @@ class ClassicCells:
 
 
 class HiddenPreview:
-    """Widget hidden while it has nothing to show (nothing drawn), always drawn while overlay is
-    unlocked, so it can be placed. Mixin before widget class."""
+    """Widget hidden while it has nothing to show (nothing drawn), always drawn (sample) in overlay edit
+    mode, so it can be placed. Merely unlocked overlays (default) draw no sample: it would pass for real
+    data in game (sample chat conversation in garage, server lobby). Mixin before widget class."""
 
     cfg: Any
 
     def start(self: Any):
         super().start()  # type: ignore[misc]
         overlay_signal.locked.connect(self.preview_toggled)
+        overlay_signal.editing.connect(self.preview_toggled)
 
     def stop(self: Any):
-        with suppress(RuntimeError, TypeError):  # not connected (widget never started)
-            overlay_signal.locked.disconnect(self.preview_toggled)
+        for signal in (overlay_signal.locked, overlay_signal.editing):
+            with suppress(RuntimeError, TypeError):  # not connected (widget never started)
+                signal.disconnect(self.preview_toggled)
         super().stop()  # type: ignore[misc]
 
-    def preview_toggled(self: Any, _locked: bool):
-        """Overlay locked or unlocked: drawn again (shown or hidden)"""
+    def preview_toggled(self: Any, _state: bool):
+        """Overlay locked or unlocked, edit mode started or ended: drawn again (shown or hidden)"""
         self.update()
 
     def previewing(self) -> bool:
-        """Overlay unlocked: widget always drawn"""
-        return not self.cfg.overlay["fixed_position"]
+        """Overlay edit mode on (overlay unlocked): widget always drawn"""
+        return realtime_state.editing and not self.cfg.overlay["fixed_position"]

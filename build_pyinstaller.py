@@ -15,12 +15,16 @@ executable before registering it: games never load the DLL from lib, rewritten b
 import argparse
 import os
 import shutil
+import sys
 from glob import glob
 
 import PyInstaller.__main__
 
 from tinypedal import version_check
-from tinypedal.const_app import APP_ID, PLATFORM, VERSION
+from tinypedal.const_app import APP_ID, APP_NAME, COPYRIGHT, PLATFORM, VERSION
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+from exe_version_info import version_info_text, written_version
 
 DIST_FOLDER = "dist"
 WORK_FOLDER = "build"
@@ -112,9 +116,19 @@ def remove_old_build(clean_build: bool) -> bool:
     return True
 
 
+def write_version_file() -> str:
+    """Windows version resource: process shown as app name (Task Manager), not "tinypedal" """
+    os.makedirs(WORK_FOLDER, exist_ok=True)
+    path = os.path.abspath(os.path.join(WORK_FOLDER, "version_info.txt"))
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(version_info_text(APP_NAME, written_version(), EXE_NAME, COPYRIGHT, APP_NAME))
+    return path
+
+
 def build_exe(extra_arguments: list[str]):
     """Build executable with PyInstaller (one folder mode)"""
     temp_dist = os.path.join(WORK_FOLDER, "dist")
+    version_file = write_version_file()
     PyInstaller.__main__.run([
         os.path.abspath("run.py"),
         "--noconfirm",
@@ -122,6 +136,7 @@ def build_exe(extra_arguments: list[str]):
         "--windowed",
         f"--name={EXE_NAME}",
         f"--icon={os.path.abspath('images/icon.ico')}",
+        f"--version-file={version_file}",
         "--contents-directory=lib",
         f"--distpath={temp_dist}",
         f"--workpath={WORK_FOLDER}",
@@ -155,7 +170,7 @@ def copy_data_files():
 def build_start():
     """Start building"""
     print("INFO:Platform:", PLATFORM.SYSTEM)
-    print("INFO:TinyPedal:", VERSION)
+    print(f"INFO:{APP_NAME}:", VERSION)
     print("INFO:Python:", version_check.python())
     print("INFO:Qt:", version_check.qt())
     print("INFO:PySide:", version_check.pyside())

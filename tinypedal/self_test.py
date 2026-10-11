@@ -154,7 +154,7 @@ def run_self_test(report_file: str = "") -> int:
     from .version import __version__
 
     app = QApplication.instance() or QApplication(sys.argv[:1])  # UI modules read font metrics at import
-    lines = [f"Modern Tiny Pedals {__version__} self test", f"Python {sys.version.split()[0]}", ""]
+    lines = [f"NeoPedal {__version__} self test", f"Python {sys.version.split()[0]}", ""]
     failed = 0
     for title, check in CHECKS:
         try:

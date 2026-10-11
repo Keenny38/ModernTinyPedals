@@ -221,6 +221,7 @@ PAGES = (
     ("spectate_view", "SpectateList"),
     ("overlay_view", "OverlayView"),
     ("game_replays", "GameReplays"),
+    ("broadcast_director", "BroadcastDirector"),
 )
 
 

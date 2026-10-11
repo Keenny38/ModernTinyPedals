@@ -39,7 +39,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update
@@ -92,14 +92,14 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
             battery_regen = 0.0
             battery_drain_last = 0.0
             battery_regen_last = 0.0
-            last_battery_charge = 0.0
+            last_battery_charge = -1.0  # not read yet (0% is a real charge)
             last_motor_state = 0
             alt_motor_state = 1  # alternative state in case motor state not available
             alt_motor_state_debounce = 0  # alternative state reset debounce counter
             motor_active_timer = 0.0
             motor_active_timer_start = False
             motor_inactive_timer = MAX_SECONDS
-            motor_inactive_timer_start: float = False
+            motor_inactive_timer_start: float | None = None  # elapsed time motor stopped (0.0 is a real time)
             lap_etime_last = 0.0
             last_lap_stime = FLOAT_INF  # last lap start time
 
@@ -130,8 +130,8 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
         last_lap_stime = lap_stime  # reset
 
         # Battery charge consumption
-        if last_battery_charge:
-            if last_battery_charge > battery_charge > 0:  # drain
+        if last_battery_charge >= 0:
+            if last_battery_charge > battery_charge >= 0:  # drain (down to empty)
                 battery_drain += last_battery_charge - battery_charge
                 alt_motor_state_debounce = 0
                 alt_motor_state = 2
@@ -163,10 +163,10 @@ def calc_motor(output: HybridInfo, min_delta_distance: float):
                 motor_inactive_timer_start = lap_etime
                 last_motor_state = motor_state
 
-        if motor_inactive_timer_start:
+        if motor_inactive_timer_start is not None:
             motor_inactive_timer = lap_etime - motor_inactive_timer_start
             if motor_state == 2:
-                motor_inactive_timer_start = False
+                motor_inactive_timer_start = None
                 motor_inactive_timer = MAX_SECONDS
 
         # Battery charge delta calculation

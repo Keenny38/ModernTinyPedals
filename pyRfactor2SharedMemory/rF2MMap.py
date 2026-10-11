@@ -39,7 +39,7 @@ logger = logging.getLogger(get_root_logger_name())
 
 
 def no_update() -> None:
-    """Update placeholder while mmap is not created"""
+    """Update placeholder while mmap is not created (None: unknown whether data changed)"""
 
 
 def platform_mmap(name: str, size: int, pid: str = "") -> mmap.mmap:
@@ -72,6 +72,8 @@ class MMapControl:
         "_struct",
         "_buffer",
         "_version",
+        "_scratch",
+        "_scratch_version",
         "update",
         "data",
     )
@@ -88,7 +90,10 @@ class MMapControl:
         self._struct = data_struct
         self._buffer = bytearray()
         self._version = None
-        self.update: Callable[[], None] = no_update
+        self._scratch = bytearray()  # copy checked first, kept only if consistent
+        self._scratch_version = None
+        # Returns True if data copy updated, False if not (no new data), None if unknown (direct access)
+        self.update: Callable[[], bool | None] = no_update
         self.data: Any = None
 
     def __del__(self):
@@ -114,6 +119,8 @@ class MMapControl:
             self._buffer[:] = self._mmap_buffer
             self.data = self._struct.from_buffer(self._buffer)
             self._version = rF2data.rF2MappedBufferVersionBlock.from_buffer(self._mmap_buffer)
+            if len(self._scratch) != len(self._buffer):
+                self.set_scratch(bytearray(len(self._buffer)))
             self.update = self.__buffer_copy
 
         mode = "Direct" if access_mode else "Copy"
@@ -133,14 +140,37 @@ class MMapControl:
             logger.error("sharedmemory: buffer error while closing %s", self._mmap_name)
         self.update = no_update  # unassign update method (for proper garbage collection)
 
-    def __buffer_share(self) -> None:
-        """Share buffer access, may result data desync"""
+    def set_scratch(self, scratch: bytearray) -> None:
+        """Set buffer receiving copies before they are checked (same size as data)"""
+        self._scratch = scratch
+        self._scratch_version = rF2data.rF2MappedBufferVersionBlock.from_buffer(scratch)
 
-    def __buffer_copy(self) -> None:
-        """Copy buffer access, helps avoid data desync"""
-        # Copy if data version changed
-        if self.data.mVersionUpdateEnd != self._version.mVersionUpdateEnd == self._version.mVersionUpdateBegin:
-            self._buffer[:] = self._mmap_buffer
+    def __buffer_share(self) -> None:
+        """Share buffer access, may result data desync (data always live, None: unknown whether changed)"""
+
+    def __buffer_copy(self) -> bool:
+        """Copy buffer access, helps avoid data desync
+
+        Copied into scratch buffer first, data copy only replaced by a consistent copy (never torn).
+
+        Returns:
+            True if data copy updated, False if data version unchanged (not copied)
+            or plugin kept writing while copying (data copy unchanged, copy again next update).
+        """
+        data = self.data
+        version = self._version
+        scratch = self._scratch
+        copied = self._scratch_version
+        for _ in range(2):  # copy again once if plugin wrote while copying
+            # Copy if data version changed & plugin not writing
+            if not data.mVersionUpdateEnd != version.mVersionUpdateEnd == version.mVersionUpdateBegin:
+                return False
+            scratch[:] = self._mmap_buffer
+            # Consistent copy: no write started since version copied (version at start of data)
+            if copied.mVersionUpdateBegin == copied.mVersionUpdateEnd == version.mVersionUpdateBegin:
+                self._buffer[:] = scratch
+                return True
+        return False
 
 
 def test_api():

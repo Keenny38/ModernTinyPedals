@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -79,8 +80,19 @@ def backend(window):
     from tinypedal.ui.quick.stats_backend import DriverStatsBackend
 
     page = DriverStatsBackend(window)
+    settle(page)  # lap time reference & results read in background
     yield page
     page.release()
+
+
+def settle(page, timeout: float = 10):
+    """Reloads & edits saved on a worker thread: wait until page updated (results handed over on UI thread)"""
+    end = time.monotonic() + timeout
+    while page.busy() or page.jobs.running:
+        assert time.monotonic() < end, "stats jobs still running"
+        QCoreApplication.processEvents()
+        time.sleep(0.002)
+    QCoreApplication.processEvents()
 
 
 def text_of(page, key, column):
@@ -112,6 +124,7 @@ def test_edit_keeps_stats_saved_meanwhile(backend):
     stats["Imola"] = {"GT3 - BMW": {"pb": 101.0}}
     write_stats(stats)
     backend.resetLapTime("Hyper - Ferrari", "pb")
+    settle(backend)
     saved = load_stats()
     assert saved[SPA]["Hyper - Ferrari"]["pb"] > 9999
     assert saved["Monza"]["GT3 - BMW"]["seconds"] == 999.0 and "Imola" in saved
@@ -119,37 +132,48 @@ def test_edit_keeps_stats_saved_meanwhile(backend):
 
 def test_undo_merges_stats_recorded_since(backend):
     backend.deleteTrack(SPA)
+    settle(backend)
     assert SPA not in load_stats()
     # Stats module saves a stint on deleted track, before undo
     driver_stats.save_driver_stats((SPA, OREGA), DriverStats(pb=121.0, valid=5, meters=1000.0), cfg.path.config)
     backend.undo()
+    settle(backend)
     restored = load_stats()[SPA][OREGA]
     assert restored["valid"] == 35 and restored["meters"] == 51000.0  # added
     assert restored["pb"] == 121.0  # faster lap kept
     assert load_stats()[SPA]["Hyper - Ferrari"] == {"pb": 119.0}
     # Lap time reset, faster lap set since: undo keeps it
     backend.resetLapTime(OREGA, "qb")
+    settle(backend)
     driver_stats.save_driver_stats((SPA, OREGA), DriverStats(qb=120.5), cfg.path.config)
     backend.undo()
+    settle(backend)
     assert load_stats()[SPA][OREGA]["qb"] == 120.5
 
 
 def test_undo_redo_edits(backend):
     backend.selectRow("Hyper - Ferrari")
     backend.removeVehicle()
+    settle(backend)
     assert "Hyper - Ferrari" not in load_stats()[SPA]
     backend.resetLapTime(OREGA, "qb")
+    settle(backend)
     assert load_stats()[SPA][OREGA]["qb"] > 9999
     backend.undo()
+    settle(backend)
     assert load_stats()[SPA][OREGA]["qb"] == 122.4
     backend.undo()
+    settle(backend)
     assert load_stats()[SPA]["Hyper - Ferrari"] == {"pb": 119.0}
     assert backend.canRedo and not backend.canUndo
     backend.redo()
+    settle(backend)
     assert "Hyper - Ferrari" not in load_stats()[SPA]
     backend.deleteTrack("")
+    settle(backend)
     assert SPA not in load_stats() and backend.selected_stats_key == "Monza"
     backend.undo()
+    settle(backend)
     assert SPA in load_stats() and backend.selected_stats_key == SPA
 
 
@@ -194,12 +218,14 @@ def test_reset_lap_time_clears_history_best(backend):
     backend.reload_stats()
     backend.selectRow(OREGA)
     backend.resetLapTime(OREGA, "pb")
+    settle(backend)
     bests = [record.best for record in driver_history.load_history(cfg.path.config)]
     assert bests == [123.0, 0.0, 122.0]  # reset lap left out of progression
     backend.selectRow(OREGA)
     assert len(backend.progression["points"]) == 2
     assert "2:01.500" not in backend.progression["top"]
     backend.undo()
+    settle(backend)
     assert [record.best for record in driver_history.load_history(cfg.path.config)] == [123.0, 121.5, 122.0]
     # Faster session best than personal best (reset by older version): left out
     assert driver_history.best_progression([SessionRecord(1.0, "T", "C", 1, 100.0),
@@ -320,11 +346,14 @@ def test_export_csv_text_and_raw(backend, tmp_path):
 def test_backup_before_edit_and_restore(backend):
     assert not backend.backups
     backend.resetLapTime("Hyper - Ferrari", "pb")
+    settle(backend)
     backups = backend.backups
     assert len(backups) == 1 and backups[0]["date"]
     backend.restoreBackup(backups[0]["name"])
+    settle(backend)
     assert load_stats()[SPA]["Hyper - Ferrari"]["pb"] == 119.0
     backend.undo()  # restore undone
+    settle(backend)
     assert load_stats()[SPA]["Hyper - Ferrari"]["pb"] > 9999
     assert driver_stats.load_stats_backup(cfg.path.config, "../driver.stats") is None
 
@@ -361,6 +390,7 @@ def test_vehicle_name_classification_grouped_by_recorded_class(window):
         SessionRecord(1.0, SPA, "Oreca 07 #22", vehicle_class="LMP2_ELMS"),
         SessionRecord(2.0, SPA, "Ferrari 499P #50", vehicle_class="Hyper")])
     page = DriverStatsBackend(window)
+    settle(page)  # lap time reference read in background
     assert text_of(page, "Oreca 07 #22", "level") == "Competitive"  # reference by recorded class
     page.selectTrack("")
     assert page.table_header_key[:3] == ["track", "class:Hyper", "class:LMP2_ELMS"]
@@ -381,6 +411,7 @@ def test_all_tracks_view_actions_and_letters(backend):
     actions = [action["id"] for action in backend.rowActions("Monza", "track")]
     assert actions == ["show", "delete", "laps"]
     backend.runAction("delete", "Monza", "track")
+    settle(backend)
     assert "Monza" not in load_stats() and backend.allTracks
     backend.openRow(SPA)
     assert backend.selected_stats_key == SPA
@@ -514,9 +545,11 @@ def test_undo_with_unreadable_history_keeps_sessions(backend, dialogs, monkeypat
     driver_history.save_history(cfg.path.config, EDIT_HISTORY)
     backend.reload_stats()
     backend.resetLapTime(OREGA, "pb")
+    settle(backend)
     with monkeypatch.context() as patch:
         lock_history(patch)
         backend.undo()
+        settle(backend)
         assert dialogs and backend.canUndo  # undo kept to retry
         assert load_stats()[SPA][OREGA]["pb"] > 9999  # stats not changed either
     assert len(driver_history.read_records(cfg.path.config)) == 3
@@ -524,8 +557,10 @@ def test_undo_with_unreadable_history_keeps_sessions(backend, dialogs, monkeypat
         lock_history(patch)
         backend.selectRow("Hyper - Ferrari")
         backend.removeVehicle()  # history unreadable: nothing removed, no undo
+        settle(backend)
         assert "Hyper - Ferrari" in load_stats()[SPA] and len(backend._edits_undo) == 1
     backend.undo()
+    settle(backend)
     assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY
     with pytest.raises(OSError), monkeypatch.context() as patch:
         lock_history(patch)
@@ -541,6 +576,7 @@ def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
     monkeypatch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
     backend.selectRow("Hyper - Ferrari")
     backend.removeVehicle()
+    settle(backend)
     assert "Hyper - Ferrari" in load_stats()[SPA]
     assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY  # history change undone
     assert not backend.canUndo and dialogs
@@ -570,6 +606,7 @@ def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, 
         patch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
         backend.selectRow("Hyper - Ferrari")
         backend.removeVehicle()
+        settle(backend)
     locked[0] = False
     assert "Hyper - Ferrari" in load_stats()[SPA]
     if rollback_failures < stats_backend.ROLLBACK_ATTEMPTS:
@@ -581,9 +618,11 @@ def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, 
     assert backend.canUndo and "Undo" in dialogs[-1]
     stats_before = load_stats()
     backend.undo()
+    settle(backend)
     assert driver_history.read_records(cfg.path.config) == EDIT_HISTORY
     assert load_stats() == stats_before and not backend.canUndo
     backend.redo()
+    settle(backend)
     assert driver_history.read_records(cfg.path.config) != EDIT_HISTORY
     assert load_stats() == stats_before
 
@@ -678,3 +717,26 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
     finally:
         QQuickWidget.setSource = set_source
         parent.deleteLater()
+
+
+def test_open_map_loaded_in_page_already_open(backend, monkeypatch):
+    """Track map viewer already open as page: shown instead, on the track asked (not the one shown before)"""
+    from tinypedal.ui.quick import stats_backend
+
+    loaded = []
+    open_page = SimpleNamespace(backend=SimpleNamespace(load_map=lambda path, name: loaded.append(name)))
+
+    class Viewer:
+        def __init__(self, parent):
+            pass
+
+        def show(self):
+            pass
+
+        def shown_dialog(self):
+            return open_page
+
+    monkeypatch.setattr(stats_backend, "TrackMapViewer", Viewer)
+    backend.selected_stats_key = "Spa"
+    backend.openMap()
+    assert loaded == ["Spa"]

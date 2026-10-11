@@ -38,6 +38,7 @@ from typing import Any
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 
+from .drawn import motion_length, motion_steps, tint_step
 from .state import WheelState, damper_tint
 
 COILS = 6
@@ -68,7 +69,12 @@ def spring_length(full: float, travel: float) -> float:
 
 def spring_length_real(full: float, offset_mm: float, pixels_per_mm: float) -> float:
     """Spring length for a real offset from static position (positive = compressed), 1:1"""
-    length = full * STATIC_LENGTH - offset_mm * pixels_per_mm
+    return spring_length_offset(full, offset_mm * pixels_per_mm)
+
+
+def spring_length_offset(full: float, offset: float) -> float:
+    """Spring length for an offset (pixels) from static position (positive = compressed)"""
+    length = full * STATIC_LENGTH - offset
     return min(max(length, full * (1 - MAX_COMPRESSION)), full)
 
 
@@ -83,13 +89,17 @@ class SuspensionPainter:
 
     # Attributes set by black box widget class (widget/black_box.py) or other parts
     brake_bar_w: Any
+    damage_level: Any
     damage_wheel_color: Any
+    device_scale: Any
+    drawn_steer: Any
     pulse: Any
     pulsed_color: Any
     rects_disc: Any
     rects_susp: Any
     rects_tyre: Any
     show_susp_damage: Any
+    show_suspension: Any
     susp_full_speed: Any
     susp_low_speed: Any
     susp_pixels_per_mm: Any
@@ -104,8 +114,7 @@ class SuspensionPainter:
         wcfg = self.wcfg
         width = rect.width()
         cap_h, top, full = spring_frame(rect)  # top: chassis mount, fixed
-        # Wheel mount follows the wheel (same travel as tyre & disc), so the corner moves as one piece
-        bottom = top + spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index))
+        bottom = self.wheel_mount(rect, index, wheel)
         center = rect.center().x()
         spring_color = self.spring_color(wheel)
         mount_color = QColor(wcfg["suspension_spring_color"]).darker(160)
@@ -115,10 +124,11 @@ class SuspensionPainter:
             mount_color = damage_color
 
         painter.save()
-        if wheel.steer and index < len(self.rects_tyre):  # same rotation as tyre & disc
+        steer = self.drawn_steer(index, wheel) if index < len(self.rects_tyre) else 0.0
+        if steer:  # same rotation as tyre & disc
             pivot = self.rects_tyre[index].center() + QPointF(0, self.wheel_shift(index, wheel))
             painter.translate(pivot)
-            painter.rotate(wheel.steer)
+            painter.rotate(steer)
             painter.translate(-pivot)
         # Link from wheel mount to disc bar (hub), so spring, disc and tyre read as one assembly
         if index < len(self.rects_disc):
@@ -145,7 +155,7 @@ class SuspensionPainter:
                          QColor(wcfg["suspension_spring_color"]).lighter(115))
         # Coil spring between mounts
         # Heavily damaged: spring drawn broken (dashed), pulsing once totaled
-        broken = self.show_susp_damage and wheel.susp_damage >= wcfg["damage_panel_suspension_heavy_threshold"]
+        broken = self.suspension_broken(wheel)
         if self.suspension_totaled(wheel):
             spring_color = QColor(self.pulsed_color(wcfg["damage_panel_suspension_color_totaled"], self.pulse()))
         painter.setPen(QPen(spring_color, max(self.unit * 0.08, 1.2),
@@ -176,6 +186,33 @@ class SuspensionPainter:
             painter.fillRect(tick_rect, tick)
         painter.restore()
 
+    def travel_steps(self, index: int, wheel: WheelState) -> int:
+        """Wheel travel from static position (pixels) in motion grid steps, see drawn"""
+        return motion_steps(wheel.susp_wheel_offset * self.pixels_per_mm(index), self.device_scale())
+
+    def wheel_travel(self, index: int, wheel: WheelState) -> float:
+        """Wheel travel from static position as drawn (pixels, positive = compressed)"""
+        return motion_length(self.travel_steps(index, wheel), self.device_scale())
+
+    def wheel_mount(self, rect: QRectF, index: int, wheel: WheelState) -> float:
+        """Wheel mount position: follows the wheel (same travel as tyre & disc), so the corner moves as one piece"""
+        _, top, full = spring_frame(rect)
+        return top + spring_length_offset(full, self.wheel_travel(index, wheel))
+
+    def suspension_key(self, index: int, wheel: WheelState) -> tuple:
+        """What moves a wheel (travel) and its coilover shows, see drawn"""
+        if not self.show_suspension:  # wheels move with suspension shown only
+            return ()
+        damaged = self.show_susp_damage and wheel.susp_damage >= self.wcfg["damage_panel_suspension_light_threshold"]
+        return (self.travel_steps(index, wheel), self.spring_tint(wheel),
+                self.damage_level(wheel.susp_damage) if damaged else None,
+                self.suspension_broken(wheel), self.suspension_totaled(wheel), wheel.susp_estimated)
+
+    def suspension_broken(self, wheel: WheelState) -> bool:
+        """Heavily damaged: spring drawn broken (dashed)"""
+        return bool(self.show_susp_damage) and (
+            wheel.susp_damage >= self.wcfg["damage_panel_suspension_heavy_threshold"])
+
     def suspension_damage_color(self, wheel: WheelState) -> QColor | None:
         """Damage panel color of the suspension damage level, None if intact or not shown"""
         if not self.show_susp_damage or wheel.susp_damage < self.wcfg["damage_panel_suspension_light_threshold"]:
@@ -196,7 +233,7 @@ class SuspensionPainter:
         if not self.wheel_suspension_motion or index >= len(self.rects_susp) or self.rects_susp[index].isNull():
             return 0.0
         _, _, full = spring_frame(self.rects_susp[index])
-        shift = spring_length_real(full, wheel.susp_wheel_offset, self.pixels_per_mm(index)) - full * STATIC_LENGTH
+        shift = spring_length_offset(full, self.wheel_travel(index, wheel)) - full * STATIC_LENGTH
         limit = self.wheel_travel_px
         return min(max(shift, -limit), limit)
 
@@ -221,15 +258,24 @@ class SuspensionPainter:
     def spring_color(self, wheel: WheelState) -> QColor:
         """Airborne or bump stop color (pulsing), else tinted by damper speed in two zones"""
         wcfg = self.wcfg
-        if wheel.susp_airborne:
-            return QColor(self.pulsed_color(wcfg["suspension_airborne_color"], self.pulse()))
-        if wheel.susp_bump:
-            return QColor(self.pulsed_color(wcfg["suspension_bump_color"], self.pulse()))
+        tint, amount = self.spring_tint(wheel)
+        if tint in ("suspension_airborne_color", "suspension_bump_color"):
+            return QColor(self.pulsed_color(wcfg[tint], self.pulse()))
         base = QColor(wcfg["suspension_spring_color"])
-        velocity = wheel.susp_velocity
-        amount = damper_tint(velocity, self.susp_low_speed, self.susp_full_speed)
-        if velocity > 0:
-            return blend(base, QColor(wcfg["suspension_compression_color"]), amount)
-        if velocity < 0:
-            return blend(base, QColor(wcfg["suspension_rebound_color"]), amount)
+        if tint:
+            return blend(base, QColor(wcfg[tint]), amount)
         return base
+
+    def spring_tint(self, wheel: WheelState) -> tuple[str, float]:
+        """(color option tinting the spring, amount), "" if none"""
+        if wheel.susp_airborne:
+            return "suspension_airborne_color", 1.0
+        if wheel.susp_bump:
+            return "suspension_bump_color", 1.0
+        velocity = wheel.susp_velocity
+        amount = tint_step(damper_tint(velocity, self.susp_low_speed, self.susp_full_speed))
+        if velocity > 0:
+            return "suspension_compression_color", amount
+        if velocity < 0:
+            return "suspension_rebound_color", amount
+        return "", 0.0

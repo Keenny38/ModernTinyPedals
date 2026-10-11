@@ -236,12 +236,38 @@ TpPage {
                 cellWidth: Math.floor((width - theme.em * 0.7) / columns)  // room for scroll bar
                 cellHeight: page.grid ? Math.round(cellWidth * 0.52 + theme.em * 3.4) : Math.round(theme.em * 2.8)
                 cacheBuffer: Math.max(0, cellHeight * 2)
+                reuseItems: true  // delegates reset their transient state when pooled (see OverlayCard)
                 boundsBehavior: Flickable.StopAtBounds
                 highlightFollowsCurrentItem: false
                 keyNavigationEnabled: true
                 activeFocusOnTab: true
                 delegate: page.grid ? cardDelegate : rowDelegate
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                // Rows on screen told to backend (previews of these rendered first), after scrolling settles
+                function reportVisible() {
+                    if (count === 0 || cellHeight <= 0)
+                        return
+                    var top = Math.max(0, contentY - originY)
+                    var first = Math.floor(top / cellHeight) * columns
+                    var last = Math.ceil((top + height) / cellHeight) * columns - 1
+                    backend.setVisibleRows(first, Math.min(last, count - 1))
+                }
+                Timer {
+                    id: visibleTimer
+                    interval: 80
+                    onTriggered: overlays.reportVisible()
+                }
+                onContentYChanged: visibleTimer.restart()
+                onHeightChanged: visibleTimer.restart()
+                onCountChanged: visibleTimer.restart()
+                onCellHeightChanged: visibleTimer.restart()
+                onColumnsChanged: visibleTimer.restart()
+                Component.onCompleted: visibleTimer.restart()
+                Connections {
+                    target: backend
+                    function onFilterChanged() { visibleTimer.restart() }  // other rows, maybe same count
+                }
 
                 add: Transition {
                     NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 170 }
@@ -335,9 +361,10 @@ TpPage {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 color: theme.dimText
-                text: backend.filtered
+                text: (backend.filtered
                     ? i18n.trm(backend.shownCount + " of " + backend.totalCount + " overlays shown")
-                    : i18n.trm(backend.totalCount + " overlays")
+                    : i18n.trm(backend.totalCount + " overlays"))
+                    + (backend.gridView ? "  ·  " + i18n.tr("Previews show simulated race values") : "")
             }
             TpButton {
                 text: backend.filtered ? i18n.tr("Enable Shown") : i18n.tr("Enable All")

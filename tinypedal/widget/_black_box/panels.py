@@ -27,7 +27,7 @@ from time import monotonic
 from typing import Any, NamedTuple
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QRegion
 
 from .._painter import fill_chip, fill_chip_gradient, fill_rect
 from .common import qcolor
@@ -80,6 +80,7 @@ class PanelPainter:
     need_energy_rows: Any
     need_fuel_rows: Any
     pen_info_label: Any
+    part_shown: Any
     pen_text: Any
     pres_decimals: Any
     pulse: Any
@@ -106,37 +107,56 @@ class PanelPainter:
         """Full-height battery charge gauge, with a flowing highlight while charging or draining"""
         wcfg = self.wcfg
         fill_chip(painter, rect, wcfg["indicator_inactive_color"])
-        charge = min(max(self.battery_charge, 0), 100) / 100
-        fill_h = rect.height() * charge
+        charge, fill_h = self.battery_fill(rect)
         if fill_h >= 1:
             fill_area = QRectF(rect.left(), rect.bottom() - fill_h, rect.width(), fill_h)
             state = self.battery_state
-            if self.battery_warning and self.battery_highlight:  # warning wins over flow color
-                color = wcfg["warning_color_low_battery" if self.battery_warning == 1
-                             else "warning_color_high_battery"]
-            elif state == 3:  # regen
-                color = wcfg["battery_charge_color"]
-            elif state == 2:  # drain
-                color = wcfg["battery_discharge_color"]
-            else:  # off or n/a: static, neutral fill
-                color = wcfg["battery_idle_color"]
-            fill_chip_gradient(painter, fill_area, color)
+            fill_chip_gradient(painter, fill_area, self.battery_color())
             if wcfg["enable_battery_bar_animation"] and state in (2, 3):
                 self.draw_battery_flow(painter, fill_area, charging=state == 3)
         if wcfg["show_battery_percentage"]:
-            # Readout chip rides the fill level (centered on its top edge, kept inside the gauge),
-            # own background so it stays legible regardless of the fill color behind it. Chip
-            # follows the text size, capped so it never takes more than a third of the gauge.
-            label_h = min(self.unit * self.battery_scale * 1.2, rect.height() / 3)
-            level_y = rect.bottom() - rect.height() * charge
-            label_top = min(max(level_y - label_h / 2, rect.top()), rect.bottom() - label_h)
-            label_rect = QRectF(rect.left(), label_top, rect.width(), label_h)
+            label_rect = self.battery_label_rect(rect, charge)
             fill_chip(painter, label_rect, wcfg["info_background_color"])
             painter.setPen(self.pen_text)
-            # Dash instead of "0" on a car without hybrid system, so an empty gauge is not
-            # mistaken for a flat battery (or for the widget being broken)
-            text = f"{self.battery_charge:.0f}" if self.has_hybrid else "-"
-            self.draw_fit_text(painter, label_rect, text, self.font_battery)
+            self.draw_fit_text(painter, label_rect, self.battery_text(), self.font_battery)
+
+    def battery_fill(self, rect: QRectF) -> tuple[float, float]:
+        """(charge 0 to 1, fill height) of battery gauge"""
+        charge = min(max(self.battery_charge, 0), 100) / 100
+        return charge, rect.height() * charge
+
+    def battery_color(self) -> str:
+        wcfg = self.wcfg
+        state = self.battery_state
+        if self.battery_warning and self.battery_highlight:  # warning wins over flow color
+            return wcfg["warning_color_low_battery" if self.battery_warning == 1 else "warning_color_high_battery"]
+        if state == 3:  # regen
+            return wcfg["battery_charge_color"]
+        if state == 2:  # drain
+            return wcfg["battery_discharge_color"]
+        return wcfg["battery_idle_color"]  # off or n/a: static, neutral fill
+
+    def battery_label_rect(self, rect: QRectF, charge: float) -> QRectF:
+        """Readout chip rides the fill level (centered on its top edge, kept inside the gauge),
+        own background so it stays legible regardless of the fill color behind it. Chip
+        follows the text size, capped so it never takes more than a third of the gauge."""
+        label_h = min(self.unit * self.battery_scale * 1.2, rect.height() / 3)
+        level_y = rect.bottom() - rect.height() * charge
+        label_top = min(max(level_y - label_h / 2, rect.top()), rect.bottom() - label_h)
+        return QRectF(rect.left(), label_top, rect.width(), label_h)
+
+    def battery_text(self) -> str:
+        """Dash instead of "0" on a car without hybrid system, so an empty gauge is not
+        mistaken for a flat battery (or for the widget being broken)"""
+        return f"{self.battery_charge:.0f}" if self.has_hybrid else "-"
+
+    def battery_key(self, rect: QRectF) -> tuple:
+        """What battery gauge shows, see drawn"""
+        charge, fill_h = self.battery_fill(rect)
+        fill = (fill_h, self.battery_color(), self.battery_state) if fill_h >= 1 else None
+        if not self.wcfg["show_battery_percentage"]:
+            return (fill,)
+        return fill, self.battery_label_rect(rect, charge).top(), self.battery_text()
 
     def draw_battery_flow(self, painter: QPainter, rect: QRectF, charging: bool):
         """Translucent bands scrolling up while charging, down while draining, suggesting flow"""
@@ -154,14 +174,18 @@ class PanelPainter:
             y += spacing
         painter.restore()
 
-    def draw_bottom_rows(self, painter: QPainter):
-        """Fuel gauge, virtual energy gauge (full row width), stint comparison"""
+    def draw_bottom_rows(self, painter: QPainter, region: QRegion | None = None):
+        """Fuel gauge, virtual energy gauge (full row width), stint comparison, rows reaching into
+        region being painted (all if None)"""
         rows = iter(self.bottom_rows)
-        if self.row_fuel:
+        shown = self.part_shown
+        if self.row_fuel and shown("fuel", region):
             left, right = next(rows)
             self.draw_level_gauge(
                 painter, left.united(right), self.text["fuel"], self.fuel_gauge(), self.wcfg["fuel_gauge_color"])
-        if self.row_energy:
+        elif self.row_fuel:
+            next(rows)
+        if self.row_energy and shown("energy", region):
             left, right = next(rows)
             if self.energy_available:  # row kept on cars without virtual energy unless auto resize
                 self.draw_level_gauge(
@@ -169,11 +193,15 @@ class PanelPainter:
                     self.wcfg["energy_gauge_color"])
             else:
                 fill_rect(painter, left.united(right), self.wcfg["info_background_color"])
-        if self.row_stint:
+        elif self.row_energy:
+            next(rows)
+        if self.row_stint and shown("stint", region):
             (rect_left, rect_right), (left_item, right_item) = next(rows), self.stint_row()
             self.draw_info_row(painter, rect_left, *left_item)
             self.draw_info_row(painter, rect_right, *right_item)
-        if self.row_damper:
+        elif self.row_stint:
+            next(rows)
+        if self.row_damper and shown("damper", region):
             left, right = next(rows)
             self.draw_damper_histogram(painter, left.united(right))
 
@@ -199,10 +227,18 @@ class PanelPainter:
             area = group.adjusted(unit * 0.2, label_h, -unit * 0.2, -unit * 0.08)
             bar_w = area.width() / 4
             for bin_index, (share, color) in enumerate(zip(wheel.damper_shares, colors)):
-                height = area.height() * min(max(share, 0.0), 1.0)
+                height = damper_bar_height(area.height(), share)
                 if height >= 0.5:
                     painter.fillRect(QRectF(area.left() + bin_index * bar_w + bar_w * 0.1, area.bottom() - height,
                                             bar_w * 0.8, height), color)
+
+    def damper_key(self, row: QRectF) -> tuple:
+        """What damper histogram shows (bar heights), see drawn"""
+        area_h = row.adjusted(0, row.height() * 0.35, 0, -self.unit * 0.08).height()
+        return tuple(
+            height if height >= 0.5 else None
+            for wheel in self.wheels for height in (damper_bar_height(area_h, share) for share in wheel.damper_shares)
+        )
 
     def fuel_gauge(self) -> Gauge:
         return Gauge(
@@ -231,27 +267,21 @@ class PanelPainter:
         wcfg = self.wcfg
         unit = self.unit
         fill_rect(painter, row, wcfg["info_background_color"])
-        low = 0 < gauge.laps <= wcfg["gauge_low_lap_threshold"]
-        # Module data may be non finite (division by a near zero consumption): no bar then
-        if gauge.capacity > 0 and all(map(math.isfinite, (gauge.level, gauge.capacity, gauge.start, gauge.needed))):
+        low = self.gauge_is_low(gauge)
+        bars = self.gauge_bars(row, gauge)
+        if bars is not None:
             fill = QColor(self.pulsed_color(wcfg["gauge_low_color"], self.pulse()) if low else qcolor(color))
             fill.setAlpha(min(fill.alpha(), 120))
-            ratio = min(max(gauge.level / gauge.capacity, 0.0), 1.0)
+            ratio, marks = bars
             if ratio > 0:  # square fill, the gauge is the row itself
                 level_rect = QRectF(row.left(), row.top(), row.width() * ratio, row.height())
                 shade = QLinearGradient(level_rect.left(), 0, level_rect.right(), 0)
                 shade.setColorAt(0.0, fill.darker(115))
                 shade.setColorAt(1.0, fill.lighter(125))
                 painter.fillRect(level_rect, shade)
-            mark_w = max(unit * 0.09, 2)
-            for show, value, mark_color in (
-                (wcfg["show_gauge_start_mark"], gauge.start, wcfg["gauge_start_mark_color"]),
-                (wcfg["show_gauge_refill_mark"], gauge.level + gauge.needed, wcfg["gauge_refill_mark_color"]),
-            ):
-                if show and value > 0:
-                    x = row.left() + row.width() * min(value / gauge.capacity, 1.0)
-                    x = min(max(x - mark_w / 2, row.left()), row.right() - mark_w)
-                    painter.fillRect(QRectF(x, row.top(), mark_w, row.height()), qcolor(mark_color))
+            mark_w = self.gauge_mark_width()
+            for x, mark_color in marks:
+                painter.fillRect(QRectF(x, row.top(), mark_w, row.height()), qcolor(mark_color))
         if self.depth_effects:
             painter.fillRect(QRectF(row.left(), row.top(), row.width(), max(unit * 0.05, 1)), HIGHLIGHT_COLOR)
         # Text: label left, amount to add right, level & laps before it
@@ -270,6 +300,35 @@ class PanelPainter:
                             max(needed_rect.left() - unit * 0.3 - inner.left() - label_w, 1), inner.height())
         painter.setPen(qcolor(wcfg["gauge_low_color"]) if low else self.pen_text)
         self.draw_fit_text(painter, value_rect, gauge.text, self.font(), align_right)
+
+    def gauge_is_low(self, gauge: Gauge) -> bool:
+        return 0 < gauge.laps <= self.wcfg["gauge_low_lap_threshold"]
+
+    def gauge_mark_width(self) -> float:
+        return max(self.unit * 0.09, 2)
+
+    def gauge_bars(self, row: QRectF, gauge: Gauge) -> tuple[float, list[tuple[float, str]]] | None:
+        """(level fill ratio, [(start & refill mark left, color)]) of level gauge, None without bar: module
+        data may be non finite (division by a near zero consumption)"""
+        if not (gauge.capacity > 0 and all(map(math.isfinite, (gauge.level, gauge.capacity, gauge.start,
+                                                                gauge.needed)))):
+            return None
+        wcfg = self.wcfg
+        ratio = min(max(gauge.level / gauge.capacity, 0.0), 1.0)
+        mark_w = self.gauge_mark_width()
+        marks = []
+        for show, value, mark_color in (
+            (wcfg["show_gauge_start_mark"], gauge.start, wcfg["gauge_start_mark_color"]),
+            (wcfg["show_gauge_refill_mark"], gauge.level + gauge.needed, wcfg["gauge_refill_mark_color"]),
+        ):
+            if show and value > 0:
+                x = row.left() + row.width() * min(value / gauge.capacity, 1.0)
+                marks.append((min(max(x - mark_w / 2, row.left()), row.right() - mark_w), mark_color))
+        return ratio, marks
+
+    def gauge_key(self, row: QRectF, gauge: Gauge) -> tuple:
+        """What a level gauge shows, see drawn"""
+        return gauge.text, gauge.needed_text, gauge.needed > 0, self.gauge_is_low(gauge), self.gauge_bars(row, gauge)
 
     def stint_row(self) -> tuple:
         """Current stint average wear per lap & pressure, with difference to previous stint"""
@@ -299,3 +358,8 @@ class PanelPainter:
         value_rect = inner.adjusted(label_w + unit * 0.3, 0, 0, 0)
         self.draw_fit_text(painter, value_rect, value, self.font(),
                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+
+def damper_bar_height(area_height: float, share: float) -> float:
+    """Damper histogram bar height (drawn from 0.5)"""
+    return area_height * min(max(share, 0.0), 1.0)

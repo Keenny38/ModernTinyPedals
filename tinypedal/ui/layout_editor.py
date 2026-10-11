@@ -125,6 +125,8 @@ class LayoutCanvas(QWidget):
         self.screens = screen_geometries()  # snapping & guides per screen
         self.background = QPixmap()
         self.background_rect = QRect(self.screen_rect)  # desktop area covered by background
+        self._scaled = QPixmap()  # background at shown size, see scaled_background
+        self._scaled_size = QSize()
         self.boxes: dict[str, QRect] = {}
         self.selected = ""
         self.snap = True
@@ -163,7 +165,18 @@ class LayoutCanvas(QWidget):
         self.screen_rect = QRect(screen)
         self.background_rect = QRect(screen)
         self.background = pixmap
+        self._scaled = QPixmap()
+        self._scaled_size = QSize()
         self.update()
+
+    def scaled_background(self, size: QSize) -> QPixmap:
+        """Background scaled to shown size (device pixels), scaled again only when size or background
+        changed: full size screenshot never scaled on each paint (mouse moves while dragging)"""
+        if size != self._scaled_size or self._scaled.isNull():
+            self._scaled_size = QSize(size)
+            self._scaled = self.background.scaled(
+                size, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return self._scaled
 
     # Editing
     def box_at(self, pos: QPoint) -> str:
@@ -232,7 +245,11 @@ class LayoutCanvas(QWidget):
         painter.fillRect(self.rect(), self.palette().window())
         painter.fillRect(view, COLOR_BACKGROUND)
         if not self.background.isNull():
-            painter.drawPixmap(self.to_view(self.background_rect), self.background, QRectF(self.background.rect()))
+            target = self.to_view(self.background_rect)
+            ratio = self.devicePixelRatioF()
+            scaled = self.scaled_background(QSize(
+                max(round(target.width() * ratio), 1), max(round(target.height() * ratio), 1)))
+            painter.drawPixmap(target, scaled, QRectF(scaled.rect()))
         # Screen edges
         painter.setPen(QPen(COLOR_BOX_EDGE, 1, Qt.PenStyle.DotLine))
         for screen in QGuiApplication.screens():

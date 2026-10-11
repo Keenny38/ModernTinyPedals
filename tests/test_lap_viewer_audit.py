@@ -254,7 +254,7 @@ def test_markers_and_zoom_history_follow_time_axis(viewer):  # noqa: F811
 
 # --- 5. Session tab values read when shown
 def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QApplication, QMessageBox
 
     from tinypedal.ui.lap_viewer import LapViewer, save_viewer_setting
 
@@ -268,6 +268,8 @@ def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
     page = LapViewer(None)
     backend = page.backend
     try:
+        while backend.reading_infos():  # lap infos of new lap files read in background first
+            QApplication.processEvents()
         assert backend._session_busy and backend.sessionData["busy"]  # read at once, busy indicator shown
         other = next(item["key"] for item in backend.sessions if item["key"] != backend.sessionKey)
         backend.setSession(other)  # chosen while first session is read: read once that job is done

@@ -21,7 +21,7 @@ Pit lane helper Widget
 
 Shown while approaching pit lane (pit requested) and in pit lane: speed against pit speed limit,
 speed limiter state, distance to pit box with a bar filling up on approach, planned services.
-Nothing drawn otherwise (unless always shown, or overlay unlocked).
+Nothing drawn otherwise (unless always shown, or in overlay edit mode).
 """
 
 from __future__ import annotations

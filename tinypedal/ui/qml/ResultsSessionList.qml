@@ -164,6 +164,8 @@ Item {
             focus: true
             activeFocusOnTab: true
             model: backend.sessionModel
+            readonly property string selectedKey: backend.selectedKey  // read once for every row
+            reuseItems: true  // rows scrolled out fed again with other sessions (see delegate onPooled)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Keys.onUpPressed: root.moveSelection(-1)
@@ -207,14 +209,19 @@ Item {
                 required property string detailText
                 required property bool newest
                 required property string trackLogo
-                readonly property bool selected: key === backend.selectedKey
+                required property bool replay
+                readonly property bool selected: key === list.selectedKey
+                // Pooled row fed again: no color animation from the session it showed before
+                property bool live: true
+                ListView.onPooled: { live = false; opacity = 1 }  // add transition may have been running
+                ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 3.4)
                 radius: theme.em * 0.5
                 color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
                      : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { ColorAnimation { duration: 110 } }
+                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
 
                 MouseArea {
                     id: rowArea
@@ -262,6 +269,12 @@ Item {
                                 color: theme.text
                                 font.weight: row.selected ? Font.DemiBold : Font.Normal
                                 elide: Text.ElideRight
+                            }
+                            Icon {  // replay saved by game
+                                visible: row.replay
+                                glyph: "\uE714"  // video
+                                size: theme.em * 0.8
+                                color: theme.dimText
                             }
                             Rectangle {  // newest session: dot
                                 visible: row.newest

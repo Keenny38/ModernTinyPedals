@@ -1,6 +1,7 @@
 """Update flow audit fixes (package C): installed vs portable copy, checker thread, download
 (once, partial file removed), installer signature, install only once app can quit"""
 
+import asyncio
 import hashlib
 import io
 import json
@@ -187,10 +188,10 @@ def test_run_installer_install_folder(monkeypatch):
     monkeypatch.setattr(update, "installer_signature", lambda path: update.SIGNATURE_UNSIGNED)
     monkeypatch.setattr(update, "update_repository", lambda: update.FORK_REPO_NAME)
     monkeypatch.setattr(update.subprocess, "Popen", lambda args, **kwargs: runs.append(args))
-    monkeypatch.setattr(update, "install_folder", lambda: "E:/Modern Tiny Pedals/")
+    monkeypatch.setattr(update, "install_folder", lambda: "E:/NeoPedal/")
     update.run_installer("Setup.exe")  # folder of install_folder by default
     update.run_installer("Setup.exe", "")  # installer picks it
-    assert runs[0][-1] == f"/DIR={os.path.normpath('E:/Modern Tiny Pedals')}"
+    assert runs[0][-1] == f"/DIR={os.path.normpath('E:/NeoPedal')}"
     assert not any(arg.startswith("/DIR") for arg in runs[1])
 
 
@@ -219,10 +220,10 @@ def shortcut_bytes(base: str, suffix: str = "", unicode: bool = True) -> bytes:
 @pytest.mark.parametrize("unicode", [True, False])
 def test_shortcut_target(tmp_path, unicode):
     link = tmp_path / "app.lnk"
-    link.write_bytes(shortcut_bytes("E:\\Modern Tiny Pedals\\", "tinypedal.exe", unicode))
-    assert update.shortcut_target(str(link)) == "E:\\Modern Tiny Pedals\\tinypedal.exe"
-    link.write_bytes(shortcut_bytes("E:\\Modern Tiny Pedals\\tinypedal.exe", "", unicode))
-    assert update.shortcut_target(str(link)) == "E:\\Modern Tiny Pedals\\tinypedal.exe"
+    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\", "tinypedal.exe", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\tinypedal.exe"
+    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\tinypedal.exe", "", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\tinypedal.exe"
 
 
 def test_shortcut_target_unreadable(tmp_path):
@@ -263,15 +264,22 @@ def test_installed_app_folder(monkeypatch, tmp_path):
     link.unlink()
     monkeypatch.setattr(update, "registry_install_folder", lambda: "")
     assert update.installed_app_folder() == ""
+    # Installed as "Modern Tiny Pedals": Start menu folder kept by updates
+    for legacy in update.LEGACY_START_MENU_SHORTCUTS:
+        old_link = appdata / legacy
+        old_link.parent.mkdir(parents=True, exist_ok=True)
+        old_link.write_bytes(shortcut_bytes(os.path.join(installed, update.APP_EXECUTABLE)))
+        assert update.installed_app_folder() == os.path.normpath(installed)
+        old_link.unlink()
 
 
 def test_install_folder(monkeypatch, frozen_exe):
-    monkeypatch.setattr(update, "installed_app_folder", lambda: "E:\\Modern Tiny Pedals")
+    monkeypatch.setattr(update, "installed_app_folder", lambda: "E:\\NeoPedal")
     assert update.install_folder() == ""  # portable copy: never installed
     (frozen_exe / update.UNINSTALLER_NAME).write_bytes(b"")
     assert update.install_folder() == str(frozen_exe)  # installed copy: itself
     monkeypatch.delattr(sys, "frozen", raising=False)
-    assert update.install_folder() == "E:\\Modern Tiny Pedals"  # run from source: installed app
+    assert update.install_folder() == "E:\\NeoPedal"  # run from source: installed app
     monkeypatch.setattr(update.sys, "platform", "linux")
     assert update.install_folder() == ""
 
@@ -412,14 +420,17 @@ def messages(monkeypatch):
     return found
 
 
-def test_install_only_after_pages_closed(updates, monkeypatch, messages):
+def test_install_only_after_pages_closed(updates, monkeypatch, messages, tmp_path):
     from tinypedal.ui import notification
 
     order = []
     monkeypatch.setattr(notification, "run_installer", lambda path, **kwargs: order.append("installer"))
     window = FakeWindow(can_quit=False)
-    assert not notification.install_update(window, "Setup.exe")  # unsaved changes kept
+    installer = tmp_path / "Setup.exe"
+    installer.write_bytes(b"MZ")
+    assert not notification.install_update(window, str(installer))  # unsaved changes kept
     assert window.calls == ["close pages"] and not order
+    assert not installer.exists()  # not installed: never left in temp folder
     window = FakeWindow()
     monkeypatch.setattr(notification, "run_installer", lambda path, **kwargs: window.calls.append("installer"))
     assert notification.install_update(window, "Setup.exe")
@@ -434,13 +445,15 @@ def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_p
 
     window = FakeWindow()
     monkeypatch.setattr(notification, "run_installer", blocked)
-    assert not notification.install_update(window, "Setup.exe")
+    installer = tmp_path / "Setup.exe"
+    installer.write_bytes(b"MZ")
+    assert not notification.install_update(window, str(installer))
     assert window.calls == ["close pages", "cancel"] and "Unable to install update" in messages["warnings"][0]
+    assert not installer.exists()  # installer not started: never left in temp folder
 
     def bad_signature(path, **kwargs):
         raise ValueError("installer signature is not valid")
 
-    installer = tmp_path / "Setup.exe"
     installer.write_bytes(b"MZ")
     monkeypatch.setattr(notification, "run_installer", bad_signature)
     assert not notification.install_update(window, str(installer))
@@ -562,15 +575,18 @@ def test_download_failure_warned(updates, monkeypatch, messages):
     assert messages["warnings"] and "no network" in messages["warnings"][0]
 
 
-def test_downloaded_update_asks_first(updates, monkeypatch, messages):
+def test_downloaded_update_asks_first(updates, monkeypatch, messages, tmp_path):
     from tinypedal.ui import notification
 
     installs = []
     monkeypatch.setattr(notification, "install_update", lambda window, path, repository=None: installs.append(path))
     monkeypatch.setattr(notification, "main_window", lambda: None)
     messages["reply"] = QMessageBox.StandardButton.No
-    updates.install_downloaded("Setup.exe", "")
+    declined = tmp_path / "Setup.exe"
+    declined.write_bytes(b"MZ")
+    updates.install_downloaded(str(declined), "")
     assert messages["questions"] and not installs
+    assert not declined.exists()  # declined: never left in temp folder
     messages["reply"] = QMessageBox.StandardButton.Yes
     updates.install_downloaded("Setup.exe", "")
     assert installs == ["Setup.exe"]
@@ -648,3 +664,140 @@ def test_update_notice_kept_after_language_change(window, updates):
     button.dismiss()
     window.retranslate()
     assert not window.centralWidget().findChild(UpdatesNotifyButton).isVisibleTo(window)  # dismissed stays hidden
+
+
+def test_latest_release_follows_redirect_when_direct_request_empty(monkeypatch):
+    """Renamed repository: raw request gets nothing (301), request again with redirects followed"""
+    calls = []
+
+    async def no_answer(*args, **kwargs):
+        return b""
+
+    def follow(uri_path, timeout):
+        calls.append(uri_path)
+        return b'{"tag_name": "v9.9.9"}'
+
+    monkeypatch.setattr(update, "get_response", no_answer)
+    monkeypatch.setattr(update, "fetch_api_following_redirects", follow)
+    assert asyncio.run(update.request_latest_release("Keenny38/old")) == b'{"tag_name": "v9.9.9"}'
+    assert calls == ["/repos/Keenny38/old/releases/latest"]
+
+
+def test_latest_release_direct_answer_used(monkeypatch):
+    async def answer(*args, **kwargs):
+        return b'{"tag_name": "v1.0.0"}'
+
+    monkeypatch.setattr(update, "get_response", answer)
+    monkeypatch.setattr(update, "fetch_api_following_redirects", lambda *args: pytest.fail("not needed"))
+    assert asyncio.run(update.request_latest_release("a/b")) == b'{"tag_name": "v1.0.0"}'
+
+
+def test_api_redirect_stays_on_github_api():
+    import urllib.request
+
+    handler = update.GitHubApiRedirect()
+    request = urllib.request.Request("https://api.github.com/repos/Keenny38/old/releases/latest")
+    moved = handler.redirect_request(
+        request, None, 301, "Moved Permanently", {}, "https://api.github.com/repositories/1/releases/latest")
+    assert moved is not None and moved.full_url == "https://api.github.com/repositories/1/releases/latest"
+    assert handler.redirect_request(request, None, 301, "Moved", {}, "https://evil.example/releases/latest") is None
+    assert handler.redirect_request(request, None, 301, "Moved", {}, "http://api.github.com/x") is None
+
+
+def test_api_fetch_failure_is_empty(monkeypatch):
+    import urllib.request
+
+    class Opener:
+        def open(self, *args, **kwargs):
+            raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: Opener())
+    assert update.fetch_api_following_redirects("/repos/a/b/releases/latest", 1) == b""
+
+
+# Updates checked again while app runs (number_of_hours_between_update_checks)
+def test_check_due_after_interval(checker, monkeypatch):
+    from tinypedal import realtime_state
+
+    checker, _ = checker
+    started = []
+    monkeypatch.setattr(update.UpdateChecker, "check", lambda self, manual, scheduled=False: started.append(
+        (manual, scheduled)))
+    monkeypatch.setitem(cfg.application, "check_for_updates_on_startup", True)
+    monkeypatch.setitem(cfg.application, "number_of_hours_between_update_checks", 12)
+    monkeypatch.setattr(realtime_state, "active", False)
+    assert checker.check_due(now=1000.0)  # never checked yet
+    checker._last_check_time = 1000.0
+    assert not checker.check_due(now=1000.0 + 11.9 * 3600)
+    assert checker.check_due(now=1000.0 + 12 * 3600)
+    assert started == [(False, True), (False, True)]
+    monkeypatch.setattr(realtime_state, "active", True)  # driving: next call
+    assert not checker.check_due(now=1e9)
+    monkeypatch.setattr(realtime_state, "active", False)
+    monkeypatch.setitem(cfg.application, "number_of_hours_between_update_checks", 0)  # startup only
+    assert not checker.check_due(now=1e9)
+    monkeypatch.setitem(cfg.application, "number_of_hours_between_update_checks", 12)
+    monkeypatch.setitem(cfg.application, "check_for_updates_on_startup", False)  # automatic checks off
+    assert not checker.check_due(now=1e9)
+    assert len(started) == 2
+
+
+def test_automatic_check_never_turns_manual_check_automatic(checker, monkeypatch):
+    checker, states = checker
+    answer = threading.Event()
+
+    async def request(repo):
+        answer.wait(5)
+        return release_response("v0.0.1")
+
+    monkeypatch.setattr(update, "request_latest_release", request)
+    checker.check(True)
+    checker.check(False, scheduled=True)  # timer while user check runs
+    assert checker.is_manual() and not checker.is_scheduled()
+    answer.set()
+    assert wait_for(lambda: not checker.is_checking() and False in states)
+    assert checker.is_manual()  # result shown though no update
+    assert checker._last_check_time is not None  # interval counted from manual check too
+
+
+def test_automatic_check_keeps_notice_and_dismissal(window, updates):
+    from tinypedal.ui.notification import UpdatesNotifyButton
+
+    UpdatesNotifyButton.prompted_version = update.update_checker.message()  # already proposed
+    button = window.centralWidget().findChild(UpdatesNotifyButton)
+    button.checking(False)
+    assert button.isVisibleTo(window)
+    button.checking(True)  # automatic check: notice shown kept, no "Checking" message
+    assert button.isVisibleTo(window) and "99.0.0" in button.text()
+    button.dismiss()
+    button.checking(False)  # same version found again
+    assert not button.isVisibleTo(window)
+
+
+@pytest.mark.parametrize("active, in_front", [(True, True), (False, False)])
+def test_automatic_check_pops_up_only_in_active_window(window, updates, monkeypatch, active, in_front):
+    from tinypedal.ui import app as app_module
+    from tinypedal.ui.notification import UpdatesNotifyButton
+
+    shown = []
+    monkeypatch.setattr(update.update_checker, "_scheduled_checking", True)
+    monkeypatch.setattr(app_module.AppWindow, "isActiveWindow", lambda self: active)
+    monkeypatch.setattr(UpdatesNotifyButton, "show_release_notes",
+                        lambda self, prompt=False, bring_to_front=True: shown.append(bring_to_front))
+    window.show()
+    try:
+        window.centralWidget().findChild(UpdatesNotifyButton).checking(False)
+    finally:
+        window.hide()
+    assert shown == [in_front]  # not active: what's new waits inside app, not over the game
+
+
+def test_window_checks_updates_while_running(window, monkeypatch):
+    from tinypedal.ui import app as app_module
+
+    due = []
+    monkeypatch.setattr(update.UpdateChecker, "check_due", lambda self, now=None: due.append(1) or False)
+    timer = window._update_timer
+    assert timer.isActive() and timer.interval() == app_module.UPDATE_CHECK_POLL_MS
+    timer.timeout.emit()
+    assert due == [1]

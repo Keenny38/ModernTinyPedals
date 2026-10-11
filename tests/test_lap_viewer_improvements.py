@@ -212,10 +212,12 @@ def test_lap_as_delta_best(viewer, laps, monkeypatch):  # noqa: F811
 
     backend = viewer.backend
     backend.exportDeltaBest(laps[2])
+    backend.wait_jobs()  # lap read, then delta best written in background
     track = os.path.basename(os.path.dirname(laps[2]))
     data, best = load_delta_best_file(cfg.path.delta_best, track, ((), 0.0))
     assert best == pytest.approx(72.0) and len(data) > 100 and data[0] == (0.0, 0.0)
     backend.exportDeltaBest(laps[1])
+    backend.wait_jobs()
     assert load_delta_best_file(cfg.path.delta_best, track, ((), 0.0))[1] == pytest.approx(70.0)
     assert os.path.exists(os.path.join(cfg.path.delta_best, f"{track}.csv.bak"))  # former file kept
 

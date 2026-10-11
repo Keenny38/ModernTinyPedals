@@ -31,6 +31,7 @@ import os
 import re
 import zipfile
 from contextlib import nullcontext
+from typing import Any
 
 import shiboken6
 from PySide6.QtCore import Qt, QTimer, QUrl, Slot
@@ -60,7 +61,7 @@ from .preset_management import (
     trash_preset,
     update_preset_references,
 )
-from .quick.preset_backend import PresetBackend
+from .quick.preset_backend import PRESET_FILES, PresetBackend
 from .toast import show_toast
 
 
@@ -141,7 +142,13 @@ class PresetList(QWidget):
     def open_page(self, name: str, preset_filename: str = ""):
         """Transfer, Restore Backup, Trash, or Compare (preset with loaded preset) page"""
         if name == "compare":
-            PresetCompare(self, preset_a=cfg.filename.setting, preset_b=preset_filename).show()
+            compare = PresetCompare(self, preset_a=cfg.filename.setting, preset_b=preset_filename)
+            compare.show()
+            shown: Any = compare.shown_dialog()
+            if shown is not compare:  # comparison already open as page: shown instead, on the presets asked
+                shown.combo_a.setCurrentText(cfg.filename.setting)
+                if preset_filename:
+                    shown.combo_b.setCurrentText(preset_filename)
         elif name == "transfer":
             PresetTransfer(self).open()
         elif name == "restore":
@@ -176,7 +183,7 @@ class PresetList(QWidget):
         zip_filename, _ = QFileDialog.getSaveFileName(
             self,
             dir=os.path.join(os.path.expanduser("~"), f"{preset_filename[:-5]}.zip"),
-            filter=translate_filter("Modern Tiny Pedals preset package (*.zip)"),
+            filter=translate_filter("NeoPedal preset package (*.zip)"),
         )
         if not zip_filename:
             return
@@ -191,7 +198,7 @@ class PresetList(QWidget):
     def import_package(self):
         """Import preset package"""
         zip_filename, _ = QFileDialog.getOpenFileName(
-            self, dir=os.path.expanduser("~"), filter=translate_filter("Modern Tiny Pedals preset package (*.zip)"),
+            self, dir=os.path.expanduser("~"), filter=translate_filter("NeoPedal preset package (*.zip)"),
         )
         if zip_filename:
             self.import_package_file(zip_filename)
@@ -291,7 +298,8 @@ class PresetList(QWidget):
             update_preset_references(preset_filename[:-len(FileExt.JSON)], "")
             return True
         try:
-            entry = trash_preset(preset_filename)
+            with PRESET_FILES:  # not being read by the page meanwhile
+                entry = trash_preset(preset_filename)
         except OSError as error:  # locked file (cloud sync, antivirus), permission
             QMessageBox.warning(self, tr("Delete Preset"), trm(f"Unable to delete preset:<br>{error}"))
             return False

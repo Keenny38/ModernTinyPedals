@@ -26,9 +26,9 @@ lap times (userfile.lap_reference), personal best progression & sessions list (u
 
 Edits (delete track, remove vehicle, reset lap time, restore backup) are applied to stats file read again
 under STATS_LOCK (stats module saves meanwhile kept), after an automatic backup; undo merges stats
-recorded since. The page never waits for STATS_LOCK: while stats module saves, reloads & edits wait in
-order and are tried again shortly (see run_locked). Stats & history files saved by stats module are reloaded at once (page shown), history
-only when its file changed (stats file is saved every lap while driving).
+recorded since. The page never waits for STATS_LOCK nor big files: reloads & edits run in order on a worker
+thread, page updated once done (see run_locked). Stats & history files saved by stats module are reloaded at
+once (page shown), history only when its file changed (stats file is saved every lap while driving).
 
 All Tracks also shows driving activity of each day (last weeks) & recent sessions. Table rows of the same
 track are moved & changed in place (sort, reload): delegates, scroll & animations kept.
@@ -44,9 +44,11 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import suppress
 from datetime import date, timedelta
+from functools import partial
 from statistics import median_low
 from typing import Any, NamedTuple
 
@@ -59,6 +61,7 @@ from PySide6.QtCore import (
     QObject,
     QStandardPaths,
     QTimer,
+    QUrl,
     Signal,
     Slot,
 )
@@ -72,6 +75,9 @@ from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...const_file import ConfigType
 from ...formatter import strip_invalid_char
 from ...i18n import current_language, tr, trm
+from ...process import results_file as rf
+from ...process import results_index as ri
+from ...process.player_profile import PlayerProfile, player_profile
 from ...setting import cfg
 from ...userfile import lap_reference
 from ...userfile.brands import select_brand_name
@@ -81,6 +87,7 @@ from ...userfile.driver_history import (
     best_lap_date,
     best_progression,
     filter_sessions,
+    forget_records,
     history_path,
     index_history,
     last_driven,
@@ -107,7 +114,8 @@ from ...userfile.sector_best import load_theoretical_best
 from .. import UIScaler
 from ..lap_viewer import number_text, signed
 from ..track_map_viewer import TrackMapViewer
-from .game_pictures import brand_logo_url, notifier, track_logo_url
+from .background import BackgroundJobs
+from .game_pictures import LogoCache, notifier
 from .models import DictListModel
 from .stint_analysis import (
     compare_friend,
@@ -125,7 +133,10 @@ REFERENCE_MAX_AGE = 24 * 3600  # seconds before cached lap time reference is dow
 REFERENCE_KEYS = ("gap", "level")  # table columns from lap time reference, after personal best
 WATCH_DELAY = 800  # milliseconds after stats or history file changed before reloading
 LAPS_DELAY = 150  # milliseconds after selection changed before recorded laps are read (arrow keys: one read)
-LOCK_RETRY_MS = 25  # stats files busy (stats module saving): reload or edit tried again after this time
+SYNC_HISTORY_BYTES = 64 * 1024  # history file read at once up to this size (a few ms), bigger one in background
+SYNC_STATS_BYTES = 128 * 1024  # stats file read at once (saved every lap) up to this size, bigger one in background
+HIDDEN_RELEASE_DELAY = 60_000  # milliseconds page hidden before session history is released (read again once shown)
+LAP_FOLDERS_KEPT = 4  # recorded laps folders whose lap infos are kept (stints of selected vehicle)
 MAX_UNDO = 50
 ROLLBACK_ATTEMPTS = 3  # history change undone again if stats not saved
 ROLLBACK_DELAY = 0.1  # seconds between attempts
@@ -169,6 +180,7 @@ COLORBLIND_LEVEL_COLORS = ("#CC79A7", "#0072B2", "#009E73", "#F0E442", "#E69F00"
 SESSION_NAMES = ("Test day", "Practice", "Qualifying", "Warmup", "Race")
 SESSION_FILTERS = ("All", "Practice", "Qualifying", "Race")
 FINISH_TEXTS = {2: "DNF", 3: "DQ"}  # race result codes, same in every language
+MAX_FIX_LINES = 12  # lap times from results listed in confirmation
 MAX_STINTS = 12  # stints & sessions listed with their consistency, newest first
 ACTIVITY_WEEKS = 53  # weeks of daily driving activity (All Tracks), page shows the last ones that fit
 ACTIVITY_STEPS = (1800, 3600, 7200)  # driving time (seconds) of activity levels 1 to 4 (above last)
@@ -377,14 +389,15 @@ def class_prefix(vehicle: str) -> str:
     return vehicle.split(" - ", 1)[0].strip()
 
 
-def vehicle_logo(vehicle: str, classes: Iterable[str] = ()) -> str:
+def vehicle_logo(vehicle: str, classes: Iterable[str] = (), logos: LogoCache | None = None) -> str:
     """Brand logo of a driver stats vehicle key: brand of "Class - Brand", or of vehicle name (none
     for a class key)"""
+    logos = logos or LogoCache()
     if " - " in vehicle:
-        return brand_logo_url(brand=vehicle.split(" - ", 1)[1].strip())
+        return logos.brand("", vehicle.split(" - ", 1)[1].strip())
     if vehicle in classes:
         return ""
-    return brand_logo_url(vehicle_name=vehicle)
+    return logos.brand(vehicle)
 
 
 def combo_name(track: str, vehicle_class: str) -> str:
@@ -434,6 +447,210 @@ class Cell(NamedTuple):
     logo: str = ""  # game logo URL before text (car brand, circuit)
 
 
+class HistoryData(NamedTuple):
+    """Session history read & indexed (background): records, file stamp, records of each (track, vehicle),
+    vehicle classes, last driven time of each (track, vehicle) & of each track, sessions of each track"""
+
+    records: list[SessionRecord]
+    stamp: tuple[int, int]
+    by_combo: dict[tuple[str, str], list[SessionRecord]]
+    classes: dict[str, str]
+    vehicle_last_driven: dict[tuple[str, str], float]
+    track_last_driven: dict[str, float]
+    track_sessions: dict[str, tuple[int, float]]
+
+
+def track_sessions(records: Iterable[SessionRecord]) -> dict[str, tuple[int, float]]:
+    """Session count & first session time of each track (records oldest first)"""
+    found: dict[str, tuple[int, float]] = {}
+    for record in records:
+        count, first = found.get(record.track, (0, 0.0))
+        found[record.track] = (count + 1, first if count else record.time)
+    return found
+
+
+class StatsJob(NamedTuple):
+    """Reload or edit of stats files: work runs holding STATS_LOCK (worker thread, plain data only, never
+    the page), done(result, *extra) called on UI thread"""
+
+    kind: str  # "reload" or "edit"
+    work: Callable[..., Any]
+    args: tuple
+    done: Callable[..., Any]
+    extra: tuple = ()
+
+
+def history_file_stamp() -> tuple[int, int]:
+    """History file modified time (ns) & size, (0, 0) if none: file read again once changed"""
+    try:
+        stat = os.stat(history_path(cfg.path.config))
+    except OSError:
+        return 0, 0
+    return stat.st_mtime_ns, stat.st_size
+
+
+def read_history() -> HistoryData:
+    """Session history read & indexed (STATS_LOCK held), file trimmed if over limit"""
+    records = load_history(cfg.path.config)
+    return HistoryData(records, history_file_stamp(), index_history(records), vehicle_classes(records),
+                       last_driven(records), track_last_driven(records), track_sessions(records))
+
+
+class StatsFiles(NamedTuple):
+    """Stats file (checked, None if invalid), session history (None if unchanged), files modified times when
+    read"""
+
+    stats: dict | None
+    history: HistoryData | None
+    times: tuple[float, float]
+
+
+def stats_file_times() -> tuple[float, float]:
+    """Modified time of stats & history files (0 if none)"""
+    times = []
+    for path in (f"{cfg.path.config}driver.stats", history_path(cfg.path.config)):
+        try:
+            times.append(os.path.getmtime(path))
+        except OSError:
+            times.append(0.0)
+    return times[0], times[1]
+
+
+def stats_file_size() -> int:
+    try:
+        return os.path.getsize(f"{cfg.path.config}driver.stats")
+    except OSError:
+        return 0
+
+
+def read_stats_files(history_stamp: tuple[int, int]) -> StatsFiles:
+    """Stats file & session history (None if unchanged since history_stamp) read (STATS_LOCK held)"""
+    times = stats_file_times()  # files not changed until lock released
+    stats_user = load_stats_json_file(filepath=cfg.path.config)
+    if stats_user is not None:
+        stats_user = validate_stats_file(stats_user)
+    if history_file_stamp() == history_stamp:  # stats saved every lap, history at end of each stint only
+        return StatsFiles(stats_user, None, times)
+    return StatsFiles(stats_user, read_history(), times)
+
+
+def run_holding_lock(work: Callable[..., Any], *args, finished: threading.Event | None = None) -> Any:
+    """Job of worker thread: waits while stats module saves, finished set once work over (raised or not)"""
+    try:
+        with STATS_LOCK:
+            return work(*args)
+    finally:
+        if finished is not None:
+            finished.set()
+
+
+def save_edits_detached(edits: list[StatsJob], after: threading.Event | None) -> threading.Event:
+    """Edits still waiting when page closed: saved in order on a thread once job running before is over,
+    page never updated (done callbacks skipped)
+
+    Returns:
+        Event set once all edits are over.
+    """
+    finished = threading.Event()
+
+    def saving():
+        try:
+            if after is not None:
+                after.wait()
+            for job in edits:
+                try:
+                    run_holding_lock(job.work, *job.args)
+                except Exception:  # next edits saved all the same (each one complete on its own)
+                    logger.exception("DRIVER STATS: stats edit failed after page closed")
+        finally:
+            forget_records(cfg.path.config)  # history read by edits not kept: page closed
+            finished.set()
+
+    threading.Thread(target=saving, daemon=True, name="Driver stats edits").start()
+    return finished
+
+
+class ResultsData(NamedTuple):
+    """Game results files summed up for player (oldest first) & game driver profile, read in background with
+    session of each history record (None: links made on UI thread, tests)"""
+
+    summaries: list[ri.ResultSummary]
+    profile: PlayerProfile | None
+    matcher: ri.SessionMatcher | None = None
+    links: dict[SessionRecord, ri.ResultSummary | None] | None = None  # record: session
+    linked: dict[str, str] | None = None  # results path: vehicle key of record linked
+
+
+def read_results_data(records: Iterable[SessionRecord] = ()) -> ResultsData:
+    """Results files of folders of race results page (game folders found, else folder chosen) & profile,
+    linked to session history records (worker thread)"""
+    folders = rf.results_folders(rf.chosen_results_folder(cfg.path.config))
+    summaries = ri.read_summaries(folders)
+    matcher, links, linked = ri.link_records(records, summaries)
+    return ResultsData(summaries, player_profile(folders), matcher, links, linked)
+
+
+def read_reference_cache() -> LapReferenceTable:
+    """Lap time reference kept from last download (works offline), worker thread"""
+    text, _ = lap_reference.load_cache(cfg.path.config)
+    return lap_reference.parse_lap_references(text) if text else LapReferenceTable()
+
+
+def store_reference(text: str) -> LapReferenceTable:
+    """Lap time reference downloaded: kept for next time & parsed (worker thread)"""
+    try:
+        lap_reference.save_cache(cfg.path.config, text)
+    except OSError:  # cache not written (disk full, read only): downloaded reference still used
+        logger.exception("STATS: unable to save lap time reference cache")
+    return lap_reference.parse_lap_references(text)
+
+
+def gap_text(summary: ri.ResultSummary) -> str:
+    """Gap to class leader of session: "+1.234", "+2 laps", "" for leader or unknown"""
+    if summary.gap_laps:
+        return f"+{plural(summary.gap_laps, 'lap', 'laps')}"
+    if summary.gap_time > 0:
+        return f"+{localized_number(summary.gap_time, 3)}"
+    return ""
+
+
+def localized_number(value: float, decimals: int) -> str:
+    return date_locale().toString(float(value), "f", decimals)
+
+
+def result_details(summary: ri.ResultSummary) -> list[str]:
+    """Tooltip lines of a session from its results file: classification, gap, incidents, setting, version"""
+    lines = []
+    if summary.position > 0:
+        place = trm(f"Position P{summary.position} of {summary.cars}")
+        if summary.class_cars != summary.cars and summary.class_position > 0:
+            place += " · " + trm(f"P{summary.class_position} of {summary.class_cars} in class")
+        lines.append(place)
+    gap = gap_text(summary)
+    if gap:
+        lines.append(f"{tr('Gap')} {gap}")
+    lines.append(trm(f"Contacts: {summary.contacts} · Penalties: {summary.penalties} · "
+                     f"Track limits: {localized_number(summary.track_limits, 0)} pts"))
+    online = tr("Online") if summary.setting == "Multiplayer" else tr("Single Player")
+    lines.append(" · ".join(part for part in (online, summary.server,
+                                              f"{tr('Version')} {summary.game_version}" if summary.game_version
+                                              else "") if part))
+    return lines
+
+
+def summary_rank(summary: ri.ResultSummary) -> str:
+    """Class position of player in session: "P3/12", "" if not classified"""
+    if summary.class_position <= 0:
+        return ""
+    return f"P{summary.class_position}/{summary.class_cars}"
+
+
+def country_name(code: str) -> str:
+    """Country of ISO code ("FR" -> "France", English name), code if unknown"""
+    territory = QLocale.codeToTerritory(code) if len(code) == 2 else QLocale.Country.AnyCountry
+    return code if territory == QLocale.Country.AnyCountry else QLocale.territoryToString(territory)
+
+
 class StatsEdit(NamedTuple):
     """Change of stats file at path (track, vehicle, stat; empty: whole file), session history change
 
@@ -452,7 +669,14 @@ class DriverStatsBackend(QObject):
     """Driver stats viewer page state & actions"""
 
     tracksChanged = Signal()
-    statsChanged = Signal()  # rows, key figures, levels, activity (track or stats changed)
+    statsChanged = Signal()  # table state: rows or not, track or All Tracks, loading
+    # Parts of page told only when changed (see publish)
+    driverChanged = Signal()
+    activityChanged = Signal()
+    recentChanged = Signal()
+    tilesChanged = Signal()
+    levelsChanged = Signal()
+    trackInfoChanged = Signal()
     sortChanged = Signal()  # sort column or order: rows moved, nothing else built again
     columnsChanged = Signal()  # columns shown, their widths
     selectionChanged = Signal()
@@ -476,12 +700,14 @@ class DriverStatsBackend(QObject):
         self.classes: dict[str, str] = {}  # game class of vehicle keys, from history
         self.vehicle_last_driven: dict[tuple[str, str], float] = {}
         self.track_last_driven: dict[str, float] = {}
+        self.track_sessions: dict[str, tuple[int, float]] = {}  # session count & first time of tracks
         self.level_counts: list[int] = [0] * len(LEVELS)
         self.unrated = 0
         self.references = LapReferenceTable()
         self.reference_error = ""
         self._downloading = False
         self._loaded = False  # first load selects current track
+        self._reading = True  # stats files not read yet (read in background): page shows it is loading
         self._visible = True
         self._dirty = False  # files changed while page hidden
         self._theory_cache: dict[str, tuple[float, float]] = {}  # sector best file: modified time, value
@@ -498,6 +724,9 @@ class DriverStatsBackend(QObject):
         self._selected = {"vehicles": "", "tracks": ""}
         self.row_model = DictListModel(("key", "cells"), self)
         self._published_track: str | None = None  # track of rows in model (rows of another one: model reset)
+        self._text_widths: dict[tuple[str, bool], float] = {}  # cell texts measured (font of _width_font)
+        self._width_font: tuple = ()
+        self.logos = LogoCache()  # car brand & circuit logos looked for once per name
         # Selected vehicle
         self._tiles: list[dict] = []
         self._track_info: dict = {}
@@ -511,11 +740,26 @@ class DriverStatsBackend(QObject):
         self._activity: dict = {}
         self._activity_key: tuple = ()
         self._recent: list[dict] = []
+        # Game results files: session of each record (classification, incidents, game version), driver card,
+        # lap times missing from stats (read in background with session history)
+        self.results: list[ri.ResultSummary] = []
+        self.profile: PlayerProfile | None = None
+        self._matcher = ri.SessionMatcher(())
+        self._record_results: dict[SessionRecord, ri.ResultSummary | None] = {}
+        self._linked: dict[str, str] | None = None  # results path: vehicle key (None: made from history)
+        self._results_serial = 0  # results read (fixes computed again)
+        self._stats_serial = 0  # stats file read
+        self._fixes_key: tuple = ()
+        self._driver_key: tuple = ()
+        self._driver: dict = {"visible": False}
+        self._fixes: list[ri.BestLapFix] = []
+        self._published: dict[str, Any] = {}  # parts of page as last told (see publish)
         self.reference_loaded.connect(self.reference_downloaded)
         # Stints & consistency of selected vehicle from recorded laps (read in background), friend's stats
         self._stints: dict = {}
         self._laps_key = ""  # recorded laps folder & vehicle shown in stints
-        self._lap_infos: dict[str, tuple[float, dict]] = {}  # lap path: file time, lap info (read once)
+        # Lap infos read once: recorded laps folder: lap path: file time, lap info (last folders only)
+        self._lap_infos: OrderedDict[str, dict[str, tuple[float, dict]]] = OrderedDict()
         self._laps_generation = 0  # latest read asked: older reads (same key, stale laps) ignored
         self._laps_job: tuple | None = None  # read waiting for debounce or running read: key, folder, vehicle, generation
         self._laps_running = 0  # generation of read running in background (0: none), one at a time
@@ -527,7 +771,7 @@ class DriverStatsBackend(QObject):
         notifier().changed.connect(self.pictures_changed)
         self._friend: dict | None = None
         self._friend_view: dict = {"visible": False}
-        self.load_friend(str(self.viewer_config().get("friend_file", "")), quiet=True)
+        self._friend_file = ""  # friend's file being read (chosen by user)
 
         # Stats & history files saved by stats module: reloaded
         self.watcher = QFileSystemWatcher(self)
@@ -537,12 +781,19 @@ class DriverStatsBackend(QObject):
         self.watch_timer.setSingleShot(True)
         self.watch_timer.setInterval(WATCH_DELAY)
         self.watch_timer.timeout.connect(self.reload_if_changed)
-        # Reloads & edits waiting for stats files (STATS_LOCK held by stats module): run in order once free
-        self._locked_jobs: list[Callable[[], Callable[[], Any] | None]] = []
-        self.lock_timer = QTimer(self)
-        self.lock_timer.setSingleShot(True)
-        self.lock_timer.setInterval(LOCK_RETRY_MS)
-        self.lock_timer.timeout.connect(self.run_locked_jobs)
+        # Page hidden a while: session history released, read again once shown
+        self.hidden_timer = QTimer(self)
+        self.hidden_timer.setSingleShot(True)
+        self.hidden_timer.setInterval(HIDDEN_RELEASE_DELAY)
+        self.hidden_timer.timeout.connect(self.release_history)
+        self._history_released = False
+        # Reloads & edits of stats files run in order, one at a time, on a worker thread (see run_locked)
+        self.jobs = BackgroundJobs(self, "Driver stats")
+        ri.hold_files()  # results files read once for race results page too
+        self._locked_jobs: list[StatsJob] = []  # waiting
+        self._running_job: StatsJob | None = None
+        self._last_finished: threading.Event | None = None  # set once last job started (or saved after close) is over
+        self._released = False
         # Level colors depend on light or dark theme: table, tiles & charts colored again when theme changes
         self._backups: list[dict] | None = None  # automatic backups (listed again once one is made)
         self._palette_connected = False
@@ -552,6 +803,7 @@ class DriverStatsBackend(QObject):
             self._palette_connected = True
 
         self.load_reference()
+        self.load_friend_file(str(self.viewer_config().get("friend_file", "")))
         self.reload_stats()
         self.watch_files()
         self.download_reference()
@@ -591,9 +843,15 @@ class DriverStatsBackend(QObject):
 
     # Lap time reference
     def load_reference(self):
-        """Lap time reference kept from last download (works offline)"""
-        text, _ = lap_reference.load_cache(cfg.path.config)
-        self.references = lap_reference.parse_lap_references(text) if text else LapReferenceTable()
+        """Lap time reference kept from last download (works offline), read in background"""
+        self.jobs.run("lap reference", read_reference_cache, self.reference_read, key="reference")
+
+    def reference_read(self, references: LapReferenceTable):
+        """Lap time reference read (cache or download): levels shown"""
+        self.references = references
+        self.referenceChanged.emit()
+        if self._loaded and not self._released:
+            self.refresh_table()
 
     def download_reference(self, force: bool = False):
         """Download lap time reference in background, when older than a day (or asked)"""
@@ -623,16 +881,12 @@ class DriverStatsBackend(QObject):
         threading.Thread(target=download, daemon=True, name="Lap reference download").start()
 
     def reference_downloaded(self, text: str, error: str):
+        """Download over: reference saved & parsed in background (cache read still running dropped)"""
         self._downloading = False
         self.reference_error = error
-        if text:
-            try:
-                lap_reference.save_cache(cfg.path.config, text)
-            except OSError:  # cache not written (disk full, read only): downloaded reference still used
-                logger.exception("STATS: unable to save lap time reference cache")
-            self.references = lap_reference.parse_lap_references(text)
         self.referenceChanged.emit()
-        self.refresh_table()
+        if text and not self._released:
+            self.jobs.run("lap reference", partial(store_reference, text), self.reference_read, key="reference")
 
     def reference_for(self, track: str, vehicle: str) -> LapReference | None:
         if not self.references.entries or not self.viewer_config().get("enable_lap_reference", True):
@@ -699,24 +953,13 @@ class DriverStatsBackend(QObject):
         ).open()
 
     # Stats & history files
-    def file_times(self) -> tuple[float, float]:
-        """Modified time of stats & history files (0 if none)"""
-        times = []
-        for path in (f"{cfg.path.config}driver.stats", history_path(cfg.path.config)):
-            try:
-                times.append(os.path.getmtime(path))
-            except OSError:
-                times.append(0.0)
-        return times[0], times[1]
+    @staticmethod
+    def file_times() -> tuple[float, float]:
+        return stats_file_times()
 
     @staticmethod
     def history_stamp() -> tuple[int, int]:
-        """History file modified time (ns) & size, (0, 0) if none: file read again once changed"""
-        try:
-            stat = os.stat(history_path(cfg.path.config))
-        except OSError:
-            return 0, 0
-        return stat.st_mtime_ns, stat.st_size
+        return history_file_stamp()
 
     def watch_files(self):
         """Watch config folder & stats files (replaced file dropped by watcher: added again)"""
@@ -742,20 +985,51 @@ class DriverStatsBackend(QObject):
 
     def page_shown(self):
         self._visible = True
-        if self._dirty:
+        self.hidden_timer.stop()
+        if self._history_released:
+            self._history_released = self._dirty = False
+            self.reload()  # history & its links read again
+        elif self._dirty:
             self._dirty = False
             self.reload_if_changed()
 
     def page_hidden(self):
         self._visible = False
+        if not self._released:
+            self.hidden_timer.start()
+
+    @Slot()
+    def release_history(self):
+        """Page hidden a while: session history & what is made of it released (memory), read again once shown
+        (table, key figures & selection kept as shown)"""
+        if self._visible or self._released or self._history_released:
+            return
+        if self.busy():
+            self.hidden_timer.start()  # reload or edit running: later
+            return
+        self._history_released = True
+        self.history, self.history_index = [], {}
+        self._history_stamp = (-1, -1)  # read again
+        self._record_results = {}
+        self._activity_key = ()
+        self._lap_infos = OrderedDict()  # a read running fills the former one
+        self._laps_key = ""
+        forget_records(cfg.path.config)
 
     def release(self):
         """Page closed: stop watching files & theme"""
         self.watch_timer.stop()
         self.laps_timer.stop()
-        self.lock_timer.stop()
+        self.hidden_timer.stop()
+        if not self._released:
+            ri.release_files()
+        self._released = True
+        # Running job finishes (edit saved), waiting reloads dropped, waiting edits still saved: page not updated
+        self.save_after_release([job for job in self._locked_jobs if job.kind == "edit"])
         self._locked_jobs.clear()
         self._laps_job = None
+        self._lap_infos = OrderedDict()  # a read running fills the former one
+        forget_records(cfg.path.config)  # session history kept for next read: memory freed
         paths = self.watcher.files() + self.watcher.directories()
         if paths:
             self.watcher.removePaths(paths)
@@ -767,62 +1041,295 @@ class DriverStatsBackend(QObject):
     @Slot()
     def reload(self):
         self.reload_stats()
+        self.load_results()
 
-    # Stats files lock: page (GUI thread) never waits for stats module saving
-    def run_locked(self, job: Callable[[], Callable[[], Any] | None]) -> bool:
-        """Run job holding STATS_LOCK: now if free & no job waiting, else in order once free (tried again
-        every LOCK_RETRY_MS), so the page never waits while stats module saves. Job returns what to do
-        once lock released (page update, messages), or None.
+    # Game results files
+    def load_results(self):
+        """Results files read & linked to session history in background (history as now)"""
+        if not self._released:
+            self.jobs.run("race results", partial(read_results_data, self.history), self.results_loaded,
+                          self.results_failed, key="results")
+
+    def results_loaded(self, data: ResultsData):
+        if self._released:
+            return
+        self.results, self.profile = data.summaries, data.profile
+        self._matcher = data.matcher if data.matcher is not None else ri.SessionMatcher(data.summaries)
+        self._record_results = data.links if data.links is not None and not self._history_released else {}
+        self._linked = data.linked
+        self._results_serial += 1
+        self.refresh_table()
+
+    def results_failed(self, error: BaseException):
+        logger.warning("DRIVER STATS: race results not read", exc_info=(type(error), error, error.__traceback__))
+
+    def record_result(self, record: SessionRecord) -> ri.ResultSummary | None:
+        """Session of results file a stint was driven in, None if not found (linked in background, records
+        recorded since looked for at once)"""
+        try:
+            return self._record_results[record]
+        except KeyError:
+            found = self._record_results[record] = self._matcher.match(
+                record.time, record.session, record.track, record.vehicle, record.vehicle_class)
+            return found
+
+    def record_version(self, record: SessionRecord) -> str:
+        """Game version a stint was driven with: recorded, else of its results file"""
+        if record.game_version:
+            return record.game_version
+        result = self.record_result(record)
+        return result.game_version if result is not None else ""
+
+    def best_lap_result(self, track: str, vehicle: str, laptime: float) -> ri.ResultSummary | None:
+        """Oldest results session of track & vehicle with lap time as best lap (lap time not in history)"""
+        vehicles = self.stats_temp.get(track, {})
+        for summary in self.results:
+            if (abs(summary.best_lap - laptime) < 0.0005 and ri.same_track(track, summary)
+                    and ri.vehicle_key(summary, vehicles, self.classification(), cfg.user.brands) == vehicle):
+                return summary
+        return None
+
+    @staticmethod
+    def classification() -> str:
+        """Vehicle keys of stats module: class, class & brand or vehicle name"""
+        setting = cfg.user.setting.get("module_stats", {})
+        return str(setting.get("vehicle_classification", "Class - Brand")) if isinstance(setting, dict) else ""
+
+    def lap_time_fixes(self) -> list[ri.BestLapFix]:
+        """Lap times of stats missing or slower than best lap of a results session, found again only when
+        results or stats changed (results linked to history in background)"""
+        brands = cfg.user.brands
+        key = (self._results_serial, self._stats_serial, self.classification(), id(brands), len(brands))
+        if key == self._fixes_key:
+            return self._fixes
+        linked = self._linked
+        if linked is None:  # results given without links
+            linked = {}
+            for record in self.history:
+                result = self.record_result(record)
+                if result is not None:
+                    linked[result.path] = record.vehicle
+        self._fixes_key = key
+        return ri.best_lap_fixes(self.results, self.stats_temp, linked, self.classification(), brands)
+
+    def driver_card(self) -> dict:
+        """Driver card, made again only when results or fixes changed"""
+        key = (self._results_serial, len(self._fixes), current_language())
+        if key != self._driver_key:
+            self._driver_key = key
+            self._driver = self.driver_data()
+        return self._driver
+
+    def driver_data(self) -> dict:
+        """Driver card (All Tracks): game profile, Steam picture, races of results files, lap times to complete"""
+        profile = self.profile
+        races = [summary for summary in self.results if summary.kind == "Race"]
+        if profile is None and not races:
+            return {"visible": False}
+        name = profile.name if profile is not None else races[-1].driver
+        details = []
+        if profile is not None:
+            details = [country_name(profile.nationality), profile.team, f"#{profile.number}" if profile.number else ""]
+        figures = []
+        if races:
+            placed = [summary.class_position for summary in races
+                      if summary.status == rf.FINISHED and summary.class_position > 0]
+            clean = sum(summary.contacts == 0 and summary.penalties == 0 for summary in races)
+            contacts = sum(summary.contacts for summary in races)
+            figures = [
+                {"label": tr("Races"), "value": str(len(races))},
+                {"label": tr("Wins"), "value": str(sum(place == 1 for place in placed))},
+                {"label": tr("Podiums"), "value": str(sum(place <= 3 for place in placed))},
+                {"label": tr("Avg. Finish"),
+                 "value": f"P{localized_number(sum(placed) / len(placed), 1)}" if placed else "-"},
+                {"label": tr("Clean Races"), "value": f"{clean}/{len(races)}"},
+                {"label": tr("Contacts/Race"), "value": localized_number(contacts / len(races), 1)},
+            ]
+        fixes = len(self._fixes)
+        return {
+            "visible": True,
+            "name": name,
+            "initials": "".join(word[:1] for word in name.split()[:2]).upper(),
+            "detail": " · ".join(part for part in details if part),
+            "avatar": QUrl.fromLocalFile(profile.avatar).toString() if profile is not None and profile.avatar else "",
+            "figures": figures,
+            "info": trm(f"From {len(races)} race results of the game, class positions") if races else "",
+            "fixes": fixes,
+            "fixText": trm(f"{fixes} lap time(s) found in race results") if fixes else "",
+        }
+
+    @Property(dict, notify=driverChanged)
+    def driver(self) -> dict:
+        """Driver card: name, initials, detail, avatar URL, figures (label, value), info, fixes, fixText"""
+        return self._driver
+
+    @Slot(str)
+    def openResults(self, path: str):
+        """Session of results file shown in race results page"""
+        if not path:
+            return
+        from ..tools_view import open_tool
+
+        page = open_tool("race_results_viewer.RaceResultsViewer", self._window)
+        backend = getattr(page, "backend", None)
+        if backend is not None:
+            backend.open_path(path)
+
+    @Slot()
+    def completeLapTimes(self):
+        """Lap times missing or slower in stats taken from results files, after confirmation (undo: Ctrl+Z)"""
+        fixes = self._fixes
+        if not fixes or self.editing:
+            return
+        lines = []
+        for fix in fixes[:MAX_FIX_LINES]:
+            before = calc.sec2laptime_full(fix.current) if fix.current else "-"
+            lines.append(f"{fix.track} · {fix.vehicle} · {tr(HEADER_KEYS[fix.stat])}: "
+                         f"{before} → <b>{calc.sec2laptime_full(fix.laptime)}</b> ({format_date(fix.time)})")
+        if len(fixes) > MAX_FIX_LINES:
+            lines.append("...")
+        message = (trm(f"Complete {len(fixes)} lap time(s) from race results?") + "<br><br>" + "<br>".join(lines)
+                   + "<br><br>" + tr("Undo with Ctrl+Z while this page is open."))
+        if self.confirm(message):
+            self.run_locked(StatsJob("edit", self.write_fixes, (tuple(fixes),), self.edit_written))
+
+    @classmethod
+    def write_fixes(cls, fixes: tuple[ri.BestLapFix, ...]) -> tuple[str, StatsEdit | None]:
+        """Lap times of fixes saved in stats file read again (STATS_LOCK held, worker thread), faster ones kept"""
+        with STATS_LOCK:
+            stats_user = cls.load_fresh_stats()
+            if stats_user is None:
+                return "unreadable", None
+            backup_stats_file(cfg.path.config)
+            before = copy.deepcopy(stats_user)
+            for fix in fixes:
+                vehicles = stats_user.get(fix.track)
+                data = vehicles.get(fix.vehicle) if isinstance(vehicles, dict) else None
+                if not isinstance(data, dict):
+                    continue
+                current = valid_laptime(data.get(fix.stat, 0))
+                if not current or fix.laptime < current - 0.0005:
+                    data[fix.stat] = fix.laptime
+            if not cls.save_edit(stats_user, (), ()):
+                return "unsaved", None
+        return "saved", StatsEdit((), before, copy.deepcopy(stats_user))
+
+    # Stats files lock: page (GUI thread) never waits for stats module saving nor for big files read
+    def run_locked(self, job: StatsJob, now: bool = False) -> bool:
+        """Run job holding STATS_LOCK, in order: on a worker thread (waits there while stats module saves),
+        page updated by job.done on UI thread; now (cheap job) on UI thread if lock free & no job waiting.
 
         Returns:
             True if job ran now.
         """
-        self._locked_jobs.append(job)
-        return self.run_locked_jobs()
-
-    @Slot()
-    def run_locked_jobs(self) -> bool:
-        """Run waiting jobs in order while STATS_LOCK is free, True if none left"""
-        while self._locked_jobs:
-            if not STATS_LOCK.acquire(blocking=False):
-                self.lock_timer.start()
-                return False
+        if self._released:  # page closed: edit saved all the same, reload dropped
+            if job.kind == "edit":
+                self.save_after_release([job])
+            return False
+        if now and not self._locked_jobs and self._running_job is None and STATS_LOCK.acquire(blocking=False):
             try:
-                after = self._locked_jobs.pop(0)()
+                result = job.work(*self.job_args(job))
             finally:
                 STATS_LOCK.release()
-            if after is not None:
-                after()
-        return True
+            job.done(result, *job.extra)
+            return True
+        self._locked_jobs.append(job)
+        if job.kind == "edit":
+            self.publish_edits()  # editing
+        self.start_locked_job()
+        return False
+
+    def job_args(self, job: StatsJob) -> tuple:
+        """Reload: history read again only if changed since last read (known when job starts)"""
+        return (self._history_stamp, *job.args) if job.kind == "reload" else job.args
+
+    def start_locked_job(self):
+        """Next waiting job started on worker thread, once running one is done"""
+        if self._running_job is not None or not self._locked_jobs or self._released:
+            return
+        job = self._running_job = self._locked_jobs.pop(0)
+        finished = self._last_finished = threading.Event()
+        self.jobs.run(f"stats {job.kind}", partial(run_holding_lock, job.work, *self.job_args(job), finished=finished),
+                      self.locked_job_done, self.locked_job_failed, key="history" if job.kind == "reload" else None)
+
+    def save_after_release(self, edits: list[StatsJob]):
+        """Edits waiting when page closed: saved in order after running job (page and its jobs may be gone)"""
+        if edits:
+            self._last_finished = save_edits_detached(edits, self._last_finished)
+
+    def locked_job_done(self, result: Any):
+        job, self._running_job = self._running_job, None
+        try:
+            if job is not None and not self._released:
+                job.done(result, *job.extra)
+        finally:
+            if job is not None and job.kind == "edit" and not self._released:
+                self.publish_edits()  # editing
+            self.start_locked_job()
+
+    def locked_job_failed(self, error: BaseException):
+        job, self._running_job = self._running_job, None
+        logger.error("DRIVER STATS: stats %s failed", job.kind if job is not None else "job",
+                     exc_info=(type(error), error, error.__traceback__))
+        try:
+            if job is None or self._released:
+                return
+            if job.kind == "edit":
+                self.publish_edits()
+                self.stats_unreadable()
+            elif self._reading:  # page never left loading
+                self._reading = False
+                self.publish_stats()
+        finally:
+            self.start_locked_job()
+
+    @Property(bool, notify=editsChanged)
+    def editing(self) -> bool:
+        """Edit waiting or being saved: page disables edit actions meanwhile (edits run in order anyway)"""
+        return any(job.kind == "edit" for job in (self._running_job, *self._locked_jobs) if job is not None)
+
+    @Property(bool, notify=statsChanged)
+    def loading(self) -> bool:
+        """Stats files not read yet (page opened, big session history read in background)"""
+        return self._reading
+
+    def busy(self) -> bool:
+        """Reload or edit waiting or running"""
+        return self._running_job is not None or bool(self._locked_jobs)
 
     def reload_stats(self, select: str | None = None):
         """Reload stats & history files: selected track kept (current track at first load)
 
+        Small stats file with small or unchanged session history read at once, bigger files read in background
+        (page shown as it was meanwhile).
+
         Args:
             select: track key to select, else selected one (neighbor track if removed).
         """
-        self.run_locked(lambda: self.read_stats_files(select))
-
-    def read_stats_files(self, select: str | None) -> Callable[[], None]:
-        """Read stats & history files (STATS_LOCK held), page updated once lock released"""
-        stats_user = load_stats_json_file(filepath=cfg.path.config)
         stamp = self.history_stamp()
-        if stamp != self._history_stamp:  # stats saved every lap, history at end of each stint only
-            self.history = load_history(cfg.path.config)
-            self._history_stamp = self.history_stamp()  # file rewritten if over limit
-            self.history_index = index_history(self.history)
-            self.classes = vehicle_classes(self.history)
-            self.vehicle_last_driven = last_driven(self.history)
-            self.track_last_driven = track_last_driven(self.history)
-        return lambda: self.stats_read(stats_user, select)
+        now = (stamp == self._history_stamp or stamp[1] <= SYNC_HISTORY_BYTES) and stats_file_size() <= SYNC_STATS_BYTES
+        self.run_locked(StatsJob("reload", read_stats_files, (), self.stats_files_read, (select,)), now=now)
+
+    def stats_files_read(self, files: StatsFiles, select: str | None):
+        """Page updated with stats & history files read"""
+        self._reading = False
+        self._file_times = files.times
+        if files.history is not None:
+            history = files.history
+            self.history, self._history_stamp, self.history_index = history.records, history.stamp, history.by_combo
+            self.classes, self.vehicle_last_driven = history.classes, history.vehicle_last_driven
+            self.track_last_driven, self.track_sessions = history.track_last_driven, history.track_sessions
+            self._history_released = False
+            self.load_results()  # session ended: its results file written too
+        self.stats_read(files.stats, select)
 
     def stats_read(self, stats_user: dict | None, select: str | None):
-        """Page updated with stats file read"""
-        self._file_times = self.file_times()
+        """Page updated with stats file read (checked already: validate_stats_file)"""
         if stats_user is None:  # invalid file: stats shown kept
             self.refresh_table()
             return
-        self.stats_temp = validate_stats_file(stats_user)
+        self.stats_temp = stats_user
+        self._stats_serial += 1
         self._laps_key = ""  # stints read again (laps recorded with new stats)
         if select is not None:
             wanted = select
@@ -833,18 +1340,23 @@ class DriverStatsBackend(QObject):
         old_keys = [ALL_TRACKS, *(entry["key"] for entry in self._tracks[1:])]
         old_index = old_keys.index(self.selected_stats_key) if self.selected_stats_key in old_keys else 0
         self._loaded = True
-        keys = self.sorted_tracks()
-        current = api.read.session.track_name() if api.read is not None else ""
-        self._tracks = [{"key": ALL_TRACKS, "label": tr("All Tracks"), "date": "", "current": False, "logo": ""}] + [
-            {"key": key, "label": key, "date": format_date(self.track_last_driven.get(key, 0.0)),
-             "current": key == current, "logo": track_logo_url(key)}
-            for key in keys
-        ]
+        keys = self.track_list()
         if wanted and wanted not in self.stats_temp:  # removed meanwhile: neighbor track
             index = min(max(old_index, 0), len(keys))
             wanted = keys[index - 1] if index > 0 else ALL_TRACKS
         self.select_stats(wanted)
         self.tracksChanged.emit()
+
+    def track_list(self) -> list[str]:
+        """Track list of picker made again (All Tracks first), track keys in shown order"""
+        keys = self.sorted_tracks()
+        current = api.read.session.track_name() if api.read is not None else ""
+        self._tracks = [{"key": ALL_TRACKS, "label": tr("All Tracks"), "date": "", "current": False, "logo": ""}] + [
+            {"key": key, "label": key, "date": format_date(self.track_last_driven.get(key, 0.0)),
+             "current": key == current, "logo": self.logos.track(key)}
+            for key in keys
+        ]
+        return keys
 
     def initial_track(self) -> str:
         """Current track if it has stats, else last driven track, else All Tracks"""
@@ -881,7 +1393,7 @@ class DriverStatsBackend(QObject):
     @Property(str, notify=tracksChanged)
     def currentLogo(self) -> str:
         """Circuit logo of selected track (game)"""
-        return track_logo_url(self.selected_stats_key) if self.selected_stats_key else ""
+        return self.logos.track(self.selected_stats_key) if self.selected_stats_key else ""
 
     @Slot(str)
     def selectTrack(self, key: str):
@@ -906,7 +1418,15 @@ class DriverStatsBackend(QObject):
         self.save_viewer_config(enable_sort_by_last_driven=enabled)
         self._sort["tracks"] = ("last", True) if enabled else ("track", False)
         self.optionsChanged.emit()
-        self.reload_stats()
+        if not self._loaded:
+            return
+        self.track_list()  # sorted again in memory: nothing read
+        self.tracksChanged.emit()
+        if not self.selected_stats_key:  # All Tracks table sorted like track list
+            self._table = self.sorted_rows(self._table)
+            self.publish_rows()
+            self.publish_sort()
+            self.publish("rowIndex", self.selected_index(), self.rowIndexChanged)
 
     @Property(bool, notify=optionsChanged)
     def colorblind(self) -> bool:
@@ -921,17 +1441,39 @@ class DriverStatsBackend(QObject):
     # Table
     @Slot()
     def pictures_changed(self):
-        """Logos fetched from game meanwhile: track list & table shown again"""
+        """Logos fetched from game meanwhile (or theme changed): track list & table shown again if their
+        logos changed"""
         if not self._loaded:
             return
-        for entry in self._tracks[1:]:
-            entry["logo"] = track_logo_url(entry["key"])
-        self._tracks = list(self._tracks)
-        self.tracksChanged.emit()
-        self.refresh_table()
+        tracks = [dict(entry, logo=self.logos.track(entry["key"])) if entry["key"] else entry
+                  for entry in self._tracks]
+        if tracks != self._tracks:
+            self._tracks = tracks
+            self.tracksChanged.emit()
+        if self.table_logos_changed():
+            self.refresh_table()
+
+    def table_logos_changed(self) -> bool:
+        """Logo of a table row or recent session (All Tracks) not the one shown"""
+        if self.selected_stats_key:
+            classes = self.classes.values()
+            return any(cells["vehicle"].logo != vehicle_logo(key, classes, self.logos)
+                       for key, cells in self._table if "vehicle" in cells)
+        return (any(row["trackLogo"] != self.logos.track(row["track"]) for row in self._recent)
+                or any(cells["track"].logo != self.logos.track(key) for key, cells in self._table if "track" in cells))
+
+    def publish(self, name: str, value: Any, signal) -> bool:
+        """Part of page told (signal) only if it changed since last told, True if told"""
+        if name in self._published and self._published[name] == value:
+            return False
+        self._published[name] = value
+        signal.emit()
+        return True
 
     def refresh_table(self):
-        """Table of vehicles (or tracks), sort, selection & tiles kept"""
+        """Table of vehicles (or tracks), sort, selection & tiles kept; parts of page told only when changed
+        (every lap while driving: stats saved)"""
+        columns = self._columns
         if self.selected_stats_key:
             rows = self.vehicle_rows()
         else:
@@ -940,19 +1482,39 @@ class DriverStatsBackend(QObject):
         self.publish_table()
         self.refresh_tiles()
         self._track_info = self.track_info()
+        self._fixes = self.lap_time_fixes()
         if not self.selected_stats_key:
             self._activity = self.activity_data()
             self._recent = self.recent_sessions()
+            self._driver = self.driver_card()
         selected = self._selected[self.mode]
         keys = [key for key, _ in self._table]
         if selected not in keys:
             self._selected[self.mode] = keys[0] if keys else ""
-        self.columnsChanged.emit()
-        self.sortChanged.emit()
-        self.statsChanged.emit()
-        self.editsChanged.emit()
+        if self._columns != columns:
+            self.columnsChanged.emit()
+        self.publish_sort()
+        self.publish_stats()
+        self.publish("tiles", self._tiles, self.tilesChanged)
+        self.publish("trackInfo", self._track_info, self.trackInfoChanged)
+        self.publish("levels", (self.levels_data(), self.levels_info()), self.levelsChanged)
+        if not self.selected_stats_key:
+            self.publish("activity", self._activity, self.activityChanged)
+            self.publish("recent", self._recent, self.recentChanged)
+            self.publish("driver", self._driver, self.driverChanged)
+        self.publish_edits()
         self.update_selection()
         self.refresh_friend()  # rows of selected track
+
+    def publish_sort(self):
+        self.publish("sort", (self.mode, *self._sort[self.mode]), self.sortChanged)
+
+    def publish_stats(self):
+        self.publish("stats", (bool(self._table), self.mode, self._reading), self.statsChanged)
+
+    def publish_edits(self):
+        self.publish("edits", (self.editing, bool(self._edits_undo), bool(self._edits_redo), self._backups is None),
+                     self.editsChanged)
 
     def set_header(self, keys: list[str], labels: list[str]):
         self.table_header_key = keys
@@ -970,7 +1532,7 @@ class DriverStatsBackend(QObject):
         best = valid_laptime(data.get("pb", 0))
         theory = self.theory_of(track, vehicle)
         cells: dict[str, Cell] = {"vehicle": Cell(vehicle, vehicle.lower(), vehicle,
-                                                  logo=vehicle_logo(vehicle, self.classes.values()))}
+                                                  logo=vehicle_logo(vehicle, self.classes.values(), self.logos))}
         percent = reference.percent(best) if reference else 0.0
         cells["gap"] = Cell(f"{percent:.2f} %" if percent else "-", percent or None, round(percent, 3) if percent else None)
         level = reference.level(best) if reference else -1
@@ -1008,7 +1570,7 @@ class DriverStatsBackend(QObject):
         unrated = 0
         rows = []
         for track, vehicles in tracks.items():
-            cells: dict[str, Cell] = {"track": Cell(track, track.lower(), track, logo=track_logo_url(track))}
+            cells: dict[str, Cell] = {"track": Cell(track, track.lower(), track, logo=self.logos.track(track))}
             bests: dict[str, tuple[float, str]] = {}
             for vehicle, data in vehicles.items():
                 best = valid_laptime(data.get("pb", 0)) if isinstance(data, dict) else 0.0
@@ -1085,8 +1647,8 @@ class DriverStatsBackend(QObject):
         self._sort[self.mode] = (key, descending)
         self._table = self.sorted_rows(self._table)
         self.publish_rows()  # rows moved: columns & widths unchanged
-        self.sortChanged.emit()
-        self.rowIndexChanged.emit()  # same row, other place: reference & charts kept
+        self.publish_sort()
+        self.publish("rowIndex", self.selected_index(), self.rowIndexChanged)  # same row: reference & charts kept
 
     @Property(str, notify=sortChanged)
     def sortKey(self) -> str:
@@ -1119,13 +1681,18 @@ class DriverStatsBackend(QObject):
         self.publish_rows()
 
     def publish_columns(self):
-        """Visible columns: widths from contents (each text measured once), or set by user"""
+        """Visible columns: widths from contents (each text measured once, kept while font unchanged), or set
+        by user"""
         keys = self.visible_keys()
         font = QFont(QApplication.font())
+        font_key = (font.key(), UIScaler.FONT_PIXEL_SCALED)
+        measured = self._text_widths  # many cells share a text ("-", dates...), most unchanged after a lap
+        if font_key != self._width_font or len(measured) > 20000:
+            measured.clear()
+            self._width_font = font_key
         metrics = QFontMetricsF(font)
         font.setBold(True)
         bold = QFontMetricsF(font)
-        measured: dict[tuple[str, bool], float] = {}  # many cells share a text ("-", dates...)
 
         def text_width(text: str, is_bold: bool) -> float:
             width = measured.get((text, is_bold))
@@ -1327,24 +1894,25 @@ class DriverStatsBackend(QObject):
     def track_info(self) -> dict:
         track = self.selected_stats_key
         if track:
-            records = [record for record in self.history if record.track == track]
+            sessions, first = self.track_sessions.get(track, (0, 0.0))
             parts = [plural(len(self.selected_stats_dict), "vehicle", "vehicles")]
             driven = self.track_last_driven.get(track, 0.0)
         else:
-            records = [record for record in self.history if record.track in self.stats_temp]
+            found = [self.track_sessions[key] for key in self.stats_temp if key in self.track_sessions]
+            sessions, first = sum(count for count, _ in found), min((when for _, when in found), default=0.0)
             count = len([key for key in self.stats_temp if key])
             parts = [plural(count, "track", "tracks")] if count else []  # no stats: empty page says it
             driven = 0.0
-        if records:
-            parts.append(plural(len(records), "session", "sessions"))
+        if sessions:
+            parts.append(plural(sessions, "session", "sessions"))
             if track:
                 parts.append(f"{tr('last driven')} {format_date(driven)}")
             else:
-                parts.append(f"{tr('since')} {format_date(records[0].time)}")
+                parts.append(f"{tr('since')} {format_date(first)}")
         current = api.read.session.track_name() if api.read is not None else ""
         return {"subtitle": " · ".join(parts), "live": bool(track) and track == current}
 
-    @Property(dict, notify=statsChanged)
+    @Property(dict, notify=trackInfoChanged)
     def trackInfo(self) -> dict:
         """Line under track name (subtitle), live: track of game session"""
         return self._track_info
@@ -1402,7 +1970,7 @@ class DriverStatsBackend(QObject):
         return {"weeks": ACTIVITY_WEEKS, "days": days, "months": months, "summary": summary,
                 "dayNames": [locale.dayName(number, QLocale.FormatType.ShortFormat) for number in (1, 3, 5)]}
 
-    @Property(dict, notify=statsChanged)
+    @Property(dict, notify=activityChanged)
     def activity(self) -> dict:
         """Daily driving activity (All Tracks): weeks, days (level, tip), months (week, text), summary"""
         return self._activity
@@ -1419,7 +1987,7 @@ class DriverStatsBackend(QObject):
             laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
             rows.append({
                 "track": record.track, "vehicle": record.vehicle, "date": format_date(record.time),
-                "trackLogo": track_logo_url(record.track),
+                "trackLogo": self.logos.track(record.track),
                 "session": session_name(record.session), "kind": session_kind(record.session),
                 "best": calc.sec2laptime_full(laptime) if laptime else "-",
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005), "result": race_result(record),
@@ -1429,7 +1997,7 @@ class DriverStatsBackend(QObject):
                 break
         return rows
 
-    @Property(list, notify=statsChanged)
+    @Property(list, notify=recentChanged)
     def recent(self) -> list[dict]:
         """Latest sessions (All Tracks): track, vehicle, date, session, kind, best lap, pb, result"""
         return self._recent
@@ -1454,20 +2022,26 @@ class DriverStatsBackend(QObject):
         elif self._selected["tracks"]:
             self.deleteTrack(self._selected["tracks"])
 
-    @Property(list, notify=statsChanged)
+    @Property(list, notify=tilesChanged)
     def tiles(self) -> list[dict]:
         return self._tiles
 
     # Level distribution (All Tracks)
-    @Property(list, notify=statsChanged)
-    def levels(self) -> list[dict]:
+    def levels_data(self) -> list[dict]:
         top = max(self.level_counts, default=0)
         return [{"name": tr(name), "color": self.level_color(level), "count": self.level_counts[level],
                  "ratio": self.level_counts[level] / top if top else 0.0, "letter": level_letter(level)}
                 for level, name in enumerate(LEVELS)]
 
-    @Property(str, notify=statsChanged)
+    @Property(list, notify=levelsChanged)
+    def levels(self) -> list[dict]:
+        return self._published.get("levels", ([], ""))[0]
+
+    @Property(str, notify=levelsChanged)
     def levelsInfo(self) -> str:
+        return self._published.get("levels", ([], ""))[1]
+
+    def levels_info(self) -> str:
         if not any(self.level_counts):
             return tr("No level yet: community lap times needed, vehicle classification by class.")
         if self.unrated:
@@ -1512,11 +2086,13 @@ class DriverStatsBackend(QObject):
             self.selectTrack(key)
 
     def update_selection(self):
+        """Reference, progression & sessions of selected row, told only if changed (stats saved every lap)"""
         self._reference = self.reference_data()
         self._progression, self._sessions = self.history_data()
         self._has_laps = bool(self.lap_folder())
-        self.selectionChanged.emit()
-        self.rowIndexChanged.emit()
+        self.publish("selection", (self.mode, self._selected[self.mode], self._session_filter, self._reference,
+                                   self._progression, self._sessions, self._has_laps), self.selectionChanged)
+        self.publish("rowIndex", self.selected_index(), self.rowIndexChanged)
         self.update_stints()
 
     # Stints & consistency of selected vehicle: recorded laps of its track & class folder
@@ -1564,8 +2140,13 @@ class DriverStatsBackend(QObject):
 
     def read_stints(self, key: str, folder: str, vehicle: str, generation: int):
         path = os.path.join(cfg.path.telemetry, folder)
+        folders = self._lap_infos  # last folders read only (one read at a time)
+        infos = folders.pop(folder, None) or {}
+        folders[folder] = infos
+        while len(folders) > LAP_FOLDERS_KEPT:
+            folders.popitem(last=False)
         try:
-            report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), self._lap_infos))
+            report = stint_report(read_laps(path, lambda info: lap_matches_vehicle(info, vehicle), infos, prune=True))
         except Exception:  # unreadable folder: nothing shown, page goes on
             logger.exception("DRIVER STATS: unable to read recorded laps of %s", folder)
             report = None
@@ -1665,6 +2246,7 @@ class DriverStatsBackend(QObject):
 
     # Friend's stats: exported session history of another driver, personal bests compared track by track
     def load_friend(self, filename: str, quiet: bool = False) -> bool:
+        """Friend's file read now (tests), see load_friend_file"""
         if not filename:
             return False
         try:
@@ -1675,19 +2257,51 @@ class DriverStatsBackend(QObject):
             return False
         return True
 
+    def load_friend_file(self, filename: str, chosen: bool = False):
+        """Friend's file read in background, compared once read (chosen by user: saved for next time, warned if
+        unreadable)"""
+        if not filename or self._released:
+            return
+        self._friend_file = filename if chosen else ""
+        self.jobs.run("friend", partial(load_friend, filename), self.friend_loaded,
+                      self.friend_failed if chosen else self.friend_skipped, key="friend")
+
+    def friend_loaded(self, friend: dict):
+        if self._released:
+            return
+        self._friend = friend
+        if self._friend_file:
+            self.save_viewer_config(friend_file=self._friend_file)
+            self._friend_file = ""
+        self.refresh_friend()
+
+    def friend_failed(self, error: BaseException):
+        self._friend_file = ""
+        if isinstance(error, ValueError) and not self._released:
+            self.warning(trm(f"Unable to read friend's stats: {error}"))
+        else:
+            self.friend_skipped(error)
+
+    @staticmethod
+    def friend_skipped(error: BaseException):
+        """Friend's file of last time unreadable (moved): nothing compared"""
+        if not isinstance(error, ValueError):
+            logger.warning("DRIVER STATS: friend's stats not read", exc_info=(type(error), error, error.__traceback__))
+
     @Slot()
     def importFriend(self):
         """Compare with a friend's exported session history (JSON)"""
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         filename, _ = QFileDialog.getOpenFileName(self._window, tr("Compare With a Friend's Stats..."),
                                                   folder or os.path.expanduser("~"), "JSON (*.json)")
-        if filename and self.load_friend(filename):
-            self.save_viewer_config(friend_file=filename)
-            self.refresh_friend()
+        if filename:
+            self.load_friend_file(filename, chosen=True)
 
     @Slot()
     def clearFriend(self):
         self._friend = None
+        self._friend_file = ""
+        self.jobs.cancel("friend")  # file being read dropped
         self.save_viewer_config(friend_file="")
         self.refresh_friend()
 
@@ -1698,7 +2312,7 @@ class DriverStatsBackend(QObject):
 
     def refresh_friend(self):
         self._friend_view = self.friend_data()
-        self.friendChanged.emit()
+        self.publish("friend", self._friend_view, self.friendChanged)
 
     def friend_data(self) -> dict:
         """Friend's personal bests against own on selected track (every track both drove for All Tracks)"""
@@ -1850,8 +2464,15 @@ class DriverStatsBackend(QObject):
         lines = []
         if best > 0:
             date = best_lap_date(records, best)
+            pb_record = next((record for record in records if record.time == date), None) if date else None
+            version = self.record_version(pb_record) if pb_record is not None else ""
+            if not date:  # lap time completed from race results, or recorded before session history
+                pb_result = self.best_lap_result(self.selected_stats_key, vehicle, best)
+                if pb_result is not None:
+                    date, version = pb_result.end, pb_result.game_version
             if date:
-                lines.append(trm(f"PB {calc.sec2laptime_full(best)} set on {format_date(date)}"))
+                line = trm(f"PB {calc.sec2laptime_full(best)} set on {format_date(date)}")
+                lines.append(f"{line} · {tr('Version')} {version}" if version else line)
         if records:
             lines.append(f"{plural(len(records), 'session', 'sessions')} · {tr('last driven')} "
                          f"{format_date(records[-1].time)}")
@@ -1861,6 +2482,15 @@ class DriverStatsBackend(QObject):
         sessions = []
         for record in reversed(records[-MAX_SESSIONS:]):
             laptime = record.best if record.best > 0 and not (best and record.best < best - 0.0005) else 0.0
+            summary = self.record_result(record)
+            version = record.game_version or (summary.game_version if summary is not None else "")
+            tip = [f"{format_duration(record.seconds)} · {parse_display_value('meters', record.meters)} "
+                   f"{tr(format_header_key('meters')).lower()}"]
+            if summary is not None:
+                tip += result_details(summary)
+                tip.append(tr("Click to show race results"))
+            elif version:
+                tip.append(f"{tr('Version')} {version}")
             sessions.append({
                 "date": format_date(record.time),
                 "session": session_name(record.session),
@@ -1870,8 +2500,11 @@ class DriverStatsBackend(QObject):
                 "result": race_result(record),
                 "podium": record.position if record.finish == 1 and 0 < record.position <= 3 else 0,
                 "pb": bool(best and laptime and abs(laptime - best) < 0.0005),
-                "tip": f"{format_duration(record.seconds)} · {parse_display_value('meters', record.meters)} "
-                       f"{tr(format_header_key('meters')).lower()}",
+                "tip": "\n".join(tip),
+                "rank": summary_rank(summary) if summary is not None and not race_result(record) else "",
+                "incidents": summary.contacts + summary.penalties if summary is not None else 0,
+                "version": version,
+                "results": summary.path if summary is not None else "",
             })
         return chart, sessions
 
@@ -1964,11 +2597,15 @@ class DriverStatsBackend(QObject):
         self.warning(tr("Unable to save stats file. Session history was changed anyway, use Undo to revert it."))
 
     @staticmethod
-    def save_edit(stats_user: dict, removed: Iterable[SessionRecord], added: Iterable[SessionRecord]) -> bool | None:
-        """Save edited stats & history change (STATS_LOCK held)
+    def save_edit(stats_user: dict, removed: Iterable[SessionRecord], added: Iterable[SessionRecord],
+                  history: list[SessionRecord] | None = None) -> bool | None:
+        """Save edited stats & history change (STATS_LOCK held, worker thread)
 
         History changed first: a change (records removed or added once) undone safely if stats not saved,
         tried again a few times.
+
+        Args:
+            history: records of history file loaded already (STATS_LOCK held since), else file read.
 
         Returns:
             True if saved, False if not saved (both files kept),
@@ -1976,16 +2613,16 @@ class DriverStatsBackend(QObject):
         """
         removed, added = tuple(removed), tuple(added)
         try:
-            replace_records(cfg.path.config, removed, added)
+            written = replace_records(cfg.path.config, removed, added, history)
         except OSError:  # history unreadable (never rewritten as empty) or not saved
             return False
         if save_stats_json_file(stats_user=stats_user, filepath=cfg.path.config):
             return True
         for attempt in range(ROLLBACK_ATTEMPTS):
             if attempt:
-                time.sleep(ROLLBACK_DELAY)
+                time.sleep(ROLLBACK_DELAY)  # worker thread: page not held up
             try:
-                replace_records(cfg.path.config, added, removed)  # history change undone
+                replace_records(cfg.path.config, added, removed, written)  # history change undone
                 return False
             except OSError as error:
                 logger.warning("STATS: history change not undone (attempt %s): %s", attempt + 1, error)
@@ -1995,26 +2632,30 @@ class DriverStatsBackend(QObject):
                    history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None = None) -> bool:
         """Set stats at path (None removes it, empty path: whole file), history changed, undo recorded
 
-        Done once stats module is not saving (see run_locked).
+        Saved on worker thread after edits asked before (see run_locked), page updated once saved.
 
         Args:
-            history_change: history records -> (records removed, records added).
+            history_change: history records -> (records removed, records added), run on worker thread.
 
         Returns:
-            True if done now.
+            True if done now (never: saved in background).
         """
-        return self.run_locked(lambda: self.write_edit(path, value, history_change))
+        return self.run_locked(StatsJob("edit", self.write_edit, (path, value, history_change), self.edit_written))
 
-    def write_edit(self, path: tuple[str, ...], value: Any,
+    @classmethod
+    def write_edit(cls, path: tuple[str, ...], value: Any,
                    history_change: Callable[[list[SessionRecord]], tuple[list, list]] | None,
-                   ) -> Callable[[], None]:
-        """Edit applied to stats file read again (STATS_LOCK held), see edit_stats"""
+                   ) -> tuple[str, StatsEdit | None]:
+        """Edit applied to stats file read again (STATS_LOCK held, worker thread), see edit_stats
+
+        Returns:
+            Outcome ("saved", "history" changed only, "unsaved", "unreadable"), edit to undo.
+        """
         with STATS_LOCK:  # held already (run_locked), reentrant
-            stats_user = self.load_fresh_stats()
+            stats_user = cls.load_fresh_stats()
             if stats_user is None:
-                return self.stats_unreadable
+                return "unreadable", None
             backup_stats_file(cfg.path.config)
-            self._backups = None  # listed again
             before = stats_entry(stats_user, path) if path else copy.deepcopy(stats_user)
             if path:
                 set_stats_entry(stats_user, path, value)
@@ -2022,23 +2663,33 @@ class DriverStatsBackend(QObject):
                 stats_user = copy.deepcopy(value)
             removed: tuple = ()
             added: tuple = ()
+            history = None
             if history_change is not None:
                 try:
                     history = load_history(cfg.path.config, strict=True)
                 except OSError:  # never rewritten from empty history
-                    return self.stats_unreadable
+                    return "unreadable", None
                 removed_list, added_list = history_change(history)
                 removed, added = tuple(removed_list), tuple(added_list)
-            saved = self.save_edit(stats_user, removed, added)
+            saved = cls.save_edit(stats_user, removed, added, history)
             if saved is False:  # not saved: no undo recorded
-                return self.stats_unsaved
+                return "unsaved", None
             if saved is None:  # history changed only: its undo recorded
+                return "history", StatsEdit(path, None, None, removed, added, history_only=True)
+        return "saved", StatsEdit(path, before, copy.deepcopy(value), removed, added)
 
-                def history_changed():
-                    self.edit_done(StatsEdit(path, None, None, removed, added, history_only=True))
-                    self.stats_unsaved_history_changed()
-                return history_changed
-        return lambda: self.edit_done(StatsEdit(path, before, copy.deepcopy(value), removed, added))
+    def edit_written(self, result: tuple[str, StatsEdit | None]):
+        """Edit saved (UI thread): undo recorded & page reloaded, or warned"""
+        outcome, edit = result
+        self._backups = None  # listed again (backup made before edit)
+        if outcome == "unreadable":
+            self.stats_unreadable()
+        elif outcome == "unsaved":
+            self.stats_unsaved()
+        elif edit is not None:
+            self.edit_done(edit)
+            if outcome == "history":
+                self.stats_unsaved_history_changed()
 
     def edit_done(self, edit: StatsEdit):
         """Edit saved: undo recorded, page reloaded"""
@@ -2047,10 +2698,11 @@ class DriverStatsBackend(QObject):
         self._edits_redo.clear()
         self.reload_stats()
 
-    def apply_edit(self, edit: StatsEdit, undo: bool) -> bool:
+    @classmethod
+    def apply_edit(cls, edit: StatsEdit, undo: bool) -> bool:
         """Apply edit again (redo) or its reverse (undo, stats recorded since kept) on stats file read again
 
-        Called with STATS_LOCK held (see run_locked), False if stats file unreadable or not saved.
+        Called with STATS_LOCK held (worker thread, see run_locked), False if stats file unreadable or not saved.
         """
         with STATS_LOCK:
             if edit.history_only:
@@ -2062,7 +2714,7 @@ class DriverStatsBackend(QObject):
                 except OSError:
                     return False
                 return True
-            stats_user = self.load_fresh_stats()
+            stats_user = cls.load_fresh_stats()
             if stats_user is None:
                 return False
             if not edit.path:  # whole file (backup restored)
@@ -2073,50 +2725,36 @@ class DriverStatsBackend(QObject):
             else:
                 set_stats_entry(stats_user, edit.path, edit.after)
             if undo:
-                return bool(self.save_edit(stats_user, edit.history_after, edit.history_before))
-            return bool(self.save_edit(stats_user, edit.history_before, edit.history_after))
+                return bool(cls.save_edit(stats_user, edit.history_after, edit.history_before))
+            return bool(cls.save_edit(stats_user, edit.history_before, edit.history_after))
 
     @Slot()
     def undo(self):
-        """Undo last edit"""
-        if not self._edits_undo:
+        """Undo last edit (saved in background), not while an edit is being saved (not in undo stack yet)"""
+        if not self._edits_undo or self.editing:
             return
         edit = self._edits_undo.pop()
-
-        def job() -> Callable[[], None]:
-            done = self.apply_edit(edit, undo=True)
-
-            def after():
-                if done:
-                    self._edits_redo.append(edit)
-                else:
-                    self._edits_undo.append(edit)
-                    self.stats_unreadable()
-                self.reload_stats(select=edit.path[0] if edit.path else None)
-            return after
-
-        self.run_locked(job)
+        self.run_locked(StatsJob("edit", self.apply_edit, (edit, True), self.edit_applied, (edit, True)))
 
     @Slot()
     def redo(self):
-        """Redo last undone edit"""
-        if not self._edits_redo:
+        """Redo last undone edit (saved in background), not while an edit is being saved"""
+        if not self._edits_redo or self.editing:
             return
         edit = self._edits_redo.pop()
+        self.run_locked(StatsJob("edit", self.apply_edit, (edit, False), self.edit_applied, (edit, False)))
 
-        def job() -> Callable[[], None]:
-            done = self.apply_edit(edit, undo=False)
-
-            def after():
-                if done:
-                    self._edits_undo.append(edit)
-                else:
-                    self._edits_redo.append(edit)
-                    self.stats_unreadable()
-                self.reload_stats(select=edit.path[0] if len(edit.path) > 1 else None)
-            return after
-
-        self.run_locked(job)
+    def edit_applied(self, done: bool, edit: StatsEdit, undo: bool):
+        """Undo or redo saved (UI thread): moved to other stack (back to its stack if not saved), page reloaded"""
+        if done:
+            (self._edits_redo if undo else self._edits_undo).append(edit)
+        else:
+            (self._edits_undo if undo else self._edits_redo).append(edit)
+            self.stats_unreadable()
+        if undo:
+            self.reload_stats(select=edit.path[0] if edit.path else None)
+        else:
+            self.reload_stats(select=edit.path[0] if len(edit.path) > 1 else None)
 
     @Property(bool, notify=editsChanged)
     def canUndo(self) -> bool:
@@ -2133,6 +2771,8 @@ class DriverStatsBackend(QObject):
     @Slot(str)
     def deleteTrack(self, track: str = ""):
         """Delete stats of track (empty: selected track) & its session history"""
+        if self.editing:  # stats shown not up to date yet
+            return
         track = track or self.selected_stats_key
         if not track or track not in self.stats_temp:
             self.warning(tr("No data found."))
@@ -2149,6 +2789,8 @@ class DriverStatsBackend(QObject):
     @Slot()
     def removeVehicle(self):
         """Remove selected vehicle stats & its session history"""
+        if self.editing:
+            return
         vehicle = self._selected["vehicles"] if self.selected_stats_key else ""
         if not vehicle:
             self.warning(tr("No data selected."))
@@ -2168,7 +2810,7 @@ class DriverStatsBackend(QObject):
     @Slot(str, str)
     def resetLapTime(self, vehicle: str, column: str):
         """Reset lap time of vehicle, its session bests in history too (progression)"""
-        if not DriverStats.is_lap_time(column) or not self.selected_stats_key:
+        if not DriverStats.is_lap_time(column) or not self.selected_stats_key or self.editing:
             return
         data = self.selected_stats_dict.get(vehicle, {})
         laptime = valid_laptime(data.get(column, 0))
@@ -2213,6 +2855,8 @@ class DriverStatsBackend(QObject):
     @Slot(str)
     def restoreBackup(self, name: str):
         """Stats file as saved in backup (undo: stats before restore)"""
+        if self.editing:
+            return
         stats_backup = load_stats_backup(cfg.path.config, name)
         if stats_backup is None:
             self.warning(tr("Unable to read stats file."))
@@ -2226,14 +2870,15 @@ class DriverStatsBackend(QObject):
     def rowActions(self, key: str, column: str) -> list[dict]:
         """Right click menu entries of row & column: id, text, enabled"""
         actions = []
+        editable = not self.editing  # edit being saved: stats shown not up to date yet
         if not self.selected_stats_key:
             actions += [{"id": "show", "text": tr("Show Track"), "enabled": True},
-                        {"id": "delete", "text": tr("Delete Track"), "enabled": True}]
+                        {"id": "delete", "text": tr("Delete Track"), "enabled": editable}]
         elif column == "vehicle":
-            actions.append({"id": "remove", "text": tr("Remove Vehicle"), "enabled": True})
+            actions.append({"id": "remove", "text": tr("Remove Vehicle"), "enabled": editable})
         elif DriverStats.is_lap_time(column):
             laptime = valid_laptime(self.selected_stats_dict.get(key, {}).get(column, 0))
-            actions.append({"id": "reset", "text": tr("Reset Lap Time"), "enabled": bool(laptime)})
+            actions.append({"id": "reset", "text": tr("Reset Lap Time"), "enabled": bool(laptime) and editable})
         actions.append({"id": "laps", "text": tr("Open Recorded Laps"), "enabled": bool(self.lap_folder(key))})
         return actions
 
@@ -2311,8 +2956,11 @@ class DriverStatsBackend(QObject):
         """Track map of selected track"""
         if not self.selected_stats_key:
             return
-        TrackMapViewer(self._window, filepath=cfg.path.track_map,
-                       filename=strip_invalid_char(self.selected_stats_key)).show()
+        viewer = TrackMapViewer(self._window)
+        viewer.show()
+        # Loaded in the page shown: viewer already open as page is shown instead (this copy deleted)
+        shown: Any = viewer.shown_dialog()
+        shown.backend.load_map(cfg.path.track_map, strip_invalid_char(self.selected_stats_key))
 
     @Slot(bool)
     def exportCsv(self, raw: bool = False):

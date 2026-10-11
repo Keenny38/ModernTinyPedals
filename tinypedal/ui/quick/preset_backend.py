@@ -21,7 +21,8 @@ Presets page backend (qml/Presets.qml): presets with their tags & content, searc
 
 Each preset row tells its primary tags (car classes, tracks), lock, preset hotkeys, last change and
 how many overlays & modules it turns on. Preset files are read only when they changed (size & time
-cache), and only while the page is shown: a refresh while hidden is done when the page shows again.
+cache), in background (rows show their last change only until read), and only while the page is shown:
+a refresh while hidden is done when the page shows again.
 Actions with dialogs (files, share codes, other pages) are run by the page hosting the backend.
 """
 
@@ -29,7 +30,9 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+from collections.abc import Iterable
 from typing import Any, NamedTuple, Protocol
 
 from PySide6.QtCore import Property, QDateTime, QLocale, QObject, Signal, Slot
@@ -45,9 +48,11 @@ from ...setting import cfg
 from ...template.setting_shortcuts import SHORTCUTS_PRESET
 from ...userfile.json_setting import create_backup_file, set_backup_timestamp
 from ...userfile.preset_share import summarize_preset
-from ...userfile.preset_trash import list_trash
+from ...userfile.preset_trash import count_trash
+from ...validator import is_allowed_filename
 from ..module_view import sort_key
 from ..preset_management import apply_preset_name, check_preset_name
+from .background import BackgroundJobs
 from .models import DictListModel
 
 SORT_RECENT = 0
@@ -55,11 +60,13 @@ SORT_NAME = 1
 MAX_SHOWN_NAMES = 40  # overlays & modules listed in details
 ROLES = (
     "key", "name", "loaded", "locked", "lockVersion", "changedText", "classes", "tracks", "hotkeys",
-    "overlays", "modules", "unreadable",
+    "overlays", "modules", "unreadable", "pending", "contentText",
 )
 MODE_NEW = ""
 MODE_DUPLICATE = "duplicate"
 MODE_RENAME = "rename"
+# Held while the read job has a preset file open: moving or renaming it waits (Windows refuses to move an open file)
+PRESET_FILES = threading.Lock()
 
 
 class PresetHost(Protocol):
@@ -85,36 +92,45 @@ class Summary(NamedTuple):
     api: str
 
 
+Stamp = tuple[int, int]  # file time (ns) & size
+
+
+def read_summary(path: str, widget_names: Iterable[str], module_names: Iterable[str]) -> tuple[Stamp | None, Summary | None]:
+    """Stamp & content of preset file (any thread): content None if unreadable, stamp None if file is gone"""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None, None
+    summary: Summary | None
+    try:
+        with PRESET_FILES, open(path, encoding="utf-8") as file:
+            preset = json.load(file)
+        if not isinstance(preset, dict):
+            raise ValueError("not a preset")
+        content = summarize_preset(preset, widget_names, module_names)
+        preset_info = preset.get("preset")
+        api = str(preset_info.get("api_name", "")) if isinstance(preset_info, dict) else ""
+        summary = Summary(content.widgets, content.modules, api)
+    except (OSError, ValueError, RecursionError, UnicodeDecodeError):
+        summary = None
+    return (stat.st_mtime_ns, stat.st_size), summary
+
+
 class SummaryCache:
     """Preset contents, read again only when file size or time changed"""
 
     def __init__(self):
-        self._entries: dict[str, tuple[tuple[int, int], Summary | None]] = {}
+        self._entries: dict[str, tuple[Stamp, Summary | None]] = {}
 
-    def get(self, path: str) -> Summary | None:
-        """Content of preset file, None if unreadable"""
-        try:
-            stat = os.stat(path)
-        except OSError:
-            return None
-        stamp = (stat.st_mtime_ns, stat.st_size)
+    def lookup(self, path: str, stamp: Stamp) -> tuple[bool, Summary | None]:
+        """(cached, content) of preset file of stamp, cached False if not read or changed since"""
         cached = self._entries.get(path)
         if cached is not None and cached[0] == stamp:
-            return cached[1]
-        summary: Summary | None
-        try:
-            with open(path, encoding="utf-8") as file:
-                preset = json.load(file)
-            if not isinstance(preset, dict):
-                raise ValueError("not a preset")
-            content = summarize_preset(preset, wctrl.names, mctrl.names)
-            preset_info = preset.get("preset")
-            api = str(preset_info.get("api_name", "")) if isinstance(preset_info, dict) else ""
-            summary = Summary(content.widgets, content.modules, api)
-        except (OSError, ValueError, RecursionError, UnicodeDecodeError):
-            summary = None
+            return True, cached[1]
+        return False, None
+
+    def store(self, path: str, stamp: Stamp, summary: Summary | None):
         self._entries[path] = (stamp, summary)
-        return summary
 
     def keep(self, paths: set[str]):
         """Forget presets gone"""
@@ -155,6 +171,58 @@ def size_text(size: int) -> str:
     return trm(f"{size / 1024:.0f} KB")
 
 
+def list_presets(folder: str) -> list[tuple[str, os.stat_result]]:
+    """Preset file names (with extension) & their stat, newest first (order of cfg.preset_files), each
+    file stat once"""
+    found = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    for filename in names:
+        name = filename[:-len(FileExt.JSON)]
+        if not filename.lower().endswith(FileExt.JSON) or not is_allowed_filename(name):
+            continue
+        try:
+            stat = os.stat(os.path.join(folder, filename))
+        except OSError:
+            continue
+        found.append((stat.st_mtime, name, filename, stat))
+    found.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [(filename, stat) for _, _, filename, stat in found]
+
+
+class References(NamedTuple):
+    """Primary preset tags by preset name: car classes (name, color), tracks (sorted), hotkey numbers"""
+
+    classes: dict[str, list[dict]]
+    tracks: dict[str, list[str]]
+    hotkeys: dict[str, list[int]]
+
+
+def preset_references() -> References:
+    """Primary preset tags of every preset, classes, tracks & shortcuts read once"""
+    def preset_of(data) -> str:
+        preset = data.get("preset") if isinstance(data, dict) else None
+        return preset if isinstance(preset, str) else ""
+
+    classes: dict[str, list[dict]] = {}
+    for class_name, data in cfg.user.classes.items():
+        if preset := preset_of(data):
+            classes.setdefault(preset, []).append({"name": class_name, "color": str(data.get("color", ""))})
+    tracks: dict[str, list[str]] = {}
+    for track, data in cfg.user.tracks.items():
+        if preset := preset_of(data):
+            tracks.setdefault(preset, []).append(track)
+    for names in tracks.values():
+        names.sort(key=sort_key)
+    hotkeys: dict[str, list[int]] = {}
+    for option in SHORTCUTS_PRESET:
+        if preset := preset_of(cfg.user.shortcuts.get(option, {})):
+            hotkeys.setdefault(preset, []).append(int(option.rsplit("_", 1)[1]))
+    return References(classes, tracks, hotkeys)
+
+
 class PresetBackend(QObject):
     """Presets page state & actions
 
@@ -173,6 +241,8 @@ class PresetBackend(QObject):
         self._host = host
         self.model = DictListModel(ROLES, self)
         self._cache = SummaryCache()
+        self._jobs = BackgroundJobs(self, "Presets")
+        self._summaries: dict[str, Summary | None] = {}  # filename: content of rows read
         self._rows: list[dict] = []  # every preset, file order
         self._times: dict[str, tuple[float, int]] = {}  # filename: (modified time, size)
         self._search = ""
@@ -198,54 +268,106 @@ class PresetBackend(QObject):
             return
         self._stale = False
         folder = cfg.path.settings
-        names = cfg.preset_files() if os.path.isdir(folder) else []
-        rows, times = [], {}
-        for name in names:
-            filename = f"{name}{FileExt.JSON}"
+        references = preset_references()
+        rows, times, summaries, missing = [], {}, {}, []
+        for filename, stat in list_presets(folder):
             path = os.path.join(folder, filename)
-            try:
-                stat = os.stat(path)
-            except OSError:
-                continue  # "default" listed while folder has no preset
             times[filename] = (stat.st_mtime, stat.st_size)
-            rows.append(self.make_row(filename, path, stat.st_mtime))
+            found, summary = self._cache.lookup(path, (stat.st_mtime_ns, stat.st_size))
+            if found:
+                summaries[filename] = summary
+            else:
+                missing.append(path)  # read in background, row pending meanwhile
+            rows.append(self.make_row(filename, stat.st_mtime, summary, pending=not found, references=references))
         self._cache.keep({os.path.join(folder, filename) for filename in times})
-        self._rows, self._times = rows, times
+        self._rows, self._times, self._summaries = rows, times, summaries
+        if missing:
+            self._read_summaries(missing)
         if self._selected not in times:
             self._selected = cfg.filename.setting if cfg.filename.setting in times else ""
-        self._trash_count = len(list_trash(folder)) if os.path.isdir(folder) else 0
+        self._trash_count = count_trash(folder)  # entries read & checked by Trash page only
         self.update_rows()
         self.presetsChanged.emit()
         self.selectionChanged.emit()
         self.stateChanged.emit()
 
-    def make_row(self, filename: str, path: str, modified: float) -> dict:
+    def _read_summaries(self, paths: list[str]):
+        """Contents of preset files read on a thread, rows updated when done (last refresh only)"""
+        widget_names, module_names = tuple(wctrl.names), tuple(mctrl.names)
+
+        def work() -> list[tuple[str, Stamp | None, Summary | None]]:
+            return [(path, *read_summary(path, widget_names, module_names)) for path in paths]
+
+        self._jobs.run("read presets", work, self._summaries_read, key="summaries")
+
+    def _summaries_read(self, results: list[tuple[str, Stamp | None, Summary | None]]):
+        """Preset contents read: pending rows updated (in place), loaded preset & details told"""
+        read = {}
+        for path, stamp, summary in results:
+            if stamp is not None:
+                self._cache.store(path, stamp, summary)
+            read[os.path.normcase(path)] = summary
+        folder = cfg.path.settings
+        changed = False
+        references = None
+        for number, row in enumerate(self._rows):
+            filename = row["key"]
+            path = os.path.normcase(os.path.join(folder, filename))
+            if not row["pending"] or path not in read:
+                continue
+            if references is None:
+                references = preset_references()
+            self._summaries[filename] = read[path]
+            self._rows[number] = self.make_row(
+                filename, row["modifiedTime"], read[path], pending=False, references=references)
+            changed = True
+        if changed:
+            self.update_rows()
+            self.presetsChanged.emit()
+            self.selectionChanged.emit()
+
+    @property
+    def reading(self) -> bool:
+        """Preset contents being read in background"""
+        return self._jobs.is_busy("summaries")
+
+    def make_row(
+        self, filename: str, modified: float, summary: Summary | None = None, pending: bool = False,
+        references: References | None = None,
+    ) -> dict:
+        """Row of preset, content read (pending: not read yet, shown without content)
+
+        Args:
+            references: primary tags of every preset (read once for all rows), read here if not set.
+        """
         name = filename[:-len(FileExt.JSON)]
-        summary = self._cache.get(path)
+        if references is None:
+            references = preset_references()
         lock = cfg.user.filelock.get(filename)
+        changed = changed_text(modified)
+        if pending:
+            content = changed
+        elif summary is None:
+            content = f"{tr('Unreadable file')}  ·  {changed}"
+        else:
+            content = (f"{changed}  ·  {trm(f'{len(summary.widgets)} overlays')}"
+                       f"  ·  {trm(f'{len(summary.modules)} modules')}")
         return {
             "key": filename,
             "name": name,
             "loaded": filename == cfg.filename.setting,
             "locked": lock is not None,
             "lockVersion": str(lock.get("version", "")) if isinstance(lock, dict) else "",
-            "changedText": changed_text(modified),
+            "changedText": changed,
+            "contentText": content,
             "modifiedTime": modified,
-            "classes": [
-                {"name": class_name, "color": str(data.get("color", ""))}
-                for class_name, data in cfg.user.classes.items()
-                if isinstance(data, dict) and data.get("preset") == name
-            ],
-            "tracks": sorted(
-                (track for track, data in cfg.user.tracks.items() if isinstance(data, dict) and data.get("preset") == name),
-                key=sort_key),
-            "hotkeys": [
-                int(option.rsplit("_", 1)[1]) for option in SHORTCUTS_PRESET
-                if cfg.user.shortcuts.get(option, {}).get("preset") == name
-            ],
+            "classes": [dict(entry) for entry in references.classes.get(name, ())],
+            "tracks": list(references.tracks.get(name, ())),
+            "hotkeys": list(references.hotkeys.get(name, ())),
             "overlays": len(summary.widgets) if summary else 0,
             "modules": len(summary.modules) if summary else 0,
-            "unreadable": summary is None,
+            "unreadable": summary is None and not pending,
+            "pending": pending,
         }
 
     def update_rows(self):
@@ -298,8 +420,7 @@ class PresetBackend(QObject):
         row = next((row for row in self._rows if row["key"] == self._selected), None)
         if row is None:
             return {"found": False}
-        path = os.path.join(cfg.path.settings, row["key"])
-        summary = self._cache.get(path)
+        summary = self._summaries.get(row["key"])  # None while pending: shown once read
         modified, size = self._times.get(row["key"], (0.0, 0))
         overlays = sorted((module_label(name) for name in summary.widgets), key=sort_key) if summary else []
         modules = sorted((module_label(name) for name in summary.modules), key=sort_key) if summary else []
@@ -414,7 +535,8 @@ class PresetBackend(QObject):
         entered_name = strip_filename_extension(name.strip(), FileExt.JSON)  # "Race.json" is "Race"
         if mode == MODE_RENAME and entered_name == filename[:-len(FileExt.JSON)]:
             return ""
-        error = apply_preset_name(name.strip(), mode, filename)
+        with PRESET_FILES:  # file not being read meanwhile
+            error = apply_preset_name(name.strip(), mode, filename)
         if not error:
             self._selected = f"{entered_name}{FileExt.JSON}"
             self.refresh()

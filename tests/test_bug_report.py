@@ -30,7 +30,53 @@ def test_create_report(ui_env, tmp_path):
         config = json.loads(package.read("settings/config.json"))
         assert config["web_dashboard"]["access_code"] == "<removed>"
         assert os.path.expanduser("~") not in package.read("logs/tinypedal.log").decode()
-        assert "Modern Tiny Pedals" in package.read("system-info.txt").decode()
+        assert "NeoPedal" in package.read("system-info.txt").decode()
+
+
+def test_report_dialog_writes_zip_in_background(ui_env, tmp_path, monkeypatch):
+    import time
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    from tinypedal.ui import bug_report_view
+
+    zip_file = tmp_path / "report.zip"
+    questions = []
+    warnings = []
+    monkeypatch.setattr(bug_report_view.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(zip_file), ""))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: questions.append(args[2]) or QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+
+    def saved(dialog) -> None:
+        dialog.show()
+        dialog.save_report()
+        assert dialog.is_saving() and not dialog.button_save.isEnabled()
+        dialog.save_report()  # ignored while saving
+        deadline = time.monotonic() + 10
+        while dialog.is_saving() and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+        assert dialog.button_save.isEnabled()
+
+    dialog = bug_report_view.BugReport(None)
+    dialog.edit_description.setPlainText("overlay froze")
+    saved(dialog)  # dialog accepted (closed)
+    assert len(questions) == 1 and not warnings and str(zip_file) in questions[0]
+    with zipfile.ZipFile(zip_file) as package:
+        assert package.read("description.txt").decode().strip() == "overlay froze"
+    dialog.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # Write error: same warning as before, button enabled again, dialog kept open
+    monkeypatch.setattr(bug_report_view.QFileDialog, "getSaveFileName",
+                        lambda *args, **kwargs: (str(tmp_path / "missing" / "report.zip"), ""))
+    dialog = bug_report_view.BugReport(None)
+    try:
+        saved(dialog)
+        assert len(warnings) == 1 and dialog.isVisible()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_process_monitor():

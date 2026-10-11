@@ -6,9 +6,11 @@ import zipfile
 import pytest
 
 from tinypedal.userfile.preset_package import (
+    MAX_MANIFEST_SIZE,
     PACKAGE_FORMAT,
     export_preset_package,
     import_preset_package,
+    read_manifest,
 )
 
 
@@ -187,18 +189,21 @@ def test_imported_styles_loaded_in_memory(ui_env, tmp_path, source, monkeypatch)
     view.deleteLater()
 
 
-def corrupt_package(tmp_path, flag_encrypted: bool) -> str:
-    """Package with one corrupted (or encrypted flagged) preset entry"""
+def corrupt_package(tmp_path, flag_encrypted: bool, entry: str = "presets/a.json") -> str:
+    """Package with one corrupted (or encrypted flagged) entry"""
     filename = str(tmp_path / "bad.zip")
     with zipfile.ZipFile(filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr("manifest.json", json.dumps({"format": PACKAGE_FORMAT, "version": 1}))
         package.writestr("presets/a.json", json.dumps({"x": list(range(2000))}))
     with zipfile.ZipFile(filename) as package:
-        info = package.getinfo("presets/a.json")
+        info = package.getinfo(entry)
     data = bytearray((tmp_path / "bad.zip").read_bytes())
     if flag_encrypted:
         data[info.header_offset + 6] |= 1
-        data[data.rfind(b"PK\x01\x02") + 8] |= 1
+        directory = data.find(b"PK\x01\x02")  # central directory record of entry
+        while data[directory + 46:directory + 46 + len(info.filename)] != info.filename.encode():
+            directory = data.find(b"PK\x01\x02", directory + 4)
+        data[directory + 8] |= 1
     else:
         start = info.header_offset + 30 + len(info.filename) + len(info.extra)
         for index in range(start + 2, start + 12):
@@ -215,6 +220,29 @@ def test_corrupt_or_encrypted_entry_raises_value_error(tmp_path, flag_encrypted)
     with pytest.raises(ValueError, match=r"presets/a\.json"):
         import_preset_package(corrupt_package(tmp_path, flag_encrypted), f"{target}/")
     assert not list(target.iterdir())
+
+
+@pytest.mark.parametrize("flag_encrypted", (False, True))
+def test_corrupt_or_encrypted_manifest_is_invalid_package(tmp_path, flag_encrypted):
+    """Manifest unreadable: import error message, never an uncaught zlib.error/RuntimeError"""
+    target = tmp_path / "dst"
+    target.mkdir()
+    with pytest.raises(ValueError, match="not a TinyPedal preset package"):
+        import_preset_package(corrupt_package(tmp_path, flag_encrypted, "manifest.json"), f"{target}/")
+    assert not list(target.iterdir())
+
+
+def test_oversized_manifest_never_inflated(tmp_path, monkeypatch):
+    """Zip bomb manifest refused from its declared size, before reading"""
+    filename = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("manifest.json", " " * (MAX_MANIFEST_SIZE + 1))
+    read = []
+    monkeypatch.setattr(zipfile.ZipFile, "read", lambda self, name, pwd=None: read.append(name))
+    monkeypatch.setattr(zipfile.ZipFile, "open", lambda self, name, *args, **kwargs: read.append(name))
+    with zipfile.ZipFile(filename) as package, pytest.raises(ValueError, match="not a TinyPedal preset package"):
+        read_manifest(package)
+    assert not read
 
 
 def test_export_error_keeps_existing_package(tmp_path, source):

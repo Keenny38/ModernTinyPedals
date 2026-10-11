@@ -23,7 +23,8 @@ Module and widget control
 from __future__ import annotations
 
 import logging
-from collections.abc import KeysView
+from collections.abc import Iterable, KeysView
+from time import monotonic
 from types import MappingProxyType
 from typing import Any
 
@@ -31,7 +32,7 @@ from . import module, widget
 from .const_file import ConfigType
 from .plugin_loader import PLUGIN_ERRORS, PLUGIN_PREFIX
 from .setting import cfg
-from .thread_guard import wait_all_stopped
+from .thread_guard import STOP_TIMEOUT, wait_all_stopped
 from .widget._modern import modern_module, uses_modern_design
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ class ModuleControl:
         "_module_pack",
         "_imported_modules",
         "_active_modules",
+        "_stopping",
+        "_stop_deadline",
+        "_stop_timeout",
         "type_id",
         "active_modules",
     )
@@ -74,6 +78,10 @@ class ModuleControl:
         self._module_pack = create_module_pack(target)
         self._imported_modules = MappingProxyType(self._module_pack)
         self._active_modules: dict = {}
+        # Modules signalled to stop by stop_all (reload), not yet seen stopped: name, (name, is_stopped, wait)
+        self._stopping: dict[str, tuple] = {}
+        self._stop_deadline = 0.0
+        self._stop_timeout = STOP_TIMEOUT
         self.type_id = type_id
         self.active_modules: MappingProxyType = MappingProxyType(self._active_modules)
 
@@ -95,6 +103,57 @@ class ModuleControl:
             self.__close_selected(name, discard)
         else:
             self.__close_enabled(discard)
+
+    def stop_all(self, discard: bool = False):
+        """Signal all active modules to stop without waiting (reload: GUI & event loop kept running)
+
+        Stopped ones are polled with stopping(), or waited with wait_stopping(). A module is never
+        started again (start, close) before its previous instance stopped or its stop timeout passed.
+        """
+        busy = bool(self._stopping)
+        timeout = STOP_TIMEOUT
+        for _name in tuple(self._active_modules):
+            timeout = max(timeout, self.__stop_timeout(_name))
+            target = self.__stop_selected(_name, discard)
+            if target is not None:
+                self._stopping[_name] = target
+        if self._stopping:
+            deadline = monotonic() + timeout
+            if busy:  # earlier ones still stopping: never given less time
+                deadline = max(deadline, self._stop_deadline)
+                timeout = max(timeout, self._stop_timeout)
+            self._stop_deadline = deadline
+            self._stop_timeout = timeout
+
+    def stopping(self) -> bool:
+        """Whether a module signalled by stop_all is still running, one past stop timeout logged & forgotten"""
+        if not self._stopping:
+            return False
+        expired = monotonic() >= self._stop_deadline
+        for _name, target in tuple(self._stopping.items()):
+            if target[1]():
+                del self._stopping[_name]
+            elif expired:
+                del self._stopping[_name]
+                logger.error("ERROR: %s not stopped after %ss, continue anyway", _name, self._stop_timeout)
+        return bool(self._stopping)
+
+    def wait_stopping(self, names: Iterable[str] | None = None) -> bool:
+        """Wait (bounded by stop timeout of stop_all) until modules signalled by stop_all stopped
+
+        Args:
+            names: module names, all modules signalled if None.
+
+        Returns:
+            True if all stopped, False if gave up on any (error logged).
+        """
+        targets = [
+            self._stopping.pop(_name) for _name in (tuple(self._stopping) if names is None else names)
+            if _name in self._stopping
+        ]
+        if not targets:
+            return True
+        return wait_all_stopped(targets, self._stop_timeout, self._stop_deadline)
 
     def reload(self, name: str = "", discard: bool = False):
         """Reload module
@@ -148,6 +207,8 @@ class ModuleControl:
     def __start_selected(self, name: str):
         """Start selected module, a module failing to start is skipped (error logged)"""
         if cfg.user.setting[name]["enable"] and name not in self._active_modules:
+            if name in self._stopping:  # previous instance still stopping (reload)
+                self.wait_stopping((name,))
             # Create module instance and add to dict
             try:
                 if self.type_id == ConfigType.WIDGET and uses_modern_design(cfg, name):
@@ -174,17 +235,32 @@ class ModuleControl:
     def __close_enabled(self, discard: bool = False):
         """Close all enabled module, stop all first then wait (bounded, shared deadline) until closed"""
         stopping = []
+        timeout = STOP_TIMEOUT
         for _name in tuple(self._active_modules):
+            timeout = max(timeout, self.__stop_timeout(_name))
             target = self.__stop_selected(_name, discard)
             if target is not None:
                 stopping.append(target)
-        wait_all_stopped(stopping)  # wait finish
+        if self._stopping:  # signalled by stop_all earlier (quit during reload)
+            stopping.extend(self._stopping.values())
+            self._stopping.clear()
+            timeout = max(timeout, self._stop_deadline - monotonic())
+        wait_all_stopped(stopping, timeout)  # wait finish
 
     def __close_selected(self, name: str, discard: bool = False):
         """Close selected module, wait (bounded) until closed"""
+        timeout = self.__stop_timeout(name)
         target = self.__stop_selected(name, discard)
         if target is not None:
-            wait_all_stopped((target,))  # wait finish
+            wait_all_stopped((target,), timeout)  # wait finish
+        elif name in self._stopping:  # signalled by stop_all earlier
+            self.wait_stopping((name,))
+
+    def __stop_timeout(self, name: str) -> float:
+        """Longest wait for active module to stop: its own stop work may take longer (saving), never started
+        again while previous instance still running"""
+        timeout = getattr(self._active_modules.get(name), "STOP_TIMEOUT", STOP_TIMEOUT)
+        return timeout if isinstance(timeout, (int, float)) else STOP_TIMEOUT
 
     def __stop_selected(self, name: str, discard: bool = False) -> tuple | None:
         """Signal selected module to stop, without waiting

@@ -134,9 +134,9 @@ class AppSettings(BaseDialog):
         if isinstance(page, DialogPage):  # in-app page title
             page.title = tr(TITLE)
             page.show_modified()
-        source = self.view.source()
-        self.view.setSource(QUrl())
-        self.view.setSource(source)
+        from .quick import reload_in_language
+
+        reload_in_language(self.view)
 
     def closeEvent(self, event):
         if self.is_modified():
@@ -205,8 +205,8 @@ class AppSettings(BaseDialog):
         from .menu import menu_reload_preset
 
         if restart and self.confirm_operation(
-                title="Restart Modern Tiny Pedals",
-                message=f"<b>{', '.join(restart)}</b>: restart Modern Tiny Pedals now to apply?"):
+                title="Restart NeoPedal",
+                message=f"<b>{', '.join(restart)}</b>: restart NeoPedal now to apply?"):
             window = self.window()
             restart_app = getattr(window, "restart_app", None) if window is not self else None
             run_after_saving(restart_app if callable(restart_app) else loader.restart)

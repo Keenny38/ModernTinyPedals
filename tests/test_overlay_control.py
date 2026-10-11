@@ -32,10 +32,12 @@ def overlay(ui_env, monkeypatch):
     monkeypatch.setattr(overlay_control, "overlay_signal", SimpleNamespace(**{
         name: recorder(calls, name) for name in ("hidden", "context", "locked", "paused", "iconify")}))
     monkeypatch.setattr(overlay_control, "app_signal", SimpleNamespace(reload=recorder(calls, "reload")))
-    for name in ("active", "paused", "resets", "hidden", "session_type", "in_pits"):
+    for name in ("active", "shown", "paused", "resets", "hidden", "session_type", "in_pits"):
         monkeypatch.setattr(realtime_state, name, getattr(realtime_state, name))
     game = {"active": True, "paused": False, "resets": 3, "session_type": 4, "in_pits": False,
-            "track": "Spa", "class": "GT3"}
+            "track": "Spa", "class": "GT3", "vehicles": 20, "on_air": False}
+    monkeypatch.setattr(overlay_control, "streamoverlay", SimpleNamespace(on_air=lambda: game["on_air"]))
+    monkeypatch.setattr(api.read.vehicle, "total_vehicles", lambda: game["vehicles"], raising=False)
     monkeypatch.setattr(api.read.state, "active", lambda: game["active"], raising=False)
     monkeypatch.setattr(api.read.state, "paused", lambda: game["paused"], raising=False)
     monkeypatch.setattr(api.read.state, "resets", lambda: game["resets"], raising=False)
@@ -67,6 +69,38 @@ def test_state_read_from_game(overlay):
     run_loop(control)
     assert ("hidden", True) in calls and ("paused", True) in calls
     assert realtime_state.session_type == -1
+
+
+def test_spectating_shown_while_streamed(overlay):
+    """Spectating or replay (game not driven): overlays shown & updated only while a stream source is on air"""
+    from tinypedal.setting import cfg
+
+    control, game, calls = overlay
+    cfg.overlay["auto_hide"] = True
+    cfg.application["enable_auto_load_preset"] = True
+    game["active"] = False
+    run_loop(control)
+    assert ("hidden", True) in calls and ("paused", True) in calls and not realtime_state.shown
+    calls.clear()
+    game["on_air"] = True  # layout source shown in OBS
+    run_loop(control)
+    assert ("hidden", False) in calls and ("paused", False) in calls
+    assert realtime_state.shown and not realtime_state.active  # data modules still idle
+    assert realtime_state.session_type == -1 and ("reload", False) not in calls  # no preset auto loading
+    calls.clear()
+    game["paused"] = True  # back to game menus: data no longer updating
+    run_loop(control)
+    assert ("hidden", True) in calls and ("paused", True) in calls and not realtime_state.shown
+    calls.clear()
+    game["paused"], game["vehicles"] = False, 0  # no session
+    run_loop(control)
+    assert calls == []
+    game["vehicles"] = 20
+    run_loop(control)
+    calls.clear()
+    game["on_air"] = False  # source stopped
+    run_loop(control)
+    assert ("hidden", True) in calls and ("paused", True) in calls
 
 
 def test_state_signals_sent_on_change_only(overlay):

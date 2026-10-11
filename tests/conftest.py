@@ -3,12 +3,18 @@
 import faulthandler
 import os
 import sys
+import tempfile
 
 import pytest
 
 # Run from repository root, headless Qt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Global config folder (and its legacy folder migration) in a temp folder, before any app import
+_USER_BASE = tempfile.mkdtemp(prefix="tp_user_base_")
+for _name in ("APPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+    os.environ[_name] = os.path.join(_USER_BASE, _name.lower())
+    os.makedirs(os.environ[_name])
 
 from PySide6.QtWidgets import QApplication
 
@@ -155,6 +161,10 @@ def ui_env(monkeypatch, tmp_path):
 
     api.connect()
     monkeypatch.setattr(api, "read", _FakeReader())
+    # No game found in Steam libraries: pages never read results files & profile of this computer
+    from tinypedal.process import results_file
+
+    monkeypatch.setattr(results_file, "find_results_folders", lambda libraries=None: {})
     saved = []
     monkeypatch.setattr(Setting, "save", lambda self, *args, **kwargs: saved.append(kwargs.get("config_type", "setting")))
     return saved

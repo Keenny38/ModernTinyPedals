@@ -21,7 +21,8 @@ Spectate page backend (qml/Spectate.qml): drivers of the session, spectated driv
 
 Drivers are read from the game twice a second, only while the page is shown and data is not paused.
 Rows are synced in place (see DictListModel.sync): delegates, scroll position & animations are kept,
-and the page is told only about values that changed. Spectated driver is saved as its slot id
+and the page is told only about values that changed (spectated driver card, class chips & counts each
+have their own signal, sent only when their value changed). Spectated driver is saved as its slot id
 (api player_index), which the game keeps while cars join or leave.
 """
 
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any
 
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
@@ -39,11 +41,12 @@ from ...formatter import random_color_class
 from ...i18n import tr
 from ...module_control import mctrl
 from ...setting import cfg
-from ..module_view import sort_key
+from ..module_view import sort_key as fold_text
 from .game_pictures import LogoCache, car_picture_url, notifier
 from .models import DictListModel
 
 logger = logging.getLogger(__name__)
+sort_key = lru_cache(maxsize=1024)(fold_text)  # same names & cars folded at every poll
 
 POLL_MS = 500
 NO_DRIVER = -1  # player_index: no driver spectated
@@ -53,6 +56,7 @@ ROLES = (
     "key", "slot", "place", "name", "vehicle", "carClass", "classColor",
     "bestLap", "lastLap", "status", "player", "spectated", "brandLogo",
 )
+CLASS_ROLES = ("key", "label", "color", "count")
 STATUS_GARAGE = "garage"
 STATUS_PIT = "pit"
 
@@ -107,7 +111,9 @@ class SpectateBackend(QObject):
         reader: game data reader (api.read), read when needed: API restarts replace it.
     """
 
-    driversChanged = Signal()  # counts, classes, spectated driver card
+    spectatedChanged = Signal()  # spectated driver card
+    classesChanged = Signal()  # class chips
+    countsChanged = Signal()  # drivers in session & shown
     stateChanged = Signal()  # spectate mode on or off, spectated slot
     filterChanged = Signal()
 
@@ -115,7 +121,12 @@ class SpectateBackend(QObject):
         super().__init__(parent)
         self._reader = reader
         self.model = DictListModel(ROLES, self)
+        self.class_model = DictListModel(CLASS_ROLES, self)  # chips kept while their values change
         self._drivers: list[dict] = []  # every car, game order
+        self._spectated: dict = {"found": False, "slot": NO_DRIVER}
+        self._classes: list[dict] = []
+        self._counts = (0, 0)  # drivers in session & shown
+        self._picture = ("", "")  # vehicle of spectated driver card & its picture URL
         self._words: tuple[str, ...] = ()
         self._search = ""
         self._class = ""
@@ -158,8 +169,10 @@ class SpectateBackend(QObject):
     @Slot()
     def pictures_changed(self):
         """Logos & pictures fetched from game meanwhile"""
+        self._picture = ("", "")  # car picture of card looked up again
         if self._drivers:
             self.set_drivers([{**row, "brandLogo": self.logos.brand(row["vehicle"])} for row in self._drivers])
+        self._update_spectated()
 
     def set_drivers(self, drivers: list[dict]):
         """Drivers of session, rows updated in place"""
@@ -170,7 +183,8 @@ class SpectateBackend(QObject):
             self._class = ""  # class left the session
             self.filterChanged.emit()
         self._sync_rows()
-        self.driversChanged.emit()
+        self._update_spectated()
+        self._update_classes()
 
     def _sync_rows(self):
         slot = self.spectated_slot()
@@ -180,10 +194,45 @@ class SpectateBackend(QObject):
         ]
         rows.sort(key=(lambda row: (sort_key(row["name"]), row["place"])) if self._sort_name else place_key)
         self.model.sync(rows)
+        counts = (len(self._drivers), self.model.rowCount())
+        if counts != self._counts:
+            self._counts = counts
+            self.countsChanged.emit()
+
+    def _update_spectated(self):
+        """Spectated driver card, page told only if it changed (not on laps of other drivers)"""
+        slot = self.spectated_slot()
+        row = next((row for row in self._drivers if row["slot"] == slot), None) if self._enabled else None
+        card: dict[str, Any]
+        if row is None:
+            card = {"found": False, "slot": slot if self._enabled else NO_DRIVER}
+        else:
+            if self._picture[0] != row["vehicle"]:
+                self._picture = (row["vehicle"], car_picture_url(row["vehicle"], large=True))
+            card = {"found": True, **row, "carPicture": self._picture[1]}
+        if card != self._spectated:
+            self._spectated = card
+            self.spectatedChanged.emit()
+
+    def _update_classes(self):
+        """Class filter chips: classes of session with their number of cars, 2 classes or more"""
+        counts: dict[str, int] = {}
+        for row in self._drivers:
+            counts[row["carClass"]] = counts.get(row["carClass"], 0) + 1
+        chips = [] if len(counts) < 2 else [
+            {"key": name, "label": name or tr("Unknown"), "color": class_color(name), "count": count}
+            for name, count in sorted(counts.items(), key=lambda item: sort_key(item[0]))
+        ]
+        if chips != self._classes:
+            self._classes = chips
+            self.class_model.sync(chips)
+            self.classesChanged.emit()
 
     def _accepts(self, row: dict) -> bool:
         if self._class and row["carClass"] != self._class:
             return False
+        if not self._words:
+            return True
         text = sort_key(f"{row['name']} {row['vehicle']} {row['carClass']}")
         return all(word in text for word in self._words)
 
@@ -219,35 +268,28 @@ class SpectateBackend(QObject):
     def spectatedSlot(self) -> int:
         return self.spectated_slot() if self._enabled else NO_DRIVER
 
-    @Property(dict, notify=driversChanged)
+    @Property(dict, notify=spectatedChanged)
     def spectated(self) -> dict:
         """Spectated driver card: found False if no driver spectated or not in session"""
-        slot = self.spectated_slot()
-        row = next((row for row in self._drivers if row["slot"] == slot), None) if self._enabled else None
-        if row is None:
-            return {"found": False, "slot": slot if self._enabled else NO_DRIVER}
-        return {"found": True, **row, "carPicture": car_picture_url(row["vehicle"], large=True)}
+        return self._spectated
 
-    @Property(int, notify=driversChanged)
+    @Property(int, notify=countsChanged)
     def driverCount(self) -> int:
-        return len(self._drivers)
+        return self._counts[0]
 
-    @Property(int, notify=driversChanged)
+    @Property(int, notify=countsChanged)
     def shownCount(self) -> int:
-        return self.model.rowCount()
+        return self._counts[1]
 
-    @Property(list, notify=driversChanged)
+    @Property(list, notify=classesChanged)
     def classes(self) -> list[dict]:
         """Class filter chips: classes of session with their number of cars, 2 classes or more"""
-        counts: dict[str, int] = {}
-        for row in self._drivers:
-            counts[row["carClass"]] = counts.get(row["carClass"], 0) + 1
-        if len(counts) < 2:
-            return []
-        return [
-            {"key": name, "label": name or tr("Unknown"), "color": class_color(name), "count": count}
-            for name, count in sorted(counts.items(), key=lambda item: sort_key(item[0]))
-        ]
+        return self._classes
+
+    @Property(QObject, constant=True)
+    def classModel(self) -> QObject:
+        """Class chips as rows (key, label, color, count), synced in place: chips kept"""
+        return self.class_model
 
     @Property(str, notify=filterChanged)
     def searchText(self) -> str:
@@ -269,7 +311,6 @@ class SpectateBackend(QObject):
     def _filter_changed(self):
         self._sync_rows()
         self.filterChanged.emit()
-        self.driversChanged.emit()
 
     @Slot(str)
     def setSearch(self, text: str):
@@ -310,7 +351,8 @@ class SpectateBackend(QObject):
                 self._followed = ""
         self.stateChanged.emit()
         self._sync_rows()
-        self.driversChanged.emit()
+        self._update_spectated()
+        self._update_classes()  # class colors may have changed
 
     @Slot(bool)
     def setEnabled(self, enabled: bool):

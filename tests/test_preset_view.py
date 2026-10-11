@@ -4,6 +4,7 @@ names, delete...), files read only when changed & while shown, Qt Quick page"""
 import json
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -16,6 +17,16 @@ from tinypedal.setting import cfg
 def flush():
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QCoreApplication.processEvents()
+
+
+def wait_read(page, timeout: float = 10.0):
+    """Preset contents read in background handed to the page"""
+    deadline = time.monotonic() + timeout
+    while page.backend.reading and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    QCoreApplication.processEvents()
+    assert not page.backend.reading
 
 
 def write_preset(name: str, data: dict | None = None, age: float = 0.0):
@@ -44,6 +55,7 @@ def page(ui_env, monkeypatch):
     cfg.user.filelock = {}
     widget = preset_view.PresetList(None)
     widget.backend.set_active(True)
+    wait_read(widget)
     yield widget
     widget.close()
     widget.deleteLater()
@@ -72,7 +84,11 @@ def test_unreadable_preset_marked(page):
     with open(f"{cfg.path.settings}broken.json", "w", encoding="utf-8") as file:
         file.write("{not json")
     page.refresh()
+    assert rows(page)["broken"]["pending"] and not rows(page)["broken"]["unreadable"]  # read in background
+    assert rows(page)["broken"]["contentText"] == rows(page)["broken"]["changedText"]
+    wait_read(page)
     assert rows(page)["broken"]["unreadable"] and rows(page)["broken"]["overlays"] == 0
+    assert rows(page)["broken"]["contentText"].startswith("Unreadable file")
 
 
 def test_load_and_auto_load(page):
@@ -116,6 +132,29 @@ def test_primary_tags_for_class_and_track(page):
     assert cfg.user.classes["GT3"]["preset"] == "" and cfg.user.tracks["Spa"]["preset"] == ""
     page.backend.setPrimaryClass("practice.json", "Unknown class")  # ignored
     assert "Unknown class" not in cfg.user.classes
+
+
+def test_tags_of_every_preset_read_once(page, monkeypatch):
+    from tinypedal.ui.quick import preset_backend
+
+    cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": "race"}, "LMP2": {"color": "#0000FF", "preset": "race"},
+                        "HY": {"color": "#FF0000", "preset": "practice"}, "Bad": "not a dict"}
+    cfg.user.tracks = {"Spa": {"preset": "race"}, "Monza": {"preset": "race"}, "Imola": {"preset": ["odd"]}}
+    calls = []
+    original = preset_backend.preset_references
+    monkeypatch.setattr(preset_backend, "preset_references", lambda: calls.append(1) or original())
+    page.refresh()
+    assert len(calls) == 1  # once per refresh, not once per preset
+    race, practice = rows(page)["race"], rows(page)["practice"]
+    assert [entry["name"] for entry in race["classes"]] == ["GT3", "LMP2"] and race["tracks"] == ["Monza", "Spa"]
+    assert practice["classes"] == [{"name": "HY", "color": "#FF0000"}] and practice["tracks"] == []
+    assert page.backend.trashCount == 0
+    page.backend.remove("practice.json")
+    page.refresh()
+    assert page.backend.trashCount == 1  # trash entries counted, not read
+    os.makedirs(os.path.join(cfg.path.settings, "trash", "not an entry"))
+    page.refresh()
+    assert page.backend.trashCount == 1
 
 
 def test_hotkeys_in_row(page):
@@ -207,7 +246,8 @@ def test_open_pages(page, monkeypatch):
 
     opened = []
     monkeypatch.setattr(preset_view, "PresetCompare", lambda *args, **kwargs: type(
-        "Shown", (), {"show": lambda self: opened.append(("compare", kwargs["preset_b"]))})())
+        "Shown", (), {"show": lambda self: opened.append(("compare", kwargs["preset_b"])),
+                      "shown_dialog": lambda self: self})())
     for name in ("PresetTransfer", "RestoreBackup", "PresetTrash"):
         monkeypatch.setattr(preset_view, name, lambda *args, _name=name: type(
             "Shown", (), {"open": lambda self: opened.append(_name)})())
@@ -215,6 +255,22 @@ def test_open_pages(page, monkeypatch):
     for name in ("transfer", "restore", "trash"):
         page.open_page(name)
     assert opened == [("compare", "race.json"), "PresetTransfer", "RestoreBackup", "PresetTrash"]
+
+
+def test_compare_already_open_switched_to_presets_asked(page, monkeypatch):
+    from PySide6.QtWidgets import QComboBox
+
+    from tinypedal.ui import preset_view
+
+    open_compare = SimpleNamespace(combo_a=QComboBox(), combo_b=QComboBox())
+    for combo in (open_compare.combo_a, open_compare.combo_b):
+        combo.addItems([cfg.filename.setting, "old.json", "race.json"])
+    open_compare.combo_b.setCurrentText("old.json")
+    monkeypatch.setattr(preset_view, "PresetCompare", lambda *args, **kwargs: type(
+        "Copy", (), {"show": lambda self: None, "shown_dialog": lambda self: open_compare})())
+    page.open_page("compare", "race.json")
+    assert open_compare.combo_a.currentText() == cfg.filename.setting
+    assert open_compare.combo_b.currentText() == "race.json"
 
 
 def test_files_read_while_shown_and_only_when_changed(page, monkeypatch):
@@ -230,7 +286,30 @@ def test_files_read_while_shown_and_only_when_changed(page, monkeypatch):
     page.refresh()
     assert parsed == [] and rows(page)["race"]["overlays"] == 1  # hidden: read when shown
     page.backend.set_active(True)
-    assert len(parsed) == 1 and rows(page)["race"]["overlays"] == 2
+    assert rows(page)["race"]["pending"] and rows(page)["race"]["overlays"] == 0  # read in background
+    wait_read(page)
+    assert len(parsed) == 1 and rows(page)["race"]["overlays"] == 2 and not rows(page)["race"]["pending"]
+    assert rows(page)["race"]["contentText"].endswith("2 overlays  ·  0 modules")
+
+
+def test_contents_read_off_ui_thread(page, monkeypatch):
+    """Changed presets read on a job thread, details & loaded card told when done"""
+    import threading
+
+    from tinypedal.ui.quick import preset_backend
+
+    threads = []
+    read = preset_backend.read_summary
+    monkeypatch.setattr(preset_backend, "read_summary", lambda *args: threads.append(threading.current_thread()) or read(*args))
+    write_preset("race.json", {"speedometer": {"enable": True}, "fuel": {"enable": True}})
+    page.backend.select("race.json")
+    told = []
+    page.backend.selectionChanged.connect(lambda: told.append(page.backend.selected["overlays"]))
+    page.refresh()
+    assert page.backend.selected["pending"] and page.backend.selected["overlayNames"] == []
+    wait_read(page)
+    assert threads and all(thread is not threading.main_thread() for thread in threads)
+    assert told[-1] == 2 and page.backend.selected["overlayNames"] == ["Fuel", "Speedometer"]
 
 
 def test_changed_text():

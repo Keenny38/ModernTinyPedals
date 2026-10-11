@@ -186,6 +186,7 @@ struct Runtime {
     uintptr_t next_handle = 0x1000;
     int spaces_alive = 0;
     bool refuse_extra_layers = false;
+    bool game_error = false;  // every frame refused (game's own error: tracking loss)
     uint32_t max_layers = 16;
     bool limit_error = false;  // more layers than max_layers submitted
     bool rect_error = false;  // imageRect outside swapchain
@@ -425,6 +426,9 @@ XRAPI_ATTR XrResult XRAPI_CALL rt_xrDestroySpace(XrSpace) {
 XRAPI_ATTR XrResult XRAPI_CALL rt_xrEndFrame(XrSession, const XrFrameEndInfo* info) {
     ++runtime.end_frame_calls;
     runtime.submitted_counts.push_back(info->layerCount);
+    if (runtime.game_error) {
+        return XR_ERROR_POSE_INVALID;
+    }
     if (info->layerCount > runtime.max_layers) {
         runtime.limit_error = true;
         return XR_ERROR_LAYER_LIMIT_EXCEEDED;
@@ -1253,6 +1257,28 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
     CHECK(end_frame(layer, session) == 2);
     CHECK(header.layer_state == TPVR_LAYER_ACTIVE);
     check_quads(app, 1, true, bgra, linear);
+
+    // Game's own error: frame refused with or without the quad, error returned to the game, overlay kept
+    runtime.game_error = true;
+    {
+        static const XrCompositionLayerProjection projection = [] {
+            XrCompositionLayerProjection value = {};
+            value.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+            return value;
+        }();
+        const XrCompositionLayerBaseHeader* game_layers[1] = {
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection)};
+        XrFrameEndInfo info = {};
+        info.type = XR_TYPE_FRAME_END_INFO;
+        info.displayTime = 1;
+        info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        info.layerCount = 1;
+        info.layers = game_layers;
+        CHECK(layer.get<PFN_xrEndFrame>("xrEndFrame")(session, &info) == XR_ERROR_POSE_INVALID);
+    }
+    runtime.game_error = false;
+    CHECK(end_frame(layer, session) == 2);
+    CHECK(header.layer_state == TPVR_LAYER_ACTIVE);
 
     // Runtime refuses the quad: frame submitted again unchanged, overlay stopped for session
     runtime.refuse_extra_layers = true;

@@ -32,6 +32,7 @@ import sys
 import zipfile
 from contextlib import suppress
 from time import localtime, strftime
+from typing import Any, NamedTuple
 
 from . import version_check
 from .const_app import APP_NAME
@@ -61,6 +62,8 @@ def redact_setting(data):
             key: ("<removed>" if key in SECRET_KEYS and value else redact_setting(value))
             for key, value in data.items()
         }
+    if isinstance(data, list):  # copied too: snapshot written on another thread
+        return [redact_setting(value) for value in data]
     if isinstance(data, str):
         return redact_text(data)
     return data
@@ -110,14 +113,41 @@ def read_log(path: str) -> str:
         return redact_text(file.read().decode("utf-8", errors="replace"))
 
 
-def create_bug_report(zip_filename: str, session_log: str = "", description: str = "") -> list[str]:
+class ReportSnapshot(NamedTuple):
+    """App state of bug report, taken on GUI thread (screens, live settings), zip written from it on any thread"""
+
+    system_info: str
+    config_path: str
+    settings: dict[str, Any]  # file name in zip: redacted copy of setting
+
+
+def snapshot_report() -> ReportSnapshot:
+    """Take bug report state (GUI thread): system info & copies of settings"""
+    sources = {
+        "config.json": cfg.user.config,
+        "shortcuts.json": cfg.user.shortcuts,
+        f"preset/{cfg.filename.setting}": cfg.user.setting,
+    }
+    settings = {}
+    for name, data in sources.items():
+        try:
+            settings[name] = redact_setting(dict(data))
+        except (AttributeError, TypeError, ValueError, RuntimeError) as error:  # changed while copied
+            logger.warning("BUG REPORT: unable to add %s: %s", name, error)
+    return ReportSnapshot(system_info(), cfg.path.config, settings)
+
+
+def create_bug_report(
+    zip_filename: str, session_log: str = "", description: str = "", snapshot: ReportSnapshot | None = None,
+) -> list[str]:
     """Create bug report zip, returns added file names, raise OSError on error
 
-    Written to temporary file, then replaces target: no truncated zip left on error.
+    Written to temporary file, then replaces target: no truncated zip left on error. Without snapshot
+    (taken by snapshot_report on GUI thread), state is taken here: GUI thread only.
     """
     temp_name = f"{zip_filename}.part"
     try:
-        added = write_bug_report(temp_name, session_log, description)
+        added = write_bug_report(temp_name, session_log, description, snapshot)
         os.replace(temp_name, zip_filename)
     except BaseException:
         with suppress(OSError):
@@ -127,17 +157,21 @@ def create_bug_report(zip_filename: str, session_log: str = "", description: str
     return added
 
 
-def write_bug_report(zip_filename: str, session_log: str, description: str) -> list[str]:
+def write_bug_report(
+    zip_filename: str, session_log: str, description: str, snapshot: ReportSnapshot | None = None,
+) -> list[str]:
     """Write bug report zip, returns added file names"""
+    if snapshot is None:
+        snapshot = snapshot_report()
     added: list[str] = []
-    config_path = cfg.path.config
+    config_path = snapshot.config_path
     with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
 
         def add_text(name: str, text: str):
             package.writestr(name, text)
             added.append(name)
 
-        add_text("system-info.txt", system_info())
+        add_text("system-info.txt", snapshot.system_info)
         if description.strip():
             add_text("description.txt", description.strip() + "\n")
         if session_log:
@@ -148,15 +182,10 @@ def write_bug_report(zip_filename: str, session_log: str, description: str) -> l
                     add_text(f"logs/{log_name}", read_log(os.path.join(config_path, log_name)))
                 except OSError as error:
                     logger.warning("BUG REPORT: unable to read %s: %s", log_name, error)
-        settings = {
-            "config.json": cfg.user.config,
-            "shortcuts.json": cfg.user.shortcuts,
-            f"preset/{cfg.filename.setting}": cfg.user.setting,
-        }
-        for name, data in settings.items():
+        for name, data in snapshot.settings.items():
             try:
-                add_text(f"settings/{name}", json.dumps(redact_setting(dict(data)), indent=4, default=str))
-            except (AttributeError, TypeError, ValueError, RuntimeError) as error:  # changed while copied
+                add_text(f"settings/{name}", json.dumps(data, indent=4, default=str))
+            except (TypeError, ValueError) as error:
                 logger.warning("BUG REPORT: unable to add %s: %s", name, error)
     return added
 

@@ -27,12 +27,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import weakref
 
-from PySide6.QtCore import Property, QEvent, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QEvent, QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QPalette, QSurfaceFormat
-from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlIncubationController
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QApplication, QWidget
+from shiboken6 import isValid
 
 from ...i18n import tr, trm
 from .. import UIScaler
@@ -247,6 +249,23 @@ def translator_copy(engine: QQmlEngine, translator: Translator) -> QObject:
     return copy
 
 
+def reload_in_language(view: QQuickWidget) -> None:
+    """QML page loaded again in current app language (backend & pending edits kept)
+
+    i18n holds the translation table of the language when it was made: replaced by a new one first,
+    old one (& its translator) deleted.
+    """
+    source = view.source()
+    view.setSource(QUrl())
+    context = view.rootContext()
+    old = context.contextProperty("i18n")
+    context.setContextProperty("i18n", translator_copy(view.engine(), Translator(view)))
+    owner = old if isinstance(old, Translator) else old.parent() if isinstance(old, QObject) else None
+    if isinstance(owner, Translator):
+        owner.deleteLater()
+    view.setSource(source)
+
+
 class PageState(QObject):
     """Page shown on screen or not, "pageState.active" in QML: timers & animations stop while hidden
 
@@ -305,6 +324,62 @@ _PAGE_STATE_EVENTS = frozenset((
     QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.WindowStateChange, QEvent.Type.ParentChange,
 ))
 
+INCUBATE_MS = 6  # QML objects built per event loop pass while some are incubating (a frame stays responsive)
+
+
+class _IncubationController(QQmlIncubationController):
+    """Tells its Incubator when QML objects wait to be built (held weakly: no reference cycle)"""
+
+    def __init__(self, incubator: Incubator):
+        super().__init__()
+        self._incubator = weakref.ref(incubator)
+
+    def incubatingObjectCountChanged(self, count: int):
+        incubator = self._incubator()
+        if incubator is not None and isValid(incubator):  # page being deleted: nothing left to drive
+            with contextlib.suppress(RuntimeError):  # timer already deleted
+                incubator.count_changed(count)
+
+
+class Incubator(QObject):
+    """Asynchronous QML incubation of a QQuickWidget page (Loader { asynchronous: true }, Repeater delegates of an
+    asynchronous Loader...): built a few milliseconds per event loop pass instead of all at once
+
+    A QQuickWidget engine has no incubation controller (unlike QQuickView): asynchronous loaders were built at once.
+    Child of the view: controller (engine holds a plain pointer to it) lives as long as the view, the engine (also
+    deleted with the view) and the controller each let go of the other when deleted first.
+    """
+
+    def __init__(self, view: QQuickWidget):
+        super().__init__(view)
+        self._timer = QTimer(self)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self.incubate)
+        self.controller = _IncubationController(self)
+        view.engine().setIncubationController(self.controller)
+
+    @property
+    def active(self) -> bool:
+        """Objects being incubated"""
+        return self._timer.isActive()
+
+    def count_changed(self, count: int):
+        if count and not self._timer.isActive():
+            self._timer.start()
+        elif not count:
+            self._timer.stop()
+
+    @Slot()
+    def incubate(self):
+        self.controller.incubateFor(INCUBATE_MS)
+
+
+def install_incubator(view: QQuickWidget) -> Incubator | None:
+    """Incubation controller set on view engine (before setSource), None if the engine already has one"""
+    if view.engine().incubationController() is not None:
+        return None
+    return Incubator(view)
+
 
 def create_quick_view(
     parent: QWidget,
@@ -338,6 +413,7 @@ def create_quick_view(
         root_context.setContextProperty(name, value)
     from .preview_provider import install_provider
     install_provider(engine)  # overlay pictures (image://overlaypreview/), registered before loading
+    install_incubator(view)  # asynchronous loaders really asynchronous, set before loading
     view.setSource(QUrl.fromLocalFile(os.path.join(QML_FOLDER, qml_name)))
     for error in view.errors():
         logger.error("QML: %s", error.toString())

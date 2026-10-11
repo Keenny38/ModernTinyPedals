@@ -338,3 +338,83 @@ def test_brand_add_delete_sort_reset(brand_editor):
     assert table.rowCount() == 2
     brand_editor.reset_setting()
     assert table.rowCount() == len(cfg.default.brands)
+
+
+# --- Bulk actions: one undo step, table read back once (not after every cell)
+def count_reads(editor, monkeypatch) -> list:
+    """Table read backs for undo history"""
+    reads: list = []
+    original = editor._undo_capture
+
+    def reading():
+        reads.append(1)
+        return original()
+
+    monkeypatch.setattr(editor, "_undo_capture", reading)
+    return reads
+
+
+def test_brand_add_from_session_is_one_undo_step(brand_editor, monkeypatch):
+    from tinypedal.api_control import api
+
+    api.read.vehicle.total_vehicles = lambda: 40
+    api.read.vehicle.vehicle_name = lambda index=None: f"Car #{index}"
+    api.read.vehicle.vehicle_model = lambda index=None: "Model"
+    reads = count_reads(brand_editor, monkeypatch)
+    brand_editor.add_brand()
+    table = brand_editor.table_brands
+    assert table.rowCount() == 41 and brand_editor.is_modified()
+    assert len(reads) <= 2  # was once per cell (O(n²) on big tables)
+    brand_editor.undo()
+    assert column_texts(table, 0) == ["Ferrari 296 #51"]
+    brand_editor.redo()
+    assert table.rowCount() == 41
+    brand_editor.add_brand()  # all listed already: new name entry
+    assert column_texts(table, 0)[-1] == "New Vehicle Name 1"
+
+
+def test_batch_replace_is_one_undo_step(brand_editor, monkeypatch):
+    from tinypedal.ui._common import TableBatchReplace
+
+    brand_editor.parse_brand_data([{"desc": f"Car #{index}", "manufacturer": "Acme"} for index in range(30)])
+    table = brand_editor.table_brands
+    before = column_texts(table, 1)
+    reads = count_reads(brand_editor, monkeypatch)
+    dialog = TableBatchReplace(brand_editor, {"Brand name": 1}, table)
+    dialog.search_selector.setCurrentText("Acme")
+    dialog.replace_entry.setText("Globex")
+    dialog.replacing()
+    assert column_texts(table, 1).count("Globex") == 30
+    assert len(reads) <= 2
+    brand_editor.undo()
+    assert column_texts(table, 1) == before
+    dialog.close()
+
+
+def test_class_and_compound_add_from_session_one_undo_step(compound_editor, monkeypatch):
+    from tinypedal.api_control import api
+
+    api.read.vehicle.total_vehicles = lambda: 3
+    api.read.tyre.compound_class = lambda index=None: (f"C{index}", f"C{index}", "Wet", "Wet")
+    reads = count_reads(compound_editor, monkeypatch)
+    compound_editor.add_compound()
+    table = compound_editor.table_compounds
+    assert column_texts(table, 0)[0] == "Soft" and table.rowCount() == 5  # Soft + C0..C2 + Wet
+    assert table.currentRow() == 4  # last added selected
+    assert len(reads) <= 2
+    compound_editor.undo()
+    assert column_texts(table, 0) == ["Soft"]
+
+
+def test_brake_add_from_session_one_undo_step(brake_editor, monkeypatch):
+    from tinypedal.api_control import api
+
+    api.read.vehicle.total_vehicles = lambda: 2
+    api.read.vehicle.class_name = lambda index=None: "LMP2"
+    api.read.vehicle.vehicle_name = lambda index=None: f"Oreca {index}"
+    rows = brake_editor.table_brakes.rowCount()
+    brake_editor.add_brake()
+    assert brake_editor.table_brakes.rowCount() > rows
+    assert brake_editor.table_brakes.currentRow() == brake_editor.table_brakes.rowCount() - 1
+    brake_editor.undo()
+    assert brake_editor.table_brakes.rowCount() == rows

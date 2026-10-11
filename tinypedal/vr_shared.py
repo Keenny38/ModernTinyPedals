@@ -24,9 +24,9 @@ The layer (TinyPedalXrLayer.dll) is loaded by the OpenXR loader in every OpenXR 
 for the current user (HKEY_CURRENT_USER, no admin rights). It draws the image this module writes to a named
 shared memory, as a quad layer after the game's layers.
 
-Registration is kept while `enable_vr_overlay` is on, also when the app is closed: the layer does nothing
-(pure pass-through) without a recent app heartbeat, so a game started before the app shows the overlay as
-soon as the app runs. Turning the option off removes the registration; the installer removes it on uninstall.
+Registered while the OpenXR overlay runs, removed when it stops and when the app closes (never left in other
+games); the layer does nothing (pure pass-through) without a recent app heartbeat. The installer also removes
+it on uninstall.
 
 Shared memory layout: native/openxr_layer/include/tinypedal_vr_shared.h (kept in sync, see tests).
 Protocol version 2: only the visible parts of the overlay canvas (desktop layout of all widgets) are sent,
@@ -36,7 +36,9 @@ A layer of another version (game started before an app update) draws nothing and
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
+import heapq
 import logging
 import ntpath
 import os
@@ -219,46 +221,93 @@ def _near(first: Rect, second: Rect, gap: int) -> bool:
             and first[1] < second[1] + second[3] + gap and second[1] < first[1] + first[3] + gap)
 
 
+Group = tuple[list[int], Rect]  # rectangle indexes, their bounding box
+
+
+def _growth(first: Rect, second: Rect) -> int:
+    """Area added by joining two tile boxes into one"""
+    union = union_rect(first, second)
+    return union[2] * union[3] - first[2] * first[3] - second[2] * second[3]
+
+
+def _absorb_near(group: Group, others: list[Group], distance: int) -> Group:
+    """Group joined with the others near it (removed from others), again while its bigger box is near one"""
+    indexes, box = group
+    position = 0
+    while position < len(others):
+        if _near(box, others[position][1], distance):
+            other = others.pop(position)
+            indexes, box = indexes + other[0], union_rect(box, other[1])
+            position = 0
+        else:
+            position += 1
+    return indexes, box
+
+
+def _merge_near(groups: list[Group], distance: int) -> list[Group]:
+    """Groups joined while two are near, ordered by first index. Boxes only grow: same groups whatever the
+    joining order, so each group is checked against the ones kept so far (O(n²), no restart from the start)."""
+    kept: list[Group] = []
+    for group in groups:
+        kept.append(_absorb_near(group, kept, distance))
+    return sorted(((sorted(indexes), box) for indexes, box in kept), key=lambda group: group[0][0])
+
+
 def cluster_rects(rects: Sequence[Rect], gap: int, max_count: int) -> list[list[int]]:
     """Group rectangles (widgets) into at most max_count tiles: rectangles less than gap pixels apart share a
-    tile, tile bounding boxes never overlap, then closest tiles merged (smallest added area) while too many
+    tile, tile bounding boxes never overlap, then closest tiles merged (smallest added area, first pair in index
+    order on a tie) while too many. Pair growths kept in a heap (stale entries skipped by group version).
 
     Returns:
         Groups of rectangle indexes (increasing, so widgets keep their stacking order), ordered by first index.
     """
-    groups = [([index], rect) for index, rect in enumerate(rects)]
+    groups = _merge_near([([index], rect) for index, rect in enumerate(rects)], gap)
+    limit = max(max_count, 1)
+    if len(groups) <= limit:
+        return [indexes for indexes, _ in groups]
+    alive: dict[int, Group] = {}  # groups by first index
+    versions: dict[int, int] = {}
+    heap: list[tuple[int, int, int, int, int]] = []  # growth, first index of both groups, their versions
+    stamp = 0
 
-    def merge(first: int, second: int):
-        indexes = sorted(groups[first][0] + groups[second][0])
-        groups[first] = (indexes, union_rect(groups[first][1], groups[second][1]))
-        del groups[second]
+    def add(group: Group):
+        nonlocal stamp
+        stamp += 1
+        key = min(group[0])
+        for other, (_, box) in alive.items():
+            first, second = (key, other) if key < other else (other, key)
+            heapq.heappush(heap, (_growth(group[1], box), first, second, stamp if first == key else versions[first],
+                                  stamp if second == key else versions[second]))
+        alive[key] = group
+        versions[key] = stamp
 
-    def merge_near(distance: int):
-        merged = True
-        while merged:
-            merged = False
-            for first in range(len(groups)):
-                for second in range(first + 1, len(groups)):
-                    if _near(groups[first][1], groups[second][1], distance):
-                        merge(first, second)
-                        merged = True
-                        break
-                if merged:
-                    break
-
-    merge_near(gap)
-    while len(groups) > max(max_count, 1):
-        best = None
-        for first in range(len(groups)):
-            for second in range(first + 1, len(groups)):
-                union = union_rect(groups[first][1], groups[second][1])
-                growth = union[2] * union[3] - sum(group[1][2] * group[1][3] for group in (groups[first], groups[second]))
-                if best is None or growth < best[0]:
-                    best = (growth, first, second)
-        assert best is not None
-        merge(best[1], best[2])
-        merge_near(0)  # merged box may cover another tile
-    return sorted((group[0] for group in groups), key=lambda indexes: indexes[0])
+    for group in groups:
+        add(group)
+    overlap_free = gap >= 0  # boxes not near at gap never overlap
+    while len(alive) > limit:
+        _, first, second, first_version, second_version = heapq.heappop(heap)
+        if versions.get(first) != first_version or versions.get(second) != second_version:
+            continue  # group joined since
+        one, two = alive.pop(first), alive.pop(second)
+        del versions[first], versions[second]
+        joined = (one[0] + two[0], union_rect(one[1], two[1]))
+        if overlap_free:  # only the joined box may cover another tile
+            others = list(alive.values())
+            joined = _absorb_near(joined, others, 0)
+            if len(others) < len(alive):
+                kept = {min(group[0]) for group in others}
+                for key in [key for key in alive if key not in kept]:
+                    del alive[key], versions[key]
+            add(joined)
+        else:  # negative gap: tiles may overlap each other, all joined once (then never again)
+            overlap_free = True
+            regrouped = _merge_near([*alive.values(), joined], 0)
+            alive.clear()
+            versions.clear()
+            heap.clear()
+            for group in regrouped:
+                add(group)
+    return sorted((sorted(indexes) for indexes, _ in alive.values()), key=lambda indexes: indexes[0])
 
 
 def tick_ms() -> int:
@@ -386,6 +435,7 @@ class SharedFrameWriter:
         self._size = (0, 0, 0)  # width, height, stride of last atlas
         self._tiles: tuple[Tile, ...] = ()  # tiles of last atlas
         self._canvas = (0, 0)  # canvas width & height of last atlas
+        self._words: dict[int, ctypes.c_uint64] = {}  # views of sequence & heartbeat (released before close)
         self.warning: str | None = None  # problem to report to the user (set by open)
 
     @property
@@ -428,11 +478,11 @@ class SharedFrameWriter:
         if sequence & 1:
             sequence += 1  # app closed while writing
         self._serial = struct.unpack_from("<I", buffer, OFFSET_FRAME + 20)[0]
-        struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 1)  # odd: header not complete
+        self.__store(OFFSET_SEQUENCE, sequence + 1)  # odd: header not complete
         struct.pack_into("<4I", buffer, OFFSET_MAGIC, MAGIC, VERSION, HEADER_SIZE, MAPPING_SIZE)
         struct.pack_into("<I", buffer, OFFSET_FRAME + 16, 0)  # flags: nothing shown yet
         struct.pack_into("<3I", buffer, OFFSET_FRAME + 40, DATA_OFFSET, MAX_IMAGE_BYTES, os.getpid())
-        struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 2)
+        self.__store(OFFSET_SEQUENCE, sequence + 2)
         self.heartbeat()
         return True
 
@@ -442,9 +492,10 @@ class SharedFrameWriter:
         if buffer is not None:
             try:
                 self.__write(None, visible=False)
-                struct.pack_into("<Q", buffer, OFFSET_APP_HEARTBEAT, 0)
+                self.__store(OFFSET_APP_HEARTBEAT, 0)
             except (TypeError, ValueError, struct.error):  # mapping already closed
                 pass
+        self._words.clear()  # views released: mmap refuses to close while exported
         if self._mmap is not None:
             try:
                 self._mmap.close()
@@ -456,7 +507,7 @@ class SharedFrameWriter:
     def heartbeat(self, now_ms: int | None = None):
         """App alive: written every update tick & every 500 ms (layer stops drawing APP_TIMEOUT_MS after the last one)"""
         if self._buffer is not None:
-            struct.pack_into("<Q", self._buffer, OFFSET_APP_HEARTBEAT, tick_ms() if now_ms is None else now_ms)
+            self.__store(OFFSET_APP_HEARTBEAT, tick_ms() if now_ms is None else now_ms)
 
     def set_placement(self, placement: Placement):
         """New placement, written with next frame (or now if changed)"""
@@ -515,19 +566,34 @@ class SharedFrameWriter:
             return None
         return LayerStatus(*struct.unpack_from(LAYER_FORMAT, self._buffer, OFFSET_LAYER))
 
+    def __store(self, offset: int, value: int):
+        """Write uint64 field read by the layer in one aligned store (struct.pack_into writes zero first, then
+        byte by byte: layer could read 0, heartbeat 0 = app closed)"""
+        word = self._words.get(offset)
+        if word is None:
+            word = self._words[offset] = ctypes.c_uint64.from_buffer(self._buffer, offset)
+        word.value = value
+
     def __write(self, image: tuple | None, visible: bool):
-        """Seqlock write: sequence odd, fields (& pixels), sequence even"""
+        """Seqlock write: sequence odd, fields (& pixels), sequence even (also on error: never left odd,
+        layer would show nothing new)"""
         buffer = self._buffer
         sequence = struct.unpack_from("<Q", buffer, OFFSET_SEQUENCE)[0]
         if sequence & 1:
             sequence += 1
-        struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 1)
+        self.__store(OFFSET_SEQUENCE, sequence + 1)
+        try:
+            self.__write_fields(buffer, image, visible)
+        finally:
+            self.__store(OFFSET_SEQUENCE, sequence + 2)
+
+    def __write_fields(self, buffer: Any, image: tuple | None, visible: bool):
+        """Fields (& pixels) of a seqlock write"""
         if image is not None:
             pixels, width, height, stride, tiles, canvas = image
             view = memoryview(pixels).cast("B")
             size = stride * height
             if len(view) < size:
-                struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 2)
                 raise ValueError("VR overlay image buffer smaller than its size")
             buffer[DATA_OFFSET:DATA_OFFSET + size] = view[:size]
             self._serial = (self._serial + 1) & 0xFFFFFFFF
@@ -547,7 +613,6 @@ class SharedFrameWriter:
         struct.pack_into("<3I", buffer, OFFSET_CANVAS, *self._canvas, len(self._tiles))
         for index, tile in enumerate(self._tiles):
             struct.pack_into(TILE_FORMAT, buffer, TILE_OFFSET + index * TILE_SIZE, *tile)
-        struct.pack_into("<Q", buffer, OFFSET_SEQUENCE, sequence + 2)
 
 
 # Layer files & registration

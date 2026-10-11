@@ -1,6 +1,7 @@
 """Track map viewer (Qt Quick page) & track map widget of track notes editor: load map, position, curve, slope"""
 
 import math
+import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -22,6 +23,15 @@ def write_map(folder: str, name: str = "Ring"):
     save_track_map_file(folder, name, "-420 -270 840 540", tuple(coords), tuple(dists), (66, 133), decimals=2)
 
 
+def wait_jobs(backend, timeout: float = 10.0):
+    """Map read & lines built in background handed over"""
+    end = time.monotonic() + timeout
+    while backend.jobs.running and time.monotonic() < end:
+        QCoreApplication.processEvents()
+        time.sleep(0.002)
+    assert not backend.jobs.running
+
+
 @pytest.fixture
 def viewer(ui_env):
     from tinypedal.ui.track_map_viewer import TrackMapViewer
@@ -29,6 +39,9 @@ def viewer(ui_env):
     write_map(cfg.path.track_map)
     dialog = TrackMapViewer(None, cfg.path.track_map, "Ring")
     dialog.resize(900, 700)
+    assert dialog.backend.loading
+    wait_jobs(dialog.backend)
+    assert not dialog.backend.loading
     yield dialog
     dialog.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -111,6 +124,7 @@ def test_open_other_map_and_invalid(viewer, monkeypatch, tmp_path):
                         lambda *args, **kwargs: (str(tmp_path / "Other.svg"), ""))
     backend = viewer.backend
     backend.openMap()
+    wait_jobs(backend)
     assert backend.mapName == "Other"
     (tmp_path / "Bad.svg").write_text("<svg></svg>", encoding="utf-8")
     warnings = []
@@ -120,6 +134,7 @@ def test_open_other_map_and_invalid(viewer, monkeypatch, tmp_path):
     monkeypatch.setattr(track_map_backend.QFileDialog, "getOpenFileName",
                         lambda *args, **kwargs: (str(tmp_path / "Bad.svg"), ""))
     backend.openMap()
+    wait_jobs(backend)
     assert warnings and backend.mapName == "" and not backend.loaded  # invalid map: warned, map cleared
     assert backend.view == {} and not VertexStore.has(backend.key("road"))
     assert not backend.load_map(f"{tmp_path.as_posix()}/", "Missing")
@@ -131,6 +146,54 @@ def test_closed_page_releases_vertices(viewer):
     key = viewer.backend.view["road"]
     viewer.close()
     assert not VertexStore.has(key)
+
+
+def test_playback_within_node_keeps_curve(viewer, monkeypatch):
+    """Position moving inside one node: curve section & circle not built again, no global shape redraw"""
+    from tinypedal.ui.quick.lines import VertexStore
+
+    backend = viewer.backend
+    assert not hasattr(backend, "revisionChanged")  # shapes told per key by VertexStore
+    backend.setPosition(101.0)
+    current = backend.current
+    stored, positions, currents = [], [], []
+    original = VertexStore.set
+    monkeypatch.setattr(VertexStore, "set", classmethod(lambda cls, key, vertices: (
+        stored.append(key), original(key, vertices))))
+    backend.positionChanged.connect(lambda: positions.append(backend.position))
+    backend.currentChanged.connect(lambda: currents.append(1))
+    for position in (101.5, 102.0, 103.0):
+        backend.setPosition(position)
+    assert positions == [101.5, 102.0, 103.0] and not stored and not currents
+    assert backend.current is current
+    backend.setPosition(250.0)  # other node
+    assert backend.key("section") in stored and currents == [1]
+    stored.clear()
+    backend.setCurveNodes(backend.curveNodes)  # same nodes: shown again (spin box value kept in range)
+    assert currents == [1, 1] and backend.key("section") in stored
+
+
+def test_scale_lines_built_in_background(viewer):
+    """Zoom settled: lines rebuilt off the UI thread, same shape as one closed band, older map result dropped"""
+    from tinypedal.ui.quick import track_map_backend
+    from tinypedal.ui.quick.lines import VertexStore, band
+
+    backend = viewer.backend
+    before = VertexStore.get(backend.view["road"])
+    backend.setScale(20.0)
+    assert VertexStore.get(backend.view["road"]) is before and backend.jobs.running  # not on UI thread
+    wait_jobs(backend)
+    road = VertexStore.get(backend.view["road"])
+    assert road is not before
+    xs = [x for x, _ in backend.raw_coords]
+    ys = [y for _, y in backend.raw_coords]
+    expected = band(xs, ys, backend.width(float(backend.ecfg["map_width"]), 5.0), closed=True)
+    assert road.vertex_count == expected.vertex_count and list(road.data) == pytest.approx(list(expected.data))
+    geometry = backend.geometry
+    assert geometry is not None and geometry.loop_sectors[0] == 0 and geometry.loop_sectors[100] == 1
+    assert geometry.loop_sectors[150] == 2
+    backend.scaled_built((None, {"road": track_map_backend.band([0.0, 1.0], [0.0, 1.0], 1.0)}))  # other map
+    assert VertexStore.get(backend.view["road"]) is road
 
 
 def test_svg_not_made_by_app_is_invalid_map(tmp_path):

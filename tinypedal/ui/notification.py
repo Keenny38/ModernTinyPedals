@@ -23,9 +23,7 @@ Notification
 from __future__ import annotations
 
 import logging
-import os
 import threading
-from contextlib import suppress
 from time import monotonic
 
 import shiboken6
@@ -48,6 +46,7 @@ from ..update import (
     DownloadCancelled,
     UnsignedInstallerError,
     can_auto_update,
+    discard_installer,
     download_installer,
     is_portable_copy,
     release_url,
@@ -74,13 +73,14 @@ def install_update(window: QWidget | None, path: str, repository: str | None = N
     """Run downloaded installer then quit, False if cancelled or installer not started
 
     Open pages are closed first (each may ask to save changes): cancelling keeps app as is,
-    installer is only started once app can quit.
+    installer is only started once app can quit. Installer not started: removed (downloaded again next time).
 
     Args:
         repository: update repository the installer was downloaded from, None for current setting.
     """
     close_pages = getattr(window, "close_pages_for_quit", None)
     if callable(close_pages) and not close_pages():
+        discard_installer(path)
         return False
     try:
         run_installer(path, repository=repository)
@@ -89,9 +89,7 @@ def install_update(window: QWidget | None, path: str, repository: str | None = N
         cancel_quit = getattr(window, "cancel_quit", None)
         if callable(cancel_quit):
             cancel_quit()
-        if isinstance(error, ValueError):  # broken signature: installer never kept
-            with suppress(OSError):
-                os.remove(path)
+        discard_installer(path)  # broken signature never kept, unstartable one never left in temp folder
         if isinstance(error, UnsignedInstallerError):
             msg_text = tr("Installer of custom update repository is not signed, update was not installed.")
         elif isinstance(error, ValueError):
@@ -207,9 +205,10 @@ class UpdateInstaller(QObject):
         if not auto_install:
             confirm = QMessageBox.question(
                 window, tr("Download And Install"),
-                tr("Update downloaded. Close Modern Tiny Pedals and install it now?"),
+                tr("Update downloaded. Close NeoPedal and install it now?"),
             )
             if confirm != QMessageBox.StandardButton.Yes:
+                discard_installer(path)  # declined: never left in temp folder
                 return
         install_update(window, path, self._repository)
 
@@ -262,56 +261,35 @@ class NotifyBar(QWidget):
     @Slot(bool)  # type: ignore[operator]
     def refresh(self):
         """Refresh & update style"""
-        # Locked preset
-        self.presetlocked.setVisible(
-            cfg.notification["notify_locked_preset"]
-            and cfg.filename.setting in cfg.user.filelock
+        notification = cfg.notification
+        self.set_notice(
+            self.presetlocked, "locked_preset",
+            notification["notify_locked_preset"] and cfg.filename.setting in cfg.user.filelock)
+        self.set_notice(
+            self.spectate, "spectate_mode",
+            notification["notify_spectate_mode"] and cfg.api["enable_player_index_override"])
+        self.set_notice(
+            self.pacenotes, "pace_notes_playback",
+            notification["notify_pace_notes_playback"] and cfg.user.setting["pace_notes_playback"]["enable"])
+        self.set_notice(
+            self.hotkey, "global_hotkey",
+            notification["notify_global_hotkey"] and cfg.application["enable_global_hotkey"])
+        self.set_notice(
+            self.carsetup, "auto_backup_car_setup",
+            notification["notify_auto_backup_car_setup"] and cfg.telemetry["enable_auto_backup_car_setup"])
+
+    @staticmethod
+    def set_notice(button: QPushButton, name: str, shown: bool):
+        """Notice shown or hidden, its colors set only when changed (style sheet parsed again on each set)"""
+        button.setVisible(bool(shown))
+        if not shown:
+            return
+        style = (
+            f"color: {cfg.notification[f'font_color_{name}']};"
+            f"background: {cfg.notification[f'background_color_{name}']};"
         )
-        if self.presetlocked.isVisible():
-            self.presetlocked.setStyleSheet(
-                f"color: {cfg.notification['font_color_locked_preset']};"
-                f"background: {cfg.notification['background_color_locked_preset']};"
-            )
-        # Spectate mode
-        self.spectate.setVisible(
-            cfg.notification["notify_spectate_mode"]
-            and cfg.api["enable_player_index_override"]
-        )
-        if self.spectate.isVisible():
-            self.spectate.setStyleSheet(
-                f"color: {cfg.notification['font_color_spectate_mode']};"
-                f"background: {cfg.notification['background_color_spectate_mode']};"
-            )
-        # Pace notes playback
-        self.pacenotes.setVisible(
-            cfg.notification["notify_pace_notes_playback"]
-            and cfg.user.setting["pace_notes_playback"]["enable"]
-        )
-        if self.pacenotes.isVisible():
-            self.pacenotes.setStyleSheet(
-                f"color: {cfg.notification['font_color_pace_notes_playback']};"
-                f"background: {cfg.notification['background_color_pace_notes_playback']};"
-            )
-        # Global hotkey
-        self.hotkey.setVisible(
-            cfg.notification["notify_global_hotkey"]
-            and cfg.application["enable_global_hotkey"]
-        )
-        if self.hotkey.isVisible():
-            self.hotkey.setStyleSheet(
-                f"color: {cfg.notification['font_color_global_hotkey']};"
-                f"background: {cfg.notification['background_color_global_hotkey']};"
-            )
-        # Auto backup car setup
-        self.carsetup.setVisible(
-            cfg.notification["notify_auto_backup_car_setup"]
-            and cfg.telemetry["enable_auto_backup_car_setup"]
-        )
-        if self.carsetup.isVisible():
-            self.carsetup.setStyleSheet(
-                f"color: {cfg.notification['font_color_auto_backup_car_setup']};"
-                f"background: {cfg.notification['background_color_auto_backup_car_setup']};"
-            )
+        if button.styleSheet() != style:
+            button.setStyleSheet(style)
 
 
 class UpdatesNotifyButton(QPushButton):
@@ -379,14 +357,17 @@ class UpdatesNotifyButton(QPushButton):
     def checking(self, checking: bool):
         """Checking updates"""
         if checking:
-            # Show checking message only with manual checking
+            # Show checking message only with manual checking, notice shown kept while checking automatically
+            if not update_checker.is_manual():
+                return
             self.setText(tr("Checking For Updates..."))
-            self.setVisible(update_checker.is_manual())
+            self.setVisible(True)
         else:
-            # Hide message if no updates (or version skipped) and not manual checking
+            # Hide message if no updates (or version skipped, or dismissed) and not manual checking
             skipped = update_checker.is_skipped()
+            dismissed = update_checker.message() == self.dismissed_message
             self.setText(trm(update_checker.message()))
-            self.setVisible(update_checker.is_manual() or (update_checker.is_updates() and not skipped))
+            self.setVisible(update_checker.is_manual() or (update_checker.is_updates() and not skipped and not dismissed))
             self.view_notes.setVisible(update_checker.is_updates() and bool(update_checker.notes(current_language())))
             self.skip_update.setVisible(update_checker.is_updates())
             self.install_update.setVisible(self.can_install())
@@ -427,14 +408,16 @@ class UpdatesNotifyButton(QPushButton):
         """Ask once per version to install available update (what's new shown), install downloads it
 
         Window hidden (tray) or minimized, game likely running: never popped up, what's new page
-        waits inside app and a tray message tells about the update.
+        waits inside app and a tray message tells about the update. Found by automatic check while app
+        runs: popped up only if window is the active one (not over the game on another screen).
         """
         version_text = update_checker.message()
         if self.prompted_version == version_text:
             return
         UpdatesNotifyButton.prompted_version = version_text
         window = self.window()
-        if window.isVisible() and not window.isMinimized():
+        if (window.isVisible() and not window.isMinimized()
+                and (not update_checker.is_scheduled() or window.isActiveWindow())):
             self.show_release_notes(prompt=True)
             return
         self.show_release_notes(prompt=True, bring_to_front=False)

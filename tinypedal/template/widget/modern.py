@@ -25,12 +25,13 @@ setting templates & config dialog use it without loading widgets.
 """
 
 from types import MappingProxyType
+from typing import Any
 
 # Common option of modern design widgets: keep classic layout (with modern colors)
 CLASSIC_LAYOUT_OPTION = "enable_classic_layout"
 
 # Widget name -> options only read by modern design (added to widget default setting)
-MODERN_DESIGN_OPTIONS = MappingProxyType({
+MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType({
     "relative": {
         "column_position": True,
         "column_class": True,
@@ -51,6 +52,7 @@ MODERN_DESIGN_OPTIONS = MappingProxyType({
         "column_speed_trap": False,
         "column_lift_and_coast_time": False,
         "column_time_gap": True,
+        "column_gap_trend": True,
     },
     "standings": {
         "column_position": True,
@@ -75,6 +77,7 @@ MODERN_DESIGN_OPTIONS = MappingProxyType({
         "column_time_interval": True,
         "column_time_gap": True,
         "show_lap_difference": True,
+        "show_class_header": True,
     },
     "rivals": {
         "column_position": True,
@@ -104,6 +107,7 @@ MODERN_DESIGN_OPTIONS = MappingProxyType({
     "timing": {"show_invalid_lap_indicator": True},
     "deltabest": {"show_invalid_lap_indicator": True},
     "deltabest_extended": {},
+    "speed_delta": {},
     "sectors": {},
     "session": {},
     "track_clock": {},
@@ -152,7 +156,11 @@ MODERN_DESIGN_OPTIONS = MappingProxyType({
     "elevation": {},
     "trailing": {},
     "radar": {},
-    "track_map": {},
+    "track_map": {
+        "show_sector_performance": True,
+        "show_nearby_vehicle_highlight": True,
+        "nearby_vehicle_threshold": 1.0,
+    },
     "navigation": {},
     "steering_wheel": {},
     "steering_meter": {},

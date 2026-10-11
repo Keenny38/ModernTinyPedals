@@ -24,6 +24,10 @@ Check, in this order:
 
 Overlays on the desktop are not visible in a VR headset. Use the SteamVR overlay or the VR mirror window: see [Connections](Connections.md#vr).
 
+### Stream overlay sources empty
+
+The `Stream Overlays` page tells why its sources are empty when no overlay is shown: auto hide outside sessions, or the visibility options of the overlays. To stream a session you spectate or a replay, keep `Show overlays while spectating` on. On an ultrawide or triple screen, the `Layout` source shows the centre of the screen in 16:9 by default: move side overlays into the frame with `Edit Layout`, or choose `Whole screen` in `Format`. See [Connections](Connections.md#stream-overlays-obs-streamlabs-xsplit-vmix).
+
 ## Game not detected
 
 - **Game selected**: check the game in the `API` menu (or the status bar). `API` > `Restart API` reconnects.
@@ -39,13 +43,13 @@ Overlays on the desktop are not visible in a VR headset. Use the SteamVR overlay
 
 ### Already running
 
-"Modern Tiny Pedals is already running": only one copy runs at a time. Look for its icon in the tray (it may be hidden in the tray overflow).
+"NeoPedal is already running": only one copy runs at a time. Look for its icon in the tray (it may be hidden in the tray overflow).
 
 ### Safe mode
 
 If a start did not finish (crash, or app killed before the window and overlays were up for a few seconds), the next start asks whether to start in **safe mode**: plugins are not loaded and overlays are not started, so you can fix the settings that caused the problem (turn off an overlay or a plugin, for example).
 
-- The window title shows `Safe Mode`. Click `Restart Normally` in the notice, or `Window` > `Restart Modern Tiny Pedals`, to start normally again.
+- The window title shows `Safe Mode`. Click `Restart Normally` in the notice, or `Window` > `Restart NeoPedal`, to start normally again.
 - You can force safe mode from the command line:
 
 ```bash
@@ -63,7 +67,7 @@ If another program (antivirus, OneDrive or another sync tool, a backup tool) hol
 ## Logs
 
 - `Help` > `Show Log` shows the log of the running app: `Save`, `Copy`, `Clear`, `Refresh`, `Auto Refresh`.
-- To write the log to a file, start the app with `--log-level 2`: the log is written to `tinypedal.log` in the global config folder. The Windows executable has no console, so this is the way to keep a log there. On Linux, put permanent arguments in `~/.config/TinyPedal/launcher.conf` (see [Installation](Installation.md#install-a-launcher)).
+- To write the log to a file, start the app with `--log-level 2`: the log is written to `tinypedal.log` in the global config folder. The Windows executable has no console, so this is the way to keep a log there. On Linux, put permanent arguments in `~/.config/NeoPedal/launcher.conf` (see [Installation](Installation.md#install-a-launcher)).
 
 ### Command line arguments
 
@@ -104,9 +108,9 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 
 | Files | Windows (installed) | Linux |
 |---|---|---|
-| Global config: `config.json`, `shortcuts.json`, `tinypedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\TinyPedal` | `~/.config/TinyPedal/` |
-| Presets and style presets (`settings`), `brandlogo`, `pacenotes`, `tracknotes` | Program folder, `%LOCALAPPDATA%\Programs\Modern Tiny Pedals` | `~/.config/TinyPedal/` |
-| `deltabest` (delta, fuel, energy, sectors, consumption), `trackmap`, `carsetups`, `telemetry` (laps and replays) | Program folder | `~/.local/share/TinyPedal/` |
+| Global config: `config.json`, `shortcuts.json`, `tinypedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\NeoPedal` | `~/.config/NeoPedal/` |
+| Presets and style presets (`settings`), `brandlogo`, `pacenotes`, `tracknotes` | Program folder, `%LOCALAPPDATA%\Programs\NeoPedal` | `~/.config/NeoPedal/` |
+| `deltabest` (delta, fuel, energy, sectors, consumption), `trackmap`, `carsetups`, `telemetry` (laps and replays) | Program folder | `~/.local/share/NeoPedal/` |
 
 `Config` > `Open Folder` opens any of them. `Config` > `User Path` moves the data folders.
 
@@ -116,6 +120,7 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 - **One preset**: create a default preset with `New` on the `Preset` page and load it, or restore a backup with `Restore`.
 - **Recorded data** of the current track and class: `Overlay` > `Reset Data`.
 - **A deleted preset**: `Trash` on the `Preset` page.
+- **Global settings**: `Config` > `TinyPedal Settings` > `Start with Default Settings...` restarts the app with default global settings, the current folder set aside (never deleted).
 - **Everything**: quit the app, then **rename** (rather than delete) the global config folder and the `settings` folder. At the next start, the app creates default settings and shows the setup wizard. Rename the folders back to return to your old settings.
 
 ## Updates

@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Lap telemetry viewer page: lap list, channel charts, track map / G circle / corners / range statistics
+// Lap telemetry viewer page: lap list, channel charts (advanced view) or simple view over them, track map / G circle /
+// corners / range statistics
 TpPage {
     id: page
 
@@ -35,38 +36,7 @@ TpPage {
         event.accepted = true
     }
 
-    // Channel menu rows matching search, changed in place: list keeps its scroll position when a channel is
-    // shown or hidden (a new array model rebuilt every row, back at top)
-    ListModel { id: channelRows }
-    function syncChannels() {
-        var query = searchField.text.toLowerCase().trim()
-        var rows = []
-        backend.channelMenu.forEach(function(item) {
-            if (query === "" || item.search.indexOf(query) >= 0 || item.group.toLowerCase().indexOf(query) >= 0)
-                rows.push({column: item.column, group: item.group, title: item.title, available: item.available,
-                           shown: item.visible})
-        })
-        var same = rows.length === channelRows.count
-        for (var i = 0; same && i < rows.length; i++) same = channelRows.get(i).column === rows[i].column
-        if (!same) {
-            channelRows.clear()
-            channelRows.append(rows)
-            return
-        }
-        for (var j = 0; j < rows.length; j++) {
-            var row = channelRows.get(j)
-            if (row.shown !== rows[j].shown || row.available !== rows[j].available || row.title !== rows[j].title
-                    || row.group !== rows[j].group)
-                channelRows.set(j, rows[j])
-        }
-    }
-    Connections {
-        target: backend
-        enabled: channelPopup.visible  // rows read again when menu opens
-        function onChannelsChanged() { page.syncChannels() }
-    }
-
-    // Math channels editor (channel menu), setup differences (lap chip menu)
+    // Math channels editor (Show menu), setup differences (lap chip menu)
     MathChannels { id: mathEditor; objectName: "mathEditor"; onClosed: chart.forceActiveFocus() }
     SetupDiff { id: setupDiff; objectName: "setupDiff"; onClosed: chart.forceActiveFocus() }
 
@@ -307,6 +277,21 @@ TpPage {
                 }
             }
 
+            // Simple view (pedals, steering wheel & values at cursor) shown over charts, or advanced view (charts):
+            // left of spacer, stays in place when chart buttons hide
+            TpSegmented {
+                id: viewMode
+                objectName: "viewMode"
+                Layout.leftMargin: theme.em * 0.5
+                options: [i18n.tr("Simple View"), i18n.tr("Advanced View")]
+                currentIndex: backend.simpleView ? 0 : 1
+                onActivated: function(index) { backend.setSimpleView(index === 0) }
+                Connections {  // changed by code: clicking an option replaced the binding
+                    target: backend
+                    function onOptionsChanged() { viewMode.currentIndex = backend.simpleView ? 0 : 1 }
+                }
+            }
+
             Item { Layout.fillWidth: true }
 
             TpButton {
@@ -323,193 +308,29 @@ TpPage {
                 onToggled: backend.setLiveMode(checked)
             }
             TpSwitch {
+                visible: !backend.simpleView  // charts only
                 text: i18n.tr("Time axis")
                 tip: i18n.tr("Charts along lap time instead of lap distance")
                 checked: backend.timeAxis
                 onToggled: backend.setTimeAxis(checked)
             }
+            // Channels shown on charts & in simple view, chart options
             TpButton {
-                id: channelButton
-                glyph: ""  // area chart
-                text: i18n.tr("Channels")
-                checked: channelPopup.visible
-                onClicked: channelPopup.visible ? channelPopup.close() : channelPopup.open()
-
-                Popup {
-                    id: channelPopup
-                    y: channelButton.height + 6
-                    x: channelButton.width - width
-                    width: theme.em * 19
-                    height: Math.min(theme.em * 38, page.height - theme.em * 6)
-                    padding: theme.em * 0.5
-                    onAboutToShow: page.syncChannels()
-                    onOpened: searchField.forceActiveFocus()
+                id: showButton
+                objectName: "showButton"
+                glyph: "\ue9e9"  // sliders
+                text: i18n.tr("Show")
+                checked: showPicker.visible
+                tip: i18n.tr("Choose what is shown")
+                onClicked: showPicker.visible ? showPicker.close() : showPicker.open()
+                ShowPicker {
+                    id: showPicker
+                    objectName: "showPicker"
+                    y: showButton.height + 6
+                    x: showButton.width - width
+                    height: Math.min(implicitHeight, page.height - theme.em * 6)
                     onClosed: chart.forceActiveFocus()  // keys back to charts
-                    enter: Transition {
-                        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 }
-                        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 150; easing.type: Easing.OutCubic }
-                    }
-                    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
-                    background: Rectangle {
-                        radius: theme.em * 0.7
-                        color: theme.raised
-                        border.width: 1
-                        border.color: theme.border
-                    }
-                    contentItem: ColumnLayout {
-                        spacing: theme.em * 0.35
-                        TextField {
-                            id: searchField
-                            Layout.fillWidth: true
-                            placeholderText: i18n.tr("Search channel")
-                            color: theme.text
-                            placeholderTextColor: theme.dimText
-                            onTextChanged: page.syncChannels()
-                            background: Rectangle {
-                                radius: theme.em * 0.45
-                                color: theme.base
-                                border.width: 1
-                                border.color: searchField.activeFocus ? theme.accent : theme.border
-                            }
-                        }
-                        // Presets
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: theme.em * 0.25
-                            Repeater {
-                                model: backend.channelPresets
-                                TpButton {
-                                    text: modelData.title
-                                    implicitHeight: theme.em * 1.8
-                                    flat: true
-                                    onClicked: backend.applyPreset(modelData.name)
-                                }
-                            }
-                        }
-                        ListView {
-                            id: channelList
-                            objectName: "channelList"
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            clip: true
-                            model: channelRows
-                            boundsBehavior: Flickable.StopAtBounds
-                            ScrollBar.vertical: ScrollBar {}
-                            section.property: "group"
-                            section.delegate: Text {
-                                required property string section
-                                text: section
-                                visible: section !== ""
-                                height: section !== "" ? implicitHeight + theme.em * 0.6 : 0
-                                verticalAlignment: Text.AlignBottom
-                                leftPadding: theme.em * 0.4
-                                color: theme.dimText
-                                font.pointSize: theme.fontPoint * 0.8
-                                font.weight: Font.DemiBold
-                            }
-                            delegate: Rectangle {
-                                id: channelRow
-                                required property string column
-                                required property string title
-                                required property bool available
-                                required property bool shown
-                                width: ListView.view.width - theme.em * 0.6
-                                height: theme.em * 2
-                                radius: theme.em * 0.4
-                                color: channelArea.containsMouse ? theme.hover : "transparent"
-                                opacity: available || shown ? 1 : 0.45
-                                ToolTip.visible: channelArea.containsMouse && !available
-                                ToolTip.text: i18n.tr("Not recorded in shown laps")
-                                ToolTip.delay: 500
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: theme.em * 0.4
-                                    spacing: theme.em * 0.5
-                                    Rectangle {
-                                        implicitWidth: theme.em * 1.05
-                                        implicitHeight: implicitWidth
-                                        radius: theme.em * 0.28
-                                        color: channelRow.shown ? theme.accent : "transparent"
-                                        border.width: channelRow.shown ? 0 : 1.5
-                                        border.color: theme.dimText
-                                        Icon { anchors.centerIn: parent; glyph: ""; size: theme.em * 0.7; color: "white"; visible: channelRow.shown && theme.iconFont !== "" }
-                                    }
-                                    Text { text: channelRow.title; color: theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                                }
-                                MouseArea {
-                                    id: channelArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: backend.setChannelVisible(channelRow.column, !channelRow.shown)
-                                }
-                            }
-                            Text {  // search without result
-                                width: channelList.width
-                                y: theme.em * 0.8
-                                visible: channelList.count === 0
-                                text: i18n.tr("No channel matches")
-                                color: theme.dimText
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                        // Display options
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: theme.em * 0.4
-                            Text { text: i18n.tr("Smoothing"); color: theme.dimText }
-                            Slider {
-                                id: smoothSlider
-                                Layout.fillWidth: true
-                                from: 0; to: backend.smoothingLevels - 1; stepSize: 1
-                                snapMode: Slider.SnapAlways
-                                value: backend.smoothing
-                                onMoved: backend.setSmoothing(Math.round(value))
-                                ToolTip.visible: hovered
-                                ToolTip.text: i18n.tr("Moving average of noisy channels: G, steering rate, wheel slip, time gain/loss")
-                            }
-                            Text { text: backend.smoothing === 0 ? i18n.tr("Off") : backend.smoothing; color: theme.text; Layout.preferredWidth: theme.em * 1.8 }
-                        }
-                        Text {
-                            text: i18n.tr("Gain/Loss window")
-                            color: theme.dimText
-                            ToolTip.visible: windowArea.containsMouse
-                            ToolTip.text: i18n.tr("Distance over which time gain/loss is measured (chart & map)")
-                            MouseArea { id: windowArea; anchors.fill: parent; hoverEnabled: true }
-                        }
-                        TpSegmented {
-                            Layout.alignment: Qt.AlignHCenter
-                            options: backend.deltaWindowTexts
-                            currentIndex: backend.deltaWindows.indexOf(backend.deltaWindow)
-                            onActivated: function(index) { backend.setDeltaWindow(backend.deltaWindows[index]) }
-                        }
-                        TpSwitch {
-                            text: i18n.tr("Min / max band")
-                            tip: i18n.tr("Lowest & highest value of shown laps (3 laps or more): consistency")
-                            checked: backend.envelope
-                            onToggled: backend.setEnvelope(checked)
-                        }
-                        TpSwitch {
-                            text: i18n.tr("Delta vs ideal lap")
-                            tip: i18n.tr("Delta & time gain/loss against ideal lap: fastest clean shown lap in each mini-sector")
-                            checked: backend.idealDelta
-                            onToggled: backend.setIdealDelta(checked)
-                        }
-                        TpButton {
-                            Layout.fillWidth: true
-                            text: i18n.tr("Math Channels...")
-                            flat: true
-                            tip: i18n.tr("Channels computed from others: understeer angle, pedal rates, your own expressions")
-                            onClicked: { channelPopup.close(); mathEditor.open() }
-                        }
-                        TpButton {
-                            Layout.fillWidth: true
-                            text: i18n.tr("Reset")
-                            flat: true
-                            onClicked: { backend.resetChannels(); backend.resetPanelWeights() }
-                        }
-                    }
+                    onMathRequested: mathEditor.open()
                 }
             }
         }
@@ -548,16 +369,55 @@ TpPage {
                 Card {
                     SplitView.fillWidth: true
                     SplitView.minimumWidth: theme.em * 30
-                    TraceChart {
-                        id: chart
-                        focus: true  // keys (?, space, arrows, A/B) work as soon as page opens
+                    ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: theme.em * 0.6
                         anchors.leftMargin: theme.em * 0.2
-                        onPictureRequested: function(copy) { page.grabPicture(copy) }
-                        onRangeSet: backend.setSideTab(3)
-                        onHelpRequested: helpPopup.open()
-                        onSetupRequested: function(lapKey) { setupDiff.show(lapKey) }
+                        spacing: theme.em * 0.3
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            // Charts hidden under simple view, lap chips kept (same chips & place in both views), key
+                            // focus & cursor kept (playback, map hover, simple view read it)
+                            TraceChart {
+                                id: chart
+                                focus: true  // keys (?, space, arrows, A/B) work as soon as page opens
+                                anchors.fill: parent
+                                chartsShown: !backend.simpleView
+                                onPictureRequested: function(copy) { page.grabPicture(copy) }
+                                onRangeSet: backend.setSideTab(3)
+                                onHelpRequested: helpPopup.open()
+                                onSetupRequested: function(lapKey) { setupDiff.show(lapKey) }
+                            }
+                            // Simple view in place of charts, under lap chips: created when first shown, then kept (hidden:
+                            // nothing read)
+                            Item {
+                                anchors.fill: parent
+                                anchors.leftMargin: theme.em * 0.4
+                                anchors.topMargin: chart.legendBottom + theme.em * 0.5
+                                opacity: backend.simpleView && simpleLoader.status === Loader.Ready ? 1 : 0
+                                visible: opacity > 0
+                                Behavior on opacity { NumberAnimation { duration: 180 } }
+                                Loader {
+                                    id: simpleLoader
+                                    objectName: "simpleView"
+                                    readonly property bool shown: backend.simpleView
+                                    property bool opened: shown
+                                    onShownChanged: if (shown) opened = true
+                                    anchors.fill: parent
+                                    active: opened
+                                    asynchronous: true
+                                    sourceComponent: SimpleView { chart: page.traceChart }
+                                }
+                            }
+                        }
+                        // Playback under charts & simple view: same place in both
+                        PlaybackBar {
+                            objectName: "playbackBar"
+                            Layout.fillWidth: true
+                            Layout.leftMargin: theme.em * 0.4
+                            chart: page.traceChart
+                        }
                     }
                 }
 
@@ -605,6 +465,7 @@ TpPage {
                                     opacity: shown && status === Loader.Ready ? 1 : 0
                                     visible: opacity > 0
                                     active: opened
+                                    asynchronous: true  // tab built over a few frames: tab click never stalls the window
                                     sourceComponent: modelData
                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                 }
@@ -625,6 +486,7 @@ TpPage {
             Loader {
                 anchors.fill: parent
                 active: page.mapFocus
+                asynchronous: true  // large map built over a few frames (fades in once ready)
                 onLoaded: item.focusMap()
                 Keys.forwardTo: [chart]
                 sourceComponent: Card {

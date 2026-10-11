@@ -150,12 +150,14 @@ def test_limits_cache_versioned_and_base_key(viewer, monkeypatch):  # noqa: F811
     assert saved["version"] == lap_map.LIMITS_VERSION and saved["base"] == key
     backend._limits, backend._limits_track = None, ""
     backend.start_limits(track)
+    backend.wait_jobs()  # cache file read in background
     assert backend._limits is not None and backend._limits_job is None  # same laps, base & algorithm: cache
     del saved["version"]  # saved by an older algorithm (wrong game edges): computed again
     with open(cache, "w", encoding="utf-8") as file:
         json.dump(saved, file)
     backend._limits, backend._limits_track = None, ""
     backend.start_limits(track)
+    backend.wait_jobs()
     assert backend._limits_job is not None
     finish_limits(backend)
 

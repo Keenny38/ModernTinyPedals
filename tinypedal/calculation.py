@@ -177,9 +177,9 @@ def time_interp_coordinate(
     time_start: float,
     time_middle: float,
 ) -> tuple[float, float]:
-    """Interpolate coordinates based on time & coordinate delta"""
+    """Interpolate coordinates based on time & coordinate delta (end position if no earlier sample)"""
     time_delta = time_middle - time_end
-    if time_delta <= 0:
+    if time_delta <= 0 or time_start <= 0 or time_end <= time_start:
         return pos_end_x, pos_end_y
     factor = time_delta / (time_end - time_start)
     return (
@@ -469,6 +469,27 @@ def delta_telemetry(
             dataset[index_higher][target_column],
         )
     return 0
+
+
+def reference_speed(dataset: Sequence, position: float, half_window: float = 15.0) -> float:
+    """Speed (m/s) of a recorded lap (distance, lap time points) at lap distance: distance over time between
+    its points around position (half_window meters each side), 0 if unknown (no lap, position outside it)"""
+    last = len(dataset) - 1
+    if last < 2 or not dataset[0][0] <= position <= dataset[last][0]:
+        return 0.0
+    low = max(binary_search_higher_column(dataset, position - half_window, 0, last) - 1, 0)
+    high = binary_search_higher_column(dataset, position + half_window, 0, last)
+    distance = dataset[high][0] - dataset[low][0]
+    elapsed = dataset[high][1] - dataset[low][1]
+    if distance > 0 and elapsed > 0:
+        return distance / elapsed
+    return 0.0
+
+
+def speed_delta(dataset: Sequence, position: float, speed: float) -> float:
+    """Speed difference (m/s, + faster) to a recorded lap at same lap distance, 0 if unknown"""
+    reference = reference_speed(dataset, position)
+    return speed - reference if reference > 0 else 0.0
 
 
 def exp_mov_avg(factor: float, ema_last: float, source: float) -> float:

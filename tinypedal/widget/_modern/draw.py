@@ -40,6 +40,7 @@ from PySide6.QtGui import (
     QTransform,
 )
 
+from .._painter import pixel_aligned
 from .theme import Theme
 
 _DEPTH_TOP = QColor(255, 255, 255, 14)
@@ -59,11 +60,13 @@ def rounded(painter: QPainter, rect: QRectF, radius: float, color: QColor | QBru
     if radius < 0.5:
         painter.fillRect(rect, color)
         return
-    if isinstance(color, QColor) and painter.transform().type() in _PLAIN_TRANSFORMS:
-        pixmap = _cached_shape(rect.width(), rect.height(), radius, color, painter.device().devicePixelRatioF())
-        if pixmap is not None:
-            painter.drawPixmap(rect.topLeft(), pixmap)
-            return
+    if isinstance(color, QColor):
+        world = painter.transform()
+        if world.type() in _PLAIN_TRANSFORMS:
+            pixmap = _cached_shape(rect.width(), rect.height(), radius, color, painter.device().devicePixelRatioF())
+            if pixmap is not None:
+                painter.drawPixmap(pixel_aligned(painter, rect.topLeft(), world), pixmap)
+                return
     path = QPainterPath()
     path.addRoundedRect(rect, radius, radius)
     painter.fillPath(path, color)

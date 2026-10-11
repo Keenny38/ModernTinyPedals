@@ -55,7 +55,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         update_interval = self.idle_interval
 
@@ -524,6 +524,7 @@ def reset_vehicle_history(data: VehicleDataSet) -> None:
     data.speedTrap = SpeedTrap()
     data.currentStintLaps = 0  # recalculated from new pit timer & histories
     data.estimatedStintLaps = 0.0
+    data.elapsedTime = 0.0  # no earlier sample: position never extrapolated from previous car's
 
 
 def update_stint_usage(

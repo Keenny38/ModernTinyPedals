@@ -160,16 +160,17 @@ class TrackInfoEditor(BaseEditor):
     def add_track(self):
         """Add new track"""
         start_index = row_index = self.table_tracks.rowCount()
-        # Add missing track name from active session
-        track_name = api.read.session.track_name()
-        if track_name and not self.is_value_in_table(track_name, self.table_tracks):
-            self.add_track_entry(row_index, track_name, TRACKINFO_DEFAULT)
-            row_index += 1
-        # Add new name entry
-        if start_index == row_index:
-            new_track_name = self.new_name_increment("New Track Name", self.table_tracks)
-            self.add_track_entry(row_index, new_track_name, TRACKINFO_DEFAULT)
-            self.table_tracks.setCurrentCell(row_index, 0)
+        with self.batch_edit():  # one undo step
+            # Add missing track name from active session
+            track_name = api.read.session.track_name()
+            if track_name and not self.is_value_in_table(track_name, self.table_tracks):
+                self.add_track_entry(row_index, track_name, TRACKINFO_DEFAULT)
+                row_index += 1
+            # Add new name entry
+            if start_index == row_index:
+                new_track_name = self.new_name_increment("New Track Name", self.table_tracks)
+                self.add_track_entry(row_index, new_track_name, TRACKINFO_DEFAULT)
+                self.table_tracks.setCurrentCell(row_index, 0)
 
     def add_track_entry(self, row_index: int, track_name: str, track_data: Mapping):
         """Add new track entry to table"""

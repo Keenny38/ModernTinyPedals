@@ -7,7 +7,7 @@ import QtQuick.Layouts
 // selected laps filled in, laps deleted from history
 Card {
     id: panel
-    readonly property var history: backend.history
+    readonly property var history: backend.historyView  // columns, sort... (rows: backend.historyRows)
     readonly property var selection: backend.historySelection
     readonly property var columns: history.columns || []
     readonly property var shown: {
@@ -111,19 +111,19 @@ Card {
                 id: headerRow
                 height: Math.round(theme.em * 1.9)
                 Repeater {
-                    model: panel.shown
+                    model: panel.shown.length
                     Item {
                         id: headerCell
                         required property int index
-                        required property var modelData
-                        readonly property bool sorted: panel.history.sortColumn === modelData
+                        readonly property int column: panel.shown[index]
+                        readonly property bool sorted: panel.history.sortColumn === column
                         width: panel.widths[index] || 0
                         height: headerRow.height
                         Row {
                             anchors.centerIn: parent
                             spacing: 2
                             Text {
-                                text: panel.columns[headerCell.modelData].title
+                                text: panel.columns[headerCell.column] ? panel.columns[headerCell.column].title : ""
                                 color: headerCell.sorted ? theme.text : theme.dimText
                                 font.weight: Font.DemiBold
                                 font.pointSize: theme.fontPoint * 0.9
@@ -141,7 +141,7 @@ Card {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.sortHistory(headerCell.modelData)
+                            onClicked: backend.sortHistory(headerCell.column)
                         }
                     }
                 }
@@ -161,7 +161,7 @@ Card {
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 reuseItems: true
-                model: panel.history.rows || []
+                model: backend.historyRows  // synced in place: new lap inserted, selection changes one role
                 activeFocusOnTab: true
                 ScrollBar.vertical: ScrollBar {  // kept at the right of the panel when scrolled sideways
                     parent: tableScroll
@@ -180,9 +180,11 @@ Card {
                 }
                 delegate: Rectangle {
                     id: lapRow
-                    required property var modelData
                     required property int index
-                    readonly property bool selected: panel.selection.indexOf(modelData.serial) >= 0
+                    required property int serial
+                    required property bool valid
+                    required property var cells
+                    required property bool selected
                     width: Math.max(panel.tableWidth, list.width)
                     height: Math.round(theme.em * 1.75)
                     radius: theme.em * 0.3
@@ -191,15 +193,15 @@ Card {
                          : index % 2 ? (theme.dark ? Qt.rgba(1, 1, 1, 0.035) : Qt.rgba(0, 0, 0, 0.03)) : "transparent"
                     Row {
                         Repeater {
-                            model: panel.shown
+                            model: panel.shown.length
                             Text {
                                 required property int index
-                                required property var modelData
-                                readonly property string key: panel.columns[modelData].key
+                                readonly property int column: panel.shown[index]
+                                readonly property string key: panel.columns[column] ? panel.columns[column].key : ""
                                 width: panel.widths[index] || 0
                                 height: lapRow.height
-                                text: lapRow.modelData.cells[modelData]
-                                color: !lapRow.modelData.valid && (key === "time" || key === "fuel" || key === "energy")
+                                text: lapRow.cells && lapRow.cells[column] !== undefined ? lapRow.cells[column] : ""
+                                color: !lapRow.valid && (key === "time" || key === "fuel" || key === "energy")
                                        ? panel.history.invalidColor : theme.text
                                 font.features: { "tnum": 1 }
                                 horizontalAlignment: Text.AlignHCenter
@@ -214,10 +216,10 @@ Card {
                         hoverEnabled: true
                         onClicked: function(mouse) {
                             list.forceActiveFocus()
-                            backend.selectLap(lapRow.modelData.serial, panel.modeOf(mouse.modifiers))
+                            backend.selectLap(lapRow.serial, panel.modeOf(mouse.modifiers))
                         }
                         onDoubleClicked: {
-                            backend.selectLap(lapRow.modelData.serial, 0)
+                            backend.selectLap(lapRow.serial, 0)
                             backend.addSelectedLaps()
                         }
                     }

@@ -308,7 +308,7 @@ def test_status_cards(settings):
     assert web["urls"][0].startswith("http://127.0.0.1:8338/?code=ABCDEFGH") and web["code"] == "ABCDEFGH"
     cfg.user.config["web_dashboard"]["enable_web_dashboard"] = False
     remote = settings.remoteControl
-    assert remote["stream"] == "ws://127.0.0.1:8337/stream" and "X-TinyPedal" in remote["command"]
+    assert remote["stream"] == "ws://127.0.0.1:8337/stream" and "X-NeoPedal" in remote["command"]
 
 
 def test_status_card_updated_when_lan_addresses_found(settings):
@@ -453,6 +453,7 @@ def test_page_rebuilt_in_new_language(window):
         assert settings_pages(window)[0].title == "Réglages" and not page._stale
         assert page.backend.pendingCount == 1 and not page.view.errors()
         assert page.backend.categoryInfo["label"] == "Application"
+        assert page.view.rootContext().contextProperty("i18n").property("table")["Search settings"] == "Rechercher un paramètre"  # QML texts too
     finally:
         i18n.set_language("English")
         page.refresh_now()
@@ -467,9 +468,14 @@ def test_config_page_in_navigation_bar_and_tools(window):
 
     entry = rail_entries()["app_settings"]
     assert entry.dialog == "app_settings.AppSettings" and entry.label == "Config"
-    assert "app_settings" in default_rail_items() and "app_settings" in default_quick_items()
+    # Not in the default bar (gear button of the quick buttons & Ctrl+,), can be added to it
+    assert "app_settings" not in default_rail_items() and "app_settings" in default_quick_items()
     assert any(path == "app_settings.AppSettings" for _, tools in TOOL_SECTIONS for _, _, path in tools)
     assert "reglages" in TOOL_KEYWORDS["app_settings.AppSettings"]
+    from tinypedal.setting import cfg
+
+    cfg.application["rail_items"] = ",".join([*default_rail_items(), "app_settings"])  # added to the bar
+    window.centralWidget().build_rail_items()
     page = open_tool("app_settings.AppSettings", window)  # navigation bar entry, Tools page, quick access
     page.backend.selectCategory("vr_overlay")
     assert open_config_application(window, "") is page and page.backend.category == "vr_overlay"  # gear, Ctrl+,

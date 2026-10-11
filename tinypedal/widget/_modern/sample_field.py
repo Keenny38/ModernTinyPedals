@@ -33,8 +33,10 @@ from typing import Any, NamedTuple
 
 from ...module.module_relative import (
     calc_standings_index,
+    class_order_rank,
     max_vehicles_in_class,
     min_top_vehicles_in_class,
+    other_class_vehicles,
     standings_index_from_all_classes,
     standings_index_from_same_class,
 )
@@ -156,8 +158,9 @@ def sample_standings(field: SampleField, setting: Mapping[str, Any]) -> list[int
     if setting["enable_multi_class_split_mode"]:
         return list(chain(*standings_index_from_all_classes(
             min_top, classes, player.vehicleClass, player.positionInClass,
-            max_vehicles_in_class(setting["maximum_vehicles_per_split_others"], min_top, 0),
-            max_vehicles_in_class(setting["maximum_vehicles_per_split_player"], min_top, 2))))
+            other_class_vehicles(setting["maximum_vehicles_per_split_others"]),
+            max_vehicles_in_class(setting["maximum_vehicles_per_split_player"], min_top, 2),
+            class_order_rank(setting.get("class_order", "")))))
     classes.sort(key=itemgetter(1))
     return calc_standings_index(
         min_top, max_vehicles_in_class(setting["maximum_vehicles_combined_mode"], min_top, 2),

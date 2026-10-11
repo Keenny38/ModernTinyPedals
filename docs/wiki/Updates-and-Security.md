@@ -2,13 +2,14 @@
 
 ## In-app updates
 
-The app checks GitHub for a new release at startup (once per start, `check_for_updates_on_startup` in `Config` > `Application`, on by default). Check by hand any time with `Help` > `Check for Updates`, or the update button of the `Home` page.
+The app checks GitHub for a new release at startup (`check_for_updates_on_startup` in `Config` > `Application`, on by default), then again every 12 hours while it runs (`number_of_hours_between_update_checks`, `0` = startup only; never while driving). Check by hand any time with `Help` > `Check for Updates`, or the update button of the `Home` page.
 
 ### When an update is available
 
 - A notice appears in the main window. Click it for its menu: `Download And Install`, `What's New`, `View Updates On GitHub`, `Skip This Version` and `Dismiss` (`Cancel Download` while downloading).
 - With the Windows installed version, the **What's New** page of the new version opens once, with `Install Now` and `Later`.
 - If the app is hidden in the tray (or minimized), it never pops up over your game: a tray message tells you about the update, and the What's New page waits inside the app.
+- A version found by the check every 12 hours opens What's New only if the main window is the active window; otherwise the notice waits in the window (or a tray message tells you). A notice you dismissed does not come back for the same version.
 
 ### What's New page
 
@@ -21,15 +22,17 @@ The app checks GitHub for a new release at startup (once per start, `check_for_u
 
 `Download And Install` (or `Install Now`) shows the progress (percent and size) in the notice and on the What's New page. `Cancel Download` stops it and removes the partial file. Then the updater:
 
-1. downloads `ModernTinyPedals-<version>-setup.zip` from GitHub;
+1. downloads `NeoPedal-<version>-setup.zip` from GitHub;
 2. checks its **SHA-256**, against the digest GitHub gives for the file, or else the SHA256 list of the release notes, and refuses a file that does not match;
 3. extracts the installer from the ZIP;
 4. checks the installer's **Authenticode signature** when it is signed, and refuses an invalid signature. An unsigned installer is accepted (and logged) only from the official repository: with a custom update repository, the installer must be signed. The repository checked is the one the update was found in, even if the setting changed since;
 5. runs the installer silently: it closes the app, updates it and starts it again. Your presets and data are kept.
 
-Running from source on Windows, the update installs the Windows app the same way: it updates your installed copy (folder found from the installer registry entry, else from the `Modern Tiny Pedals` Start menu shortcut), or installs it if there is none, then the installed app starts. The source folder itself is not changed: update it with `git pull`.
+The downloaded installer is deleted when you decline the install or when it fails to start.
 
-Apps up to 0.19 download `ModernTinyPedals-<version>-windows-setup.exe` instead and check it against its `.sha256` file. Release 0.20.0 has neither: these apps update from the app again from 0.20.1 on.
+Running from source on Windows, the update installs the Windows app the same way: it updates your installed copy (folder found from the installer registry entry, else from the `NeoPedal` Start menu shortcut), or installs it if there is none, then the installed app starts. The source folder itself is not changed: update it with `git pull`.
+
+Apps up to 0.19 download `NeoPedal-<version>-windows-setup.exe` instead and check it against its `.sha256` file. Release 0.20.0 has neither: these apps update from the app again from 0.20.1 on.
 
 The SHA-256 check detects a corrupt or altered download. As the checksum comes from the same release page, it does not prove who published the file: the build provenance attestation does (see below).
 
@@ -42,7 +45,7 @@ The SHA-256 check detects a corrupt or altered download. As the checksum comes f
 - **Running from source on Linux**: `Download And Install` opens the download in your browser. Update your source folder instead (`git pull`, or a new `-source.zip`).
 - **Portable copy** (ZIP from releases up to 0.19): the app opens the releases page. Turn it into an installed copy once: see [Moving from a portable copy](Installation.md#moving-from-a-portable-copy).
 
-To turn update checks off, uncheck `check_for_updates_on_startup`. `update_repository` (default `Keenny38/ModernTinyPedals`) sets the GitHub repository checked; an empty value disables checks.
+To turn update checks off, uncheck `check_for_updates_on_startup`. `number_of_hours_between_update_checks` set to `0` keeps the check at startup only. `update_repository` (default `Keenny38/ModernTinyPedals`) sets the GitHub repository checked; an empty value disables checks. Since 0.23.0 the check also follows GitHub redirects, so updates keep working if the repository is renamed later.
 
 ## Release files
 
@@ -50,10 +53,12 @@ Every release on the [Releases page](https://github.com/Keenny38/ModernTinyPedal
 
 | File | Content |
 |---|---|
-| `ModernTinyPedals-<version>-windows-setup.exe` | The Windows installer |
-| `ModernTinyPedals-<version>-windows-setup.exe.sha256` | Its SHA-256 (`sha256sum` format), checked by the updater of apps up to 0.19 |
-| `ModernTinyPedals-<version>-setup.zip` | The same installer, zipped: downloaded by the app updater since 0.20 |
-| `ModernTinyPedals-<version>-source.zip` | The source code with its version number set, for Linux or running from source |
+| `NeoPedal-<version>-windows-setup.exe` | The Windows installer |
+| `NeoPedal-<version>-windows-setup.exe.sha256` | Its SHA-256 (`sha256sum` format), checked by the updater of apps up to 0.19 |
+| `NeoPedal-<version>-setup.zip` | The same installer, zipped: downloaded by the app updater since 0.20 |
+| `NeoPedal-<version>-source.zip` | The source code with its version number set, for Linux or running from source |
+
+Releases up to 0.22.4 named these files `ModernTinyPedals-<version>-…`. Older apps find the installer by the end of its name (`-setup.zip`, `-windows-setup.exe`), so they still update to the renamed files.
 
 GitHub also adds its own automatic `Source code` archives to every release. They are not built by the release workflow and are not covered by the checksums and attestations: prefer `-source.zip`.
 
@@ -68,13 +73,13 @@ Compare the checksum of your file with the SHA256 list at the end of the release
 Windows (PowerShell):
 
 ```powershell
-Get-FileHash .\ModernTinyPedals-<version>-windows-setup.exe -Algorithm SHA256
+Get-FileHash .\NeoPedal-<version>-windows-setup.exe -Algorithm SHA256
 ```
 
 Linux:
 
 ```bash
-sha256sum ModernTinyPedals-<version>-source.zip
+sha256sum NeoPedal-<version>-source.zip
 ```
 
 ### Build provenance attestation
@@ -82,11 +87,11 @@ sha256sum ModernTinyPedals-<version>-source.zip
 Every release file has a signed **build provenance attestation**: proof that the file was built by the `Build and Release` workflow of this repository, from a commit of this repository. Verify it with the [GitHub CLI](https://cli.github.com/):
 
 ```bash
-gh attestation verify ModernTinyPedals-<version>-windows-setup.exe --repo Keenny38/ModernTinyPedals
+gh attestation verify NeoPedal-<version>-windows-setup.exe --repo Keenny38/ModernTinyPedals
 ```
 
 ```bash
-gh attestation verify ModernTinyPedals-<version>-source.zip --repo Keenny38/ModernTinyPedals
+gh attestation verify NeoPedal-<version>-source.zip --repo Keenny38/ModernTinyPedals
 ```
 
 Attestations exist from version 0.20.0.
@@ -108,8 +113,8 @@ Once published, a release cannot be modified: its files and tag stay as they wer
 
 ## Security of app features
 
-- **Game access**: the app reads game data. Commands are sent to the game only on an explicit action of yours (opening a replay), never automatically.
-- **Remote control** listens on `127.0.0.1` only and requires an `X-TinyPedal` header, so web pages cannot send commands. See [Connections](Connections.md#remote-control).
+- **Game access**: the app reads game data. Commands are sent to the game only on an explicit action of yours (opening a replay, moving the camera, or the camera cuts of the [Broadcast Director](Broadcast-Director.md) once you put it in `Automatic` mode).
+- **Remote control** listens on `127.0.0.1` only and requires an `X-NeoPedal` (or `X-TinyPedal`) header, so web pages cannot send commands. See [Connections](Connections.md#remote-control).
 - **Web dashboard** is off by default, requires an access code, is limited to this computer unless you allow LAN access, and can use HTTPS. See [Connections](Connections.md#web-dashboard).
 - **Plugins** run as normal Python code with full access to your computer: only install plugins you trust. Plugin ZIP files are checked before install (paths, code run).
 - **Bug reports** (`Help` > `Create Bug Report...`) remove your user folder name, access codes and repository names from the files they collect.

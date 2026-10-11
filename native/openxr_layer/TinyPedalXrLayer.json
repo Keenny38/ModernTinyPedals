@@ -5,7 +5,7 @@
         "library_path": ".\\TinyPedalXrLayer.dll",
         "api_version": "1.0",
         "implementation_version": "1",
-        "description": "Modern Tiny Pedals overlay in OpenXR games (inactive while the app is closed)",
+        "description": "NeoPedal overlay in OpenXR games (inactive while the app is closed)",
         "disable_environment": "DISABLE_TINYPEDAL_XR_LAYER"
     }
 }

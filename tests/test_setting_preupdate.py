@@ -70,6 +70,19 @@ def test_brand_logo_column_shown_once():
     assert preset["relative"]["column_brand_logo"] is False
 
 
+def test_suspension_motion_magnified_once():
+    preset = {"black_box": {"suspension_motion_scale": 1.0}}
+    preupdate_user_setting((2, 50, 5), preset)
+    assert preset["black_box"]["suspension_motion_scale"] == 8.0  # former default
+    preset["black_box"]["suspension_motion_scale"] = 1.0  # real scale chosen again by user
+    preupdate_user_setting((2, 50, 6), preset)
+    assert preset["black_box"]["suspension_motion_scale"] == 1.0
+    chosen = {"black_box": {"suspension_motion_scale": 3.0}}
+    preupdate_user_setting((2, 50, 5), chosen)
+    assert chosen["black_box"]["suspension_motion_scale"] == 3.0  # scale chosen by user kept
+    preupdate_user_setting((2, 50, 5), {"black_box": {}})  # option missing: nothing to update
+
+
 def test_wheel_toe_renamed_options():
     preset = {"wheel_toe": {"caption_text": "toe in", "show_toe_in": True}}
     preupdate_user_setting((2, 49, 0), preset)
@@ -77,7 +90,8 @@ def test_wheel_toe_renamed_options():
 
 
 @pytest.mark.parametrize(("version", "applied"), [
-    ((2, 50, 5), False),  # current: nothing changed
+    ((2, 50, 6), False),  # current: nothing changed
+    ((2, 50, 5), False),  # recorder update older
     ((2, 50, 1), True),  # only newer updates applied
 ])
 def test_only_newer_updates_applied(version, applied):

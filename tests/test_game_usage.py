@@ -94,6 +94,18 @@ def test_tyre_allocation_and_tank_capacity():
     assert team_usage.tank_capacity({"fuelInfo": {}}) == 0.0
 
 
+def test_non_finite_json_numbers_left_out():
+    """json reads 1e999 as inf: entries with an infinite number left out, never OverflowError"""
+    inf = float("inf")
+    usage = {"A": [{"lap": inf, "stint": 1}, {"lap": 1, "stint": 1, "fuel": inf}, {"lap": 2, "stint": 1, "ve": -inf},
+                   {"lap": 3, "stint": 1, "tyres": [90.0, inf]}, {"lap": 4, "stint": 1, "fuel": 0.5}]}
+    assert [lap.lap for lap in team_usage.parse_usage(usage)] == [4]
+    assert team_usage.tyre_allocation(
+        {"tireInventory": {"maxAvailableTires": inf}, "tireInvGarageOptions": {"newTiresRemaining": 2}}) is None
+    assert team_usage.tank_capacity({"fuelInfo": {"maxFuel": inf}}) == 0.0
+    assert team_usage.tank_capacity({"fuelInfo": {"maxFuel": float("nan")}}) == 0.0
+
+
 # --- Game estimate per lap (Rest API data, readers)
 def test_tyre_screen_task_gives_game_estimate():
     task = next(task for task in lmu_restapi.lmu_restapi_tasks() if task.path == "/rest/garage/UIScreen/TireManagement")

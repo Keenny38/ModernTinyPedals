@@ -140,6 +140,7 @@ Item {
             activeFocusOnTab: true
             model: backend.standingRows
             boundsBehavior: Flickable.StopAtBounds
+            reuseItems: true  // rows scrolled out fed again with other cars (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Keys.onUpPressed: { backend.moveCarSelection(-1); root.showSelected() }
             Keys.onDownPressed: { backend.moveCarSelection(1); root.showSelected() }
@@ -176,6 +177,10 @@ Item {
                 required property real energyLevel
                 required property string brandLogo
                 readonly property bool selected: key === backend.selectedCar
+                // Reused row: fed other car values at once, no color animation from the old car
+                property bool live: true
+                ListView.onPooled: live = false
+                ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * 2.9)
@@ -183,7 +188,7 @@ Item {
                 color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
                      : row.player ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.07)
                      : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { ColorAnimation { duration: 110 } }
+                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
 
                 MouseArea {
                     id: rowArea
@@ -374,7 +379,7 @@ Item {
                         focusPolicy: Qt.NoFocus
                         onClicked: backend.showDriverIncidents(row.driver)
                         ToolTip.visible: hovered
-                        ToolTip.text: i18n.tr("Incidents of %1").arg(row.driver)
+                        ToolTip.text: hovered ? i18n.tr("Incidents of %1").arg(row.driver) : ""
                         ToolTip.delay: 400
                         background: Rectangle {
                             radius: height / 2
@@ -408,13 +413,18 @@ Item {
                             size: theme.em * 0.9
                             color: theme.accent
                         }
-                        TpButton {
+                        Loader {  // made only for the selected or hovered row
+                            id: cameraLoader
                             anchors.fill: parent
-                            visible: !row.onCamera && backend.inSession && (row.selected || rowArea.containsMouse || hovered)
-                            flat: true
-                            glyph: ""
-                            tip: i18n.tr("Camera on This Car") + " (" + i18n.tr("double click") + ")"
-                            onClicked: backend.watchCar(row.key)
+                            active: !row.onCamera && backend.inSession
+                                    && (row.selected || rowArea.containsMouse
+                                        || (cameraLoader.item !== null && cameraLoader.item.hovered))
+                            sourceComponent: TpButton {
+                                flat: true
+                                glyph: ""
+                                tip: hovered ? i18n.tr("Camera on This Car") + " (" + i18n.tr("double click") + ")" : ""
+                                onClicked: backend.watchCar(row.key)
+                            }
                         }
                     }
                 }

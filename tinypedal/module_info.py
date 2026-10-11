@@ -604,6 +604,10 @@ class DeltaInfo:
         "lapTimeStint",
         "lapTimePace",
         "lapDistance",
+        "speedDeltaBest",
+        "speedDeltaSession",
+        "speedDeltaStint",
+        "speedDeltaLast",
     )
 
     def __init__(self):
@@ -625,6 +629,11 @@ class DeltaInfo:
         self.lapTimeStint: float = 0.0
         self.lapTimePace: float = 0.0
         self.lapDistance: float = 0.0
+        # Speed difference (m/s, + faster) to reference laps at same lap distance (not smoothed)
+        self.speedDeltaBest: float = 0.0
+        self.speedDeltaSession: float = 0.0
+        self.speedDeltaStint: float = 0.0
+        self.speedDeltaLast: float = 0.0
 
 
 class ForceInfo:
@@ -688,11 +697,11 @@ class FuelInfo:
     )
 
     def __init__(self):
+        self.available: bool = False  # set by fuel module each tick, kept by reset (never flickers off)
         self.reset()
 
     def reset(self):
         """Reset"""
-        self.available: bool = False
         self.capacity: float = 0.0
         self.amountStart: float = 0.0
         self.amountCurrent: float = 0.0
@@ -798,10 +807,7 @@ class MappingInfo:
 
     def reset(self):
         """Reset"""
-        self.coordinates: tuple[tuple[float, float], ...] | None = None
-        self.elevations: tuple[tuple[float, float], ...] | None = None
-        self.sectors: tuple[int, int] | None = None
-        self.lastModified: float = 0.0
+        self.reset_map()
         self.speedTrapPosition: float = 0.0
         self.pitEntryPosition: float = 0.0
         self.pitExitPosition: float = 0.0
@@ -809,6 +815,13 @@ class MappingInfo:
         self.pitSpeedLimit: float = 0.0
         self.pitPassTime: float = 0.0
         self.sunlightPhases: tuple[tuple[float, int], ...] | None = None
+
+    def reset_map(self):
+        """Reset track map only (track info fields owned by track info recording)"""
+        self.coordinates: tuple[tuple[float, float], ...] | None = None
+        self.elevations: tuple[tuple[float, float], ...] | None = None
+        self.sectors: tuple[int, int] | None = None
+        self.lastModified: float = 0.0
 
 
 class NotesData:

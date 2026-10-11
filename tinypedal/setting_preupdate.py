@@ -32,6 +32,7 @@ def preupdate_global_setting(preset_version: tuple[int, int, int], dict_user: di
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 50, 8), _global_prior_2_50_8),  # 2026-10-11
         ((2, 50, 4), _global_prior_2_50_4),  # 2026-10-06
         ((2, 50, 3), _global_prior_2_50_3),  # 2026-10-06
         ((2, 43, 0), _global_prior_2_43_0),  # 2026-03-09
@@ -47,6 +48,8 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
     # Create target version and update function list
     # Very old version may be removed later
     target_versions = (
+        ((2, 50, 7), _user_prior_2_50_7),  # 2026-10-10
+        ((2, 50, 6), _user_prior_2_50_6),  # 2026-10-10
         ((2, 50, 5), _user_prior_2_50_5),  # 2026-10-06
         ((2, 50, 2), _user_prior_2_50_2),  # 2026-10-01
         ((2, 50, 1), _user_prior_2_50_1),  # 2026-09-28
@@ -70,6 +73,14 @@ def preupdate_user_setting(preset_version: tuple[int, int, int], dict_user: dict
 
 
 # Global setting update function
+def _global_prior_2_50_8(dict_user: dict):
+    # Navigation bar: Broadcast Director in place of Spectate, Config left out (Ctrl+, & menu), same bar for
+    # everyone (once): back to default
+    application = dict_user.get("application")
+    if isinstance(application, dict):
+        application.pop("rail_items", None)
+
+
 def _global_prior_2_50_4(dict_user: dict):
     # Themes reduced to Modern Dark, Modern Light, Legacy Dark, Legacy Light: Modern Dark for everyone (once),
     # app window & overlays; former Colorblind Safe overlay theme kept as colorblind safe colors
@@ -100,6 +111,21 @@ def _global_prior_2_43_0(dict_user: dict):
 
 
 # User setting update function
+def _user_prior_2_50_7(dict_user: dict):
+    # Chat order switch replaced by scroll direction choice
+    chat = dict_user.get("chat")
+    if isinstance(chat, dict) and "show_newest_message_at_top" in chat:
+        chat["scroll_direction"] = "Downward" if chat.pop("show_newest_message_at_top") is True else "Upward"
+
+
+def _user_prior_2_50_6(dict_user: dict):
+    # Black box suspension motion magnified 8 times by default: presets at former default (real scale) too (once),
+    # other scales chosen by user kept
+    black_box = dict_user.get("black_box")
+    if isinstance(black_box, dict) and black_box.get("suspension_motion_scale") == 1:
+        black_box["suspension_motion_scale"] = 8.0
+
+
 def _user_prior_2_50_5(dict_user: dict):
     # Car brand logos now come by themselves (game & own logos): logo column of driver lists shown, also in
     # existing presets (once)

@@ -17,6 +17,8 @@ TpPage {
     readonly property var friend: backend.friend
     readonly property var info: backend.trackInfo
     readonly property var tiles: backend.tiles
+    readonly property var driver: backend.driver  // driver card (All Tracks)
+    readonly property var sessions: backend.sessions  // sessions of selected vehicle
     readonly property bool allTracks: backend.allTracks
     readonly property bool compact: width < theme.em * 80  // menu buttons as icons, 3 key figures a row
     property var menuActions: []
@@ -208,8 +210,8 @@ TpPage {
                     onClicked: backend.openLapViewer()
                 }
                 Rectangle { implicitWidth: 1; implicitHeight: theme.em * 1.4; color: theme.border; Layout.leftMargin: theme.em * 0.2; Layout.rightMargin: theme.em * 0.2 }
-                TpButton { flat: true; glyph: ""; tip: i18n.tr("Undo (Ctrl+Z)"); enabled: backend.canUndo; onClicked: backend.undo() }
-                TpButton { flat: true; glyph: ""; tip: i18n.tr("Redo (Ctrl+Y)"); enabled: backend.canRedo; onClicked: backend.redo() }
+                TpButton { flat: true; glyph: ""; tip: i18n.tr("Undo (Ctrl+Z)"); enabled: backend.canUndo && !backend.editing; onClicked: backend.undo() }
+                TpButton { flat: true; glyph: ""; tip: i18n.tr("Redo (Ctrl+Y)"); enabled: backend.canRedo && !backend.editing; onClicked: backend.redo() }
                 TpButton {
                     id: exportButton
                     glyph: ""  // export
@@ -309,7 +311,7 @@ TpPage {
                                 delegate: Action {
                                     required property var modelData
                                     text: modelData.date
-                                    enabled: modelData.name !== ""
+                                    enabled: modelData.name !== "" && !backend.editing
                                     onTriggered: backend.restoreBackup(modelData.name)
                                 }
                                 onObjectAdded: function(index, object) { backupMenu.insertAction(index, object) }
@@ -319,7 +321,7 @@ TpPage {
                         MenuSeparator {}
                         Action {
                             text: i18n.tr("Delete all stats of this track")
-                            enabled: backend.canDelete
+                            enabled: backend.canDelete && !backend.editing
                             onTriggered: backend.deleteTrack("")
                         }
                     }
@@ -375,8 +377,19 @@ TpPage {
                         onCellMenu: function(key, column, x, y) { page.openRowMenu(key, column, table, x, y) }
                         onHeaderMenu: function(x, y) { headerMenu.popup(table, x, y) }
                     }
+                    Item {  // stats files read in background (page opened, big session history)
+                        visible: backend.loading
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        BusyIndicator {
+                            anchors.centerIn: parent
+                            running: parent.visible
+                            width: theme.em * 2.4
+                            height: width
+                        }
+                    }
                     EmptyState {
-                        visible: !backend.hasRows
+                        visible: !backend.hasRows && !backend.loading
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         glyph: ""  // car
@@ -554,14 +567,14 @@ TpPage {
                 ColumnLayout {  // sessions of selected vehicle, newest first
                     visible: progressionBox.split || progressionBox.showSessions
                     Layout.fillWidth: !progressionBox.split
-                    Layout.preferredWidth: progressionBox.split ? Math.min(theme.em * 25, progressionBox.width * 0.45) : -1
+                    Layout.preferredWidth: progressionBox.split ? Math.min(theme.em * 29, progressionBox.width * 0.5) : -1
                     Layout.fillHeight: true
                     spacing: theme.em * 0.2
                     RowLayout {
                         Layout.fillWidth: true
                         SectionLabel { text: i18n.tr("Sessions"); Layout.topMargin: 0 }
                         Text {
-                            text: backend.sessions.length ? String(backend.sessions.length) : ""
+                            text: page.sessions.length ? String(page.sessions.length) : ""
                             color: theme.dimText
                             font.pointSize: theme.fontPoint * 0.85
                             font.features: { "tnum": 1 }
@@ -575,7 +588,7 @@ TpPage {
                         clip: true
                         reuseItems: true
                         boundsBehavior: Flickable.StopAtBounds
-                        model: backend.sessions
+                        model: page.sessions
                         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                         delegate: Rectangle {
                             id: sessionItem
@@ -588,7 +601,14 @@ TpPage {
                             ToolTip.visible: sessionArea.containsMouse
                             ToolTip.text: modelData.tip
                             ToolTip.delay: 600
-                            MouseArea { id: sessionArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+                            MouseArea {  // session of a results file: shown in race results page
+                                id: sessionArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: sessionItem.modelData.results ? Qt.LeftButton : Qt.NoButton
+                                cursorShape: sessionItem.modelData.results ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: backend.openResults(sessionItem.modelData.results)
+                            }
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: theme.em * 0.3
@@ -606,7 +626,20 @@ TpPage {
                                     tint: page.kindColor(sessionItem.modelData.kind)
                                     Layout.maximumWidth: theme.em * 7
                                 }
+                                Text {  // game version when driven
+                                    visible: text !== ""
+                                    text: sessionItem.modelData.version ? "v" + sessionItem.modelData.version : ""
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontPoint * 0.8
+                                    font.features: { "tnum": 1 }
+                                }
                                 Item { Layout.fillWidth: true }
+                                Icon {  // contacts & penalties of session (results file)
+                                    visible: sessionItem.modelData.incidents > 0
+                                    glyph: "\uE945"  // lightning
+                                    size: theme.em * 0.7
+                                    color: theme.warning
+                                }
                                 Icon {
                                     visible: sessionItem.modelData.pb === true
                                     glyph: ""  // star
@@ -628,14 +661,15 @@ TpPage {
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 Item {
-                                    Layout.preferredWidth: theme.em * 2.6
+                                    Layout.preferredWidth: theme.em * 3.6
                                     implicitHeight: resultChip.implicitHeight
                                     Chip {
                                         id: resultChip
                                         anchors.right: parent.right
-                                        text: sessionItem.modelData.result
-                                        tint: page.resultColor(sessionItem.modelData.result, sessionItem.modelData.podium)
-                                        strong: true
+                                        text: sessionItem.modelData.result || sessionItem.modelData.rank
+                                        tint: sessionItem.modelData.result ? page.resultColor(sessionItem.modelData.result, sessionItem.modelData.podium)
+                                                                           : theme.dimText
+                                        strong: sessionItem.modelData.result !== ""
                                     }
                                 }
                             }
@@ -960,6 +994,119 @@ TpPage {
         id: allTracksSide
         ColumnLayout {
             spacing: theme.em * 0.65
+            StatsCard {  // driver: game profile, Steam picture, races of game results files
+                visible: page.driver.visible === true
+                title: i18n.tr("Driver")
+                glyph: "\uE77B"  // contact
+                tip: page.driver.info || ""
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.em * 0.7
+                    Rectangle {  // Steam profile picture, else initials
+                        Layout.preferredWidth: Math.round(theme.em * 3.4)
+                        Layout.preferredHeight: Layout.preferredWidth
+                        radius: theme.em * 0.4
+                        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.16)
+                        Text {
+                            anchors.centerIn: parent
+                            visible: avatar.status !== Image.Ready
+                            text: page.driver.initials || ""
+                            color: theme.accent
+                            font.pointSize: theme.fontPoint * 1.3
+                            font.weight: Font.Bold
+                        }
+                        Image {
+                            id: avatar
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            source: page.driver.avatar || ""
+                            sourceSize.width: width * 2
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            smooth: true
+                        }
+                    }
+                    ColumnLayout {
+                        spacing: 0
+                        Layout.fillWidth: true
+                        Text {
+                            text: page.driver.name || ""
+                            color: theme.text
+                            font.weight: Font.DemiBold
+                            font.pointSize: theme.fontPoint * 1.15
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            visible: text !== ""
+                            text: page.driver.detail || ""
+                            color: theme.dimText
+                            font.pointSize: theme.fontPoint * 0.9
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+                GridLayout {  // races of results files
+                    visible: (page.driver.figures || []).length > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.em * 0.3
+                    columns: 3
+                    columnSpacing: theme.em * 0.5
+                    rowSpacing: theme.em * 0.4
+                    Repeater {
+                        model: page.driver.figures || []
+                        ColumnLayout {
+                            required property var modelData
+                            spacing: 0
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 1  // equal columns
+                            Text {
+                                text: modelData.value
+                                color: theme.text
+                                font.weight: Font.DemiBold
+                                font.pointSize: theme.fontPoint * 1.1
+                                font.features: { "tnum": 1 }
+                            }
+                            Text {
+                                text: modelData.label
+                                color: theme.dimText
+                                font.pointSize: theme.fontPoint * 0.8
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+                Text {
+                    visible: text !== ""
+                    text: page.driver.info || ""
+                    color: theme.dimText
+                    font.pointSize: theme.fontPoint * 0.8
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {  // lap times of stats missing or slower than in results files
+                    visible: (page.driver.fixes || 0) > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.em * 0.2
+                    spacing: theme.em * 0.5
+                    Icon { glyph: "\uE916"; size: theme.em * 0.9; color: theme.accent }  // stopwatch
+                    Text {
+                        text: page.driver.fixText || ""
+                        color: theme.text
+                        font.pointSize: theme.fontPoint * 0.9
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    TpButton {
+                        text: i18n.tr("Complete...")
+                        tip: i18n.tr("Add lap times of race results missing from your stats, or faster than them")
+                        enabled: !backend.editing
+                        onClicked: backend.completeLapTimes()
+                    }
+                }
+            }
             StatsCard {
                 title: i18n.tr("Levels, All Tracks")
                 glyph: ""  // star

@@ -1,12 +1,21 @@
-"""Driver stats page never waits for STATS_LOCK (stats module saving): reloads & edits run in order
-once free; stats module releases the lock while waiting to load the stats file again"""
+"""Driver stats page never waits for STATS_LOCK (stats module saving): reloads & edits run in order on a
+worker thread, waiting there; stats module releases the lock while waiting to load the stats file again"""
 
 import os
 import threading
 import time
 
 from PySide6.QtCore import QCoreApplication
-from test_driver_stats_viewer import OREGA, SPA, backend, dialogs, load_stats, window, write_stats  # noqa: F401
+from test_driver_stats_viewer import (  # noqa: F401
+    OREGA,
+    SPA,
+    backend,
+    dialogs,
+    load_stats,
+    settle,
+    window,
+    write_stats,
+)
 
 from tinypedal.setting import cfg
 from tinypedal.userfile import driver_stats
@@ -34,11 +43,7 @@ class LockHolder:
 
 
 def wait_jobs(page, timeout: float = 5):
-    end = time.monotonic() + timeout
-    while page._locked_jobs:
-        assert time.monotonic() < end, "jobs still waiting"
-        QCoreApplication.processEvents()
-        time.sleep(0.005)
+    settle(page, timeout)
 
 
 def test_edits_and_reload_wait_without_blocking(backend):  # noqa: F811
@@ -46,24 +51,28 @@ def test_edits_and_reload_wait_without_blocking(backend):  # noqa: F811
     try:
         start = time.monotonic()
         backend.reload_stats()
-        assert not backend.edit_stats((SPA, "Hyper - Ferrari"), None)  # waits, page not blocked
+        assert not backend.edit_stats((SPA, "Hyper - Ferrari"), None)  # waits on worker, page not blocked
         assert time.monotonic() - start < 0.5
-        assert len(backend._locked_jobs) == 2 and backend.lock_timer.isActive()
+        assert backend._running_job.kind == "reload" and len(backend._locked_jobs) == 1 and backend.editing
+        time.sleep(0.1)
+        QCoreApplication.processEvents()
         assert "Hyper - Ferrari" in load_stats()[SPA] and not backend.canUndo
     finally:
         holder.release()
     wait_jobs(backend)
-    assert "Hyper - Ferrari" not in load_stats()[SPA] and backend.canUndo
+    assert "Hyper - Ferrari" not in load_stats()[SPA] and backend.canUndo and not backend.editing
     holder = LockHolder()
     try:
         backend.undo()
+        time.sleep(0.05)
         assert "Hyper - Ferrari" not in load_stats()[SPA]
     finally:
         holder.release()
     wait_jobs(backend)
     assert "Hyper - Ferrari" in load_stats()[SPA] and backend.canRedo and not backend.canUndo
-    backend.redo()  # lock free: done at once
-    assert "Hyper - Ferrari" not in load_stats()[SPA] and not backend._locked_jobs
+    backend.redo()  # lock free: saved in background all the same
+    wait_jobs(backend)
+    assert "Hyper - Ferrari" not in load_stats()[SPA] and not backend.busy()
 
 
 def test_module_save_kept_while_edit_waits(backend):  # noqa: F811
@@ -78,14 +87,37 @@ def test_module_save_kept_while_edit_waits(backend):  # noqa: F811
     assert "Monza" not in saved and saved[SPA][OREGA]["valid"] == 35  # both kept
 
 
-def test_release_drops_waiting_jobs(backend):  # noqa: F811
+def test_release_saves_waiting_edits(backend):  # noqa: F811
+    """Page closed while an edit waits behind a reload: reload dropped, edit saved all the same"""
     holder = LockHolder()
     try:
         backend.reload_stats()
+        backend.edit_stats((SPA, "Hyper - Ferrari"), None)
         backend.release()
-        assert not backend._locked_jobs and not backend.lock_timer.isActive()
+        assert not backend._locked_jobs
+        time.sleep(0.05)
+        assert "Hyper - Ferrari" in load_stats()[SPA]  # still waits for module save
     finally:
         holder.release()
+    assert backend._last_finished is not None and backend._last_finished.wait(5)
+    wait_jobs(backend)
+    assert "Hyper - Ferrari" not in load_stats()[SPA] and not backend.canUndo  # saved, page not updated
+
+
+def test_release_saves_waiting_edits_in_order(backend):  # noqa: F811
+    """Edits waiting when page closed saved after running edit, in order, page jobs gone or not"""
+    holder = LockHolder()
+    try:
+        backend.edit_stats((SPA, "Test car"), {"pb": 100.0})  # running, waits for lock
+        backend.edit_stats((SPA, "Test car"), None)  # waiting
+        backend.release()
+        backend.jobs.deleteLater()  # page deleted: running job result never handed over
+        backend.edit_stats((SPA, OREGA), None)  # asked after close: saved after the others
+    finally:
+        holder.release()
+    assert backend._last_finished is not None and backend._last_finished.wait(5)
+    saved = load_stats()[SPA]
+    assert "Test car" not in saved and OREGA not in saved
 
 
 def test_module_save_releases_lock_while_retrying(tmp_path, monkeypatch):

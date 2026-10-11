@@ -421,7 +421,7 @@ WIDGET_TYRES = {
         "brake_pressure_color": "#3DC8FF",
         "show_suspension": True,
         "suspension_scale": 1.0,
-        "suspension_motion_scale": 1.0,
+        "suspension_motion_scale": 8.0,
         "enable_wheel_suspension_motion": True,
         "show_coilover_damage": True,
         "show_suspension_lap_stats": False,

@@ -278,7 +278,10 @@ def test_import_foreign_laps(backend, tmp_path):
     from tinypedal.ui.lap_library import LapLibrary
 
     backend.openLibrary()  # imported laps library: group of another driver's laps told apart
+    from tests.test_lap_library import wait_library
+
     library = next(widget for widget in backend._window.findChildren(LapLibrary))
+    wait_library(library)  # imported laps listed in background
     assert library.tree.topLevelItem(0).text(library.COL_DRIVER) == "foreign laps"
     library.close()
     backend.import_folder(str(other), background=False)  # imported again: same group, nothing copied twice

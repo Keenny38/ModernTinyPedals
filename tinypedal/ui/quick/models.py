@@ -23,7 +23,7 @@ List models for QML views
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from PySide6.QtCore import QAbstractListModel, QByteArray, QModelIndex, QPersistentModelIndex, Qt
 
@@ -82,10 +82,13 @@ class DictListModel(QAbstractListModel):
         return 0 if parent.isValid() else len(self.rows)
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or not 0 <= index.row() < len(self.rows):
-            return None
+        # Called for every role of every shown delegate: one lookup, one call to Qt (invalid index: row -1)
         name = self._roles.get(role)
-        return None if name is None else self.rows[index.row()].get(name)
+        if name is None:
+            return None
+        number = index.row()
+        rows = self.rows
+        return rows[number].get(name) if 0 <= number < len(rows) else None
 
     def reset(self, rows: list[dict]):
         self.beginResetModel()
@@ -199,10 +202,42 @@ class DictListModel(QAbstractListModel):
 
     def update_rows(self, change: Callable[[dict], dict]) -> bool:
         """Apply change (row -> changed values) to every row, notify changed rows only, True if any changed"""
-        changed = False
-        for number, row in enumerate(self.rows):
-            changed = self.update_row(number, change(row)) or changed
-        return changed
+        return self.update_many((number, change(row)) for number, row in enumerate(self.rows))
+
+    def update_many(self, changes: Iterable[tuple[int, Mapping]]) -> bool:
+        """Values of rows changed in place ((row number, values) in increasing row order), True if any changed
+
+        Following changed rows notified together: one dataChanged per run of rows (roles changed in any of them),
+        not one per row (select all: one notification instead of hundreds).
+        """
+        rows = self.rows
+        role_of = self._role_of
+        first = last = -1
+        roles: set[int] = set()
+        every_role = False  # a row changed only values without role: notified for every role, like update_row
+        for number, values in changes:
+            if not 0 <= number < len(rows):
+                continue
+            row = rows[number]
+            changed = {name: value for name, value in values.items() if row.get(name) != value}
+            if not changed:
+                continue
+            row.update(changed)
+            if number != last + 1 or first < 0:
+                if first >= 0:
+                    self._rows_changed(first, last, roles, every_role)
+                first, roles, every_role = number, set(), False
+            last = number
+            row_roles = [role_of[name] for name in changed if name in role_of]
+            roles.update(row_roles)
+            every_role = every_role or not row_roles
+        if first < 0:
+            return False
+        self._rows_changed(first, last, roles, every_role)
+        return True
+
+    def _rows_changed(self, first: int, last: int, roles: set[int], every_role: bool):
+        self.dataChanged.emit(self.index(first, 0), self.index(last, 0), [] if every_role else sorted(roles))
 
 
 class FoldedListModel(DictListModel):
@@ -226,9 +261,7 @@ class FoldedListModel(DictListModel):
             values = change(row)
             row.update(values)
             values_of.setdefault(row.get(self.key), values)
-        changed = False
-        for number, row in enumerate(self.rows):
-            value = row.get(self.key)
-            values = values_of[value] if value in values_of else change(row)
-            changed = self.update_row(number, values) or changed
-        return changed
+        key = self.key
+        return self.update_many(
+            (number, values_of[value] if (value := row.get(key)) in values_of else change(row))
+            for number, row in enumerate(self.rows))

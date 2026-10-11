@@ -68,6 +68,12 @@ def engine_path(box: QRectF) -> QPainterPath:
     return path
 
 
+def icon_glow_rect(box: QRectF) -> QRectF:
+    """Halo around a lit icon box"""
+    pad = box.width() * 0.3
+    return box.adjusted(-pad, -pad, pad, pad)
+
+
 class StatusPainter:
     """Headlights & engine icons, brake bias & motor map rows, between front and rear wheels on one side"""
 
@@ -202,7 +208,6 @@ class StatusPainter:
         gap = self.side_gap(True)
         if gap.isNull():
             return
-        wcfg = self.wcfg
         unit = self.unit
         block = min(self.side_rows_height(), gap.height())
         scale = block / self.side_rows_height()
@@ -215,43 +220,63 @@ class StatusPainter:
         # Chips all the same width: ABS & TC lit while active, brake bias & motor map always lit
         chip_w = gap.width() - unit * 0.4
         left = gap.center().x() - chip_w / 2
-        for name in rows:
-            rect = QRectF(left, top, chip_w, row_h)
-            if name == "abs":
-                if self.has_abs:
-                    self.draw_indicator(painter, rect, level_text(self.text["abs"], self.abs_level),
-                                        self.abs_active, wcfg["abs_active_color"])
-            elif name == "tc":
-                if self.has_tc:
-                    self.draw_indicator(
-                        painter, rect, level_text(self.text["tc"], self.tc_level, self.tc_cut_level, self.tc_slip_level),
-                        self.tc_active, wcfg["tc_active_color"])
-            elif name == "motor_map":
-                if self.motor_map_level >= 0:
-                    self.draw_indicator(painter, rect, level_text(self.text["motor_map"], self.motor_map_level),
-                                        True, wcfg["motor_map_color"])
-            elif name == "brake_bias" and self.merged_brake_bias():
-                self.draw_indicator(painter, rect, f"{self.text['brake_bias']}/{self.text['brake_migration']} "
-                                    f"{self.brake_bias * 100:.1f}/{self.brake_migration:.1f}",
-                                    True, wcfg["brake_bias_color"])
-            elif name == "brake_bias":
-                self.draw_indicator(painter, rect, f"{self.text['brake_bias']} {self.brake_bias * 100:.1f}",
-                                    True, wcfg["brake_bias_color"])
-            else:
-                self.draw_indicator(painter, rect, f"{self.text['brake_migration']} {self.brake_migration:.1f}",
-                                    True, wcfg["brake_bias_color"])
+        for chip in self.side_row_chips(rows):
+            if chip is not None:
+                self.draw_indicator(painter, QRectF(left, top, chip_w, row_h), *chip)
             top += row_h + spacing
+
+    def side_row_chips(self, rows: list[str]) -> list[tuple[str, bool, str] | None]:
+        """(text, active, color) of each side row chip, None if hidden (car has none)"""
+        wcfg = self.wcfg
+        chips: list[tuple[str, bool, str] | None] = []
+        for name in rows:
+            if name == "abs":
+                chips.append((level_text(self.text["abs"], self.abs_level), self.abs_active, wcfg["abs_active_color"])
+                             if self.has_abs else None)
+            elif name == "tc":
+                chips.append((level_text(self.text["tc"], self.tc_level, self.tc_cut_level, self.tc_slip_level),
+                              self.tc_active, wcfg["tc_active_color"]) if self.has_tc else None)
+            elif name == "motor_map":
+                chips.append((level_text(self.text["motor_map"], self.motor_map_level), True, wcfg["motor_map_color"])
+                             if self.motor_map_level >= 0 else None)
+            elif name == "brake_bias" and self.merged_brake_bias():
+                chips.append((f"{self.text['brake_bias']}/{self.text['brake_migration']} "
+                              f"{self.brake_bias * 100:.1f}/{self.brake_migration:.1f}", True,
+                              wcfg["brake_bias_color"]))
+            elif name == "brake_bias":
+                chips.append((f"{self.text['brake_bias']} {self.brake_bias * 100:.1f}", True, wcfg["brake_bias_color"]))
+            else:
+                chips.append((f"{self.text['brake_migration']} {self.brake_migration:.1f}", True,
+                               wcfg["brake_bias_color"]))
+        return chips
+
+    def side_rows_key(self) -> tuple:
+        """What side rows show, see drawn"""
+        return tuple(self.side_row_chips(self.side_rows()))
+
+    def status_key(self) -> tuple:
+        """What headlights & engine icons show, see drawn"""
+        running = self.ignition == 2
+        return self.headlights, self.ignition, self.engine_hot(), tuple(self.engine_rows()) if running else ()
 
     def draw_status_icons(self, painter: QPainter):
         """Icons side by side in one side gap: headlights, then engine with its text below"""
+        lights, engine, row = self.status_icon_boxes()
+        if lights is not None:
+            self.draw_headlights_icon(painter, lights)
+        if engine is not None:
+            self.draw_engine_icon(painter, engine, row)
+
+    def status_icon_boxes(self) -> tuple[QRectF | None, QRectF | None, QRectF]:
+        """(headlights icon, engine icon, first engine text row), None if not shown"""
         wcfg = self.wcfg
         show_lights = wcfg["show_headlights_indicator"]
         show_engine = wcfg["show_engine_status"]
         if not self.rects_tyre or not (show_lights or show_engine):
-            return
+            return None, None, QRectF()
         gap = self.side_gap(wcfg["status_icons_side"] == "Right")
         if gap.isNull():
-            return
+            return None, None, QRectF()
         unit = self.unit
         rows = self.side_rows_height()
         if rows and self.side_rows_share_icons():  # side rows below icons
@@ -269,15 +294,18 @@ class StatusPainter:
         icon = size * scale
         top = gap.top() + (gap.height() - total * scale) / 2
         left = gap.center().x() - (icon * count + spacing * scale * (count - 1)) / 2
+        lights = engine = None
+        row = QRectF()
         if show_lights:
-            self.draw_headlights_icon(painter, QRectF(left, top, icon, icon))
+            lights = QRectF(left, top, icon, icon)
             left += icon + spacing * scale
         if show_engine:
             # Text centered under the engine icon, as wide as the gap allows on both sides
             middle = left + icon / 2
             half = min(middle - gap.left(), gap.right() - middle)
             row = QRectF(middle - half, top + icon + unit * 0.1 * scale, half * 2, row_h * scale)
-            self.draw_engine_icon(painter, QRectF(left, top, icon, icon), row)
+            engine = QRectF(left, top, icon, icon)
+        return lights, engine, row
 
     def draw_icon_glow(self, painter: QPainter, box: QRectF, color: str):
         """Soft radial halo behind a lit icon"""
@@ -289,8 +317,7 @@ class StatusPainter:
         gradient.setColorAt(1.0, halo)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
-        pad = box.width() * 0.3
-        painter.drawEllipse(box.adjusted(-pad, -pad, pad, pad))
+        painter.drawEllipse(icon_glow_rect(box))
 
     def draw_headlights_icon(self, painter: QPainter, box: QRectF):
         wcfg = self.wcfg
@@ -345,11 +372,18 @@ class StatusPainter:
             text = self.text["engine_off"] if self.ignition == 0 else self.text["ignition"]
             self.draw_fit_text(painter, row, text, self.grown_font(self.font_label, row))
             return
-        for label, value, warning in (
-            (self.text["oil"], self.oil_temp, wcfg["engine_oil_warning_temperature"]),
-            (self.text["water"], self.water_temp, wcfg["engine_water_warning_temperature"]),
-        ):
-            painter.setPen(qcolor(wcfg["engine_warning_color"]) if value >= warning else self.pen_text)
-            self.draw_fit_text(painter, row, f"{label} {self.unit_temp(value):.0f}{self.sign_text}",
-                               self.grown_font(self.font_label, row))
+        for text, warning in self.engine_rows():
+            painter.setPen(qcolor(wcfg["engine_warning_color"]) if warning else self.pen_text)
+            self.draw_fit_text(painter, row, text, self.grown_font(self.font_label, row))
             row = row.translated(0, row.height())
+
+    def engine_rows(self) -> list[tuple[str, bool]]:
+        """Oil & water temperature (text, over warning temperature) of running engine"""
+        wcfg = self.wcfg
+        return [
+            (f"{label} {self.unit_temp(value):.0f}{self.sign_text}", value >= warning)
+            for label, value, warning in (
+                (self.text["oil"], self.oil_temp, wcfg["engine_oil_warning_temperature"]),
+                (self.text["water"], self.water_temp, wcfg["engine_water_warning_temperature"]),
+            )
+        ]

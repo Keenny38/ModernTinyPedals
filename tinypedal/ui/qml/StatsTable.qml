@@ -64,6 +64,14 @@ FocusScope {
         }
     }
     Component {
+        id: logoImage
+        GameLogo {
+            source: parent ? parent.logoUrl : ""
+            boxWidth: theme.em * 2.2
+            boxHeight: theme.em * 1.25
+        }
+    }
+    Component {
         id: badgeShape
         Rectangle {
             radius: width / 2
@@ -266,13 +274,14 @@ FocusScope {
                     font.weight: cell.bold ? Font.DemiBold : Font.Normal
                     font.features: { "tnum": 1 }
                     elide: Text.ElideRight
-                    GameLogo {  // car brand or circuit logo of game
+                    Loader {  // car brand or circuit logo of game: vehicle & track cells only
                         id: logo
-                        source: cellText.cell.logo || ""
-                        boxWidth: theme.em * 2.2
-                        boxHeight: theme.em * 1.25
+                        readonly property string logoUrl: cellText.cell.logo || ""
+                        readonly property bool shown: item !== null && item.shown === true
+                        active: logoUrl !== ""
                         x: -cellText.logoRoom + (theme.em * 2.2 - width) / 2
                         y: (cellText.height - height) / 2
+                        sourceComponent: logoImage
                     }
                     Loader {
                         id: decoration

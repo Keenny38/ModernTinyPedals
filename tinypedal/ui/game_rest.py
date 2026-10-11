@@ -101,8 +101,9 @@ class GameConnection:
     Once the game did not answer, the following requests of the job answer None at once.
     """
 
-    def __init__(self, timeout: float = COMMAND_TIMEOUT):
-        self.address = game_address()
+    def __init__(self, timeout: float = COMMAND_TIMEOUT, address: tuple[str, int] | None = None):
+        # Address of another computer (game running there), else the Rest API address of the app settings
+        self.address = address if address is not None else game_address()
         self.timeout = timeout
         self.connection: http.client.HTTPConnection | None = None
         self.failed = self.address is None

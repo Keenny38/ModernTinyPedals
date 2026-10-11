@@ -117,10 +117,14 @@ class BackendBase:
         _hysteresis: int
         _ideal: IdealLap | None
         _imports: int
+        _lap_cache: dict[str, LapData | None]
         _lap_corners: dict[str, tuple[tuple, ResampledLap, list[CornerStats | None]]]
         _lap_offsets: dict[str, tuple[tuple, lap_map.MapLine, list[float], list[int]]]
+        _lap_mtimes: tuple[int, dict[str, float | None]]
         _lap_shapes: dict[tuple, tuple]
+        _line_boxes: tuple
         _legend: list[dict]
+        _list_revision: int
         _limits: lap_map.TrackLimits | None
         _limits_source: str
         _line_cache: dict[str, tuple[LapData, lap_map.MapLine | None]]
@@ -131,6 +135,7 @@ class BackendBase:
         _map_auto_orient: bool
         _map_braking: bool
         _map_follow: bool
+        _map_kinds: list[str]
         _map_lines: list[tuple[lap_map.MapLine, PlotLap]]
         _map_mode: str
         _map_options: dict[str, bool]
@@ -144,6 +149,7 @@ class BackendBase:
         _mini_busy: bool
         _mini_times: dict[str, tuple[float, tuple, list[float]]]
         _normals: dict[str, tuple]
+        _official_line: tuple
         _official: list[TrackCorner]
         _official_key: tuple | None
         _official_numbered: bool
@@ -151,9 +157,11 @@ class BackendBase:
         _panels: list[dict]
         _pit: list[lap_map.MapLine]
         _placements: dict[str, tuple[tuple, tuple]]
+        _placing: int
+        _prepared_placements: dict[str, tuple[tuple, tuple]]
         _prefetch_step: float
         _prefetch_timer: QTimer
-        _prefetching: set[float]
+        _prefetching: set[tuple[int, float]]
         _preview_step: float
         _resampled: dict[str, ResampledLap]
         _road: lap_map.MapLine
@@ -161,7 +169,9 @@ class BackendBase:
         _session_busy: bool
         _session_extra: dict[str, tuple[float, dict]]
         _session_key: str
+        _session_state: dict | None
         _side_tab: int
+        _simple_view: bool
         _similar_tolerance: int
         _slips: dict[str, tuple[LapData, list]]
         _speed_range: tuple[float, float]
@@ -175,7 +185,10 @@ class BackendBase:
         _zones: dict[str, tuple[LapData, tuple]]
         chartChanged: SignalInstance
         cornersChanged: SignalInstance
+        dashboardChanged: SignalInstance
         mapDataChanged: SignalInstance
+        mapCornersChanged: SignalInstance
+        corner_model: DictListModel
         panelsChanged: SignalInstance
         checked: set[str]
         data: TraceData
@@ -202,6 +215,7 @@ class BackendBase:
         def build_map_bands(self): ...
         def build_panels(self): ...
         def bump_revision(self): ...
+        def cursorState(self, x: float) -> dict: ...
         def channels_updated(self, save: bool=True): ...
         def compared_lap(self) -> PlotLap | None: ...
         def drop_unused_vertices(self): ...
@@ -220,6 +234,7 @@ class BackendBase:
         def official_text(self, label: str) -> str: ...
         def ordered_checked(self) -> list[str]: ...
         def read_lap(self, path: str) -> LapData | None: ...
+        def rebuild_chart(self): ...
         def reference_map_line(self) -> lap_map.MapLine | None: ...
         def resampled(self, lap: PlotLap) -> ResampledLap: ...
         def row_label(self, row: CornerComparison) -> str: ...
@@ -228,5 +243,6 @@ class BackendBase:
         def session_row(self, group: list[LapEntry], is_added: bool) -> dict: ...
         def set_status(self, text: str, transient: bool=True): ...
         def short_label(self, key: str) -> str: ...
+        def store_lap(self, path: str, lap: LapData | None): ...
         def track_name(self) -> str: ...
         def track_sessions(self) -> list: ...

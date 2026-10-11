@@ -19,7 +19,7 @@
 """
 Widget plugin loader
 
-Plugin layout (in "plugins" folder next to Modern Tiny Pedals):
+Plugin layout (in "plugins" folder next to NeoPedal):
     plugins/<name>/setting.json   default options (merged with PLUGIN_BASE_DEFAULT)
     plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
 
@@ -80,7 +80,7 @@ WINDOWS_DEVICE_NAMES = frozenset((
 ))
 TRUST_FILE = "plugin_trust.json"
 UNTRUSTED_ERROR = "Not trusted: review plugin code, then trust it in Plugin Manager"
-SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart Modern Tiny Pedals to load it"
+SAFE_MODE_ERROR = "Safe mode: plugin not loaded, restart NeoPedal to load it"
 # Plugins shipped with TinyPedal: widget name: plugin digest (none since example speed plugin was removed)
 BUNDLED_PLUGINS: MappingProxyType[str, str] = MappingProxyType({})
 

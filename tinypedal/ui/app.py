@@ -21,6 +21,7 @@ Main application window
 """
 
 import logging
+import sys
 from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING, cast
@@ -69,6 +70,7 @@ from ..i18n import install_qt_translation, set_language, tr, trm
 from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
+from ..update import update_checker
 from ..userfile.layout_profile import screen_key
 from . import (
     app_icon_file,
@@ -102,6 +104,7 @@ if TYPE_CHECKING:
     from .preset_view import PresetList
 
 logger = logging.getLogger(__name__)
+UPDATE_CHECK_POLL_MS = 600000  # whether automatic update check is due, every 10 minutes
 
 
 # Rail overlay toggles: (overlay option, tooltip, icon glyph, fallback letter)
@@ -120,6 +123,43 @@ def show_restored(window: QWidget):
         window.showMaximized()
     else:
         window.showNormal()
+
+
+def force_foreground(window: QWidget):
+    """Window put in front & focused though another app (game) has focus (Windows)
+
+    Windows only flashes the taskbar button of an app activating its window without the last input
+    (global hotkey key state is polled, remote control): input of the foreground window thread is
+    shared during the call, as Qt does with its AlwaysActivateWindow behavior.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32")  # own prototypes, not shared ctypes.windll ones
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
+    user32.BringWindowToTop.argtypes = (wintypes.HWND,)
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    hwnd = int(window.winId())
+    foreground = user32.GetForegroundWindow()
+    if not foreground or foreground == hwnd:
+        return
+    foreground_thread = user32.GetWindowThreadProcessId(foreground, None)
+    current_thread = ctypes.WinDLL("kernel32").GetCurrentThreadId()
+    attached = bool(
+        foreground_thread and foreground_thread != current_thread
+        and user32.AttachThreadInput(current_thread, foreground_thread, True)
+    )
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(current_thread, foreground_thread, False)
 
 
 def build_page(key: str, host: QWidget, view: "TabView", window: QWidget, icon_family: str) -> QWidget:
@@ -321,6 +361,7 @@ class DialogPage(QWidget):
     closed = Signal(QWidget)
     modified_changed = Signal()
     minimum_changed = Signal()
+    restored = False  # reopened by app (pages left open at last quit), not opened by user
 
     def __init__(self, dialog: BaseDialog, parent=None, opener: "DialogPage | None" = None):
         super().__init__(parent)
@@ -479,7 +520,11 @@ class TabView(QWidget):
         self._pages.setMinimumSize(page_minimum_size())
         for page in self._lazy_pages.values():
             self._pages.addWidget(page)
-        self._page_release = PageRelease(self, self._lazy_pages.values())  # window hidden: pages freed
+        # Window hidden: pages freed (restored tool pages too, reopened when shown)
+        self._deferred_pages: list[str] | None = None  # tool pages reopened once window shown, see defer_pages
+        self._releasing_pages = False  # pages closed while window hidden: no page built meanwhile
+        self._page_release = PageRelease(
+            self, self._lazy_pages.values(), release_others=self.release_tool_pages, shown=self.reopen_deferred_pages)
 
         # Navigation rail
         rail = QWidget(self)
@@ -577,7 +622,10 @@ class TabView(QWidget):
         self.refresh_rail()
 
         last_page = cfg.application["last_page_index"]
-        self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0)
+        # Started hidden in tray (game starting): page built once window is first shown
+        in_tray = (not parent.isVisible() and not cfg.application["show_at_startup"]
+                   and cfg.application["minimize_to_tray"])
+        self.set_current_index(last_page if 0 <= last_page < len(NAV_PAGES) else 0, build=not in_tray)
         self._pages.currentChanged.connect(self.page_changed)
         self._pages.currentChanged.connect(self.schedule_close_left_pages)
         self._pages.currentChanged.connect(self.update_page_minimum)
@@ -979,14 +1027,58 @@ class TabView(QWidget):
 
     def open_page_paths(self) -> list[str]:
         """Tool dialog paths of open pages in order, shown page marked with leading "*" """
+        pages = self.dialog_pages()
+        if self._deferred_pages is not None and not pages:  # window hidden: pages reopened once shown
+            return list(self._deferred_pages)
         tools = {path.rsplit(".", 1)[-1]: path for _, entries in TOOL_SECTIONS for _, _, path in entries}
         current = self._pages.currentWidget()
         paths = []
-        for page in self.dialog_pages():
+        for page in pages:
             path = tools.get(type(page.dialog).__name__) if page.dialog is not None else None
             if path:
                 paths.append(f"*{path}" if page is current else path)
         return paths
+
+    def defer_pages(self, paths: list[str]):
+        """Tool pages reopened once window is shown (started hidden in tray), remembered meanwhile"""
+        self._deferred_pages = list(paths)
+
+    def reopen_deferred_pages(self):
+        """Window shown: tool pages deferred or released while hidden reopened"""
+        paths, self._deferred_pages = self._deferred_pages, None
+        if not paths:
+            return
+        current = self._pages.currentWidget()
+        if isinstance(current, DialogPage):  # page opened meanwhile (tray, hotkey): kept shown
+            paths = [path.strip().removeprefix("*") for path in paths]
+        self.restore_pages(paths)
+        if isinstance(current, DialogPage) and self._pages.indexOf(current) >= 0:
+            self.show_page_widget(current, bring_to_front=False)
+
+    def release_tool_pages(self) -> bool:
+        """Window hidden for a while: tool pages reopened at startup (or after a release) closed, reopened
+        once window is shown again (their Qt Quick graphics freed), True if released
+
+        Only when every open page is such a page without unsaved changes: pages opened by user
+        (state of their session) and edits are kept as they are.
+        """
+        pages = self.dialog_pages()
+        if not pages or not all(getattr(page, "restored", False) and not page.has_unsaved_changes()
+                                for page in pages):
+            return False
+        paths = self.open_page_paths()
+        if len(paths) != len(pages):
+            return False
+        track, self.track_pages = self.track_pages, False  # remembered pages kept as they are
+        self._releasing_pages = True
+        try:
+            released = self.close_all_pages()
+        finally:
+            self._releasing_pages = False
+            self.track_pages = track
+        if released:
+            self._deferred_pages = paths
+        return released
 
     def detach_pages(self) -> tuple[list[str], list[DialogPage], DialogPage | None]:
         """Before view is rebuilt (language change): tool pages to reopen translated (paths),
@@ -1081,6 +1173,9 @@ class TabView(QWidget):
                 except Exception:  # never block startup
                     logger.exception("GUI: unable to reopen %s", path)
                     continue
+                page = self.find_dialog_page(path.rsplit(".", 1)[-1])
+                if page is not None:
+                    page.restored = True  # may be released while window stays hidden, see release_tool_pages
                 if entry.strip().startswith("*"):
                     shown = self._pages.currentWidget()
         finally:
@@ -1234,10 +1329,10 @@ class TabView(QWidget):
             cfg.application["last_page_index"] = index
             cfg.save(config_type=ConfigType.CONFIG)
 
-    def set_current_index(self, index: int):
-        """Select page by index"""
+    def set_current_index(self, index: int, build: bool = True):
+        """Select page by index (build: built at once, else when shown)"""
         page = self._pages.widget(index)
-        if isinstance(page, LazyPage):
+        if isinstance(page, LazyPage) and build and not self._releasing_pages:
             page.ensure_page()  # built even while window hidden: page state readable once selected
         self.remember_shown(self._pages.currentWidget(), self._pages.widget(index))
         self._pages.setCurrentIndex(index)
@@ -1315,9 +1410,10 @@ class StatusButtonBar(QStatusBar):
             text_api_status = api.read.state.version()
         # Dot: green while the game is running (API reports a version), grey otherwise
         running = bool(text_api_status) and text_api_status not in ("not running", "0.0")
-        self.button_api.setProperty("running", running)
-        self.button_api.style().unpolish(self.button_api)
-        self.button_api.style().polish(self.button_api)
+        if self.button_api.property("running") != running:  # style sheet applied again only when changed
+            self.button_api.setProperty("running", running)
+            self.button_api.style().unpolish(self.button_api)
+            self.button_api.style().polish(self.button_api)
         self.button_api.setText(f"\u25cf  {api.alias} \u00b7 {tr(text_api_status)}")
 
         dark = resolve_color_theme(cfg.application["window_color_theme"]) == "Dark"
@@ -1344,7 +1440,7 @@ class StatusButtonBar(QStatusBar):
             state = "Enable"
             desc = "be auto-scaled according to system DPI scaling setting."
         msg_text = (
-            f"{state} <b>High DPI Scaling</b> and restart <b>Modern Tiny Pedals</b>?<br><br>"
+            f"{state} <b>High DPI Scaling</b> and restart <b>NeoPedal</b>?<br><br>"
             f"<b>Window</b> and <b>Overlay</b> size and position will {desc}"
         )
         restart_msg = QMessageBox.question(
@@ -1423,6 +1519,11 @@ class AppWindow(QMainWindow):
         self._screen_timer.timeout.connect(self.check_screen_setup)
         self._screen_timer.start(3000)
 
+        # Updates checked again while app runs, see number_of_hours_between_update_checks
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(lambda: update_checker.check_due())
+        self._update_timer.start(UPDATE_CHECK_POLL_MS)
+
         # Window state
         self.set_window_state()
         self.__connect_signal()
@@ -1433,9 +1534,18 @@ class AppWindow(QMainWindow):
         # Refresh GUI
         app_signal.refresh.emit(True)
 
-        # First launch setup
+        # First launch: settings imported from TinyPedal asked first, then setup wizard
+        QTimer.singleShot(600, self.first_launch_steps)
+
+    def first_launch_steps(self):
+        """Settings imported from TinyPedal (asked once), setup wizard"""
+        from .. import safe_mode
+        from .settings_import import ask_imported_settings, import_pending
+
+        if not safe_mode.state.enabled and import_pending():
+            ask_imported_settings(self)
         if cfg.application["show_setup_wizard_at_startup"]:
-            QTimer.singleShot(600, self.open_setup_wizard)
+            self.open_setup_wizard()
 
     @staticmethod
     def config_dialogs(preset_only: bool = False) -> list:
@@ -1468,7 +1578,7 @@ class AppWindow(QMainWindow):
         if cfg.application["enable_layout_per_screen_setup"]:
             logger.info("LAYOUT: screen setup changed to %s", key)
             loader.reload()
-            app_signal.refresh.emit(True)
+            loader.after_reload(partial(app_signal.refresh.emit, True))
 
     def dragEnterEvent(self, event):
         """Accept preset & zip files"""
@@ -1723,6 +1833,12 @@ class AppWindow(QMainWindow):
         self.activateWindow()
         app_signal.refresh.emit(True)
 
+    def bring_to_front(self):
+        """Show app window in front of the game (show_main_window hotkey), also hidden in tray or minimized"""
+        self.show_app()
+        self.raise_()
+        force_foreground(self)
+
     def go_back(self):
         """Previous page"""
         view = self.centralWidget()
@@ -1807,7 +1923,10 @@ class AppWindow(QMainWindow):
             return
         paths = [path for path in cfg.application["open_pages"].split(",") if path.strip()]
         if cfg.application["remember_open_pages"] and paths and not safe_mode_enabled():
-            view.restore_pages(paths)
+            if not self.isVisible() and not cfg.application["show_at_startup"]:
+                view.defer_pages(paths)  # started hidden in tray (game starting): built once window is shown
+            else:
+                view.restore_pages(paths)
         view.track_pages = True
 
     def close_pages_for_quit(self) -> bool:
@@ -1843,6 +1962,7 @@ class AppWindow(QMainWindow):
         if tray_icon is not None:
             tray_icon.hide()  # no ghost tray icon left by exited process
         loader.restart()  # only returns if relaunch failed (app reloaded & kept running)
+        self.cancel_quit()  # pages opened from now on asked to save on quit again
         if tray_icon is not None:
             tray_icon.show()
         return True
@@ -1914,7 +2034,7 @@ class AppWindow(QMainWindow):
             if dialog not in modified:
                 dialog.close()
         loader.reload(reload_preset=True)
-        app_signal.refresh.emit(True)
+        loader.after_reload(partial(app_signal.refresh.emit, True))
 
     @Slot(object)  # type: ignore[operator]
     def hotkey_command(self, hotkey_func: Callable):

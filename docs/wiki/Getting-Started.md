@@ -13,7 +13,7 @@ On first launch, the **setup wizard** asks a few questions. Every choice can be 
 5. **Overlays**: create a new preset (the name is checked as you type) or pick an existing one, then check the overlays to show, each shown as a picture: Relative, Standings, Deltabest, Fuel, Virtual Energy, Pedal, Gear, Steering Wheel, Tyre Temperature, Brake Temperature, Flag, Session, Weather, Radar, Track Map and Trailing. `Recommended` checks Relative, Deltabest, Fuel, Pedal, Gear and Flag. With an existing preset, the overlays it already shows are checked, and unchecking one turns it off; overlays not listed keep their state.
 6. **Ready**: every choice, with `Change` to go back to its step, and tips for the first drive.
 
-Overlay pictures are drawn with the overlay settings but without game data, so some overlays look empty until you drive.
+Overlay pictures are drawn with the overlay settings on a simulated race (a GT3 mid race at Road Atlanta), so you see what each overlay shows before you drive.
 
 The wizard is shown once. Open it again from `Help` > `Setup Wizard`.
 
@@ -28,13 +28,14 @@ The navigation bar on the left gives access to pages and tools:
 | `Stats` | [Driver Stats](Driver-Stats.md) |
 | `Results` | Results of past sessions: classification, laps, sectors, incidents and penalties |
 | `Replays` | Replays saved by Le Mans Ultimate, see [Connections](Connections.md#game-replays-le-mans-ultimate) |
+| `Broadcast` | [Broadcast Director](Broadcast-Director.md) (Le Mans Ultimate) |
 | `Telemetry` | [Telemetry Viewer](Telemetry-Viewer.md) |
-| `Spectate` | Show the data of another driver |
 | `Race` | [Race Calculator](Race-Calculator.md) |
 | `Preset` | Load, create and manage presets, see [Presets and Settings](Presets-and-Settings.md) |
-| `Config` | Every global option of the app (`Ctrl+,`), see [Presets and Settings](Presets-and-Settings.md#global-config) |
 
-- Right-click the bar and choose `Customize Navigation Bar...` to show, hide or reorder entries. The `Module` (data modules used by overlays and tools), `Hotkey` (keyboard shortcuts), `Tools` (every tool and editor) and `Pacenotes` pages are not in the bar by default: add them back there, or open them from the command palette (`Ctrl+K`). `Ctrl+1` to `Ctrl+9` open the first nine entries.
+The gear button under the bar opens `Config`: every global option of the app (also `Ctrl+,`), see [Presets and Settings](Presets-and-Settings.md#global-config).
+
+- Right-click the bar and choose `Customize Navigation Bar...` to show, hide or reorder entries. The `Module` (data modules used by overlays and tools), `Hotkey` (keyboard shortcuts), `Tools` (every tool and editor), `Spectate` and `Pacenotes` pages are not in the bar by default: add them back there, or open them from the command palette (`Ctrl+K`) or the Home page quick access. In 0.23.0 the bar of every user was set once to this default (`Broadcast` in place of `Spectate`). `Ctrl+1` to `Ctrl+9` open the first nine entries.
 - Tools, editors and settings open as pages inside the window. `Alt+Left` or the mouse back button goes back to the previous page. A page you leave closes by itself, unless it has unsaved changes. Navigation bar tools stay as you left them, and are reopened at the next start with the page shown last (`Window` > `Reopen Pages at Startup`).
 - `Ctrl+K` opens the **command palette**: type to find and run pages, overlays, modules, tools, presets and options.
 - A dot (`•`) marks pages with unsaved changes. `Ctrl+S` saves the page shown. Invalid values are outlined in red with the reason while you type.
@@ -136,7 +137,7 @@ A preset stores the layout and options of all overlays and modules. You can keep
 
 ## Hotkeys
 
-The `Hotkey` page binds keys to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Black box incident, turn any overlay or module on or off, load a given preset, restart or quit the app.
+The `Hotkey` page binds keys to commands: show, hide or lock the overlay, reload or switch presets, restart the API, spectate the next driver, cycle the delta best source, show the next Black box incident, bring the main window in front of the game and focus it, even from the tray (`show_main_window`), drive the [Broadcast Director](Broadcast-Director.md#hotkeys) (`director_*` commands), turn any overlay or module on or off, load a given preset, restart or quit the app.
 
 1. Click the `Disabled` button to turn global hotkeys on (it then shows `Enabled`).
 2. Click the key button of a command and press a key or key combination (`Clear` removes it, `Clear All` removes every binding). Preset commands also ask which preset to load.
@@ -151,7 +152,7 @@ The `Spectate` page shows the data of another driver in your overlays (delta, fu
 2. Click a driver to follow it. The card on top shows the driver followed, with place, class, car and best lap; the arrows (`Alt+Left`, `Alt+Right`) go to the previous or next driver by place, `Stop` follows nobody.
 3. Search by driver, car or class, keep one class with its chip, sort by position or name. Your own car is marked `You`.
 
-Drivers are read only while the page is shown. The `spectate_mode`, `spectate_next_driver` and `spectate_previous_driver` hotkeys do the same from the game.
+Drivers are read only while the page is shown. The `spectate_mode`, `spectate_next_driver` and `spectate_previous_driver` hotkeys do the same from the game. The page is no longer in the navigation bar by default (open it from the command palette or the Home page quick access). To cast a whole race with cameras and graphics, use the [Broadcast Director](Broadcast-Director.md) (LMU).
 
 ## Next steps
 

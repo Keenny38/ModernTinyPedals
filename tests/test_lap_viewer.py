@@ -360,6 +360,8 @@ def test_track_map_draws_circuit_from_track_map_file(open_viewer):
     backend = open_viewer().backend
     assert backend._road.xs == [x for x, _ in circuit]  # "Track - GT3" folder: track map "Track"
     track_map = backend.trackMap
+    backend.setMapView(0.0, 0.0, 1.0)  # map scale of a shown map (dialog never shown: no map size)
+    backend.wait_jobs()  # shapes sized for map scale built in background
     assert VertexStore.get(track_map["road"]).vertex_count > 10
     assert track_map["lines"] == [] and track_map["maxX"] == 490.0
 

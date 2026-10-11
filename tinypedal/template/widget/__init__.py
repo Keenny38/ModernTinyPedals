@@ -115,6 +115,7 @@ WIDGET_DISPLAY_ORDER = (
     "session",
     "slip_angle",
     "slip_ratio",
+    "speed_delta",
     "speedometer",
     "spotter",
     "standings",

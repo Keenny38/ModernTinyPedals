@@ -26,11 +26,12 @@ state. Cards are clickable (open their page), laid out in 1 to 3 columns followi
 from __future__ import annotations
 
 import html
+import os
 from collections.abc import Callable
 from typing import NamedTuple
 
 from PySide6.QtCore import QDateTime, QLocale, QPointF, Qt, QTimer, Slot
-from PySide6.QtGui import QFont, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QFont, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -53,7 +54,7 @@ from ..module_control import mctrl, wctrl
 from ..overlay_control import octrl
 from ..setting import cfg
 from ..update import changelog_sections, localized_changelog_name, update_checker
-from ..userfile.custom_image import brand_logo_file, load_picture, logo_for_background
+from ..userfile.custom_image import LOGO_LOADER, brand_logo_file, logo_for_background, read_picture
 from ..userfile.driver_history import SessionRecord, last_record
 from ..userfile.game_images import images
 from . import app_icon_file, status_color
@@ -83,6 +84,7 @@ QUICK_ACTIONS = {
 QUICK_SHORTCUTS = {"command_palette": "Ctrl+K"}  # shown after label
 COLUMN_WIDTH = 30  # UIScaler size of one card column, page gets 2 or 3 columns from this width
 QUICK_COLUMNS = {1: 1, 2: 3, 3: 5}  # quick access buttons per row for card columns
+LOGO_CHECK_MS = 100  # logos read on logo loader thread checked for at this interval
 
 
 class QuickEntry(NamedTuple):
@@ -234,32 +236,65 @@ def last_session() -> SessionRecord | None:
         return None
 
 
-def game_logos(track: str, vehicle_name: str = "", brand: str = "") -> tuple[str, ...]:
-    """Circuit & car brand logo files of game (own brand logo first), those cached only"""
-    light = QApplication.palette().color(QPalette.ColorRole.Window).lightness() > 128
+def light_page() -> bool:
+    """Whether app pages are light (dark logos needed)"""
+    return QApplication.palette().color(QPalette.ColorRole.Window).lightness() > 128
+
+
+def game_logos(track: str, vehicle_name: str = "", brand: str = "", light: bool | None = None) -> tuple[str, ...]:
+    """Circuit & car brand logo files of game (own brand logo first), those cached only (any thread if light
+    background is given)"""
+    if light is None:
+        light = light_page()
     track_logo = logo_for_background(images.track_logo(track), light) if track else ""
     brand_logo = brand_logo_file(cfg.path.brand_logo, images.brand(vehicle_name, brand), light, vehicle_name)         if vehicle_name or brand else ""
     return tuple(path for path in (track_logo, brand_logo) if path)
 
 
+_live_logos: dict[tuple[str, str, bool], tuple[int, tuple[str, ...]]] = {}  # track, car, light: version, logos
+
+
 def live_logos() -> tuple[str, ...]:
-    """Logos of current track & player car, none if not on track"""
+    """Logos of current track & player car, none if not on track
+
+    Asked every second: files looked for on logo loader thread, again only once game pictures change (logos
+    found earlier for same track & car shown meanwhile).
+    """
     read = api.read
     try:
         if not read.state.active():
             return ()
-        return game_logos(read.session.track_name(), read.vehicle.vehicle_name())
+        track, vehicle = read.session.track_name(), read.vehicle.vehicle_name()
     except (AttributeError, TypeError, ValueError, IndexError):
         return ()
+    key = (track, vehicle, light_page())
+    version = images.version
+    known = _live_logos.get(key)
+    if known is not None and known[0] == version:
+        return known[1]
+    done, logos = LOGO_LOADER.result(("home", *key, version), lambda: game_logos(track, vehicle, light=key[2]))
+    if not done:
+        return known[1] if known is not None else ()
+    if len(_live_logos) > 64:
+        _live_logos.clear()
+    _live_logos[key] = (version, logos or ())
+    return logos or ()
 
 
-def record_logos(record: SessionRecord) -> tuple[str, ...]:
-    """Logos of track & car brand of a session record (vehicle key "Class - Brand", or vehicle name)"""
+def record_logos(record: SessionRecord, light: bool | None = None) -> tuple[str, ...]:
+    """Logos of track & car brand of a session record (vehicle key "Class - Brand", or vehicle name), any
+    thread if light background is given"""
     if " - " in record.vehicle:
-        return game_logos(record.track, brand=record.vehicle.split(" - ", 1)[1].strip())
+        return game_logos(record.track, brand=record.vehicle.split(" - ", 1)[1].strip(), light=light)
     if record.vehicle and record.vehicle != record.vehicle_class:
-        return game_logos(record.track, record.vehicle)
-    return game_logos(record.track)
+        return game_logos(record.track, record.vehicle, light=light)
+    return game_logos(record.track, light=light)
+
+
+def logo_pictures(paths: tuple[str, ...], height: int, ratio: float) -> tuple[QImage, ...]:
+    """Logo pictures fitted in card title height, unreadable ones left out (any thread)"""
+    pictures = (read_picture(path, height * 3, height, ratio) for path in paths)
+    return tuple(picture for picture in pictures if not picture.isNull())
 
 
 def session_record_text(record: SessionRecord) -> tuple[str, str]:
@@ -307,7 +342,9 @@ class HomeCard(QFrame):
         self.label_title.setObjectName("homeCardTitle")
         self.label_logos = QLabel(self)  # circuit & car brand logos of game
         self.label_logos.hide()
-        self.logos: tuple[str, ...] = ()
+        self.logos: tuple = ()  # key of logos shown (files, or what they were looked for from)
+        self._logos_waited: tuple[tuple, Callable[[], tuple[str, ...]]] | None = None
+        self._logo_timer: QTimer | None = None
         layout_title = QHBoxLayout()
         layout_title.setSpacing(UIScaler.pixel(6))
         layout_title.addWidget(self.label_glyph)
@@ -340,14 +377,42 @@ class HomeCard(QFrame):
             self.label_glyph.setText(text)
 
     def set_logos(self, paths: tuple[str, ...]):
-        """Logos side by side next to title (hidden if none)"""
-        if paths == self.logos:
+        """Logos side by side next to title (hidden if none), see show_logos"""
+        self.show_logos(paths, lambda: paths)
+
+    def show_logos(self, key: tuple, files: Callable[[], tuple[str, ...]]):
+        """Logos of files() shown once looked for & read on logo loader thread (earlier logos kept meanwhile),
+        once per key"""
+        if key == self.logos:
+            self._logos_waited = None
             return
-        self.logos = paths
         height = UIScaler.pixel(22)
         ratio = self.devicePixelRatioF()
-        pictures = [load_picture(path, height * 3, height, ratio) for path in paths]
-        pictures = [picture for picture in pictures if not picture.isNull()]
+        done, pictures = LOGO_LOADER.result(("home card", key, height, ratio),
+                                            lambda: logo_pictures(files(), height, ratio))
+        if not done:
+            self._logos_waited = (key, files)
+            if self._logo_timer is None:
+                self._logo_timer = QTimer(self)
+                self._logo_timer.setSingleShot(True)
+                self._logo_timer.setInterval(LOGO_CHECK_MS)
+                self._logo_timer.timeout.connect(self.check_logos)
+            if not self._logo_timer.isActive():
+                self._logo_timer.start()
+            return
+        self._logos_waited = None
+        self.logos = key
+        self.draw_logos(tuple(QPixmap.fromImage(picture) for picture in pictures or ()))
+
+    def check_logos(self):
+        """Logos waited for shown once ready"""
+        if self._logos_waited is not None:
+            self.show_logos(*self._logos_waited)
+
+    def draw_logos(self, pictures: tuple[QPixmap, ...]):
+        """Logos side by side next to title (hidden if none)"""
+        height = UIScaler.pixel(22)
+        ratio = self.devicePixelRatioF()
         if not pictures:
             self.label_logos.hide()
             return
@@ -718,7 +783,13 @@ class HomeView(QWidget):
         hidden = record is None
         if record is not None:
             self.card_last.set_text(*session_record_text(record))
-            self.card_last.set_logos(record_logos(record))
+            light = light_page()
+            try:
+                own_stamp = os.path.getmtime(cfg.path.brand_logo)
+            except OSError:
+                own_stamp = 0.0
+            key = ("last", record.track, record.vehicle, record.vehicle_class, light, images.logos_version, own_stamp)
+            self.card_last.show_logos(key, lambda: record_logos(record, light))
         if self.card_last.isHidden() != hidden:
             self.card_last.setHidden(hidden)
             self.rearrange()

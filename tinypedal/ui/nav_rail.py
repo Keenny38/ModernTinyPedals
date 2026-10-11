@@ -59,6 +59,7 @@ TOOL_SHORT_LABELS = {
     "lap_viewer": "Telemetry",
     "replay_view": "Recorder",
     "game_replays": "Replays",
+    "broadcast_director": "Broadcast",
     "race_results_viewer": "Results",
     "stream_overlay_view": "Stream",
     "heatmap_editor": "Heatmap",

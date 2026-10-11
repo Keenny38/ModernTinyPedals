@@ -1,6 +1,7 @@
 """Community lap time reference (published Google Sheet) & driver stats viewer comparison"""
 
 import json
+import time
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -115,10 +116,21 @@ def viewer(ui_env, monkeypatch):
     monkeypatch.setattr(type(api.read.session), "track_name",
                         lambda self: "Circuit de Spa-Francorchamps Endurance", raising=False)
     page = driver_stats_viewer.DriverStatsViewer(None)
+    wait_jobs(page.backend)  # lap time reference read in background
     yield page.backend
     page.close()
     page.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def wait_jobs(backend, timeout: float = 10):
+    """Background jobs of driver stats page handed over"""
+    end = time.monotonic() + timeout
+    while backend.jobs.running or backend.busy():
+        assert time.monotonic() < end, "jobs still running"
+        QCoreApplication.processEvents()
+        time.sleep(0.002)
+    QCoreApplication.processEvents()
 
 
 class Now:
@@ -171,6 +183,7 @@ def test_viewer_reference_off_and_download(viewer, monkeypatch):
     viewer.setCompare(True)  # turned on: downloaded again (cache older? forced below)
     viewer.updateReference()
     QCoreApplication.processEvents()
+    wait_jobs(viewer)  # saved & parsed in background
     assert set(viewer.references.entries) == {("Spa", "LMP2elms")}
     assert lap_reference.load_cache(cfg.path.config)[0] == only_lmp2
 

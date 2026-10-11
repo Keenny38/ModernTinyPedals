@@ -103,7 +103,7 @@ CATEGORIES = (
             "show_at_startup", "minimize_to_tray", "remember_position", "remember_size", "remember_open_pages",
             "show_setup_wizard_at_startup",
         )),
-        ("Updates", ("check_for_updates_on_startup", "update_repository")),
+        ("Updates", ("check_for_updates_on_startup", "number_of_hours_between_update_checks", "update_repository")),
         ("Presets & Backups", (
             "enable_auto_load_preset", "number_of_automatic_backups", "number_of_days_to_keep_deleted_presets",
             "maximum_loading_attempts", "maximum_saving_attempts",

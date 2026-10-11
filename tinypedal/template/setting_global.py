@@ -42,6 +42,7 @@ GLOBAL_DEFAULT = {
         "show_confirmation_for_batch_toggle": True,
         "show_overlay_previews": True,  # Overlays page: cards with preview, compact list if off
         "check_for_updates_on_startup": True,
+        "number_of_hours_between_update_checks": 12,  # checked again while app runs, 0 = startup only
         "update_repository": "Keenny38/ModernTinyPedals",
         'snap_distance': 10,
         "snap_gap": 0,
@@ -69,7 +70,7 @@ GLOBAL_DEFAULT = {
         # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
         "rail_items": (
             "home,widget,driver_stats_viewer,race_results_viewer,game_replays,"
-            "lap_viewer,spectate,race_calculator,preset,app_settings"
+            "broadcast_director,lap_viewer,race_calculator,preset"
         ),
         # Home page quick access buttons in order: tool dialog module names, page keys & actions,
         # see ui.home_view.quick_access_entries
@@ -120,6 +121,7 @@ GLOBAL_DEFAULT = {
         "enable_lan_access": False,
         "stream_overlay_port": 8339,
         "frame_rate": 30,
+        "show_overlays_while_spectating": True,
         "access_token": "",
     },
     "overlay_style": {
@@ -198,6 +200,7 @@ GLOBAL_DEFAULT = {
         "input_refuel_rate": 0.0,
         "input_energy_rate": 0.0,
         "enable_tyres_during_refuel": False,
+        "enable_driver_change_during_refuel": False,
         "input_driver_change_seconds": 0.0,
         "input_minimum_stops": 0,
         "input_max_stint_minutes": 0.0,
@@ -236,6 +239,7 @@ GLOBAL_DEFAULT = {
         "export_path": "",
         "collapsed_sections": "",
         "race_tab": 0,
+        "live_unfollowed": "",
     },
     "driver_stats_viewer": {
         "enable_lap_reference": True,

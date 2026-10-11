@@ -22,11 +22,12 @@ Command palette (Ctrl+K): find & run anything, pages, widgets, modules, tools, p
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from functools import partial
 from typing import NamedTuple
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
 
 from .. import app_signal
@@ -38,10 +39,11 @@ from ..overlay_control import octrl
 from ..setting import cfg
 from ._common import UIScaler
 from .module_view import sort_key
-from .option_finder import build_index, open_option, search_options
+from .option_finder import OptionEntry, cached_index, open_option, search_options
 
 MAX_COMMANDS = 60
 MAX_OPTIONS = 30
+SEARCH_DELAY = 100  # ms, results refreshed once typing pauses
 
 
 class Command(NamedTuple):
@@ -143,13 +145,30 @@ def build_commands(window) -> list[Command]:
             commands.append(Command(
                 tr(label), tr("Tools"), search_text(tr(label), label, "tool", TOOL_KEYWORDS.get(dialog_path, "")),
                 partial(open_tool, dialog_path, window)))
-    for preset_name in cfg.preset_files():
+    for preset_name in preset_names():
         commands.append(Command(
             preset_name, tr("Preset"), search_text(preset_name, tr("Preset"), "preset load"),
             partial(load_preset, preset_name)))
     commands += module_commands(wctrl, "Overlays", window)
     commands += module_commands(mctrl, "Module", window)
     return commands
+
+
+_preset_names: tuple[tuple, list[str]] | None = None
+
+
+def preset_names() -> list[str]:
+    """Preset names (newest first), folder read again only when a file was added, removed or saved"""
+    global _preset_names
+    folder = cfg.path.settings
+    try:
+        changed = os.stat(folder).st_mtime_ns
+    except OSError:
+        changed = 0
+    key = folder, changed, cfg.version_update
+    if _preset_names is None or _preset_names[0] != key:
+        _preset_names = key, cfg.preset_files()
+    return list(_preset_names[1])
 
 
 def load_preset(preset_name: str):
@@ -167,12 +186,16 @@ class CommandPalette(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._window = window
         self.commands = build_commands(window)
-        self.options = build_index()
+        self._options: list[OptionEntry] | None = None  # read on first option search
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DELAY)
+        self._search_timer.timeout.connect(self.apply_search)
 
         self.edit_search = QLineEdit(self)
         self.edit_search.setObjectName("searchBox")
         self.edit_search.setPlaceholderText(tr("Search pages, widgets, tools, presets, options..."))
-        self.edit_search.textChanged.connect(self.update_results)
+        self.edit_search.textChanged.connect(self._search_timer.start)
         self.edit_search.returnPressed.connect(self.run_selected)
         self.edit_search.installEventFilter(self)
 
@@ -202,6 +225,18 @@ class CommandPalette(QDialog):
                 return True
         return super().eventFilter(watched, event)
 
+    @property
+    def options(self) -> list[OptionEntry]:
+        """Option index (cached across palette openings until settings change)"""
+        if self._options is None:
+            self._options = cached_index()
+        return self._options
+
+    def apply_search(self):
+        """Refresh result list at once (typing refreshes it after a short pause)"""
+        self._search_timer.stop()
+        self.update_results(self.edit_search.text())
+
     def update_results(self, text: str):
         """Refresh result list"""
         self.list_results.clear()
@@ -221,6 +256,8 @@ class CommandPalette(QDialog):
         self.list_results.addItem(item)
 
     def run_selected(self):
+        if self._search_timer.isActive():  # Enter typed before results refreshed
+            self.apply_search()
         item = self.list_results.currentItem()
         if item is not None:
             self.run_item(item)

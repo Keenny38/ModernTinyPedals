@@ -25,6 +25,7 @@ from .. import realtime_state
 from ..api_control import api
 from ..const_file import FileExt
 from ..module_info import MapCoords, MappingInfo, minfo
+from ..setting import cfg
 from ..userfile.track_info import load_track_info, save_track_info
 from ..userfile.track_map import load_track_map_file, save_track_map_file
 from ..validator import file_last_modified, generator_init
@@ -41,7 +42,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval
@@ -103,6 +104,7 @@ def record_track_info(output: MappingInfo):
     """Update track info"""
     last_reset = None  # reset check
     delayed_save = False
+    measured: dict[str, float] = {}  # values measured since last reset, only ones saved
 
     track_name = ""
     pit_entry = 0.0
@@ -114,15 +116,11 @@ def record_track_info(output: MappingInfo):
 
         # Reset
         if last_reset != reset:
-            # Save data
+            # Save data: only measured values, never cached ones over values edited meanwhile (track info editor)
             if delayed_save:
-                save_track_info(
-                    track_name=track_name,
-                    # kwargs {key: value}
-                    pit_entry=pit_entry,
-                    pit_exit=pit_exit,
-                    pit_speed=pit_speed,
-                )
+                if measured or track_name not in cfg.user.tracks:  # new track always added
+                    save_track_info(track_name, **measured)
+                measured = {}
                 delayed_save = False
 
             # Delay reset until driving (module stopping: data saved only)
@@ -160,16 +158,16 @@ def record_track_info(output: MappingInfo):
                     api.read.inputs.brake_raw() < 0.01 and  # no braking check
                     speed > 1 and  # moving check
                     0.1 > speed - last_speed > 0):  # limit speed delta in 0.0 - 0.1m/s
-                    pit_speed = speed
+                    pit_speed = measured["pit_speed"] = speed
                 last_speed = speed
 
         # Calculate pit lane length
         if last_in_pits != in_pits:
             if last_in_pits != -1 and api.read.vehicle.speed() > 1:  # avoid ESC desync
                 if in_pits:  # entering pit
-                    pit_entry = max(api.read.lap.distance(), 0.0)
+                    pit_entry = measured["pit_entry"] = max(api.read.lap.distance(), 0.0)
                 else:  # exiting pit
-                    pit_exit = max(api.read.lap.distance(), 0.0)
+                    pit_exit = measured["pit_exit"] = max(api.read.lap.distance(), 0.0)
             last_in_pits = in_pits
             pitlane_length = calc.pitlane_length(
                 api.read.lap.track_length(),
@@ -256,7 +254,7 @@ def record_track_map(output: MappingInfo, filepath: str):
                 map_exist = True
                 #logger.info("map exist")
             else:
-                output.reset()
+                output.reset_map()
                 map_exist = False
                 #logger.info("map not exist")
 

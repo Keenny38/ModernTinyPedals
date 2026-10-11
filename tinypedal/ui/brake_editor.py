@@ -44,6 +44,7 @@ from ._common import (
     FloatTableItem,
     UIScaler,
     #TableBatchReplace,
+    column_texts,
     run_after_saving,
     table_item,
 )
@@ -161,25 +162,29 @@ class BrakeEditor(BaseEditor):
     def add_brake(self):
         """Add new brake"""
         start_index = row_index = self.table_brakes.rowCount()
-        # Add all missing vehicle name from active session
-        veh_total = api.read.vehicle.total_vehicles()
-        for index in range(veh_total):
-            class_name = api.read.vehicle.class_name(index)
-            vehicle_name = api.read.vehicle.vehicle_name(index)
-            brake_names = (
-                set_predefined_brake_name(class_name, vehicle_name, True),
-                set_predefined_brake_name(class_name, vehicle_name, False),
-            )
-            for brake in brake_names:
-                if not self.is_value_in_table(brake, self.table_brakes):
-                    self.add_brake_entry(row_index, brake, 0)
-                    self.table_brakes.setCurrentCell(row_index, 0)
-                    row_index += 1
-        # Add new name entry
-        if start_index == row_index:
-            new_class_name = self.new_name_increment("New Brake Name", self.table_brakes)
-            self.add_brake_entry(row_index, new_class_name, 0)
-            self.table_brakes.setCurrentCell(row_index, 0)
+        listed = column_texts(self.table_brakes, 0)
+        with self.batch_edit():  # one undo step
+            # Add all missing vehicle name from active session
+            veh_total = api.read.vehicle.total_vehicles()
+            for index in range(veh_total):
+                class_name = api.read.vehicle.class_name(index)
+                vehicle_name = api.read.vehicle.vehicle_name(index)
+                brake_names = (
+                    set_predefined_brake_name(class_name, vehicle_name, True),
+                    set_predefined_brake_name(class_name, vehicle_name, False),
+                )
+                for brake in brake_names:
+                    if brake not in listed:
+                        self.add_brake_entry(row_index, brake, 0)
+                        listed.add(brake)
+                        row_index += 1
+            if start_index != row_index:
+                self.table_brakes.setCurrentCell(row_index - 1, 0)  # last added
+            # Add new name entry
+            else:
+                new_class_name = self.new_name_increment("New Brake Name", self.table_brakes)
+                self.add_brake_entry(row_index, new_class_name, 0)
+                self.table_brakes.setCurrentCell(row_index, 0)
 
     def add_brake_entry(
         self, row_index: int, class_name: str, failure_thickness: float,

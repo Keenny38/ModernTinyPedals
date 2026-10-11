@@ -54,12 +54,40 @@ Item {
         zoom = next
     }
     function resetZoom() { zoom = 1; viewX = 0; viewY = 0 }
-    // Axis values of part shown: plot fraction (at) & text
+    // Axis values of part shown: plot fraction (at) & text. Round values worked out here (same as backend), their
+    // texts asked to backend only when values or text precision change (not on every drag or wheel step)
+    readonly property var labelCache: ({"count": 0, "texts": {}})  // never assigned: no binding depends on changes
+    function niceStep(span, count) {
+        var raw = Math.max(span / Math.max(count, 1), 1e-9)
+        var magnitude = Math.pow(10, Math.floor(Math.log10(raw)))
+        var multiples = [1, 2, 5, 10]
+        for (var i = 0; i < multiples.length; i++) if (raw <= multiples[i] * magnitude) return multiples[i] * magnitude
+        return 10 * magnitude
+    }
     function ticksIn(column, range, start, whole) {
         if (!zoomed || !range) return whole || []
         var low = range[0] + (range[1] - range[0]) * start, high = low + (range[1] - range[0]) / zoom
-        return backend.axisTicks(column, low, high).map(function(tick) {
-            return {"at": (tick.value - low) / Math.max(high - low, 1e-9), "text": tick.text}
+        if (!(high > low)) return []
+        var span = high - low
+        var step = niceStep(span, 4)
+        var first = Math.ceil(low / step) * step
+        var values = []
+        for (var i = 0; i < 10; i++) {
+            var value = first + i * step
+            if (value <= high) values.push(value)
+        }
+        var precision = span >= 20 ? 2 : span >= 2 ? 1 : 0  // label decimals change with span only there
+        var key = column + "|" + first + "|" + step + "|" + values.length + "|" + precision
+        var cache = labelCache
+        var texts = cache.texts[key]
+        if (texts === undefined) {
+            texts = backend.axisLabels(column, values, span)
+            if (cache.count > 200) { cache.texts = {}; cache.count = 0 }
+            cache.texts[key] = texts
+            cache.count++
+        }
+        return values.map(function(value, index) {
+            return {"at": (value - low) / Math.max(span, 1e-9), "text": texts[index] || ""}
         })
     }
     readonly property var xTicks: ticksIn(xColumn, scatterData.xRange, viewX, scatterData.xTicks)
@@ -226,13 +254,22 @@ Item {
                     onDoubleClicked: root.resetZoom()
                     onWheel: function(wheel) { if (wheel.angleDelta.y !== 0) root.zoomAt(Math.pow(1.0019, wheel.angleDelta.y), wheel.x, wheel.y) }
                 }
+                // Grids & axis values: fixed item count (items kept while zooming & moving, ticks read by index)
                 Repeater {  // vertical grid
-                    model: root.xTicks
-                    Rectangle { x: Math.round(modelData.at * plot.width); width: 1; height: plot.height; color: theme.text; opacity: 0.06 }
+                    model: 10
+                    Rectangle {
+                        readonly property var tick: root.xTicks[index]
+                        visible: tick !== undefined
+                        x: tick ? Math.round(tick.at * plot.width) : 0; width: 1; height: plot.height; color: theme.text; opacity: 0.06
+                    }
                 }
                 Repeater {  // horizontal grid
-                    model: root.yTicks
-                    Rectangle { y: Math.round((1 - modelData.at) * plot.height); width: plot.width; height: 1; color: theme.text; opacity: 0.06 }
+                    model: 10
+                    Rectangle {
+                        readonly property var tick: root.yTicks[index]
+                        visible: tick !== undefined
+                        y: tick ? Math.round((1 - tick.at) * plot.height) : 0; width: plot.width; height: 1; color: theme.text; opacity: 0.06
+                    }
                 }
                 Rectangle {  // zero lines
                     readonly property real at: root.scatterData.zero ? (root.scatterData.zero[0] - root.viewX) * root.zoom : -1
@@ -244,18 +281,20 @@ Item {
                     visible: at > 0 && at < 1
                     y: Math.round((1 - at) * plot.height); width: plot.width; height: 1; color: theme.text; opacity: 0.2
                 }
-                Repeater {
-                    model: root.scatterData.laps || []
-                    GpuShape {
-                        key: modelData.key
-                        visible: lapFilter.shown(modelData.lap)
-                        color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
-                        opacity: root.lapOpacity(modelData.lap)
-                        revision: backend.revision
-                        transform: Matrix4x4 {
-                            matrix: Qt.matrix4x4(plot.width * root.zoom, 0, 0, -root.viewX * root.zoom * plot.width,
-                                                 0, -plot.height * root.zoom, 0, plot.height + root.viewY * root.zoom * plot.height,
-                                                 0, 0, 1, 0, 0, 0, 0, 1)
+                Item {  // dots of every lap: one transform for all of them (zoom & move frames stay cheap)
+                    transform: Matrix4x4 {
+                        matrix: Qt.matrix4x4(plot.width * root.zoom, 0, 0, -root.viewX * root.zoom * plot.width,
+                                             0, -plot.height * root.zoom, 0, plot.height + root.viewY * root.zoom * plot.height,
+                                             0, 0, 1, 0, 0, 0, 0, 1)
+                    }
+                    Repeater {
+                        model: root.scatterData.laps || []
+                        GpuShape {
+                            key: modelData.key
+                            visible: lapFilter.shown(modelData.lap)
+                            color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b, 0.55)
+                            opacity: root.lapOpacity(modelData.lap)
+                            revision: backend.revision
                         }
                     }
                 }
@@ -270,23 +309,26 @@ Item {
                 }
             }
             Repeater {  // y values
-                model: scatterArea.hasData ? root.yTicks : []
+                model: 10
                 Text {
+                    readonly property var tick: scatterArea.hasData ? root.yTicks[index] : undefined
                     x: scatterArea.padLeft - width - theme.em * 0.3
-                    y: (1 - modelData.at) * plot.height - height / 2
-                    visible: y > -height / 2 && y < plot.height
-                    text: modelData.text
+                    y: tick ? (1 - tick.at) * plot.height - height / 2 : 0
+                    visible: tick !== undefined && y > -height / 2 && y < plot.height
+                    text: tick ? tick.text : ""
                     color: theme.dimText
                     font.pointSize: theme.fontPoint * 0.72
                     font.features: { "tnum": 1 }
                 }
             }
             Repeater {  // x values
-                model: scatterArea.hasData ? root.xTicks : []
+                model: 10
                 Text {
-                    x: scatterArea.padLeft + modelData.at * plot.width - width / 2
+                    readonly property var tick: scatterArea.hasData ? root.xTicks[index] : undefined
+                    visible: tick !== undefined
+                    x: tick ? scatterArea.padLeft + tick.at * plot.width - width / 2 : 0
                     y: plot.height + theme.em * 0.15
-                    text: modelData.text
+                    text: tick ? tick.text : ""
                     color: theme.dimText
                     font.pointSize: theme.fontPoint * 0.72
                     font.features: { "tnum": 1 }
@@ -372,7 +414,8 @@ Item {
                                 color: modelData.color
                                 opacity: root.highlightKey === "" ? 0.85 : 0.6
                                 ToolTip.visible: barArea.containsMouse
-                                ToolTip.text: modelData.label + " · " + histogramArea.bins[bin.binIndex] + " " + (root.histogramData.unit || "")
+                                ToolTip.text: !barArea.containsMouse ? "" :  // built only for the hovered bar
+                                              modelData.label + " · " + histogramArea.bins[bin.binIndex] + " " + (root.histogramData.unit || "")
                                               + " · " + value.toFixed(1).replace(".", theme.decimalPoint) + "%"
                                 ToolTip.delay: 300
                                 MouseArea { id: barArea; anchors.fill: parent; hoverEnabled: true }

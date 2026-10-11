@@ -38,11 +38,11 @@ from time import gmtime, strftime
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QStaticText
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QRegion, QStaticText
 
 from ...const_file import FontFile
 from .._base import Overlay
-from .._painter import layer_fits
+from .._painter import DirtyRegion, layer_fits
 from .draw import drawable
 from .theme import Theme, build_theme
 
@@ -62,6 +62,10 @@ DESIGN_SCALE = 1.12
 TEXT_CACHE_SIZE = 2048  # at most (tables of many drivers)
 TEXT_CACHE_MIN = 128  # at least
 TEXT_CACHE_PER_DRAW = 4  # per text drawn in last paint
+# Values (numbers, times) in their own smaller cache: new ones every update (timers, deltas) never push out
+# labels & names, values drawn again (standings lap times) stay cached
+VALUE_CACHE_MIN = 32
+VALUE_CACHE_PER_DRAW = 2  # per value drawn in last paint
 WEIGHTS = {
     "regular": QFont.Weight.Normal,
     "medium": QFont.Weight.Medium,
@@ -168,14 +172,19 @@ class ModernOverlay(Overlay):
         self.fonts: dict[str, QFont] = {}
         self.metrics: dict[str, QFontMetricsF] = {}
         self._value_roles: dict[str, str] = {}  # role: role of its value font (numbers)
-        self._text_cache: OrderedDict[tuple, QStaticText] = OrderedDict()
+        self._text_cache: OrderedDict[tuple, QStaticText] = OrderedDict()  # labels & names
+        self._value_cache: OrderedDict[tuple, QStaticText] = OrderedDict()
         self._elide_cache: dict[tuple, str] = {}
         self._width_cache: dict[tuple, float] = {}
         self._texts_drawn = 0  # in current paint
         self._last_texts_drawn = 0  # in last paint, sets cache size
+        self._values_drawn = 0
+        self._last_values_drawn = 0
         self._caps_roles: set[str] = set()
         self._static_layer: QPixmap | None = None
         self.state: Any = None
+        self.dirty_region = DirtyRegion()  # parts to repaint, see TableMixin.refresh_rows
+        self.paint_region: QRegion | None = None  # region painted now, None: whole widget
         self.add_font("value", 1.0, "semibold")
         self.add_font("strong", 1.0, "bold")
         self.add_font("dim", 1.0, "medium")
@@ -315,16 +324,25 @@ class ModernOverlay(Overlay):
         """Number of cached texts: in proportion to texts drawn in last paint (memory of long races)"""
         return min(TEXT_CACHE_SIZE, max(TEXT_CACHE_MIN, self._last_texts_drawn * TEXT_CACHE_PER_DRAW))
 
+    def value_cache_size(self) -> int:
+        """Number of cached values: in proportion to values drawn in last paint"""
+        return min(TEXT_CACHE_SIZE, max(VALUE_CACHE_MIN, self._last_values_drawn * VALUE_CACHE_PER_DRAW))
+
     def static_text(self, role: str, text: str, font_role: str = "") -> QStaticText:
         """Cached text layout, least recently drawn dropped first (names & labels drawn every
-        update stay cached in long races, changing values make way)
+        update stay cached in long races, changing values make way in their own cache)
 
         Args:
             font_role: role whose font lays out text, else found from text (see font_role).
         """
         self._texts_drawn += 1
         key = (role, text, font_role) if font_role else (role, text)
-        cache = self._text_cache
+        value = is_value_text(text)
+        if value:
+            self._values_drawn += 1
+            cache = self._value_cache
+        else:
+            cache = self._text_cache
         static = cache.get(key)
         if static is None:
             static = QStaticText(text)
@@ -332,7 +350,7 @@ class ModernOverlay(Overlay):
             static.setPerformanceHint(QStaticText.PerformanceHint.AggressiveCaching)
             static.prepare(font=self.fonts[font_role or self.font_role(role, text)])
             cache[key] = static
-            size = self.text_cache_size()
+            size = self.value_cache_size() if value else self.text_cache_size()
             while len(cache) > size:
                 cache.popitem(last=False)
         else:
@@ -407,15 +425,25 @@ class ModernOverlay(Overlay):
         return layer
 
     def paintEvent(self, event):
-        """Draw cached background, then current state"""
-        self._texts_drawn = 0
+        """Draw cached background, then current state (parts reaching into region being painted, see
+        paint_region)"""
+        self._texts_drawn = self._values_drawn = 0
+        region = event.region() if event is not None else None
+        whole = region is None or QRegion(self.rect()).subtracted(region).isEmpty()
+        self.paint_region = None if whole else region
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         painter.drawPixmap(0, 0, self.static_layer())
         if self.state is not None:
             self.paint(painter)
-        self._last_texts_drawn = self._texts_drawn
+        painter.end()
+        self.paint_region = None
+        self.dirty_region.painted(region)
+        # Text cache sized by texts of a whole paint (a few changed rows draw far fewer)
+        self._last_texts_drawn = self._texts_drawn if whole else max(self._last_texts_drawn, self._texts_drawn)
+        self._last_values_drawn = (self._values_drawn if whole
+                                   else max(self._last_values_drawn, self._values_drawn))
 
     def paint_static(self, painter: QPainter):
         """Draw parts that never change (override)"""

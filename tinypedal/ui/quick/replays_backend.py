@@ -26,6 +26,8 @@ Everything goes through the game Rest API in background (see game_rest): the gam
 replay state, incidents & standings need a session (or a replay) loaded in game. Game asked only while page
 shown, with one connection per request: less often when game does not answer, more often while a replay is
 open (camera car & replay time), standings only while shown (or a replay open, or incidents name new drivers).
+Track map shown: car positions read 10 times a second from the shared memory of the game (as Broadcast Director),
+moved along the track between game answers when not readable.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import threading
 import time
@@ -75,6 +78,7 @@ from . import replay_files
 from .game_pictures import LogoCache, notifier
 from .lines import VertexStore, band
 from .models import DictListModel
+from .track_path import TrackPath
 
 REPLAYS_RESOURCE = "/rest/watch/replays"
 FOLDER_RESOURCE = "/rest/watch/replay/getReplayFolder"
@@ -90,6 +94,10 @@ SET_CAMERA_RESOURCE = "/rest/replay/CameraController/setCamera"
 HUD_RESOURCE = "/rest/hud"
 REFRESH_MS = 5000  # replay state & incidents asked again while page shown
 REPLAY_REFRESH_MS = 2000  # while a replay is open: camera car & replay time follow playback
+OFF_TRACK = 30.0  # meters from track path: car placed at its position (pit lane, off track), not on the track
+MAX_PATH_SPEED = 120.0  # m/s: faster move between answers (jump, other lap) not taken as speed
+JUMP = 150.0  # meters: car this far from where it was expected jumps (seek), no easing toward new place
+LIVE_MS = 100  # map shown: car positions read again from the game shared memory (as Broadcast Director)
 IDLE_REFRESH_MS = 15000  # game not running
 REPLAYS_MAX_AGE = 60.0  # seconds: replays list asked again when page shown after this long
 SESSION_END_DELAY_MS = 3000  # replays list asked again this long after a session ended (replay saved)
@@ -438,6 +446,7 @@ class GameReplaysBackend(QObject):
     copyProgressChanged = Signal()  # progress of copy alone (often), filesChanged when copy starts & ends
     noticeChanged = Signal()
     mapChanged = Signal()
+    mapLiveChanged = Signal()
     revisionChanged = Signal()
     copyProgressed = Signal(float)  # emitted by copy thread
 
@@ -449,6 +458,7 @@ class GameReplaysBackend(QObject):
         self.replays: list[GameReplay] = []
         self.replays_time = 0.0  # monotonic time of replays list answer, 0 if never
         self.replays_answered = False
+        self.pending_watch = ""  # replay to open once game lists it (race results page)
         self.folder = ""  # replay folder of game, kept when game closes
         self.temp: list[str] = []  # temporary files of game in replay folder
         self.protected: set[str] = {str(name) for name in settings.get("protected", []) if isinstance(name, str)}
@@ -521,7 +531,15 @@ class GameReplaysBackend(QObject):
              "best", "last", "gap", "pits", "status", "statusTone", "penalties", "onCamera", "player", "fastest",
              "incidents", "energy", "energyLevel", "brandLogo"), self)
         self._map_model = DictListModel(
-            ("key", "mapX", "mapY", "color", "number", "driver", "position", "onCamera", "player", "inPit"), self)
+            ("key", "mapX", "mapY", "color", "number", "driver", "position", "onCamera", "player", "inPit",
+             "onTrack", "pathS", "speed", "sampleTime", "correction", "receivedMs"), self)
+        self.track_path: TrackPath | None = None
+        self._car_tracks: dict[int, tuple] = {}  # slot: s, sample time, speed, segment, easing, received ms
+        self._direction = 1.0  # cars drive toward increasing path distance (+1) or decreasing (-1)
+        self.map_live: dict[str, list[float]] = {}  # slot: map x & y read from shared memory, {} if not read
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(LIVE_MS)
+        self._live_timer.timeout.connect(self.read_live_positions)
         self.logos = LogoCache()
         notifier().changed.connect(self.pictures_changed)
         self.request_replays = GameRequest(self, (), self.received_replays)
@@ -545,10 +563,12 @@ class GameReplaysBackend(QObject):
         if not self.replays_answered or time.monotonic() - self.replays_time > REPLAYS_MAX_AGE:
             self.ask_replays()
         self.refresh_state()
+        self.update_live_timer()
 
     def page_hidden(self):
         self._shown = False
         self._timer.stop()
+        self.update_live_timer()
 
     def release(self):
         self.page_hidden()
@@ -620,6 +640,7 @@ class GameReplaysBackend(QObject):
                 self.set_state(OFFLINE)
             self.update_files()
             self.statusChanged.emit()  # loaded
+            self.watch_pending()
             return
         self.replays_answered = True
         self.replays_time = time.monotonic()
@@ -632,6 +653,7 @@ class GameReplaysBackend(QObject):
         self.mark_updated()
         self.update_replays()
         self.update_files()
+        self.watch_pending()
 
     def received_state(self, state: dict):
         active = state["active"]
@@ -703,10 +725,11 @@ class GameReplaysBackend(QObject):
             self.playbackChanged.emit()
         if previous in (SESSION, REPLAY) and state == MENU:  # session ended: game saved its replay
             QTimer.singleShot(SESSION_END_DELAY_MS, self.ask_replays)
+        self.update_live_timer()
         self.statusChanged.emit()
 
     def mark_updated(self):
-        updated = trm(f"Updated from game at {time.strftime('%H:%M:%S')}")
+        updated = trm("Updated from game at {}").replace("{}", time.strftime("%H:%M:%S"), 1)
         if updated != self.updated:
             self.updated = updated
             self.updatedChanged.emit()
@@ -923,6 +946,26 @@ class GameReplaysBackend(QObject):
             message = f"You are in a session: opening a replay may leave it.<br><br>{message}"
         if self._window.confirm_operation("Watch in Game", message):
             self.send(play_replay(replay.name))
+
+    def watch_named(self, name: str):
+        """Replay of name opened in game (race results page): at once if game lists it, else once it answers"""
+        if self.replays_answered and self.replay_of(name) is not None:
+            self.watchReplay(name)
+            return
+        self.pending_watch = name
+        self.ask_replays()
+
+    def watch_pending(self):
+        """Replay asked by race results page opened once replays list answered, else told why not"""
+        name, self.pending_watch = self.pending_watch, ""
+        if not name:
+            return
+        if not self.replays_answered:
+            self.notify(trm(f"Start Le Mans Ultimate to watch replay {name}"), True)
+        elif self.replay_of(name) is None:
+            self.notify(trm(f"Replay not found in game: {name}"), True)
+        else:
+            self.watchReplay(name)
 
     @Slot()
     def openFolder(self):
@@ -1487,8 +1530,10 @@ class GameReplaysBackend(QObject):
             } for incident in self.incidents]
             last = max((incident.time for incident in self.incidents), default=0.0)
             cached = self._timeline = (made_from, markers, last)
-        end = max(cached[2], self.replay_time, self.session_end / 1.02, 60.0)
-        return {"end": end * 1.02, "markers": cached[1]}
+        end = max(cached[2], self.replay_time, self.session_end / 1.02, 60.0) * 1.02
+        if self.session_end <= 0:  # length unknown: whole minutes, span not changed by every replay time answer
+            end = math.ceil(end / 60) * 60
+        return {"end": end, "markers": cached[1]}
 
     @Property(int, notify=filterChanged)
     def incidentFilter(self) -> int:
@@ -1525,6 +1570,9 @@ class GameReplaysBackend(QObject):
             self.panel = index
             self.settingsChanged.emit()
             self.save_settings()
+            if PANELS[index] == "map":
+                self.update_map_cars()
+            self.update_live_timer()
             if PANELS[index] != "incidents" and self._shown and self.state in (SESSION, REPLAY):
                 self._timer.stop()
                 self.refresh_state()
@@ -1883,7 +1931,8 @@ class GameReplaysBackend(QObject):
             self._standing_view = view
             self.standingsChanged.emit()
         self.laps_changed()  # car followed by camera may have changed
-        self.update_map_cars()
+        if PANELS[self.panel] == "map":  # hidden map refreshed once shown
+            self.update_map_cars()
 
     # Track map
     @Property(int, notify=revisionChanged)
@@ -1906,13 +1955,119 @@ class GameReplaysBackend(QObject):
         (rows kept by slot: cars move smoothly)"""
         return self._map_model
 
+    @Property(dict, notify=mapChanged)
+    def mapPath(self) -> dict:
+        """Track path cars move along between answers: points, distance of each, length, closed; {} if no map"""
+        path = self.track_path
+        if path is None:
+            return {}
+        return {"xs": path.xs, "ys": path.ys, "s": path.s, "length": path.length, "closed": path.closed}
+
     def update_map_cars(self):
         focused = self.focused_slot()
-        self._map_model.sync([{
-            "key": str(car.slot), "mapX": car.x, "mapY": car.y, "color": class_color(car.car_class),
-            "number": car.number or str(car.position), "driver": car.driver, "position": car.position,
-            "onCamera": car.slot == focused, "player": car.player, "inPit": car.in_pit or car.garage,
-        } for car in self.standings if car.x or car.y])
+        rows = []
+        seen = set()
+        for car in self.standings:
+            if not (car.x or car.y):
+                continue
+            seen.add(car.slot)
+            rows.append({
+                "key": str(car.slot), "mapX": car.x, "mapY": car.y, "color": class_color(car.car_class),
+                "number": car.number or str(car.position), "driver": car.driver, "position": car.position,
+                "onCamera": car.slot == focused, "player": car.player, "inPit": car.in_pit or car.garage,
+                **self.car_track(car),
+            })
+        for slot in set(self._car_tracks) - seen:
+            del self._car_tracks[slot]
+        self._map_model.sync(rows)
+
+    def car_track(self, car: Standing) -> dict:
+        """Place of car on track path & speed along it (moved by page between answers at playback rate), easing
+        from where page showed it (correction, meters) to new place"""
+        off = {"onTrack": False, "pathS": 0.0, "speed": 0.0, "sampleTime": 0.0, "correction": 0.0, "receivedMs": 0.0}
+        path = self.track_path
+        if path is None or car.in_pit or car.garage:
+            self._car_tracks.pop(car.slot, None)
+            return off
+        sample = car.lap_start + car.into_lap if car.into_lap >= 0 else -1.0
+        old = self._car_tracks.get(car.slot)
+        if old is not None and sample == old[1]:  # same answer again (panel shown...): unchanged
+            s, sample, speed, segment, eased, received = old
+        else:
+            s, gap, segment = path.project(car.x, car.y, old[3] if old is not None else -1)
+            if gap > OFF_TRACK or sample < 0:
+                self._car_tracks.pop(car.slot, None)
+                return off
+            if old is not None and old[2]:  # speed measured before, kept if this move is no speed (jump)
+                speed = old[2]
+            else:
+                speed = self._direction * path.length / car.estimated if car.estimated > 0 else 0.0
+            eased = 0.0
+            if old is not None and sample > old[1]:
+                moved = path.delta(old[0], s) / (sample - old[1])
+                if abs(moved) < MAX_PATH_SPEED:
+                    speed = moved if not old[2] else (old[2] + moved) / 2
+                    if abs(moved) > 5:  # driving: direction of path learned from cars
+                        self._direction = 1.0 if moved > 0 else -1.0
+                expected = old[0] + old[2] * (sample - old[1])
+                eased = path.delta(s, expected)
+                if abs(eased) > JUMP:
+                    eased = 0.0
+            received = time.time() * 1000
+            self._car_tracks[car.slot] = (s, sample, speed, segment, eased, received)
+        return {"onTrack": True, "pathS": s, "speed": speed, "sampleTime": sample, "correction": eased,
+                "receivedMs": received}
+
+    # Live positions: shared memory of the game on this computer, read every LIVE_MS like the Broadcast Director
+    # track map; between game answers cars are then where the game shows them, not moved by guess along the track
+    @Property(dict, notify=mapLiveChanged)
+    def mapLive(self) -> dict:
+        """Map x & y of each car (slot) read from shared memory, {} if not read (cars moved along track instead)"""
+        return self.map_live
+
+    @staticmethod
+    def reader() -> Any:
+        """Game data of the app (shared memory), None if not readable"""
+        from ...api_control import api
+
+        return getattr(api, "read", None)
+
+    def live_wanted(self) -> bool:
+        return self._shown and PANELS[self.panel] == "map" and self.state in (SESSION, REPLAY) and bool(
+            self.map_center)
+
+    def update_live_timer(self):
+        if self.live_wanted():
+            if not self._live_timer.isActive():
+                self._live_timer.start()
+                self.read_live_positions()
+        else:
+            self._live_timer.stop()
+            self.set_live({})
+
+    def read_live_positions(self):
+        if not self.live_wanted():
+            self.update_live_timer()
+            return
+        positions: dict[str, list[float]] = {}
+        reader = self.reader()
+        if reader is not None:
+            try:
+                for index in range(reader.vehicle.total_vehicles()):
+                    x, _, z = reader.vehicle.position_xyz(index)
+                    if x or z:
+                        positions[str(reader.vehicle.slot_id(index))] = [round(x, 2), round(-z, 2)]
+            except (AttributeError, IndexError, TypeError, ValueError):
+                positions = {}
+        # Shared memory of the session open in game: its cars are those of the game answer, else not used
+        if not positions.keys() & {str(car.slot) for car in self.standings}:
+            positions = {}
+        self.set_live(positions)
+
+    def set_live(self, positions: dict[str, list[float]]):
+        if positions != self.map_live:
+            self.map_live = positions
+            self.mapLiveChanged.emit()
 
     def set_map(self, track: str, points: tuple[list, list] | None):
         """Track map of game (center path & pit lane), lines built for map scale"""
@@ -1920,8 +2075,16 @@ class GameReplaysBackend(QObject):
         self.map_center, self.map_pit = points if points else ([], [])
         if len(self.map_center) < 3:
             self.map_center, self.map_pit = [], []
+        self._car_tracks.clear()
+        if self.map_center:
+            xs = [point[0] for point in self.map_center]
+            ys = [point[1] for point in self.map_center]
+            self.track_path = TrackPath(xs, ys, abs(xs[0] - xs[-1]) + abs(ys[0] - ys[-1]) < 500)
+        else:
+            self.track_path = None
         self.build_map()
         self.mapChanged.emit()
+        self.update_live_timer()
 
     @Slot(float)
     def setMapScale(self, meters_per_pixel: float):

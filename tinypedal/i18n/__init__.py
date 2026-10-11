@@ -26,6 +26,7 @@ Qt built-in dialogs & standard buttons use Qt's own translation files.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -176,6 +177,7 @@ def _load_message_rules(code: str):
     _message_rules = tuple(
         (re.compile(pattern, flags=re.MULTILINE), replacement) for pattern, replacement in rules
     )
+    _translate_message.cache_clear()
 
 
 def tr(text: str) -> str:
@@ -199,13 +201,19 @@ def tr_overlay(text: str) -> str:
     return _overlay.get(text, text)
 
 
+@functools.lru_cache(maxsize=4096)
+def _translate_message(text: str) -> str:
+    """Apply message rules (cached, cleared whenever rules change)"""
+    for pattern, replacement in _message_rules:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def trm(text: str) -> str:
     """Translate dialog message with variable content (regex rules), keep text if no rule matches"""
     if not _message_rules or not isinstance(text, str):
         return text
-    for pattern, replacement in _message_rules:
-        text = pattern.sub(replacement, text)
-    return text
+    return _translate_message(text)
 
 
 def untr(text: str) -> str:

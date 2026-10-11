@@ -26,6 +26,7 @@ import threading
 from collections import deque
 from collections.abc import Iterator
 from logging.handlers import RotatingFileHandler
+from time import monotonic
 
 ERROR_LOG_FILE = "tinypedal-errors.log"
 LOG_STREAM_MAX_CHARS = 2 * 1024 * 1024  # log kept in memory (log dialog, bug report)
@@ -91,6 +92,32 @@ class BoundedLogStream:
     def __iter__(self) -> Iterator[str]:
         """Lines of log text kept"""
         return iter(self.getvalue().splitlines(keepends=True))
+
+
+class ErrorThrottle:
+    """Error of a repeated path (each request, each frame) logged as warning with traceback once per
+    interval, as debug in between: visible at default log level, never floods the log"""
+
+    __slots__ = ("interval", "_last", "_lock")
+
+    def __init__(self, interval: float = 60.0):
+        self.interval = interval
+        self._last: float | None = None
+        self._lock = threading.Lock()
+
+    def log(self, _logger: logging.Logger, msg: str, *args, exc_info=True) -> bool:
+        """Log msg (call from except block for traceback)
+
+        Returns:
+            True if logged as warning.
+        """
+        now = monotonic()
+        with self._lock:
+            warn = self._last is None or now - self._last >= self.interval
+            if warn:
+                self._last = now
+        _logger.log(logging.WARNING if warn else logging.DEBUG, msg, *args, exc_info=exc_info)
+        return warn
 
 
 def new_stream_handler(
@@ -160,11 +187,13 @@ def set_logging_level(_logger: logging.Logger, filepath: str, filename: str, log
     _logger.setLevel(logging.INFO)
     if log_stream is not None:
         new_stream_handler(_logger, log_stream)
-    if log_level >= 1:
-        new_stream_handler(_logger, sys.stdout)
-        _logger.info("LOGGING: output to console")
-    else:
-        new_stream_handler(_logger, sys.stdout, level=logging.WARNING)
+    # No console in windowed executable (stdout None): no console handler, it would fail on every record
+    if sys.stdout is not None:
+        if log_level >= 1:
+            new_stream_handler(_logger, sys.stdout)
+            _logger.info("LOGGING: output to console")
+        else:
+            new_stream_handler(_logger, sys.stdout, level=logging.WARNING)
     if log_level == 2:
         try:
             new_file_handler(_logger, filepath, filename)

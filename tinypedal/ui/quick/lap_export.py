@@ -54,6 +54,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from ...i18n import tr, trm
 from ...setting import cfg
+from ...userfile.lap_cache import load_cached_lap
 from ...userfile.lap_library import import_foreign_job
 from ...userfile.lap_offset import aligned_on, is_recorded
 from ...userfile.motec_ld import export_lap, export_lap_job, import_ld_job
@@ -89,6 +90,7 @@ REPORT_MAP = "corner-map.png"  # map picture of PDF report (text document resour
 REPORT_PDF_MAP = 560  # map picture largest side on PDF page (fits on a landscape page)
 DELTA_BEST_BACKUPS = 5  # dated backups kept of delta best files replaced by a lap (first backup kept apart)
 IMPORT_STOPPED = "import stopped, file too big or unreadable"  # import job without result (worker process died)
+NO_LAP_TIME = "no lap time"  # delta best not written: too few timed samples
 
 
 def backup_delta_best(target: str):
@@ -122,6 +124,28 @@ def unique_export_name(folder: str, stem: str, ext: str, taken: set[str]) -> str
         number += 1
 
 
+def delta_best_error(target: str, lap: LapData, lap_time: float, scale: float = 1.0) -> str:
+    """Write delta best file of lap (distances multiplied by scale, thread job), former file kept as backup (see
+    backup_delta_best), returns "" if written, NO_LAP_TIME if lap has too few timed rows, else error text"""
+    rows = LapExports.delta_best_rows(lap, lap_time, scale)
+    if len(rows) < 12:
+        return NO_LAP_TIME
+    temp = f"{target}.tmp"
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.exists(target):
+            backup_delta_best(target)
+        with open(temp, "w", newline="", encoding="utf-8") as file:
+            csv.writer(file).writerows(rows)
+        os.replace(temp, target)
+    except OSError as error:
+        logger.error("LAP VIEWER: unable to save delta best %s: %s", target, error)
+        with suppress(OSError):
+            os.remove(temp)
+        return str(error)
+    return ""
+
+
 class LapExports(BackendBase):
     """Exports & imports of lap viewer page"""
 
@@ -153,18 +177,35 @@ class LapExports(BackendBase):
         """Lap used as delta best & factor bringing its distances to game track distance: imported lap aligned on a lap
         recorded by the app (distance zero at the line: lap as shown, else aligned on reference or newest recorded lap
         of track) & scaled to track length (driven distance), lap recorded by the app as is"""
+        return self.delta_best_source(path, lap)()
+
+    def delta_best_source(self, path: str, lap: LapData) -> Callable[[], tuple[LapData, float]]:
+        """Function giving delta best lap & distance factor (see delta_best_lap), page state read now: may run in a
+        thread (anchor lap read & alignment measured there)"""
         if is_recorded(lap):
-            return lap, 1.0
+            return lambda: (lap, 1.0)
         shown = next((plot.data for plot in self.data.laps if plot.key == path), None)
         entries = {entry.file.path: entry for entry in self.entries}
         recorded = next((entry for entry in (entries.get(self.reference_key), *self.entries)
                          if entry is not None and "combo" in entry.info and entry.file.path != path), None)
-        aligned = shown
-        if aligned is None:
-            anchor = self.read_lap(recorded.file.path) if recorded is not None else None
-            aligned = aligned_on(anchor, lap)[0] if anchor is not None else lap
-        length = lap_length(LapData("", {}, recorded.info)) if recorded is not None else lap_length(aligned)
-        return aligned, length_ratio(length, lap_end_distance(aligned)) if length > 0 else 1.0
+        anchor_path = recorded.file.path if recorded is not None else ""
+        anchor_cached = self._lap_cache.get(anchor_path) if anchor_path in self._lap_cache else None
+        folder = self.folder
+
+        def source() -> tuple[LapData, float]:
+            aligned = shown
+            if aligned is None:
+                anchor = anchor_cached
+                if anchor is None and anchor_path:
+                    try:
+                        anchor = load_cached_lap(folder, anchor_path)
+                    except (OSError, ValueError) as error:
+                        logger.error("LAP VIEWER: unable to load %s: %s", anchor_path, error)
+                aligned = aligned_on(anchor, lap)[0] if anchor is not None else lap
+            length = lap_length(LapData("", {}, recorded.info)) if recorded is not None else lap_length(aligned)
+            return aligned, length_ratio(length, lap_end_distance(aligned)) if length > 0 else 1.0
+
+        return source
 
     @staticmethod
     def delta_best_rows(lap: LapData, lap_time: float, scale: float = 1.0) -> list[tuple[float, float]]:
@@ -183,9 +224,7 @@ class LapExports(BackendBase):
     @Slot(str)
     def exportDeltaBest(self, path: str = ""):
         """Use lap (recorded, or added lap driven on current track & class) as delta best reference of its track
-        (former file kept as backup)"""
-        from ...userfile.delta_best import load_delta_best_file
-
+        (former file kept as backup): lap & current delta best read, then delta best written in background"""
         path = path or self.reference_key
         if not path:
             self.set_status(tr("Check laps to export first."))
@@ -194,14 +233,43 @@ class LapExports(BackendBase):
         if not track:
             self.set_status(tr("Lap of another track or class: not usable as delta best of this track."))
             return
-        lap = self.read_lap(path)
+        target = self.delta_best_file(track)
+        cached = self._lap_cache.get(path)
+        known = path in self._lap_cache  # loaded, or unreadable (None)
+        folder = self.folder
+
+        def reading() -> tuple[LapData | None, str, float]:
+            from ...userfile.delta_best import load_delta_best_file
+
+            lap, error = cached, ""
+            if not known:
+                try:
+                    lap = load_cached_lap(folder, path)
+                except (OSError, ValueError) as reason:
+                    logger.error("LAP VIEWER: unable to load %s: %s", path, reason)
+                    error = str(reason)
+            return lap, error, load_delta_best_file(f"{os.path.dirname(target)}/", track, ((), 0.0))[1]
+
+        def read(result):
+            self._exports -= 1
+            if result is None:  # job failed (logged)
+                return
+            lap, error, current = result
+            if not known and path not in self._lap_cache:
+                self.store_lap(path, lap)
+            if error:
+                self.set_status(trm(f"Unable to load lap: {error}"))
+            self.confirm_delta_best(path, track, target, lap, current)
+
+        self._exports += 1
+        self.run_job("delta best", reading, read)
+
+    def confirm_delta_best(self, path: str, name: str, target: str, lap: LapData | None, current: float):
+        """Lap read: used as delta best once confirmed, aligned & written in background"""
         lap_time = lap_time_of(os.path.basename(path)) or (lap.lap_time if lap is not None else 0.0)
         if lap is None or lap_time <= 0 or "lap_time" not in lap.columns:
             self.set_status(tr("This lap has no lap time: not usable as delta best."))
             return
-        target = self.delta_best_file(track)
-        name = track
-        current = load_delta_best_file(f"{os.path.dirname(target)}/", name, ((), 0.0))[1]
         message = trm(f"Use <b>{html.escape(lap_label(os.path.basename(path)))}</b> as delta best of "
                       f"<b>{html.escape(name)}</b>?")
         if current > 0:
@@ -212,40 +280,41 @@ class LapExports(BackendBase):
             defaultButton=QMessageBox.StandardButton.No)
         if confirm != QMessageBox.StandardButton.Yes:
             return
-        lap, scale = self.delta_best_lap(path, lap)
-        if self.write_delta_best(target, lap, lap_time, scale):
-            self.set_status(trm(f"Delta best of {html.escape(name)}: {format_laptime(lap_time)} "
-                                "(used next time you drive)"))
+        aligning = self.delta_best_source(path, lap)
+
+        def writing() -> str:
+            aligned, scale = aligning()
+            return delta_best_error(target, aligned, lap_time, scale)
+
+        def written(error):
+            self._exports -= 1
+            if error == "":
+                self.set_status(trm(f"Delta best of {html.escape(name)}: {format_laptime(lap_time)} "
+                                    "(used next time you drive)"))
+            elif error == NO_LAP_TIME:
+                self.set_status(tr("This lap has no lap time: not usable as delta best."))
+            else:  # None: job failed (logged)
+                self.set_status(trm(f"Unable to save delta best: {error or tr('Unknown error')}"))
+
+        self._exports += 1
+        self.run_job("delta best", writing, written)
 
     def write_delta_best(self, target: str, lap: LapData, lap_time: float, scale: float = 1.0) -> bool:
         """Write delta best file of lap (distances multiplied by scale), former file kept as backup (see
         backup_delta_best)"""
-        rows = self.delta_best_rows(lap, lap_time, scale)
-        if len(rows) < 12:
+        error = delta_best_error(target, lap, lap_time, scale)
+        if error == NO_LAP_TIME:
             self.set_status(tr("This lap has no lap time: not usable as delta best."))
-            return False
-        temp = f"{target}.tmp"
-        try:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            if os.path.exists(target):
-                backup_delta_best(target)
-            with open(temp, "w", newline="", encoding="utf-8") as file:
-                csv.writer(file).writerows(rows)
-            os.replace(temp, target)
-        except OSError as error:
-            logger.error("LAP VIEWER: unable to save delta best %s: %s", target, error)
+        elif error:
             self.set_status(trm(f"Unable to save delta best: {error}"))
-            with suppress(OSError):
-                os.remove(temp)
-            return False
-        return True
+        return not error
 
     # Added laps: other folders, MoTeC logs, imported laps library
     @Slot()
     def addFiles(self):
         filenames, _ = QFileDialog.getOpenFileNames(
             self._window, tr("Add File..."), self.folder,
-            f"{tr('Laps')} (*.csv *.csv.gz *.ld);;Modern Tiny Pedals Lap (*.csv *.csv.gz);;MoTeC i2 (*.ld)")
+            f"{tr('Laps')} (*.csv *.csv.gz *.ld);;NeoPedal Lap (*.csv *.csv.gz);;MoTeC i2 (*.ld)")
         logs = [filename for filename in filenames if filename.lower().endswith(".ld")]
         self.add_external([filename for filename in filenames if filename not in logs])
         if logs:  # MoTeC logs: complete laps converted to lap files in background
@@ -358,15 +427,25 @@ class LapExports(BackendBase):
     # Export
     @Slot(str)
     def exportMotec(self, path: str = ""):
-        """Export lap (reference lap by default) to MoTeC .ld file"""
+        """Export lap (reference lap by default) to MoTeC .ld file, lap read & written by worker process"""
         path = path or self.reference_key
-        lap = self.read_lap(path) if path else None
-        if lap is None:
+        if not path or (path in self._lap_cache and self._lap_cache[path] is None):  # unreadable lap
             return
         filename, _ = QFileDialog.getSaveFileName(
             self._window, tr("Export MoTeC..."), lap_stem(path) + ".ld", "MoTeC i2 (*.ld)")
-        if filename and self.export_file(path, lap, filename):
-            self.set_status(trm(f"Exported: {os.path.basename(filename)}"))
+        if not filename:
+            return
+
+        def exported(error):
+            self._exports -= 1
+            if error == "":
+                self.set_status(trm(f"Exported: {os.path.basename(filename)}"))
+            else:  # None: job failed (logged)
+                self.set_status(trm(f"Unable to export lap: {error or tr('Unknown error')}"))
+
+        self._exports += 1
+        venue = os.path.basename(os.path.dirname(path)).split(" - ")[0]
+        self.run_process_job("MoTeC export", exported, export_lap_job, self.folder, path, filename, venue)
 
     @Slot(bool)
     def exportMotecMany(self, whole_track: bool):
@@ -585,7 +664,7 @@ class LapExports(BackendBase):
             laps=laps, headers=[tr(title) for _, title in REPORT_COLUMNS],
             keys=[key for key, _ in REPORT_COLUMNS], rows=rows, coaching=self._coaching,
             coaching_title=tr("Where time is lost") + (f" · {self.short_label(compared.key)}" if compared else ""),
-            png=png, map_title=tr("Track Map"), footer="Modern Tiny Pedals",
+            png=png, map_title=tr("Track Map"), footer="NeoPedal",
             image_src=REPORT_MAP if pdf and image is not None else "", image_size=size,
         )
 

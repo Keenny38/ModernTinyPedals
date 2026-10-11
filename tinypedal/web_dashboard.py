@@ -45,6 +45,7 @@ import logging
 import secrets
 import socket
 import ssl
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -57,10 +58,13 @@ from .command_server import BindRetry, BoundedRequestHandler, LocalHTTPServer
 from .const_api import API_LMU_NAME
 from .const_file import ConfigType
 from .i18n import current_language, tr
+from .log_handler import ErrorThrottle
 from .setting import cfg
 from .userfile.tls_cert import load_certificate, server_context
 
 logger = logging.getLogger(__name__)
+snapshot_errors = ErrorThrottle()  # telemetry asked every second: warning once a minute
+request_errors = ErrorThrottle()
 
 MAX_FAILURES = 10
 LOCKOUT_SECONDS = 60
@@ -280,7 +284,7 @@ class DashboardHandler(BoundedRequestHandler):
     (and TLS handshake) per request, each left in TIME_WAIT. Every response sends Content-Length.
     """
 
-    server_version = "TinyPedal"
+    server_version = "NeoPedal"
     protocol_version = "HTTP/1.1"
     timeout = 15  # idle client never holds a handler thread (socket timeout, no streaming endpoint)
     access_code = ""
@@ -302,7 +306,7 @@ class DashboardHandler(BoundedRequestHandler):
                 try:
                     body = json.dumps(telemetry_snapshot()).encode("utf-8")
                 except Exception:  # never drop connection on data error
-                    logger.debug("WEB DASHBOARD: snapshot error", exc_info=True)
+                    snapshot_errors.log(logger, "WEB DASHBOARD: snapshot error")
                     body = b'{"active": false}'
                 self.send_body(200, body, "application/json")
             return
@@ -462,7 +466,10 @@ class DashboardServer(LocalHTTPServer):
     """
 
     def handle_error(self, request, client_address):
-        logger.debug("WEB DASHBOARD: request from %s failed", client_address[0], exc_info=True)
+        if isinstance(sys.exc_info()[1], OSError):  # client gone, failed TLS handshake (SSLError): expected
+            logger.debug("WEB DASHBOARD: request from %s failed", client_address[0], exc_info=True)
+        else:  # error of a handler
+            request_errors.log(logger, "WEB DASHBOARD: request from %s failed", client_address[0])
 
 
 class WebDashboard:
@@ -613,7 +620,7 @@ LOGIN_LABELS = {
     "access_code": "Access code",
 }
 PAGE_LABELS = {
-    "title": "Modern Tiny Pedals Dashboard",
+    "title": "NeoPedal Dashboard",
     "connecting": "Connecting…",
     "gear_speed": "Gear · Speed",
     "delta": "Delta best",
@@ -666,7 +673,7 @@ def dashboard_html() -> str:
 
 
 LOGIN_HTML = """<!doctype html><html lang="@@lang@@"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Modern Tiny Pedals</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>NeoPedal</title>
 <style>body{background:#0e1116;color:#e9ecf1;font-family:system-ui,sans-serif;display:flex;
 align-items:center;justify-content:center;height:100vh;margin:0}form{display:flex;gap:8px}
 input,button{font-size:20px;padding:10px;border-radius:8px;border:1px solid #373e4c;background:#1b1f27;color:#e9ecf1}

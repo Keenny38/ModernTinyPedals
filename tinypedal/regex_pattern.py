@@ -100,10 +100,12 @@ CFG_STRING = (
     "^access_code$|"
     "^access_token$|"
     "^bind$|"
+    "^class_order$|"
     "^collapsed_sections$|"
     "^column_widths$|"
     "^hidden_columns$|"
     "^input_driver_table$|"
+    "^live_unfollowed$|"
     "^preset$|"
     "^process_id$|"
     "^open_pages$|"
@@ -286,6 +288,7 @@ CHOICE_COMMON = MappingProxyType({
     "^incident_export_format$": ("JSON", "CSV", "Both"),
     "^status_icons_side$": ("Left", "Right"),
     "^damage_panel_position$": ("Bottom Right", "Bottom Left", "Top Right", "Top Left"),
+    "^scroll_direction$": ("Upward", "Downward"),  # chat: newest message at bottom (upward) or at top
     "^resize_anchor$": ("Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Center", "Bottom Right"),
     # Per widget unit, "Global" = use Units setting
     "^override_unit_temperature$": ("Global", *CHOICE_UNITS["temperature_unit"]),

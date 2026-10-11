@@ -228,7 +228,7 @@ TpPage {
         // Class chips (2 classes or more)
         Flow {
             Layout.fillWidth: true
-            visible: backend.classes.length > 0
+            visible: classChips.count > 0
             spacing: theme.em * 0.35
             OverlayChip {
                 text: i18n.tr("All")
@@ -238,14 +238,15 @@ TpPage {
                 onClicked: backend.setClassFilter("")
             }
             Repeater {
-                model: backend.classes
+                id: classChips
+                model: backend.classModel  // synced in place: chips kept when counts change
                 OverlayChip {
-                    required property var modelData
-                    text: modelData.label
-                    dotColor: modelData.color
-                    count: modelData.count
-                    selected: backend.classFilter === modelData.key
-                    onClicked: backend.setClassFilter(selected ? "" : modelData.key)
+                    required property var model
+                    text: model.label
+                    dotColor: model.color
+                    count: model.count
+                    selected: backend.classFilter === model.key
+                    onClicked: backend.setClassFilter(selected ? "" : model.key)
                 }
             }
         }
@@ -260,6 +261,7 @@ TpPage {
                 anchors.fill: parent
                 clip: true
                 model: backend.drivers
+                reuseItems: true  // rows reset their transient state when pooled (see SpectateRow)
                 boundsBehavior: Flickable.StopAtBounds
                 highlightFollowsCurrentItem: false
                 keyNavigationEnabled: true

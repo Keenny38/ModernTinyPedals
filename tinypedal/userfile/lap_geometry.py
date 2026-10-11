@@ -31,7 +31,7 @@ import math
 import os
 import time
 from array import array
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from itertools import pairwise
 from typing import NamedTuple
@@ -119,11 +119,12 @@ def map_line_indexes(lap: LapData) -> tuple[MapLine, list[int]] | None:
     return MapLine(distances, xs, ys), indexes
 
 
-def lateral_offsets(reference: MapLine, compared: MapLine) -> tuple[list[float], list[int]]:
+def lateral_offsets(reference: MapLine, compared: MapLine, pause: Callable[[], None] | None = None
+                    ) -> tuple[list[float], list[int]]:
     """Signed distance of each compared point to reference line (left positive) & nearest reference index
 
     Nearest point found by walking from the previous one (both lines go the same way): one pass,
-    a few steps per point, instead of searching around each point.
+    a few steps per point, instead of searching around each point. pause: called now & then (thread, see Yielder).
     """
     count = len(reference.xs)
     if count < 3 or not compared.xs:
@@ -132,7 +133,9 @@ def lateral_offsets(reference: MapLine, compared: MapLine) -> tuple[list[float],
     offsets: list[float] = []
     indexes: list[int] = []
     nearest = -1
-    for distance, x, y in zip(compared.distances, compared.xs, compared.ys):
+    for number, (distance, x, y) in enumerate(zip(compared.distances, compared.xs, compared.ys)):
+        if pause is not None and not number % PAUSE_POINTS:
+            pause()
         if nearest < 0 or abs(reference.distances[nearest] - distance) > LINE_SEARCH:  # start or lost: by distance
             nearest = min(max(bisect.bisect_left(reference.distances, distance), 1), count - 2)
             low = max(bisect.bisect_left(reference.distances, distance - LINE_SEARCH), 1)
@@ -353,12 +356,13 @@ def _filled(values: Sequence[float | None], default: float) -> list[float]:
     return result
 
 
-def edge_offsets(base: MapLine, limits: TrackLimits) -> tuple[list[float], list[float]]:
-    """Left & right track edge offsets at each base line point (left positive)"""
+def edge_offsets(base: MapLine, limits: TrackLimits, pause: Callable[[], None] | None = None
+                 ) -> tuple[list[float], list[float]]:
+    """Left & right track edge offsets at each base line point (left positive), pause: see lateral_offsets"""
     count = len(base.xs)
     sides = []
     for edge in (limits.left, limits.right):
-        offsets, indexes = lateral_offsets(base, edge)
+        offsets, indexes = lateral_offsets(base, edge, pause)
         values: list[float | None] = [None] * count
         for offset, index in zip(offsets, indexes):
             values[index] = offset
@@ -429,16 +433,27 @@ def _smooth(values: list[float], points: int) -> list[float]:
 # Track limits job: placement of each clean lap around base line (saved per lap), edges from all of them
 LIMITS_PARTS_VERSION = 2  # per lap track limits data format: saved parts computed again if changed
 YIELD_EVERY = 0.004  # seconds of work between short pauses in threads (page thread gets the interpreter lock)
+PAUSE_POINTS = 256  # line points between pause checks (see lateral_offsets)
+
+
+class JobCancelled(Exception):
+    """Thread job stopped at a pause: its result is no longer wanted (newer settings, map built again)"""
 
 
 class Yielder:
-    """Short pause now & then in long thread loops: page thread waits less for the interpreter lock"""
+    """Short pause now & then in long thread loops: page thread waits less for the interpreter lock
 
-    def __init__(self, interval: float = YIELD_EVERY):
+    cancelled: checked at each pause, JobCancelled raised once it returns True (stale job stops early).
+    """
+
+    def __init__(self, interval: float = YIELD_EVERY, cancelled: Callable[[], bool] | None = None):
         self.interval = interval
+        self.cancelled = cancelled
         self.last = time.perf_counter()
 
     def __call__(self):
+        if self.cancelled is not None and self.cancelled():
+            raise JobCancelled
         now = time.perf_counter()
         if now - self.last >= self.interval:
             time.sleep(0.001)

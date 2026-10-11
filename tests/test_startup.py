@@ -130,6 +130,15 @@ def test_reload_order(controls):
     assert controls.index("mctrl.start") < controls.index("wctrl.start")
 
 
+def test_reload_preset_saves_stopped_modules_data_before_loading(controls, monkeypatch):
+    """Track info saved by stopping modules written before preset files are loaded again"""
+    monkeypatch.setattr(type(cfg), "load_user", lambda self: controls.append("cfg.load_user"))
+    monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
+    loader.reload(reload_preset=True)
+    assert controls.index("mctrl.close") < controls.index("cfg.flush", 1) < controls.index("cfg.load_user")
+
+
 def test_close_stops_api_after_modules(controls):
     loader.close()
     assert controls.index("mctrl.close") < controls.index("api.stop") < controls.index("api.close")

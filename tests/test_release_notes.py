@@ -21,7 +21,7 @@ NOTES = """### Visionneuse de télémétrie (Telemetry)
 
 ### SHA256
 
-- `f2a9  ModernTinyPedals-0.15.0-source.zip`
+- `f2a9  NeoPedal-0.15.0-source.zip`
 """
 
 

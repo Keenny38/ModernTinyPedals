@@ -55,6 +55,50 @@ def sample_at(samples, time: float):
     return found
 
 
+def trace_points(samples, x_at, y_of, width: float) -> list[QPointF]:
+    """Points of samples; more samples than 4 per pixel column (long recording): first, lowest, highest &
+    last of each pixel column only, in time order (same shape drawn, fewer points)"""
+    if len(samples) <= width * 4:
+        return [QPointF(x_at(sample.time), y_of(sample)) for sample in samples]
+    points: list[QPointF] = []
+    column = None
+    first = low = high = last = (0, 0.0, 0.0)  # sample index, x, y
+    for index, sample in enumerate(samples):
+        x = x_at(sample.time)
+        point = (index, x, y_of(sample))
+        if int(x) != column:
+            if column is not None:
+                points.extend(QPointF(x_, y_) for _, x_, y_ in sorted({first, low, high, last}))
+            column = int(x)
+            first = low = high = point
+        elif point[2] < low[2]:
+            low = point
+        elif point[2] > high[2]:
+            high = point
+        last = point
+    points.extend(QPointF(x_, y_) for _, x_, y_ in sorted({first, low, high, last}))
+    return points
+
+
+def mark_runs(samples, x_at, active, width: float) -> list[tuple[float, float]]:
+    """Left & right x of each run of active samples (marks width wide touching or overlapping)"""
+    runs: list[tuple[float, float]] = []
+    left = right = None
+    for sample in samples:
+        if not active(sample):
+            continue
+        x = x_at(sample.time)
+        if right is not None and x <= right:
+            right = x + width
+        else:
+            if left is not None and right is not None:
+                runs.append((left, right))
+            left, right = x, x + width
+    if left is not None and right is not None:
+        runs.append((left, right))
+    return runs
+
+
 def translucent(name: str, alpha: int) -> QColor:
     color = QColor(name)
     color.setAlpha(alpha)
@@ -156,11 +200,11 @@ class TracePainter:
     @staticmethod
     def draw_trace_area(painter: QPainter, rect: QRectF, samples, x_at, name: str, color: str):
         """Pedal input as a filled area from bottom"""
-        points = [QPointF(x_at(samples[0].time), rect.bottom())]
-        for sample in samples:
-            value = min(max(getattr(sample, name), 0.0), 1.0)
-            points.append(QPointF(x_at(sample.time), rect.bottom() - value * rect.height()))
-        points.append(QPointF(x_at(samples[-1].time), rect.bottom()))
+        bottom, height = rect.bottom(), rect.height()
+        points = [QPointF(x_at(samples[0].time), bottom)]
+        points.extend(trace_points(
+            samples, x_at, lambda sample: bottom - min(max(getattr(sample, name), 0.0), 1.0) * height, rect.width()))
+        points.append(QPointF(x_at(samples[-1].time), bottom))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(translucent(color, 95))
         painter.drawPolygon(QPolygonF(points))
@@ -168,13 +212,10 @@ class TracePainter:
     def draw_trace_speed(self, painter: QPainter, rect: QRectF, samples, x_at, top_speed: float,
                          compared: bool = False):
         """Speed line, scaled to top speed (compared incident: dashed & faded, behind)"""
+        bottom, height = rect.bottom(), rect.height()
         path = QPainterPath()
-        for index, sample in enumerate(samples):
-            point = QPointF(x_at(sample.time), rect.bottom() - min(max(sample.speed, 0) / top_speed, 1) * rect.height())
-            if index:
-                path.lineTo(point)
-            else:
-                path.moveTo(point)
+        path.addPolygon(QPolygonF(trace_points(
+            samples, x_at, lambda sample: bottom - min(max(sample.speed, 0) / top_speed, 1) * height, rect.width())))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if compared:
             pen = QPen(translucent(self.wcfg["trace_speed_color"], 110), max(self.unit * 0.07, 1), Qt.PenStyle.DashLine)
@@ -186,14 +227,14 @@ class TracePainter:
     def draw_trace_steering(self, painter: QPainter, rect: QRectF, samples, x_at):
         """Steering input around the middle line: up is right, down is left"""
         middle = rect.center().y()
-        path = QPainterPath()
-        for index, sample in enumerate(samples):
+        half = rect.height() / 2
+
+        def y_of(sample) -> float:
             steering = min(max(sample.steering, -1.0), 1.0) if sample.steering == sample.steering else 0.0
-            point = QPointF(x_at(sample.time), middle - steering * rect.height() / 2)
-            if index:
-                path.lineTo(point)
-            else:
-                path.moveTo(point)
+            return middle - steering * half
+
+        path = QPainterPath()
+        path.addPolygon(QPolygonF(trace_points(samples, x_at, y_of, rect.width())))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(self.wcfg["trace_steering_color"]), max(self.unit * 0.06, 1)))
         painter.drawPath(path)
@@ -208,6 +249,17 @@ class TracePainter:
         tc_color = QColor(wcfg["tc_active_color"])
         lock_color = QColor(wcfg["wheel_lock_color"])
         spin_color = QColor(wcfg["wheel_spin_color"])
+        if len(samples) > rect.width() * 4:  # long recording: one mark per run of samples, not per sample
+            top, bottom = rect.top(), rect.bottom() - tick
+            for y, color, active in (
+                (top, abs_color, lambda sample: sample.abs_active),
+                (top + tick, tc_color, lambda sample: sample.tc_active),
+                (bottom, lock_color, lambda sample: sample.slip == "lock"),
+                (bottom, spin_color, lambda sample: sample.slip and sample.slip != "lock"),
+            ):
+                for left, right in mark_runs(samples, x_at, active, width):
+                    painter.fillRect(QRectF(left, y, right - left, tick), color)
+            return
         for sample in samples:
             x = x_at(sample.time)
             if sample.abs_active:

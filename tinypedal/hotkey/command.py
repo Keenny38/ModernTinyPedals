@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+import threading
 from functools import partial
 
 from .. import app_signal, overlay_signal, realtime_state
@@ -216,11 +218,116 @@ def hotkey_spectate_previous_driver():
     spectate_place(-1)
 
 
+def open_director():
+    """Director of the Broadcast Director page if open (its module is imported only by the page)"""
+    module = sys.modules.get("tinypedal.ui.quick.director_backend")
+    return module.active_director() if module is not None else None
+
+
+def director_step(offset: int):
+    """Car on air: next (1) or previous (-1) by place; page closed: game camera on next or previous car"""
+    director = open_director()
+    if director is not None:
+        director.stepCar(offset)
+        return
+    from ..ui.game_rest import game_command
+
+    resource = "/rest/watch/focusForward" if offset > 0 else "/rest/watch/focusBackward"
+    threading.Thread(target=game_command, args=("PUT", resource), daemon=True, name="Game camera").start()
+
+
+def hotkey_director_next_car():
+    """Command - Broadcast Director: next car on air"""
+    director_step(1)
+
+
+def hotkey_director_previous_car():
+    """Command - Broadcast Director: previous car on air"""
+    director_step(-1)
+
+
+def hotkey_director_auto():
+    """Command - Broadcast Director: automatic cuts on or off (page open)"""
+    director = open_director()
+    if director is not None:
+        director.toggleAuto()
+
+
+def hotkey_director_lock():
+    """Command - Broadcast Director: keep the car on air (director does not cut) or let go (page open)"""
+    director = open_director()
+    if director is not None:
+        director.toggleLock()
+
+
+def hotkey_director_take_best():
+    """Command - Broadcast Director: cut to the best suggestion (page open)"""
+    director = open_director()
+    if director is not None:
+        director.takeBest()
+
+
+def hotkey_director_starting_grid():
+    """Command - Broadcast Director: starting grid on the graphics, or hidden (page open)"""
+    director = open_director()
+    if director is not None:
+        director.showOnDemand("grid")
+
+
+def hotkey_director_event_card():
+    """Command - Broadcast Director: event card on the graphics, or hidden (page open)"""
+    director = open_director()
+    if director is not None:
+        director.showOnDemand("event")
+
+
+def hotkey_director_classification():
+    """Command - Broadcast Director: classification captured & shown, or hidden when shown (page open)"""
+    director = open_director()
+    if director is not None:
+        if director.onDemand == "results":
+            director.showOnDemand("results")
+        else:
+            director.captureResults()
+
+
+def hotkey_director_championship():
+    """Command - Broadcast Director: championship standings on the graphics, or hidden (page open)"""
+    director = open_director()
+    if director is not None:
+        director.showOnDemand("champ")
+
+
+def hotkey_director_hide_graphics():
+    """Command - Broadcast Director: every graphic hidden, or shown again (page open)"""
+    director = open_director()
+    if director is not None:
+        director.setGraphic("hidden", not director.graphicsSettings["hidden"])
+
+
+def hotkey_director_next_layout():
+    """Command - Broadcast Director: next layout preset of the graphics (page open)"""
+    director = open_director()
+    if director is not None:
+        director.nextLayoutPreset()
+
+
 def hotkey_pace_notes_playback():
     """Command - pace notes playback"""
     cfg.user.setting["pace_notes_playback"]["enable"] = not cfg.user.setting["pace_notes_playback"]["enable"]
     cfg.save()
     app_signal.refresh.emit(True)
+
+
+def hotkey_show_main_window():
+    """Command - show main window in front of the game, also hidden in tray or minimized"""
+    from PySide6.QtWidgets import QApplication
+
+    for widget in QApplication.topLevelWidgets():
+        bring_to_front = getattr(widget, "bring_to_front", None)
+        if callable(bring_to_front):
+            bring_to_front()
+            return
 
 
 def hotkey_restart_application():
@@ -291,10 +398,22 @@ COMMANDS_GENERAL = (
     ("spectate_mode", hotkey_spectate_mode),
     ("spectate_next_driver", hotkey_spectate_next_driver),
     ("spectate_previous_driver", hotkey_spectate_previous_driver),
+    ("director_next_car", hotkey_director_next_car),
+    ("director_previous_car", hotkey_director_previous_car),
+    ("director_auto", hotkey_director_auto),
+    ("director_take_best", hotkey_director_take_best),
+    ("director_lock", hotkey_director_lock),
+    ("director_starting_grid", hotkey_director_starting_grid),
+    ("director_event_card", hotkey_director_event_card),
+    ("director_classification", hotkey_director_classification),
+    ("director_championship", hotkey_director_championship),
+    ("director_hide_graphics", hotkey_director_hide_graphics),
+    ("director_next_layout", hotkey_director_next_layout),
     ("pace_notes_playback", hotkey_pace_notes_playback),
     ("cycle_deltabest_source", hotkey_cycle_deltabest_source),
     ("black_box_next_incident", hotkey_black_box_next_incident),
     ("black_box_open_incident_folder", hotkey_black_box_open_incident_folder),
+    ("show_main_window", hotkey_show_main_window),
     ("restart_application", hotkey_restart_application),
     ("quit_application", hotkey_quit_application),
 )

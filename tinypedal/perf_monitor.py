@@ -22,6 +22,7 @@ Widget performance monitor
 
 from __future__ import annotations
 
+import gc
 import threading
 from collections.abc import Callable
 from contextlib import suppress
@@ -47,8 +48,16 @@ class PerfStats(NamedTuple):
     total: float
 
 
+STALL_INTERVAL = 0.025  # seconds between main thread checks while monitoring
+STALL_THRESHOLD = 0.05  # seconds a check came late: main thread blocked (window & overlays frozen)
+
+
 class PerfMonitor:
-    """Widget performance monitor (update & paint time), disabled by default"""
+    """Widget performance monitor (update & paint time), disabled by default
+
+    While enabled, also records main thread stalls (event loop blocked longer than STALL_THRESHOLD)
+    and Python garbage collection pauses, as events of "main_thread" and "python".
+    """
 
     enabled = False
     _data: dict[tuple[str, str], list[float]] = {}  # (name, event): [calls, total, max]
@@ -60,6 +69,8 @@ class PerfMonitor:
         if enabled and not cls.enabled:
             cls.reset()
         cls.enabled = enabled
+        _gc_probe.set_enabled(enabled)
+        _stall_probe.set_enabled(enabled)
 
     @classmethod
     def reset(cls):
@@ -97,6 +108,64 @@ class PerfMonitor:
         ]
         output.sort(key=lambda item: item.total, reverse=True)
         return output
+
+
+class _GcProbe:
+    """Python garbage collection pauses (any thread), callback registered only while monitoring"""
+
+    def __init__(self):
+        self._start = 0.0
+
+    def set_enabled(self, enabled: bool):
+        registered = self._callback in gc.callbacks
+        if enabled and not registered:
+            gc.callbacks.append(self._callback)
+        elif not enabled and registered:
+            gc.callbacks.remove(self._callback)
+
+    def _callback(self, phase: str, _info: dict):
+        if phase == "start":
+            self._start = perf_counter()
+        elif self._start:
+            PerfMonitor.record("python", "garbage collection", perf_counter() - self._start)
+            self._start = 0.0
+
+
+class _StallProbe:
+    """Main thread stalls: a timer checked every STALL_INTERVAL, late by more than STALL_THRESHOLD = blocked"""
+
+    def __init__(self):
+        self._timer = None
+        self._last = 0.0
+
+    def set_enabled(self, enabled: bool):
+        from PySide6.QtCore import QCoreApplication, Qt, QThread, QTimer
+
+        app = QCoreApplication.instance()
+        if enabled:
+            if self._timer is not None or app is None or QThread.currentThread() is not app.thread():
+                return
+            timer = self._timer = QTimer()
+            timer.setTimerType(Qt.TimerType.PreciseTimer)
+            timer.setInterval(round(STALL_INTERVAL * 1000))
+            timer.timeout.connect(self._check)
+            self._last = perf_counter()
+            timer.start()
+        elif self._timer is not None:
+            self._timer.stop()
+            self._timer.deleteLater()
+            self._timer = None
+
+    def _check(self):
+        now = perf_counter()
+        late = now - self._last - STALL_INTERVAL
+        self._last = now
+        if late > STALL_THRESHOLD:
+            PerfMonitor.record("main_thread", "stall", late)
+
+
+_gc_probe = _GcProbe()
+_stall_probe = _StallProbe()
 
 
 def _owner_name(widget) -> str:

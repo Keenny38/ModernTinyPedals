@@ -1,4 +1,4 @@
-Modern Tiny Pedals (a modified version of TinyPedal, see NOTICE.md) relies on following third-party software:
+NeoPedal (a modified version of TinyPedal, see NOTICE.md) relies on following third-party software:
 
 - Python 3, the Python Software Foundation License Version 2.
   website: https://www.python.org/

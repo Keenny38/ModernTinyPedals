@@ -12,6 +12,14 @@ Item {
     readonly property var rule: plan.rule || ({})
     readonly property var life: backend.tyreLife
     readonly property var status: plan.status || ({})
+    // Status figures as numbers: chip texts (translated by rules, a slot call each) built again only on change
+    readonly property int stockCount: status.stock || 0
+    readonly property int maximumCount: status.maximum || 0
+    readonly property int usedCount: status.used || 0
+    readonly property int stintCount: status.stints || 0
+    readonly property int pitCount: status.pits || 0
+    readonly property int changeCount: status.changes || 0
+    readonly property real changeTime: status.time || 0
     readonly property real leftWidth: theme.em * 21
     readonly property var wheels: [i18n.tr("Front Left"), i18n.tr("Front Right"), i18n.tr("Rear Left"), i18n.tr("Rear Right")]
 
@@ -59,7 +67,8 @@ Item {
             model: tab.plan.stock || []
             delegate: MenuItem {
                 required property var modelData
-                text: modelData.name + (modelData.stints ? "  ·  " + i18n.trm("Stints: " + modelData.stints) : "")
+                // Stints translated only while the menu is open (not for every tyre at every plan change)
+                text: modelData.name + (modelData.stints && wheelMenu.visible ? "  ·  " + i18n.trm("Stints: " + modelData.stints) : "")
                 checkable: true
                 checked: modelData.name === wheelMenu.current
                 onTriggered: backend.assignTyre(wheelMenu.row, wheelMenu.corner, modelData.name)
@@ -412,14 +421,14 @@ Item {
                     Layout.fillWidth: true
                     spacing: theme.em * 0.35
                     StatusChip {
-                        text: i18n.trm("Stock: " + tab.status.stock + " / " + tab.status.maximum + (tab.status.stock > tab.status.maximum ? " (" + i18n.tr("invalid") + ")" : ""))
-                        warning: tab.status.stock > tab.status.maximum
+                        text: i18n.trm("Stock: " + tab.stockCount + " / " + tab.maximumCount + (tab.stockCount > tab.maximumCount ? " (" + i18n.tr("invalid") + ")" : ""))
+                        warning: tab.stockCount > tab.maximumCount
                     }
-                    StatusChip { text: i18n.trm("Used: " + tab.status.used) }
-                    StatusChip { text: i18n.trm("Stints: " + tab.status.stints) }
-                    StatusChip { text: i18n.trm("Pits: " + tab.status.pits) }
-                    StatusChip { text: i18n.trm("Changes: " + tab.status.changes) }
-                    StatusChip { text: i18n.trm("Time: " + (tab.status.time >= 0 ? "+" : "") + Number(tab.status.time || 0).toFixed(2) + "s") }
+                    StatusChip { text: i18n.trm("Used: " + tab.usedCount) }
+                    StatusChip { text: i18n.trm("Stints: " + tab.stintCount) }
+                    StatusChip { text: i18n.trm("Pits: " + tab.pitCount) }
+                    StatusChip { text: i18n.trm("Changes: " + tab.changeCount) }
+                    StatusChip { text: i18n.trm("Time: " + (tab.changeTime >= 0 ? "+" : "") + tab.changeTime.toFixed(2) + "s") }
                 }
             }
 
@@ -526,6 +535,13 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Text { text: chip.tyreName; color: theme.text; font.pointSize: theme.fontPoint * 0.9 }
+                                Text {  // used tyre of the game: tread left
+                                    visible: (chip.modelData.tread || "") !== ""
+                                    text: chip.modelData.tread || ""
+                                    color: theme.dimText
+                                    font.pointSize: theme.fontPoint * 0.8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                                 Rectangle {
                                     visible: chip.modelData.stints > 0
                                     implicitWidth: stintsText.implicitWidth + theme.em * 0.6

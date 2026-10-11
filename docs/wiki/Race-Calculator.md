@@ -10,7 +10,7 @@ Open it with the `Race` entry of the navigation bar, or `Tools` > `Race Calculat
 
 - **Top bar**: data source (live session or file), `Follow Live`, `Live Race` and its status, `Undo` / `Redo`, `Race Plan` menu, `Load Live`, `Load File`, `Reset to Zero`.
 - **Race setup, key figures and strategy** (shared by all tabs): race type and length, formation laps, pit stop time and safety margin; race fuel and energy, pit stops and what limits the stints, longest stint, average refill per stop, tyres used; then the strategy timeline with the fuel in the tank over the race.
-- **Tabs**: `Fuel` (inputs, pit stop plan, details, scenarios, consumption history), `Tyres` (tyre wear, rules, tyre plan and stock), `Team` (LMU team stints). The page reopens on the last tab.
+- **Tabs**: `Fuel` (inputs, pit stop plan, details, scenarios, consumption history), `Tyres` (tyre wear, rules, tyre plan and stock), `Team` (LMU team stints), `Live` (every value the game gives). The page reopens on the last tab.
 
 The inputs of the `Fuel` and `Tyres` tabs are grouped in sections: click a section title to fold it (it stays folded next time, its main values shown in the title). The `Safety Car` and `Rain` sections have their switch in the title. On a narrow window the key figures go on two rows and the consumption history below the plan.
 
@@ -18,9 +18,9 @@ A typed value is applied when you press `Enter` or leave the field (not at every
 
 ## Fill in the data
 
-- `Load Live` fills lap time and consumption with the average of the last 5 valid laps at race pace of the live session (in and out laps left out), and the race length of a live race. With LMU, before any valid lap, the game's own fuel and energy estimate is used.
+- `Load Live` fills lap time and consumption with the average of the last 5 valid laps at race pace of the live session (in and out laps left out), the race length of a live race, and every other value of the `Live` tab that is followed (pit stop times, tyre rules, drivers...: see [Live tab](#live-tab)). With LMU, before any valid lap, the game's own fuel and energy estimate is used.
 - `Load File` reads a consumption history file (`.consumption` or `.csv`).
-- `Follow Live` updates the inputs at each new lap of the live session.
+- `Follow Live` updates the inputs at each new lap of the live session, and when the game data of the `Live` tab changes (values followed only).
 - `History` (next to the tabs) shows the consumption history beside the plan (below on a narrow window): lap time, fuel, energy, battery, tyre wear per lap. Click a column title to sort (again: other way), `Valid Laps Only`, optional columns. Select laps (`Ctrl` + click, `Shift` + click, `Ctrl+A`) and `Add Selected Data` puts their average in the calculator (double click: one lap). `Delete Selected` (or `Delete`) and `Delete All` remove laps from the history.
 
 ## Race setup
@@ -28,7 +28,7 @@ A typed value is applied when you press `Enter` or leave the field (not at every
 - Race type `Time` or `Laps`, duration, formation or rolling start laps, pit stop time (time lost in the pit lane), safety margin (in laps, fuel or %).
 - **Lap and consumption**: lap time, fuel and energy per lap, tank capacity. A car using energy only is planned on energy.
 - **Start**: starting fuel and energy (`0` = full tank), start time of day (pit stops then shown at their time of day).
-- **Pit stop**: refuel and energy rates (a splash costs less time than a full tank), driver change time, `Tyres Changed While Refuelling`, in and out lap consumption.
+- **Pit stop**: refuel and energy rates (a splash costs less time than a full tank), driver change time, `Tyres Changed While Refuelling`, `Driver Change While Refuelling` (the longest of service and driver change counts, as in LMU), in and out lap consumption.
 - **Race rules**: mandatory stops, maximum stint time, `Balanced Stints` (no short splash stint at the end), `Leader Finishes First (+1 Lap)` for time races.
 - **Pace**: fuel effect on lap time, track evolution, saving cost. `Estimate from History` fills them from your consumption history.
 
@@ -53,10 +53,26 @@ Both are compared with the plan without the scenario, and shown on the strategy 
 
 ## Live race
 
-During a race, turn on `Live Race`: the plan for the rest of the race is recalculated at each lap and each stop from the car (laps and time done, fuel, energy, tyres, stops done). The timeline and pit stop plan start at the current lap.
+During a race, turn on `Live Race`: the plan for the rest of the race is recalculated at each lap and each stop from the car (laps and time done, fuel, energy, tyres, stops done). The timeline and pit stop plan start at the current lap. The `Live Race` status also shows a safety car or full course yellow read from the game.
 
 - `Plan against Race` compares stints driven with the plan (laps, lap time, consumption, tyre wear), with the driver of each stint.
 - `Class Rivals` lists the cars of your class: laps, stops, laps since their last stop and their next expected stop.
+
+## Live tab
+
+Every value of the calculator the game gives, next to the value of the calculator (in bold color when they differ), with where it comes from:
+
+- **Race**: race length (race session), formation laps and start time of day (LMU session settings, or the track clock during a race), number of drivers (LMU team, names in the tooltip).
+- **Pace & consumption**: lap time, fuel, energy and tyre wear per lap (average of the valid laps at race pace, else the game estimate), tank capacity, compound on the car.
+- **Race start**: fuel, energy and tread of the car on the grid (race session, before the start).
+- **Pit stop**: pit lane time (stops of the session), refuel and energy rates, driver change time, tyre change time (1-2 / 3-4 tyres), what is done while refuelling: the pit stop times of the series in LMU.
+- **Tyres**: tyre allocation of the race (LMU, while driving). **Weather**: rain from the forecast as a rain scenario (laps of the race in the wet).
+
+The arrow of a row fills that value in, `Fill In All` every value followed (the switch of each row: values left out are kept as you set them). Followed values are also filled in by `Load Live` and `Follow Live`. Rough estimates (pit lane time from the pit lane length and speed limit, wear of the lap in progress) are never followed: fill them in by hand.
+
+On the right, **Race in Progress** shows the race under way read from the game (lap, race time and time left, fuel, energy, tread, stops, safety car or full course yellow, penalties, class position, pending repair, next stop time of the game), and **Tyres Available** the tyres the pit menu offers (LMU): new compounds and used tyres of each wheel with their tread. `Add Used Tyres to Stock` puts them in the tyre stock with their own tread, to fit them by hand in the tyre plan (`Propose Changes` uses new tyres).
+
+The LMU garage screens are asked every 10 seconds while the tab is shown or `Follow Live` is on (`Refresh` asks at once).
 
 ## Tyres tab
 

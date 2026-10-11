@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from typing import Any, TypeVar, overload
 
 import shiboken6
@@ -395,6 +396,8 @@ class BaseEditor(BaseDialog):
         self._redo_stack: list = []
         self._undo_state: object = None
         self._undo_busy = False
+        self._batch_depth = 0
+        self._batch_pending = False
 
     def enable_undo(self, capture: Callable[[], Any], restore: Callable[[Any], None]):
         """Enable undo & redo (Ctrl+Z, Ctrl+Y)
@@ -454,6 +457,9 @@ class BaseEditor(BaseDialog):
         """Record change to undo history"""
         if self._undo_capture is None or self._undo_busy:
             return
+        if self._batch_depth:
+            self._batch_pending = True  # recorded once at the end of batch
+            return
         new_state = self.__capture_state()
         if new_state is None or new_state == self._undo_state:
             return
@@ -488,6 +494,22 @@ class BaseEditor(BaseDialog):
         finally:
             self._undo_busy = False
         self.set_modified()
+
+    @contextmanager
+    def batch_edit(self) -> Iterator[None]:
+        """Group many cell changes (add from session, batch replace) into one undo step
+
+        Cell change signals still run (input validation, modified state), but the table is read
+        back for undo history once at the end instead of after every cell (O(n²) on big tables).
+        """
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            if not self._batch_depth and self._batch_pending:
+                self._batch_pending = False
+                self.__record_change()
 
     def reset_undo(self):
         """Clear undo history, use current state as start point"""
@@ -738,6 +760,7 @@ class TableBatchReplace(BaseDialog):
         super().__init__(parent)
         self.table_selector = table_selector
         self.table_data = table_data
+        self._editor = parent if isinstance(parent, BaseEditor) else None
         self.setWindowTitle(tr("Batch Replace"))
 
         # Label & combobox
@@ -818,10 +841,12 @@ class TableBatchReplace(BaseDialog):
         else:
             match_flag = re.IGNORECASE
 
-        for row_index in range(self.table_data.rowCount()):
-            item = table_item(self.table_data, row_index, column_index)
-            # Replacement is plain text, never a template ("\1", "\" are not group references)
-            item.setText(re.sub(pattern, lambda _: replace, item.text(), flags=match_flag))
+        # One undo step for whole replace
+        with self._editor.batch_edit() if self._editor is not None else nullcontext():
+            for row_index in range(self.table_data.rowCount()):
+                item = table_item(self.table_data, row_index, column_index)
+                # Replacement is plain text, never a template ("\1", "\" are not group references)
+                item.setText(re.sub(pattern, lambda _: replace, item.text(), flags=match_flag))
 
         self.update_selector(column_index, search)
 
@@ -844,6 +869,16 @@ def table_item(table: QTableWidget, row: int, column: int, item_type: type = QTa
     if not isinstance(item, item_type):
         raise LookupError(f"no {item_type.__name__} at row {row}, column {column}")
     return item
+
+
+def column_texts(table: QTableWidget, column: int = 0) -> set[str]:
+    """Texts of table column, for fast exact match checks while adding many rows"""
+    texts = set()
+    for row in range(table.rowCount()):
+        item = table.item(row, column)
+        if item is not None:
+            texts.add(item.text())
+    return texts
 
 
 # Table item class

@@ -29,9 +29,10 @@ from time import monotonic
 from typing import Any
 
 from .. import realtime_state
+from ..adapter.data_notify import notifier
 from ..api_control import api
 from ..setting import Setting
-from ..thread_guard import run_supervised
+from ..thread_guard import STOP_TIMEOUT, run_supervised
 
 logger = logging.getLogger(__name__)
 # Function
@@ -41,6 +42,11 @@ MODULE_STOP = object()
 # Sent to data generator while player inactive (left track, garage) with a lap waiting for validation
 PENDING_CHECK = object()
 PENDING_WAIT = 10.0  # seconds to validate completed lap after leaving track just after start line
+# Data recorded while driving also saved this often (seconds), not only on reset: kept after a crash or power loss
+CHECKPOINT_INTERVAL = 300.0
+# Longest wait for new game data while active (seconds), as state changes made by other threads
+# (realtime state, other modules output) are not notified
+DATA_MAX_WAIT = 0.1
 
 
 def data_stamp() -> tuple:
@@ -114,8 +120,12 @@ class DataModule:
 
     Attributes:
         discard: data not saved yet is discarded when module stops (data reset), else saved.
+        WAKE_ON_DERIVED: also woken by delta module position update (module stamp includes it).
+        STOP_TIMEOUT: longest wait for update thread to finish its stop work (saving), seconds.
     """
 
+    WAKE_ON_DERIVED = False
+    STOP_TIMEOUT = STOP_TIMEOUT
     __slots__ = (
         "module_name",
         "closed",
@@ -126,6 +136,8 @@ class DataModule:
         "idle_interval",
         "_event",
         "_done",
+        "_wake",
+        "_max_wait",
     )
 
     def __init__(self, config: Setting, module_name: str):
@@ -143,6 +155,7 @@ class DataModule:
         self._event = threading.Event()
         self._done = threading.Event()  # set once update thread finished
         self._done.set()
+        self._wake = threading.Event()  # set on new game data (connector notification) or stop
         self.active_interval = max(
             self.mcfg["update_interval"],
             self.cfg.application["minimum_update_interval"]) / 1000
@@ -150,6 +163,7 @@ class DataModule:
             self.active_interval,
             self.mcfg["idle_update_interval"],
             self.cfg.application["minimum_update_interval"]) / 1000
+        self._max_wait = max(self.active_interval, min(self.idle_interval, DATA_MAX_WAIT))
 
     def start(self):
         """Start update thread"""
@@ -157,6 +171,7 @@ class DataModule:
             self.closed = False
             self.discard = False
             self._event.clear()
+            self._wake.clear()
             self._done.clear()
             threading.Thread(target=self.__tasks, daemon=True, name=f"module:{self.module_name}").start()
             logger.info("ENABLED: %s", self.module_name.replace("_", " "))
@@ -169,6 +184,7 @@ class DataModule:
         """
         self.discard = discard
         self._event.set()
+        self._wake.set()  # wake thread waiting for game data
 
     def wait_closed(self, timeout: float) -> bool:
         """Wait (up to timeout seconds) until update thread finished, True if finished"""
@@ -191,14 +207,35 @@ class DataModule:
             except Exception:  # save other generators data
                 logger.exception("%s: saving data on stop failed", self.module_name)
 
+    def wait_update(self, interval: float) -> bool:
+        """Wait before next update, returns True once module stopping
+
+        Always waits interval first, so module never updates more often than its update interval.
+        While active (interval shorter than longest data wait) and a connector notifies new game data,
+        then waits until new data arrived since last update, or longest data wait (DATA_MAX_WAIT) passed,
+        instead of waking every interval to find game data unchanged. Else same as fixed interval polling.
+        """
+        if self._event.wait(interval):
+            return True
+        data_wait = self._max_wait - interval
+        if data_wait <= 0 or not notifier.available:
+            return False
+        wake = self._wake
+        if not wake.is_set():
+            wake.wait(data_wait)
+        wake.clear()  # before reading data: data notified from now on wakes next wait
+        return self._event.is_set()
+
     def update_data(self):
         """Update module data, rewrite in child class"""
 
     def __tasks(self):
         """Run tasks in separated thread"""
+        notifier.subscribe(self._wake, self.WAKE_ON_DERIVED)
         try:
             run_supervised(self.update_data, self.module_name.replace("_", " "), self._event)
         finally:
+            notifier.unsubscribe(self._wake)
             # Always mark closed, as module control waits for it before reload or quit
             self.closed = True
             self._done.set()

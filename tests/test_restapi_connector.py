@@ -347,3 +347,26 @@ def test_each_thread_has_own_task_state(monkeypatch):
     (event1, state1), (event2, state2) = runs
     assert event1 is not event2 and state1 is not state2
     assert state1.active_tasks is not state2.active_tasks
+
+
+def test_late_thread_never_resets_new_thread_data():
+    """Thread finishing after stop timed out & a new start keeps the new thread's data & status"""
+    from tinypedal.adapter.restapi_connector import TaskState
+
+    data = SimpleNamespace(speed=55.5, gear=4.0, missing=-1.0)
+    connector = RestAPIConnector(TASKS, data)
+    old_event, old_state = threading.Event(), TaskState()
+    old_state.active_tasks["/rest/car"] = TASKS[0].outputs
+    old_event.set()
+    connector._event = threading.Event()  # newer thread started meanwhile
+    connector._set_status("/rest/car", "active")
+    connector._RestAPIConnector__update_loop(old_event, old_state)
+    assert (data.speed, data.gear) == (55.5, 4.0)
+    assert {s.path: s.state for s in connector.status()}["/rest/car"] == "active"
+    assert not old_state.active_tasks
+    # Current thread closing still resets
+    connector._event = old_event
+    old_state.active_tasks["/rest/car"] = TASKS[0].outputs
+    connector._RestAPIConnector__update_loop(old_event, old_state)
+    assert (data.speed, data.gear) == (0.0, 0.0)
+    assert {s.path: s.state for s in connector.status()}["/rest/car"] == "idle"

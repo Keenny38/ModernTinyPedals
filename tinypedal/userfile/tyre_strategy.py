@@ -25,6 +25,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 
 from ..setting_validator import PresetValidator
 from ..userfile.json_setting import copy_setting
@@ -187,6 +188,19 @@ def _validate_tyre_plan(user_data: dict, tyre_stock: list) -> list:
     return tyre_plan
 
 
+def _validate_tyre_tread(user_data: dict, tyre_stock: list) -> dict:
+    """Validate tread of used tyres (tyre name: % left when first fitted), tyres of stock only"""
+    tyre_tread = user_data.get("tyre_tread")
+    if not isinstance(tyre_tread, dict):
+        return {}
+    valid = {}
+    for name, tread in tyre_tread.items():
+        if (name in tyre_stock and isinstance(tread, (int, float)) and not isinstance(tread, bool)
+                and math.isfinite(tread)):
+            valid[name] = min(max(float(tread), 0.0), 100.0)
+    return valid
+
+
 def validate_tyre_strategy(user_data: dict) -> dict:
     """Validate tyre strategy data"""
     file_version = _validate_file_version(user_data)
@@ -200,6 +214,7 @@ def validate_tyre_strategy(user_data: dict) -> dict:
         "tyre_set": tyre_set,
         "tyre_stock": tyre_stock,
         "tyre_plan": tyre_plan,
+        "tyre_tread": _validate_tyre_tread(user_data, tyre_stock),
     }
 
 
@@ -212,6 +227,7 @@ def create_tyre_strategy():
         "tyre_set": copy_setting(DEFAULT_TYRE_SET),
         "tyre_stock": [],
         "tyre_plan": [],
+        "tyre_tread": {},
     }
 
 

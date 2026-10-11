@@ -121,6 +121,14 @@ TpPage {
                             MouseArea { id: headerArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                         }
                     }
+                    TpButton {  // replay saved by game for this session (LMU)
+                        visible: (page.header.replay || "") !== ""
+                        accent: true
+                        glyph: "\uE768"  // play
+                        text: i18n.tr("Watch Replay")
+                        tip: i18n.tr("Open the replay of this session in the game") + "\n" + (page.header.replay || "")
+                        onClicked: backend.watchReplay()
+                    }
                     GamePicture {  // circuit picture of game
                         source: page.header.trackPicture || ""
                         boxHeight: theme.em * 3.0
@@ -267,15 +275,28 @@ TpPage {
                         anchors.fill: parent
                         anchors.margins: 1
                         currentIndex: page.tab
-                        ResultsTable {
-                            onLapsWanted: function(key) {
-                                backend.selectEntry(key)
-                                backend.setTab(2)
+                        // Tabs built when first shown, then kept
+                        Loader {
+                            active: page.tab === 0 || item !== null
+                            sourceComponent: ResultsTable {
+                                onLapsWanted: function(key) {
+                                    backend.selectEntry(key)
+                                    backend.setTab(2)
+                                }
                             }
                         }
-                        ResultsPositions { active: page.tab === 1 && backend.isRace }
-                        ResultsLaps {}
-                        ResultsEvents {}
+                        Loader {
+                            active: page.tab === 1 || item !== null
+                            sourceComponent: ResultsPositions { active: page.tab === 1 && backend.isRace }
+                        }
+                        Loader {
+                            active: page.tab === 2 || item !== null
+                            sourceComponent: ResultsLaps {}
+                        }
+                        Loader {
+                            active: page.tab === 3 || item !== null
+                            sourceComponent: ResultsEvents {}
+                        }
                     }
                 }
             }

@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from tests.test_widget_benchmark import fill_field
+from tinypedal import realtime_state
 from tinypedal.api_control import api
 from tinypedal.module_info import minfo
 from tinypedal.setting import cfg
@@ -128,13 +129,22 @@ def test_renders_in_both_themes(widgets, name, theme):
     cfg.overlay["fixed_position"] = True
 
 
-@pytest.mark.parametrize("name", ["chat", "flag", "race_notifications", "spotter"])
+@pytest.mark.parametrize("name", ["flag", "race_notifications", "spotter"])
 def test_overlays_page_picture_before_update(widgets, name):
-    """Overlays drawn only with live data show a sample before first update (picture of Overlays page)"""
+    """Overlays drawn only with live data show a sample before first update (picture of Overlays page); chat
+    draws nothing before update (sample conversation of its picture from show_sample)"""
     widget = widgets(name)
     assert visible_pixels(render(widget)) > 0
     if name == "flag":
         assert len(widget.samples) == len(widget.keys) == 12
+
+
+@pytest.mark.parametrize("name", ["flag", "race_notifications", "spotter"])
+def test_live_overlay_no_sample_before_update(widgets, name):
+    """Started (live) overlay waiting for game data (garage, joining a server) draws no picture sample"""
+    widget = widgets(name)
+    widget.overlay_started = True
+    assert visible_pixels(render(widget)) == 0
 
 
 # --- Steering meter
@@ -279,6 +289,138 @@ def test_chat_hidden_without_message(widgets, monkeypatch):
     widget = widgets("chat")
     image = update(widget)
     assert widget.state == () and visible_pixels(image) == 0
+
+
+def test_chat_nothing_drawn_before_first_update(widgets):
+    """No placeholder on screen before driving (app started, in menus): nothing drawn"""
+    widget = widgets("chat")
+    assert widget.state is None and visible_pixels(render(widget)) == 0
+
+
+def test_chat_sample_conversation_in_edit_mode(widgets, monkeypatch):
+    """Edit mode without message: sample conversation drawn faded for placement, no "Chat" word; never while
+    overlay merely unlocked (default): it passed for real messages in game (garage, joining a server)"""
+    from tinypedal.widget._modern.chat import NOTICE, OWN
+
+    reader(monkeypatch, "session", "chat_messages", ())
+    widget = widgets("chat", number_of_lines=5)
+    update(widget)
+    cfg.overlay["fixed_position"] = False
+    assert visible_pixels(render(widget)) == 0
+    monkeypatch.setattr(realtime_state, "editing", True)
+    image = render(widget)
+    assert visible_pixels(image) > 0
+    lines = widget.sample()
+    assert all(line.text != "Chat" for line in lines)
+    assert any(line.kind == OWN for line in lines) and any(line.kind == NOTICE for line in lines)
+    assert not has_color(image, widget.theme.accent, 20)  # faded: no full strength accent
+    waiting = widgets("chat", number_of_lines=5)  # live overlay before first update (garage)
+    waiting.overlay_started = True
+    assert visible_pixels(render(waiting)) > 0
+
+
+@pytest.mark.parametrize("modern", [True, False])
+def test_chat_gone_after_display_duration_while_not_driving(widgets, monkeypatch, modern):
+    """Updates paused (garage, menus): messages shown still hidden at end of display duration, card gone"""
+    import tinypedal.widget._modern.chat as modern_chat
+    import tinypedal.widget.chat as classic_chat
+
+    clock = [1000.0]
+    for module in (modern_chat, classic_chat):
+        monkeypatch.setattr(module, "time", lambda: clock[0])
+    reader(monkeypatch, "session", "chat_messages", ((999.0, "A. Rival: see you on track"),))
+    widget = widgets("chat", modern=modern, maximum_display_duration=10, new_message_duration=0)
+    widget.timerEvent(QTimerEvent(0))
+
+    def shown() -> bool:
+        if modern:
+            return bool(widget.state)
+        return any(not bar.isHidden() for bar in widget.bars)
+
+    assert shown()
+    widget.post_update()  # left track: overlay updates paused
+    assert widget._expire_timer.isActive()
+    clock[0] = 1005.0
+    widget.expire()
+    assert shown()  # message still within display duration
+    clock[0] = 1010.5
+    widget.expire()
+    assert not shown() and not widget._expire_timer.isActive()  # gone, nothing left to check
+    if modern:
+        assert visible_pixels(render(widget)) == 0
+    widget.post_update()  # nothing shown: no check
+    assert not widget._expire_timer.isActive()
+
+
+def test_chat_expiry_stopped_when_driving_again_or_closed(widgets, monkeypatch):
+    from time import time
+
+    reader(monkeypatch, "session", "chat_messages", ((time() - 1.0, "A. Rival: hi"),))
+    widget = widgets("chat")
+    widget.timerEvent(QTimerEvent(0))
+    widget.post_update()
+    assert widget._expire_timer.isActive()
+    widget.timerEvent(QTimerEvent(0))  # driving again: overlay updates take over
+    assert not widget._expire_timer.isActive()
+    from tinypedal.widget._race_aids import HiddenPreview
+
+    monkeypatch.setattr(HiddenPreview, "stop", lambda self: self.post_update())  # closing pauses updates first
+    timer = widget._expire_timer
+    widget.stop()
+    assert not timer.isActive()  # no check left running on a closed widget
+
+
+@pytest.mark.parametrize("modern", [True, False])
+def test_chat_newest_message_at_top_or_bottom(widgets, monkeypatch, modern):
+    """Scroll direction chosen: newest at bottom (upward, default) or at top (downward), lines of a message kept in
+    reading order"""
+    from time import time
+
+    now = time()
+    long_text = "A. Rival: " + "word " * 14
+    reader(monkeypatch, "session", "chat_messages", (
+        (now - 9.0, long_text), (now - 5.0, "B. Driver: second"), (now - 1.0, "C. Driver: newest"),
+    ))
+
+    def shown(widget) -> list[str]:
+        if modern:
+            return [f"{line.name}: {line.text}" if line.name else line.text for line in widget.state]
+        return [bar.text.strip() for bar in widget.bars if not bar.isHidden()]
+
+    bottom = widgets("chat", modern=modern, number_of_lines=4, line_width=30, scroll_direction="Upward")
+    bottom.timerEvent(QTimerEvent(0))
+    top = widgets("chat", modern=modern, number_of_lines=4, line_width=30, scroll_direction="Downward")
+    top.timerEvent(QTimerEvent(0))
+    lines_bottom, lines_top = shown(bottom), shown(top)
+    assert lines_bottom[-1] == "C. Driver: newest" and lines_top[0] == "C. Driver: newest"
+    assert lines_bottom[-2] == "B. Driver: second" and lines_top[1] == "B. Driver: second"
+    # Oldest message cut when lines run out: its first line (with sender) kept at top only when read downward
+    assert lines_top[2].startswith("A. Rival") and not lines_bottom[0].startswith("A. Rival")
+    if modern:  # one message: card at overlay top when newest at top, at bottom otherwise
+        reader(monkeypatch, "session", "chat_messages", ((now - 1.0, "C. Driver: newest"),))
+        top.timerEvent(QTimerEvent(0))
+        bottom.timerEvent(QTimerEvent(0))
+        assert visible_pixels(render(top).copy(0, 0, top.width(), 4)) > 0
+        assert visible_pixels(render(bottom).copy(0, 0, bottom.width(), 4)) == 0
+
+
+def test_chat_own_messages_and_notices(widgets, monkeypatch):
+    from time import time
+
+    from tinypedal.widget._modern.chat import NOTICE, OTHER, OWN
+
+    now = time()
+    reader(monkeypatch, "vehicle", "driver_name", "S. Player ")
+    reader(monkeypatch, "session", "chat_messages", (
+        (now - 9.0, "A. Rival: hello"),
+        (now - 8.0, "s. player: hi all"),  # same name, other case
+        (now - 7.0, "B. Driver joined the session"),
+    ))
+    widget = widgets("chat", number_of_lines=5, new_message_duration=0)
+    image = update(widget)
+    kinds = {line.name or line.text: line.kind for line in widget.state}
+    assert kinds == {"A. Rival": OTHER, "s. player": OWN, "B. Driver joined the session": NOTICE}
+    assert has_color(image, widget.theme.accent)  # own name in accent color
 
 
 # --- Elevation

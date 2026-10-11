@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 
 from ..const_file import ConfigType
+from ..demo_state import drawing_demo
 from ..regex_pattern import COMMON_TYRE_COMPOUNDS
 from ..setting import cfg
 from ..template.setting_brakes import BRAKEINFO_DEFAULT
@@ -39,6 +40,8 @@ from .brands import select_brand_name
 def add_missing_brake(brake_name: str) -> dict:
     """Add missing brake style to brakes preset"""
     new_data = BRAKEINFO_DEFAULT.copy()
+    if drawing_demo():  # overlay picture on simulated race: presets left as is
+        return new_data
     cfg.user.brakes[brake_name] = new_data
     cfg.save(config_type=ConfigType.BRAKES)
     return new_data
@@ -46,7 +49,7 @@ def add_missing_brake(brake_name: str) -> dict:
 
 def save_brake_failure_thickness(brake_name: str, failure: float) -> None:
     """Save brake failure thickness (mm) to brakes preset when brake fails"""
-    if invalid_save_name(brake_name):
+    if invalid_save_name(brake_name) or drawing_demo():
         return
     brake = cfg.user.brakes.get(brake_name)
     if brake is None:
@@ -110,6 +113,8 @@ def add_missing_compound(compound_name: str) -> dict:
     """Add missing compound style to compounds preset"""
     new_data = COMPOUNDINFO_DEFAULT.copy()
     new_data["symbol"] = set_predefined_compound_symbol(compound_name.split("-")[-1].strip())
+    if drawing_demo():  # overlay picture on simulated race: presets left as is
+        return new_data
     cfg.user.compounds[compound_name] = new_data
     cfg.save(config_type=ConfigType.COMPOUNDS)
     return new_data

@@ -313,6 +313,7 @@ WIDGET_STANDINGS = {
         "display_order_energy_remaining": 20,
         "display_order_lift_and_coast_time": 21,
         "display_order_pit_status": 22,
+        "display_order_gap_trend": 23,
     },
     "relative_finish_order": {
         "enable": False,
@@ -542,6 +543,7 @@ WIDGET_STANDINGS = {
         "bar_padding": 0.2,
         "bar_gap": 1,
         "enable_multi_class_split_mode": True,
+        "class_order": "Hypercar, Hyper, LMP2 ELMS, LMP2, LMP3, GT3, LMGT3, GTE",
         "enable_single_class_exclusive_mode": False,
         "minimum_top_vehicles": 3,
         "maximum_vehicles_exclusive_mode": 12,

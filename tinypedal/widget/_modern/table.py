@@ -25,9 +25,10 @@ into cells: plain values (text, colors), so state comparison is cheap and painti
 
 from __future__ import annotations
 
+import weakref
 from typing import Any, NamedTuple
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
 from ...i18n import tr_overlay as tr
@@ -43,11 +44,14 @@ COMPOUND = 4  # tyre compounds: extra = ((symbol, color), ...)
 PILL = 5  # status pill (pit, garage, flag): text, color, fill
 DELTAS = 6  # lap time deltas to player: extra = (seconds, ...), MAX_SECONDS if unknown
 LOGO = 7  # brand logo image: text = brand name, extra = vehicle name (game car list)
+TREND = 8  # gap trend: extra = (seconds per lap, gap growing or shrinking; good for player), None if steady
 
 SEPARATOR = "separator"  # row list item: space between class groups
+CLASS_HEADER_SCALE = 0.82  # class header strip height, in row height
 CHANGE_ARROW = 0.42  # position change arrow size, in row height
 COMPOUND_SIZE = 0.62  # tyre compound square, in row height
 COMPOUND_GRID = 0.9  # per wheel compounds 2x2 grid height, in row height
+LOGO_CHECK_MS = 150  # waited logo checked for at this interval (update timer may be stopped)
 
 
 class Column(NamedTuple):
@@ -79,6 +83,13 @@ class Row(NamedTuple):
     faded: bool = False  # less contrast (in garage, finished)
 
 
+class ClassHeader(NamedTuple):
+    """Row list item: name of class above its cars"""
+
+    text: str
+    color: QColor
+
+
 EMPTY_CELL = Cell()
 
 
@@ -105,14 +116,20 @@ class TableLayout(NamedTuple):
         """Space between class groups (added to row gap)"""
         return self.row_height * 0.32
 
-    def height(self, rows: int, separators: int = 0) -> float:
+    @property
+    def class_header(self) -> float:
+        """Height of class header strip"""
+        return self.row_height * CLASS_HEADER_SCALE
+
+    def height(self, rows: int, separators: int = 0, class_headers: int = 0) -> float:
         return (self.pad * 2 + self.header + rows * self.row_height + max(rows - 1, 0) * self.row_gap
-                + separators * self.separator)
+                + separators * self.separator + class_headers * (self.class_header + self.row_gap))
 
     def content_height(self, rows: tuple) -> float:
-        """Height of row list (rows & separators)"""
+        """Height of row list (rows, separators & class headers)"""
         separators = sum(1 for row in rows if row is SEPARATOR)
-        return self.height(len(rows) - separators, separators)
+        headers = sum(1 for row in rows if isinstance(row, ClassHeader))
+        return self.height(len(rows) - separators - headers, separators, headers)
 
     def row_rect(self, index: int) -> QRectF:
         top = self.pad + self.header + index * (self.row_height + self.row_gap)
@@ -177,18 +194,28 @@ class TableMixin:
             accent_edge(painter, rect, edge, self.table.stripe, radius)
 
     def draw_rows(self: Any, painter: QPainter, rows: tuple, start: int = 0):
-        """Draw every row of table (Row, None for empty row, SEPARATOR), first one at row index start"""
+        """Draw every row of table (Row, None for empty row, SEPARATOR), first one at row index start
+        (rows outside region being painted skipped)"""
         table = self.table
         top = table.pad + table.header + start * (table.row_height + table.row_gap)
         width = table.width - table.pad * 2
         index = start
+        region = getattr(self, "paint_region", None)
         for row in rows:
             if row is SEPARATOR:
                 top += table.separator
                 continue
+            if isinstance(row, ClassHeader):
+                rect = QRectF(table.pad, top, width, table.class_header)
+                top += table.class_header + table.row_gap
+                if region is None or region.intersects(self.row_update_rect(rect.top())):
+                    self.draw_class_header(painter, rect, row)
+                continue
             rect = QRectF(table.pad, top, width, table.row_height)
             top += table.row_height + table.row_gap
             index += 1
+            if region is not None and not region.intersects(self.row_update_rect(rect.top())):
+                continue
             self.draw_row_background(painter, rect, row, index)
             if row is None:
                 continue
@@ -200,6 +227,49 @@ class TableMixin:
                 self.draw_cell(painter, QRectF(left, rect.top(), column.width, rect.height()), column, cell, row)
             if row.faded:
                 painter.setOpacity(1.0)
+
+    def row_slots(self: Any, rows: tuple, start: int = 0) -> dict[float, tuple]:
+        """Top of each row drawn by draw_rows -> (row, row index)"""
+        table = self.table
+        top = table.pad + table.header + start * (table.row_height + table.row_gap)
+        slots = {}
+        index = start
+        for row in rows:
+            if row is SEPARATOR:
+                top += table.separator
+                continue
+            if isinstance(row, ClassHeader):
+                slots[top] = (row, index)
+                top += table.class_header + table.row_gap
+                continue
+            index += 1
+            slots[top] = (row, index)
+            top += table.row_height + table.row_gap
+        return slots
+
+    def row_update_rect(self: Any, top: float) -> QRect:
+        """Strip of widget a row is drawn in: whole width (centered text may overflow its cell), a pixel
+        above & below (antialiased edges)"""
+        return QRectF(0, top, self.width(), self.table.row_height).toAlignedRect().adjusted(0, -1, 0, 1)
+
+    def refresh_rows(self: Any, rows: tuple):
+        """Repaint rows that changed, moved, appeared or left (whole widget before first paint or once
+        resized)"""
+        old = self.state
+        if self.logos_arrived():  # logo cells of any row
+            self.state = rows
+            self.update()
+            return
+        if rows == old:
+            return
+        self.state = rows
+        if old is None or self._static_layer is None:
+            self.update()
+            return
+        before, after = self.row_slots(old), self.row_slots(rows)
+        rects = [self.row_update_rect(top) for top, item in after.items() if before.get(top) != item]
+        rects.extend(self.row_update_rect(top) for top in before.keys() - after.keys())
+        self.dirty_region.update(self, rects)
 
     def draw_cell(self: Any, painter: QPainter, rect: QRectF, column: Column, cell: Cell, row: Row):
         """Draw one cell"""
@@ -213,6 +283,8 @@ class TableMixin:
             self.draw_text(painter, box, cell.text, cell.role, cell.color, CENTER, elide=False)
         elif kind == CLASS:
             self.draw_class_pill(painter, rect, cell)
+        elif kind == TREND:
+            self.draw_trend(painter, rect, cell.extra)
         elif kind == CHANGE:
             self.draw_change(painter, rect, cell.extra, column.align)
         elif kind == COMPOUND:
@@ -227,6 +299,21 @@ class TableMixin:
             box = rect.adjusted(0, rect.height() * 0.2, 0, -rect.height() * 0.2)
             rounded(painter, box, box.height() / 2 * min(self.corner, 1.0), cell.fill or theme.surface_raised)
             self.draw_text(painter, box, cell.text, "label", cell.color, CENTER, elide=False)
+
+    def draw_class_header(self: Any, painter: QPainter, rect: QRectF, header: ClassHeader):
+        """Class name on a pill of class color, then a thin line of class color to the right edge"""
+        box = rect.adjusted(0, rect.height() * 0.1, 0, -rect.height() * 0.1)
+        text_width = self.text_width("label", header.text)
+        pill = QRectF(box.left(), box.top(), min(text_width + self.unit * 1.1, box.width()), box.height())
+        rounded(painter, pill, self.radius(0.25), header.color)
+        self.draw_text(painter, pill, header.text, "label", readable_on(header.color), CENTER)
+        line_left = pill.right() + self.unit * 0.35
+        if line_left < box.right():
+            line = QColor(header.color)
+            line.setAlpha(150)
+            thickness = max(self.unit * 0.08, 1.0)
+            painter.fillRect(QRectF(line_left, box.center().y() - thickness / 2, box.right() - line_left, thickness),
+                             line)
 
     def draw_class_pill(self: Any, painter: QPainter, rect: QRectF, cell: Cell):
         """Class color pill with alias, then position in class on darker part (or on cell color:
@@ -262,6 +349,20 @@ class TableMixin:
         triangle(painter, arrow, places > 0, color)
         text_rect = QRectF(arrow.right() + size * 0.3, rect.top(), rect.width() - size * 1.3, rect.height())
         self.draw_text(painter, text_rect, f"{abs(places)}", "value", color, LEFT, elide=False)
+
+    def draw_trend(self: Any, painter: QPainter, rect: QRectF, trend: tuple[float, bool] | None):
+        """Gap change per lap: arrow up if gap grows, down if it shrinks, green if good for player, red if not"""
+        theme = self.theme
+        if trend is None:
+            self.draw_text(painter, rect, DASH, "dim", theme.text_faint, CENTER)
+            return
+        rate, good = trend
+        color = theme.positive if good else theme.negative
+        size = rect.height() * CHANGE_ARROW
+        arrow = QRectF(rect.left(), rect.center().y() - size / 2, size, size)
+        triangle(painter, arrow, rate > 0, color)
+        text_rect = QRectF(arrow.right() + size * 0.3, rect.top(), rect.width() - size * 1.3, rect.height())
+        self.draw_text(painter, text_rect, f"{min(abs(rate), 9.9):.1f}", "value", color, LEFT, elide=False)
 
     def draw_deltas(self: Any, painter: QPainter, rect: QRectF, deltas: tuple):
         """Lap time difference to player of recent laps: green if player was faster"""
@@ -330,23 +431,66 @@ class TableMixin:
         painter.restore()
 
     def brand_logo(self: Any, brand: str, vehicle: str, width: float, height: float) -> QPixmap:
-        """Brand logo scaled to fit cell: logo file found once per car (again once game pictures change),
-        each logo file loaded once (cars of a brand share it)"""
-        from ...userfile.custom_image import brand_logo_file, load_picture
+        """Brand logo scaled to fit cell, null while none (brand initials drawn instead)
+
+        Logo file found once per car (again once game pictures change, if none), each logo file read once
+        (cars of a brand share it). On screen, file lookup & reading run on logo loader thread: null until
+        ready, then table repainted (see logos_arrived). Off screen (preview, test render), done at once.
+        """
+        from ...userfile.custom_image import LOGO_LOADER, brand_logo_image
         from ...userfile.game_images import images
 
         files = self.__dict__.setdefault("_logo_files", {})
-        found = files.get((brand, vehicle))
-        if found is None or (not found[0] and found[1] != images.version):
-            path = brand_logo_file(self.cfg.path.brand_logo, brand, self.theme.surface.lightness() > 128, vehicle)
-            found = files[(brand, vehicle)] = (path, images.version)
-        if not found[0]:
-            return QPixmap()
         pixmaps = self.__dict__.setdefault("_logo_cache", {})
-        pixmap = pixmaps.get(found[0])
-        if pixmap is None:
-            pixmap = pixmaps[found[0]] = load_picture(found[0], width, height, 2.0)  # sharp on high DPI screen
-        return pixmap
+        found = files.get((brand, vehicle))
+        version = images.version
+        if found is None or (not found[0] and found[1] != version):
+            args = (self.cfg.path.brand_logo, brand, self.theme.surface.lightness() > 128, vehicle,
+                    width, height, 2.0)  # sharp on high DPI screen
+            if self.isVisible():
+                done, value = LOGO_LOADER.result(("brand", *args, version),
+                                                 lambda: brand_logo_image(*args))
+                if not done:  # initials meanwhile (no logo found before either)
+                    self.__dict__["_logos_waited"] = LOGO_LOADER.finished
+                    self.watch_logos()
+                    return QPixmap()
+                path, image = value if value is not None else ("", None)
+            else:
+                path, image = brand_logo_image(*args)
+            found = files[(brand, vehicle)] = (path, version)
+            if path and path not in pixmaps:
+                pixmaps[path] = QPixmap.fromImage(image) if image is not None and not image.isNull() else QPixmap()
+        return pixmaps.get(found[0], QPixmap()) if found[0] else QPixmap()
+
+    def logos_arrived(self: Any) -> bool:
+        """Logo waited for by last paint may be ready (logo loader finished a job since): paint again"""
+        from ...userfile.custom_image import LOGO_LOADER
+
+        waited = self.__dict__.get("_logos_waited")
+        if waited is None or waited == LOGO_LOADER.finished:
+            return False
+        del self.__dict__["_logos_waited"]
+        return True
+
+    def watch_logos(self: Any):
+        """Check shortly whether waited logo arrived: update timer may be stopped (paused, off track),
+        rows then never refreshed (one check timer per widget, armed again while logo not ready)"""
+        timer = self.__dict__.get("_logo_timer")
+        if timer is None:
+            timer = self.__dict__["_logo_timer"] = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(LOGO_CHECK_MS)
+            widget = weakref.ref(self)  # no reference cycle through the timer's callback
+            timer.timeout.connect(lambda: (table := widget()) is not None and table.check_logos())
+        if not timer.isActive():
+            timer.start()
+
+    def check_logos(self: Any):
+        """Repaint once waited logo is ready, else check again"""
+        if self.logos_arrived():
+            self.update()
+        elif "_logos_waited" in self.__dict__:
+            self.watch_logos()
 
 
 def compounds_width(unit: float, row_scale: float, count: int) -> float:

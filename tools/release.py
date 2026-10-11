@@ -25,7 +25,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = "Keenny38/ModernTinyPedals"
 WORKFLOW = "build-release.yml"
-# Files of every release (name: ModernTinyPedals-<version><suffix>). Apps up to 0.19 update only with the
+# Files of every release (name: NeoPedal-<version><suffix>). Apps up to 0.19 update only with the
 # installer .exe & its .sha256 file, apps since 0.20 with the setup ZIP (else the .exe), see tinypedal/update.py
 RELEASE_ASSETS = ("-windows-setup.exe", "-windows-setup.exe.sha256", "-setup.zip", "-source.zip")
 POLL = 30  # seconds between GitHub checks
@@ -147,8 +147,8 @@ def main() -> int:
 
     release = gh_json("release", "view", f"v{version}", "--repo", REPO, "--json", "url,assets")
     names = {asset["name"] for asset in release["assets"]}
-    missing = [f"ModernTinyPedals-{version}{suffix}" for suffix in RELEASE_ASSETS
-               if f"ModernTinyPedals-{version}{suffix}" not in names]
+    missing = [f"NeoPedal-{version}{suffix}" for suffix in RELEASE_ASSETS
+               if f"NeoPedal-{version}{suffix}" not in names]
     if missing:
         print(f"\nPublished, but files are missing: {', '.join(missing)}")
         return 1

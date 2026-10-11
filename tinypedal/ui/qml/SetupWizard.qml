@@ -100,7 +100,7 @@ TpPage {
                         spacing: 0
                         Text {
                             Layout.fillWidth: true
-                            text: "Modern Tiny Pedals"
+                            text: "NeoPedal"
                             color: theme.text
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight

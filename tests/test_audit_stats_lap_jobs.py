@@ -7,7 +7,7 @@ import os
 import threading
 
 from tests.test_driver_stats_e2 import OREGA, SPA, stats_page, wait_stints  # noqa: F401
-from tests.test_driver_stats_viewer import SHEET
+from tests.test_driver_stats_viewer import SHEET, settle
 from tests.test_lap_viewer_e2 import START, TRACK
 from tests.test_lap_viewer_fix_backend import backend, write_other_track  # noqa: F401
 
@@ -18,9 +18,9 @@ def test_stints_read_debounced_and_stale_read_ignored(stats_page, monkeypatch): 
 
     calls: list[str] = []
     real = stats_backend.read_laps
-    def counted(path, *args):
+    def counted(path, *args, **kwargs):
         calls.append(path)
-        return real(path, *args)
+        return real(path, *args, **kwargs)
 
     monkeypatch.setattr(stats_backend, "read_laps", counted)
     stats_page.selectTrack(SPA)
@@ -60,7 +60,9 @@ def test_reference_kept_when_cache_not_written(stats_page, monkeypatch):  # noqa
 
     monkeypatch.setattr(lap_reference, "save_cache", failing)
     stats_page.reference_downloaded(SHEET, "")
-    assert stats_page.references.entries and not stats_page._downloading
+    assert not stats_page._downloading
+    settle(stats_page)  # saved & parsed in background
+    assert stats_page.references.entries
 
 
 # --- 41. Lap infos of a track with many new lap files read in background, stale reads ignored
@@ -94,6 +96,7 @@ def test_damaged_limits_cache_ignored(backend):  # noqa: F811
     backend._limits_track = ""
     backend._limits_job = None
     backend.start_limits(TRACK)
+    backend.wait_jobs()  # cache read in background
     assert backend._limits_job is not None  # computed again
 
 

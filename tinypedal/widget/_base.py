@@ -109,6 +109,9 @@ class Base(QWidget):
 
     # Keep updating while hidden: widget records its own data (incidents, input history)
     update_while_hidden = False
+    # Started as live overlay: never for overlay pictures (Overlays page, options), which may draw samples
+    # before first update; a live overlay waiting for game data must not show them
+    overlay_started = False
 
     def __init__(self, config: Setting, widget_name: str):
         super().__init__()
@@ -168,11 +171,12 @@ class Base(QWidget):
 
     def start(self):
         """Set initial widget state in orders, and start update"""
+        self.overlay_started = True
         self.__connect_signal()
         self.__set_window_attributes()  # 1
         self._edit_frame = EditFrame(self, module_label(self.widget_name), self.__resize_by_handle)
         self.__set_window_flags()  # 2
-        self.__toggle_timer(not realtime_state.active)
+        self.__toggle_timer(not realtime_state.shown)
         self.__keep_on_screen()
         sync_edit_mode()
 
@@ -356,7 +360,7 @@ class Base(QWidget):
         hide = self.should_hide()
         opacity = self.screen_opacity()
         # No update while hidden (hotkey, visibility context), saves CPU while driving
-        if realtime_state.active:
+        if realtime_state.shown:
             if hide and not self.update_while_hidden:
                 self._update_timer.stop()
             elif not self._update_timer.isActive():

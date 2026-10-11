@@ -137,6 +137,37 @@ def part(line: MapLine, start: float, end: float) -> MapLine:
     return MapLine(line.distances[low:high], line.xs[low:high], line.ys[low:high])
 
 
+BOX_POINTS = 64  # line points per bounding box (see chunk_boxes)
+
+
+def chunk_boxes(line: MapLine) -> list[tuple[float, float, float, float]]:
+    """Bounding box (x0, y0, x1, y1) of each BOX_POINTS points of line: bounds of a part read from whole boxes"""
+    boxes = []
+    for start in range(0, len(line.xs), BOX_POINTS):
+        xs, ys = line.xs[start:start + BOX_POINTS], line.ys[start:start + BOX_POINTS]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    return boxes
+
+
+def part_bounds(line: MapLine, boxes: Sequence[tuple[float, float, float, float]], start: float,
+                end: float) -> list[float]:
+    """Bounding box of line between two distances (same as of part), empty if under 2 points: whole boxes of
+    chunk_boxes used inside, points only at both ends"""
+    low, high = bisect.bisect_left(line.distances, start), bisect.bisect_right(line.distances, end)
+    if high - low < 2:
+        return []
+    first, last = low // BOX_POINTS + 1, (high - 1) // BOX_POINTS  # whole boxes inside: first to last - 1
+    if first >= last:
+        xs, ys = line.xs[low:high], line.ys[low:high]
+        return [min(xs), min(ys), max(xs), max(ys)]
+    ends = (range(low, first * BOX_POINTS), range(last * BOX_POINTS, high))
+    xs = [line.xs[index] for part in ends for index in part]
+    ys = [line.ys[index] for part in ends for index in part]
+    inside = boxes[first:last]
+    return [min(min(xs), min(box[0] for box in inside)), min(min(ys), min(box[1] for box in inside)),
+            max(max(xs), max(box[2] for box in inside)), max(max(ys), max(box[3] for box in inside))]
+
+
 def point_at(line: MapLine, distance: float) -> tuple[float, float]:
     return interpolate(line.distances, line.xs, distance), interpolate(line.distances, line.ys, distance)
 

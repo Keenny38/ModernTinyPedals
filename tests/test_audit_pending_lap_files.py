@@ -74,7 +74,7 @@ def tele(monkeypatch):
         "session.identifier": (1, 0, 0),
         "vehicle.class_name": "GT3",
     }
-    groups = ("session", "lap", "timing", "vehicle", "tyre", "emotor", "engine", "inputs")
+    groups = ("session", "lap", "timing", "vehicle", "tyre", "emotor", "engine", "inputs", "state")
     monkeypatch.setattr(api, "read", SimpleNamespace(**{name: Group(values, name) for name in groups}))
     monkeypatch.setattr(api, "_api", SimpleNamespace(NAME="Le Mans Ultimate"))
     monkeypatch.setattr(realtime_state, "active", True)
@@ -342,6 +342,54 @@ def test_sector3_saved_when_leaving_just_after_line(tele, tmp_path, clock):
         filepath, "SimTrack - SimCar", (1, 0, 0), (MAX_SECONDS,) * 3)
     assert alltime_tb == pytest.approx([30.0, 40.0, 20.0])
     assert alltime_pb == pytest.approx([30.0, 40.0, 20.0])
+
+
+# --- Checkpoints: data recorded while driving also saved every CHECKPOINT_INTERVAL (crash, power loss)
+def test_sectors_saved_while_driving(tele, tmp_path, monkeypatch):
+    from tests.test_module_timing import drive_sectors
+
+    now = {"now": 0.0}
+    monkeypatch.setattr(module_sectors, "monotonic", lambda: now["now"])
+    gen = module_sectors.record_sectors(SectorData(), SectorData(), f"{tmp_path}/")
+    drive_sectors(tele, gen, [(30.0, 40.0, 20.0), (29.0, 41.0, 19.5)])
+    assert not (tmp_path / "SimTrack - SimCar.sector").exists()  # not due yet
+    now["now"] = _base.CHECKPOINT_INTERVAL + 1
+    gen.send(0)  # same reset: still driving
+    (_, _, alltime_tb, _), readable = read_sector_best_file(
+        f"{tmp_path}/", "SimTrack - SimCar", (1, 0, 0), (MAX_SECONDS,) * 3)
+    assert readable and alltime_tb == pytest.approx([29.0, 40.0, 19.5])
+
+
+def test_consumption_history_saved_while_driving(history_env, tmp_path, monkeypatch):
+    now = {"now": 0.0}
+    monkeypatch.setattr(module_stint, "monotonic", lambda: now["now"])
+    history = HistoryInfo()
+    gen = module_stint.record_consumption_history(history, f"{tmp_path}/")
+    history_env["lap.number"] = 1
+    gen.send(0)  # lap recorded, checkpoint not due
+    assert not (tmp_path / "SimTrack - SimCar.consumption").exists()
+    now["now"] = _base.CHECKPOINT_INTERVAL + 1
+    history_env["lap.number"] = 2
+    minfo.delta.lapTimeLast = 91.0
+    gen.send(0)  # next lap recorded: saved without reset
+    laps, readable = read_consumption_history_file(f"{tmp_path}/", "SimTrack - SimCar")
+    assert readable and [lap.lapNumber for lap in laps][:2] == [2, 1]
+
+
+def test_fuel_reference_saved_while_driving(fuel_sim, tmp_path, clock, monkeypatch):
+    sim = fuel_sim
+    monkeypatch.setattr(module_fuel, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(_base, "CHECKPOINT_INTERVAL", 100.0)
+    monkeypatch.setattr(module_fuel, "CHECKPOINT_INTERVAL", 100.0)
+    gen = module_fuel.calc_consumption(FuelInfo(), False, f"{tmp_path}/", ".fuel", 5, 0.75)
+    loop = ModuleLoop(gen)
+    while not sim.finished:  # still on track, never reset
+        minfo.delta.lapDistance = sim.distance
+        loop.update()
+        sim.tick()
+        clock["now"] += sim.step
+    _, used_last, _ = load_fuel_delta_file(f"{tmp_path}/", "SimTrack - SimCar", ".fuel", ((), 0.0, 0.0))
+    assert used_last == pytest.approx(3.0, abs=0.01)  # reference lap saved without reset
 
 
 # --- Locked files

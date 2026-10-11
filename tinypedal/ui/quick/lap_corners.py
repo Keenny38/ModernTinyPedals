@@ -86,7 +86,7 @@ class CornerTable(BackendBase):
                 if self._map_mode in ("gain", "line", "corners"):  # colors depend on compared lap
                     self.build_colored_line(self._map_view[2])
                     self.bump_revision()
-                self.mapDataChanged.emit()
+                self.mapCornersChanged.emit()  # rest of map unchanged: not read again by QML
             self.cornersChanged.emit()
 
     @Slot(str)
@@ -195,6 +195,7 @@ class CornerTable(BackendBase):
                          "speedColor": "", "kind": "ideal", "time": signed(gap, 2), "timeColor": judged(gap),
                          "bar": gap})
         self._corners = rows
+        self.corner_model.sync([{**row, "id": f"{row['kind']}|{row['index']}"} for row in rows], "id")
         self.build_coaching()
         self.build_corner_marks()
 

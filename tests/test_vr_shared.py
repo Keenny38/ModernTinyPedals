@@ -186,6 +186,28 @@ def test_writer_rejects_too_big_image():
     assert sequence(writer._buffer) % 2 == 0  # never left odd
 
 
+def test_writer_sequence_even_after_unexpected_error():
+    writer = vr_shared.SharedFrameWriter(bytearray(vr_shared.MAPPING_SIZE))
+    writer.open()
+    before = sequence(writer._buffer)
+    with pytest.raises(TypeError):
+        writer.write_image(object(), 4, 4, 16)  # not a buffer: fails while sequence odd
+    assert sequence(writer._buffer) == before + 2  # layer keeps reading new frames
+
+
+def test_writer_heartbeat_single_store_and_mapping_closable():
+    """Heartbeat & sequence written as one 8-byte store (never 0 meanwhile), views released on close"""
+    import mmap
+
+    mapping = mmap.mmap(-1, vr_shared.MAPPING_SIZE)
+    writer = vr_shared.SharedFrameWriter(mapping)
+    assert writer.open()
+    writer.heartbeat(0x0102030405060708)
+    assert struct.unpack_from("<Q", mapping, vr_shared.OFFSET_APP_HEARTBEAT)[0] == 0x0102030405060708
+    writer.close()
+    mapping.close()  # BufferError if a view of the mapping was left exported
+
+
 @pytest.mark.parametrize("tiles, canvas", [
     ([], (10, 10)),  # no tile
     ([vr_shared.Tile(0, 0, 1, 1, 0, 0)] * (vr_shared.MAX_TILES + 1), (10, 10)),  # too many

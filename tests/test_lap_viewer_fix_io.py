@@ -11,7 +11,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
-from tests.test_lap_library import import_log, open_library, viewer  # noqa: F401
+from tests.test_lap_library import import_log, open_library, viewer, wait_library  # noqa: F401
 from tests.test_lap_viewer_e2 import TRACK, backend, lap_info, write_lap  # noqa: F401
 from tests.test_motec_import import logger_channels, write_logger_ld
 from tinypedal.userfile import lap_library, motec_import
@@ -239,10 +239,12 @@ def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
     library.tree.topLevelItem(0).setSelected(True)
     library.delete()  # was: exception out of the slot, first files gone, viewer not told
     monkeypatch.setattr(os, "replace", real_replace)
+    wait_library(library)
     assert warnings and "file in use" in warnings[0]
     assert [entry.file.path for entry in viewer.backend.external] == [paths[0]]  # deleted one forgotten only
     assert library.tree.topLevelItem(0).childCount() == 1 and library.button_undo.isVisibleTo(library)
     library.undo_delete()
+    wait_library(library)
     assert library.tree.topLevelItem(0).childCount() == 2 and not library.button_undo.isVisibleTo(library)
     assert all(os.path.exists(path) for path in paths)
     library.close()
@@ -263,6 +265,7 @@ def test_library_import_is_page_job(viewer, monkeypatch, tmp_path):  # noqa: F81
     assert "MoTeC import" in [handle.name for handle, *_ in page._jobs]
     assert "MoTeC import" in lap_backend.EXPORT_JOBS  # app exit waits for it
     page.wait_jobs()
+    wait_library(library)
     assert page._imports == 0 and library.top_items()[0].text(0) == "Monza run"
     assert not page.external  # library import: laps not added to viewer
     library.import_logs()
@@ -359,6 +362,7 @@ def test_added_lap_as_delta_best(backend, tmp_path, monkeypatch):  # noqa: F811
     backend.import_folder(str(mate), background=False)
     foreign = next(entry.file.path for entry in backend.external)
     backend.exportDeltaBest(foreign)  # teammate lap of this track & class as delta target
+    backend.wait_jobs()  # lap read, then delta best written in background
     target = os.path.join(cfg.path.delta_best, f"{TRACK}.csv")
     assert os.path.exists(target) and "1:28.500" in backend.status
 

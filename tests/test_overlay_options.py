@@ -85,6 +85,11 @@ def row(backend, key: str) -> dict:
     return next(row for row in backend.rows.rows if row["key"] == key)
 
 
+def order_list(backend) -> dict:
+    """Display order list row (not a list option row, such as class order)"""
+    return next(row for row in rows(backend, "order") if not row["option"])
+
+
 def set_classic(name: str, classic: bool = True):
     if "enable_classic_layout" in cfg.user.setting[name]:
         cfg.user.setting[name]["enable_classic_layout"] = classic
@@ -156,7 +161,7 @@ def test_rows_of_selected_overlay(options):
     assert row(options, "speedometer/font_name")["kind"] == "font"
     interval = row(options, "speedometer/update_interval")
     assert interval["kind"] == "integer" and interval["minimum"] == 1
-    order = rows(options, "order")[0]
+    order = order_list(options)
     assert next(entry["key"] for entry in order["orders"]) == "display_order_speed"
     assert rows(options)[-1]["last"] or rows(options, "order")[-1]["last"]
 
@@ -289,10 +294,10 @@ def test_display_order_moves(options):
     set_classic("speedometer", False)
     options.refresh()
     options.selectOverlay("speedometer")
-    first = [entry["key"] for entry in rows(options, "order")[0]["orders"]]
+    first = [entry["key"] for entry in order_list(options)["orders"]]
     options.moveOrder("speedometer", first[0], 1)
-    moved = [entry["key"] for entry in rows(options, "order")[0]["orders"]]
-    assert moved[:2] == [first[1], first[0]] and rows(options, "order")[0]["changed"]
+    moved = [entry["key"] for entry in order_list(options)["orders"]]
+    assert moved[:2] == [first[1], first[0]] and order_list(options)["changed"]
     assert [options.value("speedometer", key) for key in moved] == list(range(1, len(moved) + 1))
     options.placeOrder("speedometer", first[0], 0)
     assert options.pendingCount == 0  # back to saved order
@@ -409,28 +414,52 @@ def test_driver_list_sections_and_column_list(options):
     assert "additional_players_front" in relative.section_of["show_vehicle_in_garage"].keys
     options.selectOverlay("standings")
     assert not options.overlayInfo["simpleMode"]
-    order = rows(options, "order")[0]
+    order = order_list(options)
     keys = [item["key"] for item in order["orders"]]
     assert keys == [order_option(column) for column in STANDINGS_COLUMNS]  # design order, not option values
     assert order["help"].startswith("Columns from left to right")
     logo = next(item for item in order["orders"] if item["key"] == "display_order_brand_logo")
     assert logo["label"] == "Brand Logo" and logo["toggle"] == "standings/column_brand_logo" and logo["checked"]
     options.setBool(logo["toggle"], False)
-    logo = next(item for item in rows(options, "order")[0]["orders"] if item["key"] == "display_order_brand_logo")
+    logo = next(item for item in order_list(options)["orders"] if item["key"] == "display_order_brand_logo")
     assert not logo["checked"] and logo["changed"]
     assert row(options, "standings/brand_logo_width")["dimmed"]
     # Moving one column keeps the others where the overlay shows them
     options.moveOrder("standings", keys[3], -1)
-    moved = [item["key"] for item in rows(options, "order")[0]["orders"]]
+    moved = [item["key"] for item in order_list(options)["orders"]]
     assert moved == [*keys[:2], keys[3], keys[2], *keys[4:]]
     assert [options.value("standings", key) for key in moved] == list(range(1, len(moved) + 1))
     options.resetOrder("standings")
-    assert [item["key"] for item in rows(options, "order")[0]["orders"]] == keys
+    assert [item["key"] for item in order_list(options)["orders"]] == keys
     assert options.value("standings", "column_brand_logo") is False  # columns shown left as set
     options.selectOverlay("relative")
-    assert len(rows(options, "order")[0]["orders"]) == len(RELATIVE_COLUMNS)
+    assert len(order_list(options)["orders"]) == len(RELATIVE_COLUMNS)
     set_classic("standings")
     assert build_layout("standings", cfg.user.setting["standings"]).option_ui is None
+
+
+def test_class_order_edited_as_order_list(options):
+    """Class order (text option) shown as an order list: classes of option then known classes, moved & reset"""
+    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+
+    cfg.user.classes = {"Hypercar": {}, "LMP2": {}, "GT3": {}, "Formula Pro": {}}
+    options.selectOverlay("standings")
+    lists = [item for item in rows(options, "order") if item["option"] == "class_order"]
+    assert len(lists) == 1 and lists[0]["key"] == "standings/class_order"
+    names = [item["label"] for item in lists[0]["orders"]]
+    assert names[:8] == ["Hypercar", "Hyper", "LMP2 ELMS", "LMP2", "LMP3", "GT3", "LMGT3", "GTE"]
+    assert names[8:] == ["Formula Pro"]  # known class not listed: offered last (LMP2, GT3 already listed)
+    assert not lists[0]["modified"] and lists[0]["help"]
+    options.moveListItem("standings", "class_order", "GT3", -5)
+    assert options.value("standings", "class_order").startswith("GT3, Hypercar, Hyper, LMP2 ELMS")
+    moved = row(options, "standings/class_order")
+    assert moved["orders"][0]["label"] == "GT3" and moved["orders"][0]["changed"] and moved["modified"]
+    options.placeListItem("standings", "class_order", "Formula Pro", 1)
+    assert options.value("standings", "class_order").startswith("GT3, Formula Pro, Hypercar")
+    options.moveListItem("standings", "class_order", "Unknown", 1)  # not in list: nothing
+    options.resetList("standings", "class_order")
+    assert options.value("standings", "class_order") == WIDGET_DEFAULT["standings"]["class_order"]
+    assert order_list(options)["orders"][0]["key"] == "display_order_position"  # columns list still there
 
 
 def test_driver_list_preview_shows_sample_race(ui_env, bundled_fonts):
@@ -497,6 +526,41 @@ def test_preview_renders_unsaved_values(options):
     assert options.previewState == 4  # kept, marked invalid
     options.setPreviewEnabled(False)
     assert options.previewState == 0 and options.previewUrl == ""
+
+
+def test_preview_drawn_again_only_when_inputs_change(options, monkeypatch):
+    """Page shown again, refreshed, edit undone: picture kept; zoomed picture released while hidden"""
+    from tinypedal.ui.quick import overlay_options_backend
+    from tinypedal.ui.quick.preview_provider import STORE, key_of
+
+    drawn = []
+    real = overlay_options_backend.render_overlay
+    monkeypatch.setattr(overlay_options_backend, "render_overlay",
+                        lambda name, values, zoom=1.0: drawn.append(zoom) or real(name, values, zoom))
+    options.selectOverlay("speedometer")
+    options.set_active(True)
+    options.render_preview()
+    url = options.previewUrl
+    options.set_active(False)
+    options.refresh()  # page shown again: saved values read again
+    options.set_active(True)
+    options.render_preview()
+    assert drawn == [1.0] and options.previewUrl == url
+    options.setNumber("speedometer/font_size", cfg.user.setting["speedometer"]["font_size"] + 3)
+    options.render_preview()
+    options.undo()
+    options.render_preview()
+    assert drawn == [1.0, 1.0, 1.0] and options.previewState == 2
+    monkeypatch.setattr(overlay_options_backend, "KEEP_HIDDEN_BYTES", 0)
+    options.setPreviewScale(2.0)
+    options.render_preview()
+    zoomed = options.previewUrl
+    assert drawn[-1] == 2.0 and STORE.get(key_of(zoomed.removeprefix("image://overlaypreview/"))) is not None
+    options.set_active(False)  # hidden: zoomed picture released
+    assert options.previewUrl == "" and STORE.get(key_of(zoomed.removeprefix("image://overlaypreview/"))) is None
+    options.set_active(True)
+    options.render_preview()
+    assert options.previewState == 2 and options.previewUrl and options.previewScale == 2
 
 
 def test_refresh_drops_edits_saved_elsewhere(options):
@@ -570,6 +634,31 @@ def test_one_page_for_every_overlay(window):
     assert option_pages(window)[0].title == "Overlay Options"
 
 
+def test_open_page_shown_without_building_another(window, monkeypatch):
+    """Page open: shown & overlay selected, no second page built (QML view, every option read) to find it"""
+    from tinypedal.ui import overlay_options
+    from tinypedal.ui.overlay_options import OverlayOptions, open_overlay_options
+
+    first = open_overlay_options(window, "speedometer")
+    assert first is not None
+    built = []
+    original = OverlayOptions.__init__
+
+    def counting(self, *args, **kwargs):
+        built.append(self)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(OverlayOptions, "__init__", counting)
+    flashed = []
+    monkeypatch.setattr(first.backend, "focus_option", lambda name, key: flashed.append((name, key)))
+    again = open_overlay_options(window, "fuel", "opacity")
+    assert again is first and not built and flashed == [("fuel", "opacity")]
+    assert window.centralWidget()._pages.currentWidget().dialog is first
+    first.close()
+    flush()
+    assert isinstance(overlay_options.open_overlay_options(window, "fuel"), OverlayOptions) and len(built) == 1
+
+
 def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
     from tinypedal.ui import overlay_options
     from tinypedal.ui.overlay_options import open_overlay_options
@@ -637,6 +726,7 @@ def test_page_rebuilt_in_new_language(window):
         page.refresh()
         assert option_pages(window)[0].title == "Options des overlays" and not page.view.errors()
         assert page.backend.pendingCount == 1 and page.backend.overlayInfo["label"] == "Compteur de vitesse"
+        assert page.view.rootContext().contextProperty("i18n").property("table")["Find overlay"] == "Trouver un overlay"  # QML texts too
     finally:
         i18n.set_language("English")
         page.refresh_now()

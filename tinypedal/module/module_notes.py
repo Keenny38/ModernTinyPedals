@@ -45,6 +45,7 @@ from ._base import DataModule, data_stamp
 class Realtime(DataModule):
     """Notes data"""
 
+    WAKE_ON_DERIVED = True  # stamp includes delta module position
     __slots__ = ()
 
     def __init__(self, config, module_name):
@@ -52,7 +53,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         vehicle_resets = None
         update_interval = self.idle_interval

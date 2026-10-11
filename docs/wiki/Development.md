@@ -152,9 +152,9 @@ To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php
 iscc /DAppVersion=0.20.0 installer\tinypedal.iss
 ```
 
-The installer `ModernTinyPedals-<version>-windows-setup.exe` is written to `dist`. Its shortcut icon follows the Windows light or dark mode (`images/icon.ico` or `images/icon_dark.ico`). Icons are generated from `images/src/icon.webp` and `images/src/icon_dark.webp` with `images/export_icon.sh` (ImageMagick 7).
+The installer `NeoPedal-<version>-windows-setup.exe` is written to `dist`. Its shortcut icon follows the Windows light or dark mode (`images/icon.ico` or `images/icon_dark.ico`). Icons are generated from `images/src/icon.webp` and `images/src/icon_dark.webp` with `images/export_icon.sh` (ImageMagick 7).
 
-The display name is "Modern Tiny Pedals", but the internal name stays `TinyPedal` (config folder `%APPDATA%\TinyPedal`, `tinypedal.exe`, `X-TinyPedal` header of the remote control) to keep existing settings and tool compatibility.
+User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). The legacy `TinyPedal` folders, shared with the original app, are copied once on first start by `userfile/folder_migration.py` (temporary folder renamed when complete, legacy folder used for that run if the copy fails, Linux `user_path` values rewritten), never moved nor modified. The copy records the user's choice in `migration.json` (`pending`, `kept`, `default`); `ui/settings_import.py` asks once the window is up (not in safe mode) and offers `Config` > `TinyPedal Settings`. A request (`reset`, `reimport`) is written there and applied by `folder_migration` on next start, before settings are loaded: the current folder is renamed aside, never deleted. `APP_ID` stays `TinyPedal`: build folder and `tinypedal.exe`, looked for by older updaters. The remote control asks for an `X-NeoPedal` header and still accepts `X-TinyPedal`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
 
 ## Release process
 
@@ -217,7 +217,7 @@ python tools/make_change_visual.py black_box --title "Black box: engine map"
 
 Screenshots of new app pages go in `docs/changelog` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/...` address, so they show on GitHub and in the release notes. The app's What's New page skips image lines.
 
-The README preview image is generated from the real overlays:
+The README preview image is generated from the real overlays, on the simulated race of `tinypedal/demo_data.py` (the one the app's overlay pictures show: widget modules read it only while a picture is drawn, see `demo_globals`; `demo_state` keeps simulated cars out of user presets):
 
 ```bash
 python tools/make_readme_preview.py
@@ -225,7 +225,7 @@ python tools/make_readme_preview.py
 
 ### Release files and checksums
 
-Each release publishes the Windows installer `ModernTinyPedals-<version>-windows-setup.exe` with its `.sha256` file (the updater of apps up to 0.19 needs both), the same installer zipped as `ModernTinyPedals-<version>-setup.zip` (downloaded by the updater since 0.20) and `ModernTinyPedals-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. `tests/test_release_assets.py` reads the workflow and fails when a change of release files would leave an installed app (from 0.10) without an installer to update to. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
+Each release publishes the Windows installer `NeoPedal-<version>-windows-setup.exe` with its `.sha256` file (the updater of apps up to 0.19 needs both), the same installer zipped as `NeoPedal-<version>-setup.zip` (downloaded by the updater since 0.20) and `NeoPedal-<version>-source.zip`, with their SHA-256 in the release notes and a signed build provenance attestation for each file. `tests/test_release_assets.py` reads the workflow and fails when a change of release files would leave an installed app (from 0.10) without an installer to update to. The release is created as a draft, gets its files, then is published: releases are immutable. See [Updates and Security](Updates-and-Security.md#release-files).
 
 ### Code signing
 

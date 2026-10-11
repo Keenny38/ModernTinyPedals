@@ -41,6 +41,7 @@ from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from contextlib import suppress
+from itertools import islice
 from typing import NamedTuple
 
 from .. import app_signal, realtime_state
@@ -95,6 +96,8 @@ IN_LAP_KIND = "in"
 class Realtime(DataModule):
     """Telemetry recorder"""
 
+    # Stop waits for laps being saved & replay recording closed: never started again before (reload)
+    STOP_TIMEOUT = 20.0
     __slots__ = ()
 
     def __init__(self, config, module_name):
@@ -104,7 +107,7 @@ class Realtime(DataModule):
         """Update module data"""
         from ..replay_session import AutoReplay
 
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         mcfg = self.mcfg
         reset = False
         vehicle_resets = None
@@ -164,6 +167,7 @@ class Realtime(DataModule):
 LAP_SAVER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Lap saver")
 LAP_SAVER_TIMEOUT = 10.0  # seconds to wait for laps being saved when module stops
 PENDING_WAIT = 10.0  # seconds to validate completed lap after leaving track just after start line
+LAP_TEXT_CHUNK = 250  # CSV rows written at once (about 5 ms), GIL released in between
 
 
 def wait_lap_saver(timeout: float | None = None) -> bool:
@@ -372,6 +376,12 @@ def lap_info(kind: str, rows: Sequence | LapSamples) -> dict:
             "session_start": round(lap_timestamp() - read.timing.elapsed()),
         })
     except (AttributeError, TypeError, ValueError, IndexError):
+        pass
+    try:  # steering wheel rotation (degrees lock to lock): lap viewer inputs tab turns wheel by real angle
+        steering_range = float(read.inputs.steering_range_physical())
+        if steering_range > 0:
+            info["steering_range"] = round(steering_range, 1)
+    except (AttributeError, TypeError, ValueError):
         pass
     if rows:
         info["fuel_start"] = rows[0][10]
@@ -595,21 +605,32 @@ class PendingLap(NamedTuple):
 def lap_filename(lap_number: int, lap_time: float, valid: bool = True, timestamp: float | None = None,
                  compress: bool = False) -> str:
     """Recorded lap file name"""
-    minutes, seconds = divmod(lap_time, 60)
+    minutes, seconds = divmod(round(lap_time, 3), 60)  # rounded first: never "1m60.000s"
     suffix = "" if valid else " invalid"
     ext = ".csv.gz" if compress else ".csv"
     date = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(timestamp))
     return f"{date} lap{lap_number:03d} {int(minutes)}m{seconds:06.3f}s{suffix}{ext}"
 
 
-def lap_text(rows: Sequence | LapSamples, info: dict | None = None) -> str:
-    """Lap file content"""
+def lap_text(rows: Sequence | LapSamples, info: dict | None = None, chunk_rows: int = LAP_TEXT_CHUNK) -> str:
+    """Lap file content
+
+    Rows written by chunk, other threads (overlays) run in between: writing a whole lap at once
+    holds the GIL for 100 ms or more (lap saver thread).
+    """
     buffer = io.StringIO()
     if info:
         buffer.write(INFO_PREFIX + json.dumps(info) + "\n")
     writer = csv.writer(buffer)
     writer.writerow(CSV_HEADER)
-    writer.writerows(rows)
+    remaining = iter(rows)
+    chunk_rows = max(chunk_rows, 1)
+    while True:
+        chunk = list(islice(remaining, chunk_rows))
+        writer.writerows(chunk)
+        if len(chunk) < chunk_rows:
+            break
+        time.sleep(0)  # release GIL
     return buffer.getvalue()
 
 

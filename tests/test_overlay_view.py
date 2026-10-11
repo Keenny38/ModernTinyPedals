@@ -328,15 +328,137 @@ def test_render_preview(ui_env):
     assert overlay_backend.render_preview("no_such_widget") is None
 
 
-def test_refresh_redraws_previews_in_background(overlays):
+def test_refresh_redraws_previews_in_background(overlays, monkeypatch):
+    overlays.set_active(True)
     overlays.previews.render_now("fuel")
     first = overlays.previews.role("fuel", OverlayModel.PreviewRole)
     changed = []
     overlays.source.dataChanged.connect(lambda first_index, last, roles: changed.append(tuple(roles)))
+    monkeypatch.setitem(cfg.user.setting["fuel"], "font_size", cfg.user.setting["fuel"].get("font_size", 15) + 1)
     overlays.refresh()
     assert not any(OverlayModel.PreviewRole in roles for roles in changed)  # page told only once a picture changed
     assert overlays.previews.role("fuel", OverlayModel.PreviewRole) == first
     assert overlays.previews.pending() >= 1
+
+
+def test_refresh_redraws_only_previews_whose_inputs_changed(overlays, monkeypatch):
+    from tinypedal import i18n
+
+    previews = overlays.previews
+    overlays.set_active(True)
+    for name in ("fuel", "speedometer"):
+        previews.render_now(name)
+    overlays.refresh()  # nothing changed: nothing rendered again
+    assert previews.pending() == 0 and not previews.is_stale("fuel") and not previews.is_stale("speedometer")
+    monkeypatch.setitem(cfg.api, "enable_player_index_override", not cfg.api["enable_player_index_override"])
+    overlays.refresh()  # spectate switched: game API setting, never drawn
+    assert not previews.is_stale("fuel")
+    monkeypatch.setitem(cfg.user.setting["fuel"], "enable_test_option", True)  # one overlay's options
+    overlays.refresh()
+    assert previews.is_stale("fuel") and not previews.is_stale("speedometer")
+    previews.render_now("fuel")
+    previews.stop()
+    monkeypatch.setitem(cfg.units, "speed_unit", "MPH" if cfg.units.get("speed_unit") != "MPH" else "KPH")  # shared
+    overlays.refresh()
+    assert previews.is_stale("fuel") and previews.is_stale("speedometer")
+    for name in ("fuel", "speedometer"):
+        previews.render_now(name)
+    previews.stop()
+    monkeypatch.setitem(cfg.user.config["application"], "test_option", 1)  # global config (theme, design...)
+    overlays.refresh()
+    assert previews.is_stale("speedometer")
+    previews.render_now("speedometer")
+    previews.stop()
+    i18n.set_language("Français")
+    try:
+        overlays.refresh()
+        assert previews.is_stale("speedometer")
+    finally:
+        i18n.set_language("English")
+
+
+def test_refresh_while_hidden_reads_inputs_once_shown(overlays, monkeypatch):
+    """Hotkeys, tray & saves refresh the page while racing: rows updated, preview inputs read only once shown"""
+    from tinypedal.ui import widget_preview
+
+    previews = overlays.previews
+    overlays.set_active(True)
+    previews.render_now("fuel")
+    overlays.set_active(False)
+    reads = []
+    real_read = widget_preview._read_shared
+    monkeypatch.setattr(widget_preview, "_read_shared", lambda: reads.append(1) or real_read())
+    signatures = []
+    real_signature = overlay_backend.preview_signature
+    monkeypatch.setattr(overlay_backend, "preview_signature", lambda name: signatures.append(name) or real_signature(name))
+    monkeypatch.setitem(cfg.user.setting["fuel"], "enable_test_option", True)
+    monkeypatch.setitem(cfg.user.setting["speedometer"], "enable", False)  # toggled by hotkey
+    for _ in range(3):
+        overlays.refresh()
+    assert not reads and not signatures and not previews.is_stale("fuel")
+    assert not overlays.source.rows[overlays.source.index_of["speedometer"]].enabled  # row updated at once
+    overlays.set_active(True)
+    assert reads == [1] and previews.is_stale("fuel")
+    assert previews.pending() == 1  # shown row drawn again in background
+    previews.stop()
+
+
+def test_toggle_and_move_keep_previews(overlays, monkeypatch):
+    previews = overlays.previews
+    overlays.set_active(True)
+    previews.render_now("fuel")
+    monkeypatch.setitem(cfg.user.setting["fuel"], "enable", not cfg.user.setting["fuel"]["enable"])
+    monkeypatch.setitem(cfg.user.setting["fuel"], "position_x", 432)
+    overlays.refresh()
+    assert not previews.is_stale("fuel")  # state & position never drawn
+    previews.stop()
+
+
+def test_preview_queue_time_budget_and_rows_on_screen_first(monkeypatch):
+    rendered = []
+    cache = PreviewCache(lambda name: rendered.append(name) or solid("#ff0000"), lambda name: None)
+    for name in ("a", "b", "c", "d"):
+        cache.request(name)
+    cache.set_visible({"c"})
+    cache.active = True
+    cache._render_next()  # fast renders: several in one tick, row on screen first
+    assert rendered == ["c", "a", "b", "d"]
+    slow, clock = [], [0.0]
+    monkeypatch.setattr(overlay_backend, "perf_counter", lambda: clock[0])
+
+    def render(name):
+        clock[0] += 0.02  # longer than budget
+        slow.append(name)
+        return solid("#00ff00")
+
+    cache = PreviewCache(render, lambda name: None)
+    for name in ("a", "b"):
+        cache.request(name)
+    cache.active = True
+    cache._render_next()
+    assert slow == ["a"] and cache.pending() == 1  # at least one per tick, rest on next ticks
+    cache.stop()
+
+
+def test_visible_rows_from_page(overlays):
+    overlays.setVisibleRows(1, 2)
+    expected = {overlays.proxy.data(overlays.proxy.index(row, 0), OverlayModel.NameRole) for row in (1, 2)}
+    assert overlays.previews._visible == expected
+    overlays.setVisibleRows(4, 99)  # past last row: clamped
+    assert len(overlays.previews._visible) == len(NAMES) - 4
+
+
+def test_counts_cached_and_signaled_on_change(overlays):
+    told = []
+    overlays.countsChanged.connect(lambda: told.append(1))
+    overlays.refresh()
+    assert not told  # nothing changed
+    cfg.user.setting["fuel"]["enable"] = True
+    overlays.refresh()
+    assert told == [1] and overlays.activeCount == 3 and overlays.failedCount == 0
+    cfg.user.setting["fuel"]["enable"] = False
+    overlays.update_overlay("fuel")
+    assert overlays.activeCount == 2 and len(told) == 2
 
 
 # Page

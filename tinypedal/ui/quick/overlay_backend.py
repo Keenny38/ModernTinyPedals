@@ -20,11 +20,13 @@
 Overlays page backend (qml/Overlays.qml): overlay list model, filters, previews & actions
 
 Rows are filtered by a proxy model (search words, All / Active / Inactive, category), so the QML
-grid animates rows in & out instead of being rebuilt. Previews are rendered one per event loop
-tick, only for rows the page shows and only while the page is visible (never during a race with
-the window hidden), then served to QML by preview_provider (image:// URL, serial changed only when the
-picture changes): a refresh re-renders them in the background and
-the old picture stays shown until the new one is ready (unchanged picture: page not told).
+grid animates rows in & out instead of being rebuilt. Previews are rendered in background (a few ms
+of each event loop tick, rows on screen first), only for rows the page shows and only while the page
+is visible (never during a race with the window hidden), then served to QML by preview_provider
+(image:// URL, serial changed only when the picture changes). A refresh renders again only previews
+whose inputs changed (overlay options, global config & settings, style files, language, pixel ratio,
+game logos), checked only while the page is shown; the old picture stays shown until the new one is ready
+(unchanged picture: page not told). Pictures are shared by inputs with other pages (widget_preview).
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ from __future__ import annotations
 import logging
 import weakref
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Collection
+from time import perf_counter
 from typing import NamedTuple
 
 from PySide6.QtCore import (
@@ -72,13 +75,14 @@ FILTER_INACTIVE = 2
 PREVIEW_LOADING = 0
 PREVIEW_READY = 1
 PREVIEW_UNAVAILABLE = 2
+RENDER_BUDGET = 0.008  # seconds of previews rendered per event loop tick (at least one)
 
 # Widget categories: (name, widget name prefixes), first match wins, unmatched (plugins) are "Other"
 WIDGET_CATEGORIES = (
     ("Timing", (
         "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "race_plan", "relative", "rivals",
         "sectors", "session", "standings", "stint_history", "timing", "track_clock",
-        "delta_graph", "gap_trend", "stint_timer",
+        "delta_graph", "gap_trend", "stint_timer", "speed_delta",
     )),
     ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
     ("Brakes", ("brake_",)),
@@ -258,15 +262,32 @@ class OverlayFilter(QSortFilterProxyModel):
 
 
 class PreviewCache:
-    """Overlay pictures, rendered in background one per event loop tick while active"""
+    """Overlay pictures, rendered in background while active (time budget per event loop tick, rows on screen
+    first)
 
-    def __init__(self, render: Callable[[str], QImage | None], on_ready: Callable[[str], None], parent=None):
+    Args:
+        render: picture of overlay, None if not available.
+        on_ready: called with overlay name when its picture changed.
+        signature: inputs of the picture of overlay (any comparable value): invalidate() then marks only pictures
+            whose inputs changed. Without it every picture is out of date after invalidate().
+    """
+
+    def __init__(
+        self,
+        render: Callable[[str], QImage | None],
+        on_ready: Callable[[str], None],
+        parent=None,
+        signature: Callable[[str], object] | None = None,
+    ):
         self._render = render
         self._on_ready = on_ready
+        self._signature = signature
         self._previews: dict[str, Preview] = {}
+        self._signatures: dict[str, object] = {}  # inputs of drawn pictures
         self._stale: set[str] = set()
         self._queue: deque[str] = deque()
         self._queued: set[str] = set()
+        self._visible: frozenset[str] = frozenset()  # rows on screen: rendered first
         self.active = False  # page visible: queue rendered
         self._timer = QTimer(parent)  # deleted with backend: never fires on a deleted model
         self._timer.setInterval(0)
@@ -296,8 +317,23 @@ class PreviewCache:
             self._wake()
 
     def invalidate(self, name: str = ""):
-        """Overlay setting changed (all overlays if no name): rendered again when shown"""
-        self._stale.update((name,) if name else self._previews)
+        """Overlay setting changed (all overlays if no name, only those whose inputs changed when signed):
+        rendered again when shown"""
+        if name:
+            self._stale.add(name)
+        elif self._signature is None:
+            self._stale.update(self._previews)
+        else:
+            signature = self._signature
+            self._stale.update(
+                drawn for drawn in self._previews if self._signatures.get(drawn) != signature(drawn))
+
+    def is_stale(self, name: str) -> bool:
+        return name in self._stale
+
+    def set_visible(self, names: Collection[str]):
+        """Rows on screen: their pictures rendered first"""
+        self._visible = frozenset(names)
 
     def redraw(self, names: list[str]):
         """Render again pictures of names already drawn & out of date (shown rows), in background"""
@@ -324,19 +360,32 @@ class PreviewCache:
         if self.active and self._queue and not self._timer.isActive():
             self._timer.start()
 
+    def _take(self) -> str:
+        """Next overlay to render: first queued row on screen, else first queued"""
+        if self._visible:
+            for position, name in enumerate(self._queue):
+                if name in self._visible:
+                    del self._queue[position]
+                    return name
+        return self._queue.popleft()
+
     def _render_next(self):
+        """Render queued pictures for a few ms (at least one), rest on next ticks: page stays responsive"""
+        deadline = perf_counter() + RENDER_BUDGET
+        while self._queue and self.active:
+            name = self._take()
+            self._queued.discard(name)
+            self._stale.discard(name)
+            self.render_now(name)
+            if perf_counter() >= deadline:
+                break
         if not self._queue or not self.active:
-            self._timer.stop()
-            return
-        name = self._queue.popleft()
-        self._queued.discard(name)
-        self._stale.discard(name)
-        self.render_now(name)
-        if not self._queue:
             self._timer.stop()
 
     def render_now(self, name: str):
         """Render overlay picture, page told only if it changed"""
+        if self._signature is not None:
+            self._signatures[name] = self._signature(name)
         image = self._render(name)
         key = f"{self._prefix}{name}"
         if image is None:
@@ -363,22 +412,25 @@ def image_url(image: QImage) -> str:
 
 
 def render_preview(name: str) -> QImage | None:
-    """Overlay picture with current setting, None if it cannot be drawn (plugins needing live data...)"""
-    from ..widget_preview import render_widget
+    """Overlay picture with current setting, None if it cannot be drawn (plugins needing live data...); same
+    inputs as a picture drawn before (any page): that picture"""
+    from ..widget_preview import render_image
 
     try:
-        pixmap = render_widget(cfg, name, dict(cfg.user.setting[name]))
+        return render_image(cfg, name, cfg.user.setting[name], max_size=PREVIEW_MAX)
     except Exception as error:  # never break the page
         logger.debug("Overlay preview error: %s: %s", name, error, exc_info=True)
         return None
-    if pixmap.isNull():
+
+
+def preview_signature(name: str) -> object:
+    """Inputs of overlay picture (see widget_preview.preview_key): shared inputs read once per setting refresh"""
+    from ..widget_preview import preview_key
+
+    setting = cfg.user.setting.get(name)
+    if not isinstance(setting, dict):
         return None
-    ratio = pixmap.devicePixelRatio() or 1
-    limit = PREVIEW_MAX * ratio
-    if pixmap.width() > limit.width() or pixmap.height() > limit.height():
-        pixmap = pixmap.scaled(limit, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        pixmap.setDevicePixelRatio(ratio)
-    return pixmap.toImage()
+    return preview_key(cfg, name, setting, max_size=PREVIEW_MAX)
 
 
 class OverlayBackend(QObject):
@@ -413,7 +465,8 @@ class OverlayBackend(QObject):
         self._confirm = confirm
         self._show_log = show_log
         self._safe_mode = safe_mode.state.enabled
-        self.previews = PreviewCache(render_preview, self._preview_ready, self)
+        self._inputs_changed = False  # setting refreshed while hidden: previews checked once shown
+        self.previews = PreviewCache(render_preview, self._preview_ready, self, self.preview_signature)
         self.source = OverlayModel(self, self.previews)
         self.proxy = OverlayFilter(self, self.source)
         self.proxy.rowsInserted.connect(self.countsChanged)
@@ -421,7 +474,9 @@ class OverlayBackend(QObject):
         self.proxy.modelReset.connect(self.countsChanged)
         self._search = ""
         self._grid = bool(self.gridView)  # view shown, see refresh
+        self._counts = (0, 0)  # enabled & failed rows, see _recount
         self.source.set_rows([self._new_row(name) for name in module_control.names])
+        self._recount()
 
     # State
     def _failed(self, name: str, enabled: bool) -> bool:
@@ -441,34 +496,64 @@ class OverlayBackend(QObject):
         self.source.row_changed(row.name, [OverlayModel.EnabledRole, OverlayModel.FailedRole])
         return True
 
+    def _recount(self):
+        """Enabled & failed rows counted once per change (count properties read often by page)"""
+        rows = self.source.rows
+        self._counts = (sum(row.enabled for row in rows), sum(row.failed for row in rows))
+
     def update_overlay(self, name: str):
         """Overlay state from setting, after toggle or config saved"""
         index = self.source.index_of.get(name)
         if index is not None and self._update_row(self.source.rows[index]):
+            self._recount()
             self.countsChanged.emit()
+
+    def preview_signature(self, name: str) -> object:
+        """Inputs of overlay picture: shared inputs (read again after refresh), overlay options & style"""
+        return preview_signature(name)
 
     @Slot()
     def refresh(self):
-        """Setting or preset changed (also hotkey & tray toggles): states read again, previews out of date"""
+        """Setting or preset changed (also hotkey & tray toggles): states read again, previews whose inputs
+        changed rendered again (inputs read only while page is shown: never while racing)"""
+        from ..widget_preview import inputs_changed
+
         names = set(self._control.names)
+        changed = False
         if names != set(self.source.index_of):  # plugin added or removed
             self.source.set_rows([self._new_row(name) for name in self._control.names])
             self.rowsChanged.emit()
+            changed = True
         else:
             for row in self.source.rows:
-                self._update_row(row)
-        self.previews.invalidate()
-        # Rows drawn before & shown: rendered again in background, page told per row only if picture changed
-        self.previews.redraw(self.proxy.shown_names())
-        self.countsChanged.emit()
+                changed = self._update_row(row) or changed
+        inputs_changed()
+        self._inputs_changed = True
+        if self.previews.active:
+            self._check_previews()
+        if changed:
+            self._recount()
+            self.countsChanged.emit()
         grid = bool(self.gridView)
         if grid != self._grid:  # cards or list set on Config page
             self._grid = grid
             self.viewChanged.emit()
 
+    def _check_previews(self):
+        """Previews whose inputs changed marked out of date, those of shown rows rendered again in background
+        (page told per row only if picture changed)"""
+        self._inputs_changed = False
+        self.previews.invalidate()
+        self.previews.redraw(self.proxy.shown_names())
+
     def set_active(self, active: bool):
-        """Page shown or hidden: previews rendered only while shown"""
+        """Page shown or hidden: previews checked & rendered only while shown"""
+        from ..widget_preview import set_showing
+
+        set_showing(self, active)
         self.previews.set_active(active)
+        if active and self._inputs_changed:
+            self._check_previews()
 
     def _preview_ready(self, name: str):
         self.source.row_changed(name, OverlayModel.PREVIEW_ROLES)
@@ -476,6 +561,14 @@ class OverlayBackend(QObject):
     def invalidate_preview(self, name: str):
         self.previews.invalidate(name)
         self.source.row_changed(name, OverlayModel.PREVIEW_ROLES)
+
+    @Slot(int, int)
+    def setVisibleRows(self, first: int, last: int):
+        """Rows on screen (page rows, first to last): their previews rendered first"""
+        proxy = self.proxy
+        last = min(last, proxy.rowCount() - 1)
+        self.previews.set_visible([
+            proxy.data(proxy.index(row, 0), OverlayModel.NameRole) for row in range(max(first, 0), last + 1)])
 
     # Properties
     @Property(QObject, constant=True)
@@ -492,11 +585,11 @@ class OverlayBackend(QObject):
 
     @Property(int, notify=countsChanged)
     def activeCount(self) -> int:
-        return sum(row.enabled for row in self.source.rows)
+        return self._counts[0]
 
     @Property(int, notify=countsChanged)
     def failedCount(self) -> int:
-        return sum(row.failed for row in self.source.rows)
+        return self._counts[1]
 
     @Property(int, notify=countsChanged)
     def shownCount(self) -> int:
@@ -640,4 +733,7 @@ class OverlayBackend(QObject):
         app_signal.refresh.emit(True)  # other pages & menus follow, rows updated by refresh
 
     def close(self):
+        from ..widget_preview import set_showing
+
         self.previews.stop()
+        set_showing(self, False)

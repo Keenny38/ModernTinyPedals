@@ -27,11 +27,12 @@ Card {
             elide: Text.ElideRight
             Behavior on color { ColorAnimation { duration: 200 } }
         }
+        // Keyed on line count: new texts every update (playback: every frame) keep the same Text items
         Repeater {
-            model: card.lines
+            model: card.lines.length
             Text {
                 width: column.width
-                text: modelData
+                text: card.lines[index] || ""
                 visible: text !== ""
                 color: theme.text
                 font.features: { "tnum": 1 }

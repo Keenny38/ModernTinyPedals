@@ -40,7 +40,7 @@ def tele(ui_env, monkeypatch):
         "vehicle.vehicle_name": "SimCar #1",
         "lap.track_length": 4000.0,
     }
-    groups = ("session", "lap", "timing", "vehicle", "inputs", "switch", "engine")
+    groups = ("session", "lap", "timing", "vehicle", "inputs", "switch", "engine", "state")
     monkeypatch.setattr(api, "read", SimpleNamespace(**{name: Group(values, name) for name in groups}))
     monkeypatch.setattr(realtime_state, "active", True)
     return values
@@ -121,6 +121,53 @@ def test_pit_lane_calibration_saved_when_module_stops(tele, ui_env):
     gen.send(MODULE_STOP)
     assert cfg.user.tracks["SimTrack"]["pit_entry"] == 3800.0
     assert "Other" not in cfg.user.tracks
+
+
+def test_track_info_edited_meanwhile_kept_unless_measured(tele, ui_env):
+    from tinypedal.module._base import MODULE_STOP
+    from tinypedal.setting import cfg
+
+    cfg.user.tracks["SimTrack"] = {"pit_entry": 3000.0, "pit_exit": 200.0, "pit_speed": 16.0}
+    output = MappingInfo()
+    gen = module_mapping.record_track_info(output)
+    tele.update({"vehicle.in_pits": False, "vehicle.speed": 50.0, "lap.distance": 3500.0})
+    gen.send(1)
+    tele.update({"vehicle.in_pits": True, "lap.distance": 3800.0})
+    gen.send(1)  # pit entry measured
+    # Track info editor replaces tracks preset meanwhile (then reloads modules)
+    cfg.user.tracks = {"SimTrack": {"pit_entry": 3100.0, "pit_exit": 250.0, "pit_speed": 22.2}}
+    ui_env.clear()
+    gen.send(MODULE_STOP)
+    assert cfg.user.tracks["SimTrack"] == {"pit_entry": 3800.0, "pit_exit": 250.0, "pit_speed": 22.2}
+    # Nothing measured since: edits never overwritten by cached values, nothing saved
+    cfg.user.tracks["SimTrack"]["pit_entry"] = 3200.0
+    ui_env.clear()
+    gen.send(2)
+    gen.send(MODULE_STOP)
+    assert cfg.user.tracks["SimTrack"]["pit_entry"] == 3200.0
+    assert ui_env == []
+
+
+def test_new_track_added_without_measurement(tele, ui_env):
+    from tinypedal.module._base import MODULE_STOP
+    from tinypedal.setting import cfg
+
+    gen = module_mapping.record_track_info(MappingInfo())
+    tele.update({"vehicle.in_pits": False, "vehicle.speed": 50.0, "lap.distance": 100.0})
+    gen.send(1)
+    gen.send(MODULE_STOP)
+    assert "SimTrack" in cfg.user.tracks
+
+
+def test_track_map_load_failure_keeps_track_info(tele, tmp_path):
+    output = MappingInfo()
+    output.speedTrapPosition = 1234.0
+    output.sunlightPhases = ((0.0, 0),)
+    gen = module_mapping.record_track_map(output, f"{tmp_path.as_posix()}/")
+    gen.send(1)  # no map file: map reset only
+    assert output.coordinates is None
+    assert output.speedTrapPosition == 1234.0
+    assert output.sunlightPhases == ((0.0, 0),)
 
 
 # --- Mapping: track map
@@ -262,11 +309,12 @@ def test_driver_stats_recorded_and_saved(stats_env):
     assert stats.seconds > 170
 
 
-def test_driver_stats_starts_finish_position_and_history(stats_env):
+def test_driver_stats_starts_finish_position_and_history(stats_env, monkeypatch):
     from tinypedal.userfile import driver_history
 
     tele, filepath = stats_env
-    tele.update({"session.pre_race": True, "vehicle.place": 3})
+    monkeypatch.setattr(api, "_api", SimpleNamespace(NAME="Le Mans Ultimate"))
+    tele.update({"session.pre_race": True, "vehicle.place": 3, "state.version": "1.420"})
     output = StatsInfo()
     gen = module_stats.record_driver_stats(output, filepath, "Class", max_moved_distance=1500, podium_by_class=False)
     gen.send(1)
@@ -294,6 +342,7 @@ def test_driver_stats_starts_finish_position_and_history(stats_env):
             for record in records] == [
         ("GT3", 4, 1, 3, "GT3")]  # second stint: not driven (no time, no lap), not recorded
     assert records[0].best == pytest.approx(90.0) and records[0].valid == 1
+    assert records[0].game_version == "1.42"  # game version when driven (LMU shared memory)
 
 
 def test_driver_stats_teleport_not_counted(stats_env):
@@ -495,6 +544,16 @@ def test_notes_gpl_roundtrip(tmp_path):
     assert [(note["distance"], note["pace note"], note["comment"]) for note in loaded] == [
         (80.0, "right2", ""), (120.0, "left3", "careful")]
     assert meta["AUTHOR"] == "Lee"
+
+
+def test_notes_csv_with_byte_order_mark(tmp_path):
+    """Excel "CSV UTF-8" file starts with a byte order mark: header still found"""
+    filepath = f"{tmp_path.as_posix()}/"
+    (tmp_path / "excel.tppn").write_bytes("﻿distance,pace note,comment\r\n400,R2,\r\n100,L3,é\r\n".encode())
+    notes = track_notes.load_notes_file(filepath, "excel", track_notes.HEADER_PACE_NOTES,
+                                        track_notes.parse_csv_notes_only, ".tppn")
+    assert [(note["distance"], note["pace note"], note["comment"]) for note in notes] == [
+        (100.0, "L3", "é"), (400.0, "R2", "")]
 
 
 def test_notes_invalid_or_missing_file(tmp_path):

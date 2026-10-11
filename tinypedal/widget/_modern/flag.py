@@ -178,8 +178,11 @@ class Realtime(ModernOverlay):
         return Chip(self.captions[caption], value, color)
 
     def paintEvent(self, event):
-        """Every item as sample chip before first update (picture of Overlays page), then active ones"""
+        """Every item as sample chip before first update (picture of Overlays page, not live overlay), then active
+        ones"""
         if self.state is None:
+            if self.overlay_started:
+                return
             self.state = self.samples
             super().paintEvent(event)
             self.state = None

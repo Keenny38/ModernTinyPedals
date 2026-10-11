@@ -71,6 +71,34 @@ def test_canvas_background_drawn_on_one_screen(ui_env):
         canvas.deleteLater()
 
 
+def test_background_scaled_once_per_size(ui_env):
+    from PySide6.QtGui import QColor, QPixmap
+
+    from tinypedal.ui.layout_editor import LayoutCanvas
+
+    canvas = LayoutCanvas(None)
+    try:
+        screenshot = QPixmap(1920, 1080)
+        screenshot.fill(QColor(200, 0, 0))
+        canvas.set_background(screenshot, QRect(0, 0, 1920, 1080))
+        canvas.resize(640, 360)
+        canvas.grab()  # painted
+        scaled = canvas._scaled
+        assert not scaled.isNull() and scaled.width() < screenshot.width()
+        canvas.boxes = {"gear": QRect(0, 0, 100, 40)}
+        canvas.select("gear")
+        canvas.move_selected(QPoint(300, 200), snap=False)  # dragging: painted again, same size
+        canvas.grab()
+        assert canvas._scaled.cacheKey() == scaled.cacheKey()
+        canvas.resize(800, 450)
+        canvas.grab()
+        assert canvas._scaled.cacheKey() != scaled.cacheKey()  # scaled again for new size
+        canvas.set_background(QPixmap(), QRect(0, 0, 1920, 1080))
+        canvas.grab()  # no background: nothing scaled
+    finally:
+        canvas.deleteLater()
+
+
 class FakeWidget:
     def __init__(self, rect):
         self.rect = QRect(rect)

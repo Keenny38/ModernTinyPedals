@@ -19,7 +19,15 @@ Item {
     required property int previewHeight
     readonly property bool current: GridView.isCurrentItem && GridView.view.activeFocus
     readonly property real pad: Math.round(theme.em * 0.45)
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
+
+    GridView.onPooled: {
+        recycling = true
+        opacity = 1  // add transition cut short by pooling: not reused faded or shrunk
+        scale = 1
+    }
+    GridView.onReused: recycling = false
 
     width: GridView.view.cellWidth
     height: GridView.view.cellHeight
@@ -39,8 +47,8 @@ Item {
         border.color: card.active ? theme.accent
                     : area.containsMouse ? Qt.lighter(theme.border, 1.3)
                     : theme.dark ? Qt.lighter(theme.base, 1.35) : theme.border
-        Behavior on color { ColorAnimation { duration: 150 } }
-        Behavior on border.color { ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
+        Behavior on border.color { enabled: !card.recycling; ColorAnimation { duration: 150 } }
 
         // Card background click (buttons above get their own clicks)
         MouseArea {
@@ -84,14 +92,14 @@ Item {
                 // image://overlaypreview URL changes only with the picture: cached, decoded off the UI thread,
                 // old picture kept until the new one is ready, scaled once by the provider (32 px steps on resize)
                 asynchronous: true
-                retainWhileLoading: true
+                retainWhileLoading: !card.recycling  // never the picture of the previous row
                 cache: true
                 sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                 smooth: true
                 opacity: card.active ? 1 : 0.5
                 scale: area.containsMouse ? 1.03 : 1
-                Behavior on opacity { NumberAnimation { duration: 180 } }
-                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: 180 } }
+                Behavior on scale { enabled: !card.recycling; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
             }
 
             // Loading: soft pulse where the picture comes
@@ -163,7 +171,7 @@ Item {
                 focusPolicy: Qt.NoFocus
                 opacity: area.containsMouse || hovered || card.current ? 1 : 0
                 visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 140 } }
+                Behavior on opacity { enabled: !card.recycling; NumberAnimation { duration: 140 } }
                 ToolTip.visible: hovered
                 ToolTip.text: i18n.tr("Config")
                 ToolTip.delay: 500

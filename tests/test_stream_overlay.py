@@ -327,6 +327,28 @@ def test_server_routes(server):
     assert get(server.url("/layout"))[0] == 200
 
 
+def test_on_air_only_with_overlay_source(server, monkeypatch):
+    """Spectating kept shown only while a layout or overlay source asks frames, option on, server running"""
+    from tinypedal.setting import cfg
+
+    assert not server.on_air()
+    server.store.touch("layout")
+    assert server.on_air()
+    monkeypatch.setitem(cfg.user.config["stream_overlay"], "show_overlays_while_spectating", False)
+    assert not server.on_air()
+    monkeypatch.setitem(cfg.user.config["stream_overlay"], "show_overlays_while_spectating", True)
+    now = time.monotonic()
+    monkeypatch.setattr(stream_overlay.time, "monotonic", lambda: now + stream_overlay.WATCH_SECONDS)
+    assert not server.on_air()  # source gone a few seconds ago
+
+
+def test_layout_crop_source(server):
+    status, body, _ = get(server.url("/layout", "crop=16:9"))
+    assert status == 200 and b'query.get("crop")' in body and b"entry.x-left" in body
+    status, body, _ = get(server.url("/"))
+    assert b"/layout?token=" in body and b"&amp;crop=16:9" in body
+
+
 def test_server_settings_change(server):
     from tinypedal.setting import cfg
 
@@ -509,6 +531,72 @@ def test_page_backend(page_backend, monkeypatch):
     assert not backend.running and backend.statusText == "Server off"
 
 
+def test_page_layout_format(page_backend, monkeypatch):
+    from tinypedal import i18n
+    from tinypedal.ui.quick import stream_backend
+    from tinypedal.ui.quick.stream_backend import crop_size, load_page_settings
+
+    i18n.set_language("English")
+    assert crop_size(5120, 1440, (16, 9)) == (2560, 1440)
+    assert crop_size(1920, 1080, (16, 9)) == (1920, 1080)
+    assert crop_size(1280, 1024, (16, 9)) == (1280, 720)
+    assert crop_size(0, 0, (16, 9)) == (0, 0)
+    backend = page_backend
+    monkeypatch.setattr(stream_backend.StreamOverlaysBackend, "screen_size", staticmethod(lambda: (5120, 1440)))
+    assert backend.layoutFormatIndex == 0 and backend.layoutUrl.endswith("&crop=16:9")  # 16:9 by default
+    assert backend.layoutSizeText == ("Browser source size: 1920 \u00d7 1080  "
+                                      "(centre 2560 \u00d7 1440 of the screen 5120 \u00d7 1440)")
+    backend.setLayoutFormat(1)
+    assert "crop" not in backend.layoutUrl and backend.layoutSizeText == "Browser source size: 5120 \u00d7 1440"
+    assert load_page_settings()["layout_format"] == "screen"
+    backend.setLayoutFormat(5)  # out of range ignored
+    assert backend.layoutFormatIndex == 1
+    monkeypatch.setattr(stream_backend.StreamOverlaysBackend, "screen_size", staticmethod(lambda: (1920, 1080)))
+    backend.setLayoutFormat(0)
+    assert backend.layoutSizeText == "Browser source size: 1920 \u00d7 1080"  # 16:9 screen: nothing cut
+
+
+def test_page_tells_why_sources_empty(page_backend, monkeypatch):
+    from tinypedal import i18n, realtime_state
+    from tinypedal.setting import cfg
+    from tinypedal.ui.quick.stream_backend import hidden_reason
+
+    i18n.set_language("English")
+    monkeypatch.setattr(realtime_state, "hidden", True)
+    monkeypatch.setattr(realtime_state, "shown", False)
+    rows = [{"visibility": 0, "shown": False}, {"visibility": 2, "shown": True}]  # screen only one not counted
+    assert "while you spectate or watch a replay" in hidden_reason(rows, True)
+    assert "Show overlays while spectating" in hidden_reason(rows, False)
+    assert hidden_reason([{"visibility": 1, "shown": True}], True) == ""
+    assert hidden_reason([{"visibility": 2, "shown": False}], True) == ""  # nothing streamed
+    assert hidden_reason([], True) == ""
+    backend = page_backend
+    assert backend.spectating and "while you spectate" in backend.hiddenText  # test overlays never shown
+    backend.setSpectating(False)
+    assert not cfg.user.config["stream_overlay"]["show_overlays_while_spectating"]
+    assert "Turn on" in backend.hiddenText
+    backend.setSpectating(True)
+    monkeypatch.setattr(realtime_state, "hidden", False)
+    assert "visibility options" in hidden_reason(rows, True) and "visibility options" in backend.hiddenText
+    backend.setEnabled(False)
+    assert backend.hiddenText == ""  # server off: nothing to tell
+
+
+def test_page_overlays_signaled_only_when_changed(page_backend, monkeypatch):
+    from tinypedal.setting import cfg
+
+    told = []
+    page_backend.overlaysChanged.connect(lambda: told.append(page_backend.overlayCount))
+    page_backend.refresh()  # every second while shown: nothing changed
+    page_backend.refresh_overlays()
+    assert told == []
+    count = page_backend.overlayCount
+    enabled = next(name for name in ("gear", "radar") if cfg.user.setting[name]["enable"])
+    monkeypatch.setitem(cfg.user.setting[enabled], "enable", False)
+    page_backend.refresh_overlays()
+    assert told == [count - 1]
+
+
 def test_page_loads(page_backend):
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtQuickWidgets import QQuickWidget
@@ -610,3 +698,21 @@ def test_page_status_in_safe_mode(page_backend, monkeypatch):
         stream_overlay.streamoverlay.enable()
         assert page_backend.statusText.startswith("Port ")
         stream_overlay.streamoverlay.disable()
+
+
+def test_handler_error_logged_unlike_dropped_client(monkeypatch, caplog):
+    """Dropped client stays debug, handler bug logged as warning with traceback (once a minute)"""
+    import logging
+
+    from tinypedal.log_handler import ErrorThrottle
+
+    monkeypatch.setattr(stream_overlay, "request_errors", ErrorThrottle())
+    server = stream_overlay.StreamServer.__new__(stream_overlay.StreamServer)
+    with caplog.at_level(logging.DEBUG, logger=stream_overlay.logger.name):
+        for error in (BrokenPipeError(), TypeError("bug"), TypeError("bug")):
+            try:
+                raise error
+            except Exception:
+                server.handle_error(None, ("127.0.0.1", 1))
+    assert [record.levelno for record in caplog.records] == [logging.DEBUG, logging.WARNING, logging.DEBUG]
+    assert caplog.records[1].exc_info is not None

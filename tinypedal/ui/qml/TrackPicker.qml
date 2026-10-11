@@ -7,17 +7,26 @@ import QtQuick.Layouts
 AbstractButton {
     id: picker
 
-    property string filter: ""
+    property string filter: ""  // search text applied (typing settled)
+    readonly property string current: backend.currentTrack  // read once for every row
     readonly property var shown: {
         var words = filter.toLowerCase().trim()
+        var tracks = backend.tracks  // read once: each read converts the whole list
         var result = []
-        for (var i = 0; i < backend.tracks.length; i++) {
-            var entry = backend.tracks[i]
+        for (var i = 0; i < tracks.length; i++) {
+            var entry = tracks[i]
             if (words === "" || entry.label.toLowerCase().indexOf(words) >= 0) result.push(entry)
         }
         return result
     }
 
+    function applyFilter() {
+        filterTimer.stop()
+        if (filter !== search.text) {
+            filter = search.text
+            list.currentIndex = 0
+        }
+    }
     function choose(entry) {
         popup.close()
         if (entry) backend.selectTrack(entry.key)
@@ -86,8 +95,9 @@ AbstractButton {
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 } }
         onOpened: {
             search.text = ""
+            filterTimer.stop()
             picker.filter = ""
-            list.currentIndex = Math.max(0, picker.shown.findIndex(function(entry) { return entry.key === backend.currentTrack }))
+            list.currentIndex = Math.max(0, picker.shown.findIndex(function(entry) { return entry.key === picker.current }))
             search.forceActiveFocus()
         }
         background: Rectangle {
@@ -105,14 +115,28 @@ AbstractButton {
                 placeholderText: i18n.tr("Search track...")
                 color: theme.text
                 placeholderTextColor: theme.dimText
-                onTextEdited: {
-                    picker.filter = text
-                    list.currentIndex = 0
+                onTextEdited: filterTimer.restart()  // list filtered once typing settles
+                Keys.onDownPressed: {
+                    picker.applyFilter()
+                    list.currentIndex = Math.min(list.currentIndex + 1, list.count - 1)
                 }
-                Keys.onDownPressed: list.currentIndex = Math.min(list.currentIndex + 1, list.count - 1)
-                Keys.onUpPressed: list.currentIndex = Math.max(list.currentIndex - 1, 0)
-                Keys.onReturnPressed: picker.choose(picker.shown[list.currentIndex])
-                Keys.onEnterPressed: picker.choose(picker.shown[list.currentIndex])
+                Keys.onUpPressed: {
+                    picker.applyFilter()
+                    list.currentIndex = Math.max(list.currentIndex - 1, 0)
+                }
+                Keys.onReturnPressed: {
+                    picker.applyFilter()
+                    picker.choose(picker.shown[list.currentIndex])
+                }
+                Keys.onEnterPressed: {
+                    picker.applyFilter()
+                    picker.choose(picker.shown[list.currentIndex])
+                }
+                Timer {
+                    id: filterTimer
+                    interval: 120
+                    onTriggered: picker.applyFilter()
+                }
                 Keys.onEscapePressed: popup.close()
                 background: Rectangle {
                     radius: theme.em * 0.45
@@ -152,7 +176,7 @@ AbstractButton {
                         Text {
                             text: entryItem.modelData.label
                             color: theme.text
-                            font.weight: entryItem.modelData.key === backend.currentTrack ? Font.DemiBold : Font.Normal
+                            font.weight: entryItem.modelData.key === picker.current ? Font.DemiBold : Font.Normal
                             font.italic: entryItem.modelData.key === ""
                             elide: Text.ElideRight
                             Layout.fillWidth: true

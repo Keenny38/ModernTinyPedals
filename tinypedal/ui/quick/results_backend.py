@@ -22,8 +22,9 @@ classification, positions lap by lap, laps of a driver and session events (conta
 limits, chat)
 
 Results files are read in background (about half a second for a hundred files), only new or changed
-files again when the folder changes (session ended while page is open). Row texts are built here
-(app language, user units), QML only lays them out.
+files again when the folder changes (session ended while page is open). Only what the session list needs is
+kept of each file: the session picked is read again in background (last few kept), results are released a
+while after the page is hidden. Row texts are built here (app language, user units), QML only lays them out.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ import json
 import logging
 import os
 import statistics
+from collections import OrderedDict
 from collections.abc import Iterable, Sequence
 from typing import Any, NamedTuple
 
@@ -43,7 +45,9 @@ from ... import calculation as calc
 from ... import units
 from ...i18n import tr
 from ...process import results_file as rf
+from ...process import results_index as ri
 from ...process.results_file import Entry, Event, SessionResult
+from ...process.results_index import FileStamp, SessionInfo, session_info
 from ...process.results_text import (
     MINUS,
     class_color,
@@ -60,7 +64,17 @@ from ...setting import cfg
 from ...userfile import atomic_write
 from ..game_rest import GameRequest
 from ..lap_viewer import localized
-from .game_pictures import brand_logo_url, car_picture_url, notifier, track_logo_url, track_picture_url
+from .background import BackgroundJobs
+from .game_pictures import (
+    LogoCache,
+    brand_logo_url,
+    car_picture_url,
+    light_theme,
+    notifier,
+    track_logo_url,
+    track_picture_url,
+)
+from .lines import VertexStore, Vertices, band, normals
 from .models import DictListModel
 from .replays_backend import clock_minutes, day_text
 
@@ -72,10 +86,14 @@ KIND_CODES = {"Race": "R", "Qualifying": "Q", "Practice": "P", "Warmup": "W"}
 TABS = ("classification", "positions", "laps", "events")
 EVENT_FILTERS = ("", "contact", "penalty", "track_limits", "chat")
 RELOAD_DELAY_MS = 1500  # folder changed: read again once game has written whole file
+KEPT_RESULTS = 5  # full results of sessions picked lately (each one: up to a few MB)
+RELEASE_DELAY_MS = 60_000  # page hidden that long: full results released (read again when shown)
+READ_DELAY_MS = 120  # session picked: read once selection settles (Up / Down held: one read)
+SYNC_CHART_POINTS = 3000  # positions chart built at once up to this many laps, longer races in background
 
 SESSION_ROLES = (
     "key", "title", "course", "code", "kindText", "day", "clock", "cars", "online", "resultText",
-    "resultTone", "detailText", "newest", "trackLogo",
+    "resultTone", "detailText", "newest", "trackLogo", "replay",
 )
 CLASSIFICATION_ROLES = (
     "key", "posText", "gridDelta", "classText", "classPosText", "classColor", "number", "driver", "team",
@@ -112,49 +130,53 @@ def save_page_settings(data: dict[str, Any]):
         json.dump(data, file, indent=1, ensure_ascii=False)
 
 
-# Reading (background)
-class FileStamp(NamedTuple):
-    size: int
-    modified: float
+# Reading (background): files read once for driver stats page too (results_index)
+def as_info(result: SessionResult | SessionInfo) -> SessionInfo:
+    return result if isinstance(result, SessionInfo) else session_info(result)
 
 
 class Loaded(NamedTuple):
     """Results read in background"""
 
     folders: tuple[str, ...]
-    files: dict[str, tuple[FileStamp, SessionResult | None]]  # None: not a results file (yet)
+    files: dict[str, tuple[FileStamp, SessionInfo | None]]  # None: not a results file (yet)
+    full: dict[str, tuple[FileStamp, SessionResult]]  # newest sessions new to page (oldest first)
+    replays: dict[str, ri.ReplayFile]  # replay of sessions (results path: replay saved by game)
 
 
-def file_stamp(path: str) -> FileStamp | None:
-    try:
-        stat = os.stat(path)
-    except OSError:
-        return None
-    return FileStamp(stat.st_size, stat.st_mtime)
+def load_results(folders: Sequence[str], known: dict[str, tuple[FileStamp, SessionInfo | None]]) -> Loaded:
+    """Session list of folders, files unchanged since read (by this page or driver stats) not read again
+
+    Only the list part of each file is kept, with full results of the newest sessions new to the page (shown
+    next): taken from the files read now, else read again (read before by driver stats).
+    """
+    scan = ri.scan_results(folders, keep_full=KEPT_RESULTS)
+    files = {path: (parsed.stamp, parsed.info) for path, parsed in scan.files.items()}
+    fresh = []
+    for path, (stamp, info) in files.items():
+        previous = known.get(path)
+        if info is not None and not (previous is not None and previous[0] == stamp and previous[1] is not None):
+            fresh.append((info.time, path))
+    full: dict[str, tuple[FileStamp, SessionResult]] = {}
+    for _, path in sorted(fresh)[-KEPT_RESULTS:]:
+        stamp, info = files[path]
+        read = scan.full.get(path)
+        if read is not None and read[0] == stamp:
+            full[path] = read
+            continue
+        try:
+            full[path] = (stamp, rf.read_results(path, info.player_names if info is not None else ()))
+        except (OSError, ValueError) as error:  # changed meanwhile: read once picked
+            logger.debug("RACE RESULTS: %s not read: %s", path, error)
+    sessions = [ri.ReplaySession(path, info.track, info.venue, ri.session_code(path) or KIND_CODES.get(info.kind, ""),
+                                 stamp.modified) for path, (stamp, info) in files.items() if info is not None]
+    return Loaded(tuple(folders), files, full, ri.session_replays(sessions))
 
 
-def load_results(folders: Sequence[str], known: dict[str, tuple[FileStamp, SessionResult | None]]) -> Loaded:
-    """Results of folders, files unchanged since last time not read again"""
-    names: list[str] = []
-    for game_folder in rf.find_results_folders().values():  # profile of any game (folder chosen by user)
-        names.extend(rf.profile_player_names(game_folder))
-    files: dict[str, tuple[FileStamp, SessionResult | None]] = {}
-    for folder in folders:
-        folder_names = rf.profile_player_names(folder) or names
-        for path in rf.results_files(folder):
-            stamp = file_stamp(path)
-            if stamp is None:
-                continue
-            previous = known.get(path)
-            if previous is not None and previous[0] == stamp and previous[1] is not None:
-                files[path] = previous
-                continue
-            try:
-                files[path] = (stamp, rf.read_results(path, folder_names))
-            except (OSError, ValueError) as error:  # being written, or not a results file
-                logger.debug("RACE RESULTS: %s not read: %s", path, error)
-                files[path] = (stamp, None)
-    return Loaded(tuple(folders), files)
+def read_session(path: str, stamp: FileStamp, player_names: tuple[str, ...]
+                 ) -> tuple[str, FileStamp, SessionResult]:
+    """Full results of session picked (background)"""
+    return path, stamp, rf.read_results(path, player_names)
 
 
 # Texts
@@ -182,7 +204,7 @@ def length_text(result: SessionResult) -> str:
     return ""
 
 
-def track_subtitle(result: SessionResult) -> str:
+def track_subtitle(result: SessionResult | SessionInfo) -> str:
     """Layout name, or venue when event name is shown"""
     for name in (result.course, result.venue):
         if name and name != result.track:
@@ -190,7 +212,7 @@ def track_subtitle(result: SessionResult) -> str:
     return ""
 
 
-def player_result_text(result: SessionResult, entry: Entry | None) -> tuple[str, str]:
+def player_result_text(result: SessionResult | SessionInfo, entry: Entry | None) -> tuple[str, str]:
     """Result of player for session list: ("P3", tone), ("DNF", "loss"), ("", "") if not in session"""
     if entry is None:
         return "", ""
@@ -198,50 +220,62 @@ def player_result_text(result: SessionResult, entry: Entry | None) -> tuple[str,
         return game_text(entry.status), "loss"
     if entry.position <= 0 or (result.kind != "Race" and entry.best_lap <= 0):
         return "", ""
-    shown = entry.class_position if len(result.classes) > 1 and entry.class_position > 0 else entry.position
+    multiclass = as_info(result).class_count > 1
+    shown = entry.class_position if multiclass and entry.class_position > 0 else entry.position
     tone = "gold" if shown == 1 else "gain" if shown <= 3 else ""
     return f"P{shown}", tone
 
 
-def session_row(result: SessionResult, today: QDate, newest: bool = False) -> dict[str, Any]:
-    player = result.player_entry
-    result_text, tone = player_result_text(result, player)
+def session_row(result: SessionResult | SessionInfo, today: QDate, newest: bool = False, replay: bool = False,
+                logo: str | None = None) -> dict[str, Any]:
+    """Row of session list (logo: circuit logo URL if known already)"""
+    info = as_info(result)
+    player = info.player
+    result_text, tone = player_result_text(info, player)
     if player is None:
-        detail = laps_text(result.most_laps) if result.most_laps else ""
-    elif len(result.classes) > 1:
+        detail = laps_text(info.most_laps) if info.most_laps else ""
+    elif info.class_count > 1:
         detail = player.car_class
     else:
         detail = player.car
     return {
-        "key": result.path,
-        "title": result.track,
-        "course": track_subtitle(result),
-        "code": KIND_CODES.get(result.kind, "?"),
-        "kindText": kind_text(result.kind),
-        "day": day_text(result.time, today),
-        "clock": clock_minutes(result.time) if result.time > 0 else "",
-        "cars": len(result.entries),
-        "online": result.setting == "Multiplayer",
+        "key": info.path,
+        "title": info.track,
+        "course": track_subtitle(info),
+        "code": KIND_CODES.get(info.kind, "?"),
+        "kindText": kind_text(info.kind),
+        "day": day_text(info.time, today),
+        "clock": clock_minutes(info.time) if info.time > 0 else "",
+        "cars": info.cars,
+        "online": info.setting == "Multiplayer",
         "resultText": result_text,
         "resultTone": tone,
         "detailText": detail,
         "newest": newest,
-        "trackLogo": track_logo_url(result.track, result.venue, result.course),
+        "trackLogo": track_logo_url(info.track, info.venue, info.course) if logo is None else logo,
+        "replay": replay,
     }
 
 
-def session_matches(result: SessionResult, kind: str, words: Sequence[str], hide_empty: bool) -> bool:
-    if kind and result.kind != kind:
+def session_text(info: SessionInfo) -> str:
+    """Searched text of a session (casefolded)"""
+    player = info.player
+    return " ".join((
+        info.track, info.venue, info.course, info.server, info.kind, kind_text(info.kind),
+        info.first_class, player.car if player else "", player.car_class if player else "",
+    )).casefold()
+
+
+def session_matches(result: SessionResult | SessionInfo, kind: str, words: Sequence[str], hide_empty: bool,
+                    text: str | None = None) -> bool:
+    """Session shown by filters (text: session_text if known already)"""
+    info = as_info(result)
+    if kind and info.kind != kind:
         return False
-    if hide_empty and result.most_laps <= 0:
+    if hide_empty and info.most_laps <= 0:
         return False
     if words:
-        player = result.player_entry
-        haystack = " ".join((
-            result.track, result.venue, result.course, result.server, result.kind, kind_text(result.kind),
-            *(entry.car_class for entry in result.entries[:1]), player.car if player else "",
-            player.car_class if player else "",
-        )).casefold()
+        haystack = session_text(info) if text is None else text
         return all(word in haystack for word in words)
     return True
 
@@ -252,8 +286,10 @@ def filtered_entries(result: SessionResult, class_filter: str) -> list[tuple[int
             if not class_filter or entry.car_class == class_filter]
 
 
-def classification_rows(result: SessionResult, class_filter: str, selected: str) -> list[dict[str, Any]]:
+def classification_rows(result: SessionResult, class_filter: str, selected: str, logos: LogoCache | None = None
+                        ) -> list[dict[str, Any]]:
     entries = filtered_entries(result, class_filter)
+    brand_logo = logos.brand if logos is not None else brand_logo_url
     if not entries:
         return []
     race = result.kind == "Race"
@@ -298,7 +334,7 @@ def classification_rows(result: SessionResult, class_filter: str, selected: str)
             "penalties": sum(penalties.get(name, 0) for name in names),
             "player": entry.player,
             "selected": str(index) == selected,
-            "brandLogo": brand_logo_url(entry.vehicle, entry.car),
+            "brandLogo": brand_logo(entry.vehicle, entry.car),
         })
     return rows
 
@@ -475,10 +511,21 @@ def driver_options(result: SessionResult, class_filter: str) -> list[dict[str, s
 
 
 # Positions chart
+class ChartView(NamedTuple):
+    """Plot size (px) & line widths the chart lines are built for"""
+
+    width: float
+    height: float
+    thin: float
+    thick: float
+    wide: float
+
+
 def positions_chart(result: SessionResult, class_filter: str) -> dict[str, Any]:
     """Position of each car at end of each lap (class position when a class is picked), grid at lap 0
 
-    Series in classification order: {"key", "name", "number", "color", "player", "points": [[lap, place]]}.
+    Series in classification order: {"key", "name", "number", "color", "player", "points": [[lap, place]],
+    "places": place at each lap from grid (last one known, 0 if none yet)}.
     """
     entries = filtered_entries(result, class_filter)
     laps = max((lap.number for _, entry in entries for lap in entry.laps), default=0)
@@ -506,8 +553,64 @@ def positions_chart(result: SessionResult, class_filter: str) -> dict[str, Any]:
             "color": class_color(entry.car_class),
             "player": entry.player,
             "points": points,
+            "places": place_table(points, laps),
         })
     return {"laps": laps, "places": len(entries), "series": series}
+
+
+def place_table(points: Sequence[Sequence[int]], laps: int) -> list[int]:
+    """Place at each lap (0 to laps): last one known, 0 before first point (hovered car found without a scan)"""
+    table = [0] * (laps + 1)
+    place = following = 0
+    for lap in range(laps + 1):
+        while following < len(points) and points[following][0] <= lap:
+            place = points[following][1]
+            following += 1
+        table[lap] = place
+    return table
+
+
+def chart_lines(chart: dict[str, Any], view: ChartView) -> list[dict[str, Vertices]]:
+    """Line of each series as bands in plot pixels: "thin" (other cars), "thick" (picked or hovered), "wide"
+    (player only), drawn at plot size of view (other sizes: scaled by QML until built again)"""
+    laps, places = chart["laps"], chart["places"]
+    lines = []
+    for series in chart["series"]:
+        points = series["points"]
+        xs = [lap / laps * view.width for lap, _ in points] if laps > 0 else []
+        ys = [(place - 1) / (places - 1) * view.height if places > 1 else view.height / 2 for _, place in points]
+        across = normals(xs, ys)  # pixel space: same width along the line
+        bands = {"thin": band(xs, ys, view.thin / 2, line_normals=across),
+                 "thick": band(xs, ys, view.thick / 2, line_normals=across)}
+        if series["player"]:
+            bands["wide"] = band(xs, ys, view.wide / 2, line_normals=across)
+        lines.append(bands)
+    return lines
+
+
+def lap_count(result: SessionResult) -> int:
+    """Laps of every car: chart points of a race"""
+    return sum(len(entry.laps) for entry in result.entries)
+
+
+def series_points(chart: dict[str, Any]) -> int:
+    return sum(len(series["points"]) for series in chart["series"])
+
+
+class BuiltChart(NamedTuple):
+    """Positions chart built in background: serial asked, series with points, lines for view (None if no view)"""
+
+    serial: int
+    series: dict[str, Any]
+    view: ChartView | None
+    lines: list[dict[str, Vertices]] | None
+
+
+def build_chart(serial: int, result: SessionResult, class_filter: str, view: ChartView | None) -> BuiltChart:
+    """Positions chart & its lines (background: long races)"""
+    chart = positions_chart(result, class_filter)
+    lines = chart_lines(chart, view) if view is not None and chart["series"] else None
+    return BuiltChart(serial, chart, view, lines)
 
 
 # Events
@@ -540,11 +643,12 @@ def merged_contacts(events: Iterable[Event]) -> list[Event]:
     return merged
 
 
-def event_rows(result: SessionResult, kind: str, only: set[str], highlight: set[str]) -> list[dict[str, Any]]:
+def event_rows(result: SessionResult, kind: str, only: set[str], highlight: set[str],
+               merged: Sequence[Event] | None = None) -> list[dict[str, Any]]:
     """Session events, filtered by kind ("" every kind) and drivers (empty: everyone), events of highlight
-    drivers (player) marked"""
+    drivers (player) marked (merged: merged_contacts of session if known already)"""
     rows = []
-    for number, event in enumerate(merged_contacts(result.events)):
+    for number, event in enumerate(merged_contacts(result.events) if merged is None else merged):
         if kind and event.kind != kind:
             continue
         if only and not event_mine(event, only):
@@ -576,9 +680,9 @@ def event_rows(result: SessionResult, kind: str, only: set[str], highlight: set[
     return rows
 
 
-def event_counts(result: SessionResult) -> list[int]:
+def event_counts(result: SessionResult, merged: Sequence[Event] | None = None) -> list[int]:
     """Event count of each filter (all, contacts...)"""
-    events = merged_contacts(result.events)
+    events = merged_contacts(result.events) if merged is None else merged
     counts = [len(events)]
     counts.extend(sum(1 for event in events if event.kind == kind) for kind in EVENT_FILTERS[1:])
     return counts
@@ -609,12 +713,19 @@ class RaceResultsBackend(QObject):
         self.event_mine = bool(settings.get("event_mine", False))
         self.search = ""
         self.folders: tuple[str, ...] = ()
-        self.files: dict[str, tuple[FileStamp, SessionResult | None]] = {}
-        self.sessions: list[SessionResult] = []
+        self.files: dict[str, tuple[FileStamp, SessionInfo | None]] = {}
+        self.replays: dict[str, ri.ReplayFile] = {}  # replay of sessions (results path: replay)
+        self.pending_path = ""  # session to show once files read (driver stats page)
+        self.sessions: list[SessionInfo] = []
+        self._infos: dict[str, SessionInfo] = {}  # session of path
         self.loading = False
         self.loaded_once = False
-        self.selected_key = ""
-        self.result: SessionResult | None = None
+        self.selected_key = ""  # session picked in list
+        self.shown_key = ""  # session shown (picked one being read meanwhile)
+        self.reading = ""  # session picked being read in background
+        self.result: SessionResult | None = None  # released while page hidden a while (shown again when read)
+        self.kept: OrderedDict[str, tuple[FileStamp, SessionResult]] = OrderedDict()  # last sessions shown
+        self.is_race = False
         self.class_filter = ""
         self.selected_entry = ""
         self.header: dict[str, Any] = {}
@@ -623,20 +734,43 @@ class RaceResultsBackend(QObject):
         self.lap_summary: list[dict[str, str]] = []
         self.lap_columns: dict[str, bool] = {"usage": False, "wear": False}
         self.drivers: list[dict[str, str]] = []
+        self.driver_pictures: tuple[str, str] = ("", "")  # brand logo & car picture of car picked
         self.chart: dict[str, Any] = {"laps": 0, "places": 0, "series": []}
+        self.chart_series: dict[str, Any] = self.chart  # with line points (chart has places & line keys)
+        self.chart_view: ChartView | None = None
         self.counts: list[int] = [0] * len(EVENT_FILTERS)
+        self.prefix = f"race_results_{id(self)}|"
         self._shown = False
+        self._released = False
+        self._pictures_stale = False  # logos fetched while hidden: rows built again once shown
+        self.logos = LogoCache()  # car brand logos looked for once per name
+        self._rows: dict[str, tuple[tuple, dict[str, Any]]] = {}  # session list row of path: built for, row
+        self._texts: dict[str, tuple[SessionInfo, str]] = {}  # searched text of path: info, text
+        self._events: tuple[SessionResult | None, list[Event], list[int]] = (None, [], [])  # merged & counts
+        self._read_path = ""  # session read running (one at a time), "" if none
+        self._chart_serial = 0  # chart asked last (charts built in background for long races)
+        self._lines_serial = 0
+        ri.hold_files()  # results files read once for driver stats page too
         self._session_model = DictListModel(SESSION_ROLES, self)
         self._classification_model = DictListModel(CLASSIFICATION_ROLES, self)
         self._lap_model = DictListModel(LAP_ROLES, self)
         self._event_model = DictListModel(EVENT_ROLES, self)
         self.request = GameRequest(self, (), self.received, self.load_failed)
+        self._jobs = BackgroundJobs(self, "Race results")
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self.folder_changed)
         self._reload_timer = QTimer(self)
         self._reload_timer.setSingleShot(True)
         self._reload_timer.setInterval(RELOAD_DELAY_MS)
         self._reload_timer.timeout.connect(self.reload)
+        self._release_timer = QTimer(self)
+        self._release_timer.setSingleShot(True)
+        self._release_timer.setInterval(RELEASE_DELAY_MS)
+        self._release_timer.timeout.connect(self.release_results)
+        self._read_timer = QTimer(self)
+        self._read_timer.setSingleShot(True)
+        self._read_timer.setInterval(READ_DELAY_MS)
+        self._read_timer.timeout.connect(self.start_read)
         notifier().changed.connect(self.pictures_changed)
 
     @staticmethod
@@ -647,15 +781,34 @@ class RaceResultsBackend(QObject):
     def page_shown(self):
         """Results read at once, again when folder changes while shown"""
         self._shown = True
+        self._release_timer.stop()
         self.reload()
 
     def page_hidden(self):
         self._shown = False
         self._reload_timer.stop()
         self.watch(())
+        self._release_timer.start()
 
     def release(self):
         self.page_hidden()
+        self._release_timer.stop()
+        self.release_results()
+        if not self._released:
+            self._released = True
+            ri.release_files()
+
+    @Slot()
+    def release_results(self):
+        """Full results released (page hidden a while): rows kept as they are, session read again once shown"""
+        self.kept.clear()
+        self.result = None
+        self.reading = ""
+        self._read_timer.stop()
+        self._events = (None, [], [])
+        self._chart_serial += 1  # chart being built dropped
+        self._lines_serial += 1
+        VertexStore.remove_prefix(self.prefix)
 
     def save_settings(self):
         save_page_settings({
@@ -673,14 +826,26 @@ class RaceResultsBackend(QObject):
 
     @Slot()
     def pictures_changed(self):
-        """Logos & pictures fetched from game meanwhile: rows built again"""
+        """Logos & pictures fetched from game meanwhile: rows built again, views told only what changed
+        (page hidden: once shown)"""
+        if not self._shown:
+            self._pictures_stale = True
+            return
+        self._pictures_stale = False
         if self.sessions:
-            self.refresh_list()
+            self._rows = {}  # logos fetched or made meanwhile: rows built again
+            self.refresh_list(always=False)
         if self.result is not None:
-            self.header = session_header(self.result)
-            self.selectionChanged.emit()
-            self.refresh_classification()
-            self.driverChanged.emit()
+            header = self.session_header(self.result)
+            if header != self.header:
+                self.header = header
+                self.selectionChanged.emit()
+            self.refresh_classification(keep_rows=True)
+            entry = self.entry()
+            pictures = (self.logos.brand(entry.vehicle, entry.car), car_picture_url(entry.vehicle)) if entry else ("", "")
+            if pictures != self.driver_pictures:
+                self.driver_pictures = pictures
+                self.driverChanged.emit()
 
     # Reading
     @Slot()
@@ -702,21 +867,36 @@ class RaceResultsBackend(QObject):
         """Reading ended by an unexpected error (logged): page stops waiting"""
         self.loading = False
         self.loadingChanged.emit()
+        if self._pictures_stale:
+            self.pictures_changed()
 
     def received(self, loaded: Loaded):
         newest_selected = bool(self.sessions) and self.selected_key == self.sessions[0].path
         self.loading = False
         self.loaded_once = True
+        self._pictures_stale = False  # rows & session built again below
         self.folders = loaded.folders
         self.files = loaded.files
-        self.sessions = sorted((result for _, result in loaded.files.values() if result is not None),
-                               key=lambda result: (result.time, result.path), reverse=True)
+        self.replays = loaded.replays
+        self.sessions = sorted((info for _, info in loaded.files.values() if info is not None),
+                               key=lambda info: (info.time, info.path), reverse=True)
+        for path, (stamp, result) in loaded.full.items():  # newest last: kept longest
+            self.keep(path, stamp, result)
+        for path in [path for path, (stamp, _) in self.kept.items() if self.stamp_of(path) != stamp]:
+            del self.kept[path]  # file changed or gone
+        self._rows = {path: row for path, row in self._rows.items() if path in self.files}
+        self._texts = {path: text for path, text in self._texts.items() if path in self.files}
+        self._infos = {info.path: info for info in self.sessions}
         if self._shown:
             self.watch(self.folders)
         self.loadingChanged.emit()
         self.refresh_list()
+        if self.pending_path:
+            path, self.pending_path = self.pending_path, ""
+            if self.show_path(path):
+                return
         shown = self.shown_sessions()
-        keys = {result.path for result in shown}
+        keys = {info.path for info in shown}
         if newest_selected and shown:  # new session ended while newest one was shown: show new one
             self.select(shown[0].path)
         elif self.selected_key in keys:
@@ -726,17 +906,57 @@ class RaceResultsBackend(QObject):
         else:
             self.select("")
 
-    def shown_sessions(self) -> list[SessionResult]:
+    def stamp_of(self, path: str) -> FileStamp | None:
+        known = self.files.get(path)
+        return known[0] if known is not None else None
+
+    def keep(self, path: str, stamp: FileStamp, result: SessionResult):
+        """Full results of a session kept (last ones shown only)"""
+        self.kept[path] = (stamp, result)
+        self.kept.move_to_end(path)
+        while len(self.kept) > KEPT_RESULTS:
+            self.kept.popitem(last=False)
+
+    def kept_result(self, path: str) -> SessionResult | None:
+        """Full results kept of a session, None if not kept or file changed since"""
+        kept = self.kept.get(path)
+        if kept is None or kept[0] != self.stamp_of(path):
+            return None
+        self.kept.move_to_end(path)
+        return kept[1]
+
+    def session_text(self, info: SessionInfo) -> str:
+        """Searched text of session, made once per file read"""
+        known = self._texts.get(info.path)
+        if known is None or known[0] is not info:
+            known = self._texts[info.path] = (info, session_text(info))
+        return known[1]
+
+    def shown_sessions(self) -> list[SessionInfo]:
         kind = KIND_FILTERS[self.kind_filter]
         words = [word for word in self.search.casefold().split() if word]
-        return [result for result in self.sessions if session_matches(result, kind, words, self.hide_empty)]
+        return [info for info in self.sessions
+                if session_matches(info, kind, words, self.hide_empty, self.session_text(info) if words else "")]
 
-    def refresh_list(self):
+    def refresh_list(self, always: bool = True):
+        """List rows, sessionsChanged told always (counts, folders) or only when rows changed
+
+        Rows built once per file read, day & logos (typing a search only filters them).
+        """
         today = QDate.currentDate()
+        light = light_theme()
         newest = self.sessions[0].path if self.sessions else ""
-        self._session_model.sync([session_row(result, today, result.path == newest)
-                                  for result in self.shown_sessions()])
-        self.sessionsChanged.emit()
+        rows = []
+        for info in self.shown_sessions():
+            built_for = (info, today.toJulianDay(), light, info.path == newest, info.path in self.replays)
+            known = self._rows.get(info.path)
+            if known is None or known[0] != built_for:
+                logo = self.logos.track(info.track, info.venue) or (self.logos.track(info.course) if info.course else "")
+                known = self._rows[info.path] = (built_for, session_row(info, today, built_for[3], built_for[4], logo))
+            rows.append(known[1])
+        changed = self._session_model.sync(rows)
+        if changed or always:
+            self.sessionsChanged.emit()
 
     # Session list
     @Property(QObject, constant=True)
@@ -804,7 +1024,7 @@ class RaceResultsBackend(QObject):
         self.filterChanged.emit()
         self.refresh_list()
         shown = self._session_model.rows
-        if shown and self.selected_key not in {row["key"] for row in shown}:
+        if shown and self._session_model.index_of(self.selected_key) < 0:
             self.select(shown[0]["key"])
 
     @Slot(int, result=int)
@@ -813,7 +1033,7 @@ class RaceResultsBackend(QObject):
         rows = self._session_model.rows
         if not rows:
             return -1
-        current = next((number for number, row in enumerate(rows) if row["key"] == self.selected_key), -1)
+        current = self._session_model.index_of(self.selected_key) if self.selected_key else -1
         target = min(max(current + step, 0), len(rows) - 1) if current >= 0 else 0
         self.select(rows[target]["key"])
         return target
@@ -842,6 +1062,44 @@ class RaceResultsBackend(QObject):
             self.save_settings()
             self.reload()
 
+    def open_path(self, path: str):
+        """Session of results file shown (driver stats page): at once if read, else once files are read"""
+        if self.loaded_once and not self.loading and self.show_path(path):
+            return
+        self.pending_path = path
+        if not self.loading:
+            self.reload()
+
+    def show_path(self, path: str) -> bool:
+        """Session of results file shown, filters that hide it cleared, False if not a session of the list"""
+        wanted = os.path.normcase(os.path.normpath(path))
+        info = next((info for info in self.sessions if os.path.normcase(os.path.normpath(info.path)) == wanted), None)
+        if info is None:
+            return False
+        if info not in self.shown_sessions():
+            self.kind_filter, self.search, self.hide_empty = 0, "", False
+            self.filter_changed(save=False)  # filters of user kept for next time
+        self.select(info.path)
+        return True
+
+    def session_header(self, result: SessionResult) -> dict[str, Any]:
+        """Header of session, with its replay (LMU: watched from game replays page)"""
+        replay = self.replays.get(result.path)
+        return {**session_header(result), "replay": replay.name if replay is not None and result.game == "LMU" else ""}
+
+    @Slot()
+    def watchReplay(self):
+        """Replay of session shown opened in game, from game replays page (game state, confirmation, controls)"""
+        name = self.header.get("replay", "")
+        if not name:
+            return
+        from ..tools_view import open_tool
+
+        page = open_tool("game_replays.GameReplays", self.parent())
+        backend = getattr(page, "backend", None)
+        if backend is not None:
+            backend.watch_named(name)
+
     # Selected session
     @Property(str, notify=selectionChanged)
     def selectedKey(self) -> str:
@@ -849,7 +1107,7 @@ class RaceResultsBackend(QObject):
 
     @Property(bool, notify=selectionChanged)
     def hasSession(self) -> bool:
-        return self.result is not None
+        return bool(self.shown_key)
 
     @Property(dict, notify=selectionChanged)
     def sessionHeader(self) -> dict:
@@ -869,16 +1127,77 @@ class RaceResultsBackend(QObject):
 
     @Property(bool, notify=selectionChanged)
     def isRace(self) -> bool:
-        return self.result is not None and self.result.kind == "Race"
+        return self.is_race
 
     @Slot(str)
     def select(self, key: str, force: bool = False):
-        if key == self.selected_key and not force and (self.result is not None or not key):
+        """Session shown: at once if kept, else once read in background (session shown before stays meanwhile)"""
+        if key == self.selected_key and not force and (self.result is not None or not key or self.reading == key):
             return
-        result = next((session for session in self.sessions if session.path == key), None)
-        changed_session = key != self.selected_key
-        self.selected_key = key if result is not None else ""
+        info = self._infos.get(key)
+        stamp = self.stamp_of(key)
+        if info is None or stamp is None:
+            self.show_session("", None)
+            return
+        result = self.kept_result(key)
+        if result is not None:
+            self.show_session(key, result)
+            return
+        self.reading = key
+        if key != self.selected_key:
+            self.selected_key = key
+            self.selectionChanged.emit()
+        self._read_timer.start()  # selection moving (keys held): read once it settles
+
+    @Slot()
+    def start_read(self):
+        """Session picked read in background, once the running read (if any) is over: one read at a time"""
+        key = self.reading
+        if not key or self._read_path or self._released:
+            return
+        info, stamp = self._infos.get(key), self.stamp_of(key)
+        if info is None or stamp is None:
+            return
+        self._read_path = key
+        names = info.player_names
+        self._jobs.run("read session", lambda: read_session(key, stamp, names), self.session_read,
+                       self.session_failed)
+
+    def session_read(self, answer: tuple[str, FileStamp, SessionResult]):
+        path, stamp, result = answer
+        self._read_path = ""
+        if self.stamp_of(path) == stamp and (self._shown or path == self.reading):
+            self.keep(path, stamp, result)  # session passed by kept too: shown at once if picked again
+        if path != self.reading:  # other session picked meanwhile
+            if self.reading and not self._read_timer.isActive():
+                self.start_read()
+            return
+        self.reading = ""
+        self.show_session(path, result)
+
+    def session_failed(self, error: BaseException):
+        """File gone or being written (read again once folder changes), not a results file, or bug"""
+        path, self._read_path = self._read_path or self.reading, ""
+        if isinstance(error, OSError):
+            logger.debug("RACE RESULTS: %s not read: %s", path, error)
+        elif isinstance(error, ValueError):  # not a results file (or written meanwhile)
+            logger.info("RACE RESULTS: %s not read: %s", path, error)
+        else:
+            logger.warning("RACE RESULTS: %s not read", path, exc_info=(type(error), error, error.__traceback__))
+        if not self.reading:
+            return
+        if path == self.reading:
+            self.reading = ""
+            self.show_session("", None)
+        elif not self._read_timer.isActive():
+            self.start_read()  # other session picked meanwhile
+
+    def show_session(self, key: str, result: SessionResult | None):
+        self.reading = ""
+        changed_session = key != self.shown_key
+        self.selected_key = self.shown_key = key if result is not None else ""
         self.result = result
+        self.is_race = result is not None and result.kind == "Race"
         if changed_session or result is None:
             self.class_filter = ""
             player = result.player_entry if result is not None else None
@@ -892,8 +1211,9 @@ class RaceResultsBackend(QObject):
             self.class_filter = ""
         if result is None:
             self.header, self.tiles, self.classes = {}, [], []
+            self._events = (None, [], [])
         else:
-            self.header = session_header(result)
+            self.header = self.session_header(result)
             self.tiles = summary_tiles(result)
             self.classes = class_chips(result)
             if not self.selected_entry or int(self.selected_entry) >= len(result.entries):
@@ -919,10 +1239,14 @@ class RaceResultsBackend(QObject):
                 self.selected_entry = str(first[0][0]) if first else ""
         self.refresh_session()
 
-    def refresh_classification(self):
-        rows = classification_rows(self.result, self.class_filter, self.selected_entry) if self.result else []
-        self._classification_model.reset(rows)
-        self.classificationChanged.emit()
+    def refresh_classification(self, keep_rows: bool = False):
+        """Rows made again (reset: other session or filter), or rows changed in place (logos fetched)"""
+        rows = classification_rows(self.result, self.class_filter, self.selected_entry, self.logos) if self.result else []
+        if not keep_rows:
+            self._classification_model.reset(rows)
+            self.classificationChanged.emit()
+        elif self._classification_model.sync(rows):
+            self.classificationChanged.emit()
 
     @Property(QObject, constant=True)
     def classificationModel(self) -> QObject:
@@ -949,7 +1273,7 @@ class RaceResultsBackend(QObject):
             "drivers": ", ".join(names) if len(names) > 1 else "",
             "player": entry.player,
             "aids": entry.aids,
-            "brandLogo": brand_logo_url(entry.vehicle, entry.car),
+            "brandLogo": self.logos.brand(entry.vehicle, entry.car),
             "carPicture": car_picture_url(entry.vehicle),
         }
 
@@ -1003,6 +1327,8 @@ class RaceResultsBackend(QObject):
         rows = lap_rows(result, entry) if entry is not None and result is not None else []
         self.lap_summary = lap_stats(result, entry) if entry is not None and result is not None else []
         self.lap_columns = {"usage": any(row["usageText"] for row in rows), "wear": any(row["wearText"] for row in rows)}
+        self.driver_pictures = ((self.logos.brand(entry.vehicle, entry.car), car_picture_url(entry.vehicle))
+                                if entry is not None else ("", ""))
         self._lap_model.reset(rows)
         self.driverChanged.emit()
         self.lapsChanged.emit()
@@ -1013,10 +1339,78 @@ class RaceResultsBackend(QObject):
         return self.chart
 
     def refresh_chart(self):
+        """Chart of session (QML: places table & line keys of each series), lines built for plot size
+
+        Long races (endurance: thousands of laps) built in background, chart empty meanwhile.
+        """
         result = self.result
-        self.chart = (positions_chart(result, self.class_filter) if result is not None and result.kind == "Race"
-                      else {"laps": 0, "places": 0, "series": []})
+        self._chart_serial += 1
+        if result is None or result.kind != "Race" or lap_count(result) <= SYNC_CHART_POINTS:
+            self.set_chart(positions_chart(result, self.class_filter) if result is not None and result.kind == "Race"
+                           else {"laps": 0, "places": 0, "series": []})
+            return
+        serial, class_filter, view = self._chart_serial, self.class_filter, self.chart_view
+        self.set_chart({"laps": 0, "places": 0, "series": []})
+        self._jobs.run("positions chart", lambda: build_chart(serial, result, class_filter, view), self.chart_built,
+                       key="chart")
+
+    def chart_built(self, built: BuiltChart):
+        if built.serial != self._chart_serial:
+            return  # other session or class picked meanwhile
+        self.set_chart(built.series, built.lines if built.view == self.chart_view else None)
+
+    def set_chart(self, chart_series: dict[str, Any], lines: list[dict[str, Vertices]] | None = None):
+        """Chart shown: series with points, lines built for chart view already (else built here)"""
+        self.chart_series = chart_series
+        chart = dict(self.chart_series)
+        chart["series"] = [{
+            "key": series["key"], "name": series["name"], "number": series["number"], "color": series["color"],
+            "player": series["player"], "places": series["places"],
+            "last": series["points"][-1] if series["points"] else [],
+            "thin": f"{self.prefix}thin{number}", "thick": f"{self.prefix}thick{number}",
+            "wide": f"{self.prefix}wide{number}" if series["player"] else "",
+        } for number, series in enumerate(self.chart_series["series"])]
+        self.chart = chart
+        self.build_chart_lines(lines)
         self.chartChanged.emit()
+
+    @Slot(float, float, float, float, float)
+    def setChartView(self, width: float, height: float, thin: float, thick: float, wide: float):
+        """Plot size & line widths of positions chart settled (resize, zoom): lines built again for them"""
+        view = ChartView(width, height, thin, thick, wide)
+        if view != self.chart_view and width >= 1 and height >= 1:
+            self.chart_view = view
+            self.build_chart_lines()
+
+    def build_chart_lines(self, lines: list[dict[str, Vertices]] | None = None):
+        """Lines of chart for chart view: at once, in background for long races (lines kept meanwhile:
+        scaled by QML)"""
+        view = self.chart_view
+        self._lines_serial += 1
+        if view is None or not self.chart_series["series"]:
+            VertexStore.remove_prefix(self.prefix)
+            return
+        if lines is None:
+            if series_points(self.chart_series) > SYNC_CHART_POINTS:
+                serial, chart_series = self._lines_serial, self.chart_series
+                self._jobs.run("chart lines", lambda: (serial, view, chart_lines(chart_series, view)),
+                               self.lines_built, key="chart lines")
+                return
+            lines = chart_lines(self.chart_series, view)
+        self.store_lines(lines)
+
+    def lines_built(self, built: tuple[int, ChartView, list[dict[str, Vertices]]]):
+        serial, view, lines = built
+        if serial == self._lines_serial and view == self.chart_view:
+            self.store_lines(lines)
+
+    def store_lines(self, lines: list[dict[str, Vertices]]):
+        keys = []
+        for series, bands in zip(self.chart["series"], lines):
+            for kind, vertices in bands.items():
+                VertexStore.set(series[kind], vertices)
+                keys.append(series[kind])
+        VertexStore.retain(self.prefix, keys)
 
     # Events
     @Property(QObject, constant=True)
@@ -1060,9 +1454,16 @@ class RaceResultsBackend(QObject):
             only = set(driver_names(entry)) if self.event_mine and entry is not None else set()
             player = result.player_entry
             highlight = set(driver_names(player)) if player is not None else set()
-            self.counts = event_counts(result)
-            self._event_model.reset(event_rows(result, EVENT_FILTERS[self.event_filter], only, highlight))
+            merged, self.counts = self.session_events(result)
+            self._event_model.reset(event_rows(result, EVENT_FILTERS[self.event_filter], only, highlight, merged))
         self.eventsChanged.emit()
+
+    def session_events(self, result: SessionResult) -> tuple[list[Event], list[int]]:
+        """Events of session with contacts merged & count of each filter, made once per session shown"""
+        if self._events[0] is not result:
+            merged = merged_contacts(result.events)
+            self._events = (result, merged, event_counts(result, merged))
+        return self._events[1], self._events[2]
 
     # Tabs
     @Property(int, notify=tabChanged)

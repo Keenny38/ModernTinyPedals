@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QImage, QRegion
 from PySide6.QtWidgets import QWidget
 
 from tests.test_widget_benchmark import fill_field
+from tinypedal import realtime_state
 from tinypedal.module_info import minfo
 from tinypedal.setting import cfg
 from tinypedal.widget._modern import create_widget
@@ -408,8 +409,9 @@ def test_spotter_draws_only_with_car_alongside(field, monkeypatch, modern):
     assert not is_blank(grab(widget))
 
 
-def test_spotter_preview_while_unlocked(field):
+def test_spotter_preview_in_edit_mode(field, monkeypatch):
     cfg.overlay["fixed_position"] = False
+    monkeypatch.setattr(realtime_state, "editing", True)
     widget = make("spotter", True)
     widget.preview_toggled(False)
     assert not is_blank(grab(widget))
@@ -499,10 +501,17 @@ def test_race_notifications_queue(field, monkeypatch, modern, layout):
     widget.deleteLater()
 
 
-def test_race_notifications_preview(field):
+def test_race_notifications_preview(field, monkeypatch):
+    """Sample notifications in edit mode only: never while merely unlocked (would pass for real ones in game)"""
     cfg.overlay["fixed_position"] = False
     for modern in (True, False):
-        assert not is_blank(grab(make("race_notifications", modern)))
+        widget = make("race_notifications", modern)
+        widget.overlay_started = True  # live overlay: no picture sample before first update
+        widget.adjustSize()
+        assert is_blank(snapshot(widget))
+        monkeypatch.setattr(realtime_state, "editing", True)
+        assert not is_blank(grab(widget))
+        monkeypatch.setattr(realtime_state, "editing", False)
 
 
 # Tyre temperature trend
@@ -552,7 +561,8 @@ def test_tyre_temp_trend_charts(field, monkeypatch, modern):
 @pytest.mark.parametrize("modern", [True, False], ids=["modern", "classic"])
 @pytest.mark.parametrize("name", NEW_WIDGETS)
 def test_new_widgets_render_empty_and_extreme(ui_env, bundled_fonts, monkeypatch, name, modern):
-    cfg.overlay["fixed_position"] = False  # unlocked: hidden widgets drawn too
+    cfg.overlay["fixed_position"] = False  # edit mode: hidden widgets drawn too
+    monkeypatch.setattr(realtime_state, "editing", True)
     widget = make(name, modern)
     frames(widget)
     assert not is_blank(grab(widget)), "empty data"

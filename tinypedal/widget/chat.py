@@ -19,8 +19,9 @@
 """
 Chat Widget
 
-Chat messages of game (LMU Rest API), newest at bottom, long messages wrapped, each message
-hidden some seconds after it was sent, newest messages highlighted a moment.
+Chat messages of game (LMU Rest API), newest at bottom (or at top), long messages wrapped, each message
+hidden some seconds after it was sent (also while not driving: overlay updates paused), newest
+messages highlighted a moment.
 """
 
 from __future__ import annotations
@@ -28,24 +29,41 @@ from __future__ import annotations
 import textwrap
 from time import localtime, strftime, time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from ..api_control import api
 from ._base import Overlay
 
 MAX_LINES = 20
+EXPIRE_MS = 250  # messages hidden at end of display duration checked at this interval while updates are paused
+# Sample conversation of overlay pictures & placement in edit mode: (seconds ago, message), player SAMPLE_PLAYER
+SAMPLE_PLAYER = "L. Garnier"
+SAMPLE_MESSAGES = (
+    (26.0, "Race Control: Full course yellow in sector 2"),
+    (19.0, "M. Laurent: sorry for the contact at turn 1"),
+    (13.0, f"{SAMPLE_PLAYER}: no worries, have a good race"),
+    (7.0, "J. Hartmann: letting you by on the straight"),
+    (2.0, "N. Fischer joined the session"),
+)
+
+
+def sample_messages(now: float) -> tuple[tuple[float, str], ...]:
+    """Sample conversation as game messages (Unix time, text), oldest first"""
+    return tuple((now - age, text) for age, text in SAMPLE_MESSAGES)
 
 
 def chat_lines(messages, now: float, line_width: int, line_count: int, max_duration: float,
-               new_duration: float, show_time: bool) -> tuple[tuple[str, bool], ...]:
-    """Lines shown (text, newly sent), oldest at top, newest messages kept when lines run out
+               new_duration: float, show_time: bool, newest_at_top: bool = False) -> tuple[tuple[str, bool], ...]:
+    """Lines shown (text, newly sent), oldest at top (newest at top if newest_at_top), newest messages kept
+    when lines run out (lines of a message always in reading order)
 
     Args:
         messages: (Unix time, text) of each message, oldest first.
         max_duration: seconds a message stays shown, 0 or less: always.
         new_duration: seconds a message is highlighted after sent.
     """
-    lines: list[tuple[str, bool]] = []
+    blocks: list[list[tuple[str, bool]]] = []  # newest message first
+    total = 0
     for sent, text in reversed(messages):
         age = now - sent
         if 0 < max_duration < age:
@@ -54,10 +72,20 @@ def chat_lines(messages, now: float, line_width: int, line_count: int, max_durat
             text = f"{strftime('%H:%M', localtime(sent))} {text}"
         wrapped = textwrap.wrap(text, line_width) or [""]
         is_new = age < new_duration
-        lines[:0] = [(line, is_new) for line in wrapped]
-        if len(lines) >= line_count:
+        blocks.append([(line, is_new) for line in wrapped])
+        total += len(wrapped)
+        if total >= line_count:
             break
-    return tuple(lines[-line_count:])
+    return stack_blocks(blocks, line_count, newest_at_top)
+
+
+def stack_blocks(blocks: list[list], line_count: int, newest_at_top: bool) -> tuple:
+    """Lines of messages (blocks, newest first) in shown order, oldest message cut when lines run out:
+    its first lines dropped at top (newest at bottom), its last lines dropped at bottom (newest at top)"""
+    if newest_at_top:
+        return tuple(line for block in blocks for line in block)[:line_count]
+    lines = tuple(line for block in reversed(blocks) for line in block)
+    return lines[-line_count:] if line_count else ()
 
 
 class Realtime(Overlay):
@@ -85,6 +113,7 @@ class Realtime(Overlay):
         self.max_duration = float(self.wcfg["maximum_display_duration"])
         self.new_duration = max(float(self.wcfg["new_message_duration"]), 0.0)
         self.show_time = bool(self.wcfg["show_message_time"])
+        self.newest_at_top = self.wcfg["scroll_direction"] == "Downward"
         self.color_message = self.wcfg["font_color_message"]
         self.color_new_message = self.wcfg["font_color_new_message"]
         time_width = 6 if self.show_time else 0  # "12:34 " before message
@@ -107,25 +136,60 @@ class Realtime(Overlay):
 
         # Last data
         self.last_lines: tuple = ()
+        self.last_messages: tuple = ()  # kept hidden at end of display duration while updates are paused
+        self._expire_timer = QTimer(self)
+        self._expire_timer.setInterval(EXPIRE_MS)
+        self._expire_timer.timeout.connect(self.expire)
+
+    def show_sample(self):
+        """Sample conversation (overlay pictures)"""
+        lines = chat_lines(sample_messages(time()), time(), self.line_width, self.line_count, 0.0,
+                           self.new_duration, self.show_time, self.newest_at_top)
+        self.last_lines = lines
+        self.update_lines(lines)
 
     def timerEvent(self, event):
         """Update when vehicle on track"""
+        self._expire_timer.stop()
+        self.last_messages = api.read.session.chat_messages()
+        self.show_lines(self.last_messages)
+
+    def stop(self):
+        """Stop and close widget: fading out stopped too (started by update pause while stopping)"""
+        timer = self._expire_timer
+        super().stop()
+        timer.stop()
+
+    def post_update(self):
+        """Overlay updates paused (not driving): messages shown still hidden at end of display duration"""
+        if self.last_lines and self.max_duration > 0:
+            self._expire_timer.start()
+
+    def expire(self):
+        """Messages shown read again at current time (updates paused), stopped once none left"""
+        self.show_lines(self.last_messages)
+        if not self.last_lines:
+            self._expire_timer.stop()
+
+    def show_lines(self, messages):
+        """Lines of messages at current time, shown if changed"""
         lines = chat_lines(
-            api.read.session.chat_messages(), time(), self.line_width, self.line_count,
-            self.max_duration, self.new_duration, self.show_time)
+            messages, time(), self.line_width, self.line_count,
+            self.max_duration, self.new_duration, self.show_time, self.newest_at_top)
         if lines != self.last_lines:
             self.last_lines = lines
             self.update_lines(lines)
 
     # GUI update methods
     def update_lines(self, lines: tuple[tuple[str, bool], ...]):
-        """Lines filled from bottom, unused lines hidden"""
-        unused = self.line_count - len(lines)
+        """Lines filled from bottom (from top if newest at top), unused lines hidden"""
+        unused = 0 if self.newest_at_top else self.line_count - len(lines)
         for index, bar in enumerate(self.bars):
-            if index < unused:
+            line = index - unused
+            if not 0 <= line < len(lines):
                 bar.hide()
                 continue
-            text, is_new = lines[index - unused]
+            text, is_new = lines[line]
             bar.text = f" {text}"
             bar.fg = self.color_new_message if is_new else self.color_message
             bar.show()

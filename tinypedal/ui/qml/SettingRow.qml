@@ -37,19 +37,32 @@ Item {
     function flash() {
         flashAnimation.restart()
     }
-    function holdsFocus() {
-        for (var item = Window.activeFocusItem; item; item = item.parent)
-            if (item === row) return true
+    function releaseFocus() {  // focus of a field in the row dropped (field left: typed text taken), true if held
+        var chain = []
+        for (var item = Window.activeFocusItem; item; item = item.parent) {
+            if (item === row) {
+                for (var number = 0; number < chain.length; number++)
+                    chain[number].focus = false  // field & focus scopes (Loaders) around it
+                return true
+            }
+            chain.push(item)
+        }
         return false
     }
 
     // Row of a ListView with reuseItems: required properties fed again for another option, editor Loader
-    // follows kind (same kind: editor kept, its bindings read the new option)
+    // follows kind (same kind: editor kept, its bindings read the new option, fields reset once reused)
     ListView.onPooled: {
-        if (holdsFocus())
-            ListView.view.forceActiveFocus()  // field left (typed text taken) before it shows another option
+        if (releaseFocus())
+            ListView.view.forceActiveFocus()  // before the row shows another option
+        if (editor.item && editor.item.release)
+            editor.item.release()
         flashAnimation.stop()
         flashRect.opacity = 0
+    }
+    ListView.onReused: {
+        if (editor.item && editor.item.reset)
+            editor.item.reset()  // value of the new option shown (bindings broken by typing, same value)
     }
 
     implicitHeight: header.height + card.height
@@ -178,8 +191,8 @@ Item {
                         visible: row.applies !== ""
                         text: row.applies === "restart" ? i18n.tr("Restart required") : i18n.tr("Next start")
                         tint: row.applies === "restart" ? theme.warning : theme.dimText
-                        tip: row.applies === "restart" ? i18n.tr("Applied once Modern Tiny Pedals restarts (offered after Apply)")
-                                                       : i18n.tr("Used when Modern Tiny Pedals starts")
+                        tip: row.applies === "restart" ? i18n.tr("Applied once NeoPedal restarts (offered after Apply)")
+                                                       : i18n.tr("Used when NeoPedal starts")
                     }
                     Item { Layout.fillWidth: true }
                 }
@@ -225,7 +238,8 @@ Item {
                 flat: true
                 glyph: ""  // undo
                 text: theme.iconFont === "" ? "↺" : ""
-                tip: row.defaultText !== "" ? i18n.trm("Back to default: " + row.defaultText) : i18n.tr("Reset to Default")
+                tip: (hovered || visualFocus) && row.defaultText !== ""
+                     ? i18n.trm("Back to default: " + row.defaultText) : i18n.tr("Reset to Default")
                 implicitHeight: Math.round(theme.em * 1.9)
                 enabled: row.modified
                 opacity: row.modified ? 0.85 : 0  // room kept: editors stay aligned
@@ -254,6 +268,13 @@ Item {
     Component {
         id: choiceEditor
         TpCombo {
+            id: combo
+            function reset() {
+                currentIndex = Qt.binding(function() { return row.choiceIndex })
+            }
+            function release() {
+                combo.popup.close()
+            }
             model: row.choices
             currentIndex: row.choiceIndex
             tip: row.label
@@ -263,6 +284,9 @@ Item {
     Component {
         id: numberEditor
         Item {
+            function reset() {
+                numberField.text = numberField.format(numberField.value)  // decimals may differ, same value
+            }
             implicitHeight: numberField.implicitHeight
             NumberField {
                 id: numberField
@@ -288,6 +312,9 @@ Item {
     Component {
         id: colorEditor
         RowLayout {
+            function reset() {
+                colorField.text = Qt.binding(function() { return row.text })
+            }
             spacing: theme.em * 0.4
             Rectangle {
                 Layout.preferredWidth: Math.round(theme.em * 2.05)
@@ -316,6 +343,7 @@ Item {
                 Accessible.name: i18n.tr("Select Color")
             }
             TpTextField {
+                id: colorField
                 Layout.fillWidth: true
                 text: row.text
                 invalid: row.error !== ""
@@ -331,6 +359,9 @@ Item {
     Component {
         id: textEditor
         TpTextField {
+            function reset() {
+                text = Qt.binding(function() { return row.text })
+            }
             text: row.text
             invalid: row.error !== ""
             tip: row.label
@@ -342,8 +373,12 @@ Item {
     Component {
         id: pathEditor
         RowLayout {
+            function reset() {
+                pathField.text = Qt.binding(function() { return row.text })
+            }
             spacing: theme.em * 0.3
             TpTextField {
+                id: pathField
                 Layout.fillWidth: true
                 text: row.text
                 invalid: row.error !== ""

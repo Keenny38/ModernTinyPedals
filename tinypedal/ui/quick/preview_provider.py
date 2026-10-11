@@ -25,7 +25,7 @@ URL changes only when the picture of a key changes, so QML Image caches stay val
 only the pictures that changed (no PNG encoding, no base64 strings in models).
 
 Async QML Images call the provider from Qt's image reader thread: the store is guarded by a lock and
-hands out copies.
+hands out implicitly shared pictures (never painted on: copied by Qt if ever written, no deep copy per request).
 """
 
 from __future__ import annotations
@@ -60,17 +60,17 @@ class PreviewStore:
         """Store picture of key, URL for QML (same URL if picture unchanged)"""
         with self._lock:
             current = self._images.get(key)
-            if current is not None and current[1] == image:
+            if current is not None and same_picture(current[1], image):
                 return preview_url(key, current[0])
             serial = next(self._serials)
             self._images[key] = (serial, QImage(image))  # implicitly shared copy: caller may paint on its own
         return preview_url(key, serial)
 
     def get(self, key: str) -> QImage | None:
-        """Copy of picture of key (any thread), None if missing"""
+        """Picture of key (any thread, implicitly shared), None if missing"""
         with self._lock:
             current = self._images.get(key)
-            return None if current is None else current[1].copy()
+            return None if current is None else QImage(current[1])
 
     def discard(self, key: str):
         with self._lock:
@@ -88,6 +88,17 @@ class PreviewStore:
 
 
 STORE = PreviewStore()
+COMPARE_LIMIT = 1 << 20  # bytes: bigger pictures (zoomed) never compared pixel by pixel
+
+
+def same_picture(current: QImage, image: QImage) -> bool:
+    """Same picture: same shared data (picture reused from cache), else same pixels for small pictures (drawn
+    again, unchanged: QML keeps its copy)"""
+    if current.cacheKey() == image.cacheKey():
+        return True
+    if current.size() != image.size() or current.format() != image.format() or image.sizeInBytes() > COMPARE_LIMIT:
+        return False
+    return current == image
 
 
 def preview_url(key: str, serial: int) -> str:

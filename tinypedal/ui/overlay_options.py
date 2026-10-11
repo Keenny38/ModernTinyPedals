@@ -38,7 +38,7 @@ from .. import app_signal
 from ..const_file import ConfigType, FileFilter
 from ..i18n import current_language, tr
 from ..module_control import ModuleControl, wctrl
-from ._common import BaseDialog, DialogSingleton, UIScaler, run_after_saving, translate_filter
+from ._common import BaseDialog, DialogSingleton, UIScaler, page_host, run_after_saving, translate_filter
 from .toast import show_toast
 
 TITLE = "Overlay Options"
@@ -46,12 +46,24 @@ TITLE = "Overlay Options"
 
 def open_overlay_options(parent, name: str = "", key: str = "") -> OverlayOptions | None:
     """Open page (shown again if open) at overlay, option flashed if set; None if it cannot open"""
-    dialog = OverlayOptions(parent)
-    dialog.open()
-    shown = dialog.shown_dialog()  # same page already open: shown instead, this copy deleted
+    shown: BaseDialog | None = show_open_page(parent)
+    if shown is None:  # not open: built (QML page, every option read)
+        dialog = OverlayOptions(parent)
+        dialog.open()
+        shown = dialog.shown_dialog()  # same page already open: shown instead, this copy deleted
     if isinstance(shown, OverlayOptions) and name:
         shown.backend.focus_option(name, key)
     return shown if isinstance(shown, OverlayOptions) else None
+
+
+def show_open_page(parent) -> OverlayOptions | None:
+    """Page already open in app shown again (never a second page built to find it), None if not open"""
+    host = page_host(parent, OverlayOptions)
+    page = host.find_dialog_page(OverlayOptions.__name__) if host is not None else None
+    if page is None or not isinstance(page.dialog, OverlayOptions):
+        return None
+    host.show_page_widget(page)
+    return page.dialog
 
 
 def pick_color(parent, color: str) -> str:
@@ -159,9 +171,9 @@ class OverlayOptions(BaseDialog):
         if isinstance(page, DialogPage):  # in-app page title
             page.title = tr(TITLE)
             page.show_modified()
-        source = self.view.source()
-        self.view.setSource(QUrl())
-        self.view.setSource(source)
+        from .quick import reload_in_language
+
+        reload_in_language(self.view)
 
     def closeEvent(self, event):
         if self.is_modified():

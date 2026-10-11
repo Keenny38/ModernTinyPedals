@@ -135,7 +135,7 @@ def test_wizard_steps_without_qml_warnings(wizard):
         backend = wizard.backend
         QCoreApplication.processEvents()
         assert not wizard.view.errors()
-        assert "Welcome to Modern Tiny Pedals" in item_texts(wizard.view)
+        assert "Welcome to NeoPedal" in item_texts(wizard.view)
         for step in range(1, backend.stepCount):
             backend.next()
             if step >= setup_backend.STEP_LOOK:
@@ -163,9 +163,9 @@ def test_wizard_language_switches_texts_not_app(wizard):
     try:
         assert i18n.current_language() == "en"  # app language changed only once finished
         assert wizard.windowTitle() == "Assistant de configuration"
-        assert backend.steps[0]["title"] == "Bienvenue dans Modern Tiny Pedals"
+        assert backend.steps[0]["title"] == "Bienvenue dans NeoPedal"
         assert backend.newName == "mon overlay"
-        assert "Bienvenue dans Modern Tiny Pedals" in item_texts(wizard.view)
+        assert "Bienvenue dans NeoPedal" in item_texts(wizard.view)
         labels = {row["key"]: row["label"] for row in backend.tiles.rows}
         assert labels["relative"] != "Relative"  # French overlay names
         backend.setNewName("mine")
@@ -198,6 +198,27 @@ def test_new_preset_name_checked_while_typing(wizard):
     backend.setNewName("default")
     assert backend.canFinish and backend.choices().new_preset == ""
     assert backend.choices().preset == "default.json"
+
+
+def test_preset_folder_read_once_while_typing(wizard, monkeypatch):
+    import os
+
+    backend = wizard.backend
+    backend.goTo(setup_backend.STEP_OVERLAYS)
+    reads = []
+    real = type(cfg).preset_files
+    monkeypatch.setattr(type(cfg), "preset_files", lambda self, *args, **kwargs: reads.append(1) or real(self, *args, **kwargs))
+    for name in ("n", "ne", "new", "new one"):
+        backend.setNewName(name)
+        assert backend.nameError == "" and backend.canGoNext and backend.canFinish
+    assert not reads
+    folder = cfg.path.settings
+    with open(f"{folder}new one.json", "w", encoding="utf-8") as file:
+        file.write("{}")
+    stat = os.stat(folder)
+    os.utime(folder, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))  # preset added meanwhile
+    assert backend.nameError == "A preset with this name already exists"
+    assert reads == [1]
 
 
 def test_default_preset_name_not_used_yet(ui_env, renders):

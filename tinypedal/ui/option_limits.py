@@ -55,8 +55,10 @@ OPTION_LIMITS: tuple[tuple[str, OptionLimit], ...] = (
     ("^font_size", OptionLimit(1, 999, True)),
     ("^decimal_places", OptionLimit(0, 9, True)),
     ("^maximum_(loading|saving)_attempts$", OptionLimit(1, 100, True)),
+    ("^maximum_vehicles_per_split_others$", OptionLimit(0, 126, True)),  # 0 = other classes hidden
     ("^number_of_automatic_backups$", OptionLimit(0, 1000, True)),
     ("^number_of_days_to_keep_deleted_presets$", OptionLimit(1, 3650, True)),
+    ("^number_of_hours_between_update_checks$", OptionLimit(0, 168, True)),  # 0 = startup only
     ("^(snap_distance|snap_gap|grid_move_size)$", OptionLimit(0, 1000, True)),
     ("_samples$", OptionLimit(1, None, True)),
     ("_history_count$", OptionLimit(1, None, True)),

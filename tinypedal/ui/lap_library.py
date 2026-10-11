@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..i18n import tr, trm
+from ..userfile.lap_cache import indexed_infos, info_index_path, read_infos, save_info_index
 from ..userfile.lap_library import (
     delete_laps,
     group_name_error,
@@ -56,11 +57,14 @@ from ..userfile.lap_library import (
     restore_laps,
 )
 from ..userfile.motec_ld import import_ld_job
-from ..userfile.telemetry_lap import read_lap_info
+from ..userfile.telemetry_lap import IMPORT_FOLDER, LapFile
 from ._common import BaseDialog, TextInputDialog, UIScaler
+from .quick.background import BackgroundJobs
 from .toast import show_toast
 
 logger = logging.getLogger(__name__)
+
+LibraryLap = tuple[LapFile, dict, float]  # lap file, lap info, time imported (file time, 0 if unknown)
 
 
 def imported_time(path: str) -> float:
@@ -69,6 +73,30 @@ def imported_time(path: str) -> float:
         return os.path.getmtime(path)
     except OSError:
         return 0.0
+
+
+def read_library(filepath: str) -> list[tuple[str, list[LibraryLap]]]:
+    """Imported log groups with infos & import time of their laps (thread job): infos from lap infos index of each
+    group (like lap viewer track folders), new lap files read together, index saved again if changed"""
+    groups = []
+    for name, laps in list_imported(filepath):
+        index_path = info_index_path(filepath, os.path.join(IMPORT_FOLDER, name))
+        stamps, saved, known, missing = indexed_infos(os.path.join(import_folder(filepath), name), index_path, laps)
+        for item in read_infos([lap.path for lap in missing]):
+            if item is not None:
+                known[os.path.basename(item[0])] = item[2]
+        rows: list[LibraryLap] = []
+        index = {}
+        for lap in laps:
+            stamp = stamps.get(lap.filename)
+            info = known.get(lap.filename, {})
+            if stamp is not None and lap.filename in known:
+                index[lap.filename] = [stamp[0], stamp[1], info]
+            rows.append((lap, info, stamp[2] if stamp is not None else imported_time(lap.path)))
+        if missing or index.keys() != saved.keys():
+            save_info_index(index_path, index)
+        groups.append((name, rows))
+    return groups
 
 
 def format_date(timestamp: float) -> str:
@@ -103,6 +131,8 @@ class LapLibrary(BaseDialog):
         self._import_motec = import_motec or getattr(page, "import_motec", None)
         self._importing = False
         self._undo: list[tuple[str, str]] = []  # deleted files: path, path in trash
+        self._jobs = BackgroundJobs(self, "Lap library")
+        self._expand: set[str] = set()  # groups shown expanded once listed (refresh asked meanwhile)
 
         self.edit_filter = QLineEdit(self)
         self.edit_filter.setPlaceholderText(tr("Search track, vehicle, driver or log..."))
@@ -121,6 +151,7 @@ class LapLibrary(BaseDialog):
         self.tree.itemDoubleClicked.connect(lambda item, _: self.add_to_viewer([item]))
         self.label_empty = QLabel(tr("No imported lap. Import a MoTeC log (.ld) with Import MoTeC..., or drop it on the app."), self)
         self.label_empty.setWordWrap(True)
+        self.label_empty.setVisible(False)  # until imported laps are listed
 
         button_add = QPushButton(tr("Add to Viewer"))
         button_add.setToolTip(tr("Show selected laps in lap viewer (double-click also)"))
@@ -154,12 +185,25 @@ class LapLibrary(BaseDialog):
         self.refresh()
 
     def refresh(self, expand: set[str] | None = None):
-        """List imported logs & their laps, expanded state kept (and expand groups)"""
+        """List imported logs & their laps (read in background, tree filled once read), expanded state kept (and
+        expand groups)"""
+        self._expand |= expand or set()
+        filepath = self.filepath
+        self._jobs.run("refresh", lambda: read_library(filepath), self.fill_tree, key="refresh")
+
+    def is_refreshing(self) -> bool:
+        """Imported laps being listed in background"""
+        return self._jobs.is_busy("refresh")
+
+    def fill_tree(self, groups: list[tuple[str, list[LibraryLap]]]):
+        """Imported logs & their laps listed (lap infos read in background), expanded state kept"""
         from .lap_viewer import format_laptime, lap_label
 
-        expanded = {self.group_of(item) for item in self.top_items() if item.isExpanded()} | (expand or set())
+        expanded = {self.group_of(item) for item in self.top_items() if item.isExpanded()} | self._expand
+        self._expand = set()
+        # Items selected meanwhile selected again (group name or lap path)
+        selected = {item.data(self.COL_NAME, Qt.ItemDataRole.UserRole) for item in self.tree.selectedItems()}
         self.tree.clear()
-        groups = list_imported(self.filepath)
         for name, laps in groups:
             group = QTreeWidgetItem(self.tree)
             group.setText(self.COL_NAME, name)
@@ -167,14 +211,12 @@ class LapLibrary(BaseDialog):
             font = QFont(group.font(self.COL_NAME))
             font.setBold(True)
             group.setFont(self.COL_NAME, font)
-            best = min((lap.lap_time for lap in laps if lap.lap_time > 0), default=0.0)
+            best = min((lap.lap_time for lap, _, _ in laps if lap.lap_time > 0), default=0.0)
             group.setText(self.COL_TIME, format_laptime(best))
             first_info: dict = {}
             newest = 0.0
-            for lap in laps:
-                info = read_lap_info(lap.path)
+            for lap, info, imported in laps:
                 first_info = first_info or info
-                imported = imported_time(lap.path)
                 newest = max(newest, imported)
                 item = QTreeWidgetItem(group)
                 item.setText(self.COL_DATE, format_date(imported))
@@ -183,15 +225,17 @@ class LapLibrary(BaseDialog):
                 item.setText(self.COL_TIME, format_laptime(lap.lap_time))
                 if lap.lap_time > 0 and lap.lap_time == best:
                     item.setFont(self.COL_TIME, font)
+                item.setSelected(lap.path in selected)
                 for column, key in ((self.COL_TRACK, "track"), (self.COL_VEHICLE, "vehicle"),
                                     (self.COL_DRIVER, "driver")):
                     item.setText(column, str(info.get(key, "")))
             for column, key in ((self.COL_TRACK, "track"), (self.COL_VEHICLE, "vehicle"), (self.COL_DRIVER, "driver")):
                 group.setText(column, str(first_info.get(key, "")))
-            if not first_info.get("driver") and is_foreign(laps[0].path):  # laps of another driver's folder
+            if not first_info.get("driver") and is_foreign(laps[0][0].path):  # laps of another driver's folder
                 group.setText(self.COL_DRIVER, tr("foreign laps"))
             group.setText(self.COL_DATE, format_date(newest))
             group.setExpanded(name in expanded or len(groups) == 1)
+            group.setSelected(name in selected)
         for column in range(self.tree.columnCount()):
             self.tree.resizeColumnToContents(column)
         self.label_empty.setVisible(not groups)

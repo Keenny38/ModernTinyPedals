@@ -19,7 +19,15 @@ Item {
     required property int previewHeight
     property bool menuOpen: false  // no preview over the menu
     readonly property bool current: GridView.isCurrentItem && GridView.view.activeFocus
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
+
+    GridView.onPooled: {
+        recycling = true
+        opacity = 1  // add transition cut short by pooling: not reused faded or shrunk
+        scale = 1
+    }
+    GridView.onReused: recycling = false
 
     width: GridView.view.cellWidth
     height: GridView.view.cellHeight
@@ -39,7 +47,7 @@ Item {
         border.width: 1
         border.color: row.active ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.7)
                     : theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
 
         MouseArea {
             id: area

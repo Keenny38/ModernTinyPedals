@@ -221,7 +221,7 @@ class Realtime(HiddenPreview, SpotterMixin, Overlay):
         self.color_critical = QColor(wcfg["bar_color_critical"])
         self.color_clear = QColor(wcfg["bar_color_clear"])
         self.color_background = QColor(wcfg["bar_background_color"])
-        self.color_preview = QColor(self.color_background)  # unlocked: bars always visible
+        self.color_preview = QColor(self.color_background)  # edit mode: bars always visible
         self.color_preview.setAlpha(max(self.color_background.alpha(), 68))
 
         # Config canvas

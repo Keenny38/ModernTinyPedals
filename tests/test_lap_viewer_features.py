@@ -200,6 +200,8 @@ def test_map_color_modes(viewer):
     from tinypedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
+    backend.setMapView(0.0, 0.0, 1.0)  # map scale of a shown map (dialog never shown: no map size)
+    backend.wait_jobs()
     colored = backend.trackMap["colored"]
     assert VertexStore.get(colored).vertex_count == 0  # lap colors: no colored line
     for mode in ("gain", "speed", "pedals"):
@@ -355,7 +357,8 @@ def test_motec_export(viewer, laps, tmp_path, monkeypatch):
     backend = viewer.backend
     target = tmp_path / "reference.ld"
     monkeypatch.setattr(lap_export.QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(target), ""))
-    backend.exportMotec("")  # reference lap
+    backend.exportMotec("")  # reference lap, written by worker process
+    wait_loaded(viewer)
     assert target.exists() and read_ld(str(target))
     assert "Exported" in backend.status
     monkeypatch.setattr(lap_export.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(tmp_path / "all"))

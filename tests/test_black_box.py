@@ -1315,7 +1315,7 @@ def test_slow_data_read_every_n_updates(widget, monkeypatch):
 def test_repaint_only_when_state_changes(widget, monkeypatch):
     widget.alert_pulse = False  # fixture has a locked wheel & a puncture, which pulse
     calls = []
-    monkeypatch.setattr(widget, "update", lambda: calls.append(1))
+    monkeypatch.setattr(widget, "update", lambda *args: calls.append(1))
     widget.timerEvent(None)
     widget.timerEvent(None)
     assert len(calls) == 1  # same data: second update skipped
@@ -1326,14 +1326,19 @@ def test_repaint_only_when_state_changes(widget, monkeypatch):
 
 
 def test_shift_flash_keeps_repainting(widget, monkeypatch):
+    from PySide6.QtGui import QRegion
+
     from tinypedal.api_control import api
 
     monkeypatch.setattr(api.read.engine, "rpm", lambda: 7900.0)
     calls = []
-    monkeypatch.setattr(widget, "update", lambda: calls.append(1))
+    monkeypatch.setattr(widget, "update", lambda *args: calls.append(args))
     widget.timerEvent(None)
+    assert calls == [()]  # first update: whole widget
+    calls.clear()
     widget.timerEvent(None)
-    assert len(calls) == 2  # over redline, LEDs flash without data change
+    # Over redline, LEDs flash without data change (repaint rects widened over gradients, see regions)
+    assert QRegion(widget.part_rects()["leds"]).subtracted(sum((QRegion(rect) for (rect,) in calls), QRegion())).isEmpty()
 
 
 def test_fitted_font_cached(widget):
@@ -1436,6 +1441,20 @@ def test_wheel_status_setting_migrated():
     user = {"wheel_status": {"layout": 2}}
     preupdate_user_setting((2, 50, 0), user)
     assert user["black_box"] == {"layout": 2}
+
+
+def test_chat_order_setting_migrated():
+    from tinypedal.setting_preupdate import preupdate_user_setting
+
+    user = {"chat": {"show_newest_message_at_top": True}, "other": {}}
+    preupdate_user_setting((2, 50, 6), user)
+    assert user["chat"] == {"scroll_direction": "Downward"}
+    user = {"chat": {"show_newest_message_at_top": False}}
+    preupdate_user_setting((2, 50, 6), user)
+    assert user["chat"] == {"scroll_direction": "Upward"}
+    user = {"chat": {"scroll_direction": "Downward"}}
+    preupdate_user_setting((2, 50, 7), user)  # up to date: untouched
+    assert user["chat"] == {"scroll_direction": "Downward"}
 
 
 def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):

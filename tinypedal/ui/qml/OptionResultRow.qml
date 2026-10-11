@@ -18,7 +18,14 @@ Item {
     required property bool modified
     required property string help
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
+
+    ListView.onPooled: {
+        recycling = true
+        opacity = 1  // add transition cut short by pooling: not reused faded
+    }
+    ListView.onReused: recycling = false
 
     width: ListView.view ? ListView.view.width - theme.em * 0.7 : 0  // room for scroll bar
     height: Math.round(theme.em * 3.1)
@@ -35,7 +42,7 @@ Item {
         color: area.containsMouse ? theme.hover : theme.base
         border.width: 1
         border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
 
         MouseArea {
             id: area

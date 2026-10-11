@@ -19,8 +19,8 @@
 """
 Standings Widget, modern design
 
-Running order, split by class (space between class groups) or combined. Widget height
-follows the number of cars shown.
+Running order, split by class (space between class groups, class name above each group) or combined.
+Widget height follows the number of cars shown.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ from ...i18n import tr_overlay
 from ...module_info import minfo
 from ...template.widget.drivers_ui import STANDINGS_COLUMNS
 from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text
-from .rows import DASH
-from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, Column
+from .rows import DASH, class_style
+from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
 
 
 class Realtime(DriverTable):
@@ -42,6 +42,7 @@ class Realtime(DriverTable):
     options = (
         *DRIVER_OPTIONS,
         "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
+        "show_class_header", "class_order",
         "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
         "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
         "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
@@ -69,6 +70,9 @@ class Realtime(DriverTable):
         else:
             max_vehicles = wcfg["maximum_vehicles_combined_mode"]
         self.max_rows = min(max(int(max_vehicles), 5), 126)
+        # Cars grouped by class (split or exclusive mode): class name above each group instead of class column
+        self.class_headers = bool(wcfg["show_class_header"]) and (
+            split or wcfg["enable_single_class_exclusive_mode"])
         self.setup_table()
         self.set_size(self.table.width, self.table.height(1))
 
@@ -132,6 +136,11 @@ class Realtime(DriverTable):
             return Cell(TEXT, DASH, "strong", theme.text_faint)
         return Cell(TEXT, f"+{gap:.{self.gap_decimals}f}", "strong", theme.text)
 
+    def class_header(self, class_name: str) -> ClassHeader:
+        """Header of a class group: class name (game name, words apart) on class color"""
+        _, color = class_style(self.cfg, class_name, self.theme)
+        return ClassHeader(class_name.replace("_", " ").strip() or DASH, color)
+
     def timerEvent(self, event):
         """Update when vehicle on track"""
         self.show_rows(minfo.vehicles.dataSet, minfo.relative.standings, self.context())
@@ -142,14 +151,20 @@ class Realtime(DriverTable):
         self.show_rows(field.vehicles, sample_standings(field, self.wcfg), ctx)
 
     def show_rows(self, data_set, standings: list[int], ctx: Context):
-        """Rows of cars in standings order (-1: space between classes), widget height follows"""
+        """Rows of cars in standings order (-1: space between classes or cars apart in a class), class name
+        above each class group if class headers, widget height follows"""
         rows: list = []
+        shown_class = None
         for index in standings[:self.max_rows]:
             if index == -1:
                 if rows and rows[-1] is not SEPARATOR:
                     rows.append(SEPARATOR)
             elif 0 <= index < len(data_set):
-                rows.append(self.driver_row(data_set[index], ctx))
+                veh = data_set[index]
+                if self.class_headers and veh.vehicleClass != shown_class:
+                    shown_class = veh.vehicleClass
+                    rows.append(self.class_header(shown_class))
+                rows.append(self.driver_row(veh, ctx))
         while rows and rows[-1] is SEPARATOR:
             rows.pop()
         rows_tuple = tuple(rows)

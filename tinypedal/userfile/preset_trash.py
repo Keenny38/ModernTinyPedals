@@ -148,6 +148,19 @@ def list_trash(settings_path: str) -> list[TrashEntry]:
     return sorted(entries, key=lambda entry: entry.deleted, reverse=True)
 
 
+def count_trash(settings_path: str) -> int:
+    """Number of trash entries (folders with an info file), entries not read (list_trash reads them)"""
+    count = 0
+    try:
+        with os.scandir(trash_path(settings_path)) as entries:
+            for entry in entries:
+                if entry.is_dir() and os.path.isfile(os.path.join(entry.path, INFO_FILENAME)):
+                    count += 1
+    except OSError:  # no trash yet
+        return 0
+    return count
+
+
 def preset_exists(settings_path: str, filename: str) -> bool:
     """Preset file exists, any case (file names are case-insensitive on Windows)"""
     try:

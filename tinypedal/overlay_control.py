@@ -26,6 +26,7 @@ import threading
 from . import app_signal, overlay_signal, realtime_state
 from .api_control import api
 from .setting import cfg
+from .stream_overlay import streamoverlay
 from .thread_guard import run_supervised, wait_stopped
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class OverlayControl:
         "_thread",
         "_event",
         "_last_active_state",
+        "_last_shown_state",
         "_last_hide_state",
     )
 
@@ -81,6 +83,7 @@ class OverlayControl:
         self._event = threading.Event()
 
         self._last_active_state = None
+        self._last_shown_state = None
         self._last_hide_state = None
 
     def _stopped(self) -> bool:
@@ -114,7 +117,9 @@ class OverlayControl:
             active = api.read.state.active()
             paused = api.read.state.paused()
             resets = api.read.state.resets()
-            hidden = cfg.overlay["auto_hide"] and not active
+            # Overlays shown & updated: driving, or spectating / replay streamed (overlays only, see on_air)
+            shown = active or (not paused and api.read.vehicle.total_vehicles() > 0 and streamoverlay.on_air())
+            hidden = cfg.overlay["auto_hide"] and not shown
             if active:
                 session_type = api.read.session.session_type()
                 in_pits = api.read.vehicle.in_pits() or api.read.vehicle.in_garage()
@@ -122,6 +127,7 @@ class OverlayControl:
                 session_type, in_pits = -1, False
             # Update state
             realtime_state.active = active
+            realtime_state.shown = shown
             realtime_state.paused = paused
             realtime_state.resets = resets
             # Auto hide state check
@@ -142,8 +148,10 @@ class OverlayControl:
                     # Track primary preset takes priority over class primary preset
                     if not self.__check_preset_track():
                         self.__check_preset_class()
-                # Set overlay timer state
-                overlay_signal.paused.emit(not active)
+            # Set overlay timer state
+            if self._last_shown_state != shown:
+                self._last_shown_state = shown
+                overlay_signal.paused.emit(not shown)
 
         logger.info("DISABLED: overlay control")
 

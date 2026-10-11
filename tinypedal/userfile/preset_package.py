@@ -54,6 +54,7 @@ NOTES_FOLDERS = {  # package folder: allowed file extensions
     "pacenotes": (FileExt.TPPN,),
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # refuse suspiciously large entry
+MAX_MANIFEST_SIZE = 64 * 1024  # manifest is a few lines
 
 
 class ImportResult(NamedTuple):
@@ -144,9 +145,12 @@ def unique_filename(filepath: str, filename: str) -> str:
 
 
 def read_manifest(package: zipfile.ZipFile) -> dict:
-    """Read & verify package manifest, raise ValueError if invalid"""
+    """Read & verify package manifest, raise ValueError if invalid (also encrypted or corrupted)"""
     try:
-        manifest = load_json_strict(package.read("manifest.json").decode("utf-8"))
+        info = package.getinfo("manifest.json")
+        if info.file_size > MAX_MANIFEST_SIZE:  # never inflated whole (zip bomb)
+            raise ValueError("manifest too large")
+        manifest = load_json_strict(read_entry(package, info).decode("utf-8"))
     except (KeyError, ValueError) as error:  # UnicodeDecodeError & JSONDecodeError included
         raise ValueError("not a TinyPedal preset package") from error
     if not isinstance(manifest, dict) or manifest.get("format") != PACKAGE_FORMAT:
@@ -155,7 +159,7 @@ def read_manifest(package: zipfile.ZipFile) -> dict:
     if not isinstance(version, (int, float)) or isinstance(version, bool):  # never a TypeError below
         raise ValueError("not a TinyPedal preset package")
     if version > PACKAGE_VERSION:
-        raise ValueError("package made by newer Modern Tiny Pedals version")
+        raise ValueError("package made by newer NeoPedal version")
     return manifest
 
 

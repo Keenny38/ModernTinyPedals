@@ -152,6 +152,7 @@ class TyrePlan:
         self.name = tr("Untitled plan")
         self.rows: list[list[str]] = [[""] * WHEELS]
         self.stock: list[str] = []
+        self.treads: dict[str, float] = {}  # used tyres of stock (from game): tread % left when first fitted
         self.measured = tuple(DEFAULT_TYRE_SET)[MEASURED_DEFAULT]  # compound of measured wear per lap
         self.compound = self.measured  # compound selected in stock: added & proposed tyres
         self.highlight_new = True
@@ -190,6 +191,9 @@ class TyrePlan:
             self.rule[key] = round(number) if decimals == 0 else round(number, decimals)
         self.name = name
         self.stock = [str(tyre) for tyre in user_data.get("tyre_stock", [])]
+        treads = user_data.get("tyre_tread", {})
+        self.treads = {name: float(tread) for name, tread in treads.items() if name in self.stock} \
+            if isinstance(treads, dict) else {}
         rows = [[str(tyre) for tyre in row[:WHEELS]] for row in user_data.get("tyre_plan", [])]
         self.rows = rows or [[""] * WHEELS]
         self.spare_rows = []
@@ -213,6 +217,7 @@ class TyrePlan:
         data["file_version"] = TYRE_STRATEGY_FILE_VERSION
         data["tyre_stock"] = list(self.stock)
         data["tyre_plan"] = [list(row) for row in self.rows] + [list(row) for row in self.spare_rows]
+        data["tyre_tread"] = {name: tread for name, tread in self.treads.items() if name in self.stock}
         return data
 
     def file_data(self) -> dict:
@@ -226,7 +231,7 @@ class TyrePlan:
         return {
             "rule": dict(self.rule), "stock": list(self.stock), "plan": [list(row) for row in self.rows],
             "spare": [list(row) for row in self.spare_rows], "set": copy_setting(self.user_data["tyre_set"]),
-            "compound": self.compound,
+            "compound": self.compound, "treads": dict(self.treads),
         }
 
     def restore_state(self, state: dict):
@@ -237,9 +242,16 @@ class TyrePlan:
         self.rows = [list(row) for row in state["plan"]] or [[""] * WHEELS]
         self.spare_rows = [list(row) for row in state["spare"]]
         self.compound = state["compound"]
+        self.treads = dict(state.get("treads", {}))
         self.refresh()
 
     # Wear, change time & stock uses
+    def starting_tread(self, name: str, corner: int) -> float:
+        """Tread of a tyre when first fitted (fraction): used tyre of the game, else new tyre of its compound"""
+        if name in self.treads:
+            return min(max(self.treads[name], 0.0), 100.0) * 0.01
+        return min(self.setting(extract_tyre_key(name))[CORNER_STARTING_TREAD[corner]], 100.0) * 0.01
+
     def row_wear(self, row_index: int, setting: dict, corner: int) -> float:
         """Tread used over a stint by a wheel (fraction)
 
@@ -274,7 +286,7 @@ class TyrePlan:
                     changed += 1
                 uses[tyre_name] += 1
                 setting = self.setting(extract_tyre_key(tyre_name))
-                starting = min(setting[CORNER_STARTING_TREAD[corner]], 100.0) * 0.01
+                starting = self.starting_tread(tyre_name, corner)
                 wear = self.row_wear(row_index, setting, corner)
                 used = worn.get(tyre_name, 0.0)
                 remaining = starting - used
@@ -312,7 +324,7 @@ class TyrePlan:
 
     def start_tread(self, default: float) -> float:
         """Tread at start: tyres of first stint (compound starting tread), else default"""
-        treads = [min(self.setting(extract_tyre_key(name))[CORNER_STARTING_TREAD[corner]], 100.0)
+        treads = [self.starting_tread(name, corner) * 100
                   for corner, name in enumerate(self.rows[0]) if name] if self.rows else []
         return sum(treads) / len(treads) if treads else default
 
@@ -389,7 +401,7 @@ class TyrePlan:
             allowed = max(int(self.rule["maximum_tyre"]) - others, 0)
         else:
             allowed = len(self.stock) + len(self.rows) * WHEELS  # no limit
-        free = [name for name in self.stock if extract_tyre_key(name) == compound]
+        free = [name for name in self.stock if extract_tyre_key(name) == compound and name not in self.treads]
         restricted = bool(self.rule["enable_restricted_allocation"])
         removed: list[list[tuple[str, float]]] = [[] for _ in range(WHEELS)]  # tyres taken off, per wheel
         minimum = self.minimum_tread * 0.01
@@ -488,11 +500,30 @@ class TyrePlan:
         self.refresh()
         return name
 
+    def add_used_tyres(self, tyres: list[tuple[str, float]]) -> list[str]:
+        """Used tyres (compound, tread %) of the game added to stock, used tyres added before & not
+        fitted replaced (no double when asked again), names added"""
+        stale = [name for name in self.stock if name in self.treads and self.uses[name] <= 0]
+        if stale:
+            self.remove_tyres(stale)
+        added = []
+        for compound, tread in tyres:
+            if compound not in self.compounds:
+                continue
+            name = encode_tyre_name(compound, tuple(self.stock))
+            self.stock.append(name)
+            self.treads[name] = min(max(float(tread), 0.0), 100.0)
+            added.append(name)
+        self.forget_stints()
+        self.refresh()
+        return added
+
     def remove_tyres(self, names: list[str]):
         """Tyres taken out of stock, and off the plan"""
         removed = set(names)
         self.stock = [name for name in self.stock if name not in removed]
         self.proposed_names.difference_update(removed)
+        self.treads = {name: tread for name, tread in self.treads.items() if name not in removed}
         self.rows = [[name if name not in removed else "" for name in row] for row in self.rows]
         self.spare_rows = [[name if name not in removed else "" for name in row] for row in self.spare_rows]
         self.forget_stints()
@@ -553,7 +584,8 @@ class TyrePlan:
                 "cells": cells, "change": f"{seconds:+.1f}s" if seconds > 0 else tr("N/A"),
                 "changes": self.row_changes[row_index] if row_index < len(self.row_changes) else 0,
             })
-        stock = [{"name": name, "stints": self.uses[name], "compound": extract_tyre_key(name)} for name in self.stock]
+        stock = [{"name": name, "stints": self.uses[name], "compound": extract_tyre_key(name),
+                  "tread": f"{self.treads[name]:.0f}%" if name in self.treads else ""} for name in self.stock]
         return {
             "name": self.name, "linked": self.linked, "rows": rows, "stock": stock,
             "compounds": self.compounds, "compound": self.compound, "rule": dict(self.rule),

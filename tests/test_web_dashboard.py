@@ -64,7 +64,7 @@ def test_page_requires_code(dashboard):
     status, body = get("/")
     assert status == 401 and b"Access code" in body
     status, body = get("/?code=TESTCODE", opener=browser())
-    assert status == 200 and b"Modern Tiny Pedals Dashboard" in body
+    assert status == 200 and b"NeoPedal Dashboard" in body
 
 
 def test_code_link_redirects_to_clean_url(dashboard):
@@ -80,7 +80,7 @@ def test_login_form_post(dashboard):
     assert status == 401 and b'method="post"' in body and b"code=" not in body.split(b"<form")[0]
     data = urllib.parse.urlencode({"code": "TESTCODE"}).encode()
     status, body, _ = request("/login", data=data, opener=opener)
-    assert status == 200 and b"Modern Tiny Pedals Dashboard" in body
+    assert status == 200 and b"NeoPedal Dashboard" in body
     assert b"X-Access-Code" not in body  # page script uses session cookie, no code
     # Session cookie grants API access
     assert get("/api/telemetry", opener=opener)[0] == 200
@@ -104,6 +104,47 @@ def test_telemetry_api(dashboard):
     assert status == 200
     data = json.loads(body)
     assert {"speed", "gear", "delta_best", "fuel_laps", "tyre_temp"} <= set(data)
+
+
+def test_telemetry_error_logged_as_warning_once(dashboard, monkeypatch, caplog):
+    """Snapshot error answered, logged as warning (default log level shows it) then debug while repeated"""
+    import logging
+
+    from tinypedal import web_dashboard
+    from tinypedal.log_handler import ErrorThrottle
+
+    def broken():
+        raise KeyError("speed")
+
+    monkeypatch.setattr(web_dashboard, "telemetry_snapshot", broken)
+    monkeypatch.setattr(web_dashboard, "snapshot_errors", ErrorThrottle())
+    with caplog.at_level(logging.DEBUG, logger="tinypedal.web_dashboard"):
+        for _ in range(3):
+            status, body = get("/api/telemetry", {"X-Access-Code": "TESTCODE"})
+            assert status == 200 and json.loads(body) == {"active": False}
+    levels = [record.levelno for record in caplog.records if "snapshot error" in record.getMessage()]
+    assert levels == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+    assert caplog.records[0].exc_info is not None
+
+
+def test_handler_error_logged_unlike_dropped_client(monkeypatch, caplog):
+    import logging
+
+    from tinypedal import web_dashboard
+    from tinypedal.log_handler import ErrorThrottle
+
+    monkeypatch.setattr(web_dashboard, "request_errors", ErrorThrottle())
+    server = web_dashboard.DashboardServer.__new__(web_dashboard.DashboardServer)
+    with caplog.at_level(logging.DEBUG, logger="tinypedal.web_dashboard"):
+        try:
+            raise ConnectionResetError
+        except OSError:
+            server.handle_error(None, ("127.0.0.1", 1))
+        try:
+            raise TypeError("handler bug")
+        except TypeError:
+            server.handle_error(None, ("127.0.0.1", 1))
+    assert [record.levelno for record in caplog.records] == [logging.DEBUG, logging.WARNING]
 
 
 def test_lockout_after_failures(dashboard):
@@ -238,6 +279,22 @@ def test_certificate_reused_and_renewed_for_new_address(tmp_path):
     tls_cert.server_context(folder, ["192.168.1.50"])
     assert tls_cert.fingerprint(folder) != first  # new LAN address not covered
     assert tls_cert.covers(tls_cert.cert_paths(folder)[0], ["127.0.0.1", "192.168.1.50"])
+
+
+def test_certificate_mismatching_key_made_again(tmp_path):
+    """Key of another certificate (crash between both writes): new pair made, nothing left to delete by hand"""
+    import os
+
+    folder = str(tmp_path)
+    tls_cert.server_context(folder, [])
+    cert_file, key_file = tls_cert.cert_paths(folder)
+    with open(cert_file, "rb") as file:
+        old_cert = file.read()
+    tls_cert.create_certificate(cert_file, key_file, ["127.0.0.1"])  # new key...
+    with open(cert_file, "wb") as file:
+        file.write(old_cert)  # ...next to old certificate
+    tls_cert.server_context(folder, [])  # loads (ssl.SSLError caught, pair made again)
+    assert not [name for name in os.listdir(folder) if name.endswith(".tmp")]
 
 
 def test_https_error_reported_when_certificate_fails(ui_env, monkeypatch):

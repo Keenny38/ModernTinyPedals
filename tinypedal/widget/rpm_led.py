@@ -131,6 +131,21 @@ class Realtime(Overlay):
             if self.limiter:
                 update_later = True
 
+        # Update flicker state once per tick, extra paints (expose, capture) keep the blink rate
+        if self.wcfg["show_speed_limiter_flash"] and self.limiter:
+            flicker = self.warn_flash.send(True)
+        elif (
+            self.wcfg["show_rpm_flickering_above_critical"]
+            and self.rpm - self.rpm_low >= self.rpm_critical
+            and api.read.engine.gear() < self.gear_max
+        ):
+            flicker = not self.flicker
+        else:
+            flicker = False
+        if self.flicker != flicker:
+            self.flicker = flicker
+            update_later = True
+
         if update_later:
             self.update()
 
@@ -143,19 +158,7 @@ class Realtime(Overlay):
         if self.wcfg["show_background"]:
             fill_rect(painter, self.rect_background, self.wcfg["background_color"])
 
-        # Set flicker state
         rpm = self.rpm - self.rpm_low
-        if self.wcfg["show_speed_limiter_flash"] and self.limiter:
-            self.flicker = self.warn_flash.send(True)
-        elif (
-            self.wcfg["show_rpm_flickering_above_critical"]
-            and rpm >= self.rpm_critical
-            and api.read.engine.gear() < self.gear_max
-        ):
-            self.flicker = not self.flicker
-        else:
-            self.flicker = False
-
         painter.setPen(self.pen_led)
         self.draw_rpm_led(
             painter,

@@ -115,45 +115,46 @@ Item {
                 Text { text: i18n.tr("Left"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX - parent.reach + 3; y: circle.originY + 2 }
                 Text { text: i18n.tr("Right"); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75; x: circle.originX + parent.reach - width - 3; y: circle.originY + 2 }
 
-                Repeater {
-                    model: circle.info.dots || []
-                    GpuShape {
-                        key: modelData.key
-                        visible: lapFilter.shown(modelData.lap)
-                        color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b,
-                                       circle.chartZoomed || backend.gEnvelope ? 0.12 : 0.4)
-                        opacity: circle.lapOpacity(modelData.lap)
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: circle.matrix }
+                // G shapes: one transform for all of them (not one per shape: zoom & move frames stay cheap)
+                Item {
+                    transform: Matrix4x4 { matrix: circle.matrix }
+                    Repeater {
+                        model: circle.info.dots || []
+                        GpuShape {
+                            key: modelData.key
+                            visible: lapFilter.shown(modelData.lap)
+                            color: Qt.rgba(Qt.color(modelData.color).r, Qt.color(modelData.color).g, Qt.color(modelData.color).b,
+                                           circle.chartZoomed || backend.gEnvelope ? 0.12 : 0.4)
+                            opacity: circle.lapOpacity(modelData.lap)
+                            revision: backend.revision
+                        }
                     }
-                }
-                Repeater {
-                    model: circle.info.dots || []
-                    GpuShape {
-                        key: modelData.zoom
-                        color: modelData.color
-                        visible: circle.chartZoomed && lapFilter.shown(modelData.lap)
-                        opacity: circle.lapOpacity(modelData.lap)
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: circle.matrix }
+                    Repeater {
+                        model: circle.info.dots || []
+                        GpuShape {
+                            key: modelData.zoom
+                            color: modelData.color
+                            visible: circle.chartZoomed && lapFilter.shown(modelData.lap)
+                            opacity: circle.lapOpacity(modelData.lap)
+                            revision: backend.revision
+                        }
                     }
-                }
-                // Grip envelope: line drawn twice half a pixel apart (thicker)
-                Repeater {
-                    model: backend.gEnvelope ? (circle.info.dots || []) : []
-                    Item {
-                        readonly property var lap: modelData
-                        visible: lapFilter.shown(lap.lap)
-                        opacity: circle.lapOpacity(lap.lap)
-                        Repeater {
-                            model: [0, 0.6]
-                            GpuShape {
-                                key: lap.envelope
-                                color: lap.color
-                                revision: backend.revision
-                                transform: Matrix4x4 {
-                                    matrix: Qt.matrix4x4(circle.gScale, 0, 0, circle.originX + modelData, 0, -circle.gScale, 0,
-                                                         circle.originY + modelData, 0, 0, 1, 0, 0, 0, 0, 1)
+                    // Grip envelope: line drawn twice half a pixel apart (thicker): second copy placed in G units,
+                    // 0.6 pixel right & down on screen (y up in G: minus)
+                    Repeater {
+                        model: backend.gEnvelope ? (circle.info.dots || []) : []
+                        Item {
+                            readonly property var lap: modelData
+                            visible: lapFilter.shown(lap.lap)
+                            opacity: circle.lapOpacity(lap.lap)
+                            Repeater {
+                                model: [0, 0.6]
+                                GpuShape {
+                                    x: modelData / circle.gScale
+                                    y: -modelData / circle.gScale
+                                    key: lap.envelope
+                                    color: lap.color
+                                    revision: backend.revision
                                 }
                             }
                         }

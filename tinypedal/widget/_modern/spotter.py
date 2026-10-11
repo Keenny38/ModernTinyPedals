@@ -37,7 +37,7 @@ from .draw import rounded
 GLOW_ALPHA = 70  # soft light of lit part, toward screen center
 CLEAR_ALPHA = 220
 APPROACH_ALPHA = 210
-PREVIEW_ALPHA = 140  # bar track while overlay unlocked
+PREVIEW_ALPHA = 140  # bar track in overlay edit mode
 
 
 def blend(low: QColor, high: QColor, fraction: float) -> QColor:
@@ -78,7 +78,7 @@ class Realtime(HiddenPreview, SpotterMixin, ModernOverlay):
         self.show_background = bool(wcfg["show_bar_background"])
         self.color_track = theme.tint(theme.surface_raised, PREVIEW_ALPHA)
         self.color_clear = theme.tint(theme.positive, CLEAR_ALPHA)
-        self.updated = False  # bar tracks drawn before first update (picture of Overlays page)
+        self.updated = False  # bar tracks drawn before first update (picture of Overlays page, not live overlay)
         self.state = NO_STATE
 
     def timerEvent(self, event):
@@ -86,15 +86,19 @@ class Realtime(HiddenPreview, SpotterMixin, ModernOverlay):
         self.updated = True
         self.refresh(self.read_spotter())
 
+    def picture_sample(self) -> bool:
+        """Bar tracks of overlay picture not updated yet"""
+        return not (self.updated or self.overlay_started)
+
     def paintEvent(self, event):
-        """Draw while a side is lit, signaled or watched (or overlay unlocked, or not updated yet)"""
-        if self.state.shown or self.show_background or self.previewing() or not self.updated:
+        """Draw while a side is lit, signaled or watched (or in edit mode, or picture not updated yet)"""
+        if self.state.shown or self.show_background or self.previewing() or self.picture_sample():
             super().paintEvent(event)
 
     def paint(self, painter: QPainter):
         theme = self.theme
         state = self.state
-        track = self.show_background or self.previewing() or not self.updated
+        track = self.show_background or self.previewing() or self.picture_sample()
         for index, (bar, overlap, clear, approach) in enumerate(zip(self.bars, state[:2], state.clear, state.approach)):
             inward = 1 if index == 0 else -1  # glow side
             if track:

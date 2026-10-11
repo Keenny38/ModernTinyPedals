@@ -22,16 +22,18 @@ Relative module
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from functools import lru_cache
 from itertools import chain
 from operator import itemgetter
+from time import monotonic
 
 from .. import realtime_state
 from ..api_control import api
 from ..calculation import asym_max
 from ..const_common import MAX_SECONDS, MAX_VEHICLES
 from ..module_info import minfo
-from ..validator import state_timer
 from ._base import DataModule
 
 REF_PLACES = tuple(range(1, MAX_VEHICLES + 1))
@@ -39,6 +41,7 @@ TEMP_RELATIVE_AHEAD = [(0.0, -1)] * MAX_VEHICLES
 TEMP_RELATIVE_BEHIND = [(0.0, -1)] * MAX_VEHICLES
 TEMP_CLASSES = [("", -1, -1, -1.0, -1.0)] * MAX_VEHICLES
 TEMP_DRAW_ORDER = list(range(MAX_VEHICLES))
+RELATIVE_DELTA_INTERVAL = 1.0  # seconds between relative delta updates
 
 
 class Realtime(DataModule):
@@ -60,8 +63,8 @@ class Realtime(DataModule):
         setting_standings = self.cfg.user.setting["standings"]
         last_version_update = None
         slot_ids = [-1] * MAX_VEHICLES  # vehicle slot id per index, of relative delta data
-
-        gen_one_second_timer = state_timer(1.0)
+        last_stamp: tuple = ()  # scoring data stamp of last update
+        last_delta_update = 0.0  # time of last relative delta update
 
         while not _event_wait(update_interval):
             if not realtime_state.paused:
@@ -72,6 +75,7 @@ class Realtime(DataModule):
                     # New session or reload: relative delta of vehicles from scratch
                     reset_relative_delta(
                         slot_ids, output.relativeDeltaAhead, output.relativeDeltaBehind)
+                    last_stamp = ()  # never skip first tick
 
                 # Check setting
                 if last_version_update != self.cfg.version_update:
@@ -85,20 +89,37 @@ class Realtime(DataModule):
                         setting_standings["maximum_vehicles_exclusive_mode"], min_top_veh, 2)
                     veh_limit_combined = max_vehicles_in_class(
                         setting_standings["maximum_vehicles_combined_mode"], min_top_veh, 2)
-                    veh_limit_other = max_vehicles_in_class(
-                        setting_standings["maximum_vehicles_per_split_others"], min_top_veh, 0)
+                    veh_limit_other = other_class_vehicles(setting_standings["maximum_vehicles_per_split_others"])
                     veh_limit_player = max_vehicles_in_class(
                         setting_standings["maximum_vehicles_per_split_player"], min_top_veh, 2)
+                    class_rank = class_order_rank(setting_standings["class_order"])
+
+                # Relative delta updated at 1 second interval (same time with or without new data)
+                now = monotonic()
+                update_relative_delta = now - last_delta_update >= RELATIVE_DELTA_INTERVAL
+
+                # Skip while inputs not updated since last tick: every vehicle input is scoring data
+                # (updated 5 times per second, along with session elapsed time)
+                read = api.read
+                veh_total = max(read.vehicle.total_vehicles(), 1)
+                plr_index = read.vehicle.player_index()
+                stamp = (
+                    read, read.session.elapsed(), veh_total, plr_index,
+                    realtime_state.resets, last_version_update,
+                )
+                if last_stamp == stamp and not update_relative_delta:
+                    continue
+                last_stamp = stamp
+                if update_relative_delta:
+                    last_delta_update = now
 
                 # Base info
-                veh_total = max(api.read.vehicle.total_vehicles(), 1)
-                plr_index = api.read.vehicle.player_index()
-                plr_place = api.read.vehicle.place()
+                plr_place = read.vehicle.place()
 
                 # Get vehicles info
                 (relative_ahead, relative_behind, classes_list, draw_order_list, is_multi_class,
                  ) = get_vehicles_info(
-                    veh_total, plr_index, show_in_garage, next(gen_one_second_timer),
+                    veh_total, plr_index, show_in_garage, update_relative_delta,
                     output.relativeDeltaAhead, output.relativeDeltaBehind, slot_ids)
 
                 # Update vehicle class position info
@@ -112,7 +133,7 @@ class Realtime(DataModule):
                 elif is_split_mode and is_multi_class:  # multi-class split list
                     standings_index_list = list(chain(*list(standings_index_from_all_classes(
                         min_top_veh, classes_list, plr_class_name, plr_class_place,
-                        veh_limit_other, veh_limit_player))))
+                        veh_limit_other, veh_limit_player, class_rank))))
                 else:  # mixed class list
                     classes_list.sort(key=itemgetter(1))  # sort by overall position
                     standings_index_list = calc_standings_index(
@@ -258,8 +279,12 @@ def get_vehicles_info(
     )
 
 
-def update_position_in_class(sorted_veh_class: list, plr_index: int):
-    """Update vehicle position in class"""
+def update_position_in_class(sorted_veh_class: list, plr_index: int, veh_data: tuple | None = None):
+    """Update vehicle position in class
+
+    Args:
+        veh_data: vehicles data set updated (default: module info, simulated race has its own).
+    """
     last_class_name = None
     place_in_class = 0
     opt_index_ahead = -1
@@ -269,7 +294,8 @@ def update_position_in_class(sorted_veh_class: list, plr_index: int):
     last_fastest_index = -1
     plr_class_name = ""
     plr_class_place = 0
-    veh_data = minfo.vehicles.dataSet
+    if veh_data is None:
+        veh_data = minfo.vehicles.dataSet
 
     for class_name, _, opt_index, laptime_best, laptime_last in sorted_veh_class:
         output_data = veh_data[opt_index]
@@ -312,9 +338,12 @@ def update_position_in_class(sorted_veh_class: list, plr_index: int):
 
 def standings_index_from_all_classes(
     min_top_veh: int, class_pos_list: list, plr_class_name: str, plr_class_place: int,
-    veh_limit_other: int, veh_limit_player: int):
-    """Generate class standings index list from all classes"""
-    class_collection = sorted(split_class_list(class_pos_list), key=sort_class_collection)
+    veh_limit_other: int, veh_limit_player: int, class_rank: Mapping[str, int] | None = None):
+    """Generate class standings index list from all classes, in class order (class_rank, see class_order_rank),
+    classes not ranked after, fastest class first"""
+    rank = class_rank or {}
+    class_collection = sorted(split_class_list(class_pos_list), key=lambda collection: (
+        rank.get(class_key(collection[0][0]), len(rank)), sort_class_collection(collection)))
     for class_list in class_collection:
         if plr_class_name == class_list[0][0]:  # match class name
             veh_limit = veh_limit_player
@@ -416,6 +445,29 @@ def max_vehicles_in_class(max_cls_veh: int, min_top_veh: int, min_add_veh: int =
     min_add_veh: minimum addition vehicles limit (for class has local player)
     """
     return max(int(max_cls_veh), min_top_veh + min_add_veh)
+
+
+def other_class_vehicles(max_cls_veh: int) -> int:
+    """Number of top vehicles shown of each class player is not in (split mode), 0 = class hidden
+
+    Not raised to minimum top vehicles (player class only): any number of cars of other classes can be shown.
+    """
+    return max(int(max_cls_veh), 0)
+
+
+def class_key(class_name: str) -> str:
+    """Class name compared in class order: case, spaces, underscores & hyphens left out ("LMP2 ELMS" = "LMP2_ELMS")"""
+    return re.sub(r"[\s_\-]+", "", class_name).casefold()
+
+
+def class_order_rank(class_order: str) -> dict[str, int]:
+    """Place of each class of class order option (class names separated by commas, first shown first)"""
+    rank: dict[str, int] = {}
+    for name in str(class_order).split(","):
+        key = class_key(name)
+        if key and key not in rank:
+            rank[key] = len(rank)
+    return rank
 
 
 def sort_class_collection(collection: list) -> float:

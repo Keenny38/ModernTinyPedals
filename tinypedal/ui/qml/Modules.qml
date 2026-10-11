@@ -174,6 +174,7 @@ TpPage {
                 readonly property int columns: Math.max(1, Math.floor(width / page.cardMinWidth))
                 cellWidth: Math.floor((width - theme.em * 0.7) / columns)  // room for scroll bar
                 cellHeight: Math.round(theme.em * 9.2)
+                reuseItems: true  // cards reset their transient state when pooled (see ModuleCard)
                 boundsBehavior: Flickable.StopAtBounds
                 highlightFollowsCurrentItem: false
                 keyNavigationEnabled: true

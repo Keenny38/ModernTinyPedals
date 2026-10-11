@@ -1,4 +1,4 @@
-# Modern Tiny Pedals OpenXR overlay layer (implicit API layer, Windows x64)
+# NeoPedal OpenXR overlay layer (implicit API layer, Windows x64)
 #
 # Build (Windows, Visual Studio 2022 or Build Tools, from the repository root):
 #   cmake -S native/openxr_layer -B native/openxr_layer/build -A x64

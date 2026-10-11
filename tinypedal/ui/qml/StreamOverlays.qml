@@ -194,6 +194,28 @@ TpPage {
                 opacity: backend.enabled ? 1 : 0.55
                 Behavior on opacity { NumberAnimation { duration: 200 } }
 
+                // Sources empty now: no overlay shown (auto hide outside sessions...), and why
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: backend.hiddenText !== ""
+                    implicitHeight: hiddenLabel.implicitHeight + theme.em * 1.2
+                    radius: theme.em * 0.5
+                    color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.12)
+                    border.width: 1
+                    border.color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.4)
+                    Text {
+                        id: hiddenLabel
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: theme.em * 0.8
+                        anchors.rightMargin: theme.em * 0.8
+                        text: backend.hiddenText
+                        color: theme.text
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
                 // Layout & race results
                 Card {
                     Layout.fillWidth: true
@@ -211,11 +233,36 @@ TpPage {
                             glyph: ""  // layers
                             title: i18n.tr("Layout")
                             detail: i18n.tr("Every overlay shown on stream, at its place on screen.") + "  "
-                                    + i18n.tr("Browser source size") + ": " + backend.screenText
+                                    + backend.layoutSizeText
                             url: backend.layoutUrl
                             live: backend.layoutLive
                             showText: page.wide
                             active: page.on
+                        }
+                        RowLayout {
+                            Layout.leftMargin: theme.em * 3.1
+                            spacing: theme.em * 0.4
+                            OptionLabel { text: i18n.tr("Format") }
+                            TpSegmented {
+                                options: [i18n.tr("16:9 (screen centre)"), i18n.tr("Whole screen")]
+                                currentIndex: backend.layoutFormatIndex
+                                onActivated: function(index) { backend.setLayoutFormat(index) }
+                            }
+                            TpButton {
+                                objectName: "editStreamLayout"
+                                glyph: ""  // layers
+                                text: i18n.tr("Edit Layout")
+                                tip: i18n.tr("Place overlays on this layout in your browser, apart from their place on screen (for example overlays of the sides of an ultrawide screen)")
+                                enabled: page.on
+                                onClicked: backend.editLayout()
+                            }
+                            TpButton {
+                                glyph: ""  // undo
+                                flat: true
+                                tip: i18n.tr("Overlays of this layout back to their place on screen")
+                                enabled: page.on && backend.layoutPlaced
+                                onClicked: backend.resetLayout()
+                            }
                         }
                         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: theme.border; opacity: 0.5 }
                         SourceRow {
@@ -407,6 +454,12 @@ TpPage {
                                     currentIndex: backend.frameRateIndex
                                     onActivated: function(index) { backend.setFrameRate(index) }
                                 }
+                            }
+                            TpSwitch {
+                                text: i18n.tr("Show overlays while spectating")
+                                tip: i18n.tr("Overlays shown & updated while you spectate a session or watch a replay, as long as a layout or overlay source is on air (hidden otherwise by Auto Hide)")
+                                checked: backend.spectating
+                                onToggled: backend.setSpectating(checked)
                             }
                             TpSwitch {
                                 text: i18n.tr("Another computer (LAN)")

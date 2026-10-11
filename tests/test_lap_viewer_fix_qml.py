@@ -277,32 +277,39 @@ def test_playback_stops_when_page_hidden(opener):
     assert not chart.property("playing")
 
 
-def test_channel_menu_keeps_scroll_and_tells_no_match(opener, warnings):
+def test_show_menu_keeps_scroll_and_tells_no_match(opener, warnings):
     dialog = opener()
     view, backend = dialog.view, dialog.backend
-    button = find(view, lambda item: item.property("text") == "Channels")[0]
+    button = named(view, "showButton")
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center_of(button))
     wait(0.5)
-    channels = named(view, "channelList")
-    assert channels.property("count") == len(backend.channelMenu)
-    channels.setProperty("contentY", 800.0)
+    channels = named(view, "showList")
+    def chips() -> list:
+        return [item for item in items(channels) if item.objectName() == "showChip" and item.isVisible()]
+
+    listed = len(chips())
+    catalog = [item for group in backend.dashboardCatalog for item in group["items"]]
+    assert 0 < listed < len(catalog)  # one wheel channels listed only while shown or searched
+    channels.setProperty("contentY", 200.0)
     wait(0.2)
-    target = next(row for row in backend.channelMenu[30:] if not row["visible"])
-    backend.setChannelVisible(target["column"], True)
+    target = next(item for item in catalog[20:] if not item["shown"] and not item["detail"])
+    backend.setChannelVisible(target["key"], True)
     wait(0.3)
-    assert channels.property("contentY") == pytest.approx(800.0)  # list kept, not rebuilt
-    row = next(item for item in items(channels) if item.property("column") == target["column"])
-    assert row.property("shown")
+    assert channels.property("contentY") == pytest.approx(200.0)  # list kept at its place
+    chip = next(item for item in chips() if item.property("channel") == target["key"])
+    assert chip.property("shown")
     empty = find(view, lambda item: item.property("text") == "No channel matches")[0]
     assert not empty.isVisible()
     QTest.keyClicks(view, "zzqq")  # search field has focus while menu is open
     wait(0.2)
-    assert channels.property("count") == 0 and empty.isVisible()
+    assert not chips() and empty.isVisible()
     for _ in range(4):
         key(view, Qt.Key.Key_Backspace)
-    QTest.keyClicks(view, "speed")
+    QTest.keyClicks(view, "fl")  # one wheel channels found by search
     wait(0.2)
-    assert 0 < channels.property("count") < len(backend.channelMenu) and not empty.isVisible()
+    found = chips()
+    assert found and not empty.isVisible()
+    assert any(item.property("detail") for item in found)
 
 
 def test_hysteresis_applied_while_slider_moves(opener):
@@ -391,7 +398,7 @@ def test_reference_lap_cursor_largest_on_map(opener, warnings):
     cars = [item for item in find(view, lambda item: item.property("size") is not None and item.property("z") == 4.0)
             if item.isVisible()]
     reference = next(item["key"] for item in backend.legend if item["reference"])
-    sizes = {evaluate(view, car, "point.lap"): car.property("size") for car in cars}
+    sizes = {car.property("lapKey"): car.property("size") for car in cars}  # positions carry no lap key
     assert len(sizes) > 1 and max(sizes, key=lambda lap: sizes[lap]) == reference
 
 

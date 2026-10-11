@@ -115,13 +115,13 @@ jobs:
 
     - name: ZIP source code
       run: |
-        file_name=ModernTinyPedals-$APP_VER-source.zip
+        file_name=NeoPedal-$APP_VER-source.zip
         zip -qr $file_name . -x "*.git/*" -x "*.github/*"
 
     - name: Check hash sum
       id: get_hash
       run: |
-        sha256hash=$(sha256sum ModernTinyPedals-$APP_VER-source.zip)
+        sha256hash=$(sha256sum NeoPedal-$APP_VER-source.zip)
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
         echo $sha256hash
 
@@ -129,7 +129,7 @@ jobs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: source
-        path: ModernTinyPedals-${{ needs.version.outputs.app_ver }}-source.zip
+        path: NeoPedal-${{ needs.version.outputs.app_ver }}-source.zip
 
   # Windows installer, published as is (with its .sha256 file) & zipped (setup.zip), beside the source ZIP
   windows:
@@ -255,7 +255,7 @@ jobs:
         if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
         & $iscc "/DAppVersion=$env:APP_VER" installer\tinypedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        Move-Item "./dist/ModernTinyPedals-$env:APP_VER-windows-setup.exe" .
+        Move-Item "./dist/NeoPedal-$env:APP_VER-windows-setup.exe" .
 
     - name: Sign installer
       if: env.HAS_SIGNING_CERT == 'true'
@@ -269,7 +269,7 @@ jobs:
         $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
         [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
         try {
-          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "./ModernTinyPedals-$env:APP_VER-windows-setup.exe"
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "./NeoPedal-$env:APP_VER-windows-setup.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         } finally {
           Remove-Item $pfx -ErrorAction SilentlyContinue
@@ -285,7 +285,7 @@ jobs:
         endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
         signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files: ${{ github.workspace }}/ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+        files: ${{ github.workspace }}/NeoPedal-${{ needs.version.outputs.app_ver }}-windows-setup.exe
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256
@@ -294,8 +294,8 @@ jobs:
     - name: ZIP Windows installer
       shell: pwsh
       run: |
-        Compress-Archive -Path "./ModernTinyPedals-$env:APP_VER-windows-setup.exe" `
-          -DestinationPath "./ModernTinyPedals-$env:APP_VER-setup.zip"
+        Compress-Archive -Path "./NeoPedal-$env:APP_VER-windows-setup.exe" `
+          -DestinationPath "./NeoPedal-$env:APP_VER-setup.zip"
 
     # sha256sum format "<hash>  <file>" (two spaces), listed in release notes, checked by "sha256sum -c"
     # & by the app updater (with the asset digest given by GitHub). The installer also gets its .sha256 file:
@@ -303,8 +303,8 @@ jobs:
     - name: Check hash sum
       id: get_hash
       run: |
-        sha256hash=$(sha256sum ModernTinyPedals-$APP_VER-setup.zip | sed 's/ \*/  /')
-        installer=ModernTinyPedals-$APP_VER-windows-setup.exe
+        sha256hash=$(sha256sum NeoPedal-$APP_VER-setup.zip | sed 's/ \*/  /')
+        installer=NeoPedal-$APP_VER-windows-setup.exe
         installer_hash=$(sha256sum $installer | sed 's/ \*/  /')
         printf '%s\n' "$installer_hash" > $installer.sha256
         echo "hash_output=${sha256hash}" >> $GITHUB_OUTPUT
@@ -317,9 +317,9 @@ jobs:
       with:
         name: windows
         path: |
-          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-setup.zip
-          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe
-          ModernTinyPedals-${{ needs.version.outputs.app_ver }}-windows-setup.exe.sha256
+          NeoPedal-${{ needs.version.outputs.app_ver }}-setup.zip
+          NeoPedal-${{ needs.version.outputs.app_ver }}-windows-setup.exe
+          NeoPedal-${{ needs.version.outputs.app_ver }}-windows-setup.exe.sha256
 
   # Tag the tested commit and publish release with notes (the changelog)
   release:
@@ -351,9 +351,9 @@ jobs:
     - name: Check installer files
       run: |
         mkdir extracted
-        unzip -j "builds/ModernTinyPedals-$APP_VER-setup.zip" -d extracted
-        cmp "extracted/ModernTinyPedals-$APP_VER-windows-setup.exe" "builds/ModernTinyPedals-$APP_VER-windows-setup.exe"
-        (cd builds && sha256sum -c "ModernTinyPedals-$APP_VER-windows-setup.exe.sha256")
+        unzip -j "builds/NeoPedal-$APP_VER-setup.zip" -d extracted
+        cmp "extracted/NeoPedal-$APP_VER-windows-setup.exe" "builds/NeoPedal-$APP_VER-windows-setup.exe"
+        (cd builds && sha256sum -c "NeoPedal-$APP_VER-windows-setup.exe.sha256")
         ls -l builds
 
     # Signed proof that the files were built by this workflow from this commit, checked with
@@ -390,4 +390,4 @@ jobs:
         SHA: ${{ needs.version.outputs.sha }}
       run: |
         gh release create "v$APP_VER" builds/* --repo "$GITHUB_REPOSITORY" --target "$SHA" \
-          --title "Modern Tiny Pedals $APP_VER" --notes-file release.txt
+          --title "NeoPedal $APP_VER" --notes-file release.txt

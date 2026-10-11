@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
+from functools import partial
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QGuiApplication, QPalette
 
 from ...setting import cfg
-from ...userfile.custom_image import brand_logo_file, logo_for_background
+from ...userfile.custom_image import LOGO_LOADER, brand_logo_file, deferred_logos, logo_for_background
 from ...userfile.game_images import images
 
 REFRESH_DELAY = 400  # ms, pictures arriving together refresh pages once
@@ -54,15 +55,24 @@ def light_theme() -> bool:
 
 def brand_logo_url(vehicle_name: str = "", brand: str = "") -> str:
     """Logo of car brand: brand of game car list by vehicle name, else brand or car model text"""
+    return _brand_logo_url(vehicle_name, brand, light_theme())
+
+
+def _brand_logo_url(vehicle_name: str, brand: str, light: bool) -> str:
+    """Logo of car brand for light or dark pages (any thread)"""
     if not vehicle_name and not brand:
         return ""
-    return file_url(brand_logo_file(cfg.path.brand_logo, images.brand(vehicle_name, brand), light_theme(),
-                                    vehicle_name))
+    return file_url(brand_logo_file(cfg.path.brand_logo, images.brand(vehicle_name, brand), light, vehicle_name))
 
 
 def track_logo_url(*names: str) -> str:
     """Logo of circuit from any of its names"""
-    return file_url(logo_for_background(images.track_logo(*names), light_theme()))
+    return _track_logo_url(names, light_theme())
+
+
+def _track_logo_url(names: tuple[str, ...], light: bool) -> str:
+    """Logo of circuit for light or dark pages (any thread)"""
+    return file_url(logo_for_background(images.track_logo(*names), light))
 
 
 def track_picture_url(*names: str, large: bool = False) -> str:
@@ -77,20 +87,52 @@ def car_picture_url(vehicle_name: str, large: bool = False) -> str:
 
 class LogoCache:
     """URLs of logos asked on every update (live lists): looked for once per name & theme (logos
-    recolored for light or dark pages), again once game pictures change"""
+    recolored for light or dark pages)
+
+    A readable copy never decided yet (logo new to this computer) is made on logo loader thread: "" meanwhile,
+    pages told through notifier once made (later lookups: file checks only). Names without logo looked for again
+    once game pictures change; others once game logos or lists (brand & circuit names) or own logos change.
+    """
 
     def __init__(self):
         self._urls: dict[tuple[str, str, str, bool], str] = {}
         self._version = -1
+        self._logos_version = -1
+        self._lists_version = -1
+        self._own_stamp: float | None = None
+
+    def _expire(self):
+        """Answers game pictures may have changed dropped"""
+        version = images.version
+        if self._version == version:
+            return
+        self._version = version
+        logos_version, lists_version = images.logos_version, images.lists_version
+        try:
+            own_stamp: float | None = os.path.getmtime(cfg.path.brand_logo)
+        except OSError:
+            own_stamp = None
+        if lists_version != self._lists_version or own_stamp != self._own_stamp:
+            self._urls.clear()
+        elif logos_version != self._logos_version:  # dark logo of a brand may have come (light pages)
+            self._urls = {key: url for key, url in self._urls.items() if url and not (key[0] == "brand" and key[3])}
+        else:  # car or circuit picture
+            self._urls = {key: url for key, url in self._urls.items() if url}
+        self._logos_version, self._lists_version, self._own_stamp = logos_version, lists_version, own_stamp
 
     def _get(self, kind: str, first: str, second: str) -> str:
-        if self._version != images.version:
-            self._version = images.version
-            self._urls.clear()
-        key = (kind, first, second, light_theme())
+        self._expire()
+        light = light_theme()
+        key = (kind, first, second, light)
         url = self._urls.get(key)
-        if url is None:
-            url = self._urls[key] = brand_logo_url(first, second) if kind == "brand" else track_logo_url(first, second)
+        if url is not None:
+            return url
+        with deferred_logos() as deferral:
+            url = brand_logo_url(first, second) if kind == "brand" else track_logo_url(first, second)
+        if not deferral.missed:
+            self._urls[key] = url
+            return url
+        LOGO_LOADER.run(("page logo", *key, images.version), partial(_make_logo, kind, first, second, light, notifier()))
         return url
 
     def brand(self, vehicle_name: str, brand: str = "") -> str:
@@ -98,6 +140,17 @@ class LogoCache:
 
     def track(self, name: str, other_name: str = "") -> str:
         return self._get("track", name, other_name)
+
+
+def _make_logo(kind: str, first: str, second: str, light: bool, note: PictureNotifier):
+    """Readable copy of logo made (logo loader thread), pages told"""
+    try:
+        if kind == "brand":
+            _brand_logo_url(first, second, light)
+        else:
+            _track_logo_url((first, second), light)
+    finally:
+        note.picture_arrived()
 
 
 class PictureNotifier(QObject):
@@ -122,6 +175,10 @@ class PictureNotifier(QObject):
         """Fetch thread: hand over to UI thread (nothing once app objects are gone)"""
         with suppress(RuntimeError):
             self._arrived.emit()
+
+    def picture_arrived(self):
+        """Picture ready (any thread): pages told (grouped)"""
+        self._picture_arrived()
 
 
 _notifier: PictureNotifier | None = None

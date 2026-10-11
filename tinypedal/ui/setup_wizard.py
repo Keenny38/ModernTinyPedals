@@ -141,10 +141,15 @@ def run_setup(choices: SetupChoices):
     if preset:
         cfg.set_next_to_load(preset)
         loader.reload(reload_preset=True)
+    loader.after_reload(lambda: finish_setup(choices))  # choices applied to new preset once loaded
+
+
+def finish_setup(choices: SetupChoices):
+    """Apply preset choices to loaded preset and reload"""
     enabled = apply_preset_choices(choices)
     loader.reload(reload_preset=False)  # restart API with selected game, start widgets
     logger.info("SETUP: completed, enabled widgets: %s", ", ".join(enabled) or "none")
-    app_signal.refresh.emit(True)
+    loader.after_reload(lambda: app_signal.refresh.emit(True))
 
 
 class SetupWizard(QDialog):

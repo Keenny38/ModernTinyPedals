@@ -34,17 +34,19 @@ Card {
             Icon { glyph: ""; color: theme.accent; size: theme.em * 0.95 }  // flag
             Text { text: i18n.tr("Strategy"); color: theme.text; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
-            Repeater {  // legend
-                model: card.ready ? card.timeline.bands : []
+            Repeater {  // legend (items kept when the plan changes: model is the count)
+                model: card.ready ? card.timeline.bands.length : 0
                 Row {
-                    required property var modelData
+                    id: legendItem
+                    required property int index
+                    readonly property var band: card.timeline.bands[index] || ({})
                     spacing: theme.em * 0.3
                     Rectangle {
                         width: theme.em * 0.8; height: theme.em * 0.5; radius: 2
-                        color: parent.modelData.color; opacity: 0.6
+                        color: legendItem.band.color || "transparent"; opacity: 0.6
                         anchors.verticalCenter: parent.verticalCenter
                     }
-                    Text { text: parent.modelData.name || ""; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
+                    Text { text: legendItem.band.name || ""; color: theme.dimText; font.pointSize: theme.fontPoint * 0.85 }
                 }
             }
             Row {
@@ -138,42 +140,44 @@ Card {
                 opacity: 0.6
             }
 
-            // Safety car & rain laps: bands behind the stints
+            // Safety car & rain laps: bands behind the stints. Bands, stints, stops & labels kept when the plan
+            // changes (model is the count): blocks & stop lines slide to their new place
             Repeater {
-                model: card.ready ? card.timeline.bands : []
+                model: card.ready ? card.timeline.bands.length : 0
                 Rectangle {
-                    required property var modelData
-                    x: area.xOf(modelData.start)
+                    required property int index
+                    readonly property var band: card.timeline.bands[index] || ({})
+                    x: area.xOf(band.start || 0)
                     y: area.barTop - 3
-                    width: Math.max(area.xOf(modelData.end) - x, 2)
+                    width: Math.max(area.xOf(band.end || 0) - x, 2)
                     height: card.barHeight + 6
                     radius: 3
-                    color: modelData.color
+                    color: band.color || "transparent"
                     opacity: 0.45
                 }
             }
             // Stints: blocks between stops, alternating shade (driver color when drivers take turns)
             Repeater {
-                model: card.ready ? card.timeline.stints : []
+                model: card.ready ? card.timeline.stints.length : 0
                 Rectangle {
                     id: block
-                    required property var modelData
                     required property int index
+                    readonly property var stint: card.timeline.stints[index] || ({})
                     readonly property int count: card.timeline.stints.length
-                    x: area.xOf(modelData.start) + (index ? 1 : 0)
+                    x: area.xOf(stint.start || 0) + (index ? 1 : 0)
                     y: area.barTop
-                    width: Math.max(area.xOf(modelData.end) - area.xOf(modelData.start) - (index ? 1 : 0)
+                    width: Math.max(area.xOf(stint.end || 0) - area.xOf(stint.start || 0) - (index ? 1 : 0)
                                     - (index < count - 1 ? 1 : 0), 1)
                     height: card.barHeight
                     radius: Math.min(height / 2, theme.em * 0.4)
-                    color: modelData.color !== "" ? modelData.color : theme.accent
-                    opacity: modelData.color !== "" ? 0.88 : (index % 2 ? 0.58 : 0.9)
+                    color: stint.color ? stint.color : theme.accent
+                    opacity: stint.color ? 0.88 : (index % 2 ? 0.58 : 0.9)
                     Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                     Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                     Text {
                         anchors.centerIn: parent
                         visible: block.width > implicitWidth + 8
-                        text: block.modelData.laps
+                        text: block.stint.laps !== undefined ? block.stint.laps : ""
                         color: "white"
                         font.weight: Font.DemiBold
                         font.pointSize: theme.fontPoint * 0.9
@@ -183,27 +187,29 @@ Card {
             }
             // Stops: line from pit lap label to the bar
             Repeater {
-                model: card.ready ? card.timeline.stops : []
+                model: card.ready ? card.timeline.stops.length : 0
                 Rectangle {
-                    required property var modelData
-                    x: Math.round(area.xOf(modelData.pos))
+                    required property int index
+                    readonly property var mark: card.timeline.stops[index] || ({})
+                    x: Math.round(area.xOf(mark.pos || 0))
                     y: card.labelHeight + 1
-                    width: modelData.tyres ? 2 : 1
+                    width: mark.tyres ? 2 : 1
                     height: area.barTop - y + card.barHeight
-                    color: modelData.tyres ? card.tyreColor : theme.text
+                    color: mark.tyres ? card.tyreColor : theme.text
                     opacity: 0.85
                     Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                 }
             }
             Repeater {
-                model: area.labels
+                model: area.labels.length
                 Text {
-                    required property var modelData
-                    x: modelData.x
-                    width: modelData.width
+                    required property int index
+                    readonly property var label: area.labels[index] || ({})
+                    x: label.x || 0
+                    width: label.width || 0
                     height: card.labelHeight
-                    text: modelData.text
-                    color: modelData.tyres ? card.tyreColor : theme.text
+                    text: label.text || ""
+                    color: label.tyres ? card.tyreColor : theme.text
                     horizontalAlignment: Text.AlignHCenter
                     font.features: { "tnum": 1 }
                 }

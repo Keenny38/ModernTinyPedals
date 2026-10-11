@@ -22,7 +22,7 @@ Race notifications Widget, modern design
 Stack of toast cards fading out after a few seconds: icon badge in kind color (gain, loss,
 warning, info, best) showing what happened (arrow, flag, stopwatch, penalty, invalid lap),
 title over detail, thin bar at bottom shrinking with time left. Nothing drawn while there is no
-message (unless overlay unlocked, or before first update: picture of Overlays page).
+message (unless in overlay edit mode, or before first update of a picture of Overlays page).
 """
 
 from __future__ import annotations
@@ -149,8 +149,10 @@ class Realtime(HiddenPreview, NotificationsMixin, ModernOverlay):
         ))
 
     def paintEvent(self, event):
-        """Draw while a message is shown (or overlay unlocked, or not updated yet)"""
-        if self.state is None:
+        """Draw while a message is shown (or in edit mode, or picture not updated yet)"""
+        if self.state is None:  # not updated yet: sample (picture, or edit mode before data), nothing else
+            if self.overlay_started and not self.previewing():
+                return
             self.state = ()
             super().paintEvent(event)
             self.state = None

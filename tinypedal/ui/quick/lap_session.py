@@ -61,9 +61,9 @@ class SessionTab(BackendBase):
             groups.append((header["session"], f"{header['title']} · {len(group)}", group))
         return groups
 
-    def session_key(self) -> str:
+    def session_key(self, groups: list[tuple[str, str, list[LapEntry]]] | None = None) -> str:
         """Session shown: chosen one, else session of reference lap, else newest"""
-        groups = self.session_groups()
+        groups = self.session_groups() if groups is None else groups
         keys = [key for key, _, _ in groups]
         if self._session_key in keys:
             return self._session_key
@@ -78,10 +78,25 @@ class SessionTab(BackendBase):
         self.sessionChanged.emit()
         self.start_session_job()
 
-    def session_data(self) -> dict:
+    def session_state(self) -> dict:
+        """Sessions of track, session shown & its laps (see session_data), built once until sessionChanged"""
+        state = self._session_state
+        if state is None:
+            groups = self.session_groups()
+            key = self.session_key(groups)
+            state = self._session_state = {
+                "sessions": [{"key": name, "title": title} for name, title, _ in groups], "key": key,
+                "data": self.session_data(groups, key)}
+        return state
+
+    def drop_session_state(self):
+        self._session_state = None
+
+    def session_data(self, groups: list[tuple[str, str, list[LapEntry]]] | None = None, key: str | None = None) -> dict:
         """Laps of shown session: number, time, valid, fuel & tyre wear used, off tracks, track limits, shown"""
-        key = self.session_key()
-        group = next((laps for name, _, laps in self.session_groups() if name == key), [])
+        groups = self.session_groups() if groups is None else groups
+        key = self.session_key(groups) if key is None else key
+        group = next((laps for name, _, laps in groups if name == key), [])
         colors = {lap.key: lap.color.name() for lap in self.data.laps}
         units = lap_viewer.display_units()
         to_temperature = units["temperature"][0]
@@ -161,8 +176,9 @@ class SessionTab(BackendBase):
         """
         if self._session_busy:
             return
-        key = self.session_key()
-        group = next((laps for name, _, laps in self.session_groups() if name == key), [])
+        groups = self.session_groups()
+        key = self.session_key(groups)
+        group = next((laps for name, _, laps in groups if name == key), [])
         todo = []
         for entry in group:
             try:

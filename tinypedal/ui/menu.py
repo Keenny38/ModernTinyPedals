@@ -39,13 +39,6 @@ from ..setting import cfg
 from ..update import update_checker
 from ..userfile.tls_cert import fingerprint as certificate_fingerprint
 from ..web_dashboard import webdashboard
-from .about import About
-from .bug_report_view import BugReport
-from .config import FontConfig, UserConfig
-from .log_info import LogInfo
-from .option_finder import OptionFinder
-from .perf_view import PerformanceView
-from .setup_wizard import SetupWizard
 from .toast import show_toast
 from .tools_view import TOOL_SECTIONS, open_tool
 
@@ -54,13 +47,13 @@ from .tools_view import TOOL_SECTIONS, open_tool
 def menu_reload_preset():
     """Command - full reload"""
     loader.reload(reload_preset=True)
-    app_signal.refresh.emit(True)
+    loader.after_reload(menu_refresh_only)
 
 
 def menu_reload_only():
     """Command - fast reload"""
     loader.reload(reload_preset=False)
-    app_signal.refresh.emit(True)
+    loader.after_reload(menu_refresh_only)
 
 
 def menu_refresh_only():
@@ -83,6 +76,8 @@ def open_config_application(parent, section: str = "application"):
 
 def open_preset_config(parent, name: str):
     """Settings kept in the loaded preset: "units", "font" (global font override) or "api" (API options)"""
+    from .config import FontConfig, UserConfig  # dialogs imported when opened (startup time & memory)
+
     if name == "font":
         FontConfig(parent=parent, user_setting=cfg.user.setting, reload_func=menu_reload_only).open()
         return
@@ -372,6 +367,26 @@ class ConfigMenu(QMenu):
             _folder = open_folder.addAction(option_label(path_name))
             _folder.triggered.connect(lambda checked=True, p=path_name: self.open_folder(checked, p))
 
+        # Global settings from TinyPedal: import again, or start with default settings
+        tinypedal_settings = self.addMenu(tr("TinyPedal Settings"))
+        self.import_again = tinypedal_settings.addAction(tr("Import Again from TinyPedal..."))
+        self.import_again.triggered.connect(lambda: self.change_global_settings("reimport"))
+        default_settings = tinypedal_settings.addAction(tr("Start with Default Settings..."))
+        default_settings.triggered.connect(lambda: self.change_global_settings("reset"))
+        tinypedal_settings.aboutToShow.connect(self.refresh_tinypedal_settings)
+
+    def refresh_tinypedal_settings(self):
+        """Import again only if TinyPedal settings folder exists"""
+        from .settings_import import legacy_folder_found
+
+        self.import_again.setEnabled(legacy_folder_found())
+
+    def change_global_settings(self, state: str):
+        """Import again from TinyPedal, or default settings: asked, then app restarts"""
+        from .settings_import import confirm_change
+
+        confirm_change(self._parent, state)
+
     def open_folder(self, checked: bool, path_name: str):
         """Open folder in file manager"""
         filepath = getattr(cfg.path, path_name)
@@ -394,6 +409,8 @@ class ConfigMenu(QMenu):
 
     def open_option_finder(self):
         """Find option in all settings"""
+        from .option_finder import OptionFinder
+
         _dialog = OptionFinder(self._parent)
         _dialog.show()
 
@@ -609,7 +626,7 @@ class WindowMenu(QMenu):
             self.addAction(tr("Reset Window Size and Position")).triggered.connect(reset_size)
         self.addSeparator()
 
-        restart_app = self.addAction(tr("Restart Modern Tiny Pedals"))
+        restart_app = self.addAction(tr("Restart NeoPedal"))
         restart_app.triggered.connect(getattr(parent, "restart_app", loader.restart))
 
         self.aboutToShow.connect(self.refresh_menu)
@@ -684,26 +701,36 @@ class HelpMenu(QMenu):
 
     def show_about(self):
         """Show about"""
+        from .about import About
+
         _dialog = About(self._parent)
         _dialog.show()
 
     def show_setup_wizard(self):
         """Show setup wizard"""
+        from .setup_wizard import SetupWizard
+
         _dialog = SetupWizard(self._parent)
         _dialog.open()
 
     def show_performance(self):
         """Show widget performance"""
+        from .perf_view import PerformanceView
+
         _dialog = PerformanceView(self._parent)
         _dialog.show()
 
     def show_bug_report(self):
         """Create bug report"""
+        from .bug_report_view import BugReport
+
         _dialog = BugReport(self._parent)
         _dialog.show()
 
     def show_log(self):
         """Show log"""
+        from .log_info import LogInfo
+
         _dialog = LogInfo(self._parent)
         _dialog.show()
 

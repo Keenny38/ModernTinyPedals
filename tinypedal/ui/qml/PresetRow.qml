@@ -19,12 +19,18 @@ Item {
     required property int overlays
     required property int modules
     required property bool unreadable
+    required property bool pending  // content not read yet: last change only
+    required property string contentText  // last change & content, translated by backend
     property bool selected: false
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
     readonly property bool wide: width > theme.em * 36
     signal clicked()
     signal loadRequested()
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal menuRequested(Item item, real x, real y)
+
+    ListView.onPooled: recycling = true
+    ListView.onReused: recycling = false
 
     width: ListView.view ? ListView.view.width - theme.em * 0.7 : 0  // room for scroll bar
     height: Math.round(theme.em * 3.3)
@@ -43,8 +49,8 @@ Item {
         border.width: 1
         border.color: row.selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.75)
                     : theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { ColorAnimation { duration: 120 } }
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
+        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: 120 } }
 
         MouseArea {
             id: area
@@ -136,8 +142,7 @@ Item {
             }
             Text {
                 width: parent.width
-                text: row.unreadable ? i18n.tr("Unreadable file") + "  ·  " + row.changedText
-                    : row.changedText + "  ·  " + i18n.trm(row.overlays + " overlays") + "  ·  " + i18n.trm(row.modules + " modules")
+                text: row.contentText
                 color: row.unreadable ? theme.warning : theme.dimText
                 font.pointSize: theme.fontPoint * 0.85
                 elide: Text.ElideRight
@@ -199,7 +204,7 @@ Item {
                 implicitHeight: Math.round(theme.em * 1.9)
                 opacity: area.containsMouse || hovered || row.current || row.selected ? 1 : 0
                 enabled: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
+                Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: 120 } }
                 onClicked: row.loadRequested()
             }
             TpButton {

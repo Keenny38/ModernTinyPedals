@@ -32,7 +32,7 @@ TpPage {
     onFollowChanged: if (follow) centerOnPosition(true); else canvas.reset(true)
     Connections {
         target: backend
-        function onPositionChanged() { if (page.follow) page.centerOnPosition(false) }
+        function onCurrentChanged() { if (page.follow) page.centerOnPosition(false) }
         function onMapChanged() { page.playing = false; canvas.reset(false) }
     }
     FrameAnimation {  // play: one step per rendered frame, none while page hidden or window minimized
@@ -157,60 +157,48 @@ TpPage {
                         if (distance >= 0) backend.setPosition(distance)
                     }
 
-                    GpuShape {
-                        key: page.view.edge || ""
-                        color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
-                        revision: backend.revision
+                    // Map shapes: one transform for all of them (one update per zoom or move frame, not one per shape)
+                    Item {
                         transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.road || ""
-                        color: theme.dark ? Qt.lighter(theme.base, 1.5) : Qt.darker(theme.base, 1.08)
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.sectors || ""
-                        opacity: 0.85
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.start || ""
-                        color: page.colors.start_line_color || "#FF4400"
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.sectorLines || ""
-                        color: page.colors.sector_line_color || "#00AAFF"
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
+                        GpuShape {
+                            key: page.view.edge || ""
+                            color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.18 : 0.25)
+                        }
+                        GpuShape {
+                            key: page.view.road || ""
+                            color: theme.dark ? Qt.lighter(theme.base, 1.5) : Qt.darker(theme.base, 1.08)
+                        }
+                        GpuShape {
+                            key: page.view.sectors || ""
+                            opacity: 0.85
+                        }
+                        GpuShape {
+                            key: page.view.start || ""
+                            color: page.colors.start_line_color || "#FF4400"
+                        }
+                        GpuShape {
+                            key: page.view.sectorLines || ""
+                            color: page.colors.sector_line_color || "#00AAFF"
+                        }
 
-                    // Curve at position
-                    GpuShape {
-                        key: page.view.circle || ""
-                        visible: page.overlays.show_osculating_circle
-                        color: page.colors.osculating_circle_color || "#00AAFF"
-                        opacity: 0.8
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.radius || ""
-                        visible: page.overlays.show_osculating_circle
-                        color: page.colors.osculating_circle_color || "#00AAFF"
-                        opacity: 0.6
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
-                    }
-                    GpuShape {
-                        key: page.view.section || ""
-                        visible: page.overlays.show_curve_section
-                        color: page.colors.curve_section_color || "#FF4400"
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: canvas.matrix }
+                        // Curve at position
+                        GpuShape {
+                            key: page.view.circle || ""
+                            visible: page.overlays.show_osculating_circle
+                            color: page.colors.osculating_circle_color || "#00AAFF"
+                            opacity: 0.8
+                        }
+                        GpuShape {
+                            key: page.view.radius || ""
+                            visible: page.overlays.show_osculating_circle
+                            color: page.colors.osculating_circle_color || "#00AAFF"
+                            opacity: 0.6
+                        }
+                        GpuShape {
+                            key: page.view.section || ""
+                            visible: page.overlays.show_curve_section
+                            color: page.colors.curve_section_color || "#FF4400"
+                        }
                     }
 
                     // Distance circles around position (meters)
@@ -293,7 +281,7 @@ TpPage {
                     // Empty map
                     Column {
                         anchors.centerIn: parent
-                        visible: !page.loaded
+                        visible: !page.loaded && !backend.loading
                         spacing: theme.em * 0.8
                         Icon { anchors.horizontalCenter: parent.horizontalCenter; glyph: ""; size: theme.em * 3; color: theme.dimText }
                         Text {
@@ -427,17 +415,16 @@ TpPage {
                             opacity: 0.06
                         }
                     }
-                    GpuShape {
-                        key: page.view.elevation || ""
-                        color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
-                        revision: backend.revision
+                    Item {  // elevation area & line: one transform
                         transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
-                    }
-                    GpuShape {
-                        key: page.view.elevationLine || ""
-                        color: theme.accent
-                        revision: backend.revision
-                        transform: Matrix4x4 { matrix: Qt.matrix4x4(profile.sx, 0, 0, 0, 0, -profile.sy, 0, profile.height - 3 + profile.minZ * profile.sy, 0, 0, 1, 0, 0, 0, 0, 1) }
+                        GpuShape {
+                            key: page.view.elevation || ""
+                            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
+                        }
+                        GpuShape {
+                            key: page.view.elevationLine || ""
+                            color: theme.accent
+                        }
                     }
                     Text { x: 4; y: 2; text: page.distance(profile.maxZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }
                     Text { x: 4; anchors.bottom: parent.bottom; text: page.distance(profile.minZ, 1); color: theme.dimText; font.pointSize: theme.fontPoint * 0.75 }

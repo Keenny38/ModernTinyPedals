@@ -204,12 +204,18 @@ def test_command_palette(ui_env, monkeypatch):
         # Former fuel calculator & tyre strategy planner names find the merged tool
         assert match_commands(palette.commands, "fuel calculator")[0].title == "Race Calculator"
         assert match_commands(palette.commands, "stratégie pneus")[0].title == "Race Calculator"
+        shown = [palette.list_results.item(row).text() for row in range(palette.list_results.count())]
         palette.edit_search.setText("hotkey")
+        assert [palette.list_results.item(row).text() for row in range(palette.list_results.count())] == shown
+        palette.apply_search()  # typing refreshes results after a short pause
         assert palette.list_results.count() >= 1
         palette.edit_search.setText("font size speed")  # options found too
+        palette.apply_search()
         assert any("\u2192" in palette.list_results.item(row).text() for row in range(palette.list_results.count()))
+        options = palette.options
+        assert CommandPalette(window).options is options  # option index kept while settings unchanged
         palette.edit_search.setText("Tools")
-        palette.run_selected()  # first match is the page
+        palette.run_selected()  # first match is the page (pending search applied first)
         assert window.centralWidget().current_index() == app_module.PAGE_INDEX["tools"]
     finally:
         cfg.application["last_page_index"] = 0

@@ -59,7 +59,7 @@ def test_rail_items_setting():
     assert parse_rail_items("fuel_calculator,tools,tyre_strategy_planner") == ["race_calculator", "tools"]
     assert default_rail_items() == [
         "home", "widget", "driver_stats_viewer", "race_results_viewer", "game_replays",
-        "lap_viewer", "spectate", "race_calculator", "preset", "app_settings",
+        "broadcast_director", "lap_viewer", "race_calculator", "preset",
     ]
 
 

@@ -294,6 +294,7 @@ def test_vr_window_image_matches_grab():
     process_events(0.1)
     try:
         grabbed = vr_overlay.compose_widgets([widget])
+        grabbed = grabbed.copy() if grabbed is not None else None  # composed image reused by next call
         widget.paint_serial = 1
         stored = vr_overlay.compose_widgets([widget])
         assert grabbed is not None and stored is not None

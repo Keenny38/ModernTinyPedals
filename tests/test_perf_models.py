@@ -182,3 +182,75 @@ def test_folded_update_rows_computes_change_once():
     assert sorted(calls) == list("abcd")  # once per row, not again for shown copies
     assert [row["value"] for row in model.all_rows] == [1] * 4 and [row["value"] for row in model.rows] == [1] * 3
     assert not model.update_rows(lambda row: {"value": 1})
+
+
+# --- update_rows: one dataChanged per run of changed rows (union of roles), cheap data()
+def data_changes(model) -> list[tuple[int, int, list[int]]]:
+    changes: list[tuple[int, int, list[int]]] = []
+    model.dataChanged.connect(lambda first, last, roles: changes.append((first.row(), last.row(), list(roles))))
+    return changes
+
+
+def test_select_all_one_data_changed(qt_warnings):
+    model = DictListModel(("key", "checked", "value"))
+    tester = model_tester(model)
+    model.sync([{"key": number, "checked": False, "value": 0} for number in range(300)])
+    changes = data_changes(model)
+    assert model.update_rows(lambda row: {"checked": True})
+    assert changes == [(0, 299, [model._role_of["checked"]])]
+    assert all(row["checked"] for row in model.rows)
+    changes.clear()
+    assert not model.update_rows(lambda row: {"checked": True})  # nothing changed: nothing notified
+    assert changes == []
+    del tester
+    assert not qt_warnings
+
+
+def test_update_rows_runs_and_role_union():
+    model = DictListModel(("key", "checked", "value"))
+    model.sync([{"key": number, "checked": False, "value": 0} for number in range(10)])
+    changes = data_changes(model)
+
+    def change(row):
+        number = row["key"]
+        if number in (1, 2):
+            return {"checked": True}
+        if number == 3:
+            return {"value": 5}
+        if number in (6, 9):
+            return {"checked": True, "value": 0}  # value unchanged: checked role only
+        return {}
+
+    assert model.update_rows(change)
+    checked, value = model._role_of["checked"], model._role_of["value"]
+    assert changes == [(1, 3, sorted((checked, value))), (6, 6, [checked]), (9, 9, [checked])]
+
+
+def test_update_rows_value_without_role_notifies_every_role():
+    model = DictListModel(("key", "value"))
+    model.sync([{"key": number, "value": 0} for number in range(3)])
+    changes = data_changes(model)
+    assert model.update_rows(lambda row: {"hidden": row["key"]} if row["key"] else {"value": 1})
+    assert changes == [(0, 2, [])]  # like update_row: no role of the changed value, every role notified
+    assert model.rows[2]["hidden"] == 2
+
+
+def test_folded_update_rows_batched():
+    model = FoldedListModel(("key", "value"), "key")
+    model.set_rows([{"key": key, "value": 0} for key in "abcdef"], lambda row: row["key"] not in "c")
+    changes = data_changes(model)
+    assert model.update_rows(lambda row: {"value": 1})
+    assert changes == [(0, 4, [model._role_of["value"]])]  # shown rows a b d e f, hidden c updated too
+    assert [row["value"] for row in model.all_rows] == [1] * 6
+
+
+def test_data_lookup():
+    model = DictListModel(("key", "value"))
+    model.sync([{"key": "a", "value": 7}])
+    role = model._role_of["value"]
+    assert model.data(model.index(0, 0), role) == 7
+    assert model.data(model.index(0, 0), 0) is None  # display role: not a row role
+    assert model.data(model.index(5, 0), role) is None
+    assert model.data(QPersistentModelIndex(), role) is None
+    model.rows.clear()  # rows dropped without notification (view still holding an index)
+    assert model.data(model.createIndex(0, 0), role) is None

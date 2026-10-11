@@ -171,11 +171,7 @@ class Realtime(Restyled, Classic):
         ones keep a faint tint of their zone color"""
         wcfg = self.wcfg
         theme = self.theme
-        count = min(max(int(wcfg["number_of_rpm_leds"]), 3), 20)
-        ratio = self.rpm / self.rpm_max if self.rpm_max > 0 else 0
-        start = min(max(wcfg["rpm_led_start_ratio"], 0), 0.95)
-        redline = max(wcfg["rpm_redline_ratio"], start + 0.01)
-        over = ratio >= redline
+        count, ratio, start, redline, over = self.led_levels()
         flash_off = over and self.flash_off()
         gap = rect.height() * 0.3
         led_w = (rect.width() - gap * (count - 1)) / count
@@ -191,7 +187,7 @@ class Realtime(Restyled, Classic):
                 lit = not flash_off
                 color = QColor(wcfg["rpm_led_shift_color"])
             else:
-                lit = ratio >= start + led / count * (redline - start)
+                lit = self.led_lit(led, count, ratio, start, redline)
                 color = zone
             rounded(painter, led_rect, radius, inactive)
             if not lit:

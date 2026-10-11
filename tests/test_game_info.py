@@ -1,6 +1,7 @@
 """Game info of LMU Rest API: chat widget, contacts (black box event log, game replays page),
 pit lane entry (race plan widget), setup name (laps), replays saved by game"""
 
+import json
 import os
 from importlib import import_module
 from types import SimpleNamespace
@@ -71,6 +72,23 @@ def test_parse_replays():
     replay = game_info.parse_replays([{"id": 3, "replayName": "Fuji Speedway P1 5", "replayDirectory": "C:\\R\\",
                                        "metadata": {"eventTitle": None, "eventType": "quick-race"}}])[0]
     assert (replay.event, replay.event_type, replay.folder, replay.time) == ("", "quick-race", "C:\\R\\", 0.0)
+
+
+def test_non_finite_json_numbers_never_raise():
+    """json reads 1e999 as inf: entries with an infinite or huge number left out, other numbers 0"""
+    data = json.loads(
+        '[{"slotID": 1e999, "driverName": "A"}, {"slotID": 2, "driverName": "B", "position": 1e999,'
+        ' "lapsCompleted": -1e999, "bestLapTime": 1e999, "timeIntoLap": 1e999, "veFraction": 1e999,'
+        ' "carPosition": {"x": 1e999, "z": ' + "9" * 400 + '}}]')
+    cars = game_info.parse_standings(data)
+    assert [car.slot for car in cars] == [2]
+    car = cars[0]
+    assert (car.position, car.laps, car.best, car.into_lap, car.energy, car.x, car.y) == (0, 0, 0.0, -1.0, -1.0, 0.0, 0.0)
+    replays = game_info.parse_replays(json.loads(
+        '[{"id": 1e999}, {"id": 2, "size": 1e999}, {"id": 3, "timestamp": 1e999}, {"id": 4, "timestamp": 5}]'))
+    assert [replay.id for replay in replays] == [4]
+    assert game_info.parse_chat(json.loads('[{"message": "a", "timestamp": 1e999}]'), ()) == ()
+    assert game_info.parse_contacts(json.loads('[{"et": 1e999, "player": "a", "contactWith": "b"}]'), ()) == ()
 
 
 def test_replay_title():
@@ -171,6 +189,29 @@ def test_chat_widget(ui_env, monkeypatch, modern):
         shown = [bar.text.strip() for bar in widget.bars if not bar.isHidden()]
     assert shown == ["M Toit: Go Left", "M Toit: Leaving pits"]
     widget.deleteLater()
+
+
+def test_chat_lines_newest_at_top():
+    from tinypedal.widget.chat import chat_lines
+
+    messages = ((100.0, "A: one two three four five six"), (101.0, "B: last"))
+    assert chat_lines(messages, 102.0, 12, 3, 0.0, 0.0, False, True) == (
+        ("B: last", False), ("A: one two", False), ("three four", False))  # oldest cut at bottom
+    assert chat_lines(messages, 102.0, 12, 3, 0.0, 0.0, False) == (
+        ("three four", False), ("five six", False), ("B: last", False))  # oldest cut at top
+
+
+@pytest.mark.parametrize("modern", [False, True])
+def test_chat_overlay_picture_shows_sample_conversation(ui_env, bundled_fonts, modern):
+    """Overlays page & options picture: sample conversation (messages of the sample race)"""
+    from tinypedal.ui import widget_preview
+    from tinypedal.widget.chat import SAMPLE_MESSAGES
+
+    cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
+    image = widget_preview.render_widget(cfg, "chat", cfg.user.setting["chat"]).toImage()
+    shown = sum(1 for y in range(0, image.height(), 3) for x in range(0, image.width(), 3)
+                if image.pixelColor(x, y).alpha() > 0)
+    assert shown > 0 and len(SAMPLE_MESSAGES) >= 4
 
 
 # --- Black box contact events
@@ -278,6 +319,9 @@ class FakeGame:
                 return self
 
             def __exit__(self, *args):
+                pass
+
+            def close(self):
                 pass
 
             def get(self, resource):

@@ -1,7 +1,199 @@
 # Journal des modifications
 
-Toutes les nouveautés de **Modern Tiny Pedals**, la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
+Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
+
+## 0.23.0 (2026-10-11)
+
+### Nouveau nom : NeoPedal
+
+- **L'app s'appelle maintenant NeoPedal**, partout : fenêtre, menus, installateur, menu Démarrer, Gestionnaire des tâches, tableau de bord web, overlay VR et documentation. Elle reste une version modifiée de TinyPedal, avec la même licence et les mêmes crédits.
+- **Réglages séparés de TinyPedal d'origine** : le dossier de configuration globale est maintenant `%APPDATA%\NeoPedal` (Linux : `~/.config/NeoPedal` et `~/.local/share/NeoPedal`). Jusqu'ici l'app partageait `%APPDATA%\TinyPedal` avec TinyPedal d'origine, et chaque app pouvait modifier les réglages de l'autre : les deux peuvent maintenant être utilisées côte à côte.
+- **Tes réglages suivent** : mets à jour depuis l'app comme d'habitude. Au premier démarrage, ton dossier `TinyPedal` (configuration, raccourcis, statistiques pilote, packs de langue, incidents de la boîte noire) est copié une seule fois vers le nouveau et laissé tel quel : TinyPedal d'origine continue de fonctionner. Si la copie échoue, l'app utilise l'ancien dossier pour cette fois et réessaie au prochain lancement. Les presets et données à côté de l'exécutable ne bougent pas, le dossier d'installation est conservé et les raccourcis sont renommés.
+- **À toi de choisir** : après la copie, l'app demande une seule fois s'il faut garder les réglages importés ou démarrer avec les réglages par défaut (les réglages importés sont mis de côté, jamais supprimés). Plus tard, `Config` > `Réglages de TinyPedal` permet de les réimporter ou de repartir des réglages par défaut, avec à chaque fois une sauvegarde des réglages actuels.
+
+### Nouvel overlay, nouvelles colonnes et couleurs de la carte
+
+- **Nouvel overlay `Delta de vitesse`** : ta différence de vitesse avec quatre tours de référence au même endroit du tour (record absolu, meilleur de la session, meilleur du relais et dernier tour), positive quand tu es plus rapide, lissée (`speed_delta_smoothing_samples`). Chaque référence peut être affichée ou masquée, avec son préfixe et ses couleurs. Un tiret tant qu'il n'y a pas encore de tour de référence, sur un tour de sortie ou dans la voie des stands avant la ligne de départ. Désactivé par défaut : active-le dans la page `Overlays`.
+
+![Nouvel overlay Delta de vitesse](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
+
+- **Relatif : colonne `Tendance d'écart`** (design moderne, `column_gap_trend`, activée) : l'évolution de l'écart avec chaque voiture par tour, moyennée sur environ 30 s. Flèche verte quand tu gagnes (tu reviens sur la voiture devant, tu t'éloignes de celle derrière), rouge quand tu perds, un tiret quand c'est stable (moins de 0,05 s par tour) ou pour une voiture aux stands.
+- **Classement : nom de la catégorie** (design moderne, `show_class_header`, activé) : en mode multi-catégories séparées, ou avec une seule catégorie affichée, chaque catégorie commence par son nom dans une pastille de sa couleur ; la colonne catégorie disparaît et la pastille de position montre la place dans la catégorie.
+- **Classement : ordre des catégories** (`class_order`, les deux designs) : les catégories du mode multi-catégories séparées dans l'ordre que tu choisis (Hypercar, LMP2, LMP3, GT3... par défaut), réglé dans les `Options des overlays` en les glissant ou avec les flèches (`Ordre par défaut` remet l'ordre d'origine). Les catégories absentes de la liste viennent après, la plus rapide d'abord, comme avant. `maximum_vehicles_per_split_others` accepte maintenant toute valeur, `0` masque les autres catégories.
+
+![Classement : nom et ordre des catégories](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-standings-class-header.png)
+
+- **Carte de piste : performance par secteur et voitures proches** (design moderne) : chaque secteur de la route prend la couleur de ton dernier passage (violet meilleur de la session, vert plus rapide que ton meilleur tour, orange plus lent ; `show_sector_performance`), et les voitures à moins d'1 s devant ou derrière sont entourées d'un anneau (`show_nearby_vehicle_highlight`, `nearby_vehicle_threshold`). Les deux sont activés par défaut.
+
+![Carte de piste : performance par secteur et voitures proches](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-track-map-sectors-nearby.png)
+
+- **Black box** : le mouvement des suspensions est amplifié 8 fois par défaut (`suspension_motion_scale`) pour être visible ; les presets encore à 1 passent à 8 une fois, une autre valeur que tu as choisie est gardée. L'overlay est un peu plus haut (environ 15 %) pour laisser la place au débattement des roues ; remets l'échelle à 1 pour retrouver l'ancienne taille.
+
+![Black box : mouvement des suspensions x8 par défaut](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-black-box-suspension-scale.png)
+
+- **Chat** : les messages s'effacent à la fin de leur durée d'affichage aussi au garage et dans les menus (ils restaient à l'écran pendant que les overlays étaient en pause). Design moderne : ton propre nom dans la couleur d'accent, messages du jeu atténués.
+
+### Résultats de course, rejeux et statistiques pilote
+
+- **Revoir le rejeu d'une session** : `Résultats de course` affiche un bouton `Revoir le rejeu` quand LMU a enregistré le rejeu de la session, et une icône caméra dans la liste des sessions. Le rejeu s'ouvre dans le jeu via `Rejeux du jeu` (état du jeu vérifié, confirmation, commandes de lecture). Le rejeu est retrouvé grâce à l'heure à laquelle il a été enregistré à côté du fichier de résultats : les icônes s'affichent même jeu fermé.
+- **Version du jeu de tes temps** : chaque session enregistrée dans `Statistiques pilote` garde maintenant la version du jeu (LMU). La ligne du record l'affiche (`Record 1:09.984 établi le 03/10/2026 · Version 1.42`), comme chaque session de la liste. Les sessions plus anciennes la reprennent du fichier de résultats de la session.
+- **Résultats de course dans `Statistiques pilote`** : les sessions sont reliées aux fichiers de résultats du jeu. La liste montre ta position dans la catégorie (`P3/12`) et un repère quand tu as eu des contacts ou des pénalités ; l'infobulle ajoute la position, l'écart, les contacts, les pénalités, les points de limites de piste, en ligne ou solo et le serveur. Clique sur une session pour l'ouvrir dans `Résultats de course`.
+- **Carte pilote** (Tous les circuits) : nom, pays, équipe et numéro de ton profil de jeu, ta photo de profil Steam (lue dans le cache de Steam, rien n'est téléchargé), et tes courses des fichiers de résultats : victoires, podiums, arrivée moyenne dans la catégorie, courses propres, contacts par course.
+- **Compléter tes temps** : les records, meilleurs temps de qualif et de course absents de tes stats, ou plus lents qu'un meilleur tour d'un fichier de résultats LMU, sont proposés avec `Compléter...`. La confirmation liste chaque changement, une sauvegarde est faite avant et Ctrl+Z annule. Les tours invalidés par les limites de piste n'ont pas de temps dans les résultats LMU, et en course d'équipe seuls tes propres tours comptent.
+- **La carte de `Rejeux du jeu` suit les voitures comme la Régie de course** : avec le jeu sur ce PC, les voitures sont placées là où le jeu les montre, 10 fois par seconde, et glissent en douceur d'une position à la suivante, en session comme en rejeu (pause, ralenti, avance rapide). Avant, elles avançaient par estimation le long de la piste entre deux réponses du jeu toutes les 2 à 5 secondes, ce qui reste le cas quand les données du jeu ne sont pas lisibles.
+
+### Visionneuse de télémétrie
+
+- **Nouvelle `Vue simple`** : un commutateur `Vue simple` / `Vue avancée` dans la barre d'outils affiche, à la place des graphiques, chaque canal affiché au curseur dessiné comme les overlays. Une carte `Pédales et volant` par tour, côte à côte (accélérateur, frein, embrayage, volant tourné de son vrai angle, rapport, vitesse), puis `Chronométrage`, `Moteur`, `Pneus` (quatre roues colorées du froid au chaud), `Freins`, `Châssis`, `Électronique`, `Piste` et `Canaux calculés`. Valeurs du tour principal (clic sur sa carte), les autres tours en repères de leur couleur. La vue choisie est gardée par dossier.
+- **Mêmes canaux dans les deux vues** : un seul menu `Afficher`, à la place de `Canaux`, choisit ce que montrent les deux vues (un canal tracé en vue avancée est une jauge ou une tuile en vue simple), par groupe ou par canal, avec recherche, préréglages et toutes les options des graphiques (lissage, fenêtre gain/perte, bande min / max, delta par rapport au tour idéal, canaux calculés). Les canaux d'une seule roue se trouvent avec la recherche.
+- **Une seule barre de lecture sous les deux vues** : retour, lecture, avance, boucle A-B et vitesse passent sous les graphiques, avec une barre à faire glisser le long du tour et la position du curseur. Elle reste au même endroit en vue simple, où les graphiques sont masqués.
+
+![Visualiseur de tours : commutateur Vue simple / Vue avancée, un seul menu Afficher et une seule barre de lecture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-lap-viewer-simple-advanced-views.png)
+
+- Les tours enregistrés gardent maintenant l'angle de rotation du volant, pour que le volant tourne de son vrai angle.
+- Les longs tours ne figent plus la page : graphiques, carte, delta du meilleur tour et export MoTeC sont faits en arrière-plan, les onglets latéraux s'ouvrent sans à-coup.
+
+### Calculateur de course
+
+- **Nouvel onglet `Direct` : toutes les valeurs données par le jeu**, à côté de la valeur du calculateur, avec leur provenance : durée de course, tours de formation et heure de départ (réglages de la session LMU ou horloge de la piste), nombre de pilotes (équipe LMU), temps au tour, carburant, énergie et usure par tour, capacité du réservoir, gomme montée, carburant, énergie et gomme sur la grille, temps perdu au stand d'après les arrêts de la session, **débits de carburant et d'énergie, temps de changement des pneus et de pilote, et ce qui se fait pendant le ravitaillement** (temps d'arrêt de la série dans LMU), allocation de pneus et pluie d'après les prévisions (en scénario pluie). Remplissez une valeur avec sa flèche, ou `Tout remplir` ; un interrupteur par ligne écarte une valeur.
+- **`Charger en direct` et `Suivre le direct` prennent chaque valeur suivie**, pas seulement les tours : temps d'arrêt, règles de pneus, pilotes, formation, heure de départ, pluie prévue... Les écrans du garage LMU sont lus en arrière-plan (toutes les 10 s quand l'onglet est affiché ou que les saisies suivent le direct).
+- **Course en cours** lue dans le jeu : tour, temps de course et temps restant, carburant, énergie, gomme, arrêts, voiture de sécurité ou drapeau jaune général (aussi dans l'état de `Course en direct`), pénalités, position dans la catégorie, réparation en attente et durée du prochain arrêt selon le jeu.
+- **Pneus disponibles** : les pneus que propose le menu des stands de LMU, gommes neuves et pneus usés de chaque roue avec leur gomme restante. `Ajouter les pneus usés au stock` les met dans le stock du plan de pneus avec leur propre gomme (un pneu usé commence le relais à 84 %, pas comme un neuf).
+- **`Changement de pilote pendant le ravitaillement`** : le changement de pilote ne compte que s'il dure plus que le service, comme dans LMU.
+- **Plus rapide** : le plan d'arrêts d'une course de 10 heures avec voiture de sécurité, pluie et effet du carburant se calcule environ 2,5 fois plus vite (objectif d'économie et comparaison des stratégies compris), et un objectif d'économie que le calculateur ratait est maintenant trouvé.
+
+### Régie de course (LMU)
+
+![Régie de course : voitures, pupitre caméras avec la file du réalisateur, événements de course et fiche voiture](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-director.png)
+
+- **Dans la barre de navigation pour tout le monde** (`Régie`), à la place de `Spectateur` : la barre de chaque utilisateur est remise une fois sur le nouveau défaut (Accueil, Overlays, Stats, Résultats, Rejeux, Régie, Télémétrie, Course, Preset). `Spectateur` reste dans la palette de commandes, `Réglages` dans le bouton engrenage sous la barre et `Ctrl+,` ; les deux peuvent être remis avec `Personnaliser la barre de navigation...`.
+- **Nouvel outil `Régie de course`** pour réaliser une course, en direct (au volant ou en spectateur d'une course en ligne) ou sur un rejeu. Trois colonnes :
+  - **Voitures** : toutes les voitures par place, avec la place en catégorie, le numéro, l'équipe, l'intervalle avec la voiture devant dans la catégorie (`+0,8`, `+2 Tours`, mesuré sur la piste, donc juste aussi pour les voitures à plusieurs tours), et des repères pour les bagarres, les contacts et la voie des stands. Un double clic (ou le bouton caméra) met une voiture à l'antenne.
+  - **Pupitre caméras** : la voiture à l'antenne, pourquoi elle a été choisie et depuis combien de temps, et toutes les caméras du jeu (pilotage, à bord, groupes bord de piste) en un clic. Les commandes du rejeu apparaissent quand un rejeu est ouvert.
+  - **Écran commentateur** : les événements de course avec leur heure, les bagarres avec écart et tendance, les leaders et meilleurs tours de chaque catégorie, les arrêts au stand avec le temps dans la voie des stands et la longueur du relais, et la fiche de la voiture choisie avec les intervalles devant et derrière, les contacts, les pénalités et tes propres notes sur le pilote (gardées d'une session à l'autre).
+- **Réalisateur** : bagarres (deux voitures d'une catégorie à moins d'1 s, réglable), dépassements, changements de leader, contacts, voitures arrêtées, arrêts au stand, meilleurs tours, arrivées, abandons et pénalités sont repérés pour toutes les voitures. En mode `Assisté`, ils sont classés par intérêt et pris en un clic (ou Entrée). En mode `Automatique`, le réalisateur coupe tout seul, avec une caméra adaptée à chaque action : plan le plus court et le plus long, événements urgents d'abord, une voiture tout juste montrée pas remontrée aussitôt, voitures à tour de rôle quand il ne se passe rien. Une voiture choisie à la main (ou dans le jeu) retient le réalisateur 20 s. Le mode automatique n'est jamais actif à l'ouverture de la page.
+- Clic sur un événement dans un rejeu : le rejeu y va quelques secondes avant, caméra sur la voiture.
+- En option : les overlays (et les sources de stream) suivent la voiture à l'antenne, via le mode spectateur.
+- **Plus d'actions** : voitures lentes (bien plus lentes que d'habitude à cet endroit du circuit, appris des autres voitures), drapeaux jaunes dans un secteur (avec la voiture la plus lente du secteur), neutralisation et drapeau vert, et le départ (leader suivi pendant le premier tour).
+- **Live timing** : intervalles et écarts de bagarre en orange sous 0,5 s et en rouge sous 0,3 s, secteurs de chaque voiture colorés comme à la télé (violet meilleur de la catégorie, vert record personnel, jaune plus lent), places gagnées ou perdues dans la catégorie depuis le départ, temps à l'arrêt au stand à côté du temps dans la voie des stands, météo dans l'en-tête (neutralisation, températures de l'air et de la piste, pluie, piste humide).
+- **Historique des tours** de n'importe quelle voiture (clic droit, ou `Tours` dans sa fiche) : chaque tour vu avec ses secteurs colorés, les tours aux stands, l'énergie utilisée et la place en catégorie. La fiche ajoute l'énergie utilisée par tour sur 3 et 5 tours et les tours restants.
+- **Incidents pas encore vus** signalés et comptés jusqu'à ce qu'ils passent à l'antenne ou soient regardés ; **ralenti** d'un événement en direct (rejeu quelques secondes avant, puis retour au direct tout seul), aussi en spectateur en ligne ; **export CSV** de tous les événements.
+- **Verrouiller** la voiture à l'antenne pour que le réalisateur automatique attende.
+- **Habillage de diffusion fait pour la régie** : une seule source navigateur (1920 x 1080) pour OBS, Streamlabs, XSplit ou vMix, donnée par la page (`Habillage`, `Copier l'adresse`) et alimentée par elle seule : tour de classement (général, chaque catégorie à tour de rôle, ou la catégorie de la voiture à l'antenne), fiche pilote à chaque changement de voiture, carte de duel, bandeaux (meilleur tour, pénalités, drapeaux, changements de leader, gros contacts...), pit radar, bandeau REPLAY, horloge de session et météo. Chaque graphisme activable, `Masquer l'habillage` d'un coup.
+
+![Habillage de diffusion : tour de classement, bandeau meilleur tour, carte de duel, pit radar, horloge](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/0.23.0-broadcast-graphics.png)
+
+- **Pit radar** : quand la voiture à l'antenne est dans la voie des stands, les voitures proches s'affichent avec leur distance, `À côté` en rouge, dans la page et sur l'habillage.
+- **Gravité des contacts** : un contact qui fait perdre à une voiture l'essentiel de sa vitesse (ou l'arrête) passe en premier, une touchette dont les deux voitures repartent devient une action mineure. Mesuré à partir de la vitesse des voitures : marche aussi en spectateur en ligne, sur un rejeu et depuis un autre PC.
+- **Logos et photos des voitures** du jeu dans la liste, la carte à l'antenne et la fiche ; **pneus** de chaque voiture (avant et arrière, colorés comme à la télé) avec le jeu sur ce PC ; **prévisions météo** de la session (clic sur la météo de l'en-tête).
+- **Réaliser depuis un autre PC** (`PC du jeu` dans les réglages), et un **journal des événements** en option : chaque événement écrit dans un fichier CSV au fil de la course, pour la direction de course.
+- **Plus rapide** : une réponse du jeu coûte environ 3 ms à l'interface au lieu de 40 ms après des heures de course (0,5 ms page cachée), avec une seule connexion au jeu gardée ouverte.
+- **Trouver une voiture** par numéro ou nom (`Entrée` la met à l'antenne), `1` à `6` prennent la suggestion correspondante, une barre montre quand le réalisateur automatique peut couper, les écarts de bagarre indiquent leur évolution par tour, les voitures dans la voie des stands affichent leur temps en direct, et un réglage laisse le réalisateur continuer quand une autre app déplace aussi la caméra du jeu.
+- Nouveaux raccourcis, aussi pour la télécommande et le Stream Deck : `director_next_car`, `director_previous_car` (page fermée, ils déplacent la caméra du jeu), `director_auto`, `director_take_best`, `director_lock`.
+
+#### Plus d'habillage, éditeur de disposition et tableau de chronométrage
+
+- **Habillage du replay instantané** : un contact rejoué montre les deux voitures, un drapeau ou une voiture arrêtée montre la fiche pilote pendant tout le replay, et les bandeaux (meilleur tour, pénalité...) attendent 5 s après le replay pour être vus en direct.
+- **Onboard** : vitesse, rapport, régime, accélérateur et frein de la voiture à l'antenne, dix fois par seconde (jeu sur cet ordinateur : mémoire partagée, aussi en spectateur en ligne), énergie restante, en trois styles (`Tableau de bord`, `Cockpit`, `Casque`).
+- **Tour de qualif** : hors course, le tour de la voiture à l'antenne avec son chrono qui défile, ses secteurs colorés, l'écart à la pole de sa catégorie au dernier secteur et son état (tour de sortie, en amélioration, aux stands).
+- **Train de bataille** : jusqu'à 6 voitures d'une catégorie qui se suivent, en cartes, gardées 10 s après la fin du train.
+- **Carte du circuit** : le tracé du jeu avec chaque voiture à la couleur de sa catégorie, la voiture à l'antenne plus grosse avec son numéro, la voiture d'un drapeau jaune en doré.
+- **À la demande** (`Habillage` > `À la demande`, un à la fois jusqu'au clic suivant) : **grille de départ** (pages de 8 voitures avec leur tour de qualif et la photo de la voiture), **carte d'événement** (circuit, conditions, prévisions, durée de la session), **classement** capturé quand tu veux (écart au leader, tours, meilleur tour, arrêts, abandons) et **classement de championnat** importé d'un fichier CSV (pilote, points, et équipe, catégorie si tu veux ; plusieurs championnats, une catégorie ou toutes, médailles pour les trois premiers).
+- **Tour de classement** : chronos affichés quelques secondes quand chaque voiture boucle un tour (violet pour le plus rapide de sa catégorie), pneus et pénalités.
+- **Style** : opacité des panneaux et °C / °F pour l'habillage.
+- **Éditeur de disposition** : `Habillage` > `Style et disposition` > `Éditer la disposition` ouvre l'habillage dans ton navigateur avec des données d'exemple : glisse un graphisme pour le déplacer, molette pour le redimensionner, double clic pour le remettre, pastilles pour afficher les graphismes qui partagent une place, puis `Enregistrer` : toutes les sources d'habillage de cet ordinateur suivent aussitôt. `Réinitialiser la disposition` les remet toutes en place.
+- **Tableau de chronométrage** (`Chronométrage` au-dessus de la liste des voitures) : vues course, qualif et arrêts, chacune avec ses colonnes (glisse un titre pour le déplacer, clic droit pour afficher ou masquer des colonnes), secteurs et tours colorés, bagarres avec leur tendance, voiture à l'antenne en rouge, voitures lentes en orange, pneus, énergie et pénalités.
+
+#### Habillage, partie 3
+
+- **Sources plus rapides** : la source d'habillage ne reçoit que ce qui a changé depuis sa dernière réponse, la tour de classement déplace chaque ligne (les dépassements glissent) au lieu de tout redessiner, et les valeurs de l'onboard et les positions de la carte arrivent dix fois par seconde, lissées, avec des voitures qui glissent entre elles. Les temps de qualif de la grille sont lus en arrière-plan, le classement de championnat n'est calculé qu'une fois.
+- **Habillage automatique** : grille de départ pendant le tour de formation, carte d'événement au début de chaque session, classement au drapeau à damier (mis à jour pendant que les voitures finissent), chacun activable ; ton propre choix passe toujours en premier.
+- **Nouveaux raccourcis** pour l'habillage (Stream Deck, télécommande) : `director_starting_grid`, `director_event_card`, `director_classification`, `director_championship`, `director_hide_graphics`, `director_next_layout`.
+- **Bandeaux** : le plus important d'abord, jamais deux fois la même info en 30 secondes, 4 en attente au plus.
+- **Carte du circuit** : plus de fond (une ombre la garde lisible), secteurs sous drapeau jaune en doré, voitures aux stands atténuées, rotation et taille des points.
+- **Onboard** : voyants de passage de rapport et la voiture devant avec son écart.
+- **Tour de classement** : écarts avec la voiture devant ou avec le leader, catégories séparées au général, badge du meilleur tour, arrêts au stand.
+- **Éditeur de disposition** : aimantation aux autres graphismes et au centre avec des guides, flèches pour déplacer d'un pixel, `Ctrl+Z` pour annuler, position et taille affichées ; l'éditeur de la disposition du stream gagne aussi l'annulation, les flèches et la position.
+- **Réalisateur** : les incidents déjà montrés sont moins recherchés, un dépassement imminent (très proche et l'écart fond vite) est montré depuis la caméra capot de la voiture derrière, les voitures qui remontent le peloton sont davantage suivies.
+- **Sources avec certains graphismes seulement** (`only=tower,map`) pour répartir l'habillage sur plusieurs scènes ou sources OBS, chacune avec son **préréglage de disposition** (`Par défaut`, `Avant-course`, `Course`, `Après-course`), changé d'un clic ou par raccourci.
+- **Image de la ligue** : couleur principale, nom de l'événement ou de la ligue, logo et images des partenaires à tour de rôle.
+- **Message** de la direction de course ou des commentateurs en bas d'écran, et **compte à rebours** avant le départ.
+- **Historique des pilotes** dans la fiche voiture : courses, victoires et podiums de catégorie, meilleur résultat sur ce circuit, dernières courses, et courses avec les voitures devant et derrière, d'après les fichiers de résultats.
+
+### Plus fluide et plus léger
+
+- **Chargement de preset sans gel** : charger ou recharger un preset (aussi le chargement automatique en entrant en piste) ne bloque plus la fenêtre et les overlays pendant que les modules s'arrêtent et sauvegardent (tours, rejeux) : il se termine en arrière-plan, un chargement demandé entre-temps attend son tour, et quitter pendant un chargement se passe proprement.
+- **Overlays plus réactifs, moins de CPU** : les modules de données se réveillent quand le jeu écrit de nouvelles données (100 ms au plus) au lieu de vérifier à rythme fixe, et ne font presque rien quand le jeu est en pause ou dans les menus (LMU et rFactor 2).
+- **Moins de dessin en roulant** : la Black box et les tableaux de pilotes modernes (Relatif, Classement, Rivaux) ne redessinent que ce qui a changé ; l'overlay VR n'envoie que les overlays modifiés depuis la dernière image ; l'enregistrement d'un tour est écrit par petits morceaux au lieu de figer les overlays 100 ms ou plus ; les logos de marque sont lus en arrière-plan (initiales en attendant) : une nouvelle voiture ne fait plus saccader un tableau.
+- **Plus d'à-coups dans les pages** : la lecture des fichiers et les gros calculs ne passent plus par l'interface dans `Statistiques pilote` (une action sur un historique de 50 000 sessions prenait de 0,15 à 1 s, maintenant moins de 50 ms), `Résultats de course`, la visionneuse de télémétrie, la `Visionneuse de carte`, les presets, les sauvegardes et la comparaison de presets, les aperçus de la page `Overlays`, les modules et le rapport de bug. Les pages lourdes se construisent par étapes au lieu de figer à l'ouverture.
+- **Listes plus rapides** : chaque dossier de télémétrie garde un index de ses tours, les fichiers ne sont ouverts que s'ils ont changé ; `Statistiques pilote` ne lit que ce qui a été ajouté à l'historique depuis la dernière fois ; les fichiers de résultats sont lus une seule fois pour `Résultats de course` et `Statistiques pilote` ; les listes des `Options des overlays` et la recherche dans tous les overlays défilent et s'ouvrent plus vite.
+- **Démarrage caché dans la zone de notification** : les pages rouvertes au démarrage sont construites au premier affichage de la fenêtre, et les pages d'outils que tu n'as pas ouvertes toi-même sont libérées tant qu'elle reste cachée.
+- Pauses de nettoyage mémoire plus courtes en roulant : ce qui est chargé au démarrage est mis à l'écart du ramasse-miettes de Python, et le nettoyage après un chargement de preset attend que tu ne roules plus.
+- Les graphiques de positions des `Résultats de course` sont plus lisses (dessinés par la carte graphique, bords adoucis).
+- Le moniteur de performance montre aussi les blocages de l'interface (plus de 50 ms) et les pauses du ramasse-miettes.
+
+### Pour les scripts et outils
+
+- Les fichiers des versions s'appellent maintenant `NeoPedal-<version>-…` : les anciennes versions trouvent toujours leur mise à jour. Le dépôt GitHub garde son adresse.
+- L'exécutable porte maintenant ses informations de fichier Windows (NeoPedal, version, copyright), visibles dans le Gestionnaire des tâches et les propriétés du fichier.
+- Linux : `TinyPedal.sh` lit `~/.config/NeoPedal/launcher.conf`, et `~/.config/TinyPedal/launcher.conf` s'il n'existe pas.
+- La recherche de mise à jour suit maintenant aussi les redirections de GitHub : le dépôt pourra être renommé plus tard sans bloquer les mises à jour.
+- La télécommande accepte le nouvel en-tête `X-NeoPedal` ; `X-TinyPedal` marche toujours.
+
+### Données enregistrées
+
+- **Infos des stands gardées au chargement d'un preset** : l'entrée et la sortie des stands et la vitesse limite mesurées en roulant étaient perdues quand un preset était chargé ensuite (aussi par le chargement automatique en entrant en piste), et la sauvegarde suivante réécrivait les anciennes valeurs dans `tracks.json`. Tes corrections dans l'`Éditeur d'infos de piste` ne sont plus écrasées non plus par les valeurs gardées de ton dernier relais : seules les valeurs mesurées de nouveau sont sauvegardées.
+- **Sauvegardé pendant que tu roules** : les tours de référence carburant et énergie virtuelle, les meilleurs secteurs et l'historique de consommation sont aussi sauvegardés toutes les 5 minutes en piste, pas seulement au retour au garage : un plantage ou une coupure de courant pendant un long relais ne les fait plus perdre.
+- Relancer l'enregistrement d'un rejeu dans la même seconde n'écrase plus le précédent (`-2` est ajouté au nom).
+- Hybride : la décharge de la batterie jusqu'à 0 % et la régénération depuis 0 % sont comptées. La distance parcourue des statistiques pilote ignore de nouveau les sauts de position. Les noms des tours enregistrés n'affichent plus `1m60.000s`.
+- Les notes de piste enregistrées en `CSV UTF-8` par Excel sont lues.
+
+### Overlays
+
+- **Aperçus avec des valeurs réalistes** : les images de la page `Overlays`, des `Options des overlays` et de l'assistant de configuration montrent maintenant une course simulée (une GT3 en pleine course à Road Atlanta, dans un plateau multi-classes de 20 voitures) au lieu d'overlays vides, pour voir ce que chaque overlay affiche vraiment : vitesse, rapport, carburant, pneus, delta, carte, radar... Tes données de jeu, tes presets et les overlays en cours ne sont jamais touchés, même pendant que tu roules.
+- **Aperçu plus grand dans les `Options des overlays`** : zoome l'aperçu en direct de 50 % à 300 % (boutons, Ctrl+molette, double-clic pour la taille réelle ou l'ajustement) et élargis le panneau d'aperçu avec le bouton en bas à droite. Un overlay zoomé est dessiné à cette taille, comme le fait l'échelle globale des overlays : textes et traits restent nets.
+- **Plus de faux chat en jeu** : le `Chat` moderne dessinait une conversation d'exemple (« N. Fischer joined the session »...) dès que les overlays étaient déverrouillés, ce qui est le cas par défaut : elle s'affichait au garage et en rejoignant un serveur comme si elle était réelle. Cet exemple, comme ceux du `Spotter`, des `Notifications de course` et de l'`Assistant voie des stands`, n'est plus dessiné qu'en mode édition (clic droit sur un overlay > `Mode édition`), pour placer l'overlay. Les overlays modernes `Drapeau`, `Notifications de course` et `Spotter` n'affichent plus non plus leur exemple d'aperçu (tous les drapeaux, messages d'exemple) en attendant les données du jeu.
+- **Sens de défilement du chat** : la case `Message le plus récent en haut` est remplacée par un choix `Sens du défilement` : `Vers le haut` (message le plus récent en bas, par défaut) ou `Vers le bas` (message le plus récent en haut). Tes presets gardent leur ordre actuel.
+- **Black box** : `enable_required_modules` active les modules nécessaires seulement au démarrage de l'overlay, plus quand son aperçu est dessiné dans les `Options des overlays` (il pouvait démarrer des modules et les sauvegarder comme activés avant que tu appliques quoi que ce soit). Les fondus de couleur finissent sur la bonne couleur, et les longs enregistrements d'incident se dessinent plus vite.
+- L'usure des freins et les dégâts aéro et de suspension de ta propre voiture ne s'affichent plus quand tu regardes une autre voiture.
+- Une voiture qui prend la place d'une autre n'est plus dessinée très loin pendant un instant (radar, relatif).
+- Les valeurs d'énergie virtuelle ne passent plus un instant en carburant à chaque réinitialisation.
+- `LED de régime` classique : le clignotement ne dépend plus de la fréquence de dessin de l'overlay, et il clignote aussi quand le régime reste au-dessus de la valeur critique, comme le design moderne.
+- Les logos de marque chargés pendant que le jeu est en pause s'affichent tout de suite dans les tableaux de pilotes.
+
+### Overlay de stream
+
+- **Streamer une course regardée en spectateur** : quand tu regardes une session en spectateur ou un replay (aucune voiture pilotée), les overlays étaient masqués par le masquage automatique, donc toutes les sources de stream restaient vides. Ils sont maintenant affichés et mis à jour tant qu'une source `Disposition` ou overlay est à l'antenne (`Afficher les overlays en spectateur`, activé par défaut), puis masqués de nouveau quelques secondes après l'arrêt de la dernière source. Les tours, le carburant et les statistiques ne sont toujours enregistrés qu'en pilotant.
+- **Disposition en 16:9 pour les écrans ultra-larges et triples** : la source `Disposition` montre maintenant le centre de ton écran en 16:9 par défaut (`Format` sur la page `Overlays de stream`), pour une source navigateur de 1920 x 1080. Sur un écran 5120 x 1440, tout l'écran était tassé en haut de la source. `Écran entier` garde l'ancienne disposition (copie de nouveau l'adresse après avoir changé le format).
+- La page `Overlays de stream` explique pourquoi les sources sont vides quand aucun overlay n'est affiché (masquage automatique hors session, options de visibilité).
+- **Éditeur de disposition** : `Éditer la disposition` à côté de la source `Disposition` l'ouvre dans ton navigateur, tout l'écran affiché avec le cadre 16:9 : glisse les overlays où tu les veux dans le stream (par exemple ceux des côtés d'un écran ultra-large), redimensionne-les à la molette, `Enregistrer`. Leur place à l'écran ne change pas ; chaque format (16:9, écran entier) a ses propres places.
+
+### Overlay VR
+
+- Le signal de vie de l'app pouvait être lu comme « app fermée » par la couche OpenXR : l'overlay pouvait disparaître pendant une image. Après une erreur pendant l'écriture d'une image, la couche ne reste plus figée sur la dernière image.
+- Couche OpenXR (expérimental) : une erreur d'image du jeu lui-même (perte de tracking) ne coupe plus l'overlay pour toute la session, et un jeu qui quitte sans fermer sa session VR ne risque plus de se bloquer ou de planter à la fermeture.
+
+### App
+
+- **Nouveau raccourci `show_main_window`** : amène la fenêtre principale devant le jeu et lui donne le focus, même cachée dans la zone de notification ou réduite (page `Raccourcis` ; aussi une commande du contrôle à distance).
+- **Pages déjà ouvertes** : `Voir la carte` dans `Statistiques pilote` et `Comparer avec le preset chargé` affichaient la page ouverte sur la piste ou le preset précédent ; elles affichent maintenant celui que tu as demandé. Les `Options des overlays` s'ouvrent plus vite quand elles sont déjà ouvertes.
+- Les `Options des overlays` et les `Réglages` suivent un changement de langue pendant qu'ils sont ouverts (leurs textes restaient dans l'ancienne langue).
+- Après un redémarrage raté, quitter demande de nouveau d'enregistrer les pages modifiées.
+- Une page pouvait être libérée (fenêtre cachée ou réduite pendant une minute) alors qu'une de ses boîtes de confirmation était encore ouverte : plantage possible.
+- Les modifications dans `Statistiques pilote` en attente de la fin d'un rechargement sont enregistrées même si tu fermes la page.
+- Plus de petit gel environ 5 secondes après un chargement automatique de preset en piste.
+- Éditeurs (freins, gommes, marques, catégories, infos de piste) : l'ajout depuis la session et le `Remplacement groupé` ne font qu'une étape d'annulation, et la dernière ligne ajoutée est sélectionnée.
+- `Statistiques pilote` : `Annuler` et `Rétablir` attendent pendant qu'une modification est enregistrée. Frise du calculateur de course : relais et arrêts glissent à leur nouvelle place quand le plan change.
+
+### Tableau de bord web, mises à jour et fichiers
+
+- **Mises à jour vérifiées pendant que l'app tourne** : en plus de la vérification au démarrage, l'app vérifie de nouveau toutes les 12 heures (`number_of_hours_between_update_checks` dans `Réglages` > `Application`, `0` = au démarrage seulement), jamais en roulant. Une version trouvée ainsi n'ouvre les nouveautés que si la fenêtre principale est la fenêtre active ; sinon la notification attend dans la fenêtre (ou un message dans la zone de notification), et une notification ignorée ne revient pas pour la même version.
+- Les fichiers du certificat HTTPS sont écrits sans risque et recréés s'ils ne correspondent pas, au lieu d'un HTTPS en échec jusqu'à ce que tu les supprimes à la main.
+- L'installateur téléchargé est supprimé quand tu refuses l'installation ou qu'elle ne démarre pas.
+- Un `Paquet de presets (.zip)` abîmé ou chiffré est signalé comme invalide au lieu de ne rien faire, et une description de paquet démesurée n'est jamais lue.
+- Les erreurs du tableau de bord web, de l'overlay de stream et des `Résultats de course` sont maintenant écrites dans le fichier journal (elles étaient cachées).
+- Données du jeu : des valeurs hors limites venant du jeu (`1e999`) n'arrêtent plus la lecture du classement, du chat, des rejeux ou de l'usage des pneus. rFactor 2 : une copie de la mémoire partagée prise pendant que le jeu l'écrivait n'est plus utilisée. Les requêtes de données du jeu qui s'arrêtent en retard ne remettent plus à zéro les nouvelles données.
 
 ## 0.22.4 (2026-10-09)
 

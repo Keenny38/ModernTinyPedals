@@ -27,15 +27,14 @@ case & accent folded, in English and in app language. Find Option page: Qt Quick
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from PySide6.QtCore import QUrl
-from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QVBoxLayout
 
 from .. import loader
 from ..const_file import ConfigType
-from ..i18n import tr
+from ..i18n import current_language, tr
 from ..i18n.options import module_label, search_text
 from ..module_control import mctrl, wctrl
 from ..setting import cfg
@@ -43,6 +42,9 @@ from ..widget._modern import design_option_keys
 from ._common import BaseDialog, UIScaler, singleton_dialog
 from .config import HIDDEN_OPTIONS
 from .module_view import sort_key
+
+if TYPE_CHECKING:
+    from PySide6.QtQuickWidgets import QQuickWidget
 
 MAX_RESULTS = 200
 # Global config sections edited from other places (API menu, tool dialogs)
@@ -87,6 +89,22 @@ def build_index() -> list[OptionEntry]:
                 label = sort_key(search_text(key))
                 entries.append(OptionEntry(section, key, section_type, f"{section_text} {label}", label))
     return entries
+
+
+_cached_index: tuple[tuple, list[OptionEntry]] | None = None
+
+
+def cached_index() -> list[OptionEntry]:
+    """build_index result kept until preset, saved settings, language, API or overlay list change
+    (command palette opened often: index not rebuilt each time)"""
+    global _cached_index
+    key = (
+        cfg.filename.setting, cfg.version_update, id(cfg.user.setting), id(cfg.user.config),
+        current_language(), cfg.api_key, tuple(wctrl.names), tuple(mctrl.names),
+    )
+    if _cached_index is None or _cached_index[0] != key:
+        _cached_index = key, build_index()
+    return _cached_index[1]
 
 
 def match_score(entry: OptionEntry, words: tuple[str, ...]) -> int:

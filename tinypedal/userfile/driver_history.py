@@ -23,6 +23,9 @@ JSON lines appended by stats module at the end of each stint (driver.history in 
 to cumulated driver stats (driver.stats). Read by driver stats viewer: last driven date, personal best
 progression & date, sessions list. Read & written under driver_stats.STATS_LOCK (stats module thread &
 viewer page).
+
+Records read are kept (see read_records): file only appended since (stats module) has its new lines parsed
+only, a rewritten file is parsed again.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import json
 import logging
 import math
 import os
+import threading
 from collections.abc import Callable, Iterable
 from typing import NamedTuple
 
@@ -45,9 +49,14 @@ MAX_RECORDS = 50000  # oldest records dropped (file rewritten when loaded over l
 MIN_SESSION_SECONDS = 60  # stint without lap shorter than this not recorded (garage exit...)
 # Session filter: all, practice (test day, practice, warmup), qualifying, race
 SESSION_GROUPS: tuple[tuple[int, ...], ...] = ((), (0, 1, 3), (2,), (4,))
-TEXT_FIELDS = ("vehicle_class",)
+TEXT_FIELDS = ("vehicle_class", "game_version")
 TAIL_BYTES = 64 * 1024  # end of file read for last record (hundreds of records)
+CHECK_BYTES = 512  # start of file & bytes before end of parsed lines compared: file only appended since
 _last_records: dict[str, tuple[tuple[int, int], SessionRecord | None]] = {}  # path: file time & size, record
+_parsed: dict[str, _ParsedFile] = {}  # path: records read (see read_records)
+_parsed_lock = threading.Lock()  # one parse at a time (worker threads)
+_cache_lock = threading.Lock()  # _parsed & generation, held briefly: never waits for a parse (UI thread)
+_generation = 0  # records dropped (forget_records): parse running meanwhile keeps nothing
 
 
 class SessionRecord(NamedTuple):
@@ -65,6 +74,7 @@ class SessionRecord(NamedTuple):
     position: int = 0  # finish position (race), 0 if not finished
     finish: int = 0  # finish state: 0 = none, 1 = finished, 2 = DNF, 3 = DQ
     vehicle_class: str = ""  # game class name (vehicle key may be vehicle name only)
+    game_version: str = ""  # game version when driven ("1.42"), "" if unknown (rF2, older records)
 
 
 def history_path(filepath: str) -> str:
@@ -93,34 +103,141 @@ def parse_record(data) -> SessionRecord | None:
     return SessionRecord(time=float(time_value), track=track, vehicle=vehicle, **values)
 
 
+class _ParsedFile(NamedTuple):
+    """Records read from a history file: complete lines up to offset, last line without newline apart"""
+
+    stamp: tuple[int, int, int]  # file id, size, modified time (ns)
+    offset: int  # bytes of complete lines parsed (end of last newline)
+    head: bytes  # first bytes of file (up to CHECK_BYTES before offset)
+    tail: bytes  # bytes just before offset (up to CHECK_BYTES)
+    lines: list[SessionRecord]  # records of complete lines, sorted
+    records: list[SessionRecord]  # with record of unfinished last line, sorted
+
+
+def by_time(record: SessionRecord) -> float:
+    return record.time
+
+
+def parse_lines(data: bytes) -> list[SessionRecord]:
+    """Records of JSON lines in file order (invalid lines skipped), newlines as in text mode (\\n, \\r\\n, \\r)"""
+    records = []
+    text = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    for line in text.split("\n"):
+        if not line:
+            continue
+        try:
+            record = parse_record(json.loads(line))
+        except ValueError:  # half written line, edited file
+            continue
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def merged(records: list[SessionRecord], added: list[SessionRecord]) -> list[SessionRecord]:
+    """Sorted records & records of following lines, as sorting all lines (equal times: file order)"""
+    if not added:
+        return records
+    result = records + added
+    if (records and added[0].time < records[-1].time) or any(
+            added[index].time < added[index - 1].time for index in range(1, len(added))):
+        result.sort(key=by_time)  # stable: equal times kept in file order
+    return result
+
+
+def kept_records(path: str) -> _ParsedFile | None:
+    with _cache_lock:
+        return _parsed.get(path)
+
+
+def keep_records(path: str, parsed: _ParsedFile, generation: int):
+    """Records kept unless dropped since generation (page closed meanwhile)"""
+    with _cache_lock:
+        if generation == _generation:
+            _parsed[path] = parsed
+
+
+def records_generation() -> int:
+    with _cache_lock:
+        return _generation
+
+
+def parse_file(path: str) -> list[SessionRecord]:
+    """Sorted records of file (_parsed_lock held): kept, only lines appended since parsed next time
+
+    File appended (same file, larger, start & bytes before parsed end unchanged): new lines parsed,
+    else (rewritten, edited) whole file parsed again.
+    """
+    generation = records_generation()
+    with open(path, "rb") as file:
+        stat = os.fstat(file.fileno())
+        stamp = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        cached = kept_records(path)
+        if cached is not None and cached.stamp == stamp:
+            return list(cached.records)
+        lines: list[SessionRecord] = []
+        offset = 0
+        if (cached is not None and cached.stamp[0] == stamp[0] and cached.stamp[1] != stat.st_size
+                and cached.offset <= stat.st_size and file.read(len(cached.head)) == cached.head):
+            file.seek(cached.offset - len(cached.tail))
+            if file.read(len(cached.tail)) == cached.tail:
+                lines, offset = cached.lines, cached.offset
+        file.seek(offset)
+        added: list[SessionRecord] = []
+        unfinished: list[SessionRecord] = []
+        for line in file:
+            if line.endswith(b"\n"):
+                added += parse_lines(line)
+                offset += len(line)
+            else:  # last line being written (or no newline at end): parsed again next time
+                unfinished = parse_lines(line)
+        file.seek(0)
+        head = file.read(min(offset, CHECK_BYTES))
+        file.seek(max(offset - CHECK_BYTES, 0))
+        tail = file.read(min(offset, CHECK_BYTES))
+    lines = merged(lines, added)
+    records = merged(lines, unfinished)
+    keep_records(path, _ParsedFile(stamp, offset, head, tail, lines, records), generation)
+    return list(records)
+
+
+def forget_records(filepath: str = "") -> None:
+    """Records kept for history file (all files if empty) dropped: memory freed (viewer closed)
+
+    Never waits for a parse running (UI thread): that parse keeps nothing.
+    """
+    global _generation
+    with _cache_lock:
+        _generation += 1
+        if filepath:
+            _parsed.pop(history_path(filepath), None)
+        else:
+            _parsed.clear()
+
+
 def read_records(filepath: str, strict: bool = False) -> list[SessionRecord]:
     """Session records of file, oldest first (invalid lines skipped, empty if no file)
 
     Bytes that are not UTF-8 replaced (line skipped if broken): a damaged file never stops the viewer.
+    Records kept until file changes, lines appended since parsed only (see parse_file); list is a copy.
 
     Args:
         strict: raise OSError if file exists but unreadable (locked...), instead of empty records:
             file rewritten from records would lose all history.
     """
-    records = []
-    try:
-        with open(history_path(filepath), encoding="utf-8", errors="replace") as file:
-            for line in file:
-                try:
-                    record = parse_record(json.loads(line))
-                except ValueError:  # half written line, edited file
-                    continue
-                if record is not None:
-                    records.append(record)
-    except FileNotFoundError:
-        return []
-    except OSError as error:
-        logger.error("USERDATA: unable to read %s: %s", HISTORY_FILE, error)
-        if strict:
-            raise
-        return []
-    records.sort(key=lambda record: record.time)
-    return records
+    path = history_path(filepath)
+    with _parsed_lock:
+        try:
+            return parse_file(path)
+        except FileNotFoundError:
+            with _cache_lock:
+                _parsed.pop(path, None)
+            return []
+        except OSError as error:
+            logger.error("USERDATA: unable to read %s: %s", HISTORY_FILE, error)
+            if strict:
+                raise
+            return []
 
 
 def latest_record(lines: Iterable[bytes]) -> SessionRecord | None:
@@ -186,8 +303,9 @@ def record_line(record: SessionRecord) -> str:
     data = record._asdict()
     for name in ("best", "meters", "seconds"):
         data[name] = round(data[name], 3)
-    if not data["vehicle_class"]:
-        del data["vehicle_class"]
+    for name in TEXT_FIELDS:
+        if not data[name]:
+            del data[name]
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
@@ -206,10 +324,63 @@ def append_record(filepath: str, record: SessionRecord) -> None:
             logger.error("USERDATA: unable to save %s: %s", HISTORY_FILE, error)
 
 
-def write_records(filepath: str, records: Iterable[SessionRecord], raise_error: bool = False) -> None:
-    ordered = sorted(records, key=lambda record: record.time)[-MAX_RECORDS:]
-    with atomic_write(history_path(filepath), raise_error=raise_error) as file:
-        file.writelines(record_line(record) for record in ordered)
+def write_records(filepath: str, records: Iterable[SessionRecord], raise_error: bool = False,
+                  ) -> list[SessionRecord]:
+    """Rewrite history file, records written returned (sorted, oldest over limit dropped)"""
+    ordered = sorted(records, key=by_time)[-MAX_RECORDS:]
+    path = history_path(filepath)
+    with _cache_lock:
+        generation = _generation
+        _parsed.pop(path, None)
+    text = "".join(record_line(record) for record in ordered)
+    with atomic_write(path, raise_error=raise_error) as file:
+        file.write(text)
+    keep_written(path, text.replace("\n", os.linesep).encode("utf-8"), ordered, generation)
+    return ordered
+
+
+def as_read_back(record: SessionRecord) -> SessionRecord | None:
+    """Record as parsed from its line (lap time, distance & driving time rounded), None if not read back alike"""
+    if (not isinstance(record.track, str) or not isinstance(record.vehicle, str) or not record.track
+            or not record.vehicle or not isinstance(record.time, (int, float)) or isinstance(record.time, bool)
+            or not math.isfinite(record.time) or record.time <= 0):
+        return None
+    if any(type(getattr(record, name)) is not int for name in ("session", "valid", "invalid", "position", "finish")):
+        return None
+    if any(not isinstance(getattr(record, name), str) for name in TEXT_FIELDS):
+        return None
+    values = (record.best, record.meters, record.seconds)
+    if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
+        return None
+    rounded = tuple(round(float(value), 3) for value in values)
+    if rounded != values or any(type(value) is not float for value in values):
+        record = record._replace(best=rounded[0], meters=rounded[1], seconds=rounded[2])
+    return record
+
+
+def keep_written(path: str, data: bytes, records: list[SessionRecord], generation: int):
+    """Records just written kept as parsed (next read parses nothing), if file holds data written (text mode
+    newlines), every record reads back alike & records not dropped meanwhile"""
+    kept = []
+    for record in records:
+        read_back = as_read_back(record)
+        if read_back is None:
+            return  # parsed again next time
+        kept.append(read_back)
+    try:
+        with open(path, "rb") as file:
+            stat = os.fstat(file.fileno())
+            if stat.st_size != len(data):
+                return  # not saved (error logged), or changed meanwhile
+            head = file.read(min(len(data), CHECK_BYTES))
+            file.seek(max(len(data) - CHECK_BYTES, 0))
+            tail = file.read(CHECK_BYTES)
+    except OSError:
+        return
+    if head != data[:CHECK_BYTES] or tail != data[-CHECK_BYTES:]:
+        return
+    keep_records(path, _ParsedFile((stat.st_ino, stat.st_size, stat.st_mtime_ns), len(data), head, tail, kept,
+                                   kept), generation)
 
 
 def save_history(filepath: str, records: Iterable[SessionRecord]) -> None:
@@ -232,8 +403,15 @@ def remove_records(filepath: str, match: Callable[[SessionRecord], bool]) -> lis
     return removed
 
 
-def replace_records(filepath: str, removed: Iterable[SessionRecord], added: Iterable[SessionRecord]) -> None:
+def replace_records(filepath: str, removed: Iterable[SessionRecord], added: Iterable[SessionRecord],
+                    records: Iterable[SessionRecord] | None = None) -> list[SessionRecord] | None:
     """Remove records & add others (undo, redo of an edit), records already there kept once
+
+    Args:
+        records: records of file loaded already (STATS_LOCK held since), else file read.
+
+    Returns:
+        Records written, None if nothing to change.
 
     Raises:
         OSError: history file unreadable or not saved (file kept as it was, never rewritten as empty).
@@ -241,11 +419,14 @@ def replace_records(filepath: str, removed: Iterable[SessionRecord], added: Iter
     removed_set = set(removed)
     added = list(added)
     if not removed_set and not added:
-        return
+        return None
     with STATS_LOCK:
-        current = [record for record in read_records(filepath, strict=True) if record not in removed_set]
+        if records is None:
+            records = read_records(filepath, strict=True)
+        current = [record for record in records if record not in removed_set]
         known = set(current)
-        write_records(filepath, current + [record for record in added if record not in known], raise_error=True)
+        return write_records(filepath, current + [record for record in added if record not in known],
+                             raise_error=True)
 
 
 def restore_records(filepath: str, records: list[SessionRecord]) -> None:
@@ -261,13 +442,14 @@ def worth_recording(valid: int, invalid: int, seconds: float) -> bool:
 def session_record(
     track: str, vehicle: str, session: int, best: float, valid: int, invalid: int,
     meters: float, seconds: float, position: int, finish: int, time: float, vehicle_class: str = "",
+    game_version: str = "",
 ) -> SessionRecord:
     """Record of a driving stint, invalid best lap time (none) saved as 0"""
     return SessionRecord(
         time=time, track=track, vehicle=vehicle, session=session,
         best=best if 0 < best < MAX_SECONDS else 0.0,
         valid=valid, invalid=invalid, meters=meters, seconds=seconds,
-        position=position, finish=finish, vehicle_class=vehicle_class,
+        position=position, finish=finish, vehicle_class=vehicle_class, game_version=game_version,
     )
 
 

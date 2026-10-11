@@ -22,6 +22,7 @@ Delta module
 
 from .. import calculation as calc
 from .. import realtime_state
+from ..adapter.data_notify import notifier
 from ..api_control import api
 from ..const_common import DELTA_DEFAULT, DELTA_ZERO, FLOAT_INF, MAX_SECONDS
 from ..module_info import DeltaInfo, minfo
@@ -51,11 +52,12 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         waiting = False  # completed lap waiting for validation
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update
+        output = minfo.delta
 
         gen_delta_distance = calc_delta_distance(
             output=minfo.delta,
@@ -86,8 +88,11 @@ class Realtime(DataModule):
                     last_stamp = stamp
 
                     # Run calculation
+                    lap_distance = output.lapDistance
                     gen_delta_distance.send(vehicle_resets)
                     waiting = gen_delta_time.send(vehicle_resets)
+                    if output.lapDistance != lap_distance:  # wake modules following delta position
+                        notifier.notify_derived()
 
                 else:
                     if reset:
@@ -343,6 +348,7 @@ def calc_delta_time(
             delta_ema_last = 0.0
             delta_ema_session = 0.0
             delta_ema_stint = 0.0
+            speed_delta_best = speed_delta_last = speed_delta_session = speed_delta_stint = 0.0
 
             laptime_curr = 0.0  # current laptime
             laptime_last = 0.0  # last laptime
@@ -467,6 +473,12 @@ def calc_delta_time(
                     delay_update,
                 ),
             )
+            # Speed difference to reference laps at same lap distance (smoothed by overlays, own option)
+            speed = api.read.vehicle.speed()
+            speed_delta_best = calc.speed_delta(delta_array_best, pos_synced, speed)
+            speed_delta_last = calc.speed_delta(delta_array_last, pos_synced, speed)
+            speed_delta_session = calc.speed_delta(delta_array_session, pos_synced, speed)
+            speed_delta_stint = calc.speed_delta(delta_array_stint, pos_synced, speed)
 
         # Estimated laptime (none on out lap or before start line in pit lane: delta not comparable)
         delta_available = not is_out_lap and pos_synced >= 0  # negative: pit lane before line
@@ -495,3 +507,7 @@ def calc_delta_time(
         output.lapTimeSession = laptime_session_best
         output.lapTimeStint = laptime_stint_best
         output.lapTimePace = laptime_pace
+        output.speedDeltaBest = speed_delta_best
+        output.speedDeltaSession = speed_delta_session
+        output.speedDeltaStint = speed_delta_stint
+        output.speedDeltaLast = speed_delta_last

@@ -25,11 +25,12 @@ computed channels (wheel slip, steering rate...), smoothing of noisy channels.
 
 from __future__ import annotations
 
+import itertools
 import math
 import zlib
 from array import array
 from bisect import bisect_left, bisect_right
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from itertools import accumulate
 
 from ...userfile.corner_analysis import resample_sorted
@@ -64,6 +65,10 @@ SLIP_MIN_SPEED = 30.0  # km/h, wheel slip not computed slower (division by small
 SLIP_ANGLE_MIN_SPEED = 5.0  # m/s, body slip angle not computed slower
 PLACEMENT_COLUMNS = ("path_lateral", "track_position")  # measured on map when circuit & edges known
 AUTOSCALE_MARGIN = 0.05  # share of visible value range added above & below (autoscaled panel)
+# Caches a snapshot gets its own copy of (filled by a background thread, see TraceData.snapshot)
+SNAPSHOT_CACHES = ("_series", "_xs", "_ranges", "_times", "_samples", "_math_names", "_aligned")
+LIVE_FIELDS = ("sector_lines",)  # set on page thread without new version: adopt keeps them if set meanwhile
+_versions = itertools.count(1)  # trace data versions: never the same twice, snapshots included
 
 
 def moving_average(values: Sequence[float], points: int) -> list[float]:
@@ -153,9 +158,16 @@ class TraceData:
     corners & map all use it), auto_offsets tells meters added (reference distance), user alignment adds to it.
     Math channels (user expressions) are computed from recorded & computed channels of each lap, again when a
     computed input changes (delta, map placement).
+    Long work (laps shown, settings changed) can be done on a snapshot in a background thread, adopted once done if
+    trace data did not change meanwhile (see snapshot & adopt).
     """
 
     def __init__(self):
+        self.version = next(_versions)  # changes with laps & settings (snapshot of an older version not adopted)
+        self.snapshot_of = 0  # snapshot: version of trace data it was taken from
+        # Snapshot laps were set on in background (see prepare_laps): (key, lap data, clean) of each lap, reference
+        # lap key, anchor lap key & data
+        self.prepared: tuple | None = None
         self.laps: list[PlotLap] = []
         self.reference: PlotLap | None = None
         self.reference_deltas: dict[str, tuple[list[float], list[float]]] = {}  # against reference lap
@@ -195,6 +207,7 @@ class TraceData:
         if changed:
             self._series = {key: value for key, value in self._series.items() if key[1] not in changed}
             self._ranges = {}
+            self.version = next(_versions)
 
     def set_offsets(self, offsets: dict[str, float]):
         """Distance added to each lap along distance axis (0: not shifted), shifted series computed again"""
@@ -204,6 +217,7 @@ class TraceData:
             self._series = {key: value for key, value in self._series.items() if not key[3]}
             self._xs = {key: value for key, value in self._xs.items() if key[1] != "shift"}
             self._ranges = {}
+            self.version = next(_versions)
 
     def shift_of(self, lap: PlotLap, time_axis: bool | None = None) -> float:
         """Meters lap is shifted by on distance axis (none on time axis)"""
@@ -226,6 +240,7 @@ class TraceData:
         dropped = self.with_math(columns)
         self._series = {key: value for key, value in self._series.items() if key[1] not in dropped}
         self._ranges = {}
+        self.version = next(_versions)
 
     def compared(self) -> list[PlotLap]:
         return [lap for lap in self.laps if lap is not self.reference]
@@ -263,9 +278,73 @@ class TraceData:
         """Aligned laps measured beforehand (background thread, see align_laps): used by set_laps if laps match"""
         self._aligned.update(aligned)
 
+    def snapshot(self) -> TraceData:
+        """Copy of trace data with its own caches: laps & settings changed and series computed on it (background
+        thread) never touch this one, adopted once done (see adopt), laps & lap data shared (never changed)"""
+        copy = TraceData.__new__(TraceData)
+        copy.__dict__.update(self.__dict__)
+        for name in SNAPSHOT_CACHES:
+            setattr(copy, name, dict(getattr(self, name)))
+        copy.snapshot_of = self.version
+        copy.prepared = None
+        copy.__dict__["live_base"] = tuple(getattr(self, name) for name in LIVE_FIELDS)  # see adopt
+        return copy
+
+    def adopt(self, snapshot: TraceData, keep_live: bool = True) -> bool:
+        """State of snapshot (laps, settings & caches) taken if trace data did not change since it was taken, True
+        if adopted: live fields set meanwhile (see set_sector_lines) & laps aligned meanwhile kept unless not
+        keep_live (other laps shown, see adopt_laps)"""
+        if snapshot.snapshot_of != self.version:
+            return False
+        bases = snapshot.__dict__.get("live_base", ()) if keep_live else ()
+        live = {name: getattr(self, name) for name, base in zip(LIVE_FIELDS, bases) if getattr(self, name) is not base}
+        aligned = self._aligned if keep_live else {}
+        self.__dict__.update(snapshot.__dict__)
+        self.__dict__.update(live)
+        self.__dict__.pop("live_base", None)
+        if aligned:
+            self._aligned = {**aligned, **snapshot._aligned}
+        self.snapshot_of = 0
+        self.prepared = None
+        return True
+
+    def set_sector_lines(self, bounds: Sequence[float]):
+        """Sector 2 & 3 start distances (reference distances): no series depends on them, kept by adopt when set
+        while a snapshot is worked on"""
+        self.sector_lines = list(bounds)
+
+    def prepare_laps(self, laps: list[PlotLap], reference_key: str = "", anchor: tuple[str, LapData] | None = None):
+        """Laps shown on a snapshot (background thread, see set_laps): adopted by adopt_laps if the same laps are
+        shown"""
+        self.set_laps(laps, reference_key, anchor)
+        self.prepared = ([(lap.key, lap.data, lap.clean) for lap in laps], reference_key,
+                         anchor[0] if anchor is not None else "", anchor[1] if anchor is not None else None)
+
+    def adopt_laps(self, snapshot: TraceData, laps: list[PlotLap], reference_key: str = "",
+                   anchor: tuple[str, LapData] | None = None) -> bool:
+        """Laps shown from snapshot they were set on in background (see prepare_laps), same as set_laps: adopted if
+        laps (keys, lap data & clean), reference & anchor lap are the same & trace data did not change meanwhile, lap
+        names & colors of laps kept, True if adopted"""
+        prepared = snapshot.prepared
+        if prepared is None or snapshot.snapshot_of != self.version:
+            return False
+        shown, prepared_reference, anchor_key, anchor_data = prepared
+        if (len(shown) != len(laps) or prepared_reference != reference_key
+                or anchor_key != (anchor[0] if anchor is not None else "")
+                or anchor_data is not (anchor[1] if anchor is not None else None)
+                or any(key != lap.key or data is not lap.data or clean != lap.clean
+                       for (key, data, clean), lap in zip(shown, laps))):
+            return False
+        prepared_laps, reference = snapshot.laps, snapshot.reference
+        self.adopt(snapshot, keep_live=False)
+        self.laps = [lap._replace(data=prepared_lap.data) for lap, prepared_lap in zip(laps, prepared_laps)]
+        self.reference = next((lap for lap in self.laps if reference is not None and lap.key == reference.key), None)
+        return True
+
     def set_laps(self, laps: list[PlotLap], reference_key: str = "", anchor: tuple[str, LapData] | None = None):
         """Laps shown (reference_key: reference lap, anchor: lap recorded by the app an imported reference lap is
         aligned on when no shown lap was recorded by the app, see aligned_laps)"""
+        self.version = next(_versions)
         laps = self.aligned_laps(laps, reference_key, anchor)
         previous = {lap.key: lap.data for lap in self.laps}
         previous_reference = self.reference.key if self.reference is not None else ""
@@ -320,6 +399,7 @@ class TraceData:
         self._series = {key: value for key, value in self._series.items()  # removed math channels dropped too
                         if key[1] in CHANNEL_MAP and not CHANNEL_MAP[key[1]].quantity}
         self._ranges = {}
+        self.version = next(_versions)
         return True
 
     def set_ideal_mode(self, enabled: bool):
@@ -331,6 +411,7 @@ class TraceData:
     def update_deltas(self):
         """Shown deltas: against reference lap, or against ideal lap (every lap, reference lap too)"""
         was_ideal, self._deltas_ideal = self._deltas_ideal, self.ideal_mode
+        self.version = next(_versions)
         if self.ideal_mode or was_ideal:  # ideal lap changes with every shown lap
             self.drop_series(DELTA_CHANNELS)
             self.delta_version += 1
@@ -424,6 +505,7 @@ class TraceData:
     def set_time_axis(self, enabled: bool):
         self.time_axis = enabled
         self._ranges = {}
+        self.version = next(_versions)
 
     def set_smoothing(self, points: int):
         """Moving average of noisy channels (series recomputed)"""
@@ -432,6 +514,7 @@ class TraceData:
             self._series = {key: value for key, value in self._series.items()  # removed math channels dropped too
                             if key[1] in CHANNEL_MAP and not CHANNEL_MAP[key[1]].noisy}
             self._ranges = {}
+            self.version = next(_versions)
 
     def set_delta_window(self, meters: float):
         if meters != self.delta_window:
@@ -502,9 +585,9 @@ class TraceData:
         distances, times = self.lap_times(self.reference)
         return interpolate(distances, times, distance) if distances else distance
 
-    def distance_at_x(self, x: float) -> float:
-        """Reference lap distance at axis position"""
-        if not self.time_axis or self.reference is None:
+    def distance_at_x(self, x: float, time_axis: bool | None = None) -> float:
+        """Reference lap distance at axis position (of time axis, current axis by default)"""
+        if not (self.time_axis if time_axis is None else time_axis) or self.reference is None:
             return x
         distances, times = self.lap_times(self.reference)
         return interpolate(times, distances, x) if times else x
@@ -540,9 +623,9 @@ class TraceData:
         distances, times = self.lap_times(self.reference)
         return interpolate(times, distances, seconds) if times else seconds
 
-    def max_x(self) -> float:
-        """End of horizontal axis: longest lap distance, or lap time"""
-        if self.time_axis:
+    def max_x(self, time_axis: bool | None = None) -> float:
+        """End of horizontal axis: longest lap distance, or lap time (time axis, current axis by default)"""
+        if self.time_axis if time_axis is None else time_axis:
             return max((self.lap_times(lap)[1][-1] for lap in self.laps if self.lap_times(lap)[1]),
                        default=1.0) or 1.0
         return max((self.lap_end(lap) * self.scale_of(lap) for lap in self.laps if len(lap.data)),
@@ -756,6 +839,23 @@ class TraceData:
         cached = (xs, values if channel.column == "delta" else packed(values))  # delta: list of deltas itself
         self._series[key] = cached
         return cached
+
+    def series_cached(self, channel: Channel, lap: PlotLap) -> bool:
+        """Whether series (charts axis, aligned) of lap is computed already"""
+        shift = 0.0 if channel.column in DELTA_CHANNELS else self.shift_of(lap)
+        return (lap.key, channel.column, self.time_axis, shift) in self._series
+
+    def warm(self, columns: Sequence[str], pause: Callable[[], None]):
+        """Series & value ranges of channels computed beforehand (snapshot in background thread): reading them at
+        cursor later costs nothing"""
+        for column in columns:
+            channel = CHANNEL_MAP.get(column)
+            if channel is None or channel.parts or not self.available(channel):
+                continue
+            for lap in self.laps:
+                pause()
+                self.series(channel, lap)
+            self.value_range(channel)
 
     def shared_xs(self, lap: PlotLap, xs: Sequence[float], kind: str, value: float) -> Sequence[float]:
         """Axis positions of lap multiplied by its scale (kind "scale") or shifted (kind "shift") by value: one copy

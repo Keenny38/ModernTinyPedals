@@ -29,6 +29,7 @@ a cache file from a shared telemetry folder never runs code (older pickled cache
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -38,14 +39,21 @@ import sys
 import threading
 import time
 from array import array
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from typing import Any
 
-from .telemetry_lap import EXACT_COLUMNS, Column, LapData, column_type, load_lap
+from .telemetry_lap import EXACT_COLUMNS, Column, LapData, LapFile, column_type, load_lap, read_lap_info
 
 logger = logging.getLogger(__name__)
 
 CACHE_FOLDER = ".lap_cache"  # in telemetry folder (hidden: not a track)
+INFO_FOLDER = "info"  # in lap cache folder: lap infos of each lap folder (first line of lap files), see indexed_infos
+INFO_READERS = 8  # threads reading infos of new lap files (first open of a file waits for antivirus scan)
+_index_lock = threading.Lock()  # info index saved by one thread at a time (newest index written last)
+PARSED_INDEXES = 16  # lap infos indexes kept parsed (file stamp checked)
+_parsed_indexes: dict[str, tuple[tuple[int, int], dict]] = {}  # index path: file stamp, parsed index
+_parsed_lock = threading.Lock()
 CACHE_VERSION = 3  # loaded lap processing or file format changed: cached laps read again from CSV
 CACHE_LIMIT = 600 * 1024 * 1024  # bytes kept, oldest used removed over it
 STALE_TEMP = 600  # seconds, older temporary files are left over from a crash (newer ones may be written now)
@@ -160,6 +168,128 @@ def save_cached_lap(target: str, stamp: tuple[int, int], lap: LapData):
                            else array(column_type(name), values) for name, values in lap.columns.items()})
     except (OSError, OverflowError, TypeError, ValueError) as error:
         logger.debug("LAP CACHE: unable to save %s: %s", target, error)
+
+
+FileStamp = tuple[int, int, float]  # lap file size, modification time (ns) & modification time (s)
+IndexedInfos = tuple[dict[str, FileStamp], dict, dict[str, dict], list[LapFile]]
+
+
+def info_index_path(folder: str, name: str) -> str:
+    """Lap infos index of a lap folder (track folder name, imported log group...) of telemetry folder"""
+    return os.path.join(folder, CACHE_FOLDER, INFO_FOLDER, f"{name}.json")
+
+
+def index_stamp(path: str) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def read_index(path: str) -> dict:
+    """Saved lap infos index (empty if none or damaged), parsed once while its file stays the same (shared: never
+    changed by callers)"""
+    stamp = index_stamp(path)
+    if stamp is None:
+        return {}
+    with _parsed_lock:
+        cached = _parsed_indexes.get(path)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    saved: Any = {}
+    with suppress(OSError, ValueError), open(path, encoding="utf-8") as file:
+        saved = json.load(file)
+    saved = saved if isinstance(saved, dict) else {}  # damaged index ignored
+    keep_parsed(path, stamp, saved)
+    return saved
+
+
+def keep_parsed(path: str, stamp: tuple[int, int] | None, index: dict):
+    if stamp is None:
+        return
+    with _parsed_lock:
+        _parsed_indexes.pop(path, None)
+        _parsed_indexes[path] = (stamp, index)
+        while len(_parsed_indexes) > PARSED_INDEXES:
+            _parsed_indexes.pop(next(iter(_parsed_indexes)))
+
+
+def indexed_infos(lap_folder: str, index_path: str, laps: Sequence[LapFile],
+                  memory: Mapping[str, tuple[float, dict]] | None = None) -> IndexedInfos:
+    """Lap file stamps of lap folder, saved index, infos known (memory: lap path: file time & info, or index) & laps
+    whose info must be read from file (no lap file opened: one directory scan & index file read)"""
+    stamps: dict[str, FileStamp] = {}
+    if not laps:
+        return stamps, {}, {}, []
+    with suppress(OSError), os.scandir(lap_folder) as found:
+        for item in found:
+            stat = item.stat()
+            stamps[item.name] = (stat.st_size, stat.st_mtime_ns, stat.st_mtime)
+    saved = read_index(index_path)
+    known: dict[str, dict] = {}
+    missing: list[LapFile] = []
+    memory = memory or {}
+    for lap in laps:
+        stamp = stamps.get(lap.filename)
+        if stamp is None:  # removed meanwhile
+            continue
+        cached = memory.get(lap.path)
+        indexed = saved.get(lap.filename)
+        if cached is not None and cached[0] == stamp[2]:
+            known[lap.filename] = cached[1]
+        elif (isinstance(indexed, list) and len(indexed) == 3 and indexed[:2] == list(stamp[:2])
+              and isinstance(indexed[2], dict)):
+            known[lap.filename] = indexed[2]
+        else:
+            missing.append(lap)
+    return stamps, saved, known, missing
+
+
+def read_infos(paths: Sequence[str]) -> list[tuple[str, float, dict] | None]:
+    """Path, file time & lap info of each lap file (None if removed), files read together: each new file is scanned
+    by antivirus on first open (thread job)"""
+
+    def read(path: str) -> tuple[str, float, dict] | None:
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:  # removed meanwhile
+            return None
+        return path, mtime, read_lap_info(path)
+
+    if len(paths) <= 2:
+        return [read(path) for path in paths]
+    with concurrent.futures.ThreadPoolExecutor(INFO_READERS, "Lap infos") as pool:
+        return list(pool.map(read, paths))
+
+
+def save_info_index(path: str, index: dict):
+    """Lap infos of a lap folder saved atomically (temporary file renamed): never read half written, one save at a
+    time (thread jobs)"""
+    with _index_lock:
+        _write_index(path, index)
+
+
+def save_pending_index(path: str, pending: dict[str, dict]):
+    """Newest index of path waiting in pending saved (thread job), nothing if a job started later saved it already"""
+    with _index_lock:
+        index = pending.pop(path, None)
+        if index is not None:
+            _write_index(path, index)
+
+
+def _write_index(path: str, index: dict):
+    temp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(temp, "w", encoding="utf-8", newline="\n") as file:
+            json.dump(index, file, separators=(",", ":"))
+        os.replace(temp, path)
+        keep_parsed(path, index_stamp(path), index)  # read back without parsing
+    except (OSError, TypeError, ValueError) as error:
+        logger.warning("LAP CACHE: unable to save lap infos index: %s", error)
+        with suppress(OSError):
+            os.remove(temp)
 
 
 def remove_cached_lap(folder: str, path: str):

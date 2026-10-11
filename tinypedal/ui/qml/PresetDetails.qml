@@ -269,7 +269,9 @@ Card {
             }
 
             // Content
-            SectionTitle { text: i18n.trm((details.info.overlays || 0) + " overlays") }
+            SectionTitle {  // content read meanwhile: no count yet
+                text: details.info.pending === true ? i18n.tr("Overlays") : i18n.trm((details.info.overlays || 0) + " overlays")
+            }
             Flow {
                 Layout.fillWidth: true
                 spacing: theme.em * 0.25
@@ -279,7 +281,9 @@ Card {
                 }
                 Pill { visible: (details.info.overlayMore || 0) > 0; text: "+" + details.info.overlayMore; tint: theme.dimText }
             }
-            SectionTitle { text: i18n.trm((details.info.modules || 0) + " modules") }
+            SectionTitle {
+                text: details.info.pending === true ? i18n.tr("Module") : i18n.trm((details.info.modules || 0) + " modules")
+            }
             Flow {
                 Layout.fillWidth: true
                 spacing: theme.em * 0.25

@@ -2,6 +2,7 @@
 
 import ctypes
 import io
+import os
 import time
 
 import pytest
@@ -668,6 +669,29 @@ def test_start_recording_only_once(tmp_path):
     control.stop_recording()
     time.sleep(0.01)
     assert not control.recording
+
+
+def test_recording_never_overwrites_existing_file(tmp_path):
+    """Recording started again within the same second (same name): previous file kept, "-2" added"""
+    from tinypedal.replay import read_replay_info
+
+    filename = str(tmp_path / "replay-2026-10-10-12-00-00.tpreplay")
+    for _ in range(2):
+        control = ReplayControl()
+        assert control.start_recording(filename, lambda: b"abcd", rate=200)
+        end = time.monotonic() + 5
+        while control.recorded_frames < 2 and time.monotonic() < end:
+            time.sleep(0.01)
+        control.stop_recording()
+    second = str(tmp_path / "replay-2026-10-10-12-00-00-2.tpreplay")
+    assert control.recording_file == second
+    assert read_replay_info(filename).duration >= 0 and read_replay_info(second).duration >= 0
+    # Nothing recorded (game never active): only its own file removed
+    control = ReplayControl()
+    control.start_recording(filename, lambda: None, rate=200)
+    control.stop_recording()
+    assert os.path.exists(filename) and os.path.exists(second)
+    assert not os.path.exists(str(tmp_path / "replay-2026-10-10-12-00-00-3.tpreplay"))
 
 
 def test_frame_decoded_outside_player_lock(tmp_path, monkeypatch):

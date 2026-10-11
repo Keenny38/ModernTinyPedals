@@ -282,3 +282,69 @@ def test_open_folder_creates_it(tmp_path, monkeypatch):
     folder = tmp_path / "blackbox"
     assert rec.open_folder(str(folder))
     assert folder.is_dir() and opened == [str(folder)]
+
+
+# --- Trace of a long recording (up to 2400 samples): drawn from about 2 points per pixel column
+def trace_image(points, rects=()):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
+
+    image = QImage(200, 60, QImage.Format.Format_ARGB32)
+    image.fill(QColor(0, 0, 0))
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    for rect in rects:
+        painter.fillRect(rect, QColor(255, 0, 0))
+    path = QPainterPath()
+    path.addPolygon(QPolygonF(points))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor(255, 255, 255), 1.2))
+    painter.drawPath(path)
+    painter.end()
+    return image
+
+
+def differing_pixels(first, second) -> int:
+    """Pixels clearly different (antialiased edges of many short segments blend a little differently)"""
+    from PySide6.QtGui import QColor
+
+    return sum(
+        max(abs(a - b) for a, b in zip(QColor(first.pixel(x, y)).getRgb(), QColor(second.pixel(x, y)).getRgb())) > 96
+        for x in range(first.width()) for y in range(first.height())
+    )
+
+
+def test_long_trace_thinned_to_pixel_columns(ui_env):
+    import math
+
+    from PySide6.QtCore import QPointF, QRectF
+
+    from tinypedal.widget._black_box.trace import mark_runs, trace_points
+
+    samples = [rec.Sample(t * 0.05, 40 + 30 * math.sin(t * 0.07) + (t * 7919 % 13) * 0.25, 0.0, 0.0, 3,
+                          (t // 40) % 3 == 0, False, "") for t in range(2400)]
+    width = 200.0
+
+    def x_at(time):
+        return time / 120.0 * width
+
+    def y_of(sample):
+        return 60 - sample.speed * 0.6
+
+    full = [QPointF(x_at(sample.time), y_of(sample)) for sample in samples]
+    points = trace_points(samples, x_at, y_of, width)
+    assert len(points) <= width * 4  # 2400 before
+    assert points[0] == full[0] and points[-1] == full[-1]
+    assert [point.x() for point in points] == sorted(point.x() for point in points)  # time order
+    for column in range(int(width)):  # same lowest & highest point in every pixel column, first & last kept
+        before = [point.y() for point in full if int(point.x()) == column]
+        after = [point.y() for point in points if int(point.x()) == column]
+        assert min(before) == min(after) and max(before) == max(after)
+        assert before[0] == after[0] and before[-1] == after[-1]
+    runs = mark_runs(samples, x_at, lambda sample: sample.abs_active, 1.0)
+    assert len(runs) == 20  # one mark per run of ABS activity, not one per sample
+    rects = [QRectF(x_at(sample.time), 0, 1, 4) for sample in samples if sample.abs_active]
+    merged = [QRectF(left, 0, right - left, 4) for left, right in runs]
+    assert differing_pixels(trace_image(full, rects), trace_image(points, merged)) < 200 * 60 * 0.005  # same picture
+    short = samples[:600]  # up to 4 samples per pixel column (default 15 s recording): all drawn as before
+    assert len(trace_points(short, x_at, y_of, width)) == 600

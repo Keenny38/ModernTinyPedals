@@ -116,7 +116,7 @@ def test_mirror_window(ui_env, monkeypatch):
         widget = make_widget(10, 10, 80, 40)
         monkeypatch.setattr(QApplication, "topLevelWidgets", staticmethod(lambda: [widget]))
         control.update_overlay()
-        assert mirror.size().width() >= 80 and not mirror.pixmap.isNull()  # widget frame included
+        assert mirror.size().width() >= 80 and mirror.image is not None  # widget frame included
         widget.close()
         mirror.close()  # closing window turns mirror off
         assert control._mirror is None and not cfg.user.config["vr_overlay"]["enable_vr_mirror_window"]

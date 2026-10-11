@@ -74,7 +74,7 @@ def test_one_page_three_tabs(page):
     from tinypedal.ui.quick.race_backend import TABS
 
     backend = page.backend
-    assert TABS == ("fuel", "tyres", "team")
+    assert TABS == ("fuel", "tyres", "team", "live")
     backend.setTab(1)
     assert backend.header["tab"] == 1 and cfg.user.config["fuel_calculator"]["race_tab"] == 1
     backend.setTab(7)  # out of range: kept
@@ -539,15 +539,19 @@ def test_live_race_status_shown(page, monkeypatch):
 
     backend = page.backend
     backend.setLiveRace(True)
-    assert backend.header["liveStatus"] == "waiting for the race"
+    assert backend.liveStatus == "waiting for the race"
     live_race(monkeypatch, laps_done=20, fuel=9.0, stops=1)
     set_race(backend, laps=40)
+    headers, lives = [], []
+    backend.headerChanged.connect(lambda: headers.append(1))
+    backend.liveChanged.connect(lambda: lives.append(1))
     backend.refresh_race_state()
-    assert backend.header["liveStatus"] == "from lap 21"
-    assert "9.0 L" in backend.header["liveTip"]  # values read from the game, to check them
+    assert backend.liveStatus == "from lap 21"
+    assert "9.0 L" in backend.liveTip  # values read from the game, to check them
+    assert lives and not headers  # live tip (race time) refreshed without the whole header
     monkeypatch.setattr(api.read.vehicle, "in_pits", lambda *args, **kwargs: True, raising=False)
     backend.refresh_race_state()
-    assert "in the pits" in backend.header["liveStatus"]
+    assert "in the pits" in backend.liveStatus
 
 
 def test_share_code_round_trip(page, host):

@@ -282,7 +282,39 @@ def test_player_only_rest_data(api_name):
     rest.aeroDamage = 0.2
     rest.suspensionDamage = (0.1, 0.0, 0.0, 0.0)
     reader = sim.reader()
+    player_row(sim, 0).mIsPlayer = True
     assert reader.brake.wear() == rest.brakeWear and reader.brake.wear(0) == rest.brakeWear  # player index 0
     assert reader.brake.wear(5) == (-1.0, -1.0, -1.0, -1.0)
     assert reader.vehicle.aero_damage() == 0.2 and reader.vehicle.aero_damage(5) == -1.0
     assert reader.wheel.suspension_damage(5) == (-1.0, -1.0, -1.0, -1.0)
+
+
+def player_row(sim, index):
+    """Scoring row of vehicle index"""
+    info = sim._shmmapi
+    if hasattr(info, "lmuScorVeh"):
+        return info.lmuScorVeh(index)
+    return info.rf2ScorVeh(index)
+
+
+@pytest.mark.parametrize("api_name", API_FACTORIES)
+def test_rest_data_never_shown_for_spectated_car(api_name):
+    """Player index override (spectate) on another car: Rest API garage data is the local car's, not shown"""
+    sim, _ = API_FACTORIES[api_name]()
+    rest = sim._restapi_dataset
+    rest.brakeWear = (0.03, 0.03, 0.02, 0.02)
+    rest.aeroDamage = 0.2
+    rest.suspensionDamage = (0.1, 0.0, 0.0, 0.0)
+    reader = sim.reader()
+    player_row(sim, 0).mIsPlayer = True  # local car at index 0, spectated car (player index) at 3
+    info = sim._shmmapi
+    info._sync.player_scor_index = 3
+    info._sync.player_scor = player_row(sim, 3)
+    assert reader.brake.wear() == (-1.0, -1.0, -1.0, -1.0) and reader.brake.wear(3) == (-1.0, -1.0, -1.0, -1.0)
+    assert reader.vehicle.aero_damage() == -1.0
+    assert reader.wheel.suspension_damage() == (-1.0, -1.0, -1.0, -1.0)
+    # Spectating own car: data shown
+    info._sync.player_scor_index = 0
+    info._sync.player_scor = player_row(sim, 0)
+    assert reader.brake.wear() == rest.brakeWear and reader.vehicle.aero_damage() == 0.2
+    assert reader.wheel.suspension_damage() == rest.suspensionDamage

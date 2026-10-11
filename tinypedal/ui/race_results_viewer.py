@@ -42,7 +42,7 @@ class RaceResultsViewer(BaseDialog):
         self.setMinimumSize(UIScaler.size(60), UIScaler.size(30))
         self.backend = RaceResultsBackend(self)
         self.view = create_quick_view(
-            self, "RaceResults.qml", {"backend": self.backend}, samples=0)  # no GpuShape: no MSAA
+            self, "RaceResults.qml", {"backend": self.backend}, samples=0)  # chart lines: multisampled layer
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)

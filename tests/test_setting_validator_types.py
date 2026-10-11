@@ -69,6 +69,13 @@ def test_text_options_kept_by_global_validator():
     assert result["driver_stats_viewer"]["column_widths"] == "name:120,laps:60"
 
 
+def test_class_order_text_kept_by_user_validator():
+    user = copy.deepcopy(WIDGET_DEFAULT)
+    user["standings"]["class_order"] = "GT3, LMP2 ELMS, Hypercar"
+    result = PresetValidator.user_preset(user, WIDGET_DEFAULT)
+    assert result["standings"]["class_order"] == "GT3, LMP2 ELMS, Hypercar"
+
+
 def test_dict_in_place_of_value_restored_to_default():
     """"font_size": {} reset, not kept as sub-level dict (widget TypeError)"""
     defaults = {"font_size": 15, "sub": {"a": 1}}

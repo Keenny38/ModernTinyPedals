@@ -4,7 +4,8 @@ import QtQuick.Layouts
 
 // Race calculator page: data source & race plan actions, race setup, key figures & strategy timeline
 // (shared by all tabs), then Fuel (inputs, pit stop plan, scenarios, consumption history), Tyres (tyre
-// wear & rules, tyre plan, stock) and Team (stints of the team car from the game) tabs.
+// wear & rules, tyre plan, stock), Team (stints of the team car from the game) and Live (every input
+// value the game gives, race under way, tyres offered) tabs.
 // Inputs are applied on Enter or leaving a field, Up / Down step them, Ctrl+Z / Ctrl+Y undo & redo.
 TpPage {
     id: page
@@ -13,6 +14,7 @@ TpPage {
     readonly property var specs: backend.specs
     readonly property var header: backend.header
     readonly property var calc: backend.calc
+    readonly property var tiles: backend.tiles
     readonly property bool compact: width < theme.em * 62  // icon buttons, tiles on two rows
     readonly property color tyreColor: "#F5B342"
 
@@ -95,7 +97,7 @@ TpPage {
                 onSwitched: function(on) { backend.setLiveRace(on) }
             }
             Rectangle {  // live race status
-                visible: page.header.liveStatus !== ""
+                visible: backend.liveStatus !== ""
                 implicitHeight: Math.round(theme.em * 1.6)
                 implicitWidth: liveText.implicitWidth + theme.em * 1.1
                 radius: height / 2
@@ -103,13 +105,13 @@ TpPage {
                 Text {
                     id: liveText
                     anchors.centerIn: parent
-                    text: page.header.liveStatus
+                    text: backend.liveStatus
                     color: theme.dimText
                     font.pointSize: theme.fontPoint * 0.88
                 }
                 HoverHandler { id: liveHover }
-                ToolTip.visible: liveHover.hovered && page.header.liveTip !== ""
-                ToolTip.text: page.header.liveTip
+                ToolTip.visible: liveHover.hovered && backend.liveTip !== ""
+                ToolTip.text: backend.liveTip
                 ToolTip.delay: 300
             }
             Item { Layout.fillWidth: true }
@@ -160,7 +162,7 @@ TpPage {
             TpButton {
                 glyph: ""  // refresh
                 text: page.compact ? "" : i18n.tr("Load Live")
-                tip: i18n.tr("Laps of current session, race length of a live race")
+                tip: i18n.tr("Laps of current session and every followed value of the game (Live tab): race length, pit stop times, tyres...")
                 onClicked: backend.loadLive()
                 Accessible.name: i18n.tr("Load Live")
             }
@@ -193,17 +195,18 @@ TpPage {
             columnSpacing: theme.em * 0.55
             rowSpacing: theme.em * 0.55
             Repeater {
-                model: backend.tiles
+                model: page.tiles.length  // tiles kept when values change: color animations
                 RaceTile {
-                    required property var modelData
-                    visible: modelData.visible
-                    title: modelData.title
-                    value: modelData.value
-                    detail: modelData.detail
-                    tip: modelData.tip
-                    warning: modelData.warning
-                    glyph: page.tileGlyph(modelData.key)
-                    tint: page.tileTint(modelData.key)
+                    required property int index
+                    readonly property var figure: page.tiles[index] || ({})
+                    visible: figure.visible === true
+                    title: figure.title || ""
+                    value: figure.value !== undefined ? figure.value : "-"
+                    detail: figure.detail || ""
+                    tip: figure.tip || ""
+                    warning: figure.warning === true
+                    glyph: page.tileGlyph(figure.key)
+                    tint: page.tileTint(figure.key)
                 }
             }
         }
@@ -225,6 +228,7 @@ TpPage {
                     { text: i18n.tr("Fuel"), glyph: "" },
                     { text: i18n.tr("Tyres"), glyph: "" },
                     { text: i18n.tr("Team"), glyph: "" },
+                    { text: i18n.tr("Live"), glyph: "" },
                 ]
                 AbstractButton {
                     id: tabButton
@@ -305,6 +309,10 @@ TpPage {
             Loader {
                 active: page.header.tab === 2 || item !== null
                 sourceComponent: RaceTeamTab {}
+            }
+            Loader {
+                active: page.header.tab === 3 || item !== null
+                sourceComponent: RaceLiveTab {}
             }
         }
     }

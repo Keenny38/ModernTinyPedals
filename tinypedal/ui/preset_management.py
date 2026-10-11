@@ -105,7 +105,7 @@ class BackupItem(QListWidgetItem):
 
     def __init__(self):
         super().__init__()
-        self.is_valid = False
+        self.is_valid: bool | None = None  # None: not checked yet
         self.is_style = False
 
 
@@ -350,6 +350,10 @@ class RestoreBackup(BaseEditor):
         super().__init__(parent)
         self.set_utility_title(tr("Restore Backup"))
         self.setMinimumSize(UIScaler.size(40), UIScaler.size(20))
+        from .quick.background import BackgroundJobs  # Qt Quick package imported when used
+
+        self._jobs = BackgroundJobs(self, "Restore backup")
+        self._backup_items: dict[str, BackupItem] = {}
 
         # Backup list
         self.listbox_backup = QListWidget(self)
@@ -384,26 +388,47 @@ class RestoreBackup(BaseEditor):
         self.refresh()
 
     def refresh(self):
-        """Load backup file list"""
+        """Load backup file list, files are checked in background (invalid ones shown in red once checked)"""
         self.listbox_backup.clear()
         backup_list = cfg.backup_files(cfg.path.settings)
-        palette = self.listbox_backup.palette()  # colors of window theme in use
-        invalid_color = QColor(status_color("danger", palette))
-        style_color = QColor(status_color("info", palette))
-
+        self._backup_items = {}
         for backup_name in backup_list:
             basename = backup_name[:backup_name.find(FileExt.JSON)]
             if not basename:  # ignore empty file
                 continue
             item = BackupItem()
             item.setText(backup_name)
-            item.is_valid = verify_json_file(None, backup_name, cfg.path.settings)
             item.is_style = not is_allowed_filename(basename)
-            if not item.is_valid:
+            self._backup_items[backup_name] = item
+            self.listbox_backup.addItem(item)
+        self.refresh_colors()
+        filepath = cfg.path.settings
+        names = tuple(self._backup_items)
+        self._jobs.run(
+            "check backups", lambda: {name: verify_json_file(None, name, filepath) for name in names},
+            self._backups_checked, key="check")
+
+    def is_checking(self) -> bool:
+        """Backup files being checked in background"""
+        return self._jobs.is_busy("check")
+
+    def _backups_checked(self, valid: dict[str, bool]):
+        for name, is_valid in valid.items():
+            item = self._backup_items.get(name)
+            if item is not None and item.is_valid is None:
+                item.is_valid = is_valid
+        self.refresh_colors()
+
+    def refresh_colors(self):
+        """Invalid backups in red, style presets in blue (colors of window theme in use)"""
+        palette = self.listbox_backup.palette()
+        invalid_color = QColor(status_color("danger", palette))
+        style_color = QColor(status_color("info", palette))
+        for item in self._backup_items.values():
+            if item.is_valid is False:
                 item.setForeground(invalid_color)
             elif item.is_style:
                 item.setForeground(style_color)
-            self.listbox_backup.addItem(item)
 
     def is_selected(self) -> bool:
         """Is file selected"""
@@ -439,6 +464,9 @@ class RestoreBackup(BaseEditor):
             return
 
         selected_item = cast(BackupItem, self.listbox_backup.currentItem())
+        if selected_item.is_valid is None:  # not checked yet in background
+            selected_item.is_valid = verify_json_file(None, selected_item.text(), cfg.path.settings)
+            self.refresh_colors()
         if not selected_item.is_valid:
             msg_text = "Selected backup file is invalid and cannot be restored."
             QMessageBox.warning(self, tr("Error"), trm(msg_text))

@@ -1017,6 +1017,7 @@ class ReplayControl:
         """Record frames from source until stopped, returns False if already recording
 
         Args:
+            filename: file to record, "-2", "-3"... added if it exists (never overwritten), see recording_file.
             source: frame source (see RecordingSources.frame), or every recording source.
             rest_source: returns Rest API data snapshot, or None.
             header_extra: source API name & zone layout.
@@ -1024,6 +1025,7 @@ class ReplayControl:
         with self._rec_lock:
             if self.recording:
                 return False
+            filename = reserve_file(filename)
             sources = source if isinstance(source, RecordingSources) else RecordingSources(source, rest_source)
             # Own stop event for each recording, a previous recorder still closing its file never resumes
             self._rec_event = threading.Event()
@@ -1109,6 +1111,23 @@ class ReplayControl:
         if writer is None:  # nothing recorded (game never active)
             with suppress(OSError):
                 os.remove(filename)
+
+
+def reserve_file(filename: str) -> str:
+    """New empty file named filename, or with "-2", "-3"... added if taken (recording started again within
+    the same second keeps the previous one); filename itself if it cannot be created (error reported by recorder)"""
+    root, ext = os.path.splitext(filename)
+    for index in range(1, 100):
+        name = filename if index == 1 else f"{root}-{index}{ext}"
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            continue
+        except OSError:  # missing folder, no permission: recorder fails to open it & reports
+            return filename
+        os.close(fd)
+        return name
+    return filename
 
 
 replay = ReplayControl()

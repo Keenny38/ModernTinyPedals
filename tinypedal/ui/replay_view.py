@@ -540,7 +540,7 @@ class ReplayView(BaseDialog):
         if not self.check_lmu_api():
             return
         filename, _ = QFileDialog.getOpenFileName(
-            self, tr("Open Replay..."), cfg.path.telemetry, translate_filter(f"Modern Tiny Pedals Replay (*{FILE_EXT})")
+            self, tr("Open Replay..."), cfg.path.telemetry, translate_filter(f"NeoPedal Replay (*{FILE_EXT})")
         )
         if filename:
             self.open_file(filename)
@@ -667,7 +667,7 @@ class ReplayView(BaseDialog):
             return
         default = section_filename(player.replay.filename, start, end)
         filename, _ = QFileDialog.getSaveFileName(
-            self, tr("Save Section..."), default, translate_filter(f"Modern Tiny Pedals Replay (*{FILE_EXT})"))
+            self, tr("Save Section..."), default, translate_filter(f"NeoPedal Replay (*{FILE_EXT})"))
         if not filename:
             return
         if same_file(filename, player.replay.filename):

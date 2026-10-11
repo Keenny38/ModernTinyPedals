@@ -1,9 +1,9 @@
 # Notice
 
-**Modern Tiny Pedals** is a modified version of [TinyPedal](https://github.com/TinyPedal/TinyPedal),
+**NeoPedal** is a modified version of [TinyPedal](https://github.com/TinyPedal/TinyPedal),
 copyright (C) 2022-2026 TinyPedal developers (see [docs/contributors.md](docs/contributors.md)).
 
-Modifications copyright (C) 2026 Steven Vezzu ([Keenny38](https://github.com/Keenny38)) and Modern Tiny Pedals
+Modifications copyright (C) 2026 Steven Vezzu ([Keenny38](https://github.com/Keenny38)) and NeoPedal
 contributors, since September 2026: modern overlay design, Qt Quick telemetry viewer, track map viewer and
 driver stats, race calculator, French translation, installer & updater, and the changes listed in
 [CHANGELOG.md](CHANGELOG.md) and the commit history of <https://github.com/Keenny38/ModernTinyPedals>.
@@ -18,5 +18,5 @@ Third-party components and their licenses are listed in [docs/licenses](docs/lic
 
 ---
 
-**Modern Tiny Pedals** est une version modifiée de TinyPedal. Elle est distribuée sous la même licence
+**NeoPedal** est une version modifiée de TinyPedal. Elle est distribuée sous la même licence
 GPL v3 (ou ultérieure) ; le code source de chaque version est joint à sa page de release.

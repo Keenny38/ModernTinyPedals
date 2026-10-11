@@ -144,7 +144,7 @@ class Realtime(RadarMixin, ModernOverlay):
         """Background & player car, cars, edge fade, radar fade"""
         if not self.show_radar:
             return
-        self._texts_drawn = 0
+        self._texts_drawn = self._values_drawn = 0
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawPixmap(0, 0, self.static_layer())

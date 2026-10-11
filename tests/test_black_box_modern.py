@@ -451,6 +451,7 @@ def test_disabled_module_data_not_read_and_cleared(ui_env, monkeypatch):
 def test_enable_required_modules(ui_env, monkeypatch):
     from tinypedal import module_control
     from tinypedal.setting import cfg
+    from tinypedal.widget import _base as black_box_base
 
     started = []
     active = {}
@@ -461,12 +462,17 @@ def test_enable_required_modules(ui_env, monkeypatch):
 
     monkeypatch.setattr(module_control.ModuleControl, "start", start)
     monkeypatch.setattr(module_control.mctrl, "active_modules", active)
+    monkeypatch.setattr(black_box_base.Base, "start", lambda self: None)
     cfg.user.setting["module_wheels"]["enable"] = False
     widget = new_widget({"enable_required_modules": True})
     try:
+        # Built only (preview of overlay options & cards): nothing started, settings unchanged
+        assert started == []
+        assert cfg.user.setting["module_wheels"]["enable"] is False
+        widget.start()
         assert started == ["module_wheels"]
         assert cfg.user.setting["module_wheels"]["enable"] is True
-        assert not widget.modules.missing
+        assert not widget.modules.missing and widget.use_wheels
     finally:
         widget.deleteLater()
 
@@ -923,7 +929,7 @@ def test_suspension_offset_is_real_millimeters():
 def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
     from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM, spring_length_real
 
-    widget = new_widget()
+    widget = new_widget({"suspension_motion_scale": 1.0})  # real scale (default magnifies 8 times)
     try:
         tyre_h = widget.rects_tyre[0].height()
         assert widget.susp_pixels_per_mm == pytest.approx(tyre_h / TYRE_DIAMETER_MM)
@@ -938,6 +944,9 @@ def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
         assert magnified.susp_pixels_per_mm == pytest.approx(4 * tyre_h / TYRE_DIAMETER_MM)
     finally:
         magnified.deleteLater()
+    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+
+    assert WIDGET_DEFAULT["black_box"]["suspension_motion_scale"] == 8.0  # small travel easy to see by default
 
 
 def test_suspension_turns_with_wheel(ui_env, monkeypatch):
@@ -956,7 +965,8 @@ def test_suspension_turns_with_wheel(ui_env, monkeypatch):
         painter = QPainter(image)
         widget.draw_suspension(painter, widget.rects_susp[0], wheel, 0)
         painter.end()
-        assert rotations == [12.0]
+        # Drawn on motion grid (see _black_box.drawn): same angle as tyre & disc
+        assert rotations == [widget.drawn_steer(0, wheel)] and rotations[0] == pytest.approx(12.0, abs=0.1)
         rotations.clear()
         wheel.steer = 0.0
         painter = QPainter(image)
@@ -969,23 +979,25 @@ def test_suspension_turns_with_wheel(ui_env, monkeypatch):
 
 def test_tyre_and_disc_move_with_suspension(ui_env, monkeypatch):
     """Tyre & disc move by the real wheel travel (not spring travel), 1:1"""
+    from tinypedal.widget._black_box.drawn import MOTION_GRID
     from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
 
-    widget = new_widget()
+    widget = new_widget({"suspension_motion_scale": 1.0})  # real scale (default magnifies 8 times)
     try:
         wheel = widget.wheels[0]
         assert widget.wheel_shift(0, wheel) == 0.0  # static position
         wheel.susp_offset = 5.0  # spring 5 mm...
         wheel.susp_wheel_offset = 10.0  # ...wheel 10 mm compressed: goes up by wheel travel
         expected = -10 * widget.rects_tyre[0].height() / TYRE_DIAMETER_MM
-        assert widget.wheel_shift(0, wheel) == pytest.approx(expected)
+        grid = 0.5 / (MOTION_GRID * widget.device_scale())  # drawn on motion grid
+        assert widget.wheel_shift(0, wheel) == pytest.approx(expected, abs=grid)
         wheel.susp_wheel_offset = -10.0  # droop: goes down
-        assert widget.wheel_shift(0, wheel) == pytest.approx(-expected)
+        assert widget.wheel_shift(0, wheel) == pytest.approx(-expected, abs=grid)
         wheel.susp_wheel_offset = 10.0
         shifts = []
         monkeypatch.setattr(widget, "draw_tyre", lambda painter, *args: shifts.append(painter.transform().dy()))
         widget.grab()
-        assert shifts and shifts[0] == pytest.approx(expected)
+        assert shifts and shifts[0] == pytest.approx(widget.wheel_shift(0, wheel))
     finally:
         widget.deleteLater()
 
@@ -1234,16 +1246,19 @@ def test_no_slip_before_wheel_radius_is_known():
 
 def test_wheel_mount_moves_with_tyre(ui_env):
     """Spring wheel mount and tyre move by the same wheel travel: the corner stays in one piece"""
+    from tinypedal.widget._black_box.drawn import MOTION_GRID
     from tinypedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame, spring_length_real
 
     widget = new_widget()
     try:
         wheel = widget.wheels[0]
         wheel.susp_offset, wheel.susp_wheel_offset = 5.0, 12.0  # motion ratio about 0.4
-        _, top, full = spring_frame(widget.rects_susp[0])
-        mount_shift = top + spring_length_real(full, wheel.susp_wheel_offset, widget.pixels_per_mm(0)) - (
-            top + full * STATIC_LENGTH)
+        rect = widget.rects_susp[0]
+        _, top, full = spring_frame(rect)
+        mount_shift = widget.wheel_mount(rect, 0, wheel) - (top + full * STATIC_LENGTH)
         assert mount_shift == pytest.approx(widget.wheel_shift(0, wheel))
+        real = spring_length_real(full, wheel.susp_wheel_offset, widget.pixels_per_mm(0)) - full * STATIC_LENGTH
+        assert mount_shift == pytest.approx(real, abs=0.5 / (MOTION_GRID * widget.device_scale()))
     finally:
         widget.deleteLater()
 

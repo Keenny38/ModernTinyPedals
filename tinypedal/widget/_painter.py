@@ -22,7 +22,10 @@ Overlay base painter class.
 
 from __future__ import annotations
 
+import math
+import weakref
 from collections import OrderedDict
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
@@ -37,6 +40,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QRegion,
     QStaticText,
     QTransform,
 )
@@ -81,14 +85,123 @@ def fill_rect(painter: QPainter, rect: QRectF | QRect, color) -> None:
     if not rgba >> 24:  # fully transparent: no panel to round or shade
         return
     rect = QRectF(rect)
-    if painter.transform().type() not in _PLAIN_TRANSFORMS:  # scaled (black box fixed size)
+    world = painter.transform()
+    if world.type() not in _PLAIN_TRANSFORMS:  # scaled (black box fixed size)
         _fill_rect_direct(painter, rect, color, radius, depth)
         return
     pixmap = _cached_background(rect.width(), rect.height(), rgba, radius, depth, painter.device().devicePixelRatioF())
     if pixmap is None:
         _fill_rect_direct(painter, rect, color, radius, depth)
     else:
-        painter.drawPixmap(rect.topLeft(), pixmap)
+        painter.drawPixmap(pixel_aligned(painter, rect.topLeft(), world), pixmap)
+
+
+def pixel_aligned(painter: QPainter, point: QPointF, world: QTransform | None = None) -> QPointF:
+    """Position of a pixmap drawn at its own size on whole device pixels, as raster engine places it anyway
+    (same pixels)
+
+    A pixmap at a fractional position is drawn a pixel off where a repaint region cuts it, unlike in a full
+    repaint: on whole pixels, a partial repaint (see black box regions, table rows) matches a full one.
+    Screen scale of whole pixels only (100%, 200%...): other scales are left as is, see DirtyRegion.
+
+    Args:
+        world: painter.transform() of caller, translation only: device transform looked up once per painter
+            & translation (cached pixmaps are drawn hundreds of times per paint).
+    """
+    if world is None or painter.viewTransformEnabled():  # viewport or window set: view part may change
+        alignment = _alignment(painter.deviceTransform())
+    else:
+        alignment = _cached_alignment(painter, world.dx(), world.dy())
+    if alignment is None:
+        return point
+    scale, dx, dy = alignment
+    px, py = point.x(), point.y()
+    x, y = px * scale + dx, py * scale + dy
+    if not (0 <= x < _MAX_ALIGNED and 0 <= y < _MAX_ALIGNED):
+        return point  # rounding of engine not reproduced exactly: left as is
+    ax, ay = (math.floor(x + 0.5) - dx) / scale, (math.floor(y + 0.5) - dy) / scale
+    return point if ax == px and ay == py else QPointF(ax, ay)
+
+
+def _alignment(transform: QTransform) -> tuple[float, float, float] | None:
+    """(scale, dx, dy) of device transform aligned on whole pixels, None if not aligned"""
+    kind = transform.type()
+    if kind in _PLAIN_TRANSFORMS:
+        scale = 1.0
+    elif kind == QTransform.TransformationType.TxScale and transform.m11() == transform.m22():
+        scale = transform.m11()
+        if not (scale.is_integer() and scale > 0):
+            return None
+    else:
+        return None
+    dx, dy = transform.dx(), transform.dy()
+    if not (dx.is_integer() and dy.is_integer()):
+        return None  # rounding of engine not reproduced exactly
+    return scale, dx, dy
+
+
+def _cached_alignment(painter: QPainter, world_dx: float, world_dy: float) -> tuple[float, float, float] | None:
+    """Alignment of painter at a world translation, device transform read once per painter & translation
+    (device part of transform fixed while painting)"""
+    global _aligned_painter
+    if _aligned_painter is None or _aligned_painter() is not painter:
+        _aligned_painter = weakref.ref(painter)
+        _alignments.clear()
+    key = (world_dx, world_dy)
+    alignment = _alignments.get(key, _UNKNOWN)
+    if alignment is _UNKNOWN:
+        if len(_alignments) >= _ALIGNMENTS_SIZE:
+            _alignments.clear()
+        alignment = _alignments[key] = _alignment(painter.deviceTransform())
+    return alignment  # type: ignore[return-value]
+
+
+_MAX_ALIGNED = 1 << 24
+_UNKNOWN = object()
+_ALIGNMENTS_SIZE = 64
+_aligned_painter: weakref.ref | None = None  # painter of cached alignments
+_alignments: dict[tuple[float, float], object] = {}
+
+
+class DirtyRegion:
+    """Parts of a widget to repaint (each part drawn whole inside its rect)
+
+    Rects are repainted on their own at a screen scale of whole pixels. At a fractional scale (125%, 150%),
+    raster engine draws pixmaps & fills cut by a region of several rects a pixel off: their bounding rect
+    is repainted instead, merged with rects not painted yet, so the region stays one rect.
+    """
+
+    __slots__ = ("pending",)
+
+    def __init__(self):
+        self.pending = QRect()
+
+    def update(self, widget: QWidget, rects: list[QRect],
+               widen: Callable[[list[QRect]], list[QRect]] | None = None) -> None:
+        """Repaint rects, widened by widen (rects to repaint so that rects are repainted right) if given"""
+        if not rects:
+            return
+        if widget.devicePixelRatioF().is_integer():
+            for rect in (rects if widen is None else widen(rects)):
+                widget.update(rect)
+            return
+        bounding = self.pending
+        for rect in rects:
+            bounding = bounding.united(rect)
+        while widen is not None:  # bounding rect widened until stable (its edges cut nothing)
+            widened = bounding
+            for rect in widen([bounding]):
+                widened = widened.united(rect)
+            if widened == bounding:
+                break
+            bounding = widened
+        self.pending = bounding
+        widget.update(bounding)
+
+    def painted(self, region: QRegion | None = None) -> None:
+        """Paint event of region done (None: whole widget): pending rects drawn"""
+        if region is None or QRegion(self.pending).subtracted(region).isEmpty():
+            self.pending = QRect()
 
 
 def background_pixmap(width: float, height: float, color, ratio: float) -> QPixmap | None:

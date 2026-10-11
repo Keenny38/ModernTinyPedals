@@ -34,14 +34,16 @@ class PLATFORM:
 VERSION = version_check.tinypedal()
 
 # App info
-APP_NAME = "Modern Tiny Pedals"  # displayed name
-APP_ID = "TinyPedal"  # config folder, data paths & build folder: unchanged to keep user data
+APP_NAME = "NeoPedal"  # displayed name
+APP_ID = "TinyPedal"  # build folder & executable (tinypedal.exe): unchanged, found by older updaters
+CONFIG_ID = "NeoPedal"  # user config & data folders
+LEGACY_CONFIG_ID = "TinyPedal"  # user folders of older versions, shared with original TinyPedal, copied once
 REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
 FORK_REPO_NAME = "Keenny38/ModernTinyPedals"  # this fork (releases, updates)
 COPYRIGHT = "Copyright (C) 2022-2026 TinyPedal developers"
 # Modified version notice (GPL v3 section 5a), upstream copyright above is kept
 MODIFICATION_NOTICE = (
-    "Modern Tiny Pedals is a modified version of TinyPedal. "
+    "NeoPedal is a modified version of TinyPedal. "
     "Modifications copyright (C) 2026 Steven Vezzu and contributors."
 )
 DESCRIPTION = "Free and Open Source telemetry overlay application for racing simulation."

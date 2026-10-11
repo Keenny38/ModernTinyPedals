@@ -115,3 +115,61 @@ def kept_laps(folder: str) -> set[str]:
         OSError, ValueError: marks file unreadable (kept laps unknown).
     """
     return {name for name, mark in load_marks(folder, strict=True).items() if mark.get("kept")}
+
+
+def set_marks(paths: list[str], kept: bool | None = None, note: str | None = None) -> bool:
+    """Set kept state and/or note of lap files, marks file of each folder read & saved once, False if one not saved"""
+    ok = True
+    for folder, names in by_folder(paths).items():
+        marks = load_marks_to_save(folder)
+        if marks is None:
+            ok = False
+            continue
+        for name in names:
+            mark = dict(marks.get(name, {}))
+            if kept is not None:
+                mark["kept"] = kept
+            if note is not None:
+                mark["note"] = note.strip()
+            marks[name] = mark
+        ok = save_marks(folder, marks) and ok
+    return ok
+
+
+def restore_marks(saved: dict[str, dict]) -> bool:
+    """Kept state & note of each lap file (path: mark, restored laps), marks file of each folder read & saved once,
+    False if one not saved"""
+    ok = True
+    for folder, names in by_folder(list(saved)).items():
+        marks = load_marks_to_save(folder)
+        if marks is None:
+            ok = False
+            continue
+        for name in names:
+            mark = saved[os.path.join(folder, name)]
+            marks[name] = {**marks.get(name, {}), "kept": bool(mark.get("kept")), "note": str(mark.get("note", "")).strip()}
+        ok = save_marks(folder, marks) and ok
+    return ok
+
+
+def remove_marks(paths: list[str]) -> bool:
+    """Forget marks of lap files (deleted laps), marks file of each folder read & saved once, False if one not saved"""
+    ok = True
+    for folder, names in by_folder(paths).items():
+        marks = load_marks_to_save(folder)
+        if marks is None:
+            ok = False
+            continue
+        removed = [name for name in names if marks.pop(name, None) is not None]
+        if removed:
+            ok = save_marks(folder, marks) and ok
+    return ok
+
+
+def by_folder(paths: list[str]) -> dict[str, list[str]]:
+    """File names of paths by folder"""
+    folders: dict[str, list[str]] = {}
+    for path in paths:
+        folder, name = os.path.split(path)
+        folders.setdefault(folder, []).append(name)
+    return folders

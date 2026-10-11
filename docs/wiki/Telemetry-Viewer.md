@@ -1,6 +1,6 @@
 # Telemetry Viewer
 
-Every lap you drive is recorded, and the **Lap Telemetry Viewer** compares them: charts, racing line map, corner analysis, session pace and XY plots. It is drawn by the graphics card (Qt Quick), so zooming and moving stay smooth.
+Every lap you drive is recorded, and the **Lap Telemetry Viewer** compares them: charts, racing line map, corner analysis, session pace, XY plots and a simple view drawn like the overlays. It is drawn by the graphics card (Qt Quick), so zooming and moving stay smooth.
 
 Open it with the `Telemetry` entry of the navigation bar, or `Tools` > `Lap Telemetry Viewer`.
 
@@ -20,7 +20,7 @@ Main options of the Recorder module:
 | `enable_out_and_in_lap_recording` | Off |
 | `enable_compressed_lap_files` | Off (`.csv.gz`, about 5 times smaller) |
 
-Recorded channels include pedals, steering, speed, gear, RPM, fuel, position, G forces, TC and ABS activity, battery, and per wheel: tyre temperatures (inner, middle, outer), pressures, wear, load, brake temperature, wheel speed, ride height, suspension, slip angle and camber. Brake bias, TC and ABS levels, engine map, water and oil temperatures are recorded too, and with LMU the name of the setup loaded in the game. Each lap also gets a binary copy, so the viewer opens it without reading the CSV again.
+Recorded channels include pedals, steering, speed, gear, RPM, fuel, position, G forces, TC and ABS activity, battery, and per wheel: tyre temperatures (inner, middle, outer), pressures, wear, load, brake temperature, wheel speed, ride height, suspension, slip angle and camber. Brake bias, TC and ABS levels, engine map, water and oil temperatures and the steering wheel rotation (degrees lock to lock) are recorded too, and with LMU the name of the setup loaded in the game. Each lap also gets a binary copy, so the viewer opens it without reading the CSV again.
 
 ## Choose and compare laps
 
@@ -38,7 +38,8 @@ Lap list tools:
 
 ## Charts
 
-- **Channels**: the `Channels` menu picks the charts, with a search field and presets (Pedals, Tyres, Brakes, Suspension). Channels not recorded in the shown laps are greyed out. Four-wheel channels share one panel.
+- **Simple View / Advanced View**: the switch in the toolbar shows the charts (`Advanced View`) or the [Simple View](#simple-view) in their place. Both show the same channels.
+- **Channels**: the `Show` menu picks what both views show, by group (`Pedals & Steering Wheel`, `Timing`, `Engine`, `Tyres`, `Brakes`, `Chassis`, `Electronics`, `Track`, `Math Channels`) or channel, with a search field (channels of one wheel are found there) and presets (Pedals, Tyres, Brakes, Suspension). Channels not recorded in the shown laps are greyed out. Four-wheel channels share one panel. The chart options are at the bottom of the same menu.
 - **Delta and time gain/loss**: delta to the reference along the lap, and where time is gained or lost (`Gain/Loss window` from 20 to 150 m). `Delta vs ideal lap` compares with the fastest clean lap in each mini-sector instead.
 - **Cursor**: move the mouse to read every lap's value and its gap to the reference.
 - **Markers A and B** (right-click, or `A` / `B` keys) and the `Range` tab: time of each lap between the markers, gap to the reference, minimum, maximum and mean of each channel.
@@ -46,7 +47,7 @@ Lap list tools:
 - **Calculated channels**: wheel slip (lock under braking, spin on throttle), steering rate, fuel used, tyre temperature spread. `Math Channels...` adds your own formulas (`+ - * /`, `abs`, `min`, `max`, `d()` change per second) and has built-in understeer angle, brake release rate and throttle application rate.
 - **Display**: `Smoothing` for noisy channels, `Min / max band` of the shown laps (3 laps or more), `Time axis` (charts along lap time instead of distance).
 - **Align on braking**: right-click > `Align Laps on Braking Point Here` shifts laps so their braking starts line up with the reference.
-- **Playback**: `Space` plays the reference lap at real speed (0.25x to 4x), with optional loop between markers A and B.
+- **Playback**: the bar under the charts (same place in the simple view) plays the reference lap at real speed (0.1x to 4x, `Space`), with optional loop between markers A and B; drag its position bar to move along the lap.
 - **Right-click menu**: markers, zoom to sector or between markers, copy values or picture, `Open Replay Here` when a [Session recorder](Connections.md#session-recorder) replay covers the lap.
 
 Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Reset` to reset. Click `S1`, `S2`, `S3` to zoom on a sector. Drag a channel name to reorder channels, drag a panel edge to resize it. Right-click a panel and choose `Fit Values to Visible Part` to scale its values to the zoomed part.
@@ -79,6 +80,15 @@ Zoom with the mouse wheel, `Shift` + drag to zoom an area, double-click or `Rese
 - **Session**: every lap of the session with fuel and tyre wear per lap, off tracks and track limits, **long-run pace** (clean laps, slow laps left out), stints split on pit stops (refuel, tyre change), lap time **trend** per lap (also per % of tyre wear) and consistency. Click a lap to show or hide it.
 - **XY**: one channel against another as a scatter plot (presets: speed / lateral G, steering / lateral G, throttle / wheel slip...) or a histogram. Limited to the zoomed part when zoomed.
 
+### Simple View
+
+`Simple View` (toolbar switch) shows the channels picked in `Show` at the cursor, drawn like the overlays, in place of the charts. It follows the cursor, the track map hover, the kept position and lap playback (playback bar or `Space`), so you can watch the lap as it plays. The keys of the charts still work.
+
+- Every channel charted in the advanced view is shown here: pedal, steering, gear or speed channels give the pedal cards, a G channel gives the G circle, a 4-wheel channel (or one wheel of it) gives the 4-wheel tiles.
+- **Pedals & steering wheel** of each lap, side by side when there is room: throttle, brake and clutch gauges (clutch only when the lap used it), a steering wheel turned by the steering input, gear and speed. Laps recorded from this version also save the wheel rotation: the wheel turns by its real angle, shown in degrees (older laps show steering in % of lock).
+- **Channel groups**: timing (delta), engine (RPM, water and oil temperature, fuel, battery), tyres (temperatures, pressures, wear, load as 4-wheel tiles, colored from cold to hot for temperatures), brakes (temperatures, bias), chassis (G circle, body slip, wheel slip and speed, suspension, ride height), electronics (TC and ABS lights, levels), track (position on track, elevation, steering rate) and your math channels. Values are those of the main lap (the lap card clicked, else the reference lap); other laps are marks of their color on each bar, and the tooltip lists every lap.
+- The lap chips above hide or show a lap in this view only. The view chosen is kept per telemetry folder.
+
 ## Compare on track
 
 The [Telemetry Compare](Overlays.md#telemetry-compare) overlay shows the reference lap of the viewer while you drive: speed, pedals, steering and gear of your current lap over the reference lap, with the next braking point ahead of the car, delta and speed difference. Set a lap as reference here (double-click or flag button), the overlay picks it up within a few seconds.
@@ -106,6 +116,7 @@ Click the `?` button for the full list. Main keys: `Space` play / pause, `Left` 
 ## Performance notes
 
 - Laps load in the background with a progress bar. Heavy computations (track limits, session values, MoTeC imports) run in a separate process, so the page stays fluid. Lap details are kept in an index (`telemetry/.lap_cache/info`), so tracks with hundreds of laps open quickly.
+- On long laps, charts, map, delta to the best lap and MoTeC export are made in the background, so the page does not freeze, and the side tabs open without a stall.
 - When the page stays in the background for 3 minutes, loaded laps are released from memory, then reloaded with the same zoom when you come back.
 
 ## Track Map Viewer

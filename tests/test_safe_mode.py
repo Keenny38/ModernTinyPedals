@@ -182,6 +182,7 @@ def controls(ui_env, monkeypatch):
     monkeypatch.setattr(type(cfg), "load_user", lambda self: calls.append("cfg.load_user"))
     monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
     monkeypatch.setattr(loader.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(loader, "freeze_collected", lambda: None)  # test process never left frozen
     from tinypedal.ui import app
 
     monkeypatch.setattr(app, "AppWindow", lambda: calls.append("window") or None)
@@ -233,7 +234,7 @@ def test_safe_mode_notice_restarts_normally(ui_env, monkeypatch):
     from tinypedal.i18n import tr
 
     window = QMainWindow()
-    window.setWindowTitle("Modern Tiny Pedals")
+    window.setWindowTitle("NeoPedal")
     restarted = []
     window.restart_app = lambda: restarted.append(True)  # type: ignore[attr-defined]
     monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)

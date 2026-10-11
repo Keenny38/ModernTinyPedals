@@ -474,13 +474,15 @@ class TrackNotesEditor(BaseEditor):
     def add_notes(self):
         """Add new notes entry"""
         row_index = self.table_notes.rowCount()
-        self.add_table_row(row_index)
+        with self.batch_edit():  # one undo step, not one per cell
+            self.add_table_row(row_index)
         self.table_notes.setCurrentCell(row_index, 0)
 
     def insert_notes(self, row_offset: int = 0):
         """Insert new notes entry"""
         row_index = self.table_notes.currentRow() + row_offset
-        self.add_table_row(row_index)
+        with self.batch_edit():
+            self.add_table_row(row_index)
         self.table_notes.setCurrentCell(row_index, 0)
 
     def sort_notes(self):

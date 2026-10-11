@@ -31,6 +31,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 from .._painter import fill_chip
 from .common import qcolor
+from .drawn import motion_length, motion_steps
 from .state import (
     PREFIX_BOTTOMING,
     PREFIX_BUMPS,
@@ -78,7 +79,7 @@ class ColorFade:
     warming up reads as a continuous change instead of flickering between two grades.
     """
 
-    __slots__ = ("duration", "start", "source", "target", "target_name")
+    __slots__ = ("duration", "start", "source", "target", "target_name", "pending")
 
     def __init__(self, duration: float):
         self.duration = max(duration, 0.0)
@@ -86,6 +87,7 @@ class ColorFade:
         self.source = QColor()
         self.target = QColor()
         self.target_name = ""
+        self.pending = False  # fade started or still running at last update: final color not repainted yet
 
     def set(self, name: str, now: float):
         """New target color, fading from the color displayed now"""
@@ -96,6 +98,7 @@ class ColorFade:
         self.target = QColor(name)
         self.target_name = name
         self.start = -math.inf if first or self.duration <= 0 else now
+        self.pending = self.start > -math.inf
 
     def color_of(self, name: str, now: float) -> QColor:
         """Color displayed now for target color name (starts a fade if the name changed)"""
@@ -104,6 +107,13 @@ class ColorFade:
 
     def active(self, now: float) -> bool:
         return now - self.start < self.duration
+
+    def needs_repaint(self, now: float) -> bool:
+        """Whether to repaint at this update: fading, or fade ended since last update (fade started at
+        paint time, last repaint while fading lands short of target: final color painted once more)"""
+        active = self.active(now)
+        pending, self.pending = self.pending, active
+        return active or pending
 
     def color(self, now: float) -> QColor:
         """Color displayed now"""
@@ -132,6 +142,7 @@ class WheelPainter:
     brake_wear_laps: Any
     brush_gloss: Any
     depth_effects: Any
+    device_scale: Any
     draw_fit_text: Any
     fitted_font: Any
     font: Any
@@ -164,6 +175,7 @@ class WheelPainter:
     unit: Any
     unit_pres: Any
     wcfg: Any
+    wheel_reaches: Any
     wheel_targets: Any
 
     def pulse(self, now: float | None = None) -> float:
@@ -198,7 +210,7 @@ class WheelPainter:
         # Tyre turned with wheel angle (left / right)
         painter.save()
         painter.translate(rect.center())
-        painter.rotate(wheel.steer)
+        painter.rotate(self.drawn_steer(index, wheel))
         if wheel.status == "detached":
             painter.setPen(self.pulsed_pen(self.pen_detached, strength))
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -240,7 +252,29 @@ class WheelPainter:
             painter.drawPath(path)
         painter.restore()
 
-        # Text lines (upright): (priority, text, font, weight in height, pill color, text color)
+        usable = rect.height() * 0.88
+        lines = fit_readings(self.tyre_lines(index, wheel), usable, self.unit)
+        total = sum(line[3] for line in lines) or 1
+        top = rect.top() + rect.height() * 0.06
+        for priority, text, font, weight, pill_color, text_color in lines:
+            line_rect = QRectF(rect.left(), top, rect.width(), usable * weight / total)
+            top += line_rect.height()
+            font = self.fitted_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
+            painter.setFont(font)
+            if pill_color:
+                pill_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
+                pill = QRectF(line_rect.center().x() - pill_w / 2, line_rect.top() + line_rect.height() * 0.08,
+                              pill_w, line_rect.height() * 0.84)
+                fill_chip(painter, pill, self.pulsed_color(pill_color, strength)
+                          if priority == READING_STATUS else pill_color)
+            painter.setPen(qcolor(text_color) if text_color else self.pen_temp)
+            painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.setFont(self.font())
+
+    def tyre_lines(self, index: int, wheel: WheelState) -> list[tuple]:
+        """Text lines (upright): (priority, text, font, weight in height, pill color, text color), before
+        dropping lines without room (font & weight set by priority)"""
+        wcfg = self.wcfg
         lines: list[tuple] = []
         if wcfg["show_tyre_compound"] and wheel.compound:
             lines.append((READING_COMPOUND, wheel.compound, self.font_small, 0.9, "", ""))
@@ -302,24 +336,30 @@ class WheelPainter:
             text = self.text["puncture" if wheel.status == "puncture" else "flat_spot"]
             color = wcfg["wheel_puncture_color" if wheel.status == "puncture" else "wheel_flat_spot_color"]
             lines.append((READING_STATUS, text, self.font_small, 1.0, color, "#000000"))
-        usable = rect.height() * 0.88
-        lines = fit_readings(lines, usable, self.unit)
-        total = sum(line[3] for line in lines) or 1
-        top = rect.top() + rect.height() * 0.06
-        for priority, text, font, weight, pill_color, text_color in lines:
-            line_rect = QRectF(rect.left(), top, rect.width(), usable * weight / total)
-            top += line_rect.height()
-            font = self.fitted_font(painter, font, text, line_rect.width() * 0.9, line_rect.height() * 1.1)
-            painter.setFont(font)
-            if pill_color:
-                pill_w = min(painter.fontMetrics().horizontalAdvance(text) + self.unit * 0.3, rect.width() * 0.92)
-                pill = QRectF(line_rect.center().x() - pill_w / 2, line_rect.top() + line_rect.height() * 0.08,
-                              pill_w, line_rect.height() * 0.84)
-                fill_chip(painter, pill, self.pulsed_color(pill_color, strength)
-                          if priority == READING_STATUS else pill_color)
-            painter.setPen(qcolor(text_color) if text_color else self.pen_temp)
-            painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, text)
-        painter.setFont(self.font())
+        return lines
+
+    def steer_steps(self, index: int, wheel: WheelState) -> int:
+        """Wheel angle in motion grid steps of the farthest point wheel part draws from its pivot"""
+        return motion_steps(math.radians(wheel.steer) * self.wheel_reaches()[index], self.device_scale())
+
+    def drawn_steer(self, index: int, wheel: WheelState) -> float:
+        """Wheel angle as drawn (degrees), see drawn"""
+        steps = self.steer_steps(index, wheel)
+        if not steps:
+            return 0.0
+        return math.degrees(motion_length(steps, self.device_scale()) / self.wheel_reaches()[index])
+
+    def wheel_key(self, index: int, wheel: WheelState) -> tuple:
+        """What tyre & disc of a wheel show, see drawn"""
+        if wheel.status == "detached":
+            tyre: tuple = ()
+        else:
+            tyre = (wheel.ico_colors if self.wcfg["show_tyre_temperature_bands"] else wheel.tyre_color,
+                    wheel.surface_hot, wheel.warning,
+                    tuple((line[0], line[1], line[4], line[5]) for line in self.tyre_lines(index, wheel)))
+        disc = (wheel.brake_color, wheel.brake_imbalance,
+                tuple((row[0], row[2], row[3]) for row in self.disc_rows(wheel)))
+        return self.steer_steps(index, wheel), wheel.status, tyre, disc
 
     def format_load(self, wheel: WheelState) -> str:
         """Tyre load: share of the car total (default), or absolute load in kg or N
@@ -395,10 +435,11 @@ class WheelPainter:
         path = QPainterPath()
         path.addRoundedRect(bar, radius, radius)
         painter.save()
-        if wheel.steer:
+        steer = self.drawn_steer(index, wheel)
+        if steer:
             pivot = self.rects_tyre[index].center()
             painter.translate(pivot.x(), pivot.y())
-            painter.rotate(wheel.steer)
+            painter.rotate(steer)
             painter.translate(-pivot.x(), -pivot.y())
         painter.fillPath(path, self.brake_fades[index].color_of(wheel.brake_color, monotonic()))
         if wheel.brake_imbalance:  # far from the other disc of the axle: dashed warning outline
@@ -407,7 +448,21 @@ class WheelPainter:
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
         painter.restore()
-        # Temperature, remaining thickness and pressure share the text area, tallest first
+        rows = self.disc_rows(wheel)
+        if not rows:
+            return
+        total = sum(row[3] for row in rows)
+        top = text_rect.top()
+        for text, font, color, weight in rows:
+            row_h = text_rect.height() * weight / total
+            painter.setPen(qcolor(color))
+            self.draw_fit_text(painter, QRectF(text_rect.left(), top, text_rect.width(), row_h), text, font, align)
+            top += row_h
+
+    def disc_rows(self, wheel: WheelState) -> list[tuple]:
+        """Temperature, remaining thickness and pressure sharing the text area, tallest first:
+        (text, font, color, weight in height), font set by weight"""
+        wcfg = self.wcfg
         rows = []
         if wcfg["show_brake_temperature"]:
             text = self.format_temp(wheel.brake_temp)
@@ -429,12 +484,4 @@ class WheelPainter:
         if wcfg["show_brake_pressure"]:
             rows.append((f"{wheel.brake_pressure:.0f}%", self.font_small,
                          wcfg["brake_pressure_color"], 1.0))
-        if not rows:
-            return
-        total = sum(row[3] for row in rows)
-        top = text_rect.top()
-        for text, font, color, weight in rows:
-            row_h = text_rect.height() * weight / total
-            painter.setPen(qcolor(color))
-            self.draw_fit_text(painter, QRectF(text_rect.left(), top, text_rect.width(), row_h), text, font, align)
-            top += row_h
+        return rows

@@ -27,7 +27,8 @@ last one. Fuel and energy share the same stops. Mandatory stops (and balanced st
 race laps evenly over the stints.
 
 Each stop costs the pit lane time, plus refuelling (amount / refuel rate), tyre change and
-driver change; tyres can be changed while refuelling (longest of both counts). Lap time follows
+driver change; tyres can be changed while refuelling, and the driver changed meanwhile (longest
+counts). Lap time follows
 fuel in tank (heavier car is slower), track evolution, pace of the driver and fuel saving. A time
 race lasts the laps that fit in race time with these lap & stop times: race length and stops are
 settled together. A safety car period slows laps and consumption, a stop under safety car loses
@@ -90,6 +91,7 @@ class StrategyInput:
     refuel_rate: float = 0.0  # fuel unit per second, 0 = refuelling inside pit time
     energy_rate: float = 0.0  # % per second, 0 = inside pit time
     tyres_during_refuel: bool = False  # tyre change & refuelling at the same time
+    driver_during_refuel: bool = False  # driver change while refuelling & changing tyres (longest counts)
     minimum_stops: int = 0  # mandatory stops
     balanced_stints: bool = False  # race laps spread evenly over the stints (same stops)
     max_stint_minutes: float = 0.0  # driver limit per stint, 0 = none
@@ -336,6 +338,8 @@ def stop_time(setup: StrategyInput, index: int, fuel: float, energy: float, tyre
         driver_change = setup.drivers > 1
     driver = setup.driver_change_seconds if driver_change else 0.0
     pit = setup.pit_seconds * (1 - min(max(setup.sc_pit_saving, 0.0), 1.0)) if safety_car else setup.pit_seconds
+    if setup.driver_during_refuel:
+        return pit + max(service, driver), refuel, tyre
     return pit + service + driver, refuel, tyre
 
 
@@ -388,7 +392,7 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
         if first < rain.last < end:
             forced[rain.last] = "dry"
 
-    def usage_factor(lap: int) -> float:
+    def lap_usage(lap: int) -> float:
         """Consumption of a lap (plan lap number), in laps at race pace"""
         factor = 1.0
         if partial and lap == formation:
@@ -397,6 +401,32 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
             if period.first <= lap <= period.last:
                 factor *= period.consumption
         return factor
+
+    # Consumption & lap time factors of each lap of the plan worked out once (asked again and
+    # again by stint lengths): laps first to end + 1
+    # (filled period by period, in the order lap_usage multiplies them: same values)
+    usage_table: list[float] = []
+    laptime_table: list[tuple[float, ...]] = []
+    if periods or partial:
+        size = end + 2 - first
+        usage_table = [1.0] * size
+        if partial and 0 <= formation - first < size:
+            usage_table[formation - first] -= partial
+        if periods:
+            laptime_table = [()] * size
+        for period in periods:
+            for index in range(max(period.first - first, 0), min(period.last - first + 1, size)):
+                usage_table[index] *= period.consumption
+                laptime_table[index] += (period.laptime,)
+
+    usage_size = len(usage_table)
+
+    def usage_factor(lap: int) -> float:
+        """Consumption of a lap (plan lap number), in laps at race pace"""
+        if not usage_size:
+            return 1.0
+        index = lap - first
+        return usage_table[index] if 0 <= index < usage_size else lap_usage(lap)
 
     def overlap_units(after: int, until: int, wear: bool) -> float:
         """Laps at race pace saved by periods (consumption or tyre wear) over laps after `after`
@@ -483,14 +513,31 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
     def fuel_in_tank() -> float:  # car using no fuel: no fuel effect on lap time (half tank)
         return amounts["fuel"] if fuel_lap else setup.tank_capacity / 2
 
+    # lap_time worked out inline (same steps): called for every lap of every plan tried
+    base_laptime = setup.laptime
+    fuel_coefficient = setup.fuel_effect * 0.1 if setup.fuel_effect and setup.tank_capacity > 0 else 0.0
+    half_tank = setup.tank_capacity / 2
+    evolution = setup.track_evolution
+    clock_offset = setup.clock_offset
+    saving = setup.saving_seconds
+    laptime_size = len(laptime_table)
+
     def lap_seconds(lap: int, fuel: float, clock: float, driver: int) -> float:
-        seconds = lap_time(setup, fuel, setup.clock_offset + clock)
-        if seconds <= 0:
+        if base_laptime <= 0:
             return 0.0
-        seconds += setup.saving_seconds + (pace[driver - 1] if driver <= len(pace) else 0.0)
-        for period in periods:
-            if period.first <= lap <= period.last:
-                seconds *= period.laptime
+        seconds = base_laptime
+        if fuel_coefficient:
+            seconds += fuel_coefficient * (fuel - half_tank)
+        if evolution:
+            seconds += evolution * (clock_offset + clock) / 3600
+        seconds = max(seconds, 1.0)
+        seconds += saving + (pace[driver - 1] if driver <= len(pace) else 0.0)
+        if laptime_size:
+            index = lap - first
+            factors = laptime_table[index] if 0 <= index < laptime_size else tuple(
+                period.laptime for period in periods if period.first <= lap <= period.last)
+            for factor in factors:
+                seconds *= factor
         return max(seconds, 1.0)
 
     # Same time every lap: stints driven in one go (no lap by lap simulation)
@@ -539,17 +586,22 @@ def simulate(setup: StrategyInput, race_laps: int, stints: int = 0) -> Strategy:
             last_checked = lap + quick + (0 if quick == limit else 1)  # laps covered & first lap not covered
             if lap >= last_special or last_checked < next_special(lap):
                 return quick  # all at race pace consumption: no lap by lap count needed
-        left = {name: amounts[name] - reserve[name] for name in usage}
-        used = dict.fromkeys(usage, 0.0)
+        resources = [(per_lap, amounts[name] - reserve[name] + EPSILON) for name, per_lap in usage.items()]
+        used = [0.0] * len(resources)
         count = 0
         while count < limit:
             lap_no = lap + count + 1
             factor = usage_factor(lap_no) * (pit_factor if after_stop and not count else 1.0)
             in_lap = pit_factor if lap_no < end else 1.0  # this lap as last of stint
-            if any(used[name] + per_lap * factor * in_lap > left[name] + EPSILON for name, per_lap in usage.items()):
+            fits = True
+            for index, (per_lap, left) in enumerate(resources):
+                if used[index] + per_lap * factor * in_lap > left:
+                    fits = False
+                    break
+            if not fits:
                 break
-            for name, per_lap in usage.items():
-                used[name] += per_lap * factor
+            for index, (per_lap, _) in enumerate(resources):
+                used[index] += per_lap * factor
             count += 1
         return count
 
@@ -945,10 +997,19 @@ def target_for_stops(setup: StrategyInput, strategy: Strategy, stops: int) -> Sa
 
     low = full_tank_laps(setup) + 1  # fewer laps: no saving
     high = max(strategy.race_laps * 2, low)  # time race: fewer stops, more laps
+    # Laps per stint close to the answer tried first (race laps over the stints, a little more):
+    # it bounds the search to a few laps instead of the whole race
     found = attempt(high)  # most saving: one tank for everything
     if found is None:
         return None
     high -= 1
+    guess = min(max(ceil(strategy.race_laps * 1.05 / (stops + 1)) + 1, low), high)
+    if guess < high:
+        result = attempt(guess)
+        if result is not None:
+            found, high = result, guess - 1
+        else:
+            low = guess + 1
     while low <= high:
         middle = (low + high) // 2
         result = attempt(middle)
@@ -1281,6 +1342,7 @@ def strategy_input_from_values(values: dict, stop_extra_seconds: tuple[float, ..
         refuel_rate=number("input_refuel_rate"),
         energy_rate=number("input_energy_rate"),
         tyres_during_refuel=values.get("enable_tyres_during_refuel") is True,
+        driver_during_refuel=values.get("enable_driver_change_during_refuel") is True,
         minimum_stops=int(number("input_minimum_stops")),
         balanced_stints=values.get("enable_balanced_stints") is True,
         max_stint_minutes=number("input_max_stint_minutes"),

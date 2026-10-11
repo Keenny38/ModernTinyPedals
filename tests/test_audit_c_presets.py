@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import time
 import zlib
 
 import pytest
@@ -186,6 +187,9 @@ def test_backup_list_colors_follow_window_theme(ui_env, warnings):
             palette.setColor(QPalette.ColorRole.Window, QColor(window))
             dialog.listbox_backup.setPalette(palette)
             dialog.refresh()  # colors read again
+            deadline = time.monotonic() + 5
+            while dialog.is_checking() and time.monotonic() < deadline:  # files checked in background
+                QCoreApplication.processEvents()
             colors = {
                 dialog.listbox_backup.item(row).text(): dialog.listbox_backup.item(row).foreground().color().name()
                 for row in range(dialog.listbox_backup.count())
@@ -244,6 +248,9 @@ def test_preset_compare_save_keeps_changes_made_meanwhile(ui_env, warnings, monk
     flush()
     dialog = preset_compare.PresetCompare(None, preset_a="default.json", preset_b="other.json")
     try:
+        deadline = time.monotonic() + 5
+        while dialog.is_loading() and time.monotonic() < deadline:  # other preset read in background
+            QCoreApplication.processEvents()
         rows = [dialog.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(dialog.table.rowCount())]
         dialog.table.selectRow(rows.index(("speedometer", "font_size")))
         dialog.copy_selected(to_a=True)  # to loaded preset

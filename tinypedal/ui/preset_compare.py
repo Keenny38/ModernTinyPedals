@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -47,15 +47,21 @@ from ..i18n.options import module_label, option_label, option_tooltip
 from ..setting import cfg, load_setting_json_file, save_and_verify_json_file
 from ..userfile.json_setting import copy_setting
 from ..userfile.preset_compare import copy_values, diff_presets
-from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog, table_item
+from ._common import BaseEditor, CompactButton, UIScaler, singleton_dialog
 
 COLUMNS = ("Section", "Option", "Preset A", "Preset B")
+FILTER_DELAY = 150  # ms, filter applied once typing pauses
 
 
 def load_preset(filename: str) -> dict:
     """Load preset file (validated, missing options filled with default)"""
     if cfg.is_loaded(filename):
         return copy_setting(cfg.user.setting)
+    return load_preset_file(filename)
+
+
+def load_preset_file(filename: str) -> dict:
+    """Load preset file not loaded by app (thread safe: file read & validation only)"""
     return load_setting_json_file(filename=filename, filepath=cfg.path.settings, dict_def=cfg.default.setting)
 
 
@@ -74,6 +80,15 @@ class PresetCompare(BaseEditor):
         self.set_utility_title(tr("Preset Comparison"))
         self.presets: dict[str, dict] = {}  # file name: loaded (possibly edited) preset
         self.edits: dict[str, dict[tuple[str, str], Any]] = {}  # file name: copied values by (section, key)
+        self._haystacks: list[str] = []  # filter text of each row
+        self._labels: dict[tuple[str, str], tuple[str, str, str]] = {}  # section, option label & tooltip
+        from .quick.background import BackgroundJobs  # Qt Quick package imported when used
+
+        self._jobs = BackgroundJobs(self, "Preset comparison")
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(FILTER_DELAY)
+        self._filter_timer.timeout.connect(self.filter_now)
 
         files = [f"{name}{FileExt.JSON}" for name in cfg.preset_files()]
         self.combo_a = QComboBox(self)
@@ -90,7 +105,7 @@ class PresetCompare(BaseEditor):
         self.check_position.toggled.connect(self.refresh)
         self.edit_filter = QLineEdit(self)
         self.edit_filter.setPlaceholderText(tr("Filter"))
-        self.edit_filter.textChanged.connect(self.apply_filter)
+        self.edit_filter.textChanged.connect(self._filter_timer.start)
 
         self.table = QTableWidget(0, len(COLUMNS), self)
         self.table.setHorizontalHeaderLabels([tr(text) for text in COLUMNS])
@@ -141,42 +156,89 @@ class PresetCompare(BaseEditor):
             self.presets[filename] = load_preset(filename)
         return self.presets[filename]
 
+    def is_loading(self) -> bool:
+        """Presets being read in background"""
+        return self._jobs.is_busy("presets")
+
     def refresh(self):
-        """Rebuild difference table"""
+        """Rebuild difference table, presets not read yet are read in background first"""
         name_a, name_b = self.combo_a.currentText(), self.combo_b.currentText()
         self.table.setRowCount(0)
+        self._haystacks = []
         if not name_a or not name_b:
             return
-        differences = diff_presets(self.preset(name_a), self.preset(name_b), self.check_position.isChecked())
-        self.table.setRowCount(len(differences))
-        for row, diff in enumerate(differences):
-            cells = (
-                module_label(diff.section), option_label(diff.key),
-                format_value(diff.value_a), format_value(diff.value_b),
-            )
-            for column, text in enumerate(cells):
-                item = QTableWidgetItem(text)
-                item.setData(Qt.ItemDataRole.UserRole, (diff.section, diff.key))
-                if column == 1:
-                    item.setToolTip(option_tooltip(diff.section, diff.key))
-                self.table.setItem(row, column, item)
+        missing = []
+        for name in dict.fromkeys((name_a, name_b)):
+            if name in self.presets:
+                continue
+            if cfg.is_loaded(name):  # live setting, copied on UI thread
+                self.presets[name] = copy_setting(cfg.user.setting)
+            else:
+                missing.append(name)
+        if missing:
+            self.label_count.clear()
+            self._jobs.run(
+                "read presets", lambda: {name: load_preset_file(name) for name in missing},
+                self._presets_read, key="presets")
+            return
+        self.fill_table(name_a, name_b)
+
+    def _presets_read(self, presets: dict[str, dict]):
+        for name, preset in presets.items():
+            self.presets.setdefault(name, preset)
+        self.refresh()
+
+    def fill_table(self, name_a: str, name_b: str):
+        differences = diff_presets(self.presets[name_a], self.presets[name_b], self.check_position.isChecked())
+        haystacks = self._haystacks
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setRowCount(len(differences))
+            for row, diff in enumerate(differences):
+                section_label, key_label, tooltip = self.labels(diff.section, diff.key)
+                key = diff.section, diff.key
+                cells = (section_label, key_label, format_value(diff.value_a), format_value(diff.value_b))
+                for column, text in enumerate(cells):
+                    item = QTableWidgetItem(text)
+                    item.setData(Qt.ItemDataRole.UserRole, key)
+                    if column == 1:
+                        item.setToolTip(tooltip)
+                    self.table.setItem(row, column, item)
+                haystacks.append(f"{section_label} {key_label} {diff.section} {diff.key}".lower())
+        finally:
+            self.table.setUpdatesEnabled(True)
         if name_a == name_b:
             self.label_count.setText(tr("Select two different presets."))
         else:
             self.label_count.setText(trm(f"Differences: {len(differences)}"))
         self.apply_filter(self.edit_filter.text())
 
+    def labels(self, section: str, key: str) -> tuple[str, str, str]:
+        """Section label, option label & option tooltip (cached for next refresh)"""
+        labels = self._labels.get((section, key))
+        if labels is None:
+            labels = self._labels[section, key] = (
+                module_label(section), option_label(key), option_tooltip(section, key))
+        return labels
+
+    def filter_now(self):
+        """Apply filter text at once (typing applies it after a short pause)"""
+        self.apply_filter(self.edit_filter.text())
+
     def apply_filter(self, text: str):
+        self._filter_timer.stop()
         words = text.lower().split()
-        for row in range(self.table.rowCount()):
-            content = " ".join(table_item(self.table, row, column).text() for column in range(2)).lower()
-            section, key = table_item(self.table, row, 0).data(Qt.ItemDataRole.UserRole)
-            haystack = f"{content} {section} {key}"
-            self.table.setRowHidden(row, not all(word in haystack for word in words))
+        self.table.setUpdatesEnabled(False)
+        try:
+            for row, haystack in enumerate(self._haystacks):
+                self.table.setRowHidden(row, not all(word in haystack for word in words))
+        finally:
+            self.table.setUpdatesEnabled(True)
 
     def selected_items(self) -> list[tuple[str, str]]:
         rows = sorted({index.row() for index in self.table.selectedIndexes() if not self.table.isRowHidden(index.row())})
-        return [table_item(self.table, row, 0).data(Qt.ItemDataRole.UserRole) for row in rows]
+        items = (self.table.item(row, 0) for row in rows)
+        return [item.data(Qt.ItemDataRole.UserRole) for item in items if item is not None]
 
     def copy_selected(self, to_a: bool):
         """Copy selected options between presets"""

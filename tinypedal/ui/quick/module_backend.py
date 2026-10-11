@@ -37,7 +37,7 @@ from importlib.machinery import PathFinder
 from types import CodeType
 from typing import NamedTuple
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from ... import app_signal
 from ...i18n import tr, trm
@@ -45,6 +45,7 @@ from ...i18n.options import module_label
 from ...module_control import ModuleControl
 from ...setting import cfg
 from ..module_view import sort_key
+from .background import BackgroundJobs
 from .models import DictListModel
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,7 @@ class ModuleBackend(QObject):
         self._show_log = show_log
         self._reset_data = reset_data
         self._dependencies: Dependencies | None = None
+        self._jobs = BackgroundJobs(self, "Modules page")
         self._rows: list[dict] = []
         self._search = ""
         self._words: tuple[str, ...] = ()
@@ -392,9 +394,16 @@ class ModuleBackend(QObject):
 
     @Slot()
     def loadDependenciesLater(self):
-        """Read dependencies once page is drawn (page shown at once)"""
+        """Read dependencies in background (page shown at once, cold compile of code takes seconds)"""
+        if self._dependencies is not None or self._jobs.is_busy("dependencies"):
+            return
+        names = tuple(self._widgets.names), tuple(self._control.names)
+        self._jobs.run(
+            "dependencies", lambda: find_dependencies(*names), self._dependencies_found, key="dependencies")
+
+    def _dependencies_found(self, dependencies: Dependencies):
         if self._dependencies is None:
-            QTimer.singleShot(0, self, self.load_dependencies)
+            self.load_dependencies(dependencies)
 
     @Property(bool, notify=dependenciesChanged)
     def dependenciesReady(self) -> bool:

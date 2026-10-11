@@ -54,7 +54,6 @@ from .state import (
     camber_spread,
     class_target,
     impact_arrow,
-    rounded,
     wheel_offset,
 )
 from .suspension import TYRE_DIAMETER_MM
@@ -148,6 +147,7 @@ class DataReader:
     pressure_ranges: Any
     recorder: Any
     relayout: Any
+    repaint_changed: Any
     resize_debounce: Any
     show_battery_bar: Any
     show_brake_peak: Any
@@ -237,10 +237,7 @@ class DataReader:
 
         if self.auto_resize and slow:
             self.update_presence()
-        state = self.render_state()
-        if state != self.last_state or self.animating():
-            self.last_state = state
-            self.update()
+        self.repaint_changed()
 
     def update_slow(self, in_pits):
         """Slow changing data: temperatures, pressure, wear, damage, fuel"""
@@ -813,66 +810,6 @@ class DataReader:
             self.stint_wear_delta = self.stint_wear - previous[0] if self.stint_wear and previous[0] else 0.0
             self.stint_pressure_delta = (
                 self.stint_pressure - previous[1] if self.stint_pressure and previous[1] else 0.0)
-
-    def render_state(self) -> tuple:
-        """Everything the paint depends on, rounded to display precision, to skip repaint if unchanged"""
-        return (
-            tuple(wheel.signature() for wheel in self.wheels),
-            self.body_damage, self.abs_active, self.tc_active, self.abs_level, self.tc_level,
-            self.tc_cut_level, self.tc_slip_level, self.abs_seen, self.tc_seen,
-            rounded(self.brake_bias, 4), rounded(self.locking_front, 0), rounded(self.locking_rear, 0),
-            rounded(self.brake_migration, 1), self.motor_map_level, rounded(self.delta_best, 3), self.delta_shown,
-            rounded(self.laptime_current, 2),
-            self.in_pits, self.limiter, self.headlights, self.ignition,
-            rounded(self.oil_temp, 0), rounded(self.water_temp, 0), self.gear, rounded(self.speed, 1), rounded(self.rpm, 0), self.rpm_max,
-            rounded(self.throttle, 3), rounded(self.brake, 3), rounded(self.clutch, 3),
-            rounded(self.refuel, 1), rounded(self.refill, 1), rounded(self.fuel, 1), rounded(self.fuel_laps, 1),
-            rounded(self.fuel_capacity, 1), rounded(self.fuel_start, 1),
-            rounded(self.energy_capacity, 1), rounded(self.energy_start, 1),
-            rounded(self.energy, 0), rounded(self.energy_laps, 1), self.energy_available,
-            rounded(self.battery_charge, 0), self.battery_state, self.battery_warning, self.battery_highlight,
-            rounded(self.stint_wear, 2), rounded(self.stint_wear_delta, 2),
-            rounded(self.stint_pressure, 1), rounded(self.stint_pressure_delta, 1), self.stint_has_previous,
-            self.trace_version if self.show_recorder and not self.showing_incident() else -1,
-            len(self.recorder.incidents), self.show_recorder and self.showing_incident(),
-            len(self.event_log.events), self.modules.version,
-            self.damage_detached, self.damage_puncture, rounded(self.damage_aero, 2),
-            tuple(rounded(value, 2) for value in self.damage_suspension), self.impact_visible,
-            self.impact_position if self.impact_visible else None,
-            self.event_log.events[-1] if self.event_log.events else None,
-            self.brake_cold, self.brake_hot, tuple(self.wheel_targets), rounded(self.brake_heat_balance, 0),
-            self.browse_incident.time if self.browse_incident is not None else None,
-        )
-
-    def animating(self) -> bool:
-        """Something moves on screen without data change: shift flash, battery flow"""
-        wcfg = self.wcfg
-        if self.rpm_max > 0 and self.rpm / self.rpm_max >= wcfg["rpm_redline_ratio"] and (
-            self.led_h or ("gear" in self.center_order and wcfg["enable_gear_rpm_color"]
-                           and wcfg["enable_shift_flash"])
-        ):
-            return True
-        now = monotonic()
-        if self.smooth_transition and any(
-            fade.active(now) for fade in (*self.tyre_fades, *self.brake_fades)
-        ):
-            return True
-        if self.incident_replay and self.show_recorder and self.showing_incident():  # replay cursor
-            return True
-        if self.alert_pulse and any(wheel.warning or wheel.status for wheel in self.wheels):
-            return True
-        if self.alert_pulse and self.gauge_low():
-            return True
-        if self.alert_pulse and self.show_suspension and any(
-            wheel.susp_bump or wheel.susp_airborne or self.suspension_totaled(wheel) for wheel in self.wheels
-        ):
-            return True
-        if self.alert_pulse and self.show_damage_panel and (
-            any(self.damage_detached) or any(self.damage_puncture) or max(self.body_damage, default=0) >= 3
-        ):
-            return True
-        return bool(self.show_battery_bar and wcfg["enable_battery_bar_animation"]
-                    and self.battery_state in (2, 3))
 
     def battery_warning_level(self) -> int:
         """Charge warning: 0 none, 1 low, 2 high (never on a car without hybrid system)"""

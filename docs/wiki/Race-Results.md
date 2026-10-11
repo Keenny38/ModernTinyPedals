@@ -34,6 +34,8 @@ The header shows the track and layout, date, online server or single player, ses
 
 Class chips (multiclass sessions) show one class: positions and gaps become class positions and gaps.
 
+**Watch Replay** (Le Mans Ultimate): when the game saved the replay of the session (`UserData/Replays/<track> R1 3.Vcr`, written a few minutes after the results file), a button in the header opens it in the game through [Game Replays](Connections.md#game-replays-le-mans-ultimate), which checks the game state, asks for confirmation (with a warning in a live session) and has the playback controls. Sessions with a replay have a camera icon in the list. The game must run to play it; if it is closed, `Game Replays` tells you.
+
 ### Classification
 
 Position (with places gained or lost from the grid in races), class and class position, car number, car brand logo, driver and team (all drivers of a team car in the tooltip), car, laps, race time of the winner then gap (time, or laps behind; in practice and qualifying, gap to the best lap), best lap (fastest in purple), pit stops and contacts (a warning sign marks penalties). Your row is tinted. Click a car to pick it, double-click to see its laps.
@@ -51,6 +53,11 @@ The laps of the car picked (your car first, any other car from the list): place,
 ### Events
 
 Contacts (a contact reported by both cars is shown once, with its impact strength), penalties (kind, time and reason), track limits (warnings, invalidated laps, points) and chat, with the session time. Filter by kind (with counts), or show only the events of the car picked. Your events are in bold. Game texts such as retirement reasons and penalties are shown in the app language.
+
+## Used by other pages
+
+- [Driver Stats](Driver-Stats.md): your sessions are linked to their results file (class position, contacts, penalties, game version); click one to open it here. The `Driver` card counts your races from the results files, and `Complete...` adds lap times found in LMU results files that your stats miss.
+- [Broadcast Director](Broadcast-Director.md): the driver history of the car sheet (races, class wins, podiums, races with the cars ahead and behind) comes from the results files.
 
 ## Show the results on stream
 

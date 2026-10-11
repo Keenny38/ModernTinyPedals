@@ -14,6 +14,7 @@
 - [Race Calculator](Race-Calculator.md)
 - [Driver Stats](Driver-Stats.md)
 - [Race Results](Race-Results.md)
+- [Broadcast Director](Broadcast-Director.md)
 - [Connections](Connections.md)
 
 **Help**

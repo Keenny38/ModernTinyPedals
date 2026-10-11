@@ -98,7 +98,7 @@ TRANSLATION = MappingProxyType({
     "Reopen Pages at Startup": "Rouvrir les pages au démarrage",
     "Reset Window Size and Position": "Réinitialiser la taille et la position de la fenêtre",
     "Remember Open Pages": "Mémoriser les pages ouvertes",
-    "Restart Modern Tiny Pedals": "Redémarrer Modern Tiny Pedals",
+    "Restart NeoPedal": "Redémarrer NeoPedal",
 
     # Overlay menu
     "Lock Overlay": "Verrouiller l'overlay",
@@ -226,6 +226,17 @@ TRANSLATION = MappingProxyType({
     "Click & Drag to Reorder Display": "Cliquez et glissez pour réorganiser",
     "Live Preview": "Aperçu en direct",
     "Invalid value, preview not updated": "Valeur invalide, aperçu non mis à jour",
+    "Simulated race values": "Valeurs d'une course simulée",
+    "Previews show simulated race values": "Les aperçus montrent les valeurs d'une course simulée",
+    "Zoom Out (Ctrl+Wheel)": "Dézoomer (Ctrl+molette)",
+    "Zoom In (Ctrl+Wheel)": "Zoomer (Ctrl+molette)",
+    "Fit": "Ajuster",
+    "Fit to Panel (double click)": "Ajuster au panneau (double-clic)",
+    "Actual Size (double click)": "Taille réelle (double-clic)",
+    "Shrink": "Réduire",
+    "Enlarge": "Agrandir",
+    "Shrink Preview Panel": "Réduire le panneau d'aperçu",
+    "Enlarge Preview Panel": "Agrandir le panneau d'aperçu",
 
     # Log & performance
     "Log": "Journal",
@@ -1087,7 +1098,7 @@ TRANSLATION = MappingProxyType({
     "CPU time (s)": "Temps CPU (s)",
     # Plugin manager
     "Restart required": "Redémarrage nécessaire",
-    "Plugin found after start, restart Modern Tiny Pedals to load it.": "Plugin trouvé après le démarrage, redémarrez Modern Tiny Pedals pour le charger.",
+    "Plugin found after start, restart NeoPedal to load it.": "Plugin trouvé après le démarrage, redémarrez NeoPedal pour le charger.",
     "Loaded": "Chargé",
     "Plugins run as normal Python code, only install plugins from trusted sources.": "Les plugins sont du code Python, n'installez que des plugins de sources de confiance.",
     "Enable / Disable": "Activer / Désactiver",
@@ -1116,12 +1127,12 @@ TRANSLATION = MappingProxyType({
     "Section": "Section",
     "Option": "Option",
     # Setup wizard
-    "Welcome to Modern Tiny Pedals": "Bienvenue dans Modern Tiny Pedals",
+    "Welcome to NeoPedal": "Bienvenue dans NeoPedal",
     "A few questions to get you started. Every choice can be changed later.": "Quelques questions pour bien démarrer. Tous les choix pourront être modifiés plus tard.",
     "Language": "Langue",
     "Window theme": "Thème de la fenêtre",
     "Which game do you play?": "À quel jeu jouez-vous ?",
-    "Modern Tiny Pedals reads telemetry from the selected game.": "Modern Tiny Pedals lit la télémétrie du jeu sélectionné.",
+    "NeoPedal reads telemetry from the selected game.": "NeoPedal lit la télémétrie du jeu sélectionné.",
     "Modern font (JetBrains Mono)": "Police moderne (JetBrains Mono)",
     "Overlay theme": "Thème de l'overlay",
     # Setup wizard (Qt Quick): steps, game, units, appearance, overlays, summary
@@ -1201,8 +1212,8 @@ TRANSLATION = MappingProxyType({
         "La signature de l'installateur n'est pas valide, la mise à jour n'a pas été installée.",
     "Installer of custom update repository is not signed, update was not installed.":
         "L'installateur du dépôt de mise à jour personnalisé n'est pas signé, la mise à jour n'a pas été installée.",
-    "Modern Tiny Pedals is a modified version of TinyPedal. Modifications copyright (C) 2026 Steven Vezzu and contributors.":
-        "Modern Tiny Pedals est une version modifiée de TinyPedal. "
+    "NeoPedal is a modified version of TinyPedal. Modifications copyright (C) 2026 Steven Vezzu and contributors.":
+        "NeoPedal est une version modifiée de TinyPedal. "
         "Modifications copyright (C) 2026 Steven Vezzu et contributeurs.",
     "Based on TinyPedal:": "Basé sur TinyPedal :",
     "Free and Open Source telemetry overlay application for racing simulation.":
@@ -1373,7 +1384,7 @@ TRANSLATION = MappingProxyType({
     "Unable to load image.": "Impossible de charger l'image.",
     "Download And Install": "Télécharger et installer",
     "Downloading Update...": "Téléchargement de la mise à jour...",
-    "Update downloaded. Close Modern Tiny Pedals and install it now?": "Mise à jour téléchargée. Fermer Modern Tiny Pedals et l'installer maintenant ?",
+    "Update downloaded. Close NeoPedal and install it now?": "Mise à jour téléchargée. Fermer NeoPedal et l'installer maintenant ?",
     "What's New": "Voir les nouveautés",
     "View On GitHub": "Voir sur GitHub",
     "Update Available": "Mise à jour disponible",
@@ -1563,6 +1574,20 @@ TRANSLATION = MappingProxyType({
     "Keyboard & mouse help": "Aide clavier et souris",
     "Delta vs ideal lap": "Delta par rapport au tour idéal",
     "XY": "XY",
+    "Simple View": "Vue simple",
+    "Advanced View": "Vue avancée",
+    "Drag to move along lap": "Faites glisser pour vous déplacer dans le tour",
+    "Pedals & Steering Wheel": "Pédales et volant",
+    "Engine": "Moteur",
+    "Electronics": "Électronique",
+    "Choose what is shown": "Choisir ce qui est affiché",
+    "Nothing picked: choose what is shown with Show": "Rien de sélectionné : choisissez ce qui est affiché avec Afficher",
+    "Values of %1, other laps as marks": "Valeurs de %1, autres tours en repères",
+    "Click a lap card or chip to see its values here":
+        "Cliquez la carte ou la pastille d'un tour pour voir ses valeurs ici",
+    "Move over track map, drag bar below or play lap to see driver inputs":
+        "Survolez la carte du circuit, faites glisser la barre ci-dessous ou lancez la lecture pour voir "
+        "les commandes du pilote",
     "Restore deleted laps from trash (Ctrl+Z)": "Restaurer les tours supprimés depuis la corbeille (Ctrl+Z)",
     "Use as Delta Best...": "Utiliser comme delta meilleur tour...",
     "Move to Trash": "Mettre à la corbeille",
@@ -1788,6 +1813,16 @@ TRANSLATION = MappingProxyType({
     "pts": "pts",
     "All Classes": "Toutes les catégories",
     "Reading results files...": "Lecture des fichiers de résultats...",
+    "Watch Replay": "Revoir le rejeu",
+    "Open the replay of this session in the game": "Ouvrir le rejeu de cette session dans le jeu",
+    # Driver stats page: race results of the game
+    "Single Player": "Solo",
+    "Clean Races": "Courses propres",
+    "Contacts/Race": "Contacts/course",
+    "Click to show race results": "Cliquez pour voir les résultats de course",
+    "Complete...": "Compléter...",
+    "Add lap times of race results missing from your stats, or faster than them":
+        "Ajoute les temps des résultats de course absents de vos stats, ou plus rapides",
     "No results folder found": "Aucun dossier de résultats trouvé",
     "No session results yet": "Aucun résultat de session pour l'instant",
     "No session matches the filters": "Aucune session ne correspond aux filtres",
@@ -1885,9 +1920,321 @@ TRANSLATION = MappingProxyType({
         "Chaque adresse reçoit un nouveau jeton : les adresses copiées avant ne fonctionnent plus (adresse "
         "montrée en stream par erreur)",
     "Addresses for another computer": "Adresses pour un autre ordinateur",
-    "Invalid address: copy it again from the Stream Overlays page of Modern Tiny Pedals.":
-        "Adresse invalide : copie-la à nouveau depuis la page Overlays de stream de Modern Tiny Pedals.",
+    "Invalid address: copy it again from the Stream Overlays page of NeoPedal.":
+        "Adresse invalide : copie-la à nouveau depuis la page Overlays de stream de NeoPedal.",
     "Waiting for results…": "En attente de résultats…",
+    "Format": "Format",
+    "16:9 (screen centre)": "16:9 (centre de l'écran)",
+    "Whole screen": "Écran entier",
+    "Layout 16:9 (screen centre)": "Disposition 16:9 (centre de l'écran)",
+    "centre %1 of the screen %2": "centre %1 de l'écran %2",
+    "Show overlays while spectating": "Afficher les overlays en spectateur",
+    "Overlays shown & updated while you spectate a session or watch a replay, as long as a layout or overlay "
+    "source is on air (hidden otherwise by Auto Hide)":
+        "Overlays affichés et mis à jour quand tu regardes une session en spectateur ou un replay, tant qu'une "
+        "source disposition ou overlay est à l'antenne (sinon masqués par le masquage automatique)",
+    "No overlay shown now: Auto Hide hides them outside sessions. They show while you drive, and while you "
+    "spectate or watch a replay with a source on air.":
+        "Aucun overlay affiché pour l'instant : le masquage automatique les cache hors session. Ils s'affichent quand "
+        "tu pilotes, et quand tu regardes en spectateur ou un replay avec une source à l'antenne.",
+    "No overlay shown now: Auto Hide hides them while you are not driving. Turn on \"Show overlays while "
+    "spectating\" to stream a session you watch.":
+        "Aucun overlay affiché pour l'instant : le masquage automatique les cache quand tu ne pilotes pas. Active "
+        "« Afficher les overlays en spectateur » pour streamer une session que tu regardes.",
+    "No overlay shown now: hidden by their visibility options or a hotkey.":
+        "Aucun overlay affiché pour l'instant : masqués par leurs options de visibilité ou un raccourci.",
+    "Leader": "Leader",
+    "Pole": "Pole",
+    "Improving": "En amélioration",
+    "Starting Grid": "Grille de départ",
+    "Session length": "Durée de la session",
+    "PEN": "PÉN",
+    "Points": "Points",
+    "Reset All": "Tout réinitialiser",
+    "Layout saved": "Disposition enregistrée",
+    "Drag a graphic to move it, mouse wheel to resize it, double click: back to its place.":
+        "Fais glisser un graphisme pour le déplacer, molette pour le redimensionner, double clic : retour à sa "
+        "place.",
+    "Layout not saved": "Disposition non enregistrée",
+    "Drag an overlay to move it, mouse wheel to resize it, double click: back to its place on screen. Only overlays "
+    "shown now can be placed.":
+        "Fais glisser un overlay pour le déplacer, molette pour le redimensionner, double clic : retour à sa place à "
+        "l'écran. Seuls les overlays affichés en ce moment peuvent être placés.",
+    "Out lap": "Tour de sortie",
+    "Import Championship": "Importer un championnat",
+    "No driver with points found in this file": "Aucun pilote avec des points dans ce fichier",
+    "%1 drivers imported": "%1 pilotes importés",
+    "Graphics back to their places": "Graphismes remis à leur place",
+    "Overlays back to their place on screen": "Overlays remis à leur place à l'écran",
+    "On Demand": "À la demande",
+    "Style & Layout": "Style et disposition",
+    "Lap times": "Chronos au tour",
+    "Battle train: up to 6 cars close together": "Train de bataille : jusqu'à 6 voitures groupées",
+    "Instant replay graphics: driver or contact card, banners held until live":
+        "Graphismes du replay instantané : fiche pilote ou contact, bandeaux retenus jusqu'au direct",
+    "Onboard: speed, gear, rpm, pedals of the car on air":
+        "Onboard : vitesse, rapport, régime, pédales de la voiture à l'antenne",
+    "Dash": "Tableau de bord",
+    "Helmet": "Casque",
+    "Qualifying lap outside races: lap time, sectors, gap to pole":
+        "Tour de qualif hors course : chrono, secteurs, écart à la pole",
+    "Shown until clicked again, one at a time.": "Affiché jusqu'au clic suivant, un à la fois.",
+    "Event card: track, conditions, forecast": "Carte d'événement : circuit, conditions, prévisions",
+    "Captured: %1": "Capturé : %1",
+    "Not captured yet": "Pas encore capturé",
+    "Capture": "Capturer",
+    "Classification now, shown until captured again": "Classement actuel, affiché jusqu'à la prochaine capture",
+    "Import...": "Importer...",
+    "Import a CSV file: driver, points, and team, class if you want":
+        "Importer un fichier CSV : pilote, points, et équipe, catégorie si tu veux",
+    "Remove this championship": "Retirer ce championnat",
+    "Rows per page": "Lignes par page",
+    "Panel opacity": "Opacité des panneaux",
+    "Temperatures": "Températures",
+    "App setting": "Réglage de l'app",
+    "Move and resize every graphic in your browser, with sample data: drag to move, mouse wheel to resize, then "
+    "Save. Every source of this computer follows.":
+        "Déplace et redimensionne chaque graphisme dans ton navigateur, avec des données d'exemple : glisser pour "
+        "déplacer, molette pour redimensionner, puis Enregistrer. Toutes les sources de cet ordinateur suivent.",
+    "Edit Layout": "Éditer la disposition",
+    "Reset Layout": "Réinitialiser la disposition",
+    "Drag a column title to move it, right click: columns shown":
+        "Fais glisser un titre de colonne pour la déplacer, clic droit : colonnes affichées",
+    "Columns of this view by default": "Colonnes par défaut de cette vue",
+    "Timing table: race, qualifying & pits views, columns of your choice":
+        "Tableau de chronométrage : vues course, qualif et stands, colonnes au choix",
+    "Place overlays on this layout in your browser, apart from their place on screen (for example overlays of the "
+    "sides of an ultrawide screen)":
+        "Placer les overlays sur cette disposition dans ton navigateur, indépendamment de leur place à l'écran (par "
+        "exemple les overlays des côtés d'un écran ultra-large)",
+    "Overlays of this layout back to their place on screen":
+        "Overlays de cette disposition remis à leur place à l'écran",
+    "Pen": "Pén.",
+    "Driver Card": "Fiche pilote",
+    "Battle train": "Train de bataille",
+    "Banners": "Bandeaux",
+    "Pit radar": "Radar des stands",
+    "Event card": "Carte d'événement",
+    "H: hide these bars": "H : masquer ces barres",
+    "Race control": "Direction de course",
+    "Red flag: restart in 10 minutes": "Drapeau rouge : reprise dans 10 minutes",
+    "Race starts in": "Départ dans",
+    "Deploy": "Déploiement",
+    "FL": "MT",
+    "Arrows: move by one pixel, Ctrl+Z: undo, H: hide these bars":
+        "Flèches : déplacer d'un pixel, Ctrl+Z : annuler, H : masquer ces barres",
+    "Pre-race": "Avant-course",
+    "Post-race": "Après-course",
+    "Message": "Message",
+    "Countdown": "Compte à rebours",
+    "League logo": "Logo de la ligue",
+    "Sponsors": "Partenaires",
+    "Start in": "Début dans",
+    "Choose a PNG, JPG, WEBP or SVG picture": "Choisis une image PNG, JPG, WEBP ou SVG",
+    "Layout: %1": "Disposition : %1",
+    "%1 races": "%1 courses",
+    "%1 podiums": "%1 podiums",
+    "Best here: P%1": "Meilleur ici : P%1",
+    "vs #%1: %2": "contre #%1 : %2",
+    "Gaps": "Écarts",
+    "To the car ahead": "Avec la voiture devant",
+    "To the leader": "Avec le leader",
+    "Fastest lap": "Meilleur tour en course",
+    "Classes apart in overall": "Catégories séparées au général",
+    "Rotation": "Rotation",
+    "Dots": "Taille des points",
+    "Title": "Titre",
+    "Text shown on the graphics": "Texte affiché sur l'habillage",
+    "Hide": "Masquer",
+    "Starting grid during the formation lap": "Grille de départ pendant le tour de formation",
+    "Event card for 20 s when a session starts": "Carte d'événement 20 s au début de chaque session",
+    "Classification at the chequered flag": "Classement au drapeau à damier",
+    "League": "Ligue",
+    "Accent color": "Couleur principale",
+    "Event or league name": "Nom de l'événement ou de la ligue",
+    "League logo & name": "Logo et nom de la ligue",
+    "Logo...": "Logo...",
+    "Remove the logo": "Retirer le logo",
+    "Sponsors in turn": "Partenaires à tour de rôle",
+    "Folder of sponsors pictures (PNG, JPG, WEBP, SVG)": "Dossier des images des partenaires (PNG, JPG, WEBP, SVG)",
+    "Preset in use": "Préréglage utilisé",
+    "Source with some graphics only": "Source avec certains graphismes seulement",
+    "Head to head": "Face-à-face",
+    # Broadcast director page (LMU): camera desk, director, commentator screen
+    "Broadcast Director": "Régie de course",
+    "Broadcast": "Régie",
+    "Manual": "Manuel",
+    "Assisted": "Assisté",
+    "Automatic": "Automatique",
+    "Start LMU: cars, cameras & race events come from the game.":
+        "Lancez LMU : voitures, caméras et événements de course viennent du jeu.",
+    "Join a session (driving or spectating) or open a replay in the game: the director follows it.":
+        "Rejoignez une session (en pilote ou en spectateur) ou ouvrez un replay dans le jeu : la régie le suit.",
+    "Ask Game Again": "Interroger le jeu",
+    "Previous car": "Voiture précédente",
+    "Next car": "Voiture suivante",
+    "%1 contacts": "%1 contacts",
+    "Cut to this car (double click)": "Mettre cette voiture à l'antenne (double clic)",
+    "Battles": "Bagarres",
+    "Replay goes to this moment, camera on the car": "Le replay va à ce moment, caméra sur la voiture",
+    "Camera on the car": "Caméra sur la voiture",
+    "No events yet": "Aucun événement pour l'instant",
+    "Contacts, overtakes, pit stops and fastest laps are listed as the race goes on.":
+        "Contacts, dépassements, arrêts au stand et meilleurs tours s'affichent au fil de la course.",
+    "No battle right now": "Aucune bagarre en ce moment",
+    "Two cars of a class within the battle gap (races only).":
+        "Deux voitures d'une même classe sous l'écart de bagarre (en course uniquement).",
+    "%1 cars": "%1 voitures",
+    "%1 stops": "%1 arrêts",
+    "Stint %1 laps": "Relais : %1 tours",
+    "No pit stop yet": "Aucun arrêt au stand pour l'instant",
+    "Pit stops seen during the race, with time in the pit lane and laps since.":
+        "Arrêts au stand vus pendant la course, avec le temps passé dans la voie des stands et les tours depuis.",
+    "On Air": "À l'antenne",
+    "No car on air yet": "Aucune voiture à l'antenne",
+    "Pick a car, a camera or a suggestion; the automatic mode cuts by itself.":
+        "Choisissez une voiture, une caméra ou une suggestion ; le mode automatique réalise tout seul.",
+    "Operator cut: director cuts again in %1 s": "Plan du régisseur : le réalisateur reprend la main dans %1 s",
+    "Back 10 seconds": "Reculer de 10 secondes",
+    "Forward 10 seconds": "Avancer de 10 secondes",
+    "Director Queue": "File du réalisateur",
+    "Suggestions": "Suggestions",
+    "Take Best": "Prendre la meilleure",
+    "Cut to the best story now (Enter)": "Passer tout de suite à la meilleure action (Entrée)",
+    "Manual mode: you cut alone. Assisted mode lists stories worth showing, automatic mode cuts to them by itself.":
+        "Mode manuel : vous réalisez seul. Le mode assisté liste les actions à montrer, le mode automatique "
+        "y passe tout seul.",
+    "Quiet on track": "Calme en piste",
+    "Battles, overtakes, contacts and pit stops show up here as they happen.":
+        "Bagarres, dépassements, contacts et arrêts au stand apparaissent ici en direct.",
+    "Director Settings": "Réglages de la régie",
+    "Shortest shot": "Plan le plus court",
+    "Only an urgent event cuts sooner": "Seul un événement urgent coupe plus tôt",
+    "Longest shot": "Plan le plus long",
+    "Then another car, even if the story goes on": "Puis une autre voiture, même si l'action continue",
+    "Battle gap": "Écart de bagarre",
+    "Two cars of a class closer than this": "Deux voitures d'une classe plus proches que cela",
+    "Replay: seconds before an event": "Replay : secondes avant un événement",
+    "Director cameras": "Caméras du réalisateur",
+    "Overlays follow the car on air": "Les overlays suivent la voiture à l'antenne",
+    "Spectate mode on the car on air: overlays and stream sources show it":
+        "Mode spectateur sur la voiture à l'antenne : les overlays et les sources de stream l'affichent",
+    "Overall": "Au général",
+    "%1 laps": "%1 tours",
+    "Ahead": "Devant",
+    "Behind": "Derrière",
+    "Commentator note on this driver": "Note du commentateur sur ce pilote",
+    "Battle for P%1": "Bagarre pour P%1",
+    "%1 passes %2": "%1 dépasse %2",
+    "%1 takes the lead": "%1 prend la tête",
+    "Contact: %1 and %2": "Contact : %1 et %2",
+    "%1 hits the wall": "%1 touche le mur",
+    "%1 stopped on track": "%1 arrêté en piste",
+    "%1 enters the pits": "%1 rentre au stand",
+    "%1 leaves the pits": "%1 quitte le stand",
+    "%1 in pit lane": "%1 dans la voie des stands",
+    "Fastest lap: %1": "Meilleur tour : %1",
+    "%1 finishes": "%1 franchit l'arrivée",
+    "%1 wins": "%1 gagne",
+    "%1 retires": "%1 abandonne",
+    "%1 disqualified": "%1 disqualifié",
+    "Penalty for %1": "Pénalité pour %1",
+    "%1 pending": "%1 en attente",
+    "Lap %1": "Tour %1",
+    "Live session": "Session en direct",
+    "Battle": "Bagarre",
+    "Overtake": "Dépassement",
+    "Lead Change": "Changement de leader",
+    "Contact": "Contact",
+    "Wall Contact": "Contact avec le mur",
+    "Stopped Car": "Voiture arrêtée",
+    "Pit Entry": "Entrée au stand",
+    "Pit Exit": "Sortie des stands",
+    "Win": "Victoire",
+    "Around the Track": "Tour d'horizon",
+    "Operator Cut": "Plan du régisseur",
+    "Chosen in Game": "Choisie dans le jeu",
+    "Mixed": "Variées",
+    "Keep Camera": "Garder la caméra",
+    "Current stint": "Relais en cours",
+    "Full course yellow": "Neutralisation de la course",
+    "Full Course Yellow": "Drapeau jaune général",
+    "Instant Replay": "Ralenti",
+    "Lap History": "Historique des tours",
+    "Car Sheet": "Fiche voiture",
+    "Places gained since the start": "Places gagnées depuis le départ",
+    "Mark every incident as seen": "Marquer tous les incidents comme vus",
+    "Export Events": "Exporter les événements",
+    "Instant replay: the game replays this moment, then back to live":
+        "Ralenti : le jeu rejoue ce moment, puis retour au direct",
+    "Keep this car on air: the director does not cut until unlocked":
+        "Garder cette voiture à l'antenne : le réalisateur ne coupe plus jusqu'au déverrouillage",
+    "No lap yet": "Aucun tour pour l'instant",
+    "Laps are recorded while this page watches the race.":
+        "Les tours sont enregistrés tant que cette page suit la course.",
+    "Instant replay: seconds after the event": "Ralenti : secondes après l'événement",
+    "Then back to live": "Puis retour au direct",
+    "%1 slow on track": "%1 au ralenti en piste",
+    "Yellow flag in sector %1": "Drapeau jaune dans le secteur %1",
+    "Slowest car: %1": "Voiture la plus lente : %1",
+    "Green flag: racing again": "Drapeau vert : la course reprend",
+    "Race start: %1 leads": "Départ : %1 en tête",
+    "%1/lap": "%1/tour",
+    "Air %1": "Air %1",
+    "Track %1": "Piste %1",
+    "Rain %1": "Pluie %1",
+    "Wet %1": "Humide %1",
+    "Events saved": "Événements enregistrés",
+    "Events not saved": "Événements non enregistrés",
+    "Stopped %1": "Arrêt %1",
+    "Slow Car": "Voiture lente",
+    "Yellow Flag": "Drapeau jaune",
+    "Green Flag": "Drapeau vert",
+    "Race Start": "Départ de course",
+    "Number or driver, Enter: on air": "Numéro ou pilote, Entrée : à l'antenne",
+    "Pause the director when the camera changes in the game": "Mettre le réalisateur en pause quand la caméra change dans le jeu",
+    "Off when another app also moves the game camera: the director keeps cutting":
+        "À couper quand une autre app déplace aussi la caméra du jeu : le réalisateur continue de réaliser",
+    "Pit lane %1": "Voie des stands %1",
+    "Weather Forecast": "Prévisions météo",
+    "Game computer": "PC du jeu",
+    "Address of the computer running LMU, empty: this one": "Adresse du PC où tourne LMU, vide : ce PC",
+    "Write events to a file as they happen": "Écrire les événements dans un fichier au fil de la course",
+    "One CSV file per session in the broadcast_logs folder: race control log":
+        "Un fichier CSV par session dans le dossier broadcast_logs : journal de direction de course",
+    "Heavy Contact": "Contact violent",
+    "Heavy Wall Contact": "Choc violent contre le mur",
+    "Light Contact": "Contact léger",
+    "Broadcast Graphics": "Habillage de diffusion",
+    "Graphics": "Habillage",
+    "TV graphics made for the director, as one browser source (1920 x 1080) in OBS, Streamlabs, XSplit or vMix.":
+        "Graphismes TV faits pour la régie, en une seule source navigateur (1920 x 1080) dans OBS, Streamlabs, XSplit "
+        "ou vMix.",
+    "Stream overlays are off: turn them on to use this source.":
+        "Les overlays de stream sont désactivés : activez-les pour utiliser cette source.",
+    "Standings tower": "Tour de classement",
+    "Each class in turn": "Chaque catégorie à tour de rôle",
+    "Class of the car on air": "Catégorie de la voiture à l'antenne",
+    "Cars shown": "Voitures affichées",
+    "Driver card on each cut": "Fiche pilote à chaque changement de voiture",
+    "Seconds shown, 0: always": "Secondes affichées, 0 : toujours",
+    "Car picture on the driver card": "Photo de la voiture sur la fiche pilote",
+    "Battle card while a battle is on air": "Carte de duel quand une bagarre est à l'antenne",
+    "Banners: fastest lap, penalty, flags, lead change, heavy contact":
+        "Bandeaux : meilleur tour, pénalité, drapeaux, changement de leader, gros contact",
+    "Replay mark during replays": "Bandeau REPLAY pendant les ralentis",
+    "Session clock & weather": "Horloge de session et météo",
+    "Show Driver Card": "Afficher la fiche pilote",
+    "Hide Graphics": "Masquer l'habillage",
+    "Show Graphics": "Afficher l'habillage",
+    "Address copied: add it as a browser source (1920 x 1080)":
+        "Adresse copiée : ajoutez-la comme source navigateur (1920 x 1080)",
+    "Remaining": "Restant",
+    "Elapsed": "Écoulé",
+    "Places": "Places",
+    "%1 cars approaching": "%1 voitures arrivent",
+    "Alongside": "À côté",
+    "Pit radar: cars near the car on air in the pit lane": "Pit radar : voitures proches de la voiture à l'antenne dans la voie des stands",
     # Audit fixes (package A)
     "Replay recorded with another game data structure (older game or app version), it cannot be played.":
         "Rejeu enregistré avec une autre structure de données du jeu (version plus ancienne du jeu ou de "
@@ -1931,21 +2278,21 @@ TRANSLATION = MappingProxyType({
     "Plan image copied": "Image du plan copiée",
     "Driver in the car at the stops of the stint (game scoring)":
         "Pilote dans la voiture aux arrêts du relais (classement du jeu)",
-    "Modern Tiny Pedals did not finish starting last time.\n\n"
+    "NeoPedal did not finish starting last time.\n\n"
     "Start in safe mode? Plugins and overlays are not started, so settings can be fixed, "
-    "then Modern Tiny Pedals restarted normally (Window menu, Restart Modern Tiny Pedals).":
-        "Modern Tiny Pedals n'a pas fini de démarrer la dernière fois.\n\n"
+    "then NeoPedal restarted normally (Window menu, Restart NeoPedal).":
+        "NeoPedal n'a pas fini de démarrer la dernière fois.\n\n"
         "Démarrer en mode sans échec ? Les plugins et les overlays ne sont pas lancés : les réglages "
-        "peuvent être corrigés, puis Modern Tiny Pedals redémarré normalement (menu Fenêtre, "
-        "Redémarrer Modern Tiny Pedals).",
+        "peuvent être corrigés, puis NeoPedal redémarré normalement (menu Fenêtre, "
+        "Redémarrer NeoPedal).",
     "Safe Mode": "Mode sans échec",
     "Safe mode: plugins are not loaded and overlays are not started.\n\n"
-    "Fix the settings that stopped Modern Tiny Pedals from starting, then restart normally.":
+    "Fix the settings that stopped NeoPedal from starting, then restart normally.":
         "Mode sans échec : les plugins ne sont pas chargés et les overlays ne sont pas lancés.\n\n"
-        "Corriger les réglages qui empêchaient Modern Tiny Pedals de démarrer, puis redémarrer normalement.",
+        "Corriger les réglages qui empêchaient NeoPedal de démarrer, puis redémarrer normalement.",
     "Restart Normally": "Redémarrer normalement",
     "Access code": "Code d'accès",
-    "Modern Tiny Pedals Dashboard": "Tableau de bord Modern Tiny Pedals",
+    "NeoPedal Dashboard": "Tableau de bord NeoPedal",
     "Connecting…": "Connexion…",
     "Gear · Speed": "Rapport · Vitesse",
     "Delta best": "Delta au meilleur tour",
@@ -2006,10 +2353,10 @@ TRANSLATION = MappingProxyType({
     "SVG image": "Image SVG",
     "PNG image": "Image PNG",
     "GPL Pace Notes": "Notes de pilotage GPL",
-    "Modern Tiny Pedals Pace Notes": "Notes de pilotage Modern Tiny Pedals",
-    "Modern Tiny Pedals Track Notes": "Notes de piste Modern Tiny Pedals",
-    "Modern Tiny Pedals preset package": "Paquet de presets Modern Tiny Pedals",
-    "Modern Tiny Pedals Replay": "Rejeu Modern Tiny Pedals",
+    "NeoPedal Pace Notes": "Notes de pilotage NeoPedal",
+    "NeoPedal Track Notes": "Notes de piste NeoPedal",
+    "NeoPedal preset package": "Paquet de presets NeoPedal",
+    "NeoPedal Replay": "Rejeu NeoPedal",
     "Error: file not found.": "Erreur : fichier introuvable.",
     "overriding": "forcé",
     "unknown": "inconnu",
@@ -2018,6 +2365,8 @@ TRANSLATION = MappingProxyType({
     "Hotkey not supported on Linux": "Raccourci non pris en charge sous Linux",
     "update": "mise à jour",
     "paint": "dessin",
+    "stall": "blocage",
+    "garbage collection": "ramasse-miettes",
     "Shared preset": "Preset partagé",
     "none": "aucun",
     "delta best": "delta meilleur tour",
@@ -2076,6 +2425,8 @@ TRANSLATION = MappingProxyType({
     "Bottom Left": "En bas à gauche",
     "Bottom Center": "En bas au centre",
     "Bottom Right": "En bas à droite",
+    "Upward": "Vers le haut",
+    "Downward": "Vers le bas",
     "Screen & Stream": "Écran et stream",
     "Stream Only": "Stream seulement",
     "Screen Only": "Écran seulement",
@@ -2323,9 +2674,9 @@ TRANSLATION = MappingProxyType({
     "Settings": "Paramètres",
     "All Settings": "Tous les réglages",
     "Next start": "Au prochain démarrage",
-    "Applied once Modern Tiny Pedals restarts (offered after Apply)":
-        "Appliqué au redémarrage de Modern Tiny Pedals (proposé après Appliquer)",
-    "Used when Modern Tiny Pedals starts": "Utilisé au démarrage de Modern Tiny Pedals",
+    "Applied once NeoPedal restarts (offered after Apply)":
+        "Appliqué au redémarrage de NeoPedal (proposé après Appliquer)",
+    "Used when NeoPedal starts": "Utilisé au démarrage de NeoPedal",
     "Search settings": "Rechercher un paramètre",
     "In the loaded preset": "Dans le preset chargé",
     "API Options": "Options de l'API",
@@ -2462,6 +2813,9 @@ TRANSLATION = MappingProxyType({
     "Options saved": "Options enregistrées",
     "Order of shown items, top first: drag them, or use the arrows.":
         "Ordre des éléments affichés, le premier en haut : faites-les glisser, ou utilisez les flèches.",
+    "Classes in multi-class split mode, top first: drag them, or use the arrows. Classes found in no list come after, fastest first.":
+        "Catégories en mode de séparation multi-classe, la première en haut : faites-les glisser, ou utilisez les flèches. "
+        "Les catégories absentes de la liste viennent après, la plus rapide d'abord.",
     "Overlay state (saved)": "État de l'overlay (enregistré)",
     "Position & Layout": "Position et disposition",
     # Overlay Options: driver lists (Relative, Standings, Rivals)
@@ -2487,6 +2841,7 @@ TRANSLATION = MappingProxyType({
     "Lift & Coast": "Lift & coast",
     "Interval": "Intervalle",
     "Time Gap": "Écart de temps",
+    "Gap Trend": "Tendance d'écart",
     "Preview not available for this overlay": "Aperçu indisponible pour cet overlay",
     "Preview off": "Aperçu désactivé",
     "Reset Overlay": "Réinitialiser l'overlay",
@@ -2501,4 +2856,107 @@ TRANSLATION = MappingProxyType({
     "Type more words to narrow the search": "Tapez d'autres mots pour affiner la recherche",
     "Used only while on:": "Utilisé seulement si activé :",
     "Where search & filter look": "Où cherchent la recherche et le filtre",
+    # Settings imported from TinyPedal (ui/settings_import.py)
+    "Settings Imported from TinyPedal": "Réglages importés de TinyPedal",
+    "Your TinyPedal settings were copied to NeoPedal: options, shortcuts, driver stats, "
+    "language packs and Black box incidents. TinyPedal keeps its own settings, unchanged.\n\n"
+    "Keep these settings, or start NeoPedal with default settings? Imported settings "
+    "are then set aside in a backup folder, never deleted.":
+        "Vos réglages de TinyPedal ont été copiés dans NeoPedal : options, raccourcis, "
+        "statistiques pilote, packs de langue et incidents de la boîte noire. TinyPedal garde "
+        "ses propres réglages, inchangés.\n\n"
+        "Garder ces réglages, ou démarrer NeoPedal avec les réglages par défaut ? Les réglages "
+        "importés sont alors mis de côté dans un dossier de sauvegarde, jamais supprimés.",
+    "Keep Imported Settings": "Garder les réglages importés",
+    "Use Default Settings": "Utiliser les réglages par défaut",
+    "TinyPedal Settings": "Réglages de TinyPedal",
+    "Import Again from TinyPedal...": "Réimporter depuis TinyPedal...",
+    "Start with Default Settings...": "Repartir des réglages par défaut...",
+    "Import settings from TinyPedal again?\n\n"
+    "Current NeoPedal settings are set aside in a backup folder, then NeoPedal "
+    "restarts with a new copy of TinyPedal settings.":
+        "Réimporter les réglages de TinyPedal ?\n\n"
+        "Les réglages actuels de NeoPedal sont mis de côté dans un dossier de sauvegarde, "
+        "puis NeoPedal redémarre avec une nouvelle copie des réglages de TinyPedal.",
+    "Start with default settings?\n\n"
+    "Current NeoPedal settings are set aside in a backup folder, then NeoPedal "
+    "restarts with default settings.":
+        "Repartir des réglages par défaut ?\n\n"
+        "Les réglages actuels de NeoPedal sont mis de côté dans un dossier de sauvegarde, "
+        "puis NeoPedal redémarre avec les réglages par défaut.",
+    "TinyPedal settings folder not found.": "Dossier de réglages de TinyPedal introuvable.",
+    "Request not saved, see log.": "Demande non enregistrée, voir le journal.",
+    "Applied at next start of NeoPedal.": "Appliqué au prochain démarrage de NeoPedal.",
+    # Race calculator live tab (every input value the game gives)
+    "Calculator": "Calculateur",
+    "Calculator already holds the live values": "Le calculateur a déjà les valeurs du jeu",
+    "Class Position": "Position dans la catégorie",
+    "Data": "Donnée",
+    "Driver Change While Refuelling": "Changement de pilote pendant le ravitaillement",
+    "Drivers swap while the car is serviced: longest of service and driver change counts":
+        "Les pilotes se relaient pendant l'arrêt : seul le plus long du service et du changement de pilote compte",
+    "Every followed value the game gives goes to the calculator":
+        "Chaque valeur suivie donnée par le jeu va dans le calculateur",
+    "Fill In": "Remplir",
+    "Fill In All": "Tout remplir",
+    "Filled in by Load Live, Follow Live and Fill In All":
+        "Remplie par Charger en direct, Suivre le direct et Tout remplir",
+    "Follow": "Suivre",
+    "Full Tank": "Réservoir plein",
+    "Game not running or not in a session: values of the car & session needed":
+        "Jeu non lancé ou hors session : les valeurs de la voiture et de la session sont nécessaires",
+    "Laps of current session and every followed value of the game (Live tab): race length, pit stop times, tyres...":
+        "Tours de la session en cours et chaque valeur suivie du jeu (onglet Direct) : durée de course, temps d'arrêt, pneus...",
+    "New Left": "Neufs restants",
+    "Next Stop (Game)": "Prochain arrêt (jeu)",
+    "No LMU garage data: pit stop times, tyres & team come from LMU in a session":
+        "Pas de données du garage LMU : temps d'arrêt, pneus et équipe viennent de LMU en session",
+    "No tyre data: LMU in a session needed (pit menu).": "Pas de données pneus : LMU en session nécessaire (menu des stands).",
+    "No used tyre": "Aucun pneu usé",
+    "Pending Repair": "Réparation en attente",
+    "Race in Progress": "Course en cours",
+    "Rough estimate: fill it in by hand": "Estimation grossière : à remplir à la main",
+    "Shown during a race of the game.": "Affiché pendant une course du jeu.",
+    "Source": "Source",
+    "Tyres Available": "Pneus disponibles",
+    "Tyres the pit menu offers (LMU): new compounds and used tyres of each wheel with their tread":
+        "Pneus proposés par le menu des stands (LMU) : gommes neuves et pneus usés de chaque roue avec leur gomme restante",
+    "Values of the car, the session and the LMU garage screens (pit stop times, tyres, team): followed values are "
+    "filled in by Load Live, Follow Live and Fill In All":
+        "Valeurs de la voiture, de la session et des écrans du garage LMU (temps d'arrêt, pneus, équipe) : les valeurs "
+        "suivies sont remplies par Charger en direct, Suivre le direct et Tout remplir",
+    "Pace & Consumption": "Rythme et consommation",
+    "Weather": "Météo",
+    "Car on the grid": "Voiture sur la grille",
+    "Car without virtual energy or no valid lap yet": "Voiture sans énergie virtuelle ou aucun tour valide",
+    "Driver Change Time": "Temps de changement de pilote",
+    "Formation Laps": "Tours de formation",
+    "Game estimate (LMU)": "Estimation du jeu (LMU)",
+    "No Rain": "Pas de pluie",
+    "No forecast": "Pas de prévisions",
+    "No stop in the session yet": "Aucun arrêt dans la session",
+    "No valid lap yet": "Aucun tour valide pour l'instant",
+    "Pit lane at speed limit (braking & pulling away not counted)":
+        "Voie des stands à vitesse limitée (freinage et relance non comptés)",
+    "Pit stop times (LMU)": "Temps d'arrêt de la série (LMU)",
+    "Race Length": "Durée de course",
+    "Race pace of the session": "Rythme course de la session",
+    "Race session": "Session de course",
+    "Race session before the start only": "Session de course avant le départ seulement",
+    "Race session only": "Session de course seulement",
+    "Rain Forecast": "Pluie prévue",
+    "Session settings (LMU)": "Réglages de la session (LMU)",
+    "Team (LMU)": "Équipe (LMU)",
+    "Track clock": "Horloge de la piste",
+    "Tyre Change Time": "Temps de changement des pneus",
+    "Tyre allocation (LMU)": "Allocation de pneus (LMU)",
+    "Tyre allocation (LMU, while driving)": "Allocation de pneus (LMU, en roulant)",
+    "Tyre wear of the lap in progress": "Usure des pneus du tour en cours",
+    "Tyres on the car": "Pneus de la voiture",
+    "1-2 tyres / 3-4 tyres": "1-2 pneus / 3-4 pneus",
+    "Add Used Tyres to Stock": "Ajouter les pneus usés au stock",
+    "New Tyres": "Pneus neufs",
+    "Used tyres the pit menu offers go to the tyre stock (Tyres tab) with their tread, to fit them by hand":
+        "Les pneus usés du menu des stands vont dans le stock de pneus (onglet Pneus) avec leur gomme restante, "
+        "à monter à la main",
 })

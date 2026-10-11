@@ -10,6 +10,11 @@ TpPage {
 
     readonly property string gameState: backend.gameState
     readonly property bool wide: width > theme.em * 64
+    // Replay clock of last game answer, read once per answer (clock timers tick between answers)
+    readonly property real replayTime: backend.replayTime
+    readonly property real replayRate: backend.replayRate
+    readonly property real timeReceived: backend.timeReceived
+    readonly property real liveTime: backend.liveTime
 
     function stateColor(name) {
         return name === "replay" ? theme.accent : name === "session" ? theme.gain : name === "menu" ? theme.warning : theme.loss
@@ -282,8 +287,8 @@ TpPage {
                                     repeat: true
                                     running: liveClock.visible && pageState.active  // stopped while page hidden
                                     triggeredOnStart: true
-                                    onTriggered: liveClock.now = backend.liveTime
-                                                 + Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 10)
+                                    onTriggered: liveClock.now = page.liveTime
+                                                 + Math.min(Math.max((Date.now() - page.timeReceived) / 1000, 0), 10)
                                 }
                                 Connections {
                                     target: backend
@@ -302,10 +307,10 @@ TpPage {
                                 Timer {
                                     interval: 250
                                     repeat: true
-                                    running: replayClock.visible && backend.replayRate !== 0 && pageState.active
+                                    running: replayClock.visible && page.replayRate !== 0 && pageState.active
                                     triggeredOnStart: true
-                                    onTriggered: replayClock.now = backend.replayTime + backend.replayRate
-                                                 * Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 3)
+                                    onTriggered: replayClock.now = page.replayTime + page.replayRate
+                                                 * Math.min(Math.max((Date.now() - page.timeReceived) / 1000, 0), 3)
                                 }
                                 Connections {
                                     target: backend
@@ -563,9 +568,19 @@ TpPage {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             currentIndex: backend.panelIndex
-                            IncidentPanel {}
-                            StandingsPanel {}
-                            MapPanel {}
+                            // Panels built when first shown, then kept
+                            Loader {
+                                active: backend.panelIndex === 0 || item !== null
+                                sourceComponent: IncidentPanel {}
+                            }
+                            Loader {
+                                active: backend.panelIndex === 1 || item !== null
+                                sourceComponent: StandingsPanel {}
+                            }
+                            Loader {
+                                active: backend.panelIndex === 2 || item !== null
+                                sourceComponent: MapPanel {}
+                            }
                         }
                     }
                 }

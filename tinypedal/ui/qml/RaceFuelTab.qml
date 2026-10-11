@@ -232,6 +232,11 @@ Item {
                             text: i18n.tr("Tyres Changed While Refuelling")
                             tip: i18n.tr("Longest of refuelling and tyre change counts, not both")
                         }
+                        RaceSwitch {
+                            store: tab.store; key: "enable_driver_change_during_refuel"
+                            text: i18n.tr("Driver Change While Refuelling")
+                            tip: i18n.tr("Drivers swap while the car is serviced: longest of service and driver change counts")
+                        }
                         RaceNumber {
                             store: tab.store; key: "input_pit_lap_consumption"; label: i18n.tr("In & Out Laps")
                             tip: i18n.tr("Consumption of the laps into & out of the pits (pit lane speed limit), % of race pace")

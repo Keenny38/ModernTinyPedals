@@ -18,7 +18,7 @@ from release import RELEASE_ASSETS
 from tinypedal import update
 
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "build-release.yml")
-VERSIONED_NAME = re.compile(r"ModernTinyPedals-\$\{\{ needs\.version\.outputs\.app_ver \}\}(\S+)")
+VERSIONED_NAME = re.compile(r"NeoPedal-\$\{\{ needs\.version\.outputs\.app_ver \}\}(\S+)")
 DIGEST = "ab" * 32
 
 
@@ -40,7 +40,7 @@ def published_suffixes() -> set[str]:
 def release_response(version: str = "9.9.9") -> bytes:
     """GitHub API response of a release with the files the workflow publishes"""
     base = f"https://github.com/Keenny38/ModernTinyPedals/releases/download/v{version}/"
-    names = [f"ModernTinyPedals-{version}{suffix}" for suffix in sorted(published_suffixes())]
+    names = [f"NeoPedal-{version}{suffix}" for suffix in sorted(published_suffixes())]
     return b"HTTP/1.1 200 OK\r\n\r\n" + json.dumps({
         "tag_name": f"v{version}", "published_at": "2026-10-06T00:00:00Z", "body": "",
         "assets": [{"name": name, "browser_download_url": base + name, "digest": f"sha256:{DIGEST}"}
@@ -65,9 +65,9 @@ def test_workflow_publishes_release_files():
 
 def test_every_app_updater_finds_installer():
     data = release_response()
-    assert legacy_installer(data) == "ModernTinyPedals-9.9.9-windows-setup.exe"  # apps up to 0.19
+    assert legacy_installer(data) == "NeoPedal-9.9.9-windows-setup.exe"  # apps up to 0.19
     found = update.parse_installer(data)  # apps since 0.20
-    assert found is not None and found.name == "ModernTinyPedals-9.9.9-setup.zip" and found.sha256 == DIGEST
+    assert found is not None and found.name == "NeoPedal-9.9.9-setup.zip" and found.sha256 == DIGEST
 
 
 def test_installer_sha256_file_in_sha256sum_format():

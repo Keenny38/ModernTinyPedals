@@ -1,6 +1,6 @@
 # Game Setup
 
-Modern Tiny Pedals reads telemetry from the game's shared memory, and for Le Mans Ultimate also from the game's local REST API. Set up your game once, then select it in the app.
+NeoPedal reads telemetry from the game's shared memory, and for Le Mans Ultimate also from the game's local REST API. Set up your game once, then select it in the app.
 
 ## Summary
 

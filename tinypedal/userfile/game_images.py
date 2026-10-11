@@ -27,7 +27,8 @@ their brand & picture file, circuit names) are kept in catalog.json of the same 
 Lookups never block nor touch the network: a picture not cached yet answers "" and is fetched in
 background; listeners are told once it is saved (called on fetch thread: Qt code hands over to UI
 thread, see ui.quick.game_pictures). `version` grows with each new picture or catalog, so users
-caching "no picture" answers know when to look again.
+caching "no picture" answers know when to look again; `logos_version` only with logos & catalog,
+`lists_version` only with catalog (brand & circuit names: any answer may change).
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ RETRY_MISSING = 7 * 86400.0  # seconds before asking again a picture game does n
 QUEUE_WAIT = 30.0  # seconds, fetch thread wakes up to read game lists when game starts
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9 ._-]+")
 PICTURE_SIGNATURES = (b"<", b"\xef\xbb\xbf<", b"\x89PNG", b"RIFF", b"\xff\xd8")  # svg, png, webp, jpeg
+LOGO_KINDS = (gi.BRAND, gi.BRAND_DARK, gi.TRACK_LOGO)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,7 @@ class GameImages:
         self._queued: set[tuple[str, str]] = set()
         self._thread: threading.Thread | None = None
         self._listeners: list[Callable[[], None]] = []
+        self._file_listeners: list[Callable[[str, str], None]] = []
         self._loaded_folder = ""
         self._catalog_read = False  # game lists read from game during this run
         self._game_retry = 0.0  # time game may be asked again (did not answer)
@@ -87,6 +90,8 @@ class GameImages:
         self.tracks: dict[str, str] = {}  # circuit name (lower case) -> circuit picture name
         self.missing: dict[str, float] = {}  # picture path on game server -> time game did not have it
         self.version = 0
+        self.logos_version = 0
+        self.lists_version = 0
 
     # Folder & catalog
     @property
@@ -230,14 +235,36 @@ class GameImages:
             if callback in self._listeners:
                 self._listeners.remove(callback)
 
-    def changed(self):
+    def add_file_listener(self, callback: Callable[[str, str], None]):
+        """Called (on fetch thread) with kind & file of each picture saved, ("", "") after game lists are read"""
+        with self._lock:
+            if callback not in self._file_listeners:
+                self._file_listeners.append(callback)
+
+    def remove_file_listener(self, callback: Callable[[str, str], None]):
+        with self._lock:
+            if callback in self._file_listeners:
+                self._file_listeners.remove(callback)
+
+    def changed(self, kind: str = "", path: str = ""):
+        """Picture of kind saved in path, or game lists read (no kind)"""
         with self._lock:
             self.version += 1
+            if not kind or kind in LOGO_KINDS:
+                self.logos_version += 1
+            if not kind:
+                self.lists_version += 1
             listeners = tuple(self._listeners)
+            file_listeners = tuple(self._file_listeners)
         for callback in listeners:
             try:
                 callback()
             except Exception:  # a listener never stops fetching
+                logger.exception("GAME IMAGES: listener failed")
+        for file_callback in file_listeners:
+            try:
+                file_callback(kind, path)
+            except Exception:
                 logger.exception("GAME IMAGES: listener failed")
 
     # Background fetch
@@ -373,7 +400,7 @@ class GameImages:
         except OSError:
             logger.warning("GAME IMAGES: picture not saved: %s", target)
             return False
-        self.changed()
+        self.changed(kind, target)
         return True
 
 

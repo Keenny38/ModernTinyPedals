@@ -27,7 +27,10 @@ import bisect
 import math
 import os
 import threading
+from array import array
 from collections import OrderedDict
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QColor
@@ -55,6 +58,7 @@ from . import lap_map
 from .lap_base import COLOR_GAIN, COLOR_LOSS, BackendBase, format_diff, keys_match
 from .lines import (
     VertexStore,
+    Vertices,
     band,
     band_part,
     markers,
@@ -149,8 +153,115 @@ def yaw_calibration(lap: LapData) -> tuple[float, float]:
     return (sign, offset) if error < math.radians(8) else (0.0, 0.0)
 
 
+def frame_normals(frame: dict[str, Any], lap: PlotLap, line: lap_map.MapLine) -> list[tuple[float, float]]:
+    """Normals of lap line turned like map from map frame (see MapView.map_frame), computed ones left in frame"""
+    cached = frame["normals"].get(lap.key)
+    if cached is None or cached[0] is not lap.data or cached[1] != frame["angle"] or cached[2] != len(line.xs):
+        cached = (lap.data, frame["angle"], len(line.xs), normals(line.xs, line.ys))
+        frame["normals"][lap.key] = frame["new"]["normals"][lap.key] = cached
+    return cached[3]
+
+
+def track_length_of(lap: PlotLap | None) -> float:
+    """Track length of lap info, else lap distance at lap end, 0 if no lap"""
+    if lap is None or not len(lap.data):
+        return 0.0
+    length = lap.data.meta.get("track_length")
+    return float(length) if isinstance(length, (int, float)) and length > 0 else lap.data.distance[-1]
+
+
+def prepare_placements(laps: Sequence[PlotLap], reference: PlotLap | None, limits: lap_map.TrackLimits | None,
+                       geometry: Any, official_line: tuple, line_cache: Mapping[str, tuple]) -> dict:
+    """Driving lines of laps about to be shown, base line, track edges along it & placement of each lap measured in
+    background (loading thread, same as MapView.update_base): kept by MapView.keep_placements, page state never
+    touched (state it needs given: track limits, official circuit, official line & driving lines known)"""
+    lines: dict[str, tuple] = {}
+    for lap in laps:
+        cached = line_cache.get(lap.key)
+        if cached is None or cached[0] is not lap.data:
+            cached = (lap.data, lap_map.map_line(lap.data))
+        lines[lap.key] = cached
+    official = None
+    if geometry is not None:  # see official_base
+        length = track_length_of(reference)
+        key = (geometry, length or geometry.length)
+        if not official_line or not keys_match(official_line[0], key):
+            official_line = (key, lap_map.geometry_line(geometry.center, geometry.start, length or geometry.length))
+        official = official_line[1]
+    line = lines[reference.key][1] if reference is not None else None
+    base = official if official is not None else line
+    prepared: dict = {"lines": lines, "official": official_line, "edges": (), "offsets": {}, "placements": {},
+                      "limits": limits, "geometry": geometry}
+    if limits is None or base is None or len(base.xs) <= 2:
+        return prepared
+    pause = Yielder() if threading.current_thread() is not threading.main_thread() else None
+    edges = lap_map.edge_offsets(base, limits, pause)
+    prepared["edges"] = ((base, limits), edges)
+    for lap in laps if edges[0] else ():
+        line = lines[lap.key][1]
+        if line is None or any(lap.data.columns.get("track_edge") or ()):  # game values recorded
+            continue
+        sides, indexes = lap_map.lateral_offsets(base, line, pause)
+        prepared["offsets"][lap.key] = (
+            (lap.data, len(base.xs), base.xs[0], base.ys[0], base.distances[-1]), line, sides, indexes)
+        if sides:
+            prepared["placements"][lap.key] = ((sides, edges), MapView.lap_placements((line, sides, indexes), *edges))
+    return prepared
+
+
 class MapView(BackendBase):
     """Track map of lap viewer page"""
+
+    def keep_placements(self, prepared: dict):
+        """Driving lines & lap placements measured in background (see prepare_placements) kept where they match shown
+        laps, official circuit & track limits (cache keys), so update_base finds them, else measured again"""
+        shown = {lap.key: lap.data for lap in self.data.laps}
+        for key, value in prepared["lines"].items():
+            cached = self._line_cache.get(key)
+            if shown.get(key) is value[0] and (cached is None or cached[0] is not value[0]):
+                self._line_cache[key] = value
+        official, geometry = prepared["official"], self._geometry
+        if official and geometry is not None:
+            length = self.reference_length()
+            key = (geometry, length or geometry.length)
+            if keys_match(official[0], key) and not (self._official_line and keys_match(self._official_line[0], key)):
+                self._official_line = official
+        reference = self.data.reference
+        line = self.lap_line(reference) if reference is not None else None  # cached: no line computed
+        base = self.official_base(self.reference_length())
+        base = base if base is not None else line
+        if base is None or len(base.xs) < 3:
+            return
+        edges = prepared["edges"]
+        if edges and edges[0][0] is base and edges[0][1] is self._limits:
+            self._edges_cache = edges
+        for key, value in prepared["offsets"].items():
+            if key in shown and keys_match(value[0], (shown[key], len(base.xs), base.xs[0], base.ys[0],
+                                                      base.distances[-1])):
+                self._lap_offsets[key] = value
+        self._prepared_placements = prepared["placements"]  # used once by update_placements (cache keys checked)
+
+    def placements_current(self, prepared: dict) -> bool:
+        """Whether lap placements measured in background used current track limits & official circuit"""
+        return prepared["limits"] is self._limits and prepared["geometry"] is self._geometry
+
+    def place_laps(self):
+        """Lap placement on map measured in background (track limits or official circuit changed), then charts & map
+        built again: page stays responsive"""
+        if not self.data.laps:
+            return
+        reference = self.data.reference
+        args = (list(self.data.laps), reference, self._limits, self._geometry, self._official_line,
+                dict(self._line_cache))
+
+        def placed(prepared):
+            self._placing -= 1
+            if prepared is not None:
+                self.keep_placements(prepared)
+            self.rebuild_chart()
+
+        self._placing += 1
+        self.run_job("lap placement", lambda: prepare_placements(*args), placed)
 
     @Slot(bool)
     def setMapShown(self, shown: bool):
@@ -302,7 +413,13 @@ class MapView(BackendBase):
         return self._map_lines[0][0] if self._map_lines else self._road
 
     def build_map(self):
-        """Circuit, driving lines, start & sector marks, corners, braking points of displayed laps"""
+        """Circuit, driving lines, start & sector marks, corners, braking points of displayed laps
+
+        Shapes sized for map scale are built in background (see build_map_bands): shapes of former map stay shown
+        until then if circuit & map rotation are the same, else none.
+        """
+        shown_before = self._band_cache.get(self._preview_step) if self._band_cache_applied else None
+        placed_before = (self._map_angle, self.road_key(self._road))
         lines = []
         for lap in self.data.laps:
             line = self.lap_line(lap)
@@ -334,6 +451,10 @@ class MapView(BackendBase):
         self._band_generation += 1
         self._preview_step = math.nan
         self._band_cache_applied = False
+        if shown_before and placed_before != (self._map_angle, self.road_key(self._road)):  # never at a wrong place
+            for key, vertices in shown_before.items():
+                if isinstance(vertices, Vertices):
+                    VertexStore.set(key, vertices._replace(data=array("f"), vertex_count=0))
         shown = {lap.key for _, lap in self._map_lines}
         self._normals = {name: value for name, value in self._normals.items() if name in shown}
         self._turned = {name: value for name, value in self._turned.items() if name in shown}
@@ -391,6 +512,11 @@ class MapView(BackendBase):
         self.build_minimap()
         self.build_map_bands()
         self.pinChanged.emit()  # kept position on map turned with it
+
+    @staticmethod
+    def road_key(road: lap_map.MapLine) -> tuple:
+        """Circuit line told apart from another (turned like map)"""
+        return (len(road.xs), road.xs[0], road.ys[0], road.xs[-1], road.ys[-1]) if road.xs else ()
 
     @staticmethod
     def map_ticks(line: lap_map.MapLine) -> list[dict]:
@@ -552,11 +678,7 @@ class MapView(BackendBase):
 
     # Lap placement across track: offset from base line (official circuit path, else reference lap) & track edges
     def reference_length(self) -> float:
-        reference = self.data.reference
-        if reference is None or not len(reference.data):
-            return 0.0
-        length = reference.data.meta.get("track_length")
-        return float(length) if isinstance(length, (int, float)) and length > 0 else reference.data.distance[-1]
+        return track_length_of(self.data.reference)
 
     def lap_offsets(self, lap: PlotLap) -> tuple[lap_map.MapLine, list[float], list[int]] | None:
         """Offset of each lap line point from base line (left positive) & nearest base point, cached"""
@@ -610,12 +732,15 @@ class MapView(BackendBase):
                 placement_key = (found[1], self._edges)
                 cached = self._placements.get(lap.key)
                 if cached is None or not keys_match(cached[0], placement_key):
+                    cached = self._prepared_placements.get(lap.key)  # measured in background (loading laps)
+                if cached is None or not keys_match(cached[0], placement_key):
                     cached = (placement_key, self.lap_placements(found, lefts, rights))
                 cache[lap.key] = cached
                 placements[lap.key] = cached[1]
         unchanged = cache.keys() == self._placements.keys() and all(
             cache[name] is self._placements[name] for name in cache)
         self._placements = cache
+        self._prepared_placements = {}
         if not unchanged or self.data.placements.keys() != placements.keys():  # charts drawn again only if changed
             self.data.set_placements(placements)
 
@@ -740,9 +865,8 @@ class MapView(BackendBase):
             if path in shown:
                 times.append(shown[path])
                 continue
-            try:
-                mtime = os.path.getmtime(path)
-            except OSError:
+            mtime = self.lap_mtime(path)
+            if mtime is None:
                 continue
             cached = self._mini_times.get(path)
             if cached is not None and cached[0] == mtime and cached[1] == key:
@@ -755,6 +879,20 @@ class MapView(BackendBase):
                                        reference.key, anchor)
         return {"bounds": bounds, "spreads": mini_sector_spread(times), "laps": len(times),
                 "busy": bool(missing) or self._mini_busy}
+
+    def lap_mtime(self, path: str) -> float | None:
+        """File time of listed lap (None if gone), asked once while lap list stays the same (map zoom colors the
+        consistency line again)"""
+        revision, mtimes = self._lap_mtimes
+        if revision != self._list_revision:
+            mtimes = {}
+            self._lap_mtimes = (self._list_revision, mtimes)
+        if path not in mtimes:
+            try:
+                mtimes[path] = os.path.getmtime(path)
+            except OSError:
+                mtimes[path] = None
+        return mtimes[path]
 
     def start_consistency_job(self, todo: list[tuple[str, float]], bounds: list[float], key: tuple, length: float,
                               reference_info: dict | None = None, reference_path: str = "", anchor_path: str = ""):
@@ -858,25 +996,22 @@ class MapView(BackendBase):
             return
         start, end, meters_per_pixel = self._map_view
         step = scale_step(meters_per_pixel)
-        shown = step
+        shown: float | None = step
         cached = self._band_cache.get(step)
-        if cached is None:
-            nearest = min(self._band_cache, key=lambda cached_step: abs(cached_step - step), default=None)
-            if nearest is None:  # first scale of this map: built now
-                cached = self._band_cache[step] = self.scale_shapes(2 ** step)
-            else:  # nearest built scale shown at once, this one built in background (shown once ready)
-                self.prepare_step(step)
-                shown, cached = nearest, self._band_cache[nearest]
-        self._band_cache.move_to_end(shown)
-        while len(self._band_cache) > BAND_CACHE_STEPS:
-            self._band_cache.popitem(last=False)
-        if shown != self._preview_step or not self._band_cache_applied:
-            for key, vertices in cached.items():
-                VertexStore.set(key, vertices)  # type: ignore[arg-type]
-            self._band_cache_applied = True
-        self._preview_step = shown
-        self._prefetch_step = step
-        self._prefetch_timer.start()  # neighbor scales once map stays still (threads would slow zoom frames)
+        if cached is None:  # built in background (shown once ready), nearest built scale shown meanwhile if any
+            self.prepare_step(step)
+            shown = min(self._band_cache, key=lambda cached_step: abs(cached_step - step), default=None)
+            cached = self._band_cache[shown] if shown is not None else None
+        if shown is not None and cached is not None:
+            self._band_cache.move_to_end(shown)
+            self.trim_band_cache()
+            if shown != self._preview_step or not self._band_cache_applied:
+                for key, vertices in cached.items():
+                    VertexStore.set(key, vertices)  # type: ignore[arg-type]
+                self._band_cache_applied = True
+            self._preview_step = shown
+            self._prefetch_step = step
+            self._prefetch_timer.start()  # neighbor scales once map stays still (threads would slow zoom frames)
         zoomed = end > start
         for (line, lap), keys in zip(self._map_lines, self._map["lines"]):
             scale = self.data.scale_of(lap)
@@ -893,24 +1028,41 @@ class MapView(BackendBase):
 
     def prepare_step(self, step: float):
         """Thick lines of map scale step built in background, shown once ready if it is the scale shown"""
-        if step in self._band_cache or step in self._prefetching or not self._map:
-            return
         generation = self._band_generation
-        self._prefetching.add(step)
+        if step in self._band_cache or (generation, step) in self._prefetching or not self._map:
+            return
+        self._prefetching.add((generation, step))  # a step of a former map being built never stops this one
+        frame = self.map_frame()  # page state read here: job never reads it
 
         def done(shapes):
-            self._prefetching.discard(step)
+            self._prefetching.discard((generation, step))
             if shapes is None or generation != self._band_generation or step in self._band_cache:
                 return
             self._band_cache[step] = shapes  # kept like recently used, shown step kept newest
             if self._preview_step in self._band_cache:
                 self._band_cache.move_to_end(self._preview_step)
-            while len(self._band_cache) > BAND_CACHE_STEPS:
-                self._band_cache.popitem(last=False)
+            self.keep_frame_caches(frame)
+            self.trim_band_cache()
             if self._map and step == scale_step(self._map_view[2]) and step != self._preview_step:
                 self.build_map_bands()  # map waits at this scale: exact thickness now
 
-        self.run_job("map zoom step", lambda: self.scale_shapes(2 ** step), done)
+        def building() -> dict[str, object]:  # map built again meanwhile: stops at next pause
+            pause = Yielder(cancelled=lambda: generation != self._band_generation)
+            return self.scale_shapes(2 ** step, frame, pause)
+
+        self.run_job("map zoom step", building, done)
+
+    def trim_band_cache(self):
+        """Least recently used scale steps dropped over BAND_CACHE_STEPS, lap shapes & colored lines of dropped steps
+        too (shown step kept)"""
+        while len(self._band_cache) > BAND_CACHE_STEPS:
+            self._band_cache.popitem(last=False)
+        steps = set(self._band_cache)
+        steps.add(scale_step(self._map_view[2]))
+        if any(scale_step(key[1]) not in steps for key in self._lap_shapes):
+            self._lap_shapes = {key: value for key, value in self._lap_shapes.items() if scale_step(key[1]) in steps}
+        if any(step not in steps for step in self._colored_steps):
+            self._colored_steps = {step: value for step, value in self._colored_steps.items() if step in steps}
 
     def build_minimap(self):
         """Whole circuit as thin lines for minimap (built once per map)"""
@@ -931,54 +1083,96 @@ class MapView(BackendBase):
             selected = lap_map.part(line, corner.start, corner.end)
         VertexStore.set(self._map["selectedKey"], lap_map.line_band(selected, meters_per_pixel * 9))
 
-    def scale_shapes(self, meters_per_pixel: float) -> dict[str, object]:
-        """Vertices of everything sized in pixels for map scale: road, lines, marks, markers, zones, arrows"""
+    def map_frame(self) -> dict[str, Any]:
+        """What shapes sized for a map scale are built from, read on page thread (see scale_shapes): background builds
+        never read page state, per lap caches copied (new entries kept by keep_frame_caches)"""
+        reference = self.data.reference
+        reference_line = self.reference_map_line()
+        return {
+            "map": dict(self._map), "lines": list(self._map_lines), "road": self._road, "angle": self._map_angle,
+            "limits": self._limits, "show_limits": bool(self._map_options.get("limits")), "edges": self._edges,
+            "reference": reference, "hysteresis": self._hysteresis, "sectors": tuple(self.data.sector_lines),
+            "pit": list(self._pit), "reference_line": reference_line, "guide": self.guide_line(),
+            "spreads": list(self.brake_spreads().values()), "lap_shapes": dict(self._lap_shapes),
+            "normals": dict(self._normals), "zones": dict(self._zones), "arrows": self._arrows,
+            "edge_normals": self._edge_normals, "new": {"normals": {}, "zones": {}, "lap_shapes": {}},
+        }
+
+    def keep_frame_caches(self, frame: dict[str, Any]):
+        """Per lap results computed by a background build (see map_frame) kept for laps still shown"""
+        new = frame["new"]
+        shown = {lap.key: lap.data for _, lap in self._map_lines}
+        if new["zones"]:  # braking & throttle zones of each lap computed once per loaded lap (every scale uses them)
+            self._zones = {key: value for key, value in self._zones.items() if key in shown}
+        for name, cache in (("normals", self._normals), ("zones", self._zones)):
+            for key, value in new[name].items():
+                if shown.get(key) is value[0]:
+                    cache[key] = value
+        for key, value in new["lap_shapes"].items():
+            if shown.get(key[0]) is value[0][0]:
+                self._lap_shapes[key] = value
+        if "arrows" in new and new["arrows"][0] is self.guide_line():
+            self._arrows = new["arrows"]
+        if "edge_normals" in new and keys_match(new["edge_normals"][0], (self._limits, self._map_angle)):
+            self._edge_normals = new["edge_normals"]
+
+    def scale_shapes(self, meters_per_pixel: float, frame: dict[str, Any] | None = None,
+                     pause: Callable[[], None] | None = None) -> dict[str, object]:
+        """Vertices of everything sized in pixels for map scale: road, lines, marks, markers, zones, arrows
+
+        Built from frame (see map_frame, taken now if not given): thread job never reads page state, per lap results
+        it computes left in frame["new"]. pause: called now & then (thread: Yielder, may stop a stale build).
+        """
+        frame = frame if frame is not None else self.map_frame()
+        if pause is None:
+            pause = Yielder() if threading.current_thread() is not threading.main_thread() else (lambda: None)
+        map_keys, map_lines, angle, new = frame["map"], frame["lines"], frame["angle"], frame["new"]
         shapes: dict[str, object] = {}
-        pause = Yielder() if threading.current_thread() is not threading.main_thread() else (lambda: None)
-        road = self._road
+        road = frame["road"]
         road_half = max(TRACK_WIDTH / 2, meters_per_pixel * 4)  # visible when zoomed out
         # Circuit (road, edges) does not depend on laps shown: kept per scale while circuit & rotation stay
-        circuit_key = (meters_per_pixel, self._map_angle, self._limits if self._map_options.get("limits") else None,
-                       road.xs[0] if road.xs else 0.0, len(road.xs))
+        limits = frame["limits"] if frame["show_limits"] else None
+        circuit_key = (meters_per_pixel, angle, limits, road.xs[0] if road.xs else 0.0, len(road.xs))
         cached_circuit = self._circuit_shapes.get(meters_per_pixel)
         if cached_circuit is not None and keys_match(cached_circuit[0], circuit_key):
-            shapes[self._map["road"]], shapes[self._map["edge"]] = cached_circuit[1]
+            shapes[map_keys["road"]], shapes[map_keys["edge"]] = cached_circuit[1]
         else:
-            shapes[self._map["road"]], shapes[self._map["edge"]] = self.circuit_shapes(road, road_half, meters_per_pixel)
+            shapes[map_keys["road"]], shapes[map_keys["edge"]] = self.circuit_shapes(
+                road, road_half, meters_per_pixel, frame)
             with CIRCUIT_LOCK:
                 self._circuit_shapes[meters_per_pixel] = (
-                    circuit_key, (shapes[self._map["road"]], shapes[self._map["edge"]]))
+                    circuit_key, (shapes[map_keys["road"]], shapes[map_keys["edge"]]))
                 while len(self._circuit_shapes) > BAND_CACHE_STEPS * 2:
                     self._circuit_shapes.pop(next(iter(self._circuit_shapes)), None)
-        reference = self.data.reference.data if self.data.reference is not None else None
+        reference = frame["reference"].data if frame["reference"] is not None else None
         # Lap shapes depend on map rotation, corners of reference lap & track edges (driving points, track-out,
         # events): not on other laps shown
-        lap_key = (self._map_angle, reference, self._hysteresis, self._limits, self._edges)
+        lap_key = (angle, reference, frame["hysteresis"], frame["limits"], frame["edges"])
         built: set[str] = set()
-        for _, lap in self._map_lines:
-            cached = self._lap_shapes.get((lap.key, meters_per_pixel))
+        for _, lap in map_lines:
+            cached = frame["lap_shapes"].get((lap.key, meters_per_pixel))
             if cached is not None and keys_match(cached[0], (lap.data, *lap_key)):
                 shapes.update(cached[1])  # lap shown before at this scale: nothing built
                 built.add(lap.key)
-        for (line, lap), keys in zip(self._map_lines, self._map["lines"]):
+        for (line, lap), keys in zip(map_lines, map_keys["lines"]):
             if lap.key in built:
                 continue
             pause()
-            shapes[keys["key"]] = band_part(line.xs, line.ys, self.line_normals(lap, line),
+            shapes[keys["key"]] = band_part(line.xs, line.ys, frame_normals(frame, lap, line),
                                             lap_map.kept_indexes(line, meters_per_pixel * 0.75),
                                             meters_per_pixel * LINE_WIDTH)
         marks = []
-        reference_line = self.reference_map_line()
+        reference_line = frame["reference_line"]
         if reference_line is not None:
-            for distance in self.data.sector_lines:  # sector boundaries across road
+            for distance in frame["sectors"]:  # sector boundaries across road
                 marks.append(lap_map.cross_mark(reference_line, distance, road_half * 1.6))
-        shapes[self._map["marks"]] = segments(marks)
+        shapes[map_keys["marks"]] = segments(marks)
         # Markers: one buffer per lap & kind, outline (map background color) drawn under fill
         points: dict[tuple[str, str], list[tuple[float, float, float]]] = {}
-        for point in self._map.get("points", []) + self._map.get("slips", []) + self._map.get("events", []):
+        for point in map_keys.get("points", []) + map_keys.get("slips", []) + map_keys.get("events", []):
             points.setdefault((point["lap"], point["kind"]), []).append(
                 (point["x"], point["y"], math.radians(point.get("angle", 0.0))))
-        for item in self._map["markers"]:
+        for item in map_keys["markers"]:
             if item["lap"] in built:
                 continue
             pause()
@@ -989,41 +1183,53 @@ class MapView(BackendBase):
                 outline = "dot" if form in ("dot", "ring") else form.replace("hollow_", "")
                 shapes[shape["outline"]] = markers(found, outline, (pixels + OUTLINE_PIXELS * 2) * meters_per_pixel)
         # Braking & throttle application zones of each lap
-        for (line, lap), keys, item in zip(self._map_lines, self._map["lines"], self._map["markers"]):
+        for (line, lap), keys, item in zip(map_lines, map_keys["lines"], map_keys["markers"]):
             if lap.key in built:
                 continue
             pause()
-            braking, applying = self.pedal_zones(lap)
-            line_normals = self.line_normals(lap, line)
+            zones = frame["zones"].get(lap.key)
+            if zones is None or zones[0] is not lap.data:
+                zones = frame["zones"][lap.key] = new["zones"][lap.key] = (lap.data, lap_map.pedal_zones(lap.data))
+            braking, applying = zones[1]
+            line_normals = frame_normals(frame, lap, line)
             shapes[item["brakeZones"]] = lap_map.zones_band(line, braking, meters_per_pixel * 6, line_normals)
             shapes[item["throttleZones"]] = lap_map.zones_band(line, applying, meters_per_pixel * 6, line_normals)
             own = [keys["key"], item["brakeZones"], item["throttleZones"]]
             own += [key for shape in item["shapes"] for key in (shape["fill"], shape["outline"])]
-            self._lap_shapes[(lap.key, meters_per_pixel)] = ((lap.data, *lap_key), {key: shapes[key] for key in own})
-        arrows = [(x, y, math.radians(angle)) for x, y, angle in self.direction_marks()]
-        shapes[self._map["arrowsKey"]] = markers(arrows, "triangle", ARROW_PIXELS * meters_per_pixel)
-        pits = [band(part.xs, part.ys, meters_per_pixel * 1.2) for part in self._pit]
-        shapes[self._map["pit"]] = merge_strips(pits) if pits else band([], [], 1)
+            new["lap_shapes"][(lap.key, meters_per_pixel)] = ((lap.data, *lap_key), {key: shapes[key] for key in own})
+        guide = frame["guide"]
+        if not frame["arrows"] or frame["arrows"][0] is not guide:
+            frame["arrows"] = new["arrows"] = (guide, lap_map.direction_marks(guide))
+        arrows = [(x, y, math.radians(angle)) for x, y, angle in frame["arrows"][1]]
+        shapes[map_keys["arrowsKey"]] = markers(arrows, "triangle", ARROW_PIXELS * meters_per_pixel)
+        pits = [band(part.xs, part.ys, meters_per_pixel * 1.2) for part in frame["pit"]]
+        shapes[map_keys["pit"]] = merge_strips(pits) if pits else band([], [], 1)
         # Braking points range of shown laps in each corner, along reference line
         spreads = []
-        if reference_line is not None and len(self._map_lines) > 1:
-            reference_lap = self.data.reference
-            reference_normals = self.line_normals(reference_lap, reference_line) if reference_lap is not None and any(
-                lap is reference_lap for _, lap in self._map_lines) else normals(reference_line.xs, reference_line.ys)
-            for low, high in self.brake_spreads().values():
+        if reference_line is not None and len(map_lines) > 1 and frame["spreads"]:
+            reference_lap = frame["reference"]
+            reference_normals = frame_normals(frame, reference_lap, reference_line) if reference_lap is not None and any(
+                lap is reference_lap for _, lap in map_lines) else normals(reference_line.xs, reference_line.ys)
+            for low, high in frame["spreads"]:
                 if high - low >= 1:
                     spreads.append(band_part(reference_line.xs, reference_line.ys, reference_normals,
                                              range_indexes(reference_line.distances, low, high), meters_per_pixel * 6))
-        shapes[self._map["spread"]] = merge_strips(spreads) if spreads else band([], [], 1)
+        shapes[map_keys["spread"]] = merge_strips(spreads) if spreads else band([], [], 1)
         return shapes
 
-    def circuit_shapes(self, road: lap_map.MapLine, road_half: float, meters_per_pixel: float) -> tuple:
+    def circuit_shapes(self, road: lap_map.MapLine, road_half: float, meters_per_pixel: float,
+                       frame: dict[str, Any]) -> tuple:
         """Road & road edge (or track edges) sized for map scale"""
-        limits = self.shown_limits()
-        if limits is not None:  # road between guessed track edges, thin edge lines
+        if frame["limits"] is not None and frame["show_limits"]:  # road between guessed track edges, thin edge lines
+            limits = lap_map.TrackLimits(lap_map.rotate_line(frame["limits"].left, frame["angle"]),
+                                         lap_map.rotate_line(frame["limits"].right, frame["angle"]))
+            key = (frame["limits"], frame["angle"])
+            if not frame["edge_normals"] or not keys_match(frame["edge_normals"][0], key):
+                frame["edge_normals"] = frame["new"]["edge_normals"] = (key, (
+                    normals(limits.left.xs, limits.left.ys), normals(limits.right.xs, limits.right.ys)))
             keep = lap_map.kept_indexes(limits.left, meters_per_pixel * 0.75)
             edges = [band_part(edge.xs, edge.ys, edge_normals, keep, meters_per_pixel * 1.1)
-                     for edge, edge_normals in zip((limits.left, limits.right), self.edge_normals(limits))]
+                     for edge, edge_normals in zip((limits.left, limits.right), frame["edge_normals"][1])]
             return lap_map.limits_band(limits, keep), merge_strips(edges)
         closed = len(road.xs) > 2 and (road.xs[0] - road.xs[-1]) ** 2 + (road.ys[0] - road.ys[-1]) ** 2 < 50 ** 2
         simple_road = lap_map.simplify(road, meters_per_pixel * 0.75)
@@ -1049,27 +1255,8 @@ class MapView(BackendBase):
         cached = self._normals.get(lap.key)
         if cached is None or cached[0] is not lap.data or cached[1] != self._map_angle or cached[2] != len(line.xs):
             cached = (lap.data, self._map_angle, len(line.xs), normals(line.xs, line.ys))
-            self._normals[lap.key] = cached  # one assignment: safe from background map builds
+            self._normals[lap.key] = cached
         return cached[3]
-
-    def edge_normals(self, limits: lap_map.TrackLimits) -> tuple[list, list]:
-        """Normals of track edges turned like map, computed once per track edges & map rotation"""
-        key = (self._limits, self._map_angle)
-        cached = self._edge_normals
-        if not cached or not keys_match(cached[0], key):
-            cached = (key, (normals(limits.left.xs, limits.left.ys), normals(limits.right.xs, limits.right.ys)))
-            self._edge_normals = cached
-        return cached[1]
-
-    def pedal_zones(self, lap: PlotLap) -> tuple[list, list]:
-        """Braking & throttle application zones of lap (computed once per loaded lap, every zoom step uses them)"""
-        cached = self._zones.get(lap.key)
-        if cached is None or cached[0] is not lap.data:
-            cached = (lap.data, lap_map.pedal_zones(lap.data))
-            self._zones = {key: value for key, value in self._zones.items()
-                           if key in {shown.key for shown in self.data.laps}}
-            self._zones[lap.key] = cached
-        return cached[1]
 
     def build_colored_line(self, meters_per_pixel: float):
         """Line of current color mode: compared lap by time gain, reference lap by speed or pedals
@@ -1316,14 +1503,19 @@ class MapView(BackendBase):
         reference_line = self.reference_map_line()
         if reference_line is None:
             return []
-        line = lap_map.part(reference_line, self.data.distance_at_x(start_x), self.data.distance_at_x(end_x))
-        if len(line.xs) < 2:
-            return []
-        return [min(line.xs), min(line.ys), max(line.xs), max(line.ys)]
+        if not self._line_boxes or self._line_boxes[0] is not reference_line:  # map follows chart zoom every frame
+            self._line_boxes = (reference_line, lap_map.chunk_boxes(reference_line))
+        return lap_map.part_bounds(reference_line, self._line_boxes[1], self.data.distance_at_x(start_x),
+                                   self.data.distance_at_x(end_x))
 
     @Slot(float, result=list)
     def mapCursor(self, x: float) -> list[dict]:
         """Position of each lap at axis position, map coordinates (time axis: where each lap is at that time)"""
+        return self.map_cursor(x)
+
+    def map_cursor(self, x: float, constant: bool = True) -> list[dict]:
+        """Map positions at cursor (see mapCursor), lap color & key left out unless constant (cursorState: QML takes
+        them from map laps)"""
         points = []
         reference = self.data.reference
         reference_distance = self.data.lap_distance_at_x(reference, x) if reference is not None else 0.0
@@ -1345,9 +1537,11 @@ class MapView(BackendBase):
                 angle = math.degrees(heading + self._map_angle)
                 drift = (angle - travel + 180) % 360 - 180
                 slip = f"{drift:+.0f}°" if abs(drift) >= 1.5 else ""
-            points.append({"x": interpolate(line.distances, line.xs, distance),
-                           "y": interpolate(line.distances, line.ys, distance), "color": lap.color.name(),
-                           "lap": lap.key, "angle": angle, "gap": gap, "slip": slip})
+            point = {"x": interpolate(line.distances, line.xs, distance),
+                     "y": interpolate(line.distances, line.ys, distance), "angle": angle, "gap": gap, "slip": slip}
+            if constant:
+                point.update(color=lap.color.name(), lap=lap.key)
+            points.append(point)
         return points
 
     def lap_heading(self, lap: PlotLap, distance: float) -> float | None:
@@ -1394,6 +1588,29 @@ class MapView(BackendBase):
             return {}
         lap, distance = found
         return {"lap": lap.key, "x": self.data.x_at_lap_distance(lap, distance)}
+
+    @Slot(list)
+    def setMapKinds(self, kinds: list):
+        """Driving point & wheel slip kinds shown on map (see mapHover), told only when they change"""
+        self._map_kinds = [str(kind) for kind in kinds]
+
+    @Slot(float, float, float, float, str, bool, result=dict)
+    def mapHover(self, map_x: float, map_y: float, point_radius: float, pick_radius: float, highlight: str,
+                 scrub: bool) -> dict:
+        """Mouse over map, everything in one call: driving point under mouse among shown kinds (point, empty if
+        none), then unless not scrub (no chart or lap playing): axis position of reference line under mouse (x, -1
+        if none), and there lap across track (placement, unless a driving point is hovered) & chart cursor state
+        (cursor, see cursorState)"""
+        point = self.mapPointAt(map_x, map_y, point_radius, self._map_kinds)
+        result: dict = {"point": point}
+        if not scrub:
+            return result
+        position = self.mapPick(map_x, map_y, pick_radius)
+        result["x"] = position
+        if position >= 0:
+            result["placement"] = {} if "tip" in point else self.placementAt(position, highlight)
+            result["cursor"] = self.cursorState(position)
+        return result
 
     @Slot(float, float, float, list, result=dict)
     def mapPointAt(self, map_x: float, map_y: float, radius: float, kinds: list) -> dict:

@@ -1,11 +1,12 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import TinyPedal
 
 // Positions lap by lap (races): place of every car at end of each lap (class place when a class is picked),
 // grid at lap 0. Other cars dimmed in their class color, player in accent color, car picked in text color.
 // Hover: nearest car highlighted with its name & place. Click: pick that car.
-// Layers: grid, other cars (painted once per data / size / theme / car picked, one canvas per dim level so
-// hovering never repaints them), highlighted cars (small canvas painted on hover). Lines revealed by a clip.
+// Lines drawn by the GPU (GpuShape), built by backend in plot pixels once the plot size settles: resize only
+// scales them meanwhile, hover & pick only show other lines. Lines revealed by a clip.
 Item {
     id: chart
 
@@ -25,8 +26,36 @@ Item {
     readonly property bool revealed: reveal >= 1
     readonly property int picked: seriesIndex(backend.selectedEntry)
     readonly property bool highlighted: picked >= 0 || hovered >= 0
-    // Place of each series at each lap (last known before, 0 if none): no scan of points per mouse move
-    readonly property var placeTable: buildPlaceTable(series, laps)
+    readonly property bool drawn: active && series.length > 0 && laps > 0
+    readonly property var players: {
+        var found = []
+        for (var i = 0; i < series.length; i++) if (series[i].player) found.push(series[i])
+        return found
+    }
+    // Names at end of highlighted lines (car picked, player, hovered car)
+    readonly property var labels: {
+        var found = []
+        for (var n = 0; n < series.length; n++) {
+            var item = series[n]
+            if ((n !== picked && n !== hovered && !item.player) || item.last.length === 0) continue
+            found.push({ "lap": item.last[0], "place": item.last[1], "name": item.name,
+                         "color": item.player ? theme.accent : n === picked ? theme.text : item.color })
+        }
+        return found
+    }
+    // Plot size lines were built for (sent to backend once size settles), lines scaled to plot size meanwhile
+    property real builtWidth: 0
+    property real builtHeight: 0
+    readonly property real thinWidth: Math.max(theme.em * 0.11, 1.2)
+    readonly property real thickWidth: theme.em * 0.22
+    readonly property real wideWidth: theme.em * 0.26
+    readonly property var lineMatrix: Qt.matrix4x4(
+        builtWidth > 0 ? plotWidth / builtWidth : 1, 0, 0, plotX,
+        0, builtHeight > 0 ? plotHeight / builtHeight : 1, 0, plotY,
+        0, 0, 1, 0,
+        0, 0, 0, 1)
+    readonly property int placeStep: places > 30 ? 5 : places > 12 ? 2 : 1
+    readonly property int lapStep: laps > 80 ? 10 : laps > 30 ? 5 : laps > 12 ? 2 : 1
 
     function px(lap) { return plotX + (laps > 0 ? lap / laps : 0) * plotWidth }
     function py(place) { return plotY + (places > 1 ? (place - 1) / (places - 1) : 0.5) * plotHeight }
@@ -34,65 +63,44 @@ Item {
         for (var i = 0; i < series.length; i++) if (series[i].key === key) return i
         return -1
     }
-    function buildPlaceTable(rows, lapCount) {
-        var table = []
-        if (lapCount < 0) return table
-        for (var s = 0; s < rows.length; s++) {
-            var points = rows[s].points
-            var places = new Int32Array(lapCount + 1)
-            var place = 0, next = 0
-            for (var lap = 0; lap <= lapCount; lap++) {
-                while (next < points.length && points[next][0] <= lap) place = points[next++][1]
-                places[lap] = place
-            }
-            table.push(places)
-        }
-        return table
-    }
     function nearest(mouseX, mouseY) {
         if (laps <= 0 || series.length === 0) return -1
         var lap = Math.round((mouseX - plotX) / plotWidth * laps)
         lap = Math.max(Math.min(lap, laps), 0)
         var best = -1, bestDistance = theme.em * 1.2
-        var table = placeTable
-        for (var i = 0; i < table.length; i++) {
-            var place = table[i][lap]
-            if (place <= 0) continue
+        for (var i = 0; i < series.length; i++) {
+            var place = series[i].places[lap]  // place table of backend: no scan of points per mouse move
+            if (!(place > 0)) continue
             var distance = Math.abs(py(place) - mouseY)
             if (distance < bestDistance) { bestDistance = distance; best = i }
         }
         return best
     }
-    // Other cars layer of current dim level painted if out of date (other level painted when needed)
-    function paintDim() {
-        var canvas = highlighted ? dimHigh : dimLow
-        if (!canvas.fresh) canvas.requestPaint()
+    function sendView() {
+        if (!active || width < 1 || height < 1) return
+        var lineWidth = Math.round(plotWidth), lineHeight = Math.round(plotHeight)
+        backend.setChartView(lineWidth, lineHeight, thinWidth, thickWidth, wideWidth)
+        builtWidth = lineWidth
+        builtHeight = lineHeight
     }
-    function paintLines() {
-        dimLow.fresh = false
-        dimHigh.fresh = false
-        paintDim()
-        topCanvas.requestPaint()
-    }
-    function paintAll() {
-        gridCanvas.requestPaint()
-        paintLines()
+    function sizeChanged() {
+        if (builtWidth <= 0) Qt.callLater(sendView)  // first lines at once
+        else settleTimer.restart()
     }
 
-    onData_Changed: { hovered = -1; paintAll(); if (active) revealAnimation.restart() }
-    onActiveChanged: { paintAll(); if (active) revealAnimation.restart() }
-    onRevealedChanged: topCanvas.requestPaint()  // names shown once lines are drawn
-    onWidthChanged: paintAll()
-    onHeightChanged: paintAll()
-    onHoveredChanged: topCanvas.requestPaint()
-    onHighlightedChanged: paintDim()
-    onPickedChanged: paintLines()
-    Connections {
-        target: backend
-        function onDriverChanged() { chart.paintLines() }
+    onData_Changed: { hovered = -1; if (active) revealAnimation.restart() }
+    onActiveChanged: if (active) { sizeChanged(); revealAnimation.restart() }
+    onPlotWidthChanged: sizeChanged()
+    onPlotHeightChanged: sizeChanged()
+    onThinWidthChanged: sizeChanged()
+    onThickWidthChanged: sizeChanged()
+    Component.onCompleted: sizeChanged()
+
+    Timer {
+        id: settleTimer
+        interval: 150
+        onTriggered: chart.sendView()
     }
-    readonly property var paintColors: [theme.accent, theme.text, theme.dark, theme.border]
-    onPaintColorsChanged: paintAll()
 
     NumberAnimation {
         id: revealAnimation
@@ -122,149 +130,112 @@ Item {
         }
     }
 
-    // Line of series (whole line: the reveal clip hides the part not drawn yet)
-    function drawLine(ctx, index, lineWidth, color, alpha) {
-        var points = series[index].points
-        if (points.length === 0) return
-        ctx.globalAlpha = alpha
-        ctx.strokeStyle = color
-        ctx.lineWidth = lineWidth
-        ctx.lineJoin = "round"
-        ctx.beginPath()
-        ctx.moveTo(px(points[0][0]), py(points[0][1]))
-        for (var i = 1; i < points.length; i++)
-            ctx.lineTo(px(points[i][0]), py(points[i][1]))
-        ctx.stroke()
-        ctx.globalAlpha = 1
-    }
-    // Other cars (not picked, not player) dimmed, hovered one included (covered by its highlighted line)
-    function paintOthers(ctx, alpha) {
-        var picked = chart.picked
-        var width = Math.max(theme.em * 0.11, 1.2)
-        for (var s = 0; s < series.length; s++) {
-            if (s === picked || series[s].player) continue
-            drawLine(ctx, s, width, series[s].color, alpha)
-        }
-    }
-
-    // Grid: place lines, lap ticks
-    Canvas {
-        id: gridCanvas
-        anchors.fill: parent
-        visible: chart.active
-        renderStrategy: Canvas.Cooperative
-        onPaint: {
-            var ctx = getContext("2d")
-            ctx.reset()
-            if (!chart.active || chart.series.length === 0 || chart.laps <= 0) return
-            var x0 = chart.plotX, x1 = chart.plotX + chart.plotWidth
-            var y1 = chart.plotY + chart.plotHeight
-            var placeStep = chart.places > 30 ? 5 : chart.places > 12 ? 2 : 1
-            var lapStep = chart.laps > 80 ? 10 : chart.laps > 30 ? 5 : chart.laps > 12 ? 2 : 1
-            ctx.lineWidth = 1
-            ctx.strokeStyle = Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.06 : 0.08)
-            ctx.fillStyle = theme.dimText
-            ctx.font = Math.round(theme.em * 0.78) + "px sans-serif"
-            ctx.textAlign = "right"
-            ctx.textBaseline = "middle"
-            ctx.beginPath()
-            for (var place = 1; place <= chart.places; place++) {
-                if (place !== 1 && place % placeStep !== 0) continue
-                var gy = Math.round(chart.py(place)) + 0.5
-                ctx.moveTo(x0, gy)
-                ctx.lineTo(x1, gy)
-                ctx.fillText(place, x0 - theme.em * 0.5, gy)
-            }
-            ctx.stroke()
-            ctx.textAlign = "center"
-            ctx.textBaseline = "top"
-            for (var lap = 0; lap <= chart.laps; lap += lapStep) {
-                ctx.fillText(lap === 0 ? i18n.tr("Grid") : lap, chart.px(lap), y1 + theme.em * 0.5)
-            }
-        }
-    }
-
-    // Lines drawn up to the lap revealed (whole width once revealed: names at line ends)
+    // Grid: place lines, lap ticks (items follow plot size, nothing painted)
     Item {
-        id: revealClip
-        visible: chart.active
-        width: chart.revealed ? chart.width : Math.max(0, chart.px(chart.laps * chart.reveal))
-        height: chart.height
-        clip: !chart.revealed
+        anchors.fill: parent
+        visible: chart.drawn
+        Repeater {
+            model: chart.drawn ? chart.places : 0
+            Item {
+                required property int index
+                readonly property int place: index + 1
+                readonly property real gridY: Math.round(chart.py(place))
+                visible: place === 1 || place % chart.placeStep === 0
+                Rectangle {
+                    x: chart.plotX
+                    y: parent.gridY
+                    width: chart.plotWidth
+                    height: 1
+                    color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, theme.dark ? 0.06 : 0.08)
+                }
+                Text {
+                    x: chart.plotX - theme.em * 0.5 - width
+                    y: parent.gridY + 0.5 - height / 2
+                    text: parent.place
+                    color: theme.dimText
+                    font.pixelSize: Math.round(theme.em * 0.78)
+                }
+            }
+        }
+        Repeater {
+            model: chart.drawn ? Math.floor(chart.laps / chart.lapStep) + 1 : 0
+            Text {
+                required property int index
+                readonly property int lap: index * chart.lapStep
+                x: chart.px(lap) - width / 2
+                y: chart.plotY + chart.plotHeight + theme.em * 0.5
+                text: lap === 0 ? i18n.tr("Grid") : lap
+                color: theme.dimText
+                font.pixelSize: Math.round(theme.em * 0.78)
+            }
+        }
+    }
 
-        // Other cars, one canvas per dim level: the level needed is painted (canvases also paint themselves
-        // when resized: the level not needed stays empty, out of date), the other one shown until it is ready
-        Canvas {
-            id: dimLow  // nothing highlighted
-            objectName: "positionsDimLow"
-            property int paints: 0  // times painted (tests)
-            property bool fresh: false
-            width: chart.width
+    // Lines: rendered in a multisampled layer while shown (smooth edges, window itself without MSAA)
+    Item {
+        id: lineLayer
+        objectName: "positionsLines"
+        width: chart.width
+        height: chart.height
+        visible: chart.drawn
+        layer.enabled: chart.drawn
+        layer.samples: 4
+        // Drawn up to the lap revealed (whole width once revealed: names at line ends)
+        Item {
+            id: revealClip
+            width: chart.revealed ? chart.width : Math.max(0, chart.px(chart.laps * chart.reveal))
             height: chart.height
-            visible: chart.highlighted ? !dimHigh.fresh : fresh || !dimHigh.fresh
-            renderStrategy: Canvas.Cooperative
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                fresh = !chart.highlighted
-                if (!fresh || !chart.active || chart.series.length === 0 || chart.laps <= 0) return
-                paints++
-                chart.paintOthers(ctx, 0.55)
-            }
-        }
-        Canvas {
-            id: dimHigh  // car picked or hovered
-            objectName: "positionsDimHigh"
-            property int paints: 0  // times painted (tests)
-            property bool fresh: false
-            width: chart.width
-            height: chart.height
-            visible: !dimLow.visible
-            renderStrategy: Canvas.Cooperative
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                fresh = chart.highlighted
-                if (!fresh || !chart.active || chart.series.length === 0 || chart.laps <= 0) return
-                paints++
-                chart.paintOthers(ctx, 0.28)
-            }
-        }
-        // Car picked, player & hovered on top, names at end of their lines
-        Canvas {
-            id: topCanvas
-            objectName: "positionsTop"
-            property int paints: 0  // times painted (tests)
-            width: chart.width
-            height: chart.height
-            renderStrategy: Canvas.Cooperative
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                paints++
-                var series = chart.series
-                if (!chart.active || series.length === 0 || chart.laps <= 0) return
-                var picked = chart.picked
-                var hovered = chart.hovered
-                if (picked >= 0 && !series[picked].player) chart.drawLine(ctx, picked, theme.em * 0.22, theme.text, 1)
-                for (var p = 0; p < series.length; p++) {
-                    if (series[p].player) chart.drawLine(ctx, p, theme.em * 0.26, theme.accent, 1)
+            clip: !chart.revealed
+            Item {
+                transform: Matrix4x4 { matrix: chart.lineMatrix }  // one transform for every line
+                // Other cars, dimmed more while a car is picked or hovered (hovered one covered by its line)
+                Repeater {
+                    model: chart.series
+                    GpuShape {
+                        required property var modelData
+                        required property int index
+                        visible: index !== chart.picked && !modelData.player
+                        key: modelData.thin
+                        color: modelData.color
+                        opacity: chart.highlighted ? 0.28 : 0.55
+                    }
                 }
-                if (hovered >= 0 && hovered !== picked && !series[hovered].player)
-                    chart.drawLine(ctx, hovered, theme.em * 0.22, series[hovered].color, 1)
-                if (!chart.revealed) return
-                ctx.textAlign = "left"
-                ctx.textBaseline = "middle"
-                ctx.font = "600 " + Math.round(theme.em * 0.8) + "px sans-serif"
-                for (var n = 0; n < series.length; n++) {
-                    if (n !== picked && n !== hovered && !series[n].player) continue
-                    var item = series[n]
-                    if (item.points.length === 0) continue
-                    var last = item.points[item.points.length - 1]
-                    ctx.fillStyle = item.player ? theme.accent : n === picked ? theme.text : item.color
-                    ctx.fillText("P" + last[1] + "  " + item.name, chart.px(last[0]) + theme.em * 0.5, chart.py(last[1]))
+                GpuShape {  // car picked
+                    readonly property bool shown: chart.picked >= 0 && !chart.series[chart.picked].player
+                    visible: shown
+                    key: shown ? chart.series[chart.picked].thick : ""
+                    color: theme.text
+                }
+                Repeater {  // player
+                    model: chart.players
+                    GpuShape {
+                        required property var modelData
+                        key: modelData.wide
+                        color: theme.accent
+                    }
+                }
+                GpuShape {  // hovered car
+                    readonly property bool shown: chart.hovered >= 0 && chart.hovered !== chart.picked
+                                                  && !chart.series[chart.hovered].player
+                    visible: shown
+                    key: shown ? chart.series[chart.hovered].thick : ""
+                    color: shown ? chart.series[chart.hovered].color : "transparent"
                 }
             }
+        }
+    }
+
+    // Names at end of highlighted lines, once lines are drawn
+    Repeater {
+        model: chart.drawn && chart.revealed ? chart.labels : []
+        Text {
+            required property var modelData
+            x: chart.px(modelData.lap) + theme.em * 0.5
+            y: chart.py(modelData.place) - height / 2
+            text: "P" + modelData.place + "  " + modelData.name
+            color: modelData.color
+            font.pixelSize: Math.round(theme.em * 0.8)
+            font.weight: Font.DemiBold
         }
     }
 

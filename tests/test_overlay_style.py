@@ -344,8 +344,8 @@ def test_hidden_widget_does_not_update(ui_env):
     from tinypedal.setting import cfg
     from tinypedal.widget import speedometer
 
-    saved = realtime_state.active, realtime_state.hidden, cfg.overlay["fixed_position"]
-    realtime_state.active, realtime_state.hidden = True, False
+    saved = realtime_state.active, realtime_state.shown, realtime_state.hidden, cfg.overlay["fixed_position"]
+    realtime_state.active, realtime_state.shown, realtime_state.hidden = True, True, False
     cfg.overlay["fixed_position"] = True
     widget = speedometer.Realtime(cfg, "speedometer")
     widget.start()
@@ -359,7 +359,7 @@ def test_hidden_widget_does_not_update(ui_env):
         assert widget._update_timer.isActive()
     finally:
         widget.stop()
-        realtime_state.active, realtime_state.hidden, cfg.overlay["fixed_position"] = saved
+        realtime_state.active, realtime_state.shown, realtime_state.hidden, cfg.overlay["fixed_position"] = saved
 
 
 def test_character_bar_width_not_scaled():

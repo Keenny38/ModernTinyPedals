@@ -94,7 +94,7 @@ def start_api_recording(auto: bool = False) -> str:
     )
     if not replay.start_recording(filename, sources, header_extra=api.replay_header()):
         return ""  # started meanwhile from another thread (replay window, recorder module)
-    return filename
+    return replay.recording_file or filename  # name made unique if taken
 
 
 class AutoReplay:

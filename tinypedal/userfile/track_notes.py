@@ -203,7 +203,8 @@ def load_notes_file(
         if os.path.getsize(filename_full) > 1024000:  # limit file size under 1024kb
             raise TypeError
 
-        with open(filename_full, newline="", encoding="utf-8") as temp_file:
+        # utf-8-sig: byte order mark of Excel "CSV UTF-8" files removed (header line found)
+        with open(filename_full, newline="", encoding="utf-8-sig") as temp_file:
             return parser(temp_file, table_header)
 
     except FileNotFoundError:

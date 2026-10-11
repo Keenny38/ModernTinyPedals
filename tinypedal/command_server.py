@@ -21,7 +21,7 @@ Remote control command server (Stream Deck, button box, SimHub, Companion...)
 
 Local HTTP server, disabled by default, only listens on 127.0.0.1:
     GET  /commands         -> list available command names (JSON)
-    POST /command/<name>   -> run command, requires "X-TinyPedal" request header
+    POST /command/<name>   -> run command, requires "X-NeoPedal" request header ("X-TinyPedal" also accepted)
     GET  /stream           -> WebSocket, pushes live telemetry JSON
                               query: interval=ms, fields=speed,gear (only these fields),
                               changes=1 (only fields changed since last message, nothing if none)
@@ -59,12 +59,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from PySide6.QtCore import QTimer
 
 from . import app_signal
+from .log_handler import ErrorThrottle
 from .setting import cfg
 
 logger = logging.getLogger(__name__)
+snapshot_errors = ErrorThrottle()  # stream pushes snapshots every 100 ms: warning once a minute
 
 HOST = "127.0.0.1"
-REQUIRED_HEADER = "X-TinyPedal"
+REQUIRED_HEADER = "X-NeoPedal"
+LEGACY_HEADER = "X-TinyPedal"  # still accepted: tools set up before the NeoPedal name
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_OP_TEXT = 0x1
 WS_OP_CLOSE = 0x8
@@ -405,7 +408,7 @@ def default_snapshot() -> dict:
 class CommandHandler(BoundedRequestHandler):
     """Command request handler"""
 
-    server_version = "TinyPedal"
+    server_version = "NeoPedal"
     timeout = 15  # idle client releases its thread
     stream_timeout = 5  # WebSocket send timeout, server can stop a stream to a stalled client
     commands: dict[str, Callable] = {}
@@ -437,7 +440,7 @@ class CommandHandler(BoundedRequestHandler):
         if not self.path.startswith("/command/"):
             self.send_json(404, {"error": "not found"})
             return
-        if self.headers.get(REQUIRED_HEADER) is None:
+        if self.headers.get(REQUIRED_HEADER) is None and self.headers.get(LEGACY_HEADER) is None:
             self.send_json(403, {"error": f"missing {REQUIRED_HEADER} header"})
             return
         name = unquote(self.path[len("/command/"):]).strip("/")
@@ -478,7 +481,7 @@ class CommandHandler(BoundedRequestHandler):
                 try:
                     data = self.snapshot()
                 except Exception:  # never break stream on bad telemetry
-                    logger.debug("REMOTE CONTROL: snapshot error", exc_info=True)
+                    snapshot_errors.log(logger, "REMOTE CONTROL: snapshot error")
                     data = {"active": False}
                 message = options.payload(data)
                 if message is not None:

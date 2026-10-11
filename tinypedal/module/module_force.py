@@ -38,7 +38,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         update_interval = self.idle_interval
         last_stamp: tuple = ()  # game data stamp of last update

@@ -44,6 +44,7 @@ from ._common import (
     BaseEditor,
     CompactButton,
     UIScaler,
+    column_texts,
     run_after_saving,
     table_item,
 )
@@ -144,20 +145,23 @@ class VehicleClassEditor(BaseEditor):
     def add_class(self):
         """Add new class entry"""
         start_index = row_index = self.table_classes.rowCount()
-        # Add all missing vehicle class from active session
-        veh_total = api.read.vehicle.total_vehicles()
-        for index in range(veh_total):
-            class_name = api.read.vehicle.class_name(index)
-            if not self.is_value_in_table(class_name, self.table_classes):
+        listed = column_texts(self.table_classes, 0)
+        with self.batch_edit():  # one undo step
+            # Add all missing vehicle class from active session
+            veh_total = api.read.vehicle.total_vehicles()
+            for index in range(veh_total):
+                class_name = api.read.vehicle.class_name(index)
+                if class_name not in listed:
+                    self.add_vehicle_entry(
+                        row_index, class_name, class_name, random_color_class(class_name))
+                    listed.add(class_name)
+                    row_index += 1
+            # Add new class entry
+            if start_index == row_index:
+                new_class_name = self.new_name_increment("New Class Name", self.table_classes)
                 self.add_vehicle_entry(
-                    row_index, class_name, class_name, random_color_class(class_name))
-                row_index += 1
-        # Add new class entry
-        if start_index == row_index:
-            new_class_name = self.new_name_increment("New Class Name", self.table_classes)
-            self.add_vehicle_entry(
-                row_index, new_class_name, "NAME", random_color_class(str(random.random())))
-            self.table_classes.setCurrentCell(row_index, 0)
+                    row_index, new_class_name, "NAME", random_color_class(str(random.random())))
+                self.table_classes.setCurrentCell(row_index, 0)
 
     def add_vehicle_entry(self, row_index: int, class_name: str, alias_name: str, color: str):
         """Add new class entry to table"""

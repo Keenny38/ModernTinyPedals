@@ -22,13 +22,15 @@ Sectors module
 
 from __future__ import annotations
 
+from time import monotonic
+
 from .. import realtime_state
 from ..api_control import api
 from ..const_common import MAX_SECONDS
 from ..module_info import SectorData, minfo
 from ..userfile.sector_best import merge_sector_best, read_sector_best_file, save_sector_best_file
 from ..validator import generator_init, is_same_session, session_token, valid_sectors
-from ._base import MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp
+from ._base import CHECKPOINT_INTERVAL, MODULE_STOP, PENDING_CHECK, DataModule, PendingLap, data_stamp
 
 
 class Realtime(DataModule):
@@ -41,7 +43,7 @@ class Realtime(DataModule):
 
     def update_data(self):
         """Update module data"""
-        _event_wait = self._event.wait
+        _event_wait = self.wait_update  # also wakes on new game data
         reset = False
         vehicle_resets = None
         waiting = False  # completed lap waiting for validation
@@ -96,6 +98,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
     last_reset = None  # reset check
     sent_reset = None  # last reset value sent
     delayed_save = False
+    next_checkpoint = 0.0  # monotonic time of next save while driving
     pending: PendingLap | None = None  # lap just completed, S3 not set yet
     readable = True  # sector file readable at load, False if not accessible (never saved over)
 
@@ -106,6 +109,32 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
     is_bad_lap = False  # lap with pit visit or invalidated by game (no best S1/S2)
     last_lap_bad = False  # lap before current lap was bad (no best S3 nor personal best sectors from it)
     s3_lap_stime = -1.0  # start time of lap last seen in sector 3 (S3 of lap still in progress or just finished)
+
+    def save_data():
+        """Best sectors saved (on reset, module stop & every CHECKPOINT_INTERVAL while driving)"""
+        nonlocal delayed_save, readable, next_checkpoint
+        next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
+        if not readable:  # not accessible at load: best sectors of file kept
+            saved, readable = read_sector_best_file(
+                filepath=filepath,
+                filename=combo_name,
+                session_id=session_id,
+                defaults=(MAX_SECONDS, MAX_SECONDS, MAX_SECONDS),
+            )
+            if readable:
+                merge_sector_best(output_session.sectorBestTB, output_session.sectorBestPB, *saved[:2])
+                merge_sector_best(output_alltime.sectorBestTB, output_alltime.sectorBestPB, *saved[2:])
+        if readable:
+            save_sector_best_file(
+                filepath=filepath,
+                filename=combo_name,
+                session_id=session_id,
+                session_best_tb=output_session.sectorBestTB,
+                session_best_pb=output_session.sectorBestPB,
+                alltime_best_tb=output_alltime.sectorBestTB,
+                alltime_best_pb=output_alltime.sectorBestPB,
+            )
+            delayed_save = False
 
     def resolve_pending(final: bool = False):
         """Set S3 of lap completed before player left track once validated by game"""
@@ -154,27 +183,8 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                     continue
 
             # Save data
-            if delayed_save and not readable:  # not accessible at load: best sectors of file kept
-                saved, readable = read_sector_best_file(
-                    filepath=filepath,
-                    filename=combo_name,
-                    session_id=session_id,
-                    defaults=(MAX_SECONDS, MAX_SECONDS, MAX_SECONDS),
-                )
-                if readable:
-                    merge_sector_best(output_session.sectorBestTB, output_session.sectorBestPB, *saved[:2])
-                    merge_sector_best(output_alltime.sectorBestTB, output_alltime.sectorBestPB, *saved[2:])
-            if delayed_save and readable:
-                save_sector_best_file(
-                    filepath=filepath,
-                    filename=combo_name,
-                    session_id=session_id,
-                    session_best_tb=output_session.sectorBestTB,
-                    session_best_pb=output_session.sectorBestPB,
-                    alltime_best_tb=output_alltime.sectorBestTB,
-                    alltime_best_pb=output_alltime.sectorBestPB,
-                )
-                delayed_save = False
+            if delayed_save:
+                save_data()
 
             # Delay reset until driving (module stopping: data saved only)
             if reset is MODULE_STOP or not realtime_state.active:
@@ -183,6 +193,7 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
 
             # Load data (laps not saved, file not accessible: discarded, file kept)
             delayed_save = False
+            next_checkpoint = monotonic() + CHECKPOINT_INTERVAL
             output_session.reset()
             output_alltime.reset()
             last_lap_stime = -1.0
@@ -202,6 +213,10 @@ def record_sectors(output_session: SectorData, output_alltime: SectorData, filep
                 defaults=(MAX_SECONDS, MAX_SECONDS, MAX_SECONDS),
                 backup=True,  # own sector file, replaced by next save
             )
+
+        # Checkpoint while driving (crash, power loss)
+        if delayed_save and monotonic() >= next_checkpoint:
+            save_data()
 
         # Pit visit & track limits of lap in progress (flag of lap just completed may stay a moment)
         lap_stime = api.read.timing.start()

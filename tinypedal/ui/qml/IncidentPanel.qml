@@ -16,6 +16,10 @@ Item {
     property string menuKey: ""  // incident of row menu
     readonly property bool canJump: backend.inSession && !backend.lastSession
     readonly property bool live: backend.inSession && !backend.replayActive  // jump: replay of live session
+    // Replay clock of last game answer, read once per answer (playhead timer ticks between answers)
+    readonly property real replayTime: backend.replayTime
+    readonly property real replayRate: backend.replayRate
+    readonly property real timeReceived: backend.timeReceived
 
     function clock(seconds) {
         var total = Math.max(Math.floor(seconds), 0)
@@ -136,7 +140,8 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(theme.em * 3.2)
             visible: root.counts.all > 0 || (backend.replayActive && backend.replayTime >= 0)
-            readonly property real fullEnd: Math.max(root.timelineData.end || 60, now * 1.02, 60)
+            // Playhead past known end: whole minutes, timeline span not changed on every playhead step
+            readonly property real fullEnd: Math.max(root.timelineData.end || 60, Math.ceil(now * 1.02 / 60) * 60, 60)
             property real zoomStart: -1  // shown part of session, -1: whole session
             property real zoomEnd: -1
             readonly property real viewStart: zoomStart >= 0 ? Math.min(zoomStart, fullEnd - 30) : 0
@@ -151,15 +156,11 @@ Item {
             property real hoverTime: -1
             readonly property real step: {
                 var steps = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600]
-                var count = Math.max(2, Math.floor(railWidth / (theme.em * 5)))
+                var count = Math.max(2, Math.min(Math.floor(railWidth / (theme.em * 5)), 38))  // ticks: 40 at most
                 for (var i = 0; i < steps.length; i++) if (viewSpan / steps[i] <= count) return steps[i]
                 return 43200
             }
-            readonly property var ticks: {
-                var result = []
-                for (var t = Math.ceil(viewStart / step) * step; t < viewEnd - step * 0.2; t += step) if (t > 0) result.push(t)
-                return result
-            }
+            readonly property real firstTick: Math.max(step, Math.ceil(viewStart / step) * step)
             function xOf(seconds) { return pad + railWidth * (seconds - viewStart) / viewSpan }
             function timeAt(px) { return Math.max(0, Math.min(viewStart + (px - pad) / railWidth * viewSpan, fullEnd)) }
             function markerAt(px, py) {  // nearest marker under mouse, "" if none
@@ -194,10 +195,10 @@ Item {
             Timer {  // playhead moves between game answers at measured rate
                 interval: 100
                 repeat: true
-                running: timeline.visible && backend.replayActive && backend.replayRate !== 0 && pageState.active
+                running: timeline.visible && backend.replayActive && root.replayRate !== 0 && pageState.active
                 triggeredOnStart: true
-                onTriggered: timeline.now = backend.replayTime + backend.replayRate
-                             * Math.min(Math.max((Date.now() - backend.timeReceived) / 1000, 0), 3)
+                onTriggered: timeline.now = root.replayTime + root.replayRate
+                             * Math.min(Math.max((Date.now() - root.timeReceived) / 1000, 0), 3)
             }
             Connections {
                 target: backend
@@ -219,16 +220,19 @@ Item {
                     color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.45)
                 }
             }
-            Repeater {  // time ticks
-                model: timeline.ticks
+            Repeater {  // time ticks: fixed items, values follow zoom (no delegate made again on wheel or drag)
+                model: 40
                 Item {
-                    required property var modelData
-                    x: timeline.xOf(modelData)
+                    id: tick
+                    required property int index
+                    readonly property real value: timeline.firstTick + index * timeline.step
+                    visible: value < timeline.viewEnd - timeline.step * 0.2
+                    x: visible ? timeline.xOf(value) : 0
                     Rectangle { x: -0.5; y: timeline.railY + theme.em * 0.3; width: 1; height: theme.em * 0.3; color: theme.border }
                     Text {
                         x: -width / 2
                         y: timeline.railY + theme.em * 0.6
-                        text: root.clock(parent.modelData)
+                        text: tick.visible ? root.clock(tick.value) : ""
                         color: theme.dimText
                         font.pointSize: theme.fontPoint * 0.72
                         font.features: { "tnum": 1 }
@@ -446,6 +450,7 @@ Item {
             activeFocusOnTab: true
             model: backend.incidentRows
             boundsBehavior: Flickable.StopAtBounds
+            reuseItems: true  // rows scrolled out fed again with other incidents (see delegate onPooled)
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             Keys.onUpPressed: { backend.moveIncidentSelection(-1); root.showSelected() }
             Keys.onDownPressed: { backend.moveIncidentSelection(1); root.showSelected() }
@@ -468,13 +473,17 @@ Item {
                 required property string otherCar
                 required property string focused
                 readonly property bool selected: key === backend.selectedIncident
+                // Reused row: fed other incident values at once, no color animation from the old incident
+                property bool live: true
+                ListView.onPooled: { live = false; opacity = 1 }  // add transition may have been running
+                ListView.onReused: live = true
 
                 width: ListView.view.width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
                 height: Math.round(theme.em * (driverCar !== "" || otherCar !== "" ? 3.1 : 2.4))
                 radius: theme.em * 0.5
                 color: selected ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, rowArea.containsMouse ? 0.22 : 0.15)
                      : rowArea.containsMouse ? theme.hover : "transparent"
-                Behavior on color { ColorAnimation { duration: 110 } }
+                Behavior on color { enabled: row.live; ColorAnimation { duration: 110 } }
 
                 Rectangle {  // my car involved
                     visible: row.mine
@@ -551,7 +560,8 @@ Item {
                         radius: height / 2
                         color: theme.hover
                         ToolTip.visible: mergedArea.containsMouse
-                        ToolTip.text: i18n.tr("Contacts of the same cars a moment apart, shown as one incident")
+                        ToolTip.text: mergedArea.containsMouse
+                            ? i18n.tr("Contacts of the same cars a moment apart, shown as one incident") : ""
                         ToolTip.delay: 400
                         MouseArea { id: mergedArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                         Text {
@@ -563,15 +573,20 @@ Item {
                             font.features: { "tnum": 1 }
                         }
                     }
-                    TpButton {
-                        id: jumpButton
-                        visible: root.canJump && (row.selected || rowArea.containsMouse || hovered)
-                        glyph: ""  // play
-                        flat: !row.selected
-                        accent: row.selected
-                        implicitHeight: Math.round(theme.em * 2.0)
-                        tip: (root.live ? i18n.tr("Replay This Moment") : i18n.tr("Jump to Incident")) + " (" + i18n.tr("double click") + ")"
-                        onClicked: backend.jumpTo(row.key, "")
+                    Loader {  // jump button made only for the selected or hovered row
+                        id: jumpLoader
+                        active: root.canJump && (row.selected || rowArea.containsMouse
+                                                 || (jumpLoader.item !== null && jumpLoader.item.hovered))
+                        visible: active
+                        sourceComponent: TpButton {
+                            glyph: ""  // play
+                            flat: !row.selected
+                            accent: row.selected
+                            implicitHeight: Math.round(theme.em * 2.0)
+                            tip: hovered ? (root.live ? i18n.tr("Replay This Moment") : i18n.tr("Jump to Incident"))
+                                           + " (" + i18n.tr("double click") + ")" : ""
+                            onClicked: backend.jumpTo(row.key, "")
+                        }
                     }
                 }
             }

@@ -86,6 +86,7 @@ TpPage {
                 keyNavigationEnabled: true
                 activeFocusOnTab: true
                 cacheBuffer: theme.em * 30
+                reuseItems: true  // results synced at each search: rows of other options reuse delegates
                 currentIndex: count > 0 ? 0 : -1
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 delegate: OptionResultRow {
@@ -96,7 +97,9 @@ TpPage {
                 onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
 
                 add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 } }
-                displaced: Transition {
+                displaced: count > 30 ? null : moved  // long lists: rows placed at once, not animated
+                Transition {
+                    id: moved
                     NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic }
                     NumberAnimation { property: "opacity"; to: 1; duration: 180 }
                 }

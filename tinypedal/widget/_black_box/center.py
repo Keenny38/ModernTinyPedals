@@ -121,14 +121,31 @@ class CenterPainter:
         gap = self.unit * 0.2
         return sum(self.item_height(name) + gap for name in (self.center_order if items is None else items))
 
-    def draw_leds(self, painter: QPainter, rect: QRectF):
-        """RPM LEDs: light up from green to red, all flash over shift point, soft glow when lit"""
+    def led_levels(self) -> tuple[int, float, float, float, bool]:
+        """(LED count, RPM ratio, start ratio, redline ratio, over redline) of RPM LEDs"""
         wcfg = self.wcfg
         count = min(max(int(wcfg["number_of_rpm_leds"]), 3), 20)
         ratio = self.rpm / self.rpm_max if self.rpm_max > 0 else 0
         start = min(max(wcfg["rpm_led_start_ratio"], 0), 0.95)
         redline = max(wcfg["rpm_redline_ratio"], start + 0.01)
-        over = ratio >= redline
+        return count, ratio, start, redline, ratio >= redline
+
+    @staticmethod
+    def led_lit(led: int, count: int, ratio: float, start: float, redline: float) -> bool:
+        """LED lit below redline"""
+        return ratio >= start + led / count * (redline - start)
+
+    def leds_key(self) -> tuple:
+        """What RPM LEDs show: lit LEDs, or flash phase over redline"""
+        count, ratio, start, redline, over = self.led_levels()
+        if over:
+            return -1, self.flash_off()
+        return sum(self.led_lit(led, count, ratio, start, redline) for led in range(count)), False
+
+    def draw_leds(self, painter: QPainter, rect: QRectF):
+        """RPM LEDs: light up from green to red, all flash over shift point, soft glow when lit"""
+        wcfg = self.wcfg
+        count, ratio, start, redline, over = self.led_levels()
         flash_off = over and self.flash_off()
         gap = rect.height() * 0.3
         led_w = (rect.width() - gap * (count - 1)) / count
@@ -136,11 +153,10 @@ class CenterPainter:
         glow_pad = rect.height() * 0.35
         for led in range(count):
             led_rect = QRectF(rect.left() + led * (led_w + gap), rect.top(), led_w, rect.height())
-            threshold = start + led / count * (redline - start)
             if over:
                 lit = not flash_off
                 color = wcfg["rpm_led_shift_color"] if lit else inactive
-            elif ratio >= threshold:
+            elif self.led_lit(led, count, ratio, start, redline):
                 lit = True
                 position = led / max(count - 1, 1)
                 key = "rpm_led_low_color" if position < 0.5 else "rpm_led_mid_color" if position < 0.8 else "rpm_led_high_color"
@@ -187,28 +203,85 @@ class CenterPainter:
             self.draw_center_item(painter, name, QRectF(rect.left(), top, rect.width(), heights[name]))
             top += heights[name] + gap
 
+    # Values as drawn: shared by drawing & change keys (see drawn)
+    def brake_heat_text(self) -> str:
+        """Front minus rear disc temperature: which way to move brake bias"""
+        difference = self.unit_temp(self.brake_heat_balance) - self.unit_temp(0.0)
+        return f"{difference:+.0f}{self.sign_text}"
+
+    def delta_value(self) -> tuple[str, str]:
+        """Delta text & color ("" for text color)"""
+        if not (self.use_delta and self.delta_shown):  # no reference lap, or out lap: no delta
+            return "-", ""
+        return f"{self.delta_best:+.3f}", self.wcfg["delta_gain_color" if self.delta_best < 0 else "delta_loss_color"]
+
+    def laptime_text(self) -> str:
+        return calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-"
+
+    def locking_text(self) -> str:
+        return f"{self.locking_front:.0f}/{self.locking_rear:.0f}" if self.use_wheels else "-"
+
+    def speed_text(self) -> str:
+        return f"{self.unit_speed(self.speed):.0f}"
+
+    def rpm_ratio(self) -> float:
+        """RPM bar fill, 0 to 1 (0: no bar)"""
+        if self.rpm_max > 0 and self.rpm > 0:
+            return min(self.rpm / self.rpm_max, 1)
+        return 0.0
+
+    def pedal_values(self) -> list[tuple[float, str]]:
+        """Pedal bars: (value, color) top to bottom"""
+        wcfg = self.wcfg
+        pedals = [(self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"])]
+        if wcfg["show_clutch_bar"]:
+            pedals.append((self.clutch, wcfg["clutch_color"]))
+        return pedals
+
+    def center_key(self) -> tuple:
+        """What center column shows, see drawn"""
+        items = self.visible_center_items()
+        return tuple(items), tuple(self.center_item_key(name) for name in items)
+
+    def center_item_key(self, name: str):
+        """Texts, colors & bar fills of a center item (bars as wide as the column)"""
+        if name == "brake_heat":
+            return self.brake_heat_text()
+        if name == "delta":
+            return self.delta_value()
+        if name == "laptime":
+            return self.laptime_text()
+        if name == "locking":
+            return self.locking_text()
+        if name == "pit_limiter":
+            return self.in_pits, self.limiter
+        if name == "gear" and self.gear_speed_cluster and self.wcfg["show_speed"]:
+            return self.gear_text(), self.gear_color(), self.speed_text(), self.rpm_ratio()
+        if name == "gear":
+            return self.gear_text(), self.gear_color()
+        if name == "speed":
+            return self.speed_text()
+        if name == "rpm":
+            ratio = self.rpm_ratio()
+            return f"{self.rpm:.0f}", ratio, ratio >= self.wcfg["rpm_redline_ratio"]
+        if name == "pedals":
+            return tuple(min(value, 1) if value > 0.001 else None for value, _ in self.pedal_values())
+        return None
+
     def draw_center_item(self, painter: QPainter, name: str, rect: QRectF):
         wcfg = self.wcfg
         unit = self.unit
         if name == "brake_heat":
-            # Front minus rear disc temperature: which way to move brake bias
-            difference = self.unit_temp(self.brake_heat_balance) - self.unit_temp(0.0)
-            self.draw_info_row(painter, rect, self.text["brake_heat"], f"{difference:+.0f}{self.sign_text}")
+            self.draw_info_row(painter, rect, self.text["brake_heat"], self.brake_heat_text())
         elif name == "delta":
-            gain = self.delta_best < 0
-            color = wcfg["delta_gain_color" if gain else "delta_loss_color"]
             # Delta source initial after the label, unless the default best lap delta
             source = wcfg["deltabest_source"]
             label = self.text["delta"] if source == "Best" else f"{self.text['delta']} {source[0]}"
-            shown = self.use_delta and self.delta_shown  # no reference lap, or out lap: no delta
-            self.draw_info_row(painter, rect, label, f"{self.delta_best:+.3f}" if shown else "-",
-                               color if shown else "")
+            self.draw_info_row(painter, rect, label, *self.delta_value())
         elif name == "laptime":
-            self.draw_info_row(painter, rect, self.text["laptime"],
-                               calc.sec2laptime(self.laptime_current)[:8] if self.use_delta else "-")
+            self.draw_info_row(painter, rect, self.text["laptime"], self.laptime_text())
         elif name == "locking":
-            self.draw_info_row(painter, rect, self.text["locking"],
-                               f"{self.locking_front:.0f}/{self.locking_rear:.0f}" if self.use_wheels else "-")
+            self.draw_info_row(painter, rect, self.text["locking"], self.locking_text())
         elif name == "pit_limiter":
             # Only active indicators, sharing the row
             active = [
@@ -228,7 +301,7 @@ class CenterPainter:
             painter.setPen(qcolor(self.gear_color()))
             self.draw_fit_text(painter, rect, self.gear_text(), self.font_gear)
         elif name == "speed":
-            text = f"{self.unit_speed(self.speed):.0f} {self.speed_label}"
+            text = f"{self.speed_text()} {self.speed_label}"
             if self.justify_center:
                 self.draw_info_row(painter, rect, self.text["speed"], text)
             else:
@@ -243,15 +316,13 @@ class CenterPainter:
                 self.draw_fit_text(painter, text_rect, f"{self.rpm:.0f} rpm", self.font_rpm)
             bar = QRectF(rect.left(), text_rect.bottom(), rect.width(), unit * 0.3)
             fill_chip(painter, bar, wcfg["indicator_inactive_color"])
-            if self.rpm_max > 0 and self.rpm > 0:
-                ratio = min(self.rpm / self.rpm_max, 1)
+            ratio = self.rpm_ratio()
+            if ratio > 0:
                 color = wcfg["rpm_redline_color" if ratio >= wcfg["rpm_redline_ratio"] else "rpm_bar_color"]
                 fill_chip_gradient(painter, QRectF(bar.left(), bar.top(), bar.width() * ratio, bar.height()), color)
         elif name == "pedals":
             gap = unit * 0.1
-            pedals = [(self.throttle, wcfg["throttle_color"]), (self.brake, wcfg["brake_color"])]
-            if wcfg["show_clutch_bar"]:
-                pedals.append((self.clutch, wcfg["clutch_color"]))
+            pedals = self.pedal_values()
             bar_h = (rect.height() - gap * (len(pedals) - 1)) / len(pedals)
             for index, (value, color) in enumerate(pedals):
                 back = QRectF(rect.left(), rect.top() + index * (bar_h + gap), rect.width(), bar_h)
@@ -274,8 +345,8 @@ class CenterPainter:
         # RPM accent: thin bar along top edge, in gear color (turns shift color at redline)
         accent = QRectF(rect.left(), rect.top(), rect.width(), max(unit * 0.1, 2))
         fill_chip(painter, accent, wcfg["indicator_inactive_color"])
-        if self.rpm_max > 0 and self.rpm > 0:
-            ratio = min(self.rpm / self.rpm_max, 1)
+        ratio = self.rpm_ratio()
+        if ratio > 0:
             fill_chip_gradient(painter, QRectF(accent.left(), accent.top(), accent.width() * ratio, accent.height()),
                                gear_color)
         inner = rect.adjusted(unit * 0.15, accent.height() + unit * 0.05, -unit * 0.15, -unit * 0.1)
@@ -291,7 +362,7 @@ class CenterPainter:
         painter.setPen(qcolor(gear_color))
         self.draw_fit_text(painter, gear_rect, self.gear_text(), self.grown_font(self.font_gear, gear_rect))
         painter.setPen(self.pen_text)
-        self.draw_fit_text(painter, speed_rect, f"{self.unit_speed(self.speed):.0f}",
+        self.draw_fit_text(painter, speed_rect, self.speed_text(),
                            self.grown_font(self.font_speed, speed_rect))
         painter.setPen(self.pen_info_label)
         self.draw_fit_text(painter, label_rect, self.speed_label.upper(), self.font_label)

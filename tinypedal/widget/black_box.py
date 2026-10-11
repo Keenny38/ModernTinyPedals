@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap, QRegion
 
 from .. import units
 from ._base import Overlay, store_screen_layout
@@ -47,6 +47,7 @@ from ._black_box.panels import PanelPainter
 from ._black_box.persist import keep_records, memory, restore_records
 from ._black_box.reader import DataReader
 from ._black_box.recorder import EventLog, IncidentBrowse, Recorder, open_folder
+from ._black_box.regions import WHEEL_PARTS, RegionMixin
 from ._black_box.sizing import COMPACT_START, Debounce, Fit, Presence, anchored_position, fit_content
 from ._black_box.state import (
     BrakePeak,
@@ -68,13 +69,13 @@ from ._black_box.suspension import TYRE_DIAMETER_MM, WHEEL_TRAVEL_MM, Suspension
 from ._black_box.trace import TracePainter
 from ._black_box.wheels import ColorFade, WheelPainter
 from ._common import warning_flash
-from ._painter import OverlayStyle
+from ._painter import DirtyRegion, OverlayStyle
 from ._style import StyledConfig
 
 
 class Realtime(
     DataReader, WheelPainter, SuspensionPainter, CenterPainter, PanelPainter, DamagePainter, TracePainter, StatusPainter,
-    PaintBase, Overlay,
+    RegionMixin, PaintBase, Overlay,
 ):
     """Draw widget
 
@@ -255,6 +256,7 @@ class Realtime(
         tyre_h = layout.rects_tyre[0].height() if layout.rects_tyre else 0
         self.susp_pixels_per_mm = tyre_h / TYRE_DIAMETER_MM * max(wcfg["suspension_motion_scale"], 0)
         self.static_layer = None
+        self.region_cache = None
         self.fit = fit_content(layout.width, layout.height, *self.fixed_size)
         self.resize_anchored(self.fit.width, self.fit.height)
 
@@ -366,7 +368,9 @@ class Realtime(
         # Caches: background layer (rebuilt on resize), fitted fonts, last drawn state
         self.static_layer: QPixmap | None = None
         self.font_cache: dict[tuple, QFont] = {}
-        self.last_state: tuple = ()
+        self.last_state: tuple = ()  # layout drawn last (whole widget repainted once changed)
+        self.last_parts: dict = {}  # state of each part drawn last, see _black_box.regions
+        self.dirty_region = DirtyRegion()
         # Custom labels
         self.text = {key[5:]: value for key, value in wcfg.items() if key.startswith("text_")}
 
@@ -491,14 +495,20 @@ class Realtime(
 
     def config_modules(self, wcfg):
         """Data modules needed by enabled options, checked about once per second"""
-        settings = self.cfg.user.setting
-        self.modules = ModuleStatus(settings, required_modules(wcfg))
-        if wcfg["enable_required_modules"] and self.modules.missing:
-            enable_modules(self.modules.missing, settings, self.cfg.save)
-            self.modules.refresh()
+        self.modules = ModuleStatus(self.cfg.user.setting, required_modules(wcfg))
+        self.enable_required_modules = bool(wcfg["enable_required_modules"])  # on start, never by a preview
         self.module_check_every = max(round(1000 / max(wcfg["update_interval"], 1)), 1)
         self.show_module_warning = bool(wcfg["show_module_warning"])
         self.apply_module_status()
+
+    def start(self):
+        """Missing modules turned on first (enable_required_modules): only a started overlay changes module
+        settings & starts modules, a preview (overlay options, cards) is never started"""
+        if self.enable_required_modules and self.modules.missing:
+            enable_modules(self.modules.missing, self.cfg.user.setting, self.cfg.save)
+            self.modules.refresh()
+            self.apply_module_status()
+        super().start()
 
     def reset_data(self):
         """Last data"""
@@ -593,19 +603,25 @@ class Realtime(
         depth_effects = OverlayStyle.depth_effects
         OverlayStyle.depth_effects = False
         try:
-            self.paint_content()
+            region = event.region() if event is not None else None
+            whole = region is None or QRegion(self.rect()).subtracted(region).isEmpty()
+            self.paint_content(None if whole else region)
+            self.dirty_region.painted(region)
         finally:
             OverlayStyle.depth_effects = depth_effects
 
-    def paint_content(self):
-        """Draw"""
+    def paint_content(self, region: QRegion | None = None):
+        """Draw parts reaching into region (whole widget if None), see _black_box.regions"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawPixmap(0, 0, self.background_layer())
         self.apply_fit(painter)
-        if self.led_h:
+        shown = self.part_shown
+        if self.led_h and shown("leds", region):
             self.draw_leds(painter, self.rect_leds)
         for index, wheel in enumerate(self.wheels):
+            if not shown(WHEEL_PARTS[index], region):
+                continue
             # Tyre & disc hang on the suspension, like on the car: they move with the wheel
             # mount, by the real offset (screen vertical axis = suspension axis, as the spring)
             shift = self.wheel_shift(index, wheel)
@@ -618,18 +634,20 @@ class Realtime(
                 painter.restore()
             if self.show_suspension:
                 self.draw_suspension(painter, self.rects_susp[index], wheel, index)
-        if not self.rect_center.isNull():
+        if not self.rect_center.isNull() and shown("center", region):
             self.draw_center(painter, self.rect_center)
-        self.draw_status_icons(painter)
-        self.draw_side_rows(painter)
-        if self.row_battery:
+        if shown("status", region):
+            self.draw_status_icons(painter)
+        if shown("side_rows", region):
+            self.draw_side_rows(painter)
+        if self.row_battery and shown("battery", region):
             self.draw_battery_bar(painter, self.rect_battery)
-        self.draw_bottom_rows(painter)
-        if self.show_damage_panel:
+        self.draw_bottom_rows(painter, region)
+        if self.show_damage_panel and shown("damage", region):
             self.draw_damage_panel(painter, self.rect_damage)
-        if self.show_recorder:
+        if self.show_recorder and shown("trace", region):
             self.draw_trace(painter, self.rect_trace)
-        if self.show_event_log:
+        if self.show_event_log and shown("events", region):
             self.draw_event_log(painter)
-        if self.show_module_warning and self.modules.missing:
+        if self.show_module_warning and self.modules.missing:  # own chip over car view: always drawn (clipped)
             self.draw_module_warning(painter)

@@ -57,14 +57,19 @@ def test_run_command_requires_header(server):
 
 
 def test_run_command(server):
-    status, data = request("/command/overlay_lock", method="POST", headers={"X-TinyPedal": "1"})
+    status, data = request("/command/overlay_lock", method="POST", headers={"X-NeoPedal": "1"})
     assert status == 200 and data["ok"]
     QCoreApplication.processEvents()  # command is queued to main thread
     assert len(server) == 1 and callable(server[0])
 
 
+def test_legacy_header_accepted(server):
+    status, data = request("/command/overlay_lock", method="POST", headers={"X-TinyPedal": "1"})
+    assert status == 200 and data["ok"]  # tools set up before the NeoPedal name
+
+
 def test_unknown_command(server):
-    status, _ = request("/command/format_disk", method="POST", headers={"X-TinyPedal": "1"})
+    status, _ = request("/command/format_disk", method="POST", headers={"X-NeoPedal": "1"})
     assert status == 404
 
 
@@ -136,6 +141,26 @@ def test_stream_pushes_json(server, stream_data):
         while (frame := ws_read(sock))[0] != command_server.WS_OP_CLOSE:
             pass
         assert frame[1] == b"\x03\xe8"
+
+
+def test_stream_snapshot_error_logged_once_as_warning(server, monkeypatch, caplog):
+    """Bad telemetry never breaks stream, error visible at default log level without flooding the log"""
+    import logging
+
+    from tinypedal.log_handler import ErrorThrottle
+
+    def broken():
+        raise KeyError("speed")
+
+    monkeypatch.setattr(command_server.CommandHandler, "snapshot", staticmethod(broken))
+    monkeypatch.setattr(command_server, "snapshot_errors", ErrorThrottle())
+    caplog.set_level(logging.DEBUG, logger=command_server.logger.name)
+    sock, _, response = ws_connect()
+    with sock:
+        assert response.startswith("HTTP/1.1 101")
+        assert [json.loads(ws_read(sock)[1]) for _ in range(3)] == [{"active": False}] * 3
+    levels = [record.levelno for record in caplog.records if "snapshot error" in record.getMessage()]
+    assert levels[0] == logging.WARNING and len(levels) >= 3 and set(levels[1:]) == {logging.DEBUG}
 
 
 def test_stream_rejects_foreign_origin(server, stream_data):

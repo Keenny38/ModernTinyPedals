@@ -124,6 +124,19 @@ def test_search_and_class_filters(backend):
     assert names(backend) == ["Dario"]
 
 
+def test_poll_without_search_folds_no_text(backend, monkeypatch):
+    """No search words: rows accepted without folding name, car & class of every row at each poll"""
+    from tinypedal.ui.quick import spectate_backend
+
+    folded = []
+    monkeypatch.setattr(spectate_backend, "sort_key", lambda text: folded.append(text) or text.casefold())
+    backend.reader.vehicle.cars.append(("Emma", "Alpine A424", "Hypercar", 5, 40))
+    backend.poll()
+    assert "Emma" in names(backend) and not [text for text in folded if " " in text]
+    backend.setSearch("alpine")
+    assert names(backend) == ["Emma"] and any("Alpine" in text for text in folded)
+
+
 def test_rows_synced_in_place(backend):
     inserted, reset = [], []
     backend.model.rowsInserted.connect(lambda *args: inserted.append(args))
@@ -163,6 +176,43 @@ def test_spectated_card(backend):
     cfg.api["player_index"] = 99  # left session
     backend.refresh()
     assert not backend.spectated["found"] and backend.spectated["slot"] == 99
+
+
+def test_derived_values_signaled_only_when_changed(backend, monkeypatch):
+    """Card, chips & counts each told only when their value changed (not on laps of other drivers)"""
+    from tinypedal.ui.quick import spectate_backend
+
+    cfg.api["enable_player_index_override"] = True
+    cfg.api["player_index"] = 14
+    backend.refresh()
+    pictures = []
+    monkeypatch.setattr(spectate_backend, "car_picture_url",
+                        lambda vehicle, large=False: pictures.append(vehicle) or f"picture:{vehicle}")
+    backend.pictures_changed()  # pictures arrived: card picture looked up again
+    assert backend.spectated["carPicture"] == "picture:Ferrari 499P"
+    told: dict[str, int] = {"spectated": 0, "classes": 0, "counts": 0}
+    for name in told:
+        getattr(backend, f"{name}Changed").connect(lambda name=name: told.__setitem__(name, told[name] + 1))
+    chip_resets, chips_changed = [], []
+    backend.class_model.modelReset.connect(lambda: chip_resets.append(1))
+    backend.class_model.dataChanged.connect(lambda *args: chips_changed.append(1))
+    laps = {1: 0.0}
+    monkeypatch.setattr(Timing, "last_laptime", lambda self, index=None: laps.get(index, 0.0))
+    laps[1] = 210.0  # Ben (not spectated) finished a lap
+    backend.poll()
+    assert told == {"spectated": 0, "classes": 0, "counts": 0}
+    laps[0] = 205.0  # Anna (spectated) finished a lap
+    backend.poll()
+    assert told == {"spectated": 1, "classes": 0, "counts": 0} and backend.spectated["lastLap"]
+    assert pictures == ["Ferrari 499P"]  # same car: picture not looked up again
+    backend.reader.vehicle.cars.append(("Emma", "Alpine A424", "Hypercar", 5, 40))
+    backend.poll()
+    assert told["classes"] == 1 and told["counts"] == 1 and backend.driverCount == 5
+    assert backend.classes[0] == {"key": "Hypercar", "label": "Hypercar", "color": backend.classes[0]["color"], "count": 3}
+    assert not chip_resets and chips_changed  # chips kept, count changed in place
+    assert [row["count"] for row in backend.class_model.rows] == [3, 1, 1]
+    backend.setClassFilter("LMP2")
+    assert told["counts"] == 2 and backend.shownCount == 1 and told["classes"] == 1
 
 
 def test_data_modules_restarted_when_followed_driver_changes(backend, setups, monkeypatch):
@@ -274,6 +324,13 @@ def test_qml_page(setups):
             QCoreApplication.processEvents()
         texts = item_texts(page.view)
         assert {"Spectate", "Carla", "Porsche 963", "Turn On Spectate Mode"} <= texts
+        stack, chips = [page.view.rootObject()], []
+        while stack:
+            item = stack.pop()
+            if item.property("text") in ("All", "LMGT3"):
+                chips.append(item)
+            stack.extend(item.childItems())
+        assert len(chips) >= 2 and all(chip.isVisible() for chip in chips)  # 3 classes: chips shown
         page.hide()
         assert not page.backend._timer.isActive()  # nothing read while hidden
     finally:

@@ -70,7 +70,7 @@ class Realtime(HiddenPreview, PitLaneMixin, StatsMixin, ModernOverlay):
         self.refresh((reading.visible, self.values(reading)))
 
     def paintEvent(self, event):
-        """Draw while shown (or overlay unlocked)"""
+        """Draw while shown (or in overlay edit mode)"""
         if self.state[0] or self.previewing():
             super().paintEvent(event)
 

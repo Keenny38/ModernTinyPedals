@@ -35,12 +35,20 @@ from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from ... import app_signal, safe_mode
+from ... import app_signal, realtime_state, safe_mode
 from ...const_file import ConfigType
 from ...i18n import tr
 from ...i18n.options import module_label
 from ...setting import cfg
-from ...stream_overlay import LAYOUT, STREAM_VISIBILITY, canvas_screen, stream_visibility, streamoverlay
+from ...stream_overlay import (
+    LAYOUT,
+    STREAM_VISIBILITY,
+    canvas_screen,
+    layout_section,
+    stream_layout,
+    stream_visibility,
+    streamoverlay,
+)
 from ...template.setting_widget import WIDGET_FILENAME
 from ...userfile import atomic_write
 from .models import DictListModel
@@ -52,6 +60,7 @@ RESULTS_CLASSES = ("all", "cycle")
 RESULTS_SESSIONS = ("race", "qualifying", "any")
 RESULTS_ROWS = (10, 15, 20, 25)
 RESULTS_CYCLES = (6, 10, 15, 20)
+LAYOUT_FORMATS = ("16:9", "screen")  # layout canvas: centre of screen in 16:9 (1920 x 1080 source), or whole screen
 OVERLAY_ROLES = ("key", "label", "visibility", "sizeText", "live", "shown")
 TIMES = chr(0xD7)  # multiplication sign
 
@@ -123,6 +132,30 @@ def choice(value: Any, choices: tuple, default: Any) -> Any:
     return value if value in choices else default
 
 
+def crop_size(width: int, height: int, aspect: tuple[int, int]) -> tuple[int, int]:
+    """Size of centre part of a screen in aspect ratio (whole screen if same ratio), same as layout page"""
+    if width <= 0 or height <= 0:
+        return width, height
+    ratio = aspect[0] / aspect[1]
+    if width / height > ratio:
+        return round(height * ratio), height
+    return width, round(width / ratio)
+
+
+def hidden_reason(rows: list[dict[str, Any]], spectating: bool) -> str:
+    """Why no overlay is shown on stream now, empty if one is (or none enabled for stream)"""
+    streamed = [row for row in rows if row["visibility"] != 2]
+    if not streamed or any(row["shown"] for row in streamed):
+        return ""
+    if realtime_state.hidden and not realtime_state.shown:
+        if spectating:
+            return tr("No overlay shown now: Auto Hide hides them outside sessions. They show while you drive, "
+                      "and while you spectate or watch a replay with a source on air.")
+        return tr("No overlay shown now: Auto Hide hides them while you are not driving. Turn on "
+                  "\"Show overlays while spectating\" to stream a session you watch.")
+    return tr("No overlay shown now: hidden by their visibility options or a hotkey.")
+
+
 class StreamOverlaysBackend(QObject):
     """Stream overlays page state & actions"""
 
@@ -138,6 +171,7 @@ class StreamOverlaysBackend(QObject):
         self.results_session = choice(settings.get("results_session"), RESULTS_SESSIONS, "race")
         self.results_rows = choice(settings.get("results_rows"), RESULTS_ROWS, 15)
         self.results_cycle = choice(settings.get("results_cycle"), RESULTS_CYCLES, 10)
+        self.layout_format = choice(settings.get("layout_format"), LAYOUT_FORMATS, LAYOUT_FORMATS[0])
         self.notice = ""
         self.notice_count = 0
         self.watched: set[str] = set()
@@ -165,6 +199,7 @@ class StreamOverlaysBackend(QObject):
         save_page_settings({
             "results_class": self.results_class, "results_session": self.results_session,
             "results_rows": self.results_rows, "results_cycle": self.results_cycle,
+            "layout_format": self.layout_format,
         })
 
     @Slot()
@@ -183,12 +218,14 @@ class StreamOverlaysBackend(QObject):
         return (
             bool(setting["enable_stream_overlay"]), streamoverlay.running, frozenset(self.watched),
             bool(setting["enable_lan_access"]), streamoverlay.port(), setting["frame_rate"],
-            streamoverlay.access_token(), self.lanText, self.screenText,
+            streamoverlay.access_token(), self.lanText, self.screenText, self.layoutSizeText,
+            self.spectating, self.hiddenText, stream_layout.version,
         )
 
     def refresh_overlays(self, *_args):
-        self._model.sync(overlay_rows(self.watched))
-        self.overlaysChanged.emit()
+        """Overlay rows synced in place (every second while shown), page told only when something changed"""
+        if self._model.sync(overlay_rows(self.watched)):
+            self.overlaysChanged.emit()
 
     def notify(self, text: str):
         self.notice = text
@@ -227,6 +264,18 @@ class StreamOverlaysBackend(QObject):
     def lanAccess(self) -> bool:
         return bool(self.setting()["enable_lan_access"])
 
+    @Property(bool, notify=serverChanged)
+    def spectating(self) -> bool:
+        """Overlays shown & updated while spectating or watching a replay, a source on air"""
+        return bool(self.setting().get("show_overlays_while_spectating", True))
+
+    @Property(str, notify=serverChanged)
+    def hiddenText(self) -> str:
+        """Why sources are empty now (no overlay shown), empty if not"""
+        if not self.running:
+            return ""
+        return hidden_reason(self._model.rows, bool(self.setting().get("show_overlays_while_spectating", True)))
+
     @Property(int, notify=serverChanged)
     def port(self) -> int:
         return streamoverlay.port()
@@ -263,6 +312,10 @@ class StreamOverlaysBackend(QObject):
     def setLanAccess(self, enabled: bool):
         self.apply_setting("enable_lan_access", enabled)
 
+    @Slot(bool)
+    def setSpectating(self, enabled: bool):
+        self.apply_setting("show_overlays_while_spectating", enabled)
+
     @Slot(int)
     def setPort(self, port: int):
         if 1024 <= port <= 65535:
@@ -283,20 +336,70 @@ class StreamOverlaysBackend(QObject):
     # Addresses
     @Property(str, notify=serverChanged)
     def layoutUrl(self) -> str:
-        return streamoverlay.url(f"/{LAYOUT}")
+        return streamoverlay.url(f"/{LAYOUT}", "crop=16:9" if self.layout_format == "16:9" else "")
 
     @Property(str, notify=serverChanged)
     def indexUrl(self) -> str:
         return streamoverlay.url("/")
 
+    @staticmethod
+    def screen_size() -> tuple[int, int]:
+        """Screen of layout canvas (holding most overlays), screen pixels"""
+        screen = canvas_screen(list(overlay_windows().values()))
+        if screen is None:
+            return 0, 0
+        ratio = screen.devicePixelRatio()
+        return round(screen.geometry().width() * ratio), round(screen.geometry().height() * ratio)
+
     @Property(str, notify=serverChanged)
     def screenText(self) -> str:
         """Layout canvas size: screen holding most overlays"""
-        screen = canvas_screen(list(overlay_windows().values()))
-        if screen is None:
-            return ""
-        ratio = screen.devicePixelRatio()
-        return size_text(round(screen.geometry().width() * ratio), round(screen.geometry().height() * ratio))
+        return size_text(*self.screen_size())
+
+    @Property(str, notify=serverChanged)
+    def layoutSizeText(self) -> str:
+        """Layout source detail: browser source size & part of screen shown"""
+        width, height = self.screen_size()
+        if self.layout_format == "screen":
+            return tr("Browser source size") + ": " + size_text(width, height)
+        text = tr("Browser source size") + ": " + size_text(1920, 1080)
+        crop = crop_size(width, height, (16, 9))
+        if crop != (width, height) and width > 0:
+            text += "  (" + tr("centre %1 of the screen %2").replace("%1", size_text(*crop)).replace(
+                "%2", size_text(width, height)) + ")"
+        return text
+
+    @Property(bool, notify=serverChanged)
+    def layoutPlaced(self) -> bool:
+        """Overlays placed by the layout editor on this layout format"""
+        return bool(stream_layout.get(layout_section(self.crop())))
+
+    def crop(self) -> str:
+        return "16:9" if self.layout_format == "16:9" else ""
+
+    @Slot()
+    def editLayout(self):
+        """Layout editor in the browser (overlays shown now dragged to their place on the layout)"""
+        query = f"crop={self.crop()}&edit=1" if self.crop() else "edit=1"
+        self.openInBrowser(streamoverlay.url(f"/{LAYOUT}", query))
+
+    @Slot()
+    def resetLayout(self):
+        stream_layout.set(layout_section(self.crop()), {})
+        streamoverlay.store.bump()
+        self.refresh(force=True)
+        self.notify(tr("Overlays back to their place on screen"))
+
+    @Property(int, notify=serverChanged)
+    def layoutFormatIndex(self) -> int:
+        return LAYOUT_FORMATS.index(self.layout_format)
+
+    @Slot(int)
+    def setLayoutFormat(self, index: int):
+        if 0 <= index < len(LAYOUT_FORMATS) and LAYOUT_FORMATS[index] != self.layout_format:
+            self.layout_format = LAYOUT_FORMATS[index]
+            self.save_settings()
+            self.refresh(force=True)
 
     @Property(bool, notify=serverChanged)
     def layoutLive(self) -> bool:

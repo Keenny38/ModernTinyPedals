@@ -31,6 +31,7 @@ import ipaddress
 import logging
 import os
 import ssl
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ CERT_FILE = "web_dashboard_cert.pem"
 KEY_FILE = "web_dashboard_key.pem"
 VALID_DAYS = 3650
 RENEW_DAYS = 30  # create a new certificate this many days before expiry
+_lock = threading.Lock()  # certificate made & loaded by GUI (server start) & background thread (new address)
 
 
 def cert_paths(folder: str) -> tuple[str, str]:
@@ -91,13 +93,21 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-    # Key readable by current user only (POSIX), written before certificate
-    fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as file:
-        file.write(key_bytes)
-    with open(cert_file, "wb") as file:
-        file.write(cert.public_bytes(serialization.Encoding.PEM))
+    # Both written in full first, then replaced (never a truncated file); key readable by current user only (POSIX)
+    _write_new(key_file, key_bytes, 0o600)
+    _write_new(cert_file, cert.public_bytes(serialization.Encoding.PEM), 0o644)
+    os.replace(f"{key_file}.tmp", key_file)
+    os.replace(f"{cert_file}.tmp", cert_file)
     logger.info("WEB DASHBOARD: created self-signed certificate for %s", ", ".join(["localhost", *addresses]))
+
+
+def _write_new(filename: str, data: bytes, mode: int) -> None:
+    """Write data to filename.tmp, flushed to disk"""
+    fd = os.open(f"{filename}.tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "wb") as file:
+        file.write(data)
+        file.flush()
+        os.fsync(file.fileno())
 
 
 def server_context(folder: str, addresses: list[str]) -> ssl.SSLContext:
@@ -113,9 +123,15 @@ def load_certificate(context: ssl.SSLContext, folder: str, addresses: list[str])
     cover addresses (raise OSError, ValueError or ImportError)"""
     cert_file, key_file = cert_paths(folder)
     addresses = sorted({"127.0.0.1", *addresses})
-    if not (os.path.exists(key_file) and covers(cert_file, addresses)):
-        create_certificate(cert_file, key_file, addresses)
-    context.load_cert_chain(cert_file, key_file)
+    with _lock:
+        if not (os.path.exists(key_file) and covers(cert_file, addresses)):
+            create_certificate(cert_file, key_file, addresses)
+        try:
+            context.load_cert_chain(cert_file, key_file)
+        except ssl.SSLError as error:  # key not matching certificate or damaged (crash while written): made again
+            logger.warning("WEB DASHBOARD: certificate not loaded (%s), creating a new one", error)
+            create_certificate(cert_file, key_file, addresses)
+            context.load_cert_chain(cert_file, key_file)
 
 
 def fingerprint(folder: str) -> str:

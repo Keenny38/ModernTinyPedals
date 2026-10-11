@@ -21,7 +21,7 @@ Race notifications Widget
 
 Short messages that fade out after a few seconds: position gained or lost (overall & in class),
 new penalty, fastest lap in class, blue flag, full course yellow start & end, lap invalidated.
-Nothing drawn while there is no message (unless overlay unlocked).
+Nothing drawn while there is no message (unless in overlay edit mode).
 """
 
 from __future__ import annotations

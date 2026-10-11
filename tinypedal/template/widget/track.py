@@ -267,6 +267,7 @@ WIDGET_TRACK = {
         "line_width": 40,
         "maximum_display_duration": 30,
         "new_message_duration": 5,
+        "scroll_direction": "Upward",
         "show_message_time": False,
         "font_color_message": "#FFFFFF",
         "font_color_new_message": "#FFDD44",

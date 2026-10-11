@@ -45,6 +45,15 @@ The **Lap Time Reference** card on the right shows the **level scale** of the se
 
 - **Activity**: a calendar of the last 12 months, one square per day colored by your driving time (all tracks), with the days driven, the total time and your longest streak. Hover a day for its sessions.
 - **Recent Sessions**: your latest sessions on every track, with the best lap (★ when it was your personal best), the race result and the session type. Click one to open its track with its car selected.
+- **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty) and contacts per race. Positions are class positions.
+
+### Complete lap times from race results
+
+Sessions played before the Stats module recorded them, or with the app closed, are still in the game results files. When a best lap of an LMU results file is missing from your stats, or faster than your personal, qualifying or race best, the **Driver** card shows how many lap times were found, with `Complete...`. The confirmation lists every change (track, car, lap time before and after, date); the stats file is backed up first and `Ctrl+Z` undoes it.
+
+- The car is the one of the session history when the session is linked to it, else found from the results (class, brand in the car name, or vehicle name, following `vehicle_classification`).
+- Laps invalidated by track limits have no time in LMU results files; in team races, only the laps you drove count.
+- rFactor 2 results files are not used here (they keep times of invalid laps).
 
 ## Community levels
 
@@ -65,9 +74,11 @@ The sheet is downloaded once a day when the page opens and kept for offline use.
 
 Under the table, side by side (one at a time with the list button when the window is narrow):
 
-- **Progression**: best lap of each session (dots, new personal bests highlighted) and your personal best over time (line over a shaded area), with round lap time grid lines and the level limits (dashed, level letter at the end). Filter by `All`, `Practice`, `Qualifying` or `Race`; the filter applies to the sessions list too.
-- **Sessions**: sessions of the selected car, newest first: date, session type, best lap (★ personal best), valid laps, race result (position, podium in color, DNF or DQ).
+- **Progression**: best lap of each session (dots, new personal bests highlighted) and your personal best over time (line over a shaded area), with round lap time grid lines and the level limits (dashed, level letter at the end). Filter by `All`, `Practice`, `Qualifying` or `Race`; the filter applies to the sessions list too. The line under the chart gives the date of your personal best and the game version it was set with (`PB 1:09.984 set on 03/10/2026 · Version 1.42`).
+- **Sessions**: sessions of the selected car, newest first: date, session type, game version (`v1.42`), best lap (★ personal best), valid laps, race result (position, podium in color, DNF or DQ), or your class position from the game results file (`P3/12`). A lightning mark shows contacts or penalties. The tooltip adds driving time and distance and, from the results file, position, gap, contacts, penalties, track limits points, online or single player and server. Click a session linked to a results file to open it in [Race Results](Race-Results.md).
 - **Stints & Consistency**: pace and lap time change per lap **by tyre compound** over your recorded stints, and a **consistency index** per session and per track (lap time spread of clean laps; lower is more consistent).
+
+The game version is recorded with each session since 0.23.0 (Le Mans Ultimate); older sessions take it from the game results file of the session. Sessions are linked to the game results files by track, session type and time.
 
 ## Compare with a friend
 
@@ -95,6 +106,6 @@ The viewer never lets you edit a value, only reset or remove:
 - right-click a car > `Remove Vehicle`;
 - `⋯` > `Delete all stats of this track` removes all stats of the track (or `Delete` on a track of `All Tracks`).
 
-Before each change, the stats file is backed up (the last 10 are kept): `⋯` > `Restore Backup`. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) work while the page is open, and stats recorded meanwhile are kept. `⋯` > `Reload` (`F5`) reads the stats file again (the page also reloads by itself when the Stats module saves).
+Before each change, the stats file is backed up (the last 10 are kept): `⋯` > `Restore Backup`. `Undo` / `Redo` (`Ctrl+Z` / `Ctrl+Y`) work while the page is open (they wait while an edit is being saved), and stats recorded meanwhile are kept. `⋯` > `Reload` (`F5`) reads the stats file again (the page also reloads by itself when the Stats module saves).
 
 All options: [Driver stats viewer](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#driver-stats-viewer) and [Stats module](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/customization.md#stats-module).

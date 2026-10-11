@@ -242,7 +242,7 @@ TpPage {
                             }
                         }
                         ToolTip.visible: entryArea.containsMouse && entry.model.customized > 0
-                        ToolTip.text: i18n.trm("Modified: " + entry.model.customized)
+                        ToolTip.text: ToolTip.visible ? i18n.trm("Modified: " + entry.model.customized) : ""
                         ToolTip.delay: 700
                     }
                 }
@@ -422,6 +422,7 @@ TpPage {
                     model: backend.options
                     activeFocusOnTab: true
                     boundsBehavior: Flickable.StopAtBounds
+                    reuseItems: true  // rows of other options & overlays reuse delegates (see OverlayOptionRow)
                     cacheBuffer: Math.round(theme.em * 30)
                     leftMargin: theme.em * 1.0
                     rightMargin: theme.em * 1.0
@@ -464,17 +465,59 @@ TpPage {
                     }
                 }
 
-                // Live preview
+                // Live preview on simulated race values: fit to panel or zoomed (Ctrl+wheel, double click),
+                // panel widened on demand. Zoomed overlay drawn bigger (sharp), see backend.setPreviewScale
                 Rectangle {
+                    id: previewPanel
+                    objectName: "previewPanel"
+                    property real zoom: 0  // 0: fit to panel, else size relative to overlay
+                    property bool expanded: false
+                    readonly property var zoomSteps: [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3]
+                    readonly property real baseWidth: backend.previewScale > 0 ? backend.previewWidth / backend.previewScale : 0
+                    readonly property real baseHeight: backend.previewScale > 0 ? backend.previewHeight / backend.previewScale : 0
+                    readonly property real fitZoom: baseWidth > 0 && baseHeight > 0 && previewFlick.width > 0
+                        ? Math.max(0.1, Math.min(previewFlick.width / baseWidth, previewFlick.height / baseHeight, 3)) : 1
+                    readonly property real shownZoom: zoom > 0 ? zoom : fitZoom
+
+                    function zoomStep(direction) {
+                        var current = shownZoom
+                        var steps = zoomSteps
+                        if (direction > 0) {
+                            for (var i = 0; i < steps.length; i++) {
+                                if (steps[i] > current + 0.01) {
+                                    zoom = steps[i]
+                                    return
+                                }
+                            }
+                        } else {
+                            for (var j = steps.length - 1; j >= 0; j--) {
+                                if (steps[j] < current - 0.01) {
+                                    zoom = steps[j]
+                                    return
+                                }
+                            }
+                        }
+                    }
+
                     visible: page.previewShown && !(backend.filtering && backend.scopeAll)
                     Layout.fillHeight: true
-                    Layout.preferredWidth: Math.round(theme.em * 21)
+                    Layout.preferredWidth: expanded ? Math.max(Math.round(theme.em * 21), Math.round(parent.width * 0.5))
+                                                    : Math.round(theme.em * 21)
+                    Behavior on Layout.preferredWidth { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                     Layout.bottomMargin: theme.em * 1.0
                     Layout.rightMargin: theme.em * 1.0
                     radius: theme.em * 0.7
                     color: theme.base
                     border.width: 1
                     border.color: theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
+
+                    onShownZoomChanged: scaleTimer.restart()
+                    Component.onCompleted: scaleTimer.restart()
+                    Timer {  // drawn again at new size once zoom & panel width settle
+                        id: scaleTimer
+                        interval: 200
+                        onTriggered: backend.setPreviewScale(previewPanel.shownZoom)
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -483,12 +526,23 @@ TpPage {
                         RowLayout {
                             Layout.fillWidth: true
                             Icon { glyph: ""; color: theme.dimText }  // view
-                            Text {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                text: i18n.tr("Live Preview")
-                                color: theme.text
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
+                                spacing: 0
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: i18n.tr("Live Preview")
+                                    color: theme.text
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: i18n.tr("Simulated race values")
+                                    color: theme.dimText
+                                    font.pixelSize: theme.em * 0.8
+                                    elide: Text.ElideRight
+                                }
                             }
                             TpSwitch {
                                 checkable: false
@@ -507,19 +561,23 @@ TpPage {
                                 id: previewFlick
                                 anchors.fill: parent
                                 anchors.margins: theme.em * 0.5
-                                contentWidth: width
+                                contentWidth: Math.max(width, previewImage.width)
                                 contentHeight: Math.max(height, previewImage.height)
                                 boundsBehavior: Flickable.StopAtBounds
-                                interactive: contentHeight > height
+                                interactive: contentWidth > width || contentHeight > height
+                                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                                 Image {
                                     id: previewImage
                                     visible: backend.previewState === 2 || backend.previewState === 4
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: Math.min(previewFlick.width, backend.previewWidth)
-                                    height: backend.previewWidth > 0 ? width * backend.previewHeight / backend.previewWidth : 0
+                                    x: Math.max(0, (previewFlick.contentWidth - width) / 2)
+                                    y: Math.max(0, (previewFlick.contentHeight - height) / 2)
+                                    width: Math.round(previewPanel.baseWidth * previewPanel.shownZoom)
+                                    height: Math.round(previewPanel.baseHeight * previewPanel.shownZoom)
                                     source: backend.previewUrl
                                     fillMode: Image.PreserveAspectFit
                                     smooth: true
+                                    mipmap: true
                                     // Old picture kept while the new one decodes off the UI thread
                                     asynchronous: true
                                     retainWhileLoading: true
@@ -527,6 +585,15 @@ TpPage {
                                     sourceSize.width: Math.ceil(width * Screen.devicePixelRatio / 32) * 32
                                     opacity: backend.previewState === 4 ? 0.4 : 1
                                     Behavior on opacity { NumberAnimation { duration: 150 } }
+                                }
+                                TapHandler {
+                                    onDoubleTapped: previewPanel.zoom = previewPanel.zoom > 0 ? 0 : 1
+                                }
+                                WheelHandler {
+                                    acceptedModifiers: Qt.ControlModifier
+                                    onWheel: function(event) {
+                                        previewPanel.zoomStep(event.angleDelta.y > 0 ? 1 : -1)
+                                    }
                                 }
                             }
                             Text {
@@ -540,6 +607,44 @@ TpPage {
                                     : backend.previewState === 3 ? i18n.tr("Preview not available for this overlay")
                                     : i18n.tr("Invalid value, preview not updated")
                                 color: "#C8CACF"
+                            }
+                        }
+                        RowLayout {  // zoom & panel size
+                            Layout.fillWidth: true
+                            spacing: theme.em * 0.2
+                            enabled: backend.previewEnabled
+                            TpButton {
+                                flat: true
+                                glyph: ""  // zoom out
+                                text: theme.iconFont === "" ? "−" : ""
+                                tip: i18n.tr("Zoom Out (Ctrl+Wheel)")
+                                enabled: previewPanel.shownZoom > previewPanel.zoomSteps[0] + 0.01
+                                onClicked: previewPanel.zoomStep(-1)
+                            }
+                            TpButton {
+                                flat: true
+                                Layout.minimumWidth: theme.em * 4.5
+                                text: previewPanel.zoom > 0 ? Math.round(previewPanel.zoom * 100) + " %" : i18n.tr("Fit")
+                                tip: previewPanel.zoom > 0 ? i18n.tr("Fit to Panel (double click)")
+                                                           : i18n.tr("Actual Size (double click)")
+                                onClicked: previewPanel.zoom = previewPanel.zoom > 0 ? 0 : 1
+                            }
+                            TpButton {
+                                flat: true
+                                glyph: ""  // zoom in
+                                text: theme.iconFont === "" ? "+" : ""
+                                tip: i18n.tr("Zoom In (Ctrl+Wheel)")
+                                enabled: previewPanel.shownZoom < previewPanel.zoomSteps[previewPanel.zoomSteps.length - 1] - 0.01
+                                onClicked: previewPanel.zoomStep(1)
+                            }
+                            Item { Layout.fillWidth: true }
+                            TpButton {
+                                flat: true
+                                checked: previewPanel.expanded
+                                glyph: previewPanel.expanded ? "" : ""  // shrink, enlarge
+                                text: theme.iconFont === "" ? (previewPanel.expanded ? i18n.tr("Shrink") : i18n.tr("Enlarge")) : ""
+                                tip: previewPanel.expanded ? i18n.tr("Shrink Preview Panel") : i18n.tr("Enlarge Preview Panel")
+                                onClicked: previewPanel.expanded = !previewPanel.expanded
                             }
                         }
                     }

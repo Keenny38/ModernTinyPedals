@@ -71,6 +71,7 @@ SAVED_INPUTS = {
     "input_refuel_rate": 0.0,
     "input_energy_rate": 0.0,
     "enable_tyres_during_refuel": False,
+    "enable_driver_change_during_refuel": False,
     "input_driver_change_seconds": 0.0,
     "input_minimum_stops": 0,
     "input_max_stint_minutes": 0.0,

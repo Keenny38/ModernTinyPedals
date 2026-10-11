@@ -36,7 +36,7 @@ logger = logging.getLogger(get_root_logger_name())
 
 
 def no_update() -> None:
-    """Update placeholder while mmap is not created"""
+    """Update placeholder while mmap is not created (None: unknown whether data changed)"""
 
 
 def platform_mmap(name: str, size: int) -> mmap.mmap:
@@ -85,7 +85,8 @@ class MMapControl:
         self._struct = data_struct
         self._buffer = bytearray()
         self._realtime = None
-        self.update: Callable[[], None] = no_update
+        # Returns True if data copy updated, False if not (no new data), None if unknown (direct access)
+        self.update: Callable[[], bool | None] = no_update
         self.data: Any = None
 
     def __del__(self):
@@ -129,10 +130,14 @@ class MMapControl:
         self.update = no_update  # unassign update method (for proper garbage collection)
 
     def __buffer_share(self) -> None:
-        """Share buffer access, may result data desync"""
+        """Share buffer access, may result data desync (data always live, None: unknown whether changed)"""
 
-    def __buffer_copy(self) -> None:
-        """Copy buffer access, helps avoid data desync"""
+    def __buffer_copy(self) -> bool:
+        """Copy buffer access, helps avoid data desync
+
+        Returns:
+            True if data copy updated, False if not copied or same data (copy unchanged).
+        """
         # Check if game updating data
         if (
             self._realtime.generic.events.SME_UPDATE_SCORING
@@ -140,8 +145,10 @@ class MMapControl:
         ) and (
             self._realtime.scoring.scoringInfo.mNumVehicles
             == self._realtime.telemetry.activeVehicles
-        ):
+        ) and self._buffer != self._mmap_buffer:  # compare is faster than copy, same data not copied again
             self._buffer[:] = self._mmap_buffer
+            return True
+        return False
 
 
 def test_api():

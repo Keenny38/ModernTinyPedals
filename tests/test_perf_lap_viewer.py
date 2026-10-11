@@ -38,7 +38,7 @@ def test_view_set_at_once_and_cursor_panels(opener, warnings):  # noqa: F811
         for series, _ in enumerate(texts):
             expected = sum(1 for text in texts[:series] if text)
             assert evaluate(view, chart, f"valueRow({index}, {series})") == expected
-        colors = js(view, chart, f"cursorValues[{index}].map(function(value) {{ return value.color }})")
+        colors = [series["color"] for series in backend.panels[index]["series"]]  # values carry no color
         compact = [f"<font color='{color}'>{text}</font>" for text, color in zip(texts, colors) if text]
         assert evaluate(view, chart, f"compactValues({index})") == " ".join(compact[:4])
     evaluate(view, chart, "setCursor(NaN)")

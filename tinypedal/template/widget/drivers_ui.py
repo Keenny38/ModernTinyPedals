@@ -32,7 +32,7 @@ from .black_box_ui import ORDER_LIST, OptionUI
 RELATIVE_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
     "pit_status", "pitstop_count", "laptime", "best_laptime", "average_laptime", "energy_remaining",
-    "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time", "time_gap",
+    "vehicle_integrity", "incidents", "stint_laps", "speed_trap", "lift_and_coast_time", "time_gap", "gap_trend",
 )
 STANDINGS_COLUMNS = (
     "position", "class", "position_change", "driver_name", "vehicle_name", "brand_logo", "tyre_compound",
@@ -72,6 +72,7 @@ COLUMN_TITLES = {
     "lift_and_coast_time": "Lift & Coast",
     "time_interval": "Interval",
     "time_gap": "Time Gap",
+    "gap_trend": "Gap Trend",
 }
 # Options of each column (column, options), shown after the column list
 COLUMN_OPTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -129,7 +130,7 @@ RELATIVE_UI = driver_list_ui(RELATIVE_COLUMNS, (
 STANDINGS_UI = driver_list_ui(STANDINGS_COLUMNS, (
     ("Rows", ROW_OPTIONS),
     ("Classes & Number of Cars", (
-        "enable_multi_class_split_mode", "maximum_vehicles_split_mode", "maximum_vehicles_per_split_player",
+        "enable_multi_class_split_mode", "show_class_header", "class_order", "maximum_vehicles_split_mode", "maximum_vehicles_per_split_player",
         "maximum_vehicles_per_split_others", "enable_single_class_exclusive_mode", "maximum_vehicles_exclusive_mode",
         "maximum_vehicles_combined_mode", "minimum_top_vehicles",
     )),
@@ -138,6 +139,7 @@ STANDINGS_UI = driver_list_ui(STANDINGS_COLUMNS, (
 STANDINGS_UI = STANDINGS_UI._replace(dependencies={
     **STANDINGS_UI.dependencies,
     "maximum_vehicles_split_mode": "enable_multi_class_split_mode",
+    "class_order": "enable_multi_class_split_mode",
     "maximum_vehicles_per_split_player": "enable_multi_class_split_mode",
     "maximum_vehicles_per_split_others": "enable_multi_class_split_mode",
     "maximum_vehicles_exclusive_mode": "enable_single_class_exclusive_mode",

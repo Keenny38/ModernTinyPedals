@@ -9,14 +9,27 @@ import QtQuick.Layouts
 Item {
     id: root
     property var chart
-    readonly property var rows: backend.corners
-    readonly property real maxDelta: rows.reduce(function(top, row) {
-        return row.kind === "corner" ? Math.max(top, Math.abs(row.bar)) : top }, 0.05)
+    // Rows: backend model (rows kept while their corner stays: only changed values update their items)
+    readonly property bool hasRows: cornerView.count > 0
+    readonly property real maxDelta: backend.cornerMaxDelta
     readonly property int selected: backend.selectedCorner  // also selected by clicking map corners
+    readonly property var comparedLaps: backend.comparedLaps  // read once (list built by backend)
+    readonly property var alignment: backend.alignment
     onSelectedChanged: {  // corner selected on map: row shown
-        for (var i = 0; i < rows.length; i++)
-            if (rows[i].index === selected && rows[i].kind === "corner") { cornerView.positionViewAtIndex(i, ListView.Contain); break }
+        var position = backend.cornerPosition(selected)
+        if (position >= 0) cornerView.positionViewAtIndex(position, ListView.Contain)
     }
+    // Details tooltip: built once, shown text only while a row is hovered
+    readonly property string detailsTip: [
+        i18n.tr("Braking point of compared lap: positive = brakes later"),
+        i18n.tr("Full throttle point of compared lap: negative = earlier"),
+        i18n.tr("Seconds braking while turning: reference lap, compared lap"),
+        i18n.tr("Seconds without throttle nor brake: reference lap, compared lap (red: more than reference)"),
+        i18n.tr("Seconds with throttle & brake together: reference lap, compared lap (red: more than reference)"),
+        i18n.tr("Speed at corner start & end: reference lap, compared lap"),
+        i18n.tr("Gear at minimum speed, highest brake pressure: reference lap, compared lap"),
+        i18n.tr("Fastest: lap with the best time in this corner (ideal lap)"),
+    ].join("\n")
 
     function tone(name, fallback) { return name === "loss" ? theme.loss : name === "gain" ? theme.gain : fallback }
     function showCorner(index) {
@@ -63,15 +76,15 @@ Item {
         // Compared lap & order
         RowLayout {
             Layout.fillWidth: true
-            visible: root.rows.length > 0
+            visible: root.hasRows
             spacing: theme.em * 0.4
             Flow {
                 Layout.fillWidth: true
                 spacing: theme.em * 0.3
-                visible: backend.comparedLaps.length > 1
+                visible: root.comparedLaps.length > 1
                 Text { text: i18n.tr("Compared:"); color: theme.dimText; height: theme.em * 1.8; verticalAlignment: Text.AlignVCenter }
                 Repeater {
-                    model: backend.comparedLaps
+                    model: root.comparedLaps
                     TpButton {
                         text: modelData.label
                         flat: true
@@ -81,7 +94,7 @@ Item {
                     }
                 }
             }
-            Item { Layout.fillWidth: true; visible: backend.comparedLaps.length <= 1 }
+            Item { Layout.fillWidth: true; visible: root.comparedLaps.length <= 1 }
             TpSegmented {
                 options: [i18n.tr("Track order"), i18n.tr("Time lost")]
                 currentIndex: backend.cornerSort === "loss" ? 1 : 0
@@ -92,14 +105,14 @@ Item {
         // Laps aligned on braking point of selected corner, corner report
         RowLayout {
             Layout.fillWidth: true
-            visible: root.rows.length > 0
+            visible: root.hasRows
             spacing: theme.em * 0.4
             TpButton {
-                readonly property bool aligned: backend.alignment.index !== undefined && backend.alignment.index === root.selected
+                readonly property bool aligned: root.alignment.index !== undefined && root.alignment.index === root.selected
                 text: "↔ " + i18n.tr("Align on Braking")
                 flat: true
                 implicitHeight: theme.em * 1.8
-                enabled: root.selected >= 0 && backend.comparedLaps.length > 0
+                enabled: root.selected >= 0 && root.comparedLaps.length > 0
                 checked: aligned
                 tip: i18n.tr("Shift laps along distance so their braking starts in selected corner line up with reference lap")
                 onClicked: backend.alignBraking(aligned ? -1 : root.selected)
@@ -186,7 +199,7 @@ Item {
         }
 
         Text {
-            visible: root.rows.length === 0
+            visible: !root.hasRows
             text: backend.legend.length === 0 ? i18n.tr("Select recorded laps to compare.")
                 : i18n.tr("No corner found: speed not recorded.")
             color: theme.dimText
@@ -196,7 +209,7 @@ Item {
 
         // Header
         RowLayout {
-            visible: root.rows.length > 0
+            visible: root.hasRows
             Layout.fillWidth: true
             Layout.leftMargin: theme.em * 0.5
             Layout.rightMargin: theme.em * 0.5
@@ -217,12 +230,14 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: root.rows
+            model: backend.cornerModel
             spacing: 2
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
             delegate: Rectangle {
                 id: rowItem
+                required property var model
+                readonly property var modelData: model  // row values (roles)
                 readonly property bool corner: modelData.kind === "corner"
                 width: ListView.view.width
                 height: corner ? rowContent.implicitHeight + theme.em * 0.6 : theme.em * 2.2
@@ -341,16 +356,7 @@ Item {
                         ].concat(modelData.best ? [i18n.tr("Fastest") + " " + value(modelData.best, "")] : []).join(" &nbsp; ")
                         ToolTip.visible: detailArea.containsMouse
                         ToolTip.delay: 500
-                        ToolTip.text: [
-                            i18n.tr("Braking point of compared lap: positive = brakes later"),
-                            i18n.tr("Full throttle point of compared lap: negative = earlier"),
-                            i18n.tr("Seconds braking while turning: reference lap, compared lap"),
-                            i18n.tr("Seconds without throttle nor brake: reference lap, compared lap (red: more than reference)"),
-                            i18n.tr("Seconds with throttle & brake together: reference lap, compared lap (red: more than reference)"),
-                            i18n.tr("Speed at corner start & end: reference lap, compared lap"),
-                            i18n.tr("Gear at minimum speed, highest brake pressure: reference lap, compared lap"),
-                            i18n.tr("Fastest: lap with the best time in this corner (ideal lap)"),
-                        ].join("\n")
+                        ToolTip.text: detailArea.containsMouse ? root.detailsTip : ""
                         MouseArea { id: detailArea; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
                     }
                 }

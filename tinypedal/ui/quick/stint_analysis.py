@@ -37,7 +37,7 @@ from collections.abc import Callable, Iterable, Sequence
 from itertools import pairwise
 from typing import NamedTuple
 
-from ...userfile.driver_history import SessionRecord, parse_record
+from ...userfile.driver_history import SessionRecord
 from ...userfile.telemetry_lap import group_sessions, lap_files, lap_number_of, lap_timestamp_of, read_lap_info
 
 HISTORY_FORMAT = "modern-tiny-pedals-driver-history"  # exported session history (JSON), friend's stats read back
@@ -116,25 +116,31 @@ def lap_compound(info: dict) -> str:
 
 
 def read_laps(folder: str, keep: Callable[[dict], bool] | None = None,
-              cache: dict[str, tuple[float, dict]] | None = None) -> list[list[StintLap]]:
+              cache: dict[str, tuple[float, dict]] | None = None, prune: bool = False) -> list[list[StintLap]]:
     """Recorded laps of a track & class folder grouped by session (newest session first, laps in driving order)
 
     Args:
         keep: lap info filter (vehicle of driver stats row), every lap if None.
         cache: lap path: (file time, lap info) kept between calls (only new or changed laps read).
+        prune: cache of this folder only, laps no longer in folder dropped from it.
     """
     entries = []
+    seen = set()
     for lap in lap_files(folder):
         try:
             mtime = os.path.getmtime(lap.path)
         except OSError:
             continue
+        seen.add(lap.path)
         cached = cache.get(lap.path) if cache is not None else None
         info = cached[1] if cached is not None and cached[0] == mtime else read_lap_info(lap.path)
         if cache is not None:
             cache[lap.path] = (mtime, info)
         if keep is None or keep(info):
             entries.append((lap, info))
+    if cache is not None and prune:
+        for path in [path for path in cache if path not in seen]:
+            del cache[path]
     sessions = []
     for group in group_sessions(entries, lambda entry: entry[0].filename, lambda entry: entry[1]):
         sessions.append([StintLap(
@@ -335,7 +341,8 @@ def write_history_csv(filename: str, records: Iterable[SessionRecord], header: S
 
 
 def load_friend(filename: str) -> dict:
-    """Friend's exported session history (JSON of history_document), raises ValueError if not one"""
+    """Friend's exported session history (JSON of history_document): name, stats & classes compared (sessions
+    left out), raises ValueError if not one"""
     try:
         with open(filename, encoding="utf-8") as file:
             document = json.load(file)
@@ -345,14 +352,10 @@ def load_friend(filename: str) -> dict:
         raise ValueError("not an exported session history")
     stats = document.get("stats")
     classes = document.get("classes")
-    rows = document.get("sessions")
     stats = stats if isinstance(stats, dict) else {}
     classes = classes if isinstance(classes, dict) else {}
-    sessions = [record for record in (parse_record(row) for row in (rows if isinstance(rows, list) else []))
-                if record is not None]
     name = str(document.get("driver") or "") or os.path.splitext(os.path.basename(filename))[0]
-    return {"name": name, "stats": stats, "classes": {str(key): str(value) for key, value in classes.items()},
-            "sessions": sessions}
+    return {"name": name, "stats": stats, "classes": {str(key): str(value) for key, value in classes.items()}}
 
 
 def best_by_class(stats: dict, track: str, class_of: Callable[[str], str]) -> dict[str, float]:

@@ -20,7 +20,11 @@ Item {
     required property string brandLogo
     readonly property bool current: ListView.isCurrentItem && ListView.view.activeFocus
     readonly property bool wide: width > theme.em * 34
+    property bool recycling: false  // in reuse pool: no animation from the previous row's state
     signal picked(int slot)
+
+    ListView.onPooled: recycling = true
+    ListView.onReused: recycling = false
 
     width: ListView.view ? ListView.view.width - theme.em * 0.7 : 0  // room for scroll bar
     height: Math.round(theme.em * 2.7)
@@ -39,8 +43,8 @@ Item {
         border.width: 1
         border.color: row.spectated ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.8)
                     : theme.dark ? Qt.lighter(theme.base, 1.3) : theme.border
-        Behavior on color { ColorAnimation { duration: 150 } }
-        Behavior on border.color { ColorAnimation { duration: 150 } }
+        Behavior on color { enabled: !row.recycling; ColorAnimation { duration: 150 } }
+        Behavior on border.color { enabled: !row.recycling; ColorAnimation { duration: 150 } }
 
         MouseArea {
             id: area
@@ -183,7 +187,7 @@ Item {
                     glyph: ""  // view
                     color: theme.accent
                     opacity: row.spectated ? 1 : area.containsMouse ? 0.35 : 0
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                    Behavior on opacity { enabled: !row.recycling; NumberAnimation { duration: 150 } }
                 }
             }
         }

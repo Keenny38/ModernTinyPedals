@@ -215,10 +215,8 @@ class DamagePainter:
     def draw_impact_cone(self, painter: QPainter, rect: QRectF):
         """Cone toward last impact, fading out from the middle"""
         wcfg = self.wcfg
-        angle = min(max(wcfg["damage_panel_impact_cone_angle"], 2), 90)
         size = max(rect.width(), rect.height())
         center = rect.center()
-        raw_angle = calc.degrees(calc.oriyaw(*self.impact_position))
         color = QColor(wcfg["damage_panel_impact_cone_color"])
         glow = QRadialGradient(center, size * 0.75)
         glow.setColorAt(0.0, color)
@@ -227,11 +225,31 @@ class DamagePainter:
         painter.setClipRect(rect)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(glow)
-        painter.drawPie(
-            QRectF(center.x() - size, center.y() - size, size * 2, size * 2),
-            int(16 * (raw_angle - 90 - angle * 0.5)), int(16 * angle),
-        )
+        painter.drawPie(QRectF(center.x() - size, center.y() - size, size * 2, size * 2), *self.impact_span())
         painter.restore()
+
+    def impact_span(self) -> tuple[int, int]:
+        """Impact cone (start, span) in 1/16 degrees"""
+        angle = min(max(self.wcfg["damage_panel_impact_cone_angle"], 2), 90)
+        raw_angle = calc.degrees(calc.oriyaw(*self.impact_position))
+        return int(16 * (raw_angle - 90 - angle * 0.5)), int(16 * angle)
+
+    def damage_key(self) -> tuple:
+        """What damage panel shows, see drawn"""
+        wcfg = self.wcfg
+        light = wcfg["damage_panel_suspension_light_threshold"]
+        wheels = tuple(
+            (detached, puncture, None if detached else self.damage_level(suspension), suspension >= light)
+            for detached, puncture, suspension in zip(self.damage_detached, self.damage_puncture,
+                                                      self.damage_suspension)
+        )
+        integrity = None
+        if wcfg["show_damage_panel_integrity"]:
+            value = self.integrity()
+            integrity = (self.uses_aero_integrity(), self.integrity_text(value), self.integrity_color(value),
+                         value if value > 0.005 else None)
+        impact = self.impact_span() if self.impact_visible and wcfg["show_damage_panel_impact_cone"] else None
+        return self.body_damage, wheels, integrity, impact
 
     def integrity_text(self, value: float) -> str:
         """Integrity reading text"""
@@ -268,7 +286,15 @@ class DamagePainter:
         wcfg = self.wcfg
         if detached:
             return self.pulsed_color(wcfg["damage_panel_wheel_color_detached"], strength)
+        level = self.damage_level(suspension)
+        if level:
+            return QColor(wcfg[f"damage_panel_suspension_color_{level}"])
+        return faded(QColor(wcfg["damage_panel_suspension_color"]), INTACT_ALPHA)
+
+    def damage_level(self, suspension: float) -> str:
+        """Suspension damage level: totaled, heavy, medium, light, "" if intact"""
+        wcfg = self.wcfg
         for level in ("totaled", "heavy", "medium", "light"):
             if suspension >= wcfg[f"damage_panel_suspension_{level}_threshold"]:
-                return QColor(wcfg[f"damage_panel_suspension_color_{level}"])
-        return faded(QColor(wcfg["damage_panel_suspension_color"]), INTACT_ALPHA)
+                return level
+        return ""

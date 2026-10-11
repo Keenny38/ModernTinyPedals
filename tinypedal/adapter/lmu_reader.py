@@ -69,6 +69,15 @@ class DataAdapter:
         self.shmm = shmm
         self.rest = rest
 
+    def _is_local_car(self, index: int | None) -> bool:
+        """Is vehicle the local player's own car (Rest API garage data belongs to it)
+
+        Player index override (spectate) points player index at another car: never its data.
+        """
+        if index is not None and index != self.shmm.playerIndex:
+            return False
+        return bool(self.shmm.lmuScorVeh(index).mIsPlayer)
+
 
 class State(_reader.State, DataAdapter):
     """State"""
@@ -159,7 +168,7 @@ class Brake(_reader.Brake, DataAdapter):
 
         Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
         """
-        if index is None or index == self.shmm.playerIndex:
+        if self._is_local_car(index):
             return self.rest.brakeWear
         return WHEELS_NA
 
@@ -1289,7 +1298,7 @@ class Vehicle(_reader.Vehicle, DataAdapter):
 
         Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
         """
-        if index is None or index == self.shmm.playerIndex:
+        if self._is_local_car(index):
             return self.rest.aeroDamage
         return -1.0
 
@@ -1458,7 +1467,7 @@ class Wheel(_reader.Wheel, DataAdapter):
 
         Local player only (LMU Rest API), -1 for other vehicles or if unavailable.
         """
-        if index is None or index == self.shmm.playerIndex:
+        if self._is_local_car(index):
             return self.rest.suspensionDamage
         return WHEELS_NA
 

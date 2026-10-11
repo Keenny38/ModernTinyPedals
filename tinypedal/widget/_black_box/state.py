@@ -147,11 +147,6 @@ class WheelState:
         self.heave = 0.0  # third spring deflection of the axle (mm)
         self.damper_shares = (0.0, 0.0, 0.0, 0.0)  # time share: fast rebound, slow rebound, slow bump, fast bump
 
-    def signature(self) -> tuple:
-        """Displayed state, floats rounded, so a repaint is skipped when nothing visible changed"""
-        # Suspension moves continuously: finer steps, so its motion stays smooth
-        return tuple(rounded(getattr(self, name), 0 if name == "susp_velocity" else 2 if name.startswith("susp") else 1) for name in self.__slots__)
-
 
 def rounded(value, digits: int = 1):
     """Float rounded for change detection, unchanged if not finite or not a float"""
