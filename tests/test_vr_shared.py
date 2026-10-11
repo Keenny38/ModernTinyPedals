@@ -11,6 +11,7 @@ import os
 import re
 import struct
 import sys
+import time
 import types
 
 import pytest
@@ -1158,12 +1159,21 @@ def test_steamvr_process_checked_in_background(env, monkeypatch):
         return env.steamvr
 
     monkeypatch.setattr(vr_overlay, "steamvr_running", scan)
+
+    def scan_started() -> bool:
+        """Check thread ran its scan (started in background: may not have run yet on a slow machine)"""
+        end = time.monotonic() + 5
+        while not threads and time.monotonic() < end:
+            time.sleep(0.005)
+        return bool(threads)
+
     env.steamvr = True
     control = VROverlay()
     widget = make_widget(monkeypatch)
     try:
         control.enable()  # check started, GUI thread not blocked
-        assert threads and threads[0] is not threading.main_thread()
+        assert scan_started()
+        assert threads[0] is not threading.main_thread()
         control.update_overlay()
         assert "init" not in log  # result not known yet
         release.set()
@@ -1187,7 +1197,8 @@ def test_steamvr_process_checked_in_background(env, monkeypatch):
         assert not threads and control._steamvr_check is None
         env.now += vr_shared.LAYER_TIMEOUT_MS + 1  # game closed: layer silent, SteamVR checked again
         control.update_overlay()
-        assert threads and (control._steamvr_check is not None or control._overlay is not None)
+        assert control._steamvr_check is not None or control._overlay is not None
+        assert scan_started()
     finally:
         release.set()
         widget.close()
