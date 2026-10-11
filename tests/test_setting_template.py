@@ -5,13 +5,13 @@ from importlib import import_module
 
 import pytest
 
-from tinypedal.plugin_loader import PLUGIN_PREFIX
-from tinypedal.template.setting_widget import WIDGET_DEFAULT, WIDGET_FILENAME
-from tinypedal.template.widget import WIDGET_CATEGORIES, WIDGET_DISPLAY_ORDER
+from neopedal.plugin_loader import PLUGIN_PREFIX
+from neopedal.template.setting_widget import WIDGET_DEFAULT, WIDGET_FILENAME
+from neopedal.template.widget import WIDGET_CATEGORIES, WIDGET_DISPLAY_ORDER
 
 WIDGET_MODULES = sorted(
     module.name
-    for module in pkgutil.iter_modules(import_module("tinypedal.widget").__path__)
+    for module in pkgutil.iter_modules(import_module("neopedal.widget").__path__)
     if not module.name.startswith("_") and not module.name.startswith(PLUGIN_PREFIX)
 )
 

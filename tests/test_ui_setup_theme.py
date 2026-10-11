@@ -4,12 +4,12 @@ import time
 
 from PySide6.QtCore import QCoreApplication
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 def test_option_finder(ui_env):
-    from tinypedal.i18n import set_language
-    from tinypedal.ui import option_finder
+    from neopedal.i18n import set_language
+    from neopedal.ui import option_finder
 
     entries = option_finder.build_index()
     assert len(entries) > 600
@@ -37,7 +37,7 @@ def test_option_finder(ui_env):
 
 
 def test_preset_diff_and_copy():
-    from tinypedal.userfile.preset_compare import copy_values, diff_presets
+    from neopedal.userfile.preset_compare import copy_values, diff_presets
 
     preset_a = {"speed": {"enable": True, "position_x": 1, "font_size": 15}, "gear": {"enable": False}}
     preset_b = {"speed": {"enable": True, "position_x": 9, "font_size": 20}, "gear": {"enable": True}}
@@ -50,8 +50,8 @@ def test_preset_diff_and_copy():
 
 
 def test_preset_compare_dialog(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui import preset_compare
+    from neopedal.setting import cfg
+    from neopedal.ui import preset_compare
 
     settings = cfg.path.settings
     other = dict(cfg.user.setting)

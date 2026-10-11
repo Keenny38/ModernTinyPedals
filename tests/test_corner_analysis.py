@@ -4,8 +4,8 @@ from itertools import pairwise
 
 import pytest
 
-from tinypedal.userfile.corner_analysis import compare_corners, corner_stats, find_corners, smooth
-from tinypedal.userfile.telemetry_lap import LapData
+from neopedal.userfile.corner_analysis import compare_corners, corner_stats, find_corners, smooth
+from neopedal.userfile.telemetry_lap import LapData
 
 # Track profile: (distance, speed km/h) points, straight then 2 corners then straight
 PROFILE = ((0, 250), (400, 250), (500, 100), (700, 220), (800, 220), (900, 150), (1100, 240), (1500, 240))
@@ -88,14 +88,14 @@ def test_smooth():
 def corner_backend(folder: str):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     parent = QWidget()
     return LapViewerBackend(parent, folder), parent
 
 
 def show_laps(backend, laps):
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     backend.data.set_laps([lap_viewer.PlotLap(name, name, lap, lap_viewer.COLOR_A) for name, lap in laps],
                           laps[0][0] if laps else "")
@@ -129,7 +129,7 @@ def test_lap_viewer_corner_tab(ui_env, tmp_path):
 
 
 def test_corner_tab_totals_and_sensitivity(ui_env, tmp_path):
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     folder = f"{tmp_path.as_posix()}/"
     backend, parent = corner_backend(folder)

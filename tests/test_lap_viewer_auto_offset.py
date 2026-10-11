@@ -7,8 +7,8 @@ import math
 import pytest
 from PySide6.QtGui import QColor
 
+from neopedal.userfile.telemetry_lap import LapData, interpolate
 from tests.telemetry_sim import circuit_lap
-from tinypedal.userfile.telemetry_lap import LapData, interpolate
 
 LENGTH = 3000.0
 RECORDED = {"combo": "Spa - GT3", "track": "Spa", "track_length": LENGTH}
@@ -35,14 +35,14 @@ def imported_lap(shift: float, pace: float = 1.02, positions: bool = False, numb
 
 
 def plot_lap(key, data):
-    from tinypedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.lap_viewer import PlotLap
 
     return PlotLap(key, key, data, QColor("red"))
 
 
 def slowest_point(data, lap, low: float = 1500.0, high: float = 2100.0) -> float:
     """Chart distance of lowest speed in corner around 1800 m"""
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     xs, ys = data.series(CHANNEL_MAP["speed_kph"], lap)
     return min((y, x) for x, y in zip(xs, ys) if low < x < high)[1]
@@ -51,7 +51,7 @@ def slowest_point(data, lap, low: float = 1500.0, high: float = 2100.0) -> float
 @pytest.mark.parametrize(("shift", "positions"), [(37.0, False), (120.0, False), (-60.0, False), (37.0, True),
                                                   (120.0, True)])
 def test_imported_lap_aligned_on_reference(ui_env, shift, positions):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, reference_time = reference_lap()
     imported, imported_time = imported_lap(shift, positions=positions)
@@ -79,7 +79,7 @@ def test_imported_lap_aligned_on_reference(ui_env, shift, positions):
 
 
 def test_recorded_lap_never_shifted(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, _ = reference_lap()
     shifted, _ = imported_lap(37.0, info=dict(RECORDED))  # recorded by the app: game lap distance, kept
@@ -92,7 +92,7 @@ def test_recorded_lap_never_shifted(ui_env):
 
 
 def test_imported_lap_at_the_line_not_shifted(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, _ = reference_lap()
     for positions in (False, True):
@@ -103,7 +103,7 @@ def test_imported_lap_at_the_line_not_shifted(ui_env):
 
 
 def test_auto_offset_with_braking_alignment_and_reference_change(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, _ = reference_lap()
     imported, _ = imported_lap(80.0)
@@ -123,7 +123,7 @@ def test_auto_offset_with_braking_alignment_and_reference_change(ui_env):
 
 
 def test_mini_sectors_and_sectors_of_aligned_lap(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, reference_time = reference_lap()
     imported, imported_time = imported_lap(120.0, pace=1.0)
@@ -165,7 +165,7 @@ def write_log(tmp_path, lag: float, odometer: bool, lap_time_channel: bool = Tru
 
 @pytest.mark.parametrize(("lag", "odometer"), [(0.3, True), (1.5, True), (1.5, False), (2.5, False)])
 def test_motec_lap_distance_zero_at_line(tmp_path, lag, odometer):
-    from tinypedal.userfile.motec_import import import_laps
+    from neopedal.userfile.motec_import import import_laps
 
     filename, start = write_log(tmp_path, lag, odometer)
     _, laps = import_laps(filename)
@@ -182,7 +182,7 @@ def test_motec_lap_distance_zero_at_line(tmp_path, lag, odometer):
 
 def test_motec_odometer_without_line_rebased_at_lap_change(tmp_path):
     """No line crossing in the log (odometer, no lap time): lap from lap number change, offset found by viewer"""
-    from tinypedal.userfile.motec_import import import_laps
+    from neopedal.userfile.motec_import import import_laps
 
     filename, _ = write_log(tmp_path, 0.3, True, lap_time_channel=False)
     _, laps = import_laps(filename)
@@ -193,7 +193,7 @@ def test_motec_odometer_without_line_rebased_at_lap_change(tmp_path):
 def test_imported_lap_driven_differently_not_shifted(ui_env, monkeypatch):
     """Lap at the line braking later & carrying another speed through a corner: no offset made up"""
     import tests.telemetry_sim as sim
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference, _ = reference_lap()
     corners = list(sim.CIRCUIT_CORNERS)

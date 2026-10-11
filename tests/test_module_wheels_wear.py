@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module.module_wheels import calc_brake_wear, calc_suspension_travel, calc_tyre_wear
-from tinypedal.module_info import WheelsInfo
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module.module_wheels import calc_brake_wear, calc_suspension_travel, calc_tyre_wear
+from neopedal.module_info import WheelsInfo
 
 
 class Group(SimpleNamespace):
@@ -101,7 +101,7 @@ def test_brake_wear_per_lap_and_max_thickness(tele):
 
 
 def test_brake_failure_thickness_saved(tele):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     output = WheelsInfo()
     gen = calc_brake_wear(output, min_delta_distance=50)
@@ -116,7 +116,7 @@ def test_brake_failure_thickness_saved(tele):
 
 
 def test_brake_failure_record_reset_on_vehicle_change(tele):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     output = WheelsInfo()
     gen = calc_brake_wear(output, min_delta_distance=50)

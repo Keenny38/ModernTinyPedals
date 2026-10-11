@@ -11,9 +11,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.process import game_images as gi
-from tinypedal.setting import cfg
-from tinypedal.userfile import game_images
+from neopedal.process import game_images as gi
+from neopedal.setting import cfg
+from neopedal.userfile import game_images
 
 WHITE_LOGO = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">'
               b'<rect x="10" y="10" width="180" height="80" fill="#ffffff"/></svg>')
@@ -60,8 +60,8 @@ def game(ui_env, monkeypatch):
     monkeypatch.setattr(game_images, "fetch_from_game", fake)
     cache = game_images.GameImages()
     monkeypatch.setattr(game_images, "images", cache)
-    from tinypedal.ui.quick import game_pictures
-    from tinypedal.userfile import custom_image
+    from neopedal.ui.quick import game_pictures
+    from neopedal.userfile import custom_image
     monkeypatch.setattr(custom_image, "_tinted", {})
     monkeypatch.setattr(custom_image, "_own_logos", {})
     monkeypatch.setattr(game_pictures, "images", cache)
@@ -81,7 +81,7 @@ def wait_for(condition, seconds: float = 5.0):
 
 def settled(lookup):
     """Answer of lookup once readable copies made in background (logo loader) are ready"""
-    from tinypedal.userfile.custom_image import LOGO_LOADER
+    from neopedal.userfile.custom_image import LOGO_LOADER
 
     lookup()
     assert LOGO_LOADER.wait()
@@ -160,7 +160,7 @@ def test_listeners_told_once_saved(game):
 
 # --- Picture files for Qt
 def test_read_picture_sharp_at_size(game, tmp_path):
-    from tinypedal.userfile.custom_image import is_light_logo, read_picture
+    from neopedal.userfile.custom_image import is_light_logo, read_picture
 
     path = tmp_path / "logo.svg"
     path.write_bytes(WHITE_LOGO)
@@ -175,7 +175,7 @@ def test_read_picture_sharp_at_size(game, tmp_path):
 
 
 def test_light_background_gets_dark_copy_of_white_logo(game):
-    from tinypedal.userfile.custom_image import logo_for_background, read_picture
+    from neopedal.userfile.custom_image import logo_for_background, read_picture
 
     _, cache = game
     assert cache.fetch_picture(gi.BRAND, "McLaren") and cache.fetch_picture(gi.BRAND, "Ferrari")
@@ -190,7 +190,7 @@ def test_light_background_gets_dark_copy_of_white_logo(game):
 
 
 def test_dark_background_gets_light_copy_of_black_logo(game, tmp_path):
-    from tinypedal.userfile.custom_image import logo_for_background, read_picture
+    from neopedal.userfile.custom_image import logo_for_background, read_picture
 
     black = tmp_path / "black.svg"  # black wordmark with an orange swoosh (kept)
     black.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">'
@@ -210,7 +210,7 @@ def test_dark_background_gets_light_copy_of_black_logo(game, tmp_path):
 
 
 def test_logo_drawn_on_part_of_picture_gets_copy_without_margins(game, tmp_path):
-    from tinypedal.userfile.custom_image import drawn_rect, logo_for_background, read_picture
+    from neopedal.userfile.custom_image import drawn_rect, logo_for_background, read_picture
 
     wordmark = tmp_path / "wordmark.png"  # red wordmark drawn in the middle of a square picture
     image = QImage(240, 180, QImage.Format.Format_ARGB32)
@@ -232,7 +232,7 @@ def test_logo_drawn_on_part_of_picture_gets_copy_without_margins(game, tmp_path)
 
 
 def test_own_logo_matches_brand_words(game):
-    from tinypedal.userfile.custom_image import own_logo_file
+    from neopedal.userfile.custom_image import own_logo_file
 
     for name in ("Corvette", "Chevrolet", "Ford", "Mercedes-AMG"):
         image = QImage(8, 4, QImage.Format.Format_ARGB32)
@@ -247,7 +247,7 @@ def test_own_logo_matches_brand_words(game):
 
 
 def test_own_brand_logo_first(game):
-    from tinypedal.userfile.custom_image import brand_logo_file
+    from neopedal.userfile.custom_image import brand_logo_file
 
     _, cache = game
     assert cache.fetch_picture(gi.BRAND, "Ferrari")
@@ -264,9 +264,9 @@ def test_own_brand_logo_first(game):
 def test_modern_driver_table_draws_game_logo(game, bundled_fonts, monkeypatch):
     from importlib import import_module
 
+    from neopedal.module_info import minfo
+    from neopedal.widget._modern import create_widget
     from tests.test_widget_benchmark import fill_field
-    from tinypedal.module_info import minfo
-    from tinypedal.widget._modern import create_widget
 
     _, cache = game
     for name in ("dataSet", "totalVehicles", "playerIndex", "leaderIndex"):
@@ -275,7 +275,7 @@ def test_modern_driver_table_draws_game_logo(game, bundled_fonts, monkeypatch):
     for car in minfo.vehicles.dataSet:
         car.vehicleBrand = "Ferrari"
     assert cfg.default.setting["standings"]["column_brand_logo"]  # on by default
-    widget = create_widget(import_module("tinypedal.widget.standings"), cfg, "standings")
+    widget = create_widget(import_module("neopedal.widget.standings"), cfg, "standings")
     try:
         assert widget.brand_logo("Ferrari", "", 30, 15).isNull()  # not fetched yet
         assert wait_for(lambda: os.path.isfile(cache.picture_file(gi.BRAND, "Ferrari")))
@@ -289,7 +289,7 @@ def test_modern_driver_table_draws_game_logo(game, bundled_fonts, monkeypatch):
 
 # --- Pages
 def test_page_urls_and_notifier(game, monkeypatch):
-    from tinypedal.ui.quick import game_pictures as gp
+    from neopedal.ui.quick import game_pictures as gp
 
     _, cache = game
     assert cache.fetch_picture(gi.TRACK_LOGO, "lemanswec") and cache.fetch_picture(gi.BRAND, "BMW")
@@ -313,7 +313,7 @@ def test_page_urls_and_notifier(game, monkeypatch):
 
 def test_logo_cache_follows_theme(game, monkeypatch):
     """Logos recolored for light or dark pages: cached per theme (was: stale logo after theme change)"""
-    from tinypedal.ui.quick import game_pictures as gp
+    from neopedal.ui.quick import game_pictures as gp
 
     _, cache = game
     assert cache.fetch_picture(gi.TRACK_LOGO, "lemanswec")
@@ -331,7 +331,7 @@ def test_pages_told_when_theme_changes(game):
     unreadable, kept by results, race & spectate pages until game pictures changed)"""
     from PySide6.QtGui import QColor, QGuiApplication, QPalette
 
-    from tinypedal.ui.quick import game_pictures as gp
+    from neopedal.ui.quick import game_pictures as gp
 
     notifier = gp.notifier()
     notifier._timer.stop()
@@ -348,8 +348,8 @@ def test_pages_told_when_theme_changes(game):
 
 
 def test_results_rows_show_logos(game):
-    from tinypedal.process.results_file import Entry, SessionResult
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.process.results_file import Entry, SessionResult
+    from neopedal.ui.quick import results_backend as rb
 
     _, cache = game
     assert cache.fetch_picture(gi.TRACK_LOGO, "lemanswec") and cache.fetch_picture(gi.BRAND, "Ferrari")
@@ -365,7 +365,7 @@ def test_results_rows_show_logos(game):
 
 # --- Stream overlay
 def test_stream_picture_links_stay_in_folders(game):
-    from tinypedal import stream_overlay as so
+    from neopedal import stream_overlay as so
 
     _, cache = game
     assert cache.fetch_picture(gi.BRAND, "Ferrari")

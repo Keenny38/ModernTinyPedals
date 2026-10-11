@@ -8,12 +8,12 @@ import copy
 
 import pytest
 
-from tinypedal.setting_validator import PresetValidator
-from tinypedal.template.setting_api import API_DEFAULT
-from tinypedal.template.setting_common import COMMON_DEFAULT
-from tinypedal.template.setting_global import GLOBAL_DEFAULT
-from tinypedal.template.setting_module import MODULE_DEFAULT
-from tinypedal.template.setting_widget import WIDGET_DEFAULT
+from neopedal.setting_validator import PresetValidator
+from neopedal.template.setting_api import API_DEFAULT
+from neopedal.template.setting_common import COMMON_DEFAULT
+from neopedal.template.setting_global import GLOBAL_DEFAULT
+from neopedal.template.setting_module import MODULE_DEFAULT
+from neopedal.template.setting_widget import WIDGET_DEFAULT
 
 EXPECTED_VALIDATORS = {
     str: {"string", "color", "clock_format", "choice_units", "choice_common"},
@@ -98,7 +98,7 @@ def test_port_out_of_range_reset():
 
 def test_style_int_accepted_in_float_field():
     """tracks.json "pit_speed": 60 kept as 60.0, not reset"""
-    from tinypedal.setting_validator import _validate_style
+    from neopedal.setting_validator import _validate_style
 
     user = {"Track": {"pit_speed": 60, "flag": True}, "Other": {"pit_speed": True, "flag": False}}
     _validate_style(user, {}, {"pit_speed": 0.0, "flag": False})

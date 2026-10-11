@@ -2,7 +2,7 @@
 
 import threading
 
-from tinypedal import thread_guard
+from neopedal import thread_guard
 
 
 def _crashing_target(clock, run_time, crashes):

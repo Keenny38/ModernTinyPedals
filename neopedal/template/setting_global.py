@@ -1,0 +1,335 @@
+#  NeoPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of NeoPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Default global (config) setting template
+"""
+
+from ..const_api import API_DEFAULT_NAME
+from ..const_app import PLATFORM
+from ..userfile import set_default_config_path, set_default_data_path
+from ..version import SETTING_VERSION
+
+GLOBAL_DEFAULT = {
+    "preset": {
+        "version": SETTING_VERSION,
+    },
+    "application": {
+        "show_at_startup": True,
+        "minimize_to_tray": PLATFORM.WINDOWS,
+        "remember_position": True,
+        "remember_size": True,
+        "remember_open_pages": True,
+        "enable_high_dpi_scaling": True,
+        "enable_auto_load_preset": False,
+        "enable_global_hotkey": False,
+        "show_option_group_title": True,
+        "show_confirmation_for_batch_toggle": True,
+        "show_overlay_previews": True,  # Overlays page: cards with preview, compact list if off
+        "check_for_updates_on_startup": True,
+        "number_of_hours_between_update_checks": 12,  # checked again while app runs, 0 = startup only
+        "update_repository": "Keenny38/ModernTinyPedals",
+        'snap_distance': 10,
+        "snap_gap": 0,
+        "enable_magnetic_snap": True,  # overlays snap while dragged (Ctrl: free move), else snap with Ctrl
+        "show_layout_guides": True,
+        "enable_edit_mode_on_unlock": False,  # unlock shows edit toolbar, else overlays only movable on hover
+        "grid_move_size": 8,
+        "minimum_update_interval": 10,
+        "maximum_loading_attempts": 5,
+        "maximum_saving_attempts": 10,
+        "number_of_automatic_backups": 10,
+        # Phase 2 (package C2): deleted presets kept in trash, update version not proposed again
+        # (major * 1000000 + minor * 1000 + patch, 0 if none), see update.version_number
+        "number_of_days_to_keep_deleted_presets": 30,
+        "skipped_update_version": 0,
+        "position_x": 0,
+        "position_y": 0,
+        "window_width": 0,
+        "window_height": 0,
+        "window_maximized": False,  # shown maximized at startup, while remember_size is enabled
+        "window_color_theme": "Modern Dark",  # see regex_pattern.THEME_NAMES
+        "language": "English",
+        "show_setup_wizard_at_startup": True,
+        "last_page_index": 0,
+        # Navigation rail entries in order: page keys & tool dialog module names, see ui.app.rail_entries
+        "rail_items": (
+            "home,widget,driver_stats_viewer,race_results_viewer,game_replays,"
+            "broadcast_director,lap_viewer,race_calculator,preset"
+        ),
+        # Home page quick access buttons in order: tool dialog module names, page keys & actions,
+        # see ui.home_view.quick_access_entries
+        "home_quick_access": (
+            "lap_viewer,race_calculator,driver_stats_viewer,layout_editor,perf_view,"
+            "game_replays,widget,module,preset,spectate,"
+            "hotkey,tools,app_settings,bug_report,check_updates"
+        ),
+        "enable_layout_per_screen_setup": True,
+        # Tool pages open at quit, reopened at startup: dialog paths separated by comma, shown one marked "*"
+        "open_pages": "",
+    },
+    "compatibility": {
+        "enable_bypass_window_manager": (not PLATFORM.WINDOWS),
+        "enable_translucent_background": True,
+        "enable_window_position_correction": True,
+        "enable_x11_platform_plugin_override": (not PLATFORM.WINDOWS),
+        "background_color_global": "#000000",
+    },
+    "vr_overlay": {
+        "enable_vr_overlay": False,
+        "enable_openxr_layer": False,  # experimental: OpenXR games (layer loaded by every OpenXR game)
+        "enable_attach_to_headset": False,
+        "update_interval": 50,
+        "overlay_width_meters": 0.8,
+        "distance_meters": 1.0,
+        "vertical_offset_meters": -0.2,
+        "horizontal_offset_meters": 0.0,
+        "enable_vr_mirror_window": False,
+        "mirror_background_color": "#000000",
+        # Audit fixes (package C): mirror window position, kept by app (not on any screen: not set)
+        "mirror_position_x": -99999,
+        "mirror_position_y": -99999,
+    },
+    "remote_control": {
+        "enable_remote_control": False,
+        "remote_control_port": 8337,
+    },
+    "web_dashboard": {
+        "enable_web_dashboard": False,
+        "enable_lan_access": False,
+        "enable_https": False,
+        "web_dashboard_port": 8338,
+        "access_code": "",
+    },
+    "stream_overlay": {
+        "enable_stream_overlay": False,
+        "enable_lan_access": False,
+        "stream_overlay_port": 8339,
+        "frame_rate": 30,
+        "show_overlays_while_spectating": True,
+        "access_token": "",
+    },
+    "overlay_style": {
+        "overlay_theme": "Modern Dark",  # see regex_pattern.THEME_NAMES, legacy = classic look
+        "enable_colorblind_colors": False,
+        "enable_modern_font": True,
+        "modern_font_name": "JetBrains Mono",
+        "modern_design_font_name": "Barlow Semi Condensed",
+        "corner_radius_scale": 0.05,
+        "enable_depth_effects": True,
+        "minimum_bar_gap": 2,
+        "overlay_scale": 1.0,
+        "enable_fade_animation": True,
+    },
+    "telemetry": {
+        "api_name": API_DEFAULT_NAME,
+        "enable_api_selection_from_preset": True,
+        "enable_auto_backup_car_setup": False,
+        "enable_legacy_api_selection": False,
+    },
+    "user_path": {
+        "settings_path": set_default_config_path("settings/"),
+        "brand_logo_path": set_default_config_path("brandlogo/"),
+        "delta_best_path": set_default_data_path("deltabest/"),
+        "sector_best_path": set_default_data_path("deltabest/"),
+        "energy_delta_path": set_default_data_path("deltabest/"),
+        "fuel_delta_path": set_default_data_path("deltabest/"),
+        "track_map_path": set_default_data_path("trackmap/"),
+        "pace_notes_path": set_default_config_path("pacenotes/"),
+        "track_notes_path": set_default_config_path("tracknotes/"),
+        "car_setups_path": set_default_data_path("carsetups/"),
+        "telemetry_path": set_default_data_path("telemetry/"),
+        "game_image_path": set_default_data_path("gameimage/"),
+    },
+    "notification": {
+        "notify_locked_preset": True,
+        "font_color_locked_preset": "#FFFFFF",
+        "background_color_locked_preset": "#777777",
+        "notify_spectate_mode": True,
+        "font_color_spectate_mode": "#FFFFFF",
+        "background_color_spectate_mode": "#0088CC",
+        "notify_pace_notes_playback": True,
+        "font_color_pace_notes_playback": "#FFFFFF",
+        "background_color_pace_notes_playback": "#228800",
+        "notify_global_hotkey": True,
+        "font_color_global_hotkey": "#FFFFFF",
+        "background_color_global_hotkey": "#885544",
+        "notify_auto_backup_car_setup": True,
+        "font_color_auto_backup_car_setup": "#FFFFFF",
+        "background_color_auto_backup_car_setup": "#334499",
+    },
+    "fuel_calculator": {
+        "show_consumption_history": True,
+        "show_column_fuel_ratio": True,
+        "show_column_battery_drain": True,
+        "show_column_battery_regen": True,
+        "show_column_battery_net_change": True,
+        "show_column_tyre_wear": True,
+        "show_column_tank_capacity": True,
+        # Inputs of last time
+        "input_lap_time": 0.0,
+        "input_fuel_per_lap": 0.0,
+        "input_energy_per_lap": 0.0,
+        "input_tank_capacity": 0.0,
+        "enable_lap_race": False,
+        "input_race_minutes": 0,
+        "input_race_laps": 0,
+        "input_formation_laps": 0.0,
+        "input_pit_seconds": 0.0,
+        "input_safety_margin": 0.0,
+        "input_fuel_start": 0.0,
+        "input_energy_start": 0.0,
+        "input_tread_start": 100.0,
+        "input_wear_per_lap": 0.0,
+        "input_minimum_tread": 0.0,
+        "input_refuel_rate": 0.0,
+        "input_energy_rate": 0.0,
+        "enable_tyres_during_refuel": False,
+        "enable_driver_change_during_refuel": False,
+        "input_driver_change_seconds": 0.0,
+        "input_minimum_stops": 0,
+        "input_max_stint_minutes": 0.0,
+        "input_drivers": 1,
+        "input_fuel_effect": 0.0,
+        "input_track_evolution": 0.0,
+        "input_target_stint_laps": 0,
+        "input_safety_margin_kind": 0,
+        "enable_balanced_stints": False,
+        "input_stints_per_driver": 1,
+        "input_driver_table": "",
+        "input_saving_cost": 0.0,
+        "input_race_start_minutes": -1,
+        "enable_safety_car": False,
+        "input_sc_lap": 1,
+        "input_sc_laps": 3,
+        "input_sc_consumption": 50.0,
+        "input_sc_laptime": 150.0,
+        "enable_sc_pit": False,
+        "input_sc_pit_saving": 50.0,
+        "input_sc_wear": 50.0,
+        "enable_rain": False,
+        "input_rain_lap": 1,
+        "input_rain_laps": 0,
+        "input_rain_consumption": 100.0,
+        "input_rain_laptime": 110.0,
+        "enable_rain_tyres": True,
+        "input_pit_lap_consumption": 100.0,
+        "enable_leader_finish": False,
+        "input_measured_compound": 3,
+        "enable_follow_live": False,
+        "enable_valid_laps_only": False,
+        "enable_live_race": False,
+        "enable_auto_load_combo_plan": True,
+        "enable_plan_inputs": False,
+        "export_path": "",
+        "collapsed_sections": "",
+        "race_tab": 0,
+        "live_unfollowed": "",
+    },
+    "driver_stats_viewer": {
+        "enable_lap_reference": True,
+        "lap_reference_sheet_url": (
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vTN03UvJDm99byA6vQPZHKOCYVvfxLu1zkJAzdaKyROykzEKY2-"
+            "Xl1rl1q5znZEf36m88dxMKsY2eaO/pubhtml#gid=1766901750"
+        ),
+        "hidden_columns": "penalty_rate,win_rate,podium_rate",
+        "enable_sort_by_last_driven": False,
+        "enable_colorblind_colors": False,
+        "column_widths": "",
+    },
+    "tyre_strategy_planner": {
+        "last_file_path": "",
+        "last_file_name": "",
+    },
+    "track_map_viewer": {
+        "show_dark_background": True,
+        "show_map_info": True,
+        "show_position_info": True,
+        "show_curve_info": True,
+        "show_slope_info": True,
+        "show_center_mark": True,
+        "show_curve_section": True,
+        "show_distance_circle": True,
+        "show_marked_coordinates": True,
+        "show_osculating_circle": True,
+        "show_highlighted_coordinates": True,
+        "show_elevation_profile": True,
+        "inner_margin": 6,
+        "position_increment_step": 5,
+        "font_color_light": "#CCCCCC",
+        "background_color_light": "#FFFFFF",
+        "font_color_dark": "#333333",
+        "background_color_dark": "#333333",
+        "map_color": "#FFFFFF",
+        "map_width": 10,
+        "map_outline_color": "#111111",
+        "map_outline_width": 4,
+        "start_line_color": "#FF4400",
+        "start_line_width": 10,
+        "start_line_length": 30,
+        "sector_line_color": "#00AAFF",
+        "sector_line_width": 8,
+        "sector_line_length": 30,
+        "marked_coordinates_color": "#808080",
+        "marked_coordinates_size": 15,
+        "highlighted_coordinates_color": "#22DD00",
+        "highlighted_coordinates_width": 5,
+        "highlighted_coordinates_size": 15,
+        "center_mark_color": "#808080",
+        "center_mark_width": 1,
+        "center_mark_radius": 1000,
+        "curve_section_color": "#FF4400",
+        "curve_section_width": 5,
+        "osculating_circle_color": "#00AAFF",
+        "osculating_circle_width": 2,
+        "distance_circle_color": "#808080",
+        "distance_circle_width": 1,
+        "distance_circle_0_radius": 50,
+        "distance_circle_1_radius": 100,
+        "distance_circle_2_radius": 200,
+        "distance_circle_3_radius": 300,
+        "distance_circle_4_radius": 400,
+        "distance_circle_5_radius": 500,
+        "distance_circle_6_radius": 1000,
+        "distance_circle_7_radius": 0,
+        "distance_circle_8_radius": 0,
+        "distance_circle_9_radius": 0,
+        "curve_grade_hairpin": 5,
+        "curve_grade_1": 15,
+        "curve_grade_2": 25,
+        "curve_grade_3": 40,
+        "curve_grade_4": 65,
+        "curve_grade_5": 105,
+        "curve_grade_6": 275,
+        "curve_grade_7": -1,
+        "curve_grade_8": -1,
+        "curve_grade_straight": 3050,
+        "length_grade_short": 0,
+        "length_grade_normal": 50,
+        "length_grade_long": 150,
+        "length_grade_very_long": 250,
+        "length_grade_extra_long": 350,
+        "length_grade_extremely_long": 450,
+        "slope_grade_flat": 0,
+        "slope_grade_gentle": 0.03,
+        "slope_grade_moderate": 0.1,
+        "slope_grade_steep": 0.25,
+        "slope_grade_extreme": 0.5,
+        "slope_grade_cliff": 1,
+    },
+}

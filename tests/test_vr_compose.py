@@ -11,8 +11,8 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect, QRe
 from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import vr_overlay, vr_shared
-from tinypedal.vr_overlay import MAX_PIXELS, CanvasComposer, canvas_size, compose_tiles, content_rect, image_frame
+from neopedal import vr_overlay, vr_shared
+from neopedal.vr_overlay import MAX_PIXELS, CanvasComposer, canvas_size, compose_tiles, content_rect, image_frame
 
 # Reference: previous algorithm
 

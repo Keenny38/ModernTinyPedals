@@ -78,7 +78,7 @@ Some settings are shared by all presets and edited with their own tools (`Tools`
 
 ## Global config
 
-Global options are in `config.json`, in the global config folder: `%APPDATA%\NeoPedal` on Windows, `~/.config/NeoPedal/` on Linux. Up to 0.22 this folder was `TinyPedal`, shared with the original TinyPedal: on first start it is copied once to the new folder (see [Settings from TinyPedal](Installation.md#settings-from-tinypedal)). They are all edited in the `Config` page: its entry in the navigation bar, the gear button at the bottom of the bar, `Config` > `All Settings` (`Ctrl+,`), the Home page quick access, the `Tools` page or the command palette. Like the other navigation bar tools, it stays as you left it (category, pending changes) while you browse other pages.
+Global options are in `config.json`, in the global config folder: `%APPDATA%\NeoPedal` on Windows, `~/.config/NeoPedal/` on Linux. They are all edited in the `Config` page: its entry in the navigation bar, the gear button at the bottom of the bar, `Config` > `All Settings` (`Ctrl+,`), the Home page quick access, the `Tools` page or the command palette. Like the other navigation bar tools, it stays as you left it (category, pending changes) while you browse other pages.
 
 - One category per section of `config.json`, options in groups with their description, and an editor matching each option: switch, choice list, number with its limits, color with a picker, folder with `Choose Folder...` and `Open Folder`.
 - `Search settings` (`Ctrl+F` on the page) looks through every category; the count of matches shows next to each category.
@@ -91,7 +91,6 @@ The menus open the matching category:
 | Menu | Settings |
 |---|---|
 | `Config` > `Application` | Startup, tray, updates (`number_of_hours_between_update_checks`), language, window theme, setup wizard, auto load, backups, trash, snapping, layout guides |
-| `Config` > `TinyPedal Settings` | `Import Again from TinyPedal...` or `Start with Default Settings...`, see [Settings from TinyPedal](Installation.md#settings-from-tinypedal) |
 | `Config` > `Compatibility` | Linux window manager bypass, translucent background, window position correction, X11 override |
 | `Config` > `Notification` | Notices shown in the main window |
 | `Config` > `Units` | Distance, fuel, speed, temperature, pressures, power, weight |

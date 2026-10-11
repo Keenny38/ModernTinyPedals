@@ -120,7 +120,7 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 - **One preset**: create a default preset with `New` on the `Preset` page and load it, or restore a backup with `Restore`.
 - **Recorded data** of the current track and class: `Overlay` > `Reset Data`.
 - **A deleted preset**: `Trash` on the `Preset` page.
-- **Global settings**: `Config` > `TinyPedal Settings` > `Start with Default Settings...` restarts the app with default global settings, the current folder set aside (never deleted).
+- **Global settings**: quit the app, then rename the global config folder: the app starts with default global settings.
 - **Everything**: quit the app, then **rename** (rather than delete) the global config folder and the `settings` folder. At the next start, the app creates default settings and shows the setup wizard. Rename the folders back to return to your old settings.
 
 ## Updates

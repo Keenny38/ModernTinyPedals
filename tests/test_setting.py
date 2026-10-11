@@ -7,10 +7,10 @@ from copy import deepcopy
 
 import pytest
 
-from tinypedal import setting as setting_module
-from tinypedal.const_file import ConfigType, FileExt
-from tinypedal.setting import Setting, snapshot_dict
-from tinypedal.userfile.json_setting import copy_setting
+from neopedal import setting as setting_module
+from neopedal.const_file import ConfigType, FileExt
+from neopedal.setting import Setting, snapshot_dict
+from neopedal.userfile.json_setting import copy_setting
 
 
 @pytest.fixture
@@ -251,8 +251,8 @@ def test_flush_without_pending_save(config):
 
 def test_app_version_does_not_drive_setting_migrations(monkeypatch):
     """App version (0.x) is independent from setting format version (2.x): no old migration rerun"""
-    from tinypedal import setting_validator, version
-    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+    from neopedal import setting_validator, version
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
 
     assert GLOBAL_DEFAULT["preset"]["version"] == version.SETTING_VERSION
     calls = []
@@ -264,9 +264,9 @@ def test_app_version_does_not_drive_setting_migrations(monkeypatch):
 
 
 def test_recorder_module_enabled_in_existing_presets_once():
-    from tinypedal import setting_validator, version
-    from tinypedal.setting import cfg
-    from tinypedal.userfile.json_setting import copy_setting
+    from neopedal import setting_validator, version
+    from neopedal.setting import cfg
+    from neopedal.userfile.json_setting import copy_setting
 
     cfg.default.set_default()
     default = copy_setting(dict(cfg.default.setting))
@@ -283,9 +283,9 @@ def test_recorder_module_enabled_in_existing_presets_once():
 
 
 def test_navigation_rail_and_quick_access_reset_to_new_default_once():
-    from tinypedal import setting_validator, version
-    from tinypedal.template.setting_global import GLOBAL_DEFAULT
-    from tinypedal.userfile.json_setting import copy_setting
+    from neopedal import setting_validator, version
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
+    from neopedal.userfile.json_setting import copy_setting
 
     default = copy_setting(GLOBAL_DEFAULT)
     new_rail = default["application"]["rail_items"]
@@ -424,7 +424,7 @@ def test_invalid_section_reset_alone(config):
 
 
 def test_nan_and_infinity_values_rejected():
-    from tinypedal import setting_validator
+    from neopedal import setting_validator
 
     default = {"widget": {"opacity": 0.9, "position_x": 100, "font_name": "Arial"}}
     user = json.loads('{"widget": {"opacity": NaN, "position_x": 1e999, "font_name": "Consolas"}}')
@@ -434,7 +434,7 @@ def test_nan_and_infinity_values_rejected():
 
 def test_boolean_validator_restores_default_for_non_bool_values():
     """Hand edited preset: "false" must not become True (bool("false")), default restored"""
-    from tinypedal.setting_validator import PresetValidator
+    from neopedal.setting_validator import PresetValidator
 
     default = {"enable": True, "auto_hide": False, "show_a": True, "show_b": False}
     user = {"enable": "false", "auto_hide": "true", "show_a": 0, "show_b": 1}

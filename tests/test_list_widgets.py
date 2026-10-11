@@ -6,11 +6,11 @@ import pytest
 from PySide6.QtCore import QTimerEvent
 from PySide6.QtGui import QColor
 
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.widget._modern import create_widget
 from tests.test_readers import lmu_api
 from tests.test_widget_benchmark import drive, fill_field
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.widget._modern import create_widget
 
 LIST_WIDGETS = ("standings", "relative")
 
@@ -18,7 +18,7 @@ LIST_WIDGETS = ("standings", "relative")
 @pytest.fixture
 def field(ui_env, monkeypatch):
     """Default settings (saving disabled), 20 cars field in module data, API reader on in-memory shared memory"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     saved_vehicles = (minfo.vehicles.dataSet, minfo.vehicles.totalVehicles, minfo.vehicles.playerIndex)
     fill_field(20)
@@ -33,7 +33,7 @@ def run_widget(name: str, data, frames: int = 4, **options):
     """Build widget with options, update & paint a few frames, return last image"""
     wcfg = cfg.user.setting[name]
     wcfg.update(options)
-    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     event = QTimerEvent(0)
     try:
@@ -73,7 +73,7 @@ def test_every_column(field, name, modern):
 
 @pytest.mark.parametrize("name", LIST_WIDGETS)
 def test_race_session_and_class_split(field, name):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     field.scoring.scoringInfo.mSession = 10  # race
     assert api.read.session.in_race()

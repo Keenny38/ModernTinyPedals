@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from tinypedal import loader, realtime_state
-from tinypedal.const_file import ConfigType
-from tinypedal.module_control import ModuleControl
-from tinypedal.setting import cfg
+from neopedal import loader, realtime_state
+from neopedal.const_file import ConfigType
+from neopedal.module_control import ModuleControl
+from neopedal.setting import cfg
 
 
 def spin_until(condition, seconds: float = 5.0) -> bool:

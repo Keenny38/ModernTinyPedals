@@ -15,9 +15,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import app_signal, vr_overlay, vr_shared
-from tinypedal.setting import cfg
-from tinypedal.vr_overlay import VROverlay
+from neopedal import app_signal, vr_overlay, vr_shared
+from neopedal.setting import cfg
+from neopedal.vr_overlay import VROverlay
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

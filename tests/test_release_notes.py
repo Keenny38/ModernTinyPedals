@@ -26,7 +26,7 @@ NOTES = """### Visionneuse de télémétrie (Telemetry)
 
 
 def test_split_notes_themes_and_details():
-    from tinypedal.ui.release_notes import split_notes
+    from neopedal.ui.release_notes import split_notes
 
     themes, details = split_notes(NOTES)
     assert [section.title for section in themes] == ["Visionneuse de télémétrie (Telemetry)", "Calculateur"]
@@ -40,7 +40,7 @@ def test_split_notes_themes_and_details():
 
 
 def test_inline_html():
-    from tinypedal.ui.release_notes import inline_html
+    from neopedal.ui.release_notes import inline_html
 
     assert inline_html("**Bold** & `code`") == "<b>Bold</b> &amp; <code>code</code>"
     assert inline_html("<b>x</b>") == "&lt;b&gt;x&lt;/b&gt;"  # notes text never read as HTML
@@ -49,8 +49,8 @@ def test_inline_html():
 
 
 def test_release_date_in_current_language():
-    from tinypedal import i18n
-    from tinypedal.ui.release_notes import format_release_date
+    from neopedal import i18n
+    from neopedal.ui.release_notes import format_release_date
 
     i18n.set_language("Français")
     try:
@@ -63,8 +63,8 @@ def test_release_date_in_current_language():
 
 @pytest.fixture
 def notes_page(ui_env, monkeypatch):
-    from tinypedal.ui import release_notes
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.ui import release_notes
+    from neopedal.ui.release_notes import ReleaseNotesDialog
 
     monkeypatch.setattr(release_notes, "app_version", "0.10.0")  # source checkout reports its last release
 
@@ -83,7 +83,7 @@ def notes_page(ui_env, monkeypatch):
 
 
 def test_page_cards_and_details(notes_page):
-    from tinypedal.ui.release_notes import NotesCard
+    from neopedal.ui.release_notes import NotesCard
 
     dialog = notes_page()
     cards = dialog.findChildren(NotesCard)
@@ -99,7 +99,7 @@ def test_page_cards_and_details(notes_page):
 
 
 def test_prompt_install(notes_page):
-    from tinypedal.i18n import tr
+    from neopedal.i18n import tr
 
     dialog = notes_page(can_install=True, prompt=True)
     asked = []
@@ -111,7 +111,7 @@ def test_prompt_install(notes_page):
 
 
 def test_update_messages_translated():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -122,9 +122,9 @@ def test_update_messages_translated():
 
 
 def test_notify_button_opens_notes(ui_env, monkeypatch):
-    from tinypedal.ui import notification
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
-    from tinypedal.update import update_checker
+    from neopedal.ui import notification
+    from neopedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.update import update_checker
 
     monkeypatch.setattr(update_checker, "release_notes", NOTES)
     opened = []
@@ -147,9 +147,9 @@ def test_shown_as_page(ui_env, monkeypatch):
     """Inside the app: page title & Close button of page only, readable column on a wide page"""
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.setting import cfg
+    from neopedal.ui import app as app_module
+    from neopedal.ui.release_notes import ReleaseNotesDialog
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -161,7 +161,7 @@ def test_shown_as_page(ui_env, monkeypatch):
         dialog.open()
         QApplication.processEvents()
         assert dialog.in_app_page and dialog.button_close.isHidden()  # page has its own Close
-        from tinypedal.ui.release_notes import NotesCard
+        from neopedal.ui.release_notes import NotesCard
         card = dialog.findChildren(NotesCard)[0]
         assert card.width() > dialog.width() * 0.8  # notes fill the page width
         dialog.close()
@@ -171,7 +171,7 @@ def test_shown_as_page(ui_env, monkeypatch):
 
 
 def test_download_in_browser_when_app_cannot_install(notes_page, monkeypatch):
-    from tinypedal.ui import release_notes
+    from neopedal.ui import release_notes
 
     opened = []
     monkeypatch.setattr(release_notes.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toString())))

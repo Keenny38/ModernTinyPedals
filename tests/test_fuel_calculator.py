@@ -4,9 +4,9 @@ columns, export, saving target & scenarios"""
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
+from neopedal.module_info import ConsumptionDataSet, minfo
+from neopedal.setting import cfg
 from tests.test_race_calculator import cell, host, tile  # noqa: F401 (host: fixture)
-from tinypedal.module_info import ConsumptionDataSet, minfo
-from tinypedal.setting import cfg
 
 HISTORY = (
     ConsumptionDataSet(12, 1, 90.5, 3.0, 2.5, 1.0, 0.5, 0.4, 100.0),
@@ -17,7 +17,7 @@ HISTORY = (
 
 @pytest.fixture
 def calculator(ui_env, monkeypatch, host):  # noqa: F811
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     cfg.units["fuel_unit"] = "Liter"
@@ -162,8 +162,8 @@ def test_history_panel_toggle_and_columns(calculator):
 
 @pytest.mark.parametrize("extension", ["consumption", "csv"])
 def test_load_history_file(calculator, host, tmp_path, extension):  # noqa: F811
-    from tinypedal.const_file import FileExt
-    from tinypedal.userfile.consumption_history import save_consumption_history_file
+    from neopedal.const_file import FileExt
+    from neopedal.userfile.consumption_history import save_consumption_history_file
 
     save_consumption_history_file(HISTORY, f"{tmp_path.as_posix()}/", "Spa - GT3")
     path = tmp_path / f"Spa - GT3{FileExt.CONSUMPTION}"
@@ -180,8 +180,8 @@ def test_load_history_file(calculator, host, tmp_path, extension):  # noqa: F811
 
 
 def test_file_laps_keep_their_tank(calculator, host, monkeypatch, tmp_path):  # noqa: F811
-    from tinypedal.api_control import api
-    from tinypedal.userfile.consumption_history import save_consumption_history_file
+    from neopedal.api_control import api
+    from neopedal.userfile.consumption_history import save_consumption_history_file
 
     save_consumption_history_file(HISTORY, f"{tmp_path.as_posix()}/", "Monza - LMP2")
     monkeypatch.setattr(type(api.read.engine), "tank_capacity", lambda self, index=None: 120.0, raising=False)
@@ -290,7 +290,7 @@ def test_plan_picture_copied(calculator, host):  # noqa: F811
 
 
 def test_inputs_saved_and_restored(calculator):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     set_race(calculator, laps=30, fuel=2.5, pit=45)
     calculator.setInput("input_safety_margin", 0.5)
@@ -330,8 +330,8 @@ def test_one_calculation_per_batch(calculator):
 
 
 def test_live_race_length_filled(calculator, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.ui.quick.race_model import live_race_length
+    from neopedal.api_control import api
+    from neopedal.ui.quick.race_model import live_race_length
 
     session = api.read.session
     monkeypatch.setattr(type(session), "session_type", lambda self: 4, raising=False)
@@ -359,7 +359,7 @@ def test_live_history_follows_new_laps(calculator, monkeypatch):
 
 
 def test_empty_inputs_show_dashes(ui_env, monkeypatch, host):  # noqa: F811
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", (ConsumptionDataSet(),))  # placeholder only
@@ -396,7 +396,7 @@ def test_history_sorted_and_valid_only(calculator):
 def test_delete_live_history(calculator, monkeypatch, tmp_path):
     from collections import deque
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     history = deque(HISTORY, 100)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", history)
@@ -414,7 +414,7 @@ def test_delete_live_history(calculator, monkeypatch, tmp_path):
 
 
 def test_delete_from_file_history(calculator, host, tmp_path):  # noqa: F811
-    from tinypedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
+    from neopedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
 
     save_consumption_history_file(HISTORY, f"{tmp_path.as_posix()}/", "Monza - LMP2")
     host.open_path = str(tmp_path / "Monza - LMP2.consumption")
@@ -620,7 +620,7 @@ def test_start_at_midnight(calculator):
 
 
 def test_scenarios_deferred_while_changing_quickly(calculator, monkeypatch):
-    from tinypedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_backend
 
     set_race(calculator, laps=40, tank=45, fuel=3.0)
     monkeypatch.setattr(race_backend, "SCENARIO_DELAY_MS", 150)
@@ -636,7 +636,7 @@ def test_scenarios_deferred_while_changing_quickly(calculator, monkeypatch):
 
 
 def test_export_folder_remembered(calculator, monkeypatch, tmp_path):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     set_race(calculator, laps=40, tank=45, fuel=3.0)
     folder = tmp_path / "plans"
@@ -676,8 +676,8 @@ def test_fuel_levels_follow_stops(calculator):
 
 
 def test_game_estimate_and_team_fill_in(calculator, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.process.team_usage import StintUsage
+    from neopedal.api_control import api
+    from neopedal.process.team_usage import StintUsage
 
     monkeypatch.setattr(api.read.engine, "expected_fuel_consumption", lambda: 2.78)
     monkeypatch.setattr(api.read.engine, "expected_energy_consumption", lambda: 3.26)

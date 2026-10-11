@@ -9,10 +9,10 @@ from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog
 
-from tinypedal import i18n
-from tinypedal.setting import cfg
-from tinypedal.ui import setup_wizard
-from tinypedal.ui.quick import setup_backend
+from neopedal import i18n
+from neopedal.setting import cfg
+from neopedal.ui import setup_wizard
+from neopedal.ui.quick import setup_backend
 
 
 def flush():
@@ -317,7 +317,7 @@ def test_previews_rendered_in_chosen_style(wizard, renders):
 
 
 def test_render_overlay_keeps_running_overlay_style(ui_env, bundled_fonts):
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.widget._painter import OverlayStyle
 
     OverlayStyle.corner_scale, OverlayStyle.depth_effects = 0.05, True
     style = {**cfg.user.config["overlay_style"], "overlay_theme": "Legacy Light"}
@@ -392,8 +392,8 @@ def test_wizard_opens_in_app_language_with_current_choices(ui_env, renders):
 
 
 def test_unit_systems_cover_preset_units():
-    from tinypedal.regex_pattern import CHOICE_UNITS
-    from tinypedal.template.setting_common import COMMON_DEFAULT
+    from neopedal.regex_pattern import CHOICE_UNITS
+    from neopedal.template.setting_common import COMMON_DEFAULT
 
     assert setup_wizard.UNIT_SYSTEMS["Metric"] == COMMON_DEFAULT["units"]
     for units in setup_wizard.UNIT_SYSTEMS.values():

@@ -7,8 +7,8 @@ from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QSize
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.setting import cfg
 
 
 def settle():
@@ -36,7 +36,7 @@ def close_windows(*windows):
 @pytest.fixture
 def make_window(ui_env):
     """Main window built with given application options, window state set as at startup"""
-    from tinypedal.ui.app import AppWindow
+    from neopedal.ui.app import AppWindow
 
     windows = []
 
@@ -58,7 +58,7 @@ def screen_area() -> QRect:
 
 # --- Geometry helpers
 def test_fit_rect_moves_then_shrinks():
-    from tinypedal.ui.window_geometry import fit_rect
+    from neopedal.ui.window_geometry import fit_rect
 
     area = QRect(0, 0, 1000, 800)
     assert fit_rect(QRect(100, 100, 300, 200), area) == QRect(100, 100, 300, 200)  # inside: kept
@@ -68,7 +68,7 @@ def test_fit_rect_moves_then_shrinks():
 
 
 def test_screen_for_rect_outside_screens_is_nearest_screen():
-    from tinypedal.ui.window_geometry import screen_for
+    from neopedal.ui.window_geometry import screen_for
 
     screen = QGuiApplication.primaryScreen()
     geometry = screen.geometry()
@@ -78,7 +78,7 @@ def test_screen_for_rect_outside_screens_is_nearest_screen():
 
 
 def test_default_frame_rect_centered_within_screen(make_window):
-    from tinypedal.ui.window_geometry import DEFAULT_SCREEN_RATIO, default_frame_rect
+    from neopedal.ui.window_geometry import DEFAULT_SCREEN_RATIO, default_frame_rect
 
     main = make_window()
     area = screen_area()
@@ -110,7 +110,7 @@ def test_window_never_smaller_than_its_layout(make_window):
 
 
 def test_pages_never_squeezed(make_window):
-    from tinypedal.ui.window_geometry import page_minimum_size
+    from neopedal.ui.window_geometry import page_minimum_size
 
     main = make_window(window_width=200, window_height=150)  # saved size too small: minimum kept
     settle()
@@ -124,16 +124,16 @@ def test_pages_never_squeezed(make_window):
 
 
 def test_qml_tool_pages_ask_larger_minimum():
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
-    from tinypedal.ui.window_geometry import page_minimum_size
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
+    from neopedal.ui.window_geometry import page_minimum_size
 
     minimum = DriverStatsViewer.page_minimum_size()  # French notes of cards cut below it
     assert minimum.width() > page_minimum_size().width() and minimum.height() > page_minimum_size().height()
 
 
 def test_shown_page_keeps_its_own_minimum(make_window):
-    from tinypedal.ui.tools_view import open_tool
-    from tinypedal.ui.window_geometry import max_content_size, page_minimum_size
+    from neopedal.ui.tools_view import open_tool
+    from neopedal.ui.window_geometry import max_content_size, page_minimum_size
 
     main = make_window()
     main.showNormal()
@@ -219,7 +219,7 @@ def test_window_state_saved_shortly_after_change(make_window, ui_env):
 
 
 def test_window_state_not_tracked_before_startup_state_set(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -233,7 +233,7 @@ def test_window_state_not_tracked_before_startup_state_set(ui_env, monkeypatch):
 
 # --- Pages growing window
 def test_grown_window_kept_on_screen_and_moved_back(make_window):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     area = screen_area()
     main = make_window(window_width=480, window_height=420)
@@ -254,7 +254,7 @@ def test_grown_window_kept_on_screen_and_moved_back(make_window):
 
 
 def test_grown_size_never_saved_as_window_size(make_window):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     main = make_window(window_width=480, window_height=420)
     main.showNormal()
@@ -273,7 +273,7 @@ def test_grown_size_never_saved_as_window_size(make_window):
 
 
 def test_moved_by_user_keeps_position_when_page_closes(make_window):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     main = make_window(window_width=480, window_height=420)
     main.showNormal()
@@ -292,8 +292,8 @@ def test_moved_by_user_keeps_position_when_page_closes(make_window):
 
 
 def test_reset_window_size(make_window, ui_env):
-    from tinypedal.ui.tools_view import open_tool
-    from tinypedal.ui.window_geometry import default_frame_rect
+    from neopedal.ui.tools_view import open_tool
+    from neopedal.ui.window_geometry import default_frame_rect
 
     main = make_window(window_width=480, window_height=420)
     main.showNormal()
@@ -314,7 +314,7 @@ def test_reset_window_size(make_window, ui_env):
 
 
 def test_reset_window_size_in_window_menu_and_palette(make_window):
-    from tinypedal.ui.command_palette import build_commands
+    from neopedal.ui.command_palette import build_commands
 
     main = make_window()
     menu = next(action.menu() for action in main.menuBar().actions() if action.text() == "Window")

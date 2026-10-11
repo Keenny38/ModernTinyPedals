@@ -5,10 +5,10 @@ import os
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile.telemetry_lap import LapData
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, check_only, laps, rows_by_path, save, viewer  # noqa: F401
-from tinypedal.setting import cfg
-from tinypedal.userfile.telemetry_lap import LapData
 
 
 def lap_data(name: str = "a", length: float = 1000.0, step: float = 10.0, speed: float = 100.0, **columns) -> LapData:
@@ -20,7 +20,7 @@ def lap_data(name: str = "a", length: float = 1000.0, step: float = 10.0, speed:
 
 # --- Data
 def test_parse_columns_skips_bad_rows(tmp_path):
-    from tinypedal.userfile.telemetry_lap import load_lap, parse_columns
+    from neopedal.userfile.telemetry_lap import load_lap, parse_columns
 
     assert parse_columns([["1", "2"], ["3", "4"]], 2) == [[1.0, 3.0], [2.0, 4.0]]
     assert parse_columns([["1", "2"], ["x", "4"], ["5", "6"]], 2) == [[1.0, 5.0], [2.0, 6.0]]
@@ -31,7 +31,7 @@ def test_parse_columns_skips_bad_rows(tmp_path):
 
 
 def test_delta_scaled_to_reference_length():
-    from tinypedal.userfile.telemetry_lap import compute_delta, distance_scale
+    from neopedal.userfile.telemetry_lap import compute_delta, distance_scale
 
     reference = lap_data("ref", length=1000.0)
     longer = LapData("log", {"distance": [d * 1.03 for d in reference.distance],  # driven distance 3% longer
@@ -44,7 +44,7 @@ def test_delta_scaled_to_reference_length():
 
 
 def test_viewer_setting_written_safely(ui_env, tmp_path):
-    from tinypedal.ui.lap_viewer import VIEWER_SETTING, load_viewer_setting, save_viewer_setting
+    from neopedal.ui.lap_viewer import VIEWER_SETTING, load_viewer_setting, save_viewer_setting
 
     folder = tmp_path / "viewer"
     folder.mkdir()
@@ -55,7 +55,7 @@ def test_viewer_setting_written_safely(ui_env, tmp_path):
 
 
 def test_map_line_keeps_increasing_distance():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     lap = LapData("a", {"distance": [0.0, 10.0, 5.0, 20.0, 20.0, 30.0], "pos_x": [1.0, 2, 3, 4, 5, 6],
                         "pos_y": [1.0] * 6})
@@ -66,7 +66,7 @@ def test_map_line_keeps_increasing_distance():
 
 
 def test_slip_events_and_map_rotation_helpers():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     count = 101
     distance = [index * 10.0 for index in range(count)]
@@ -88,8 +88,8 @@ def test_slip_events_and_map_rotation_helpers():
 
 # --- Corners
 def test_corner_stats_extra_values_and_ideal_lap():
+    from neopedal.userfile.corner_analysis import compare_corners, find_corners, ideal_lap, resample_sorted
     from tests.test_corner_analysis import make_lap
-    from tinypedal.userfile.corner_analysis import compare_corners, find_corners, ideal_lap, resample_sorted
 
     assert resample_sorted([0.0, 10.0], [0.0, 100.0], [-5.0, 0.0, 2.5, 10.0, 20.0]) == [0.0, 0.0, 25.0, 100.0, 100.0]
     reference = make_lap()
@@ -111,8 +111,8 @@ def test_corner_stats_extra_values_and_ideal_lap():
 def test_trace_data_computed_channels_and_smoothing(ui_env):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData, moving_average
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData, moving_average
 
     assert moving_average([0.0, 3.0, 0.0, 3.0, 0.0], 3) == pytest.approx([1.5, 1.0, 2.0, 1.0, 1.5])
     assert moving_average([1.0, 2.0], 5) == [1.0, 2.0]
@@ -145,8 +145,8 @@ def test_trace_data_computed_channels_and_smoothing(ui_env):
 def test_trace_data_keeps_series_of_shown_laps(ui_env):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     first, second, third = (PlotLap(name, name, lap_data(name, speed=speed), QColor("red"))
                             for name, speed in (("a", 100.0), ("b", 90.0), ("c", 80.0)))
@@ -212,8 +212,8 @@ def test_cursor_state_and_differences(viewer):  # noqa: F811
     assert len(speed) == len(backend.data.laps) and speed[0]["diff"] == "" and speed[1]["diff"]
     beyond = backend.cursorValues(5000.0)[0]  # past end of laps: one empty entry per lap (QML items kept)
     assert len(beyond) == len(backend.data.laps) and all(value["text"] == "" for value in beyond)
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
-    from tinypedal.ui.quick.lap_backend import format_diff
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.quick.lap_backend import format_diff
 
     assert format_diff(CHANNEL_MAP["throttle"], 0.25) == "+25%"
     assert format_diff(CHANNEL_MAP["speed_kph"], -4.0) == chr(0x2212) + "4"
@@ -249,7 +249,7 @@ def test_selection_shortcuts(viewer, laps):  # noqa: F811
 def test_presets_options_and_layout_saved(viewer):  # noqa: F811
     from PySide6.QtCore import QByteArray
 
-    from tinypedal.ui.lap_viewer import CHANNEL_PRESETS, load_viewer_setting
+    from neopedal.ui.lap_viewer import CHANNEL_PRESETS, load_viewer_setting
 
     backend = viewer.backend
     backend.applyPreset("Tyres")
@@ -358,7 +358,7 @@ def test_export_in_foreground_and_status_cleared(viewer, laps, tmp_path):  # noq
 def test_g_circle_orientation_and_scale(viewer):  # noqa: F811
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.lap_viewer import PlotLap
 
     backend = viewer.backend
     count = 200
@@ -370,15 +370,15 @@ def test_g_circle_orientation_and_scale(viewer):  # noqa: F811
     assert backend.gCircle["limit"] == 3.0  # one 9 G spike left out of scale
     point = backend.gCursor(500.0)[0]  # sample 50
     assert point["x"] == pytest.approx(-math.sin(5)) and point["y"] == pytest.approx(-2 * math.cos(5))  # left turn left, braking down
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     assert VertexStore.get(backend.gCircle["dots"][0]["envelope"]).vertex_count >= 2
 
 
 def test_replay_found_for_lap(viewer, monkeypatch):  # noqa: F811
-    from tinypedal import replay
-    from tinypedal.replay import ReplayInfo
-    from tinypedal.userfile.telemetry_lap import lap_timestamp_of
+    from neopedal import replay
+    from neopedal.replay import ReplayInfo
+    from neopedal.userfile.telemetry_lap import lap_timestamp_of
 
     backend = viewer.backend
     lap = backend.data.reference
@@ -398,7 +398,7 @@ def test_replay_found_for_lap(viewer, monkeypatch):  # noqa: F811
 
 # --- Track map: driving points, coloring modes, sectors, arrows
 def test_map_line_helpers():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     distance = [float(index) for index in range(0, 1001, 10)]
     angles = [d / 1000 * math.pi for d in distance]  # half circle turning left (counterclockwise)
@@ -421,7 +421,7 @@ def test_map_line_helpers():
 
 
 def test_map_driving_points_and_options(viewer):  # noqa: F811
-    from tinypedal.ui.lap_viewer import load_viewer_setting
+    from neopedal.ui.lap_viewer import load_viewer_setting
 
     backend = viewer.backend
     points = backend.trackMap["points"]
@@ -449,8 +449,8 @@ def test_map_driving_points_and_options(viewer):  # noqa: F811
 def test_map_modes_cursor_gap_and_sectors(viewer):  # noqa: F811
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     for mode, filled in (("line", True), ("gear", True), ("elevation", False)):  # elevation not recorded
@@ -479,7 +479,7 @@ def test_map_modes_cursor_gap_and_sectors(viewer):  # noqa: F811
 def test_marker_shapes_and_faded_band():
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.quick import lines
+    from neopedal.ui.quick import lines
 
     points = [(0.0, 0.0, 0.0), (10.0, 0.0, math.pi / 2)]
     counts = {shape: lines.markers(points, shape, 2.0).vertex_count for shape in lines.MARKER_SHAPES}
@@ -494,7 +494,7 @@ def test_marker_shapes_and_faded_band():
 
 
 def test_track_limits_trackout_zones_grid():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     distance = [float(index) for index in range(0, 2001, 5)]
     base = lap_map.MapLine(distance, distance[:], [0.0] * len(distance))  # straight along x, left is +y
@@ -529,7 +529,7 @@ def test_track_limits_trackout_zones_grid():
     assert xs[0] == pytest.approx(100.0) and xs[-1] == pytest.approx(200.0)
     assert alphas[0] == 0.0 and alphas[-1] == pytest.approx(1.0)
     colors = lap_map.corner_delta_colors(base, [(100.0, 200.0, 0.2), (300.0, 400.0, -0.1)])
-    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR
+    from neopedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR
 
     assert colors[30] == LOSS_COLOR and colors[70] != LOSS_COLOR and colors[0].name() == "#6b7280"
     assert lap_map.corner_delta_colors(base, [(100.0, 200.0, 0.2)], colorblind=True)[30].name() == "#f97316"
@@ -537,7 +537,7 @@ def test_track_limits_trackout_zones_grid():
 
 
 def test_map_markers_picking_and_card(viewer, laps):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     track_map = backend.trackMap
@@ -581,7 +581,7 @@ def test_map_markers_picking_and_card(viewer, laps):  # noqa: F811
 
 
 def test_track_limits_job_and_cache(viewer, laps):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     backend = viewer.backend
     assert backend._limits is None and backend._limits_job is None  # 2 clean laps: not enough
@@ -611,8 +611,8 @@ def test_track_limits_job_and_cache(viewer, laps):  # noqa: F811
 
 # --- Kept position, map following charts back, precision
 def test_kept_position_remembered(viewer, laps):  # noqa: F811
+    from neopedal.ui.lap_viewer import LapViewer, load_viewer_setting
     from tests.test_lap_viewer import flush_deleted
-    from tinypedal.ui.lap_viewer import LapViewer, load_viewer_setting
 
     backend = viewer.backend
     assert backend.pinnedX == -1.0 and backend.mapPin == {}
@@ -622,7 +622,7 @@ def test_kept_position_remembered(viewer, laps):  # noqa: F811
     assert backend.pinnedX == pytest.approx(1234.5) and changes == [pytest.approx(1234.5)]
     pin = backend.mapPin
     line = backend._map_lines[0][0]
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     assert (pin["x"], pin["y"]) == pytest.approx(lap_map.point_at(line, 1234.5))
     assert load_viewer_setting(cfg.path.telemetry)["pins"] == {backend.currentTrack: 1234.5}
@@ -643,7 +643,7 @@ def test_kept_position_remembered(viewer, laps):  # noqa: F811
 
 
 def test_map_follows_back_overlays_and_projection(viewer):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     line = backend._map_lines[0][0]
@@ -666,8 +666,8 @@ def test_map_follows_back_overlays_and_projection(viewer):  # noqa: F811
 
 
 def test_driving_points_between_grid_samples():
+    from neopedal.userfile.corner_analysis import ResampledLap, compare_corners
     from tests.test_corner_analysis import make_lap
-    from tinypedal.userfile.corner_analysis import ResampledLap, compare_corners
 
     lap = make_lap(step=1.0)  # samples every meter, analysis grid every 5 m
     row = compare_corners(lap)[0]
@@ -682,7 +682,7 @@ def test_driving_points_between_grid_samples():
 
 # --- Game track position, scoring data, sectors
 def test_scoring_steps_smoothed_and_median_sectors():
-    from tinypedal.userfile.telemetry_lap import median_sector_bounds, smooth_steps
+    from neopedal.userfile.telemetry_lap import median_sector_bounds, smooth_steps
 
     times = [index * 0.02 for index in range(30)]
     values = [0.0] * 10 + [1.0] * 10 + [2.0] * 10  # game value updated every 0.2s
@@ -706,7 +706,7 @@ def test_scoring_steps_smoothed_and_median_sectors():
 
 @pytest.mark.parametrize("game_sign", [1.0, -1.0])
 def test_game_track_limits_found_whichever_way_lateral_goes(game_sign):
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     xs = [index * 2.0 for index in range(251)]
     base = lap_map.MapLine(list(xs), list(xs), [0.0] * len(xs))  # reference line along x, left is +y
@@ -725,8 +725,8 @@ def test_game_track_limits_found_whichever_way_lateral_goes(game_sign):
 def test_track_position_channel(ui_env):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     count = 101
     lap = lap_data("a", path_lateral=[index / 10 - 5 for index in range(count)], track_edge=5.0)

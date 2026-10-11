@@ -4,8 +4,8 @@ import math
 
 import pytest
 
+from neopedal.module import module_recorder
 from tests.test_lap_viewer import wait_loaded
-from tinypedal.module import module_recorder
 
 
 def write_lap(folder, lap_number, lap_time, samples=400, length=3000.0, speed=180.0):
@@ -30,8 +30,8 @@ def write_lap(folder, lap_number, lap_time, samples=400, length=3000.0, speed=18
 def backend(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     folder = cfg.path.telemetry.rstrip("/")
     write_lap(folder, 1, 90.0)
@@ -47,7 +47,7 @@ def backend(ui_env):
 
 
 def test_vertex_builders():
-    from tinypedal.ui.quick import lines
+    from neopedal.ui.quick import lines
 
     strip = lines.line_strip([0.0, 1.0, 2.0], [5.0, 6.0, 7.0])
     assert strip.vertex_count == 3 and list(strip.data) == [0.0, 5.0, 1.0, 6.0, 2.0, 7.0]
@@ -69,7 +69,7 @@ def test_vertex_builders():
 
 
 def test_vertex_store_serial():
-    from tinypedal.ui.quick.lines import VertexStore, line_strip
+    from neopedal.ui.quick.lines import VertexStore, line_strip
 
     VertexStore.set("test|a", line_strip([0.0, 1.0], [0.0, 1.0]))
     first = VertexStore.get("test|a").serial
@@ -95,7 +95,7 @@ def test_backend_lap_list(backend):
 
 
 def test_backend_toggle_and_reference(backend):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     unchecked = next(row["path"] for row in backend.lap_model.rows if row["kind"] == "lap" and not row["checked"])
     backend.toggleLap(unchecked)
@@ -119,7 +119,7 @@ def test_backend_toggle_and_reference(backend):
 
 
 def test_backend_channels_and_cursor(backend):
-    from tinypedal.ui.lap_viewer import DEFAULT_CHANNELS
+    from neopedal.ui.lap_viewer import DEFAULT_CHANNELS
 
     assert [panel["column"] for panel in backend.panels] == list(DEFAULT_CHANNELS)
     delta = next(panel for panel in backend.panels if panel["column"] == "delta")
@@ -154,7 +154,7 @@ def test_backend_time_axis(backend):
 
 
 def test_backend_map_corners_gcircle(backend):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     track_map = backend.trackMap
     assert VertexStore.get(track_map["road"]).vertex_count > 10 and len(track_map["lines"]) == 2
@@ -177,7 +177,7 @@ def test_backend_map_corners_gcircle(backend):
 
 
 def test_backend_release(backend):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     key = backend.panels[0]["series"][0]["key"]
     assert VertexStore.has(key)
@@ -189,7 +189,7 @@ def test_qml_page_loads(backend):
     """Every QML file of the page compiles & binds to backend without error"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     parent = QWidget()
     view = create_quick_view(parent, "LapViewer.qml", {"backend": backend})
@@ -208,8 +208,8 @@ def test_qml_page_loads_with_bundled_modules(backend, tmp_path):
     from PySide6.QtCore import QLibraryInfo
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.quick import QML_FOLDER, create_quick_view
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick import QML_FOLDER, create_quick_view
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     source = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
     for module in QML_MODULES:  # module folder files only, sub modules are listed separately
@@ -228,9 +228,9 @@ def test_qml_page_loads_with_bundled_modules(backend, tmp_path):
     try:
         from PySide6.QtWidgets import QWidget
 
-        from tinypedal.ui.quick.director_backend import DirectorBackend
-        from tinypedal.ui.quick.replays_backend import GameReplaysBackend
-        from tinypedal.ui.quick.track_map_backend import TrackMapBackend
+        from neopedal.ui.quick.director_backend import DirectorBackend
+        from neopedal.ui.quick.replays_backend import GameReplaysBackend
+        from neopedal.ui.quick.track_map_backend import TrackMapBackend
 
         parent = QWidget()
         director = DirectorBackend(parent)
@@ -245,7 +245,7 @@ def test_qml_page_loads_with_bundled_modules(backend, tmp_path):
 
 
 def test_tool_registered():
-    from tinypedal.ui.tools_view import TOOL_SECTIONS
+    from neopedal.ui.tools_view import TOOL_SECTIONS
 
     paths = [path for _, tools in TOOL_SECTIONS for _, _, path in tools]
     assert "lap_viewer.LapViewer" in paths
@@ -254,8 +254,8 @@ def test_tool_registered():
 def test_map_geometry_helpers():
     import math
 
-    from tinypedal.ui.quick import lap_map
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.ui.quick import lap_map
+    from neopedal.userfile.telemetry_lap import LapData
 
     distance = [float(index) for index in range(0, 1001, 5)]
     lap = LapData("a", {
@@ -289,7 +289,7 @@ def test_chart_view_kept_inside_lap(backend):
     from PySide6.QtCore import Q_ARG, QMetaObject
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     parent = QWidget()
     view = create_quick_view(parent, "LapViewer.qml", {"backend": backend})
@@ -324,8 +324,8 @@ def test_qml_page_translated(backend):
     """QML texts go through app translation (i18n.tr was QObject.tr: pages stayed in English)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal import i18n
-    from tinypedal.ui.quick import Translator, create_quick_view
+    from neopedal import i18n
+    from neopedal.ui.quick import Translator, create_quick_view
 
     i18n.set_language("Français")
     parent = QWidget()

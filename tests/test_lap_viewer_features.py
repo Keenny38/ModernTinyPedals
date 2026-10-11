@@ -7,9 +7,9 @@ import time
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
+from neopedal.module import module_recorder
+from neopedal.setting import cfg
 from tests.test_lap_viewer import flush_deleted, wait_loaded
-from tinypedal.module import module_recorder
-from tinypedal.setting import cfg
 
 TRACK = "Atlanta - Hyper"
 LENGTH = 2000.0
@@ -61,7 +61,7 @@ def laps(ui_env, monkeypatch):
 
 @pytest.fixture
 def viewer(laps):
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.ui.lap_viewer import LapViewer
 
     dialog = LapViewer(None)
     dialog.resize(1300, 800)
@@ -89,7 +89,7 @@ def rows_by_path(backend) -> dict[str, dict]:
 
 # --- 1. Lap names
 def test_lap_names(viewer, laps):
-    from tinypedal.ui.lap_viewer import lap_label
+    from neopedal.ui.lap_viewer import lap_label
 
     assert lap_label(os.path.basename(laps[1])) == "Lap 2 · 1:10.000"
     assert lap_label("other file.csv") == "other file"
@@ -106,7 +106,7 @@ def test_values_in_user_units(viewer, monkeypatch):
     backend = viewer.backend
     backend.load_laps()
     data = backend.data
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     speed = CHANNEL_MAP["speed_kph"]
     assert data.unit_of(speed) == "mph" and data.unit_of(CHANNEL_MAP["tyre_temp_fl"]) == "°F"
@@ -127,7 +127,7 @@ def test_cursor_values_colored_and_in_charts(viewer):
     throttle = values[backend.visible.index("throttle")]
     assert len(throttle) == 2 and throttle[0]["text"].endswith("%")
     assert throttle[0]["color"] == backend.data.laps[0].color.name()
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, format_channel_value
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, format_channel_value
 
     assert format_channel_value(CHANNEL_MAP["delta"], 0.1234) == "+0.123"
 
@@ -146,7 +146,7 @@ def test_added_laps_grouped_by_folder(viewer, tmp_path):
 
 # --- 5. Axes
 def test_axis_steps_and_labels():
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, format_axis_time, format_axis_value, nice_step
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, format_axis_time, format_axis_value, nice_step
 
     assert nice_step(2000, 8) == 500 and nice_step(70, 6) == 20 and nice_step(0.9, 3) == pytest.approx(0.5)
     assert format_axis_time(45) == "45s" and format_axis_time(65) == "1:05"
@@ -168,8 +168,8 @@ def test_corners_marked_and_driving_analysis(viewer):
 
 
 def test_driving_times_counted():
-    from tinypedal.userfile.corner_analysis import driving_times
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.userfile.corner_analysis import driving_times
+    from neopedal.userfile.telemetry_lap import LapData
 
     distance = [float(index) for index in range(0, 101, 10)]
     lap = LapData("x", {"distance": distance, "lap_time": [d / 10 for d in distance],
@@ -197,7 +197,7 @@ def test_map_click_and_cursor(viewer):
 
 
 def test_map_color_modes(viewer):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     backend.setMapView(0.0, 0.0, 1.0)  # map scale of a shown map (dialog never shown: no map size)
@@ -233,8 +233,8 @@ def test_star_and_hidden_laps(viewer, laps):
 
 # --- 11 & 19. Keep, note, delete
 def test_keep_note_and_delete(viewer, laps, monkeypatch):
-    from tinypedal.ui import _common
-    from tinypedal.userfile.lap_marks import kept_laps, load_marks
+    from neopedal.ui import _common
+    from neopedal.userfile.lap_marks import kept_laps, load_marks
 
     backend = viewer.backend
     folder = os.path.dirname(laps[0])
@@ -270,7 +270,7 @@ def test_added_lap_actions(viewer, tmp_path):
 
 # --- 12. Selection remembered
 def test_selection_remembered(viewer, laps):
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.ui.lap_viewer import LapViewer
 
     check_only(viewer, [laps[2], laps[3]])
     viewer.backend.setReference(laps[3])
@@ -288,8 +288,8 @@ def test_selection_remembered(viewer, laps):
 
 # --- 14. Time gain / loss chart
 def test_delta_rate_channel(viewer):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
-    from tinypedal.userfile.telemetry_lap import delta_rate
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.userfile.telemetry_lap import delta_rate
 
     assert delta_rate([0, 100, 200], [0.0, 0.5, 1.0], window=100) == pytest.approx([0.5, 0.5, 0.5])  # ends too
     backend = viewer.backend
@@ -351,8 +351,8 @@ def test_csv_export(viewer, tmp_path):
 
 
 def test_motec_export(viewer, laps, tmp_path, monkeypatch):
-    from tinypedal.ui.quick import lap_export
-    from tinypedal.userfile.motec_ld import read_ld
+    from neopedal.ui.quick import lap_export
+    from neopedal.userfile.motec_ld import read_ld
 
     backend = viewer.backend
     target = tmp_path / "reference.ld"
@@ -369,7 +369,7 @@ def test_motec_export(viewer, laps, tmp_path, monkeypatch):
 
 
 def test_gear_drawn_as_steps(viewer):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     backend.setChannelVisible("gear", True)
@@ -384,7 +384,7 @@ def test_motec_export_many_same_file_name(viewer, laps, tmp_path):
     """Same lap file name in two track/class folders: two distinct .ld files with their own lap, former exports kept"""
     import shutil
 
-    from tinypedal.userfile.motec_ld import read_ld
+    from neopedal.userfile.motec_ld import read_ld
 
     backend = viewer.backend
     other_folder = os.path.join(cfg.path.telemetry, "Laguna Seca - LMGT3")

@@ -43,8 +43,9 @@ SHARE_PATH="${DESTINATION_PREFIX}/share"
 APPLICATIONS_PATH="${SHARE_PATH}/applications"
 BIN_PATH="${DESTINATION_PREFIX}/bin"
 DESTINATION_PATH="${SHARE_PATH}/NeoPedal"
-# Installed there until 0.23.0, like the original TinyPedal: both apps could not be installed together
-LEGACY_PATH="${SHARE_PATH}/TinyPedal"
+# Name of versions until 0.23.0, installed in paths of the app this one is derived from (replacing it)
+LEGACY_NAME="TinyPedal"
+LEGACY_PATH="${SHARE_PATH}/${LEGACY_NAME}"
 
 if [ ! -w "${SHARE_PATH}" -o ! -w "${BIN_PATH}" -o ! -w "${APPLICATIONS_PATH}" ];
 then
@@ -67,13 +68,13 @@ fi
 
 rm -f "${APPLICATIONS_PATH}/NeoPedal.desktop" "${BIN_PATH}/NeoPedal"
 
-# Older NeoPedal install in TinyPedal paths: removed (an install of the original TinyPedal is kept)
-if grep -qs -e "NeoPedal" -e "ModernTinyPedals" -e "Modern Tiny Pedals" \
-    "${LEGACY_PATH}/README.md" "${LEGACY_PATH}/tinypedal/const_app.py";
+# Older NeoPedal install in legacy paths: removed (an install of the other app there is kept)
+if grep -qs -e "NeoPedal" -e "Modern Tiny Pedals" \
+    "${LEGACY_PATH}/README.md" "${LEGACY_PATH}/${LEGACY_NAME,,}/const_app.py";
 then
     echo "Removing older NeoPedal install in ${LEGACY_PATH}"
     rm -rf "${LEGACY_PATH}"
-    rm -f "${APPLICATIONS_PATH}/TinyPedal-overlay.desktop" "${BIN_PATH}/TinyPedal"
+    rm -f "${APPLICATIONS_PATH}/${LEGACY_NAME}-overlay.desktop" "${BIN_PATH}/${LEGACY_NAME}"
 fi
 
 # Write new file
@@ -167,10 +168,10 @@ done
 echo "Writing ${DESTINATION_PATH}/docs"
 cp -r "docs" "${DESTINATION_PATH}/docs"
 
-# Copy app source folder file (Python package keeps its "tinypedal" name)
-echo "Writing ${DESTINATION_PATH}/tinypedal"
-mkdir -p "${DESTINATION_PATH}/tinypedal"
-copyfiles "tinypedal"
+# Copy app source folder file
+echo "Writing ${DESTINATION_PATH}/neopedal"
+mkdir -p "${DESTINATION_PATH}/neopedal"
+copyfiles "neopedal"
 
 # Finish
 echo -e "\nInstallation finished."

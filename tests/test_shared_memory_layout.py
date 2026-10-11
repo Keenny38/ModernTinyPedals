@@ -2,7 +2,7 @@
 
 Struct sizes must match the game plugin memory layout (LMU native, rF2 shared memory plugin).
 Updating pyLMUSharedMemory / pyRfactor2SharedMemory submodules must not change them silently:
-if a size changed on purpose (game update), check readers in tinypedal/adapter, then update below.
+if a size changed on purpose (game update), check readers in neopedal/adapter, then update below.
 
 Note (2026-09): upstream submodules renamed modules (rF2data -> rf2_data, rF2MMap -> rf2_mmap,
 lmu_type/rF2Type stubs removed) with identical struct layout, adapters must be ported before bumping.

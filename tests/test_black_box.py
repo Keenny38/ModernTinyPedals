@@ -5,17 +5,17 @@ from types import SimpleNamespace
 import pytest
 
 # Safe at module level: conftest builds the QApplication before collection
-from tinypedal.widget import _painter as painter_mod
-from tinypedal.widget import black_box
-from tinypedal.widget._black_box import center as center_mod
-from tinypedal.widget._black_box import state as wheel_state
+from neopedal.widget import _painter as painter_mod
+from neopedal.widget import black_box
+from neopedal.widget._black_box import center as center_mod
+from neopedal.widget._black_box import state as wheel_state
 
 
 @pytest.fixture
 def widget(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
-    from tinypedal.setting import cfg
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
+    from neopedal.setting import cfg
 
     fake = SimpleNamespace(
         tyre=SimpleNamespace(
@@ -86,7 +86,7 @@ def test_paint(widget):
 
 
 def test_abs_tc_shown_only_if_car_has_them(widget, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     widget.timerEvent(None)
     assert widget.has_abs  # level 4 reported
@@ -106,8 +106,8 @@ def test_tyres_turn_with_real_wheel_angle(widget, monkeypatch):
     """1:1 with the car: real angle straight from game, no multiplier, no module needed"""
     import math
 
-    from tinypedal.api_control import api
-    from tinypedal.widget._black_box.common import REAR_MAX_STEER
+    from neopedal.api_control import api
+    from neopedal.widget._black_box.common import REAR_MAX_STEER
 
     monkeypatch.setattr(api.read.wheel, "toe", lambda: tuple(map(math.radians, (-10.0, 40.0, 0.5, 40.0))),
                         )
@@ -135,7 +135,7 @@ def test_tyre_wear(widget):
 
 
 def test_driving_info(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.fuel, "neededRelative", 12.34)
     monkeypatch.setattr(minfo.energy, "neededRelative", 8.5)
@@ -152,7 +152,7 @@ def test_driving_info(widget, monkeypatch):
 def test_text_sizes_and_fit(ui_env):
     from PySide6.QtGui import QPainter, QPixmap
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"].update(font_scale_gear=3.0, font_scale_speed=1.5, font_scale_rpm=1.0,
                                           show_wheel_angle=False, show_suspension=False)  # center column sets height
@@ -207,7 +207,7 @@ def test_gear_color_and_leds(widget):
 
 
 def test_display_order_and_layouts(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"].update(display_order_gear=0, display_order_locking=99, show_wheel_locking=True)
     widget = black_box.Realtime(cfg, "black_box")
@@ -252,7 +252,7 @@ def test_last_rpm_led_is_reachable(widget):
 
 def test_end_stint_tread_hidden_while_unknown(widget, monkeypatch):
     """Without Wheels & Fuel module data, no estimate is shown (used to display "0%")"""
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.wheels, "currentTreadDepth", [0.0] * 4)
     monkeypatch.setattr(minfo.fuel, "estimatedLaps", 0.0)
@@ -270,7 +270,7 @@ def test_end_stint_tread_hidden_while_unknown(widget, monkeypatch):
 
 
 def test_display_scale_is_clamped(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"]["display_scale"] = 100.0
     huge = black_box.Realtime(cfg, "black_box")
@@ -293,7 +293,7 @@ def test_pressure_warning_has_own_color(widget):
 
 # --- New features
 def test_brake_wear(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     widget.wcfg["show_brake_wear"] = True
     monkeypatch.setattr(minfo.wheels, "maxBrakeThickness", [0.03] * 4)
@@ -307,7 +307,7 @@ def test_brake_wear(widget, monkeypatch):
 
 
 def test_brake_wear_unknown_without_module(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     widget.wcfg["show_brake_wear"] = True
     monkeypatch.setattr(minfo.wheels, "maxBrakeThickness", [0.0] * 4)
@@ -318,8 +318,8 @@ def test_brake_wear_unknown_without_module(widget, monkeypatch):
 
 
 def test_tyre_compound_symbol(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.setting import cfg
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"].update(show_tyre_compound=True, enable_heatmap_auto_matching=False)
     cfg.user.compounds["GT3 - Soft"] = {"symbol": "S", "heatmap": "tyre_default"}
@@ -344,7 +344,7 @@ def test_tyre_temperature_warning(widget):
 
 
 def test_caption(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"]["show_caption"] = False
     plain = black_box.Realtime(cfg, "black_box")
@@ -358,7 +358,7 @@ def test_caption(ui_env):
 
 
 def test_laps_label_on_gauges(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.fuel, "estimatedLaps", 4.5)
     monkeypatch.setattr(minfo.energy, "available", True)
@@ -376,7 +376,7 @@ def test_laps_label_on_gauges(widget, monkeypatch):
 def test_vertical_layout_centers_hidden_items(ui_env):
     from PySide6.QtCore import QRectF
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"]["layout"] = 1
     widget = black_box.Realtime(cfg, "black_box")
@@ -394,8 +394,8 @@ def test_vertical_layout_centers_hidden_items(ui_env):
 
 def test_compact_layout_skips_center_data(ui_env, monkeypatch):
     """Compact layout draws no center column, so its data must not be read every tick"""
-    from tinypedal.api_control import api
-    from tinypedal.setting import cfg
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
 
     calls = []
     monkeypatch.setattr(api.read.switch, "speed_limiter", lambda: calls.append("speed_limiter") or 0)
@@ -409,7 +409,7 @@ def test_compact_layout_skips_center_data(ui_env, monkeypatch):
 
 
 def test_pits_read_once_per_update(widget, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     calls = []
     monkeypatch.setattr(api.read.vehicle, "in_pits", lambda: calls.append(1) or False)
@@ -423,7 +423,7 @@ def test_chip_radius_respects_corner_scale(monkeypatch):
     """Chips render square if the user disabled rounded corners, full capsule at the default"""
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.widget._painter import OverlayStyle
 
     wide = QRectF(0, 0, 100, 20)  # short side is height
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.0)
@@ -438,7 +438,7 @@ def test_chip_radius_uses_shorter_side(monkeypatch):
     """A narrow/tall rect (battery bar) must round by width, not height, or it turns into a lens"""
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.widget._painter import OverlayStyle
 
     monkeypatch.setattr(OverlayStyle, "corner_scale", 0.05)
     tall = QRectF(0, 0, 14, 180)  # short side is width
@@ -449,7 +449,7 @@ def test_fill_chip_square_when_rounding_disabled(monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.widget._painter import OverlayStyle
 
     image = QImage(40, 20, QImage.Format.Format_ARGB32)
     image.fill(0)
@@ -466,7 +466,7 @@ def test_fill_chip_gradient_square_when_rounding_disabled(monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.widget._painter import OverlayStyle
 
     image = QImage(40, 20, QImage.Format.Format_ARGB32)
     image.fill(0)
@@ -513,7 +513,7 @@ def test_led_glow_only_on_lit_leds(widget, monkeypatch):
 
 # --- Battery bar (charge/discharge gauge, positioned left or right of the widget)
 def new_widget(overrides=None):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["black_box"].update({"enable_auto_resize": False, **(overrides or {})})
     return black_box.Realtime(cfg, "black_box")
@@ -559,7 +559,7 @@ def test_battery_bar_spans_whole_widget_height(ui_env):
 
 
 def test_battery_data_not_read_when_disabled(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.hybrid, "batteryCharge", 88.0)
     monkeypatch.setattr(minfo.hybrid, "motorState", 3)
@@ -569,7 +569,7 @@ def test_battery_data_not_read_when_disabled(widget, monkeypatch):
 
 
 def test_battery_data_read_when_enabled(widget, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     widget.show_battery_bar = True
     monkeypatch.setattr(minfo.hybrid, "batteryCharge", 42.5)
@@ -597,7 +597,7 @@ def test_battery_flow_direction_differs_charge_vs_drain(ui_env, monkeypatch):
 
     instance = new_widget({"show_battery_bar": True})
     try:
-        monkeypatch.setattr("tinypedal.widget._black_box.panels.monotonic", lambda: 12.345)
+        monkeypatch.setattr("neopedal.widget._black_box.panels.monotonic", lambda: 12.345)
         rect = QRectF(0, 0, 16, 120)
 
         def render(charging):
@@ -751,7 +751,7 @@ def test_battery_warning_levels(ui_env):
 
 def test_battery_warning_flashes_then_stays_highlighted(ui_env, monkeypatch):
     """Flashes a few times to catch the eye, then holds the warning color"""
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     instance = new_widget({
         "show_battery_bar": True, "show_battery_warning_flash": True,
@@ -762,7 +762,7 @@ def test_battery_warning_flashes_then_stays_highlighted(ui_env, monkeypatch):
         monkeypatch.setattr(minfo.hybrid, "batteryCharge", 5.0)
         monkeypatch.setattr(minfo.hybrid, "motorState", 2)
         clock = [1000.0]
-        monkeypatch.setattr("tinypedal.widget._common.monotonic", lambda: clock[0])
+        monkeypatch.setattr("neopedal.widget._common.monotonic", lambda: clock[0])
         seen = []
         for _ in range(40):  # 4 seconds at 0.1s steps, past the 3 flashes
             instance.timerEvent(None)
@@ -776,7 +776,7 @@ def test_battery_warning_flashes_then_stays_highlighted(ui_env, monkeypatch):
 
 
 def test_battery_warning_steady_when_flash_disabled(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     instance = new_widget({"show_battery_bar": True, "show_battery_warning_flash": False,
                            "battery_low_threshold": 10})
@@ -844,7 +844,7 @@ def test_readings_dropped_when_box_too_crowded(ui_env):
         "show_tyre_wear": True, "show_tyre_wear_end_stint": True,
     })
     try:
-        from tinypedal.widget._black_box.state import (
+        from neopedal.widget._black_box.state import (
             MIN_READING_SCALE,
             READING_COMPOUND,
             READING_END_STINT,
@@ -893,7 +893,7 @@ def test_few_readings_are_all_kept(ui_env):
 
 def test_old_damage_marks_removed(ui_env):
     """Body marks & suspension bars are replaced by the damage panel"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     options = cfg.default.setting["black_box"]
     for key in ("show_body_damage", "show_suspension_damage", "damage_color_minor"):
@@ -928,7 +928,7 @@ def test_diagnostic_readings_are_opt_in(widget):
 
 def test_diagnostic_readings_skip_their_readers_when_off(widget, monkeypatch):
     """A reading that is off must not cost a shared-memory read every frame"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     called = []
 
@@ -949,8 +949,8 @@ def test_diagnostic_readings_skip_their_readers_when_off(widget, monkeypatch):
 
 
 def test_diagnostic_readings_reach_wheel_state(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(api.read.tyre, "carcass_temperature", lambda: (91.0, 92.0, 93.0, 94.0), raising=False)
     monkeypatch.setattr(api.read.tyre, "load", lambda: (1000.0, 1000.0, 500.0, 500.0), raising=False)
@@ -977,7 +977,7 @@ def test_diagnostic_readings_reach_wheel_state(ui_env, monkeypatch):
 
 
 def test_wheel_locking_is_a_center_item(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.wheels, "lockingPercentFront", 0.12)
     monkeypatch.setattr(minfo.wheels, "lockingPercentRear", 0.04)
@@ -1003,7 +1003,7 @@ def test_diagnostic_readings_yield_to_the_core_ones(ui_env):
     """A crowded box drops camber or ride height before it drops temperature or pressure"""
     instance = new_widget(dict.fromkeys(DIAGNOSTIC_OPTIONS, True))
     try:
-        from tinypedal.widget._black_box.state import (
+        from neopedal.widget._black_box.state import (
             READING_CAMBER,
             READING_RIDE_HEIGHT,
             READING_STATUS,
@@ -1050,8 +1050,8 @@ def test_brake_column_shares_rows_between_readings(ui_env, monkeypatch):
 
 # --- Center column: brake migration, delta to best, lap time, justified alignment
 def test_new_center_items_read_their_data(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(api.read.brake, "migration", lambda: 2.5, raising=False)
     monkeypatch.setattr(minfo.delta, "deltaBest", -0.234)
@@ -1073,7 +1073,7 @@ def test_new_center_items_read_their_data(ui_env, monkeypatch):
 def test_motor_map_drawn_between_right_wheels(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     level = [3]
     monkeypatch.setattr(api.read.switch, "motor_map_level", lambda: level[0], raising=False)
@@ -1103,7 +1103,7 @@ def test_motor_map_drawn_between_right_wheels(ui_env, monkeypatch):
 def test_brake_bias_drawn_above_motor_map(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.switch, "motor_map_level", lambda: 3, raising=False)
     monkeypatch.setattr(api.read.brake, "bias_front", lambda: 0.56)
@@ -1132,7 +1132,7 @@ def test_brake_bias_drawn_above_motor_map(ui_env, monkeypatch):
 def test_abs_tc_chips_on_top_of_right_stack(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.switch, "abs_level", lambda: 4)
     monkeypatch.setattr(api.read.switch, "tc_level", lambda: 5)
@@ -1228,7 +1228,7 @@ def test_justified_alignment_uses_label_value_rows(ui_env, monkeypatch):
 
 def test_center_alignment_option_is_a_valid_choice():
     """Unmatched choice options are rejected by the config dialog, as bar_position once was"""
-    from tinypedal import regex_pattern as rxp
+    from neopedal import regex_pattern as rxp
 
     assert rxp.CHOICE_COMMON[rxp.CFG_COLUMN_ALIGNMENT] == ("Centered", "Justified")
 
@@ -1282,7 +1282,7 @@ def test_rounded_keeps_non_finite_values():
 
 # --- Widget behaviour
 def test_profile_overrides_without_saving(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     setting = cfg.user.setting["black_box"]
     monkeypatch.setitem(setting, "display_profile", "Endurance")
@@ -1297,7 +1297,7 @@ def test_profile_overrides_without_saving(ui_env, monkeypatch):
 
 
 def test_slow_data_read_every_n_updates(widget, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     widget.slow_every = 3
     widget.tick = 0
@@ -1328,7 +1328,7 @@ def test_repaint_only_when_state_changes(widget, monkeypatch):
 def test_shift_flash_keeps_repainting(widget, monkeypatch):
     from PySide6.QtGui import QRegion
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.engine, "rpm", lambda: 7900.0)
     calls = []
@@ -1359,7 +1359,7 @@ def test_background_layer_rebuilt_only_on_resize(widget):
 
 
 def test_unit_override_and_custom_labels(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     setting = cfg.user.setting["black_box"]
     monkeypatch.setitem(setting, "override_unit_speed", "MPH")
@@ -1404,7 +1404,7 @@ def test_phase_colors_and_compound_targets(widget, monkeypatch):
 
 
 def test_stint_row_and_trends_draw(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     setting = cfg.user.setting["black_box"]
     for key in ("show_stint_comparison", "show_tyre_temperature_trend", "show_tyre_pressure_trend",
@@ -1429,14 +1429,14 @@ def test_stint_row_and_trends_draw(ui_env, monkeypatch):
 
 
 def test_new_choice_options_are_valid():
-    from tinypedal import regex_pattern as rxp
+    from neopedal import regex_pattern as rxp
 
     assert "Endurance" in rxp.CHOICE_COMMON["^display_profile$"]
     assert rxp.CHOICE_COMMON["^override_unit_speed$"][0] == "Global"
 
 
 def test_wheel_status_setting_migrated():
-    from tinypedal.setting_preupdate import preupdate_user_setting
+    from neopedal.setting_preupdate import preupdate_user_setting
 
     user = {"wheel_status": {"layout": 2}}
     preupdate_user_setting((2, 50, 0), user)
@@ -1444,7 +1444,7 @@ def test_wheel_status_setting_migrated():
 
 
 def test_chat_order_setting_migrated():
-    from tinypedal.setting_preupdate import preupdate_user_setting
+    from neopedal.setting_preupdate import preupdate_user_setting
 
     user = {"chat": {"show_newest_message_at_top": True}, "other": {}}
     preupdate_user_setting((2, 50, 6), user)
@@ -1458,7 +1458,7 @@ def test_chat_order_setting_migrated():
 
 
 def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     widget.timerEvent(None)
     assert widget.damage_detached == (False, True, False, False)
@@ -1475,7 +1475,7 @@ def test_damage_panel_reads_damage_and_impact(widget, monkeypatch):
 
 
 def test_impact_cone_hidden_on_new_session(widget, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     widget.timerEvent(None)
     monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: 95.0)

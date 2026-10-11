@@ -1,0 +1,248 @@
+#  NeoPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of NeoPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Heatmap preset function
+"""
+
+from __future__ import annotations
+
+import re
+
+from ..const_file import ConfigType
+from ..demo_state import drawing_demo
+from ..regex_pattern import COMMON_TYRE_COMPOUNDS
+from ..setting import cfg
+from ..template.setting_brakes import BRAKEINFO_DEFAULT
+from ..template.setting_compounds import COMPOUNDINFO_DEFAULT
+from ..template.setting_heatmap import HEATMAP_DEFAULT_BRAKE, HEATMAP_DEFAULT_TYRE
+from ..validator import invalid_save_name, is_hex_color
+from ..widget._style import overlay_theme, theme_color
+from .brands import select_brand_name
+
+
+# Brake function
+def add_missing_brake(brake_name: str) -> dict:
+    """Add missing brake style to brakes preset"""
+    new_data = BRAKEINFO_DEFAULT.copy()
+    if drawing_demo():  # overlay picture on simulated race: presets left as is
+        return new_data
+    cfg.user.brakes[brake_name] = new_data
+    cfg.save(config_type=ConfigType.BRAKES)
+    return new_data
+
+
+def save_brake_failure_thickness(brake_name: str, failure: float) -> None:
+    """Save brake failure thickness (mm) to brakes preset when brake fails"""
+    if invalid_save_name(brake_name) or drawing_demo():
+        return
+    brake = cfg.user.brakes.get(brake_name)
+    if brake is None:
+        new_data = BRAKEINFO_DEFAULT.copy()
+        new_data["failure_thickness"] = failure
+        cfg.user.brakes[brake_name] = new_data
+    else:
+        brake["failure_thickness"] = failure
+    cfg.save(config_type=ConfigType.BRAKES)
+
+
+def set_predefined_brake_name(class_name: str, vehicle_name: str, is_front: bool) -> str:
+    """Set common brake name"""
+    if class_name == "":
+        return ""
+    suffix_name = "Front Brake" if is_front else "Rear Brake"
+    brand_name = select_brand_name(vehicle_name=vehicle_name)
+    if brand_name != "":
+        return f"{class_name} - {brand_name} {suffix_name}"
+    return f"{class_name} - {suffix_name}"
+
+
+def select_brake_failure_thickness(brake_name: str) -> float:
+    """Select brake failure thickness, minimum thickness 0.0"""
+    brake = cfg.user.brakes.get(brake_name)
+    if brake is not None:
+        return max(brake.get("failure_thickness", 0.0), 0.0)
+    if not invalid_save_name(brake_name):
+        add_missing_brake(brake_name)
+    return 0.0
+
+
+def select_brake_heatmap_name(brake_name: str) -> str:
+    """Select brake heatmap name from brakes preset"""
+    brake = cfg.user.brakes.get(brake_name)
+    if brake is None:
+        if invalid_save_name(brake_name):
+            return HEATMAP_DEFAULT_BRAKE
+        brake = add_missing_brake(brake_name)
+    return brake.get("heatmap", HEATMAP_DEFAULT_BRAKE)
+
+
+def brake_failure_thickness(class_name: str, vehicle_name: str) -> tuple[float, float, float, float]:
+    """Get failure thickness"""
+    failure_thickness_f = select_brake_failure_thickness(
+        set_predefined_brake_name(class_name, vehicle_name, True)
+    )
+    failure_thickness_r = select_brake_failure_thickness(
+        set_predefined_brake_name(class_name, vehicle_name, False)
+    )
+    return (
+        failure_thickness_f,
+        failure_thickness_f,
+        failure_thickness_r,
+        failure_thickness_r,
+    )
+
+
+# Tyre function
+def add_missing_compound(compound_name: str) -> dict:
+    """Add missing compound style to compounds preset"""
+    new_data = COMPOUNDINFO_DEFAULT.copy()
+    new_data["symbol"] = set_predefined_compound_symbol(compound_name.split("-")[-1].strip())
+    if drawing_demo():  # overlay picture on simulated race: presets left as is
+        return new_data
+    cfg.user.compounds[compound_name] = new_data
+    cfg.save(config_type=ConfigType.COMPOUNDS)
+    return new_data
+
+
+def set_predefined_compound_symbol(compound_name: str) -> str:
+    """Set common tyre compound name to predefined symbol"""
+    for compound in COMMON_TYRE_COMPOUNDS:
+        if re.search(compound[0], compound_name, flags=re.IGNORECASE):
+            return compound[1]
+    if compound_name:  # use first letter if available
+        return compound_name[0].upper()
+    return "?"
+
+
+def select_compound_symbol(compound_name: str) -> str:
+    """Select compound symbol"""
+    compound = cfg.user.compounds.get(compound_name)
+    if compound is None:
+        if invalid_save_name(compound_name):
+            return "?"
+        compound = add_missing_compound(compound_name)
+    return compound.get("symbol", "?")
+
+
+def select_compound_color(compound_name: str, text: bool = True) -> str:
+    """Select compound color, as text color on panel (darkened on light overlay themes) unless text is False"""
+    compound = cfg.user.compounds.get(compound_name)
+    if compound is None:
+        if invalid_save_name(compound_name):
+            return "#AAAAAA"
+        compound = add_missing_compound(compound_name)
+    color = compound.get("color", "#AAAAAA")
+    if text:
+        theme = overlay_theme(cfg.user.config["overlay_style"])
+        if theme.light:
+            return theme_color(long_hex_color(color), theme)
+    return color
+
+
+def select_tyre_heatmap_name(compound_name: str) -> str:
+    """Select tyre heatmap name from compounds preset"""
+    compound = cfg.user.compounds.get(compound_name)
+    if compound is None:
+        if invalid_save_name(compound_name):
+            return HEATMAP_DEFAULT_TYRE
+        compound = add_missing_compound(compound_name)
+    return compound.get("heatmap", HEATMAP_DEFAULT_TYRE)
+
+
+# Heatmap function
+def long_hex_color(color: str) -> str:
+    """#RRGGBB form of #RGB color (other forms unchanged)"""
+    if len(color) == 4 and color[0] == "#":
+        return "#" + "".join(digit * 2 for digit in color[1:])
+    return color
+
+
+def verify_heatmap(heatmap_dict: dict | None) -> bool:
+    """Verify heatmap: temperature keys (numbers) & colors
+
+    Style file edited by hand or imported from a package may hold anything: an invalid heatmap
+    falls back to default, instead of an error stopping every widget that loads it.
+    """
+    if not heatmap_dict or not isinstance(heatmap_dict, dict):
+        return False
+    for temperature, color in heatmap_dict.items():
+        if not is_hex_color(color):
+            return False
+        try:
+            float(temperature)
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def load_heatmap_color(
+    heatmap_name: str, default_name: str, swap_style: bool = False,
+    fg_color: str = "", bg_color: str = "") -> tuple[tuple[float, tuple[str, str]], ...]:
+    """Load heatmap preset (dictionary) & set color
+
+    key = temperature string, value = hex color string.
+    Convert key to float, sort by key.
+
+    Args:
+        heatmap_name: heatmap preset name.
+        default_name: default preset name.
+        swap_style: assign heatmap color as background color if True, otherwise as foreground.
+        fg_color: assign foreground color if swap_style True.
+        bg_color: assign background color if swap_style False.
+
+    Returns:
+        tuple(tuple(temperature value, tuple(color string, color string)))
+    """
+    heatmap_dict = cfg.user.heatmap.get(heatmap_name)
+    if heatmap_dict is None or not verify_heatmap(heatmap_dict):
+        heatmap_dict = cfg.default.heatmap[default_name]
+    theme = overlay_theme(cfg.user.config["overlay_style"])
+    if theme.light and not swap_style:  # text on light panel: darkened to stay readable
+        heatmap_dict = {temp: theme_color(long_hex_color(color), theme) for temp, color in heatmap_dict.items()}
+    if swap_style:
+        return tuple(sorted(
+            (float(temp), (fg_color, heatmap_color))
+            for temp, heatmap_color in heatmap_dict.items()
+        ))
+    return tuple(sorted(
+        (float(temp), (heatmap_color, bg_color))
+        for temp, heatmap_color in heatmap_dict.items()
+    ))
+
+
+#def load_heatmap(heatmap_name: str, default_name: str) -> list[tuple[float, str]]:
+#    """Load heatmap preset (dictionary)
+#
+#    key = temperature string, value = hex color string.
+#    Convert key to float, sort by key.
+#
+#    Args:
+#        heatmap_name: heatmap preset name.
+#        default_name: default preset name.
+#
+#    Returns:
+#        list(tuple(temperature value, hex color string))
+#    """
+#    heatmap_dict = cfg.user.heatmap.get(heatmap_name)
+#    if not verify_heatmap(heatmap_dict):
+#        heatmap_dict = cfg.default.heatmap[default_name]
+#    return sorted(
+#        (float(temp), heatmap_color)
+#        for temp, heatmap_color in heatmap_dict.items()
+#    )

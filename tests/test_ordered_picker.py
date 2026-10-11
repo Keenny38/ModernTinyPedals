@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QBoxLayout
 
-from tinypedal.ui.ordered_picker import ROLE_HEADER, ROLE_KEY, OrderedPicker, PickerEntry
+from neopedal.ui.ordered_picker import ROLE_HEADER, ROLE_KEY, OrderedPicker, PickerEntry
 
 
 def make_entries(removable: bool = True) -> dict[str, PickerEntry]:
@@ -139,8 +139,8 @@ def test_rows_drawn(ui_env, icon_family):
 
 # --- Editors built on picker
 def test_rail_editor_marks_changes_and_undo(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.nav_rail import RailEditor, current_rail_items
+    from neopedal.setting import cfg
+    from neopedal.ui.nav_rail import RailEditor, current_rail_items
 
     saved = []
     editor = RailEditor(None, lambda: saved.append(1))

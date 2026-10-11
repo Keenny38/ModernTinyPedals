@@ -8,8 +8,8 @@ from array import array
 import pytest
 from PySide6.QtGui import QColor
 
-from tinypedal.ui.quick import lines
-from tinypedal.ui.quick.lines import (
+from neopedal.ui.quick import lines
+from neopedal.ui.quick.lines import (
     COLORED_VERTEX,
     LINE_STRIP,
     LINES,

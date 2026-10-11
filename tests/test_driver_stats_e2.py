@@ -8,12 +8,12 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
+from neopedal.setting import cfg
+from neopedal.ui.quick import stint_analysis as sa
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord
 from tests.test_driver_stats_viewer import OREGA, SPA, STATS, settle, write_stats
 from tests.test_lap_viewer_e2 import lap_info, write_lap
-from tinypedal.setting import cfg
-from tinypedal.ui.quick import stint_analysis as sa
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord
 
 FOLDER = f"{SPA} - LMP2_ELMS"
 START = 1_700_000_000
@@ -90,9 +90,9 @@ def test_history_export_and_friend_comparison(tmp_path):
 def stats_page(ui_env, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.api_control import api
-    from tinypedal.ui._common import BaseDialog
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.api_control import api
+    from neopedal.ui._common import BaseDialog
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
 
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
@@ -184,8 +184,8 @@ def test_driver_stats_page_with_stints_and_friend(stats_page, tmp_path):
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal import i18n
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal import i18n
+    from neopedal.ui.quick import create_quick_view
 
     stats_page.selectTrack("")
     stats_page.write_history(str(tmp_path / "all.json"), "json")

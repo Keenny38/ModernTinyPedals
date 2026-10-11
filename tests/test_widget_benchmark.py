@@ -6,7 +6,7 @@ no game needed). Test fails if a widget frame is slower than FRAME_BUDGET_MS on 
 report is saved to "tests/_render/benchmark.json" (CI artifact) to compare runs.
 
 Compare with previous report (fails if a widget got SLOWDOWN_FACTOR times slower):
-    TINYPEDAL_BENCHMARK_BASELINE=old_benchmark.json pytest -m benchmark
+    NEOPEDAL_BENCHMARK_BASELINE=old_benchmark.json pytest -m benchmark
 
 The data modules do not run here, so minfo is filled with a full field before the widgets
 are built. Without it the standings, relative and radar widgets draw an empty list and
@@ -22,27 +22,27 @@ from importlib import import_module
 import pytest
 from PySide6.QtCore import QTimerEvent
 
+from neopedal.const_common import REL_TIME_DEFAULT
+from neopedal.module_info import VehicleDataSet, minfo
+from neopedal.perf_monitor import PerfMonitor
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
+from neopedal.widget._modern import create_widget
 from tests.test_readers import lmu_api
-from tinypedal.const_common import REL_TIME_DEFAULT
-from tinypedal.module_info import VehicleDataSet, minfo
-from tinypedal.perf_monitor import PerfMonitor
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
-from tinypedal.widget._modern import create_widget
 
 pytestmark = pytest.mark.benchmark
 
 FRAMES = 40
 FIELD_SIZE = 20  # cars on track, so list widgets are measured with rows to draw
 # Generous budget: widgets update every 20-50 ms and share GUI thread with all other widgets
-FRAME_BUDGET_MS = float(os.environ.get("TINYPEDAL_FRAME_BUDGET_MS", "15"))
+FRAME_BUDGET_MS = float(os.environ.get("NEOPEDAL_FRAME_BUDGET_MS", "15"))
 SLOWDOWN_FACTOR = 3.0
 SLOWDOWN_MIN_MS = 0.5  # ignore tiny absolute differences (timer noise)
-BASELINE_FILE = os.environ.get("TINYPEDAL_BENCHMARK_BASELINE", "")
+BASELINE_FILE = os.environ.get("NEOPEDAL_BENCHMARK_BASELINE", "")
 OUTPUT = os.path.join(os.path.dirname(__file__), "_render", "benchmark.json")
 WIDGET_NAMES = sorted(
     module.name
-    for module in pkgutil.iter_modules(import_module("tinypedal.widget").__path__)
+    for module in pkgutil.iter_modules(import_module("neopedal.widget").__path__)
     if not module.name.startswith("_")
 )
 RESULTS: dict[str, dict[str, float]] = {}
@@ -61,7 +61,7 @@ BASELINE = load_baseline()
 @pytest.fixture(scope="module")
 def live_api(bundled_fonts):
     """Default settings, API reader on in-memory shared memory data"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     cfg.default.set_default()
     backup = {name: getattr(cfg.user, name, None) for name in cfg.user.__slots__}
@@ -168,7 +168,7 @@ def test_widget_frame_time(live_api, name):
     # A number measured against an empty field would be meaningless for the list widgets
     assert minfo.vehicles.totalVehicles == FIELD_SIZE, "field missing from minfo"
     assert len(minfo.relative.standings) == FIELD_SIZE, "standings order missing from minfo"
-    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     event = QTimerEvent(0)
     PerfMonitor.set_enabled(True)
@@ -206,7 +206,7 @@ def test_black_box_all_options_frame_time(live_api):
     options.update({key: True for key in options if key.startswith("show_")})
     options["display_profile"] = "Custom"
     try:
-        widget = import_module("tinypedal.widget.black_box").Realtime(cfg, "black_box")
+        widget = import_module("neopedal.widget.black_box").Realtime(cfg, "black_box")
         widget.adjustSize()
         event = QTimerEvent(0)
         PerfMonitor.set_enabled(True)

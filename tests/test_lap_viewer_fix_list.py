@@ -8,9 +8,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QMetaObject, qInstallMessageHandler
 from PySide6.QtTest import QTest
 
+from neopedal.module import module_recorder
+from neopedal.setting import cfg
 from tests.test_lap_viewer import wait_loaded
-from tinypedal.module import module_recorder
-from tinypedal.setting import cfg
 
 TRACK = "Atlanta - Hyper"
 BASE = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
@@ -38,7 +38,7 @@ def sessions(ui_env):
 
 
 def open_page(parent):
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     page = LapViewerBackend(parent, cfg.path.telemetry)
     page.refresh()
@@ -63,7 +63,7 @@ def headers(page) -> list[str]:
 
 
 def test_sync_batches_rows_and_keeps_kept_ones():
-    from tinypedal.ui.quick.models import DictListModel, FoldedListModel
+    from neopedal.ui.quick.models import DictListModel, FoldedListModel
 
     model = DictListModel(("key", "value"))
     model.sync([{"key": key, "value": 0} for key in "abcdef"])
@@ -171,7 +171,7 @@ def test_lap_infos_index(sessions, monkeypatch):
     """J60: lap infos read once, then from track index while lap files stay the same (damaged index ignored)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.userfile import lap_cache
+    from neopedal.userfile import lap_cache
 
     parent = QWidget()
     pages = []
@@ -246,7 +246,7 @@ def test_lap_list_qml(page, sessions):
     """Delegates of shown rows only (J55), search text kept as typed (J10), no match hint & action (J65)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     messages: list[str] = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

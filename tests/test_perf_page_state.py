@@ -7,7 +7,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 def process_events(seconds: float = 0.0):
@@ -48,7 +48,7 @@ def qml_warnings(monkeypatch):
 
 # --- Page state
 def test_page_state_follows_show_hide_and_minimize():
-    from tinypedal.ui.quick import PageState
+    from neopedal.ui.quick import PageState
 
     window = QWidget()
     stack = QStackedWidget(window)
@@ -87,7 +87,7 @@ def test_page_state_follows_show_hide_and_minimize():
 
 
 def test_page_state_follows_moved_page():
-    from tinypedal.ui.quick import PageState
+    from neopedal.ui.quick import PageState
 
     first, second = QWidget(), QWidget()
     page = QWidget(first)
@@ -118,7 +118,7 @@ def test_page_state_follows_moved_page():
 # --- i18n.tr in JavaScript
 @pytest.fixture
 def french():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     yield i18n
@@ -126,7 +126,7 @@ def french():
 
 
 def js_translations(texts: list, method: str = "tr") -> list:
-    from tinypedal.ui.quick import Translator, translator_copy
+    from neopedal.ui.quick import Translator, translator_copy
 
     engine = QQmlEngine()
     translator = Translator()
@@ -148,7 +148,7 @@ def js_translations(texts: list, method: str = "tr") -> list:
 
 
 def test_js_tr_matches_python_tr(french):
-    from tinypedal.i18n.fr import TRANSLATION
+    from neopedal.i18n.fr import TRANSLATION
 
     texts = [*TRANSLATION, "Not a translated text", "", "toString", "constructor", "__proto__"]
     assert js_translations(texts) == [french.tr(text) for text in texts]
@@ -166,8 +166,8 @@ def test_js_trm_uses_python_rules(french):
 
 # --- Pages: MSAA only with GPU drawn lines, no QML warning
 def test_pages_without_gpu_lines_have_no_msaa(ui_env):
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
-    from tinypedal.ui.race_results_viewer import RaceResultsViewer
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
+    from neopedal.ui.race_results_viewer import RaceResultsViewer
 
     for viewer_class in (DriverStatsViewer, RaceResultsViewer):
         viewer = viewer_class(None)
@@ -179,8 +179,8 @@ def test_pages_without_gpu_lines_have_no_msaa(ui_env):
 
 
 def test_track_map_play_stops_while_hidden(ui_env, qml_warnings):
+    from neopedal.ui.track_map_viewer import TrackMapViewer
     from tests.test_track_map_viewer import write_map
-    from tinypedal.ui.track_map_viewer import TrackMapViewer
 
     write_map(cfg.path.track_map)
     viewer = TrackMapViewer(None, cfg.path.track_map, "Ring")
@@ -230,15 +230,15 @@ def test_pages_shown_hidden_without_qml_warning(ui_env, monkeypatch, qml_warning
     """Pages reading pageState load, hide & show again without QML warning"""
     from importlib import import_module
 
+    from neopedal.ui import game_rest
+    from neopedal.ui._common import BaseDialog
     from tests.test_game_info import FakeGame
-    from tinypedal.ui import game_rest
-    from tinypedal.ui._common import BaseDialog
 
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     monkeypatch.setattr(game_rest, "GameConnection", FakeGame().connection)  # no real game request
     window = QWidget()
     try:
-        page = getattr(import_module(f"tinypedal.ui.{module_name}"), class_name)(window)
+        page = getattr(import_module(f"neopedal.ui.{module_name}"), class_name)(window)
         page.resize(1100, 750)
         window.resize(1100, 750)
         window.show()

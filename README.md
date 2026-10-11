@@ -31,10 +31,10 @@
 
 ![The 87 overlays with the new design on a simulated race at Road Atlanta](images/readme_preview.png)
 
-NeoPedal is a modernized version of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same solid base, with a new design, a redesigned interface, new tools and a lot of work on reliability.
+NeoPedal is a telemetry overlay and analysis app: a modern design, a clear interface, many tools and a lot of work on reliability.
 
 > [!NOTE]
-> **New in 0.23.0**: Modern Tiny Pedals is now **NeoPedal**, with its own settings folder (`%APPDATA%\NeoPedal`), separate from the original TinyPedal: your settings are copied once on first start, and you choose to keep them or start with default settings. New **Broadcast Director** (Le Mans Ultimate) to cast a race live or in a replay: assisted or automatic director, every game camera in one click, commentator screen, timing table, and **broadcast graphics** for OBS (standings tower, driver and battle cards, banners, onboard, track map, starting grid, championship...) placed with a layout editor in your browser. The race calculator gets a **`Live` tab** with every value the game gives (pit stop times, tyres available, race in progress). **Race results, driver stats and replays are linked**: watch the replay of a session, class positions and game version in your sessions, a driver card, missing lap times completed from the results files. **Stream a race you spectate**, with a 16:9 `Layout` source for ultrawide screens and a stream layout editor. New **`Speed Delta`** overlay (speed difference to your best, session, stint and last laps), a `Gap Trend` column in Relative, class headers and class order in Standings, sector performance colors and nearby cars in the track map. The telemetry viewer gets a **`Simple View`** next to the charts (`Advanced View`): the same channels at the cursor drawn like the overlays, one `Show` menu and one playback bar for both. Overlay pictures show a **simulated race**, and the `Overlay Options` preview zooms up to 300 %. **Smoother**: a preset loads without freezing the window and overlays, overlays wake when the game writes new data, and the driver tables and Black box redraw only what changed. New `show_main_window` hotkey, and updates are also checked every 12 hours while the app runs. All the details, with screenshots, in the [changelog](CHANGELOG.md).
+> **New in 0.23.0**: Modern Tiny Pedals is now **NeoPedal**, with its own settings folder (`%APPDATA%\NeoPedal`). New **Broadcast Director** (Le Mans Ultimate) to cast a race live or in a replay: assisted or automatic director, every game camera in one click, commentator screen, timing table, and **broadcast graphics** for OBS (standings tower, driver and battle cards, banners, onboard, track map, starting grid, championship...) placed with a layout editor in your browser. The race calculator gets a **`Live` tab** with every value the game gives (pit stop times, tyres available, race in progress). **Race results, driver stats and replays are linked**: watch the replay of a session, class positions and game version in your sessions, a driver card, missing lap times completed from the results files. **Stream a race you spectate**, with a 16:9 `Layout` source for ultrawide screens and a stream layout editor. New **`Speed Delta`** overlay (speed difference to your best, session, stint and last laps), a `Gap Trend` column in Relative, class headers and class order in Standings, sector performance colors and nearby cars in the track map. The telemetry viewer gets a **`Simple View`** next to the charts (`Advanced View`): the same channels at the cursor drawn like the overlays, one `Show` menu and one playback bar for both. Overlay pictures show a **simulated race**, and the `Overlay Options` preview zooms up to 300 %. **Smoother**: a preset loads without freezing the window and overlays, overlays wake when the game writes new data, and the driver tables and Black box redraw only what changed. New `show_main_window` hotkey, and updates are also checked every 12 hours while the app runs. All the details, with screenshots, in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -57,7 +57,7 @@ Each release has the Windows installer (`-windows-setup.exe`, also zipped as `-s
 
 | Game | Windows | Linux |
 |---|---|---|
-| **Le Mans Ultimate** | Nothing to install. Enable `Settings > Gameplay > Enable Plugins`. | Needs a third-party plugin, see [this discussion](https://github.com/TinyPedal/TinyPedal/issues/9). |
+| **Le Mans Ultimate** | Nothing to install. Enable `Settings > Gameplay > Enable Plugins`. | Needs a third-party plugin, see [Game setup](https://github.com/Keenny38/ModernTinyPedals/wiki/Game-Setup). |
 | **rFactor 2** | [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download) plugin. | [Wine version of the plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build). |
 
 For rFactor 2: copy `rFactor2SharedMemoryMapPlugin64.dll` into `rFactor 2\Bin64\Plugins` (create the folder if it is missing), enable it in `Settings > Gameplay > Plugins`, then restart the game. If the plugin does not show up, install the `Visual C++ 2013` runtime found in the game's `Support\Runtimes` folder.
@@ -82,7 +82,7 @@ With Le Mans Ultimate, the app also reads the game's local REST API (nothing to 
 - **Graphic overlays drawn for the design**: round radar fading at its edge, track map with numbered car dots and a checkered start line, navigation view, friction circle with a fading trace, compass heading, steering wheel, instrument and weather icons drawn as shapes in the theme colors.
 - **Flags as colored chips** (caption above value, only while active), **chat** feed with sender colors, **elevation** profile with the driven part highlighted, **race notifications** with icons and a time bar, **steering meter** growing from center, **RPM LEDs** showing their color zones before they light up.
 - **Simplified options**: the configuration only shows what the design uses. The classic look is still available, for every overlay (Legacy themes) or just one.
-- **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (original TinyPedal look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable.
+- **Four themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (classic look), each with a colorblind safe variant. Light themes keep flags and warnings in their colors and darken the others so they stay readable.
 - **Visibility by session** (practice, qualifying, race) and pit lane, with fade.
 - **Race aids**: delta graph over the lap, gap trend ahead and behind, pit lane helper (speed limit, pit limiter, distance to the box), stint timer and driving time per driver, spotter on the screen edges, race notifications, tyre temperature trend, and **telemetry compare**: your live speed, pedals, steering and gear over the reference lap of the telemetry viewer, with the next braking point ahead of the car, delta and speed difference.
 
@@ -214,7 +214,7 @@ Cast a race live (driving or spectating an online race) or in a replay, from the
 - **Preset share code**: copy a preset as text, import it with a preview. **Preset trash** with undo.
 - **Unsaved changes** flagged on each page, `Ctrl+S` to save, values checked as you type.
 - **Session recorder** (`Tools` > `Advanced`): record a session and replay it in every overlay, without the game, to test overlays or attach to a bug report.
-- **Four window themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (colors of TinyPedal 2.50), switched from the status bar.
+- **Four window themes**: Modern Dark, Modern Light, Legacy Dark and Legacy Light (classic colors), switched from the status bar.
 - Gold and black or gold and white icon, following the Windows light or dark mode.
 
 ### Connections
@@ -284,9 +284,9 @@ The shared memory libraries (`pyLMUSharedMemory`, `pyRfactor2SharedMemory`) are 
 
 On Windows, `Download And Install` of an update found while running from source installs the Windows app (your installed copy is updated, then started); update the source folder itself with `git pull`.
 
-On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `TinyPedal` command in `/usr/local/`. Settings are in `$HOME/.config/NeoPedal/` and data in `$HOME/.local/share/NeoPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
+On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `NeoPedal` command in `/usr/local/`. Settings are in `$HOME/.config/NeoPedal/` and data in `$HOME/.local/share/NeoPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
 
-> Settings and data folders are named `NeoPedal` (`%APPDATA%\NeoPedal`, `~/.config/NeoPedal/`, `~/.local/share/NeoPedal/`), separate from the original TinyPedal. On first start, an existing `TinyPedal` folder is copied there once and left unchanged, so both apps can be used side by side. Since 0.23.1 the executable is `neopedal.exe` (Linux: `NeoPedal` command, `/usr/local/share/NeoPedal`), no longer the `tinypedal.exe` name of the original app, and the remote control still accepts the old `X-TinyPedal` header besides `X-NeoPedal`.
+> Settings and data folders are named `NeoPedal` (`%APPDATA%\NeoPedal`, `~/.config/NeoPedal/`, `~/.local/share/NeoPedal/`). The executable is `neopedal.exe` (Linux: `NeoPedal` command, `/usr/local/share/NeoPedal`).
 
 ## Contributing
 
@@ -294,6 +294,6 @@ Report a problem or suggest an idea in the [issues](https://github.com/Keenny38/
 
 ## License and credits
 
-NeoPedal is derived from [TinyPedal](https://github.com/TinyPedal/TinyPedal), Copyright (C) 2022-2026 TinyPedal developers. See [docs/contributors.md](docs/contributors.md) for the list of developers and contributors.
+Copyright (C) 2022-2026 TinyPedal developers, see [NOTICE.md](NOTICE.md) and [docs/contributors.md](docs/contributors.md) for the list of developers and contributors.
 
 Free software under the [GNU GPL v3](LICENSE.txt) or any later version, distributed WITHOUT ANY WARRANTY. The icon and the images of the `images` folder are under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The [Barlow](https://github.com/jpt/barlow) font is under the SIL Open Font License 1.1 (`fonts/OFL-Barlow.txt`). Third-party software licenses are in [docs/licenses](docs/licenses/THIRDPARTYNOTICES.txt).

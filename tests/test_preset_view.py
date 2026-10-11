@@ -10,8 +10,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.setting import cfg
 
 
 def flush():
@@ -41,7 +41,7 @@ def write_preset(name: str, data: dict | None = None, age: float = 0.0):
 @pytest.fixture
 def page(ui_env, monkeypatch):
     """Presets page (active) with presets "race" & "practice", questions answered yes"""
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     write_preset("race.json", age=3600)
     write_preset("practice.json", {"speedometer": {"enable": False}}, age=60)
@@ -135,7 +135,7 @@ def test_primary_tags_for_class_and_track(page):
 
 
 def test_tags_of_every_preset_read_once(page, monkeypatch):
-    from tinypedal.ui.quick import preset_backend
+    from neopedal.ui.quick import preset_backend
 
     cfg.user.classes = {"GT3": {"color": "#00AA00", "preset": "race"}, "LMP2": {"color": "#0000FF", "preset": "race"},
                         "HY": {"color": "#FF0000", "preset": "practice"}, "Bad": "not a dict"}
@@ -242,7 +242,7 @@ def test_host_actions(page, monkeypatch):
 
 
 def test_open_pages(page, monkeypatch):
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     opened = []
     monkeypatch.setattr(preset_view, "PresetCompare", lambda *args, **kwargs: type(
@@ -260,7 +260,7 @@ def test_open_pages(page, monkeypatch):
 def test_compare_already_open_switched_to_presets_asked(page, monkeypatch):
     from PySide6.QtWidgets import QComboBox
 
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     open_compare = SimpleNamespace(combo_a=QComboBox(), combo_b=QComboBox())
     for combo in (open_compare.combo_a, open_compare.combo_b):
@@ -274,7 +274,7 @@ def test_compare_already_open_switched_to_presets_asked(page, monkeypatch):
 
 
 def test_files_read_while_shown_and_only_when_changed(page, monkeypatch):
-    from tinypedal.ui.quick import preset_backend
+    from neopedal.ui.quick import preset_backend
 
     parsed = []
     load = json.load
@@ -296,7 +296,7 @@ def test_contents_read_off_ui_thread(page, monkeypatch):
     """Changed presets read on a job thread, details & loaded card told when done"""
     import threading
 
-    from tinypedal.ui.quick import preset_backend
+    from neopedal.ui.quick import preset_backend
 
     threads = []
     read = preset_backend.read_summary
@@ -313,7 +313,7 @@ def test_contents_read_off_ui_thread(page, monkeypatch):
 
 
 def test_changed_text():
-    from tinypedal.ui.quick.preset_backend import changed_text
+    from neopedal.ui.quick.preset_backend import changed_text
 
     now = 1_000_000_000.0
     assert changed_text(now - 5, now) == "Just now"
@@ -353,7 +353,7 @@ def test_qml_page_created_when_shown(page):
 
 
 def test_qml_page_translated(page):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:

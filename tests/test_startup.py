@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import loader, main, realtime_state
-from tinypedal.setting import cfg
+from neopedal import loader, main, realtime_state
+from neopedal.setting import cfg
 
 
 # --- Single instance (PID file)
@@ -18,7 +18,7 @@ def test_pid_file_of_running_app(ui_env):
 
 @pytest.mark.parametrize("content", ["", "not a pid", "999999999,0,NeoPedal", f"{os.getpid()},12345.0,NeoPedal"])
 def test_pid_file_stale_or_invalid(ui_env, content):
-    from tinypedal.const_file import LogFile
+    from neopedal.const_file import LogFile
 
     with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
         file.write(content)
@@ -26,13 +26,13 @@ def test_pid_file_stale_or_invalid(ui_env, content):
 
 
 def test_pid_file_of_other_app_ignored(ui_env):
-    """PID saved by original TinyPedal (no app name), or another app: never blocks this app"""
+    """PID saved by another app (no or other app name): never blocks this app"""
     import psutil
 
-    from tinypedal.const_file import LogFile
+    from neopedal.const_file import LogFile
 
     create_time = psutil.Process(os.getpid()).create_time()
-    for content in (f"{os.getpid()},{create_time}", f"{os.getpid()},{create_time},TinyPedal"):
+    for content in (f"{os.getpid()},{create_time}", f"{os.getpid()},{create_time},OtherApp"):
         with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
             file.write(content)
         assert not main.is_pid_exist()
@@ -44,14 +44,14 @@ def test_pid_file_unwritable_or_locked(ui_env, monkeypatch, caplog):
         raise PermissionError("locked")
 
     monkeypatch.setattr(main, "open", locked, raising=False)
-    with caplog.at_level("WARNING", logger="tinypedal"):
+    with caplog.at_level("WARNING", logger="neopedal"):
         main.save_pid_file()
     assert "PID file not saved" in caplog.text
     assert not main.is_pid_exist()
 
 
 def test_single_instance_modes(ui_env, monkeypatch):
-    from tinypedal.const_file import LogFile
+    from neopedal.const_file import LogFile
 
     pid_file = f"{cfg.path.config}{LogFile.PID}"
     monkeypatch.setattr(realtime_state, "singleton", False)
@@ -98,7 +98,7 @@ def test_app_font_size_and_version_log(ui_env, caplog):
     try:
         main.set_app_font(app)
         assert app.font().pointSize() == 10
-        with caplog.at_level("INFO", logger="tinypedal"):
+        with caplog.at_level("INFO", logger="neopedal"):
             main.get_version()
         assert "Python" in caplog.text and "Qt" in caplog.text
     finally:
@@ -197,7 +197,7 @@ def test_restart_failure_reloads_app(controls, monkeypatch):
 
 def test_api_stop_after_close():
     """close() run again (quit after failed restart): stopping closed API is no error"""
-    from tinypedal.api_control import APIControl
+    from neopedal.api_control import APIControl
 
     control = APIControl()
     control.close()
@@ -205,7 +205,7 @@ def test_api_stop_after_close():
 
 
 def test_screen_layout_sync_optional(controls, monkeypatch):
-    from tinypedal.userfile import layout_profile
+    from neopedal.userfile import layout_profile
 
     synced = []
     monkeypatch.setattr(layout_profile, "sync_layout", lambda *args: synced.append(args) or False)

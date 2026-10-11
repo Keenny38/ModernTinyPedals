@@ -8,7 +8,7 @@ if __name__ == "__main__":
 
     root = QApplication(sys.argv)
 
-    from tinypedal.ui.about import About
+    from neopedal.ui.about import About
 
     about = About(None)
     sys.exit(about.exec())

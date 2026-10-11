@@ -7,12 +7,12 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 def write_map(folder: str, name: str = "Ring"):
     """Oval 2 km track with elevation, sectors at 1/3 & 2/3"""
-    from tinypedal.userfile.track_map import save_track_map_file
+    from neopedal.userfile.track_map import save_track_map_file
 
     nodes = 200
     coords, dists = [], []
@@ -34,7 +34,7 @@ def wait_jobs(backend, timeout: float = 10.0):
 
 @pytest.fixture
 def viewer(ui_env):
-    from tinypedal.ui.track_map_viewer import TrackMapViewer
+    from neopedal.ui.track_map_viewer import TrackMapViewer
 
     write_map(cfg.path.track_map)
     dialog = TrackMapViewer(None, cfg.path.track_map, "Ring")
@@ -49,7 +49,7 @@ def viewer(ui_env):
 
 # --- Track Map Viewer page
 def test_map_loaded(viewer):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     assert not viewer.view.errors() and viewer.view.rootObject() is not None
@@ -66,7 +66,7 @@ def test_map_loaded(viewer):
 
 @pytest.mark.parametrize("position", [0, 300, 1000, 1900])
 def test_position_curve_slope_info(viewer, position):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     backend.setPosition(position)
@@ -116,8 +116,8 @@ def test_nodes_pick_scale_and_overlays(viewer, monkeypatch):
 
 
 def test_open_other_map_and_invalid(viewer, monkeypatch, tmp_path):
-    from tinypedal.ui.quick import track_map_backend
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick import track_map_backend
+    from neopedal.ui.quick.lines import VertexStore
 
     write_map(f"{tmp_path.as_posix()}/", "Other")
     monkeypatch.setattr(track_map_backend.QFileDialog, "getOpenFileName",
@@ -141,7 +141,7 @@ def test_open_other_map_and_invalid(viewer, monkeypatch, tmp_path):
 
 
 def test_closed_page_releases_vertices(viewer):
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     key = viewer.backend.view["road"]
     viewer.close()
@@ -150,7 +150,7 @@ def test_closed_page_releases_vertices(viewer):
 
 def test_playback_within_node_keeps_curve(viewer, monkeypatch):
     """Position moving inside one node: curve section & circle not built again, no global shape redraw"""
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     assert not hasattr(backend, "revisionChanged")  # shapes told per key by VertexStore
@@ -175,8 +175,8 @@ def test_playback_within_node_keeps_curve(viewer, monkeypatch):
 
 def test_scale_lines_built_in_background(viewer):
     """Zoom settled: lines rebuilt off the UI thread, same shape as one closed band, older map result dropped"""
-    from tinypedal.ui.quick import track_map_backend
-    from tinypedal.ui.quick.lines import VertexStore, band
+    from neopedal.ui.quick import track_map_backend
+    from neopedal.ui.quick.lines import VertexStore, band
 
     backend = viewer.backend
     before = VertexStore.get(backend.view["road"])
@@ -197,14 +197,14 @@ def test_scale_lines_built_in_background(viewer):
 
 
 def test_svg_not_made_by_app_is_invalid_map(tmp_path):
-    from tinypedal.userfile.track_map import load_track_map_file
+    from neopedal.userfile.track_map import load_track_map_file
 
     (tmp_path / "Logo.svg").write_text('<svg><path d="M0 0"/></svg>', encoding="utf-8")
     assert load_track_map_file(f"{tmp_path.as_posix()}/", "Logo") == (None, None, None)  # was TypeError
 
 
 def test_geometry_helpers():
-    from tinypedal.ui.track_map_geometry import config_grades, curve_description, section_indices
+    from neopedal.ui.track_map_geometry import config_grades, curve_description, section_indices
 
     assert section_indices(10, 4, 8) == [8, 9, 0, 1]  # wraps around lap end
     assert section_indices(5, 10, 0) == [0, 1, 2]  # at most nodes - 2
@@ -219,7 +219,7 @@ def test_geometry_helpers():
 def widget(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.track_map_widget import MapView
+    from neopedal.ui.track_map_widget import MapView
 
     write_map(cfg.path.track_map)
     for key, value in cfg.user.config["track_map_viewer"].items():

@@ -51,17 +51,17 @@ jobs:
       run: ruff check .
 
     - name: Type check
-      run: mypy tinypedal
+      run: mypy neopedal
 
     - name: Tests (with coverage)
       # A hung test (QML page load, worker process) fails after 5 minutes instead of blocking the runner
-      run: pytest -v --timeout=300 --cov=tinypedal --cov-report=term --cov-report=xml:coverage.xml
+      run: pytest -v --timeout=300 --cov=neopedal --cov-report=term --cov-report=xml:coverage.xml
 
     - name: Widget benchmark
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
       # Shared runners are 3-4x slower than a desktop and jittery: catch big regressions only
       env:
-        TINYPEDAL_FRAME_BUDGET_MS: "50"
+        NEOPEDAL_FRAME_BUDGET_MS: "50"
       run: pytest -m benchmark -q
 
     - name: Coverage summary

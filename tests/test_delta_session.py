@@ -6,12 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import realtime_state, validator
-from tinypedal.api_control import api
-from tinypedal.const_common import DELTA_DEFAULT, MAX_SECONDS
-from tinypedal.module import module_delta
-from tinypedal.module_info import DeltaInfo
-from tinypedal.userfile.delta_best import load_delta_session_file, save_delta_session_file
+from neopedal import realtime_state, validator
+from neopedal.api_control import api
+from neopedal.const_common import DELTA_DEFAULT, MAX_SECONDS
+from neopedal.module import module_delta
+from neopedal.module_info import DeltaInfo
+from neopedal.userfile.delta_best import load_delta_session_file, save_delta_session_file
 
 STEP = 0.05
 TRACK = 4000.0
@@ -268,15 +268,15 @@ def overlays(ui_env, bundled_fonts):
 
     from PySide6.QtCore import QCoreApplication
 
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import create_widget
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import create_widget
 
     created = []
 
     def make(name: str, **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -287,7 +287,7 @@ def overlays(ui_env, bundled_fonts):
 
 
 def delta_info(monkeypatch, **values):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     base = {"lapTimeCurrent": 50.0, "lapTimeLast": 99.0, "lapTimeBest": 97.0, "lapTimeSession": 98.0,
             "lapTimeStint": MAX_SECONDS, "deltaBest": 0.4, "deltaSession": -0.2, "deltaStint": 0.0, "deltaLast": 0.1,
@@ -297,7 +297,7 @@ def delta_info(monkeypatch, **values):
 
 
 def test_extended_dash_without_reference_or_delta(overlays, monkeypatch):
-    from tinypedal.widget._modern.base import DASH
+    from neopedal.widget._modern.base import DASH
 
     delta_info(monkeypatch)
     widget = overlays("deltabest_extended", show_all_time_deltabest=True, show_session_deltabest=True,
@@ -331,12 +331,12 @@ def test_deltabest_dash_without_reference_or_delta(overlays, monkeypatch):
 def classic_overlay(name: str, **options):
     from importlib import import_module
 
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import create_widget
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Legacy Dark"
     cfg.user.setting[name].update(options)
-    return create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    return create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
 
 
 def test_classic_delta_overlays_dash_without_delta(ui_env, bundled_fonts, monkeypatch):
@@ -372,7 +372,7 @@ def test_estimated_laptime_none_on_out_lap(driver):
 
 
 def test_web_dashboard_delta_available(monkeypatch):
-    from tinypedal import web_dashboard
+    from neopedal import web_dashboard
 
     delta_info(monkeypatch)
     assert web_dashboard.delta_available()

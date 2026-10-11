@@ -1,5 +1,5 @@
 """
-Generate option help (tooltips) from docs/customization.md: tinypedal/i18n/data/option_help.json
+Generate option help (tooltips) from docs/customization.md: neopedal/i18n/data/option_help.json
 
 Run from project root after editing documentation:
     python tools/gen_option_help.py
@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DOC = "docs/customization.md"
-OUTPUT = "tinypedal/i18n/data/option_help.json"
+OUTPUT = "neopedal/i18n/data/option_help.json"
 MAX_LENGTH = 700
 COMMON = "_common"  # options shared by all sections (Common terms and keywords)
 SHARED_OPTIONS: tuple[str, ...] = ()  # documented once in a section, present in every widget
@@ -41,7 +41,7 @@ _link = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 
 
 def known_sections() -> list[str]:
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.default.set_default()
     sections = set()

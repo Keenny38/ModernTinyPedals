@@ -19,13 +19,13 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import app_signal, vr_overlay, vr_shared
-from tinypedal.setting import cfg
-from tinypedal.vr_overlay import VROverlay, fit_image
+from neopedal import app_signal, vr_overlay, vr_shared
+from neopedal.setting import cfg
+from neopedal.vr_overlay import VROverlay, fit_image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAYER_DIR = os.path.join(ROOT, "native", "openxr_layer")
-HEADER = os.path.join(LAYER_DIR, "include", "tinypedal_vr_shared.h")
+HEADER = os.path.join(LAYER_DIR, "include", "neopedal_vr_shared.h")
 
 
 def c_header():
@@ -83,7 +83,7 @@ def test_protocol_matches_layer_header():
 
 def test_layer_manifest():
     """Implicit layer manifest accepted by the OpenXR loader: required fields, DLL next to it"""
-    with open(os.path.join(LAYER_DIR, "TinyPedalXrLayer.json"), encoding="utf-8") as file:
+    with open(os.path.join(LAYER_DIR, "NeoPedalXrLayer.json"), encoding="utf-8") as file:
         manifest = json.load(file)
     layer = manifest["api_layer"]
     assert manifest["file_format_version"] == "1.0.0"
@@ -406,7 +406,7 @@ OTHER_LAYER = r"C:\Program Files\OpenKneeboard\OpenKneeboard-OpenXR.json"
 
 def test_register_layer(tmp_path):
     manifest = str(tmp_path / vr_shared.LAYER_MANIFEST)
-    old = r"C:\Old\TinyPedal\lib\openxr_layer\TinyPedalXrLayer.json"
+    old = r"C:\Old\NeoPedal\lib\openxr_layer\NeoPedalXrLayer.json"
     reg = FakeWinreg({OTHER_LAYER: 0, old: 0})
     assert vr_shared.register_layer(manifest, reg)
     values = reg.keys[vr_shared.REGISTRY_KEY]
@@ -423,7 +423,7 @@ def test_register_respects_layer_disabled_by_user(tmp_path, caplog):
     """Disabled in an OpenXR layer tool (value 1): never enabled again, also when the app moved"""
     manifest = os.path.abspath(str(tmp_path / vr_shared.LAYER_MANIFEST))
     reg = FakeWinreg({OTHER_LAYER: 0, manifest: 1})
-    with caplog.at_level("WARNING", logger="tinypedal.vr_shared"):
+    with caplog.at_level("WARNING", logger="neopedal.vr_shared"):
         assert vr_shared.register_layer(manifest, reg)
     assert reg.keys[vr_shared.REGISTRY_KEY] == {OTHER_LAYER: 0, manifest: 1}
     assert any("disabled by user" in record.getMessage() for record in caplog.records)
@@ -433,9 +433,9 @@ def test_register_respects_layer_disabled_by_user(tmp_path, caplog):
 
 
 def test_register_adds_new_entry_before_removing_old(tmp_path):
-    """Never a moment without a TinyPedal entry (game starting meanwhile keeps its overlay)"""
+    """Never a moment without a NeoPedal entry (game starting meanwhile keeps its overlay)"""
     manifest = os.path.abspath(str(tmp_path / vr_shared.LAYER_MANIFEST))
-    old = r"C:\Old\openxr_layer\0123\TinyPedalXrLayer.json"
+    old = r"C:\Old\openxr_layer\0123\NeoPedalXrLayer.json"
     reg = FakeWinreg({old: 0})
     calls = []
     set_value, delete_value = reg.SetValueEx, reg.DeleteValue
@@ -528,7 +528,7 @@ def test_register_failure_reported(tmp_path):
 
 
 def test_find_layer_manifest(tmp_path, monkeypatch):
-    monkeypatch.setenv("TINYPEDAL_XR_LAYER_DIR", str(tmp_path))
+    monkeypatch.setenv("NEOPEDAL_XR_LAYER_DIR", str(tmp_path))
     monkeypatch.setattr(os.path, "isfile", lambda path, isfile=os.path.isfile: isfile(path) and str(tmp_path) in path)
     assert vr_shared.find_layer_manifest() is None
     (tmp_path / vr_shared.LAYER_MANIFEST).write_text("{}")
@@ -536,7 +536,7 @@ def test_find_layer_manifest(tmp_path, monkeypatch):
     (tmp_path / vr_shared.LAYER_DLL).write_bytes(b"MZ")
     assert vr_shared.find_layer_manifest() == str(tmp_path / vr_shared.LAYER_MANIFEST)
     # Release build: lib/openxr_layer_bundle (sys._MEIPASS)
-    monkeypatch.delenv("TINYPEDAL_XR_LAYER_DIR")
+    monkeypatch.delenv("NEOPEDAL_XR_LAYER_DIR")
     bundle = tmp_path / "lib"
     (bundle / vr_shared.LAYER_FOLDER).mkdir(parents=True)
     for name in (vr_shared.LAYER_MANIFEST, vr_shared.LAYER_DLL):
@@ -548,7 +548,7 @@ def test_find_layer_manifest(tmp_path, monkeypatch):
 def make_layer(folder, dll=b"MZ v1"):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / vr_shared.LAYER_DLL).write_bytes(dll)
-    (folder / vr_shared.LAYER_MANIFEST).write_text('{"api_layer": {"library_path": ".\\\\TinyPedalXrLayer.dll"}}')
+    (folder / vr_shared.LAYER_MANIFEST).write_text('{"api_layer": {"library_path": ".\\\\NeoPedalXrLayer.dll"}}')
     return str(folder / vr_shared.LAYER_MANIFEST)
 
 
@@ -611,7 +611,7 @@ def test_prepare_layer(tmp_path, monkeypatch):
     assert vr_shared.prepare_layer(bundle) == bundle
     # Release: copy next to executable, older copies removed
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(tmp_path / "tinypedal.exe"))
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "neopedal.exe"))
     root = tmp_path / vr_shared.LAYER_INSTALL_FOLDER
     assert vr_shared.layer_install_root() == str(root)
     make_layer(root / "previous_build", dll=b"MZ v0")
@@ -668,8 +668,8 @@ def test_installer_removes_every_ascii_layer_copy(monkeypatch):
 
 
 def test_is_layer_entry():
-    assert vr_shared.is_layer_entry(r"C:\A\lib\openxr_layer\TinyPedalXrLayer.json")
-    assert vr_shared.is_layer_entry(r"c:\a\tinypedalxrlayer.JSON")
+    assert vr_shared.is_layer_entry(r"C:\A\lib\openxr_layer\NeoPedalXrLayer.json")
+    assert vr_shared.is_layer_entry(r"c:\a\neopedalxrlayer.JSON")
     assert not vr_shared.is_layer_entry(OTHER_LAYER)
 
 
@@ -774,7 +774,7 @@ def test_release_registers_layer_copy_outside_lib(env, tmp_path, monkeypatch):
     bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
     monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: bundle)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "tinypedal.exe"))
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "neopedal.exe"))
     control = VROverlay()
     try:
         control.enable()
@@ -856,7 +856,7 @@ def test_option_off_unregisters_layer(env):
 def test_openxr_layer_off_by_default_unregistered(env):
     """0.22.3 registered the layer with enable_vr_overlay alone (loaded by every OpenXR game, LMU too): now
     experimental, off by default, and every start without it removes a layer left registered"""
-    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
 
     assert GLOBAL_DEFAULT["vr_overlay"]["enable_openxr_layer"] is False
     cfg.user.config["vr_overlay"]["enable_openxr_layer"] = False
@@ -985,7 +985,7 @@ def test_two_openxr_games_write_layer_status_in_turn(env, monkeypatch, caplog):
         control.update_overlay()
         assert control._visible
         log.clear()
-        with caplog.at_level("INFO", logger="tinypedal.vr_overlay"):
+        with caplog.at_level("INFO", logger="neopedal.vr_overlay"):
             for tick in range(20):  # game 1111 draws (frames grow), game 2222 draws nothing (no layer slot)
                 if tick % 2:
                     write_layer_status(env.buffer, env.now, frames=50, pid=2222)
@@ -1004,7 +1004,7 @@ def test_two_openxr_games_write_layer_status_in_turn(env, monkeypatch, caplog):
         write_layer_status(env.buffer, 0, frames=30, pid=1111)
         caplog.clear()
         log.clear()
-        with caplog.at_level("INFO", logger="tinypedal.vr_overlay"):
+        with caplog.at_level("INFO", logger="neopedal.vr_overlay"):
             for _ in range(vr_shared.LAYER_TIMEOUT_MS // 100 + 2):
                 env.now += 100
                 control.update_overlay()
@@ -1402,7 +1402,7 @@ def test_layer_version_mismatch_reported(env, monkeypatch, caplog):
         control.enable()
         control.update_overlay()
         write_layer_status(env.buffer, env.now, state=vr_shared.LAYER_VERSION_MISMATCH, frames=0, version=3)
-        with caplog.at_level("WARNING", logger="tinypedal.vr_overlay"):
+        with caplog.at_level("WARNING", logger="neopedal.vr_overlay"):
             control.update_overlay()
         assert any("restart the game" in record.getMessage() for record in caplog.records)
         assert not control._xr_drawing
@@ -1542,7 +1542,7 @@ def test_old_copies_removed_after_registration(env, monkeypatch, tmp_path):
     bundle = make_layer(tmp_path / "lib" / vr_shared.LAYER_FOLDER)
     monkeypatch.setattr(vr_shared, "find_layer_manifest", lambda: bundle)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "tinypedal.exe"))
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "neopedal.exe"))
     old = tmp_path / "app" / vr_shared.LAYER_INSTALL_FOLDER / "old_build"
     make_layer(old, dll=b"MZ v0")
     monkeypatch.setattr(vr_shared, "register_layer", lambda path: False)  # registry denied

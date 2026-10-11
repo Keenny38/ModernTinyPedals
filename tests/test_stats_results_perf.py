@@ -10,6 +10,11 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication
 
+from neopedal.process import results_file as rf
+from neopedal.process import results_index as ri
+from neopedal.setting import cfg
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord, record_line
 from tests.test_driver_stats_viewer import OREGA, SPA, backend, dialogs, settle, window, write_stats  # noqa: F401
 from tests.test_race_results import (  # noqa: F401
     RACE_NAME,
@@ -19,11 +24,6 @@ from tests.test_race_results import (  # noqa: F401
     wait_until,
     write_results,
 )
-from tinypedal.process import results_file as rf
-from tinypedal.process import results_index as ri
-from tinypedal.setting import cfg
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord, record_line
 
 UI_BUDGET = 0.05  # seconds a slot may hold the UI thread (generous: slow CI machines)
 HISTORY_RECORDS = 50000
@@ -100,7 +100,7 @@ def test_matcher_timing():
 
 # --- Results files parsed once for both pages, released once no page uses them
 def test_results_parsed_once_for_both_pages(results_folder, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick.results_backend import load_results
+    from neopedal.ui.quick.results_backend import load_results
 
     ri.forget_summaries()
     calls = []
@@ -186,7 +186,7 @@ def test_written_records_kept_as_parsed(tmp_path):
 # --- Driver stats page: big history & many results files
 @pytest.fixture
 def big_page(window, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     stats = {track: {f"GT3 - Car {number}": {"pb": 100.0 + number, "seconds": 600.0, "valid": 5}
                      for number in range(25)} for track in TRACKS}
@@ -251,7 +251,7 @@ def test_parts_told_only_when_changed(big_page):
 
 
 def test_per_lap_reload_of_big_stats_in_background(big_page, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     page = big_page
     monkeypatch.setattr(stats_backend, "SYNC_STATS_BYTES", 1)
@@ -265,7 +265,7 @@ def test_per_lap_reload_of_big_stats_in_background(big_page, monkeypatch):
 
 
 def test_sort_by_last_driven_reads_nothing(big_page, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     page = big_page
     reads = []
@@ -292,7 +292,7 @@ def test_history_released_while_hidden(big_page):
 
 
 def test_friend_read_in_background(backend, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import stats_backend, stint_analysis
+    from neopedal.ui.quick import stats_backend, stint_analysis
 
     friend = tmp_path / "friend.json"
     stint_analysis.write_history_json(str(friend), stint_analysis.history_document(
@@ -322,7 +322,7 @@ def race_files(folder, count):
 def results_page(results_folder, english):  # noqa: F811
     from PySide6.QtCore import QEvent
 
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     race_files(results_folder, 12)
     page = RaceResultsBackend()
@@ -335,7 +335,7 @@ def results_page(results_folder, english):  # noqa: F811
 
 
 def test_held_arrow_keys_read_once(results_page, monkeypatch):
-    from tinypedal.ui.quick import results_backend
+    from neopedal.ui.quick import results_backend
 
     page = results_page
     page.kept.clear()
@@ -364,8 +364,8 @@ def test_superseded_read_kept(results_page):
 
 
 def test_long_race_chart_built_in_background(results_page, monkeypatch):
-    from tinypedal.ui.quick import results_backend
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick import results_backend
+    from neopedal.ui.quick.lines import VertexStore
 
     page = results_page
     monkeypatch.setattr(results_backend, "SYNC_CHART_POINTS", 0)
@@ -385,7 +385,7 @@ def test_long_race_chart_built_in_background(results_page, monkeypatch):
 
 
 def test_events_merged_once_per_session(results_page, monkeypatch):
-    from tinypedal.ui.quick import results_backend
+    from neopedal.ui.quick import results_backend
 
     page = results_page
     calls = []
@@ -399,7 +399,7 @@ def test_events_merged_once_per_session(results_page, monkeypatch):
 
 
 def test_typing_search_only_filters_rows(results_page, monkeypatch):
-    from tinypedal.ui.quick import results_backend
+    from neopedal.ui.quick import results_backend
 
     page = results_page
     built = []

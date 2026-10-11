@@ -2,10 +2,10 @@
 
 import pytest
 
-from tinypedal.module_info import ConsumptionDataSet
-from tinypedal.process import garage, vehicle
-from tinypedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
-from tinypedal.userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
+from neopedal.module_info import ConsumptionDataSet
+from neopedal.process import garage, vehicle
+from neopedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
+from neopedal.userfile.fuel_delta import load_fuel_delta_file, save_fuel_delta_file
 
 
 # --- Vehicle setup values
@@ -50,7 +50,7 @@ def test_absolute_refilling():
 def class_name(monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     reader = SimpleNamespace(vehicle=SimpleNamespace(class_name=lambda: "GT3"))
     monkeypatch.setattr(api, "read", reader)
@@ -145,7 +145,7 @@ def test_consumption_history_backup_only_of_unreadable_content(tmp_path, monkeyp
             raise PermissionError("locked")
         return real_open(file, *args, **kwargs)
 
-    from tinypedal.userfile import consumption_history
+    from neopedal.userfile import consumption_history
 
     monkeypatch.setattr(consumption_history, "open", locked_open, raising=False)
     assert load_consumption_history_file(filepath, "locked", backup=True) == (ConsumptionDataSet(),)
@@ -198,7 +198,7 @@ def test_invalid_user_data_path_falls_back(tmp_path, monkeypatch):
     """Invalid path (Windows "<": WinError 123) returns "" (default path used), no startup crash"""
     import os
 
-    from tinypedal.userfile import set_user_data_path
+    from neopedal.userfile import set_user_data_path
 
     def invalid(path):
         raise OSError(22, "The filename, directory name, or volume label syntax is incorrect")

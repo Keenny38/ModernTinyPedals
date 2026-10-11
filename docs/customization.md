@@ -5,7 +5,7 @@ NeoPedal offers a wide range of customization options for `widget` and `module` 
 # Global user configuration
 NeoPedal stores global user configuration in `config.json` file, which is used for none-preset specific options.
 
-* For Windows, `config.json` is stored under `username\AppData\Roaming\TinyPedal` folder.
+* For Windows, `config.json` is stored under `username\AppData\Roaming\NeoPedal` folder.
 * For Linux, `config.json` is stored under `home/username/.config/NeoPedal` folder.
 
 Available settings:
@@ -21,7 +21,7 @@ Reload or Restart:
 
 * To reload all presets, select `Reload` from `Overlay` menu in main window.
 * To restart game API, select `Restart API` from `API` menu in main window.
-* To restart NeoPedal, select `Restart TinyPedal` from `Window` menu in main window.
+* To restart NeoPedal, select `Restart NeoPedal` from `Window` menu in main window.
 
 [**`Back to Top`**](#)
 
@@ -29,7 +29,7 @@ Reload or Restart:
 # Preset management
 NeoPedal stores all customization options in `JSON` format preset files, and can be managed from `Preset` tab in main window.
 
-All user preset files, by default, are located in `TinyPedal\settings` folder. Those `JSON` files can also be manually edited with text editor.
+All user preset files, by default, are located in `NeoPedal\settings` folder. Those `JSON` files can also be manually edited with text editor.
 
 `Double-Click` on a preset name in `Preset` tab to load selected preset.
 
@@ -195,7 +195,7 @@ For example, to only transfer all widgets `position` setting to another preset, 
 
 Brands preset can be customized by accessing `Vehicle brand editor` from `Tools` menu in main window. See [Vehicle Brand Editor](#vehicle-brand-editor) section for complete editing guide.
 
-`brands.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`brands.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -205,7 +205,7 @@ Brands preset can be customized by accessing `Vehicle brand editor` from `Tools`
 
 Classes preset can be customized by accessing `Vehicle class editor` from `Tools` menu in main window. See [Vehicle Class Editor](#vehicle-class-editor) section for complete editing guide.
 
-`classes.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`classes.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -215,7 +215,7 @@ Classes preset can be customized by accessing `Vehicle class editor` from `Tools
 
 Brakes preset can be customized by accessing `Brake editor` from `Tools` menu in main window. See [Brake Editor](#brake-editor) section for complete editing guide.
 
-`brakes.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`brakes.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -225,7 +225,7 @@ Brakes preset can be customized by accessing `Brake editor` from `Tools` menu in
 
 Compounds preset can be customized by accessing `Tyre compound editor` from `Tools` menu in main window. See [Tyre Compound Editor](#tyre-compound-editor) section for complete editing guide.
 
-`compounds.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`compounds.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -235,7 +235,7 @@ Compounds preset can be customized by accessing `Tyre compound editor` from `Too
 
 Heatmap preset can be customized by accessing `Heatmap editor` from `Tools` menu in main window. See [Heatmap Editor](#heatmap-editor) section for complete editing guide.
 
-`heatmap.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`heatmap.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -247,7 +247,7 @@ Tracks preset can be customized by accessing `Track info editor` from `Tools` me
 
 Track info recording is handled by [Mapping Module](#mapping-module).
 
-`tracks.json` preset will be generated and saved in `TinyPedal\settings` folder after first time launch of the APP.
+`tracks.json` preset will be generated and saved in `NeoPedal\settings` folder after first time launch of the APP.
 
 [**`Back to Top`**](#)
 
@@ -279,7 +279,7 @@ Data recording is handled by [Stats Module](#stats-module).
 
 
 ## Delta best
-Delta best data is stored as `CSV` format (.csv extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
+Delta best data is stored as `CSV` format (.csv extension) under `NeoPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
 Session best and stint best laps of last session are stored as `JSON` format (.session extension) in the same folder, so they are kept when NeoPedal restarts or preset is reloaded during the session.
 
@@ -289,7 +289,7 @@ Data recording is handled by [Delta Module](#delta-module).
 
 
 ## Energy delta
-Energy delta data is stored as `CSV` format (.energy extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
+Energy delta data is stored as `CSV` format (.energy extension) under `NeoPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
 Data recording is handled by [Fuel Module](#fuel-module).
 
@@ -297,7 +297,7 @@ Data recording is handled by [Fuel Module](#fuel-module).
 
 
 ## Fuel delta
-Fuel delta data is stored as `CSV` format (.fuel extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
+Fuel delta data is stored as `CSV` format (.fuel extension) under `NeoPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
 Data recording is handled by [Fuel Module](#fuel-module).
 
@@ -305,7 +305,7 @@ Data recording is handled by [Fuel Module](#fuel-module).
 
 
 ## Consumption history
-Consumption history data is stored as `CSV` format (.consumption extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
+Consumption history data is stored as `CSV` format (.consumption extension) under `NeoPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
 Consumption history data stores lap time, fuel consumption, battery charge, tyre wear usage data per `track and vehicle class`, which can be loaded in [Race Calculator](#race-calculator). Up to 100 most recent lap entries are saved per `track and vehicle class`. Data recording is handled by [Fuel Module](#fuel-module).
 
@@ -313,7 +313,7 @@ Consumption history data stores lap time, fuel consumption, battery charge, tyre
 
 
 ## Sector best
-Sector best data is stored as `CSV` format (.sector extension) under `TinyPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
+Sector best data is stored as `CSV` format (.sector extension) under `NeoPedal\deltabest` folder (default). Those files can be opened in spreadsheet or notepad programs.
 
 Data recording is handled by [Sectors Module](#sectors-module).
 
@@ -321,7 +321,7 @@ Data recording is handled by [Sectors Module](#sectors-module).
 
 
 ## Track map
-Track map is stored as `SVG` vector image format (.svg extension) under `TinyPedal\trackmap` folder (default). Track map can be viewed with [Track Map Viewer](#track-map-viewer) from `Tools` menu in main window.
+Track map is stored as `SVG` vector image format (.svg extension) under `NeoPedal\trackmap` folder (default). Track map can be viewed with [Track Map Viewer](#track-map-viewer) from `Tools` menu in main window.
 
 Data recording is handled by [Mapping Module](#mapping-module).
 
@@ -335,7 +335,7 @@ Each sector position index is also stored in SVG file for finding sector coordin
 
 
 ## Pace notes
-`TinyPedal Pace Notes` data is stored as `TPPN` format (.tppn extension) under `TinyPedal\pacenotes` folder (default). Pace notes can be created or edited with [Track Notes Editor](#track-notes-editor) from `Tools` menu in main window.
+`NeoPedal Pace Notes` data is stored as `TPPN` format (.tppn extension) under `NeoPedal\pacenotes` folder (default). Pace notes can be created or edited with [Track Notes Editor](#track-notes-editor) from `Tools` menu in main window.
 
 Pace notes data is mainly used for [Pace Notes Playback](#pace-notes-playback) for specific tracks.
 
@@ -345,7 +345,7 @@ To allow `auto notes loading` function to work, pace notes file name must match 
 
 
 ## Track notes
-`TinyPedal Track Notes` data is stored as `TPTN` format (.tptn extension) under `TinyPedal\tracknotes` folder (default). Track notes can be created or edited with [Track Notes Editor](#track-notes-editor) from `Tools` menu in main window.
+`NeoPedal Track Notes` data is stored as `TPTN` format (.tptn extension) under `NeoPedal\tracknotes` folder (default). Track notes can be created or edited with [Track Notes Editor](#track-notes-editor) from `Tools` menu in main window.
 
 Track notes data is mainly used for displaying corner and section names for specific tracks, or providing additional info at specific track location while driving.
 
@@ -355,13 +355,13 @@ To allow `auto notes loading` function to work, track notes file name must match
 
 
 ## Tyre strategy
-`TinyPedal Tyre Strategy` file is stored as `JSON` format (.tyre-strategy extension). Tyre strategy file can be created or edited in the tyre tab of [Race Calculator](#race-calculator).
+`NeoPedal Tyre Strategy` file is stored as `JSON` format (.tyre-strategy extension). Tyre strategy file can be created or edited in the tyre tab of [Race Calculator](#race-calculator).
 
 [**`Back to Top`**](#)
 
 
 ## Brand logo
-NeoPedal supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `TinyPedal\brandlogo` folder (default).
+NeoPedal supports user-defined brand logo image in `PNG` format (.png extension) which is placed under `NeoPedal\brandlogo` folder (default).
 
 With Le Mans Ultimate, real car brand logos, circuit logos, car pictures and circuit pictures are taken from the game itself: the app asks them to the game running on your computer (its local web server, same address as the [Le Mans Ultimate API](#le-mans-ultimate-api) Rest API access, which must be enabled) and keeps them in the `game_image_path` folder, so they are shown everywhere (brand logo column of Relative, Standings & Rivals, Home, Race Results, Driver Stats, Spectate, Replays, Race Calculator, Telemetry Viewer, Track Map Viewer and stream overlay of race results), also while the game is not running. Nothing is shipped with the app. A brand logo of your own in the brand logo folder is always shown first; its file name may be one word of a longer brand name (`Corvette.png` for `Chevrolet Corvette`, `Ford.png` for `Ford Mustang`). Logos too close to the background color are shown with a readable copy (kept in `game_image_path`): black logos get light on dark overlays and pages, white logos get dark on light themes, colored parts are kept.
 
@@ -370,14 +370,14 @@ Note: NeoPedal does not provide brand logo image assets, it is up to user to pre
 How to prepare brand logo image:
 1. Brand logo image should have all transparent borders cropped. For example, in `GIMP` this can be done by selecting `Image` > `Crop to Content`.
 2. Make sure image dimension is not too big, usually around 100 pixel width or height is good enough. Bigger dimension may consume more RAM or exceed maximum supported file size.
-3. Save image to `TinyPedal\brandlogo` folder, image filename must match corresponding `brand name` that defined in [Vehicle Brand Editor](#vehicle-brand-editor). For cross-platform compatibility, filename matching is set to be case-sensitive, make sure filename has the same upper or lower case as set in `brand name`.
+3. Save image to `NeoPedal\brandlogo` folder, image filename must match corresponding `brand name` that defined in [Vehicle Brand Editor](#vehicle-brand-editor). For cross-platform compatibility, filename matching is set to be case-sensitive, make sure filename has the same upper or lower case as set in `brand name`.
 4. `Reload` preset to load newly added brand logo images for displaying in overlay (logos of the game show up by themselves once fetched).
 
 [**`Back to Top`**](#)
 
 
 ## Car setup
-Car setup files for specific games are stored under `TinyPedal\carsetups` folder (default). Those files are auto generated backups via `Auto Backup Car Setup` function.
+Car setup files for specific games are stored under `NeoPedal\carsetups` folder (default). Those files are auto generated backups via `Auto Backup Car Setup` function.
 
 See [Telemetry API](#telemetry-api) section for details about `Auto Backup Car Setup` function.
 
@@ -413,7 +413,7 @@ Set running mode. `0` allows running multiple instances (copies) of NeoPedal. `1
 
 To run multiple copies of NeoPedal at same time: `python .\run.py -s 0` or `.\neopedal.exe --single-instance 0`
 
-Single instance mode saves `pid.log` file in the same folder as `neopedal.log`, which is used for instance identification. It is separate from the one of the original TinyPedal (`%APPDATA%\TinyPedal`), so both apps can run at the same time.
+Single instance mode saves `pid.log` file in the same folder as `neopedal.log`, which is used for instance identification.
 
     --safe-mode
 Start in safe mode: plugins are not loaded, overlays (widgets & VR overlay) are not started, so settings can be fixed in the main window (a widget can still be turned on by hand). Window title and a notice show safe mode; `Restart Normally` in the notice, or `Restart NeoPedal` in `Window` menu, starts normally again.
@@ -790,7 +790,7 @@ Define main window size on screen in pixels. Those values will be auto updated a
 Whether main window was maximized at last quit, shown maximized again at startup. This value will be auto updated and saved while `remember_size` option is enabled.
 
     window_color_theme
-Set color theme for main window and dialog: `Modern Dark` (default), `Modern Light`, `Legacy Dark` or `Legacy Light` (colors of TinyPedal 2.50). This option does not affect overlay widget, see `overlay_theme` in Overlay Style.
+Set color theme for main window and dialog: `Modern Dark` (default), `Modern Light`, `Legacy Dark` or `Legacy Light` (classic colors). This option does not affect overlay widget, see `overlay_theme` in Overlay Style.
 
 Color theme can be quickly toggled via `UI` button on main window status bar.
 
@@ -853,15 +853,15 @@ Note, global background color will only be visible when `enable_translucent_back
 ## Overlay Style
 **Overlay style options can be accessed from `Config` menu in main window. Changes apply to all widgets in all presets.**
 
-Themes only restyle options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so changing theme never changes presets. Modern themes use modern design, rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Legacy themes keep classic TinyPedal look: modern font, corner, depth and bar gap options do not apply.
+Themes only restyle options that still use their default value, any customized font, color or gap in widget preset is kept as it is. Styled values are never saved to preset file, so changing theme never changes presets. Modern themes use modern design, rounded corners, minimum gap between bars, fixed width digits, and auto font vertical offset that is independent of font leading. Legacy themes keep classic look: modern font, corner, depth and bar gap options do not apply.
 
     overlay_theme
 Set overlay theme, applied to default colors only (alpha channel is kept):
 
 * `Modern Dark`: modern design, slate neutrals with softer accent colors (default).
 * `Modern Light`: modern design, light panels and dark text.
-* `Legacy Dark`: classic TinyPedal look: classic layout, colors and fonts.
-* `Legacy Light`: classic TinyPedal look with light panels and dark text.
+* `Legacy Dark`: classic look: classic layout, colors and fonts.
+* `Legacy Light`: classic look with light panels and dark text.
 
 Light themes invert gray panels and text, keep colored backgrounds (flags, warnings) and darken colors drawn on panels so they stay readable.
 
@@ -949,7 +949,7 @@ To share user path across multiple copies of NeoPedal, user must set path to pla
 Remote control allows other programs (Stream Deck, Companion, SimHub, button box software) to run any hotkey command through a local HTTP server that only listens on `127.0.0.1`:
 
 * `GET http://127.0.0.1:8337/commands` lists available commands.
-* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-NeoPedal` header (any value; `X-TinyPedal` also accepted).
+* `POST http://127.0.0.1:8337/command/<name>` runs a command, request must include `X-NeoPedal` header (any value; `X-NeoPedal` also accepted).
 * `ws://127.0.0.1:8337/stream` is a WebSocket that pushes live telemetry as JSON (same fields as web dashboard: speed, gear, rpm, pedals, position, lap times, delta, fuel, tyre & brake temperatures...). Push interval is set with `?interval=<ms>` (20 to 5000, default 100). `?fields=speed,gear,rpm` only sends these fields, `?changes=1` only sends fields changed since last message (nothing if none changed). Client can change both at any time by sending a text message such as `{"fields": ["speed", "gear"], "changes": true}` (`"fields": null` for every field). Browser pages from other sites are refused (`Origin` check).
 
 Requests without the header, or with a host name other than `127.0.0.1` or `localhost`, are refused. This protects against web pages trying to send commands from a browser.
@@ -1035,7 +1035,7 @@ The VR overlay is hidden automatically when all widgets are hidden, and only sen
 Enable VR overlay: SteamVR overlay once SteamVR runs, and in OpenXR games with `enable_openxr_layer`.
 
     enable_openxr_layer
-Experimental, disabled by default: show the VR overlay in OpenXR games with the app's own OpenXR layer (needs `enable_vr_overlay`). On Windows, the layer is registered for your user account (no admin rights) while the app runs with both options on, and removed when the app is closed, when an option is turned off or when the app is uninstalled: start the app before the game. Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite): if a game no longer starts in VR, turn this option off. To keep it out of one game, set the `DISABLE_TINYPEDAL_XR_LAYER` environment variable to `1`. Games run as administrator do not load it.
+Experimental, disabled by default: show the VR overlay in OpenXR games with the app's own OpenXR layer (needs `enable_vr_overlay`). On Windows, the layer is registered for your user account (no admin rights) while the app runs with both options on, and removed when the app is closed, when an option is turned off or when the app is uninstalled: start the app before the game. Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite): if a game no longer starts in VR, turn this option off. To keep it out of one game, set the `DISABLE_NEOPEDAL_XR_LAYER` environment variable to `1`. Games run as administrator do not load it.
 
     enable_attach_to_headset
 Attach overlay to headset (follows head movement), otherwise overlay is fixed in seated space.
@@ -1683,7 +1683,7 @@ To create or open track notes, click `File` and select `New Track Notes` or `Ope
 
 To save notes file, click `Save`. Note, notes file name should exactly match with track name from track map file name for `auto notes loading` function to work. The editor will try to retrieve track name automatically in an active session, or from an opened track map in `Track Map Viewer`.
 
-To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `TinyPedal` notes file formats are supported for used in NeoPedal.
+To save notes file to other formats or for used in other games, select a file format name from `save type` in save dialog, such as `GPL Pace Notes (*.ini)` which saves pace notes in GPL pace notes file format. Note, only `NeoPedal` notes file formats are supported for used in NeoPedal.
 
 To hide map viewer, click `Hide Map`. To show map viewer, click `Show Map`.
 
@@ -5030,7 +5030,7 @@ Show current suspension position (millimeter) relative to static position instea
     show_system_performance
 Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by `update_interval` setting.
 
-    show_tinypedal_performance
+    show_neopedal_performance
 Show NeoPedal's CPU utilization (percent) and memory usage (MB).
 
     average_samples
@@ -6265,14 +6265,14 @@ Set number of samples for reducing data fluctuation. Lower value may result more
 Each plugin is a folder in `plugins` folder (next to NeoPedal), named with lowercase letters, digits or `_`:
 
     plugins/<name>/setting.json   default options of the widget
-    plugins/<name>/widget.py      Realtime class, inherits tinypedal.widget._base.Overlay
+    plugins/<name>/widget.py      Realtime class, inherits neopedal.widget._base.Overlay
 
 Plugin appears as `plugin_<name>` widget in `Overlays` tab, with the same common options as other widgets (position, font, opacity...). A plugin that fails to load shows a red `PLUGIN ERROR` widget instead of stopping NeoPedal; error details are shown in [Plugin manager](#plugin-manager) and log.
 
 Minimal example, a speed widget (`plugins/speed/setting.json` holds `{"enable": false, "font_color": "#FFFFFF", "background_color": "#222222"}`):
 
-    from tinypedal.api_control import api
-    from tinypedal.widget._base import Overlay
+    from neopedal.api_control import api
+    from neopedal.widget._base import Overlay
 
 
     class Realtime(Overlay):

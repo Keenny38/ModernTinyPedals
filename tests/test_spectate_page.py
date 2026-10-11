@@ -4,7 +4,7 @@ click, next / previous by place, spectate mode switch, data modules restarted, Q
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 CARS = (
     # name, vehicle, class, place, slot
@@ -70,8 +70,8 @@ def flush():
 @pytest.fixture
 def setups(ui_env, monkeypatch):
     """API setups & module reloads done by the page"""
-    from tinypedal import realtime_state
-    from tinypedal.ui.quick import spectate_backend
+    from neopedal import realtime_state
+    from neopedal.ui.quick import spectate_backend
 
     calls = []
     monkeypatch.setattr(realtime_state, "paused", False)  # game data updating
@@ -86,7 +86,7 @@ def setups(ui_env, monkeypatch):
 
 @pytest.fixture
 def backend(setups):
-    from tinypedal.ui.quick.spectate_backend import SpectateBackend
+    from neopedal.ui.quick.spectate_backend import SpectateBackend
 
     reader = Reader()
     backend = SpectateBackend(None, lambda: reader)
@@ -126,7 +126,7 @@ def test_search_and_class_filters(backend):
 
 def test_poll_without_search_folds_no_text(backend, monkeypatch):
     """No search words: rows accepted without folding name, car & class of every row at each poll"""
-    from tinypedal.ui.quick import spectate_backend
+    from neopedal.ui.quick import spectate_backend
 
     folded = []
     monkeypatch.setattr(spectate_backend, "sort_key", lambda text: folded.append(text) or text.casefold())
@@ -180,7 +180,7 @@ def test_spectated_card(backend):
 
 def test_derived_values_signaled_only_when_changed(backend, monkeypatch):
     """Card, chips & counts each told only when their value changed (not on laps of other drivers)"""
-    from tinypedal.ui.quick import spectate_backend
+    from neopedal.ui.quick import spectate_backend
 
     cfg.api["enable_player_index_override"] = True
     cfg.api["player_index"] = 14
@@ -216,7 +216,7 @@ def test_derived_values_signaled_only_when_changed(backend, monkeypatch):
 
 
 def test_data_modules_restarted_when_followed_driver_changes(backend, setups, monkeypatch):
-    from tinypedal import realtime_state
+    from neopedal import realtime_state
 
     monkeypatch.setattr(realtime_state, "active", True)
     backend.setEnabled(True)
@@ -237,7 +237,7 @@ def test_refresh_follows_other_changes_without_side_effects(backend, setups):
 
 
 def test_not_read_while_hidden_or_paused(backend, monkeypatch):
-    from tinypedal import realtime_state
+    from neopedal import realtime_state
 
     backend.set_active(False)
     backend.reader.vehicle.cars.pop()
@@ -251,7 +251,7 @@ def test_not_read_while_hidden_or_paused(backend, monkeypatch):
 
 
 def test_empty_session(setups):
-    from tinypedal.ui.quick.spectate_backend import SpectateBackend
+    from neopedal.ui.quick.spectate_backend import SpectateBackend
 
     backend = SpectateBackend(None, lambda: Reader(()))
     backend.set_active(True)
@@ -277,8 +277,8 @@ def deleted_with_window(setups, unload: bool) -> list[str]:
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.app import AppWindow
-    from tinypedal.ui.spectate_view import SpectateList
+    from neopedal.ui.app import AppWindow
+    from neopedal.ui.spectate_view import SpectateList
 
     reader = Reader()
     window = QWidget()
@@ -309,7 +309,7 @@ def test_rail_page_deleted_with_window(setups):
 
 
 def test_qml_page(setups):
-    from tinypedal.ui.spectate_view import SpectateList
+    from neopedal.ui.spectate_view import SpectateList
 
     reader = Reader()
     page = SpectateList(None)

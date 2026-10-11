@@ -9,10 +9,10 @@ import os
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile.circuit_match import names_match, same_imported_circuit, same_shape
+from neopedal.userfile.telemetry_lap import LapData
 from tests.telemetry_sim import circuit_lap
-from tinypedal.setting import cfg
-from tinypedal.userfile.circuit_match import names_match, same_imported_circuit, same_shape
-from tinypedal.userfile.telemetry_lap import LapData
 
 LENGTH = 3000.0
 COMBO = "Spa - GT3"
@@ -65,7 +65,7 @@ def write_lap(folder: str, lap: LapData) -> str:
 def listed_path(backend, path: str) -> str:
     """Path of lap as listed by viewer (key of shown lap): laps of telemetry folder keep the slashes of the folder
     option, laps given from elsewhere are normalized"""
-    from tinypedal.ui.quick.lap_backend import path_key
+    from neopedal.ui.quick.lap_backend import path_key
 
     return next((entry.file.path for entry in backend.all_entries() if path_key(entry.file.path) == path_key(path)),
                 os.path.normpath(path))
@@ -142,8 +142,8 @@ def test_speed_trace_fallback_without_positions():
 def track(ui_env):
     from PySide6.QtWidgets import QWidget
 
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
     from tests.test_lap_viewer import wait_loaded
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
 
     folder = os.path.join(cfg.path.telemetry.rstrip("/"), COMBO)
     paths = [write_lap(folder, make_lap(number, recorded=True, pace=1 + number / 100)) for number in (1, 2)]
@@ -204,10 +204,10 @@ def test_imported_lap_of_other_circuit_in_track_folder_unchecked(track):
 def test_consistency_job_aligns_imported_laps(ui_env, tmp_path):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.lap_geometry import mini_sector_job
-    from tinypedal.userfile.telemetry_lap import load_lap
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.lap_geometry import mini_sector_job
+    from neopedal.userfile.telemetry_lap import load_lap
 
     folder = str(tmp_path / COMBO)
     reference_path = write_lap(folder, make_lap(1, recorded=True, positions=False))

@@ -5,8 +5,8 @@ import random
 
 from PySide6.QtCore import QCoreApplication
 
+from neopedal.setting import cfg
 from tests.test_overlay_options import options, row, set_classic  # noqa: F401
-from tinypedal.setting import cfg
 
 
 def spy(monkeypatch, backend, name: str) -> list:
@@ -81,7 +81,7 @@ def test_dependent_edits_rebuild_every_row(options, monkeypatch):  # noqa: F811
 
 
 def test_random_edits_match_full_rebuild(options):  # noqa: F811
-    from tinypedal.ui.quick.option_kinds import KIND_BOOL, KIND_CHOICE, NUMBER_KINDS
+    from neopedal.ui.quick.option_kinds import KIND_BOOL, KIND_CHOICE, NUMBER_KINDS
 
     rng = random.Random(5)
     for name in ("speedometer", "black_box", "relative", "fuel"):

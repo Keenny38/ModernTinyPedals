@@ -4,8 +4,8 @@ import asyncio
 import socket
 import threading
 
-from tinypedal.async_request import parse_response, resolve_hostname, set_header_get
-from tinypedal.update import parse_release
+from neopedal.async_request import parse_response, resolve_hostname, set_header_get
+from neopedal.update import parse_release
 
 
 def feed_in_pieces(data: bytes, piece: int = 7) -> asyncio.StreamReader:
@@ -82,7 +82,7 @@ class LoopbackServer:
 def test_resolve_hostname_sends_valid_request():
     """Probes must send a complete GET request (bytes), not a bare path string:
     asyncio's writer rejects str, which used to crash the whole RestAPI thread"""
-    from tinypedal.async_request import clear_resolved_hosts
+    from neopedal.async_request import clear_resolved_hosts
 
     clear_resolved_hosts()
     server = LoopbackServer()
@@ -122,7 +122,7 @@ def test_failed_probe_does_not_cancel_others():
     """A refused probe (instant on Linux) must not stop a probe that may still answer"""
     import asyncio
 
-    from tinypedal.async_request import cancel_tasks
+    from neopedal.async_request import cancel_tasks
 
     async def scenario():
         async def refused():
@@ -147,7 +147,7 @@ def test_failed_probe_does_not_cancel_others():
 # --- Audit fixes (package A)
 def test_status_read_from_status_line():
     """"200" elsewhere in headers is not a success status"""
-    from tinypedal.async_request import parse_status_line
+    from neopedal.async_request import parse_status_line
 
     assert run_parse(b"HTTP/1.1 404 Not Found\r\nX-Request-Id: 200\r\nContent-Length: 2\r\n\r\n{}") == b""
     assert run_parse(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}") == b"{}"  # header name case ignored
@@ -157,7 +157,7 @@ def test_status_read_from_status_line():
 
 def test_failed_first_probe_keeps_slower_answer(monkeypatch):
     """First probe refused before a slower one answers: resolving must not return nothing"""
-    from tinypedal import async_request
+    from neopedal import async_request
 
     async def probe(request, host, port, timeout, ssl=False):
         if host == "127.0.0.1":
@@ -171,7 +171,7 @@ def test_failed_first_probe_keeps_slower_answer(monkeypatch):
 
 
 def test_resolved_host_cached_until_forgotten():
-    from tinypedal.async_request import clear_resolved_hosts, forget_hostname
+    from neopedal.async_request import clear_resolved_hosts, forget_hostname
 
     clear_resolved_hosts()
     server = LoopbackServer()
@@ -215,7 +215,7 @@ def make_http_server(protocol: str, connections: list):
 
 def test_http_connection_kept_open():
     """Rest API polling reuses its connection (HTTP/1.1), reconnects when server closes it (HTTP/1.0)"""
-    from tinypedal.async_request import HttpConnection
+    from neopedal.async_request import HttpConnection
 
     for protocol, expected in (("HTTP/1.1", 1), ("HTTP/1.0", 3)):
         connections: list = []
@@ -251,7 +251,7 @@ def test_header_over_reader_limit_is_invalid_response():
     response (caught by callers), not asyncio.LimitOverrunError"""
     import pytest
 
-    from tinypedal.async_request import HttpConnection, get_response
+    from neopedal.async_request import HttpConnection, get_response
 
     huge = b"X-Big: " + b"a" * (70 * 1024) + b"\r\n"
     with pytest.raises(ValueError, match="too long"):
@@ -296,7 +296,7 @@ def test_failed_retry_closes_kept_connection():
     so next request is not sent on a socket with a pending late response"""
     import pytest
 
-    from tinypedal.async_request import HttpConnection
+    from neopedal.async_request import HttpConnection
 
     server = socket.socket()
     server.bind(("127.0.0.1", 0))

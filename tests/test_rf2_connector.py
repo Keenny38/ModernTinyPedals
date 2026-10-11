@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from tinypedal.adapter import rf2_connector
-from tinypedal.adapter.rf2_connector import INVALID_INDEX, RF2Info, SyncData, rF2data
+from neopedal.adapter import rf2_connector
+from neopedal.adapter.rf2_connector import INVALID_INDEX, RF2Info, SyncData, rF2data
 
 
 class Zone:
@@ -176,7 +176,7 @@ class OpenedZone(Zone):
 
 def test_shared_memory_open_failure_not_connected(monkeypatch):
     """Opening error must not stop app start: not connected state, stop safe"""
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     errors: list[str] = []
     app_signal.error.connect(errors.append)
@@ -200,7 +200,7 @@ def test_shared_memory_open_failure_not_connected(monkeypatch):
 
 
 def test_lmu_shared_memory_open_failure_not_connected():
-    from tinypedal.adapter import lmu_connector
+    from neopedal.adapter import lmu_connector
 
     info = lmu_connector.LMUInfo()
     info._sync.dataset.shmm = FailingZone(None)
@@ -222,7 +222,7 @@ def test_gave_up_after_errors_hides_overlays(game, monkeypatch):
 
 
 def test_lmu_gave_up_after_errors_hides_overlays(monkeypatch):
-    from tinypedal.adapter import lmu_connector
+    from neopedal.adapter import lmu_connector
 
     sync = lmu_connector.SyncData()
     sync.synced = True
@@ -232,8 +232,8 @@ def test_lmu_gave_up_after_errors_hides_overlays(monkeypatch):
 
 
 def test_lmu_telemetry_matched_on_active_vehicles():
+    from neopedal.adapter import lmu_connector
     from pyLMUSharedMemory import lmu_data
-    from tinypedal.adapter import lmu_connector
 
     telemetry = lmu_data.LMUTelemetryData()
     telemetry.activeVehicles = 2
@@ -258,8 +258,8 @@ def test_telemetry_slots_forgotten_on_session_change(game):
 
 def test_unknown_slot_never_reads_other_car_telemetry():
     """Slot id without telemetry match: zeroed telemetry, not another car (same index) or last entry"""
+    from neopedal.adapter import lmu_connector, rf2_connector
     from pyLMUSharedMemory import lmu_data
-    from tinypedal.adapter import lmu_connector, rf2_connector
 
     assert rf2_connector.default_tele_indexes() == {} == lmu_connector.default_tele_indexes()
     # rF2
@@ -352,8 +352,8 @@ def test_player_index_bound_by_vehicle_count(game):
 
 
 def test_scoring_index_helpers_bound_by_vehicle_count():
+    from neopedal.adapter import lmu_connector
     from pyLMUSharedMemory import lmu_data
-    from tinypedal.adapter import lmu_connector
 
     vehicles = (rF2data.rF2VehicleScoring * 5)()
     vehicles[3].mIsPlayer = True
@@ -372,7 +372,7 @@ def test_scoring_index_helpers_bound_by_vehicle_count():
 
 
 def test_lmu_restart_uses_new_event(monkeypatch, caplog):
-    from tinypedal.adapter import lmu_connector
+    from neopedal.adapter import lmu_connector
 
     class MemoryShmm(Zone):
         def __init__(self):
@@ -397,7 +397,7 @@ def test_lmu_restart_uses_new_event(monkeypatch, caplog):
 def test_lmu_results_driver_key_with_parenthesis_and_xml_entities():
     """Incident driver key: name up to "(id) reported contact" (may contain parenthesis),
     XML entities decoded to match mDriverName"""
-    from tinypedal.adapter import lmu_connector
+    from neopedal.adapter import lmu_connector
 
     results = lmu_connector.LMUResults()
     results.update(

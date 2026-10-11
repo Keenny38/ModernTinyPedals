@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal.adapter import data_notify, lmu_connector, rf2_connector
-from tinypedal.adapter.data_notify import DataNotifier
-from tinypedal.module import _base, module_delta, module_recorder
+from neopedal.adapter import data_notify, lmu_connector, rf2_connector
+from neopedal.adapter.data_notify import DataNotifier
+from neopedal.module import _base, module_delta, module_recorder
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ def test_stop_wakes_module_waiting_for_data(notifier):
 
 
 def test_derived_modules_subscribed_to_derived_data():
-    from tinypedal.module import module_fuel, module_notes, module_vehicles
+    from neopedal.module import module_fuel, module_notes, module_vehicles
 
     assert module_fuel.Realtime.WAKE_ON_DERIVED and module_notes.Realtime.WAKE_ON_DERIVED
     assert not module_vehicles.Realtime.WAKE_ON_DERIVED and not module_delta.Realtime.WAKE_ON_DERIVED
@@ -561,9 +561,9 @@ def test_lap_text_releases_gil_between_chunks(monkeypatch):
 
 def test_delta_position_update_wakes_derived_modules(ui_env, notifier, monkeypatch):
     """Fuel & notes stamps include delta module position: woken when it changes, not on same position"""
-    from tinypedal import realtime_state
-    from tinypedal.module_info import minfo
-    from tinypedal.setting import cfg
+    from neopedal import realtime_state
+    from neopedal.module_info import minfo
+    from neopedal.setting import cfg
 
     positions = iter((10.0, 10.0, 12.5))
 

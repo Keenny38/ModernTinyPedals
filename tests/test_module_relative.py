@@ -7,8 +7,8 @@ shows the wrong cars.
 
 import pytest
 
-from tinypedal.const_common import MAX_SECONDS
-from tinypedal.module.module_relative import (
+from neopedal.const_common import MAX_SECONDS
+from neopedal.module.module_relative import (
     calc_standings_index,
     create_reference_place,
     max_vehicles_in_class,
@@ -125,7 +125,7 @@ def test_class_vehicle_limit_never_cuts_into_the_top():
 
 # --- Position in class
 def test_position_in_class_numbers_each_class_separately(ui_env):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     sorted_veh_class = [
         entry("LMP2", 1, 0, best=95.0, last=96.0),
@@ -164,8 +164,8 @@ SCORING_TIME = {"elapsed": 0.0}  # session elapsed time of scoring data
 def field(ui_env, monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal import realtime_state
-    from tinypedal.api_control import api
+    from neopedal import realtime_state
+    from neopedal.api_control import api
 
     vehicle = SimpleNamespace(
         total_vehicles=lambda: len(FIELD), player_index=lambda: 0,
@@ -181,8 +181,8 @@ def field(ui_env, monkeypatch):
 
 
 def test_vehicles_info_relative_gaps_and_draw_order(field):
-    from tinypedal.module.module_relative import get_vehicles_info
-    from tinypedal.module_info import minfo
+    from neopedal.module.module_relative import get_vehicles_info
+    from neopedal.module_info import minfo
 
     ahead, behind, classes, draw_order, multi_class = get_vehicles_info(
         len(FIELD), 0, False, True, minfo.relative.relativeDeltaAhead, minfo.relative.relativeDeltaBehind)
@@ -201,8 +201,8 @@ def test_vehicles_info_relative_gaps_and_draw_order(field):
 
 
 def test_relative_delta_reset_when_other_car_takes_index(field, monkeypatch):
-    from tinypedal.module.module_relative import get_vehicles_info, reset_relative_delta
-    from tinypedal.module_info import DeltaTimeInterval
+    from neopedal.module.module_relative import get_vehicles_info, reset_relative_delta
+    from neopedal.module_info import DeltaTimeInterval
 
     ahead = tuple(DeltaTimeInterval() for _ in FIELD)
     behind = tuple(DeltaTimeInterval() for _ in FIELD)
@@ -229,7 +229,7 @@ def test_relative_delta_reset_when_other_car_takes_index(field, monkeypatch):
 
 
 def test_standings_split_by_class_fastest_class_first():
-    from tinypedal.module.module_relative import standings_index_from_all_classes
+    from neopedal.module.module_relative import standings_index_from_all_classes
 
     classes = [entry("GT3", 3, 0, best=101.0), entry("GT3", 4, 1, best=101.0),
                entry("HY", 1, 2, best=95.0), entry("HY", 2, 3, best=95.0)]
@@ -238,7 +238,7 @@ def test_standings_split_by_class_fastest_class_first():
 
 
 def test_class_order_option():
-    from tinypedal.module.module_relative import class_key, class_order_rank, standings_index_from_all_classes
+    from neopedal.module.module_relative import class_key, class_order_rank, standings_index_from_all_classes
 
     assert class_key(" LMP2 ELMS ") == class_key("lmp2_elms") == "lmp2elms"
     assert class_order_rank("Hypercar, LMP2 ELMS,, lmp2, Hypercar") == {"hypercar": 0, "lmp2elms": 1, "lmp2": 2}
@@ -255,7 +255,7 @@ def test_class_order_option():
 @pytest.mark.parametrize(("others", "shown"), [(1, [2]), (0, []), (5, [2, 3])])
 def test_other_class_count_not_raised_by_minimum_top(others, shown):
     """Cars of a class player is not in: exactly the count asked (0: class hidden), even below minimum top"""
-    from tinypedal.module.module_relative import other_class_vehicles, standings_index_from_all_classes
+    from neopedal.module.module_relative import other_class_vehicles, standings_index_from_all_classes
 
     classes = [entry("GT3", 3, 0, best=101.0), entry("GT3", 4, 1, best=101.0),
                entry("HY", 1, 2, best=95.0), entry("HY", 2, 3, best=95.0)]
@@ -270,9 +270,9 @@ def test_other_class_count_not_raised_by_minimum_top(others, shown):
     ("enable_multi_class_split_mode", False),
 ])
 def test_module_loop_outputs_standings(field, option, value):
-    from tinypedal.module.module_relative import Realtime
-    from tinypedal.module_info import minfo
-    from tinypedal.setting import cfg
+    from neopedal.module.module_relative import Realtime
+    from neopedal.module_info import minfo
+    from neopedal.setting import cfg
 
     cfg.user.setting["standings"]["enable_single_class_exclusive_mode"] = False
     cfg.user.setting["standings"][option] = value
@@ -291,8 +291,8 @@ def test_module_loop_outputs_standings(field, option, value):
 
 def test_module_loop_skips_ticks_without_new_scoring(field, monkeypatch):
     """Tick skipped while scoring data & settings unchanged, except relative delta update every second"""
-    from tinypedal.module import module_relative
-    from tinypedal.setting import cfg
+    from neopedal.module import module_relative
+    from neopedal.setting import cfg
 
     runs: list[bool] = []  # relative delta updated, per run
     original = module_relative.get_vehicles_info

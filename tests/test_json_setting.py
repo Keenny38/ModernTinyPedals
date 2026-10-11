@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from tinypedal.const_file import FileExt
-from tinypedal.userfile import json_setting
-from tinypedal.userfile.json_setting import (
+from neopedal.const_file import FileExt
+from neopedal.userfile import json_setting
+from neopedal.userfile.json_setting import (
     copy_setting,
     create_backup_file,
     create_versioned_backup,
@@ -140,7 +140,7 @@ def test_load_locked_file_not_saved_over(folder, monkeypatch):
 def test_skipped_save_of_locked_file_notified_once(folder, monkeypatch):
     from types import SimpleNamespace
 
-    import tinypedal
+    import neopedal
 
     write(folder, "user.json", json.dumps({"widget": {"enable": True}}))
     locked_open(f"{folder}user.json", monkeypatch)
@@ -150,7 +150,7 @@ def test_skipped_save_of_locked_file_notified_once(folder, monkeypatch):
     monkeypatch.setattr(json_setting, "_unreadable_files", unreadable)
     monkeypatch.setattr(json_setting, "_notified_files", set())
     errors = []
-    monkeypatch.setattr(tinypedal, "app_signal", SimpleNamespace(error=SimpleNamespace(emit=errors.append)))
+    monkeypatch.setattr(neopedal, "app_signal", SimpleNamespace(error=SimpleNamespace(emit=errors.append)))
     monkeypatch.setattr(json_setting, "_notices_ready", False)  # first save runs before main window
     monkeypatch.setattr(json_setting, "_pending_notices", [])
     save_and_verify_json_file(DEFAULT, "user.json", folder)

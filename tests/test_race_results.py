@@ -8,7 +8,7 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QDate, QEvent
 
-from tinypedal.process import results_file as rf
+from neopedal.process import results_file as rf
 
 RACE_XML = """<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE rF [
@@ -306,14 +306,14 @@ def test_game_folders(tmp_path):
 # Page texts & rows
 @pytest.fixture
 def english():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("English")
     yield
 
 
 def test_race_classification_rows(english, ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     rows = rb.classification_rows(race(), "", "1")
     assert [row["driver"] for row in rows] == ["Alice Driver", "Bob Racer", "Carl Slow"]
@@ -332,7 +332,7 @@ def test_race_classification_rows(english, ui_env):
 
 
 def test_practice_rows(english, ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     practice = rf.parse_results(PRACTICE_XML.format(laps=5).encode(), PRACTICE_NAME)
     rows = rb.classification_rows(practice, "", "")
@@ -344,7 +344,7 @@ def test_practice_rows(english, ui_env):
 
 
 def test_summary_tiles(english, ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     tiles = {tile["label"]: tile for tile in rb.summary_tiles(race())}
     assert tiles["Position"]["value"] == "P1" and tiles["Position"]["tone"] == "gold"
@@ -361,7 +361,7 @@ def test_summary_tiles(english, ui_env):
 
 
 def test_lap_rows(english, ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     result = race()
     alice = rb.lap_rows(result, result.entries[0])
@@ -378,7 +378,7 @@ def test_lap_rows(english, ui_env):
 
 
 def test_positions_chart(ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     chart = rb.positions_chart(race(), "")
     assert (chart["laps"], chart["places"]) == (3, 3)
@@ -391,7 +391,7 @@ def test_positions_chart(ui_env):
 
 
 def test_event_rows(english, ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     result = race()
     rows = rb.event_rows(result, "", set(), {"Alice Driver"})
@@ -405,8 +405,8 @@ def test_event_rows(english, ui_env):
 
 
 def test_game_texts_french(ui_env):
-    from tinypedal import i18n
-    from tinypedal.process import results_text
+    from neopedal import i18n
+    from neopedal.process import results_text
 
     i18n.set_language("Français")
     try:
@@ -432,7 +432,7 @@ def wait_until(condition, timeout=10.0):
 @pytest.fixture
 def results_folder(tmp_path, ui_env, monkeypatch):
     """Results folder chosen by user, no game installed"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = tmp_path / "Results"
     write_results(folder, {RACE_NAME: RACE_XML, PRACTICE_NAME: PRACTICE_XML.format(laps=5),
@@ -448,7 +448,7 @@ def results_folder(tmp_path, ui_env, monkeypatch):
 
 @pytest.fixture
 def backend(results_folder):
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     backend = RaceResultsBackend()
     backend.page_shown()
@@ -504,7 +504,7 @@ def test_backend_car_and_filters(backend, english):
     assert backend.classFilter == "GT3"
     backend.setTab(1)
     assert backend.tabIndex == 1
-    from tinypedal.ui.quick.results_backend import load_page_settings
+    from neopedal.ui.quick.results_backend import load_page_settings
 
     assert load_page_settings()["event_filter"] == 2 and load_page_settings()["tab"] == 1
 
@@ -519,7 +519,7 @@ def test_backend_reads_new_file(backend, results_folder):
 
 def test_backend_load_failed(backend, monkeypatch):
     """Reading ended by an unexpected error: page stops waiting"""
-    from tinypedal.ui.quick import results_backend
+    from neopedal.ui.quick import results_backend
 
     def broken(*args):
         raise RuntimeError("broken")
@@ -535,7 +535,7 @@ def test_backend_session_failure_logged(backend, caplog):
     """Session not read: file gone stays debug, not a results file info, unexpected error warning + traceback"""
     import logging
 
-    with caplog.at_level(logging.DEBUG, logger="tinypedal.ui.quick.results_backend"):
+    with caplog.at_level(logging.DEBUG, logger="neopedal.ui.quick.results_backend"):
         for error in (FileNotFoundError("gone"), ValueError("not a results file"), KeyError("bug")):
             try:
                 raise error
@@ -548,7 +548,7 @@ def test_backend_session_failure_logged(backend, caplog):
 
 
 def test_backend_without_folder(ui_env, monkeypatch, tmp_path):
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     monkeypatch.setattr(rf, "find_results_folders", lambda libraries=None: {})
     backend = RaceResultsBackend()
@@ -564,7 +564,7 @@ def test_page_loads(results_folder, english):
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.race_results_viewer import RaceResultsViewer
+    from neopedal.ui.race_results_viewer import RaceResultsViewer
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

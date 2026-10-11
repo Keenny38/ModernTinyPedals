@@ -105,7 +105,7 @@ def scroll_through(page, listing):
 
 
 def test_rows_reused_show_their_own_option(window):  # noqa: F811
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -142,7 +142,7 @@ def test_rows_reused_show_their_own_option(window):  # noqa: F811
 def test_field_text_put_back_and_typed_text_taken_on_reuse(window):  # noqa: F811
     """Field showing other text than its option (binding broken by typing): option value shown once reused;
     focused field scrolled out: typed text taken for its own option before the row is reused"""
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -197,7 +197,7 @@ def test_class_order_list_on_page(window):  # noqa: F811
 
     from PySide6.QtCore import QPointF
 
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

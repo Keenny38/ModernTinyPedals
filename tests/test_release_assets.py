@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from release import RELEASE_ASSETS
 
-from tinypedal import update
+from neopedal import update
 
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "build-release.yml")
 VERSIONED_NAME = re.compile(r"NeoPedal-\$\{\{ needs\.version\.outputs\.app_ver \}\}(\S+)")

@@ -14,9 +14,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import app_signal, update
-from tinypedal.const_app import APP_ID
-from tinypedal.setting import cfg
+from neopedal import app_signal, update
+from neopedal.const_app import APP_ID
+from neopedal.setting import cfg
 
 DIGEST = "a" * 64
 ASSET = update.InstallerAsset("Setup.exe", "https://github.com/x/Setup.exe", DIGEST)
@@ -35,7 +35,7 @@ def frozen_exe(monkeypatch, tmp_path):
     """App run as Windows executable from tmp folder"""
     monkeypatch.setattr(update.sys, "platform", "win32")
     monkeypatch.setattr(update.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(update.sys, "executable", str(tmp_path / "tinypedal.exe"))
+    monkeypatch.setattr(update.sys, "executable", str(tmp_path / "neopedal.exe"))
     return tmp_path
 
 
@@ -55,7 +55,7 @@ def test_source_run_installs_on_windows_only(monkeypatch):
 
 
 def test_portable_notes_open_release_page(ui_env, monkeypatch):
-    from tinypedal.ui import notification, release_notes
+    from neopedal.ui import notification, release_notes
 
     opened = []
     monkeypatch.setattr(release_notes.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url.toString())))
@@ -221,10 +221,10 @@ def shortcut_bytes(base: str, suffix: str = "", unicode: bool = True) -> bytes:
 @pytest.mark.parametrize("unicode", [True, False])
 def test_shortcut_target(tmp_path, unicode):
     link = tmp_path / "app.lnk"
-    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\", "tinypedal.exe", unicode))
-    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\tinypedal.exe"
-    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\tinypedal.exe", "", unicode))
-    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\tinypedal.exe"
+    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\", "neopedal.exe", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\neopedal.exe"
+    link.write_bytes(shortcut_bytes("E:\\NeoPedal\\neopedal.exe", "", unicode))
+    assert update.shortcut_target(str(link)) == "E:\\NeoPedal\\neopedal.exe"
 
 
 def test_shortcut_target_unreadable(tmp_path):
@@ -232,11 +232,11 @@ def test_shortcut_target_unreadable(tmp_path):
     assert update.shortcut_target(str(link)) == ""  # missing
     link.write_bytes(b"not a shortcut")
     assert update.shortcut_target(str(link)) == ""
-    data = bytearray(shortcut_bytes("E:\\app\\tinypedal.exe"))
+    data = bytearray(shortcut_bytes("E:\\app\\neopedal.exe"))
     data[20:24] = (0x01).to_bytes(4, "little")  # no link info
     link.write_bytes(bytes(data))
     assert update.shortcut_target(str(link)) == ""
-    link.write_bytes(shortcut_bytes("E:\\app\\tinypedal.exe")[:100])  # truncated
+    link.write_bytes(shortcut_bytes("E:\\app\\neopedal.exe")[:100])  # truncated
     assert update.shortcut_target(str(link)) == ""
 
 
@@ -275,7 +275,7 @@ def test_installed_app_folder(monkeypatch, tmp_path):
 
 
 def test_installed_app_folder_of_older_version(monkeypatch, tmp_path):
-    """Installed until 0.23.0 with tinypedal.exe: found by its shortcut (run from source updates it)"""
+    """Installed until 0.23.0 with neopedal.exe: found by its shortcut (run from source updates it)"""
     installed = tmp_path / "installed"
     installed.mkdir()
     (installed / update.LEGACY_EXECUTABLE).write_bytes(b"")
@@ -387,7 +387,7 @@ def test_checker_disabled_without_repository(checker):
 @pytest.fixture
 def updates(ui_env, monkeypatch):
     """Update available with installer, app can install it"""
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     checker = update.update_checker
     monkeypatch.setattr(checker, "_update_available", True)
@@ -438,7 +438,7 @@ def messages(monkeypatch):
 
 
 def test_install_only_after_pages_closed(updates, monkeypatch, messages, tmp_path):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     order = []
     monkeypatch.setattr(notification, "run_installer", lambda path, **kwargs: order.append("installer"))
@@ -455,7 +455,7 @@ def test_install_only_after_pages_closed(updates, monkeypatch, messages, tmp_pat
 
 
 def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_path):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     def blocked(path, **kwargs):
         raise PermissionError(13, "blocked by antivirus")
@@ -479,7 +479,7 @@ def test_installer_errors_keep_app_running(updates, monkeypatch, messages, tmp_p
 
 
 def test_unsigned_installer_of_custom_repository_refused(updates, monkeypatch, messages, tmp_path):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     runs = []
     monkeypatch.setitem(cfg.application, "update_repository", "someone/fork")
@@ -496,7 +496,7 @@ def test_unsigned_installer_of_custom_repository_refused(updates, monkeypatch, m
 
 def test_installer_checked_against_repository_found_at_check(updates, monkeypatch, messages, tmp_path):
     """Update repository blanked or changed between check & install: repository of release checked"""
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     runs = []
     monkeypatch.setitem(cfg.application, "update_repository", "")  # blanked after check
@@ -533,7 +533,7 @@ def test_is_official_repository(repo, official):
 
 def test_download_keeps_repository_of_check(updates, monkeypatch, messages):
     """Installer installed with repository it was found in, even if a later check replaced it"""
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     installs = []
     monkeypatch.setattr(update.update_checker, "installer", ASSET._replace(repository="someone/fork"))
@@ -548,7 +548,7 @@ def test_download_keeps_repository_of_check(updates, monkeypatch, messages):
 
 
 def test_download_runs_once(updates, monkeypatch, messages):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     release = threading.Event()
     downloads = []
@@ -580,7 +580,7 @@ def test_download_runs_once(updates, monkeypatch, messages):
 
 
 def test_download_failure_warned(updates, monkeypatch, messages):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     def failing(asset, **kwargs):
         raise OSError("no network")
@@ -593,7 +593,7 @@ def test_download_failure_warned(updates, monkeypatch, messages):
 
 
 def test_downloaded_update_asks_first(updates, monkeypatch, messages, tmp_path):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     installs = []
     monkeypatch.setattr(notification, "install_update", lambda window, path, repository=None: installs.append(path))
@@ -615,7 +615,7 @@ def window(ui_env, monkeypatch):
 
     from PySide6.QtWidgets import QSystemTrayIcon
 
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -637,14 +637,14 @@ def window(ui_env, monkeypatch):
 def test_prompt_never_pops_hidden_window(window, updates, monkeypatch):
     from PySide6.QtWidgets import QSystemTrayIcon
 
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.ui.release_notes import ReleaseNotesDialog
 
     messages = []
     monkeypatch.setattr(QSystemTrayIcon, "isVisible", lambda self: True)
     monkeypatch.setattr(QSystemTrayIcon, "showMessage", lambda self, title, text, *args: messages.append(text))
     view = window.centralWidget()
     assert not window.isVisible()  # started hidden in tray
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     button = window.centralWidget().findChild(UpdatesNotifyButton)
     button.checking(False)
@@ -657,7 +657,7 @@ def test_prompt_never_pops_hidden_window(window, updates, monkeypatch):
 
 
 def test_prompt_shown_when_window_visible(window, updates, monkeypatch):
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     window.show()
     try:
@@ -670,7 +670,7 @@ def test_prompt_shown_when_window_visible(window, updates, monkeypatch):
 
 
 def test_update_notice_kept_after_language_change(window, updates):
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     UpdatesNotifyButton.prompted_version = update.update_checker.message()  # already proposed
     window.centralWidget().findChild(UpdatesNotifyButton).checking(False)
@@ -734,7 +734,7 @@ def test_api_fetch_failure_is_empty(monkeypatch):
 
 # Updates checked again while app runs (number_of_hours_between_update_checks)
 def test_check_due_after_interval(checker, monkeypatch):
-    from tinypedal import realtime_state
+    from neopedal import realtime_state
 
     checker, _ = checker
     started = []
@@ -778,7 +778,7 @@ def test_automatic_check_never_turns_manual_check_automatic(checker, monkeypatch
 
 
 def test_automatic_check_keeps_notice_and_dismissal(window, updates):
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     UpdatesNotifyButton.prompted_version = update.update_checker.message()  # already proposed
     button = window.centralWidget().findChild(UpdatesNotifyButton)
@@ -793,8 +793,8 @@ def test_automatic_check_keeps_notice_and_dismissal(window, updates):
 
 @pytest.mark.parametrize("active, in_front", [(True, True), (False, False)])
 def test_automatic_check_pops_up_only_in_active_window(window, updates, monkeypatch, active, in_front):
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui import app as app_module
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     shown = []
     monkeypatch.setattr(update.update_checker, "_scheduled_checking", True)
@@ -810,7 +810,7 @@ def test_automatic_check_pops_up_only_in_active_window(window, updates, monkeypa
 
 
 def test_window_checks_updates_while_running(window, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     due = []
     monkeypatch.setattr(update.UpdateChecker, "check_due", lambda self, now=None: due.append(1) or False)
@@ -821,12 +821,13 @@ def test_window_checks_updates_while_running(window, monkeypatch):
 
 
 def test_installer_matches_app_names():
-    """Installer & build use the executable name looked for by updates, old tinypedal.exe removed"""
+    """Installer & build use the executable name looked for by updates, old neopedal.exe removed"""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "installer", "neopedal.iss"), encoding="utf-8") as file:
         script = file.read()
     assert f'#define AppExe "{update.APP_EXECUTABLE}"' in script
     assert f"AppId={{{update.INSTALLER_APP_ID}" in script
-    assert f'Type: files; Name: "{{app}}\\{update.LEGACY_EXECUTABLE}"' in script
+    assert f'#define LegacyName "{update.LEGACY_EXECUTABLE.removesuffix(".exe")}"' in script
+    assert 'Type: files; Name: "{app}\\{#LegacyName}.exe"' in script
     assert f'#define AppFolder "{APP_ID}"' in script
     assert f"{APP_ID.lower()}.exe" == update.APP_EXECUTABLE

@@ -6,8 +6,8 @@ timing widgets. They were untested, and every one of them is easy to get subtly 
 
 import pytest
 
-from tinypedal.api_control import api
-from tinypedal.module.module_vehicles import (
+from neopedal.api_control import api
+from neopedal.module.module_vehicles import (
     calc_gap_behind_leader,
     calc_gap_behind_next,
     calc_time_gap_behind,
@@ -15,7 +15,7 @@ from tinypedal.module.module_vehicles import (
     update_qualify_position,
     update_stint_usage,
 )
-from tinypedal.module_info import VehicleDataSet, VehiclesInfo
+from neopedal.module_info import VehicleDataSet, VehiclesInfo
 
 
 def set_reader(monkeypatch, group, name, value_or_func):
@@ -132,7 +132,7 @@ def test_lap_race_finishes_as_lap(field, monkeypatch):
     set_reader(monkeypatch, "session", "remaining", 600.0)
     set_reader(monkeypatch, "lap", "remaining", 5.0)
     field.dataSet[0].lapTimeHistory.average = 100.0
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.delta, "lapTimePace", 101.0)
 
@@ -147,7 +147,7 @@ def test_lap_race_finishes_as_time_when_the_player_is_far_off_the_pace(field, mo
     set_reader(monkeypatch, "session", "remaining", 600.0)
     set_reader(monkeypatch, "lap", "remaining", 5.0)
     field.dataSet[0].lapTimeHistory.average = 100.0
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.delta, "lapTimePace", 130.0)  # 150s slower over 5 laps
 
@@ -162,7 +162,7 @@ def test_timed_race_reports_a_lap_offset(field, monkeypatch):
     set_reader(monkeypatch, "lap", "progress", 0.5)
     set_reader(monkeypatch, "vehicle", "pit_stop_time", 25.0)
     field.dataSet[0].lapTimeHistory.average = 100.0
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.delta, "lapTimePace", 100.0)
 
@@ -185,8 +185,8 @@ def test_player_leading_a_timed_race_has_no_offset(field, monkeypatch):
 
 def test_timed_race_without_valid_lap_pace_has_no_offset(field, monkeypatch):
     """Formation lap & first lap: no leader lap yet (pace MAX_SECONDS), no "+664 laps" offset"""
-    from tinypedal.const_common import MAX_SECONDS
-    from tinypedal.module_info import minfo
+    from neopedal.const_common import MAX_SECONDS
+    from neopedal.module_info import minfo
 
     set_reader(monkeypatch, "session", "finish_type", 0)
     set_reader(monkeypatch, "session", "remaining", 3600.0)

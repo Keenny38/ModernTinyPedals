@@ -83,7 +83,7 @@ def chart_view(ui_env, tmp_path):
     """Chart component in a QQuickWidget with app theme & translator"""
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.quick import QML_FOLDER, Theme, Translator, register_types, theme_copy
+    from neopedal.ui.quick import QML_FOLDER, Theme, Translator, register_types, theme_copy
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

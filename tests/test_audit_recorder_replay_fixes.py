@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module._base import MODULE_STOP, DataModule
+from neopedal.replay import KEYFRAME_INTERVAL, ReplayFile, ReplayWriter, list_replays, read_replay_info
 from tests.telemetry_sim import LapSim, fake_reader
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module._base import MODULE_STOP, DataModule
-from tinypedal.replay import KEYFRAME_INTERVAL, ReplayFile, ReplayWriter, list_replays, read_replay_info
 
 
 # --- Module data saved when update loop ends by error
@@ -42,7 +42,7 @@ def test_module_saves_data_when_update_crashes(monkeypatch):
     """Error in update loop: data not saved yet is written before module restarts (and reloads file)"""
     import threading
 
-    from tinypedal.module import module_stint
+    from neopedal.module import module_stint
 
     sent = []
 
@@ -91,7 +91,7 @@ class Clock:
 
 def leave_after_line(sim_api, clock):
     """Lap completed, back to garage 0.3s later while game last lap time not updated yet"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     saved = []
     sim = LapSim([95.0, 90.0])
@@ -118,7 +118,7 @@ def test_recorder_validates_lap_after_leaving_track(sim_api):
 
 
 def test_recorder_lap_left_unconfirmed_saved_invalid_after_delay(sim_api):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     clock = Clock()
     _, gen, saved, _ = leave_after_line(sim_api, clock)
@@ -140,7 +140,7 @@ def test_recorder_lap_left_unconfirmed_saved_on_module_stop(sim_api):
 
 def test_lap_info_replay_unloaded_meanwhile(monkeypatch):
     """Replay unloaded from GUI thread between check & use: no AttributeError"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     class Replay:
         def __init__(self):
@@ -161,8 +161,8 @@ def test_lap_info_replay_unloaded_meanwhile(monkeypatch):
 
 # --- Replay session: folder creation failure never stops recorder module
 def test_auto_replay_folder_error(monkeypatch, caplog):
-    from tinypedal import replay_session
-    from tinypedal.replay import replay
+    from neopedal import replay_session
+    from neopedal.replay import replay
 
     makedirs = []
 
@@ -210,7 +210,7 @@ def test_replay_header_types_validated(tmp_path, field):
 
 def test_replay_summary_duration_type(tmp_path, monkeypatch):
     """Summary with null duration: unknown duration instead of TypeError"""
-    from tinypedal import replay as replay_module
+    from neopedal import replay as replay_module
 
     filename = write_replay(tmp_path / "a.tpreplay")
     monkeypatch.setattr(replay_module, "read_summary", lambda file, frame_header=None: {"duration": None})
@@ -267,7 +267,7 @@ def test_export_section_never_replaces_open_replay(tmp_path):
 
 
 def test_same_file(tmp_path):
-    from tinypedal.replay import same_file
+    from neopedal.replay import same_file
 
     first = tmp_path / "a.tpreplay"
     first.write_bytes(b"x")
@@ -278,7 +278,7 @@ def test_same_file(tmp_path):
 
 # --- Bug report
 def test_bug_report_written_atomically(ui_env, tmp_path, monkeypatch):
-    from tinypedal import bug_report
+    from neopedal import bug_report
 
     target = tmp_path / "report.zip"
     target.write_bytes(b"previous report")
@@ -306,7 +306,7 @@ def test_bug_report_written_atomically(ui_env, tmp_path, monkeypatch):
 
 # --- MoTeC import: channels read up to time limit only
 def test_read_ld_max_seconds(tmp_path):
-    from tinypedal.userfile.motec_ld import Channel, LdInfo, read_ld, write_ld
+    from neopedal.userfile.motec_ld import Channel, LdInfo, read_ld, write_ld
 
     filename = str(tmp_path / "log.ld")
     channels = [Channel("Ground Speed", "km/h", "km/h", 10, [float(index) for index in range(1000)]),
@@ -320,7 +320,7 @@ def test_read_ld_max_seconds(tmp_path):
 
 
 def test_import_ld_job_memory_error(monkeypatch):
-    from tinypedal.userfile import motec_import, motec_ld
+    from neopedal.userfile import motec_import, motec_ld
 
     def huge(*args):
         raise MemoryError
@@ -332,7 +332,7 @@ def test_import_ld_job_memory_error(monkeypatch):
 
 # --- Official circuit: unexpected REST answer
 def test_fetch_geometry_unexpected_answer(monkeypatch):
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     center = [{"type": 0, "x": 300 * math.cos(step / 50 * math.tau), "y": 0,
                "z": 200 * math.sin(step / 50 * math.tau)} for step in range(50)]

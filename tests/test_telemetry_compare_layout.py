@@ -4,6 +4,8 @@ several layouts sharing a track name never mixed, no reference lap rather than a
 import json
 import os
 
+from neopedal.userfile.reference_trace import ReferenceLoader, reference_file
+from neopedal.userfile.telemetry_lap import VIEWER_SETTING
 from tests.test_telemetry_compare import (  # noqa: F401  (fixtures)
     LENGTH,
     TRACK,
@@ -13,8 +15,6 @@ from tests.test_telemetry_compare import (  # noqa: F401  (fixtures)
     loading_thread,
     write_lap,
 )
-from tinypedal.userfile.reference_trace import ReferenceLoader, reference_file
-from tinypedal.userfile.telemetry_lap import VIEWER_SETTING
 
 OTHER_LENGTH = 1150.0  # another layout of the same track name
 

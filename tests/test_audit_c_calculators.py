@@ -11,10 +11,10 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import i18n
-from tinypedal.module_info import ConsumptionDataSet, minfo
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseEditor
+from neopedal import i18n
+from neopedal.module_info import ConsumptionDataSet, minfo
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseEditor
 
 HISTORY = (
     ConsumptionDataSet(12, 1, 90.5, 3.0, 2.5, 1.0, 0.5, 0.4, 100.0),
@@ -41,7 +41,7 @@ class Warnings(list):
 @pytest.fixture
 def warnings(monkeypatch):
     """Warning texts & toasts (no modal box offscreen), questions answered yes"""
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     found = Warnings()
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda parent, title, text, *args, **kwargs:
@@ -57,7 +57,7 @@ def warnings(monkeypatch):
 @pytest.fixture
 def make_page(ui_env, monkeypatch, warnings):
     """Race calculator page in a fuel unit (closed after test)"""
-    from tinypedal.ui.quick import race_backend
+    from neopedal.ui.quick import race_backend
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(race_backend, "SCENARIO_DELAY_MS", 0)
@@ -65,7 +65,7 @@ def make_page(ui_env, monkeypatch, warnings):
     pages = []
 
     def make(unit: str = "Liter"):
-        from tinypedal.ui import race_calculator
+        from neopedal.ui import race_calculator
 
         cfg.units["fuel_unit"] = unit
         page = race_calculator.RaceCalculator(None)
@@ -86,7 +86,7 @@ def failing_replace(*args, **kwargs):
 
 def answer_files(monkeypatch, path):
     """File dialogs of the page answered with path"""
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     answer = staticmethod(lambda *args, **kwargs: (str(path), ""))
     monkeypatch.setattr(race_calculator.QFileDialog, "getOpenFileName", answer)
@@ -114,8 +114,8 @@ def test_race_plan_saved_once_writable(make_page, warnings, tmp_path):
 
 
 def test_delete_laps_failure_warned(make_page, warnings, monkeypatch, tmp_path):
-    from tinypedal.ui.quick import race_backend
-    from tinypedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
+    from neopedal.ui.quick import race_backend
+    from neopedal.userfile.consumption_history import load_consumption_history_file, save_consumption_history_file
 
     backend = make_page().backend
     folder = f"{tmp_path.as_posix()}/"
@@ -176,7 +176,7 @@ def test_tyre_plan_save_failures_warned(make_page, warnings, monkeypatch, tmp_pa
 
 # Item 11: fuel unit of race plans & share codes, nan refused
 def set_fuel_inputs(backend):
-    from tinypedal.fuel_strategy import MARGIN_UNITS
+    from neopedal.fuel_strategy import MARGIN_UNITS
 
     backend.set_values({
         "input_lap_time": 90.0, "input_tank_capacity": 100.0, "input_fuel_per_lap": 3.0,
@@ -188,14 +188,14 @@ def set_fuel_inputs(backend):
 
 
 def paste(page, monkeypatch, code: str):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(race_calculator.QInputDialog, "getText", staticmethod(lambda *args, **kwargs: (code, True)))
     page.backend.pasteShareCode()
 
 
 def test_share_code_converted_to_fuel_unit(make_page, warnings, monkeypatch):
-    from tinypedal.ui.quick.race_model import decode_share_code, encode_share_code
+    from neopedal.ui.quick.race_model import decode_share_code, encode_share_code
 
     litre = make_page("Liter")
     set_fuel_inputs(litre.backend)
@@ -246,7 +246,7 @@ def test_plan_file_without_unit_kept_in_page_unit(make_page, warnings, tmp_path)
 
 
 def test_share_code_with_nan_refused(make_page, warnings, monkeypatch):
-    from tinypedal.ui.quick.race_model import RACE_PLAN_FORMAT, SHARE_CODE_PREFIX, decode_share_code
+    from neopedal.ui.quick.race_model import RACE_PLAN_FORMAT, SHARE_CODE_PREFIX, decode_share_code
 
     page = make_page()
     set_fuel_inputs(page.backend)
@@ -265,7 +265,7 @@ def test_share_code_with_nan_refused(make_page, warnings, monkeypatch):
 
 # Item 23: huge & nan values of files
 def test_huge_plan_values_not_half_applied(make_page, warnings):
-    from tinypedal.ui.quick.race_model import RACE_PLAN_FORMAT
+    from neopedal.ui.quick.race_model import RACE_PLAN_FORMAT
 
     backend = make_page().backend
     inputs = {
@@ -289,7 +289,7 @@ def test_huge_plan_values_not_half_applied(make_page, warnings):
 
 
 def test_nan_tread_of_tyre_file_shown(make_page, warnings, monkeypatch, tmp_path):
-    from tinypedal.userfile.tyre_strategy import create_tyre_strategy
+    from neopedal.userfile.tyre_strategy import create_tyre_strategy
 
     backend = make_page().backend
     data = create_tyre_strategy()
@@ -313,7 +313,7 @@ def test_nan_tread_of_tyre_file_shown(make_page, warnings, monkeypatch, tmp_path
 
 
 def test_nan_tread_view_values():
-    from tinypedal.ui.quick.race_tyres import tread_color, tread_text
+    from neopedal.ui.quick.race_tyres import tread_color, tread_text
 
     for percent, wear in ((float("nan"), 0.1), (float("-inf"), 0.0), (-1e300, 0.1), (0.5, float("nan"))):
         assert tread_text(percent, percent - wear)  # no ValueError / OverflowError
@@ -322,7 +322,7 @@ def test_nan_tread_view_values():
 
 # Item 29: tyre planner texts translated
 def test_tyre_planner_texts_translated(french):
-    from tinypedal.ui.quick.race_tyres import TyrePlan, tread_text
+    from neopedal.ui.quick.race_tyres import TyrePlan, tread_text
 
     assert tread_text(1.0, 0.7) == "Neuf-70%" and tread_text(0.2, -0.1) == "Éclaté"
     plan = TyrePlan()

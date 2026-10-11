@@ -12,12 +12,12 @@ from importlib import import_module
 import pytest
 from PySide6.QtCore import QCoreApplication, QTimerEvent
 
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.template.widget.modern import MODERN_DESIGNS
+from neopedal.widget._modern import base, create_widget, uses_modern_design
 from tests.test_readers import lmu_api
 from tests.test_widget_benchmark import drive, fill_field
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.template.widget.modern import MODERN_DESIGNS
-from tinypedal.widget._modern import base, create_widget, uses_modern_design
 
 IMPERIAL = {
     "distance_unit": "Feet", "fuel_unit": "Gallon", "odometer_unit": "Mile", "power_unit": "Horsepower",
@@ -46,7 +46,7 @@ FIELD_ATTRIBUTES = {
 def reference_loading():
     """Background thread finding reference lap (telemetry comparison) ended after each test"""
     yield
-    from tinypedal.userfile.reference_trace import stop_loading
+    from neopedal.userfile.reference_trace import stop_loading
 
     stop_loading()
 
@@ -54,7 +54,7 @@ def reference_loading():
 @pytest.fixture
 def live(ui_env, bundled_fonts, monkeypatch):
     """API reader on in-memory shared memory, field of cars in data module output"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     sim, data = lmu_api()
     monkeypatch.setattr(api, "_api", sim)
@@ -113,7 +113,7 @@ def widest_values(data, monkeypatch):
 
 def wide_plan(widget):
     """Le Mans race plan, late in race: 3 digit stop laps, big refuel"""
-    from tinypedal.fuel_strategy import PitStop, Strategy
+    from neopedal.fuel_strategy import PitStop, Strategy
 
     widget.refresh_plan = lambda: None
     widget.strategy = Strategy(race_laps=378, stints=[14] * 27,
@@ -126,7 +126,7 @@ WIDGET_SETUP = {"race_plan": wide_plan}
 @pytest.fixture(params=["English", "Français"])
 def language(request):
     """Overlay labels in each bundled language (French labels are often longer)"""
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language(request.param)
     yield request.param
@@ -159,7 +159,7 @@ def test_modern_text_fits_cells(live, monkeypatch, language, units):
         options.update(WIDE_OPTIONS.get(name, {}))
         if not uses_modern_design(cfg, name):
             continue
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         try:
             if name in WIDGET_SETUP:
                 WIDGET_SETUP[name](widget)

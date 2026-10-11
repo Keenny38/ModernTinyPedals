@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from tinypedal.userfile.preset_package import (
+from neopedal.userfile.preset_package import (
     MAX_MANIFEST_SIZE,
     PACKAGE_FORMAT,
     export_preset_package,
@@ -89,7 +89,7 @@ def test_invalid_package(tmp_path):
 def test_preset_share_code():
     import pytest
 
-    from tinypedal.userfile.preset_share import decode_preset, encode_preset, summarize_preset
+    from neopedal.userfile.preset_share import decode_preset, encode_preset, summarize_preset
 
     preset = {"speedometer": {"enable": True, "font_size": 15}, "gear": {"enable": False}, "module_delta": {"enable": True}}
     code = encode_preset(preset)
@@ -109,8 +109,8 @@ def test_share_code_and_package_refuse_nan():
 
     import pytest
 
-    from tinypedal.userfile.preset_package import is_json_dict
-    from tinypedal.userfile.preset_share import decode_preset
+    from neopedal.userfile.preset_package import is_json_dict
+    from neopedal.userfile.preset_share import decode_preset
 
     raw = b'{"speedometer": {"opacity": NaN, "font_size": 1e999}}'
     for data in (raw, b"[" * 100_000):  # non-finite numbers, too deeply nested
@@ -124,10 +124,10 @@ def test_import_share_code_dialog(ui_env, monkeypatch):
 
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui._common import TextInputDialog
-    from tinypedal.ui.preset_view import PresetList
-    from tinypedal.userfile.preset_share import SHARE_PREFIX, encode_preset
+    from neopedal.setting import cfg
+    from neopedal.ui._common import TextInputDialog
+    from neopedal.ui.preset_view import PresetList
+    from neopedal.userfile.preset_share import SHARE_PREFIX, encode_preset
 
     QApplication.clipboard().setText(encode_preset({"speedometer": {"enable": True}}))
     shown = []
@@ -149,7 +149,7 @@ def test_import_share_code_dialog(ui_env, monkeypatch):
 
 def test_style_write_error_keeps_existing_file(tmp_path, source, monkeypatch):
     """Write error (full disk) while importing styles: existing style file kept whole (was: truncated)"""
-    from tinypedal.userfile import preset_package
+    from neopedal.userfile import preset_package
 
     settings, _ = source
     package = tmp_path / "race.zip"
@@ -174,8 +174,8 @@ def test_imported_styles_loaded_in_memory(ui_env, tmp_path, source, monkeypatch)
     """Styles imported: loaded in memory, so a later style save keeps them (was: old styles saved over)"""
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.preset_view import PresetList
+    from neopedal.setting import cfg
+    from neopedal.ui.preset_view import PresetList
 
     settings, _ = source
     package = tmp_path / "race.zip"

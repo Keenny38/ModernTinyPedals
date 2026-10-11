@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from tinypedal.setting_preupdate import preupdate_global_setting, preupdate_user_setting
+from neopedal.setting_preupdate import preupdate_global_setting, preupdate_user_setting
 
 
 def old_preset() -> dict:

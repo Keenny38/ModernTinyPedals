@@ -45,7 +45,7 @@ def check_api(info, read_info) -> tuple[str, str, str]:
 
 
 def check_lmu() -> tuple[str, str, str]:
-    from tinypedal.adapter.lmu_connector import LMUInfo
+    from neopedal.adapter.lmu_connector import LMUInfo
 
     return check_api(LMUInfo(), lambda info: (
         info.lmuGeneric.gameVersion,
@@ -55,7 +55,7 @@ def check_lmu() -> tuple[str, str, str]:
 
 
 def check_rf2() -> tuple[str, str, str]:
-    from tinypedal.adapter.rf2_connector import RF2Info
+    from neopedal.adapter.rf2_connector import RF2Info
 
     info = RF2Info()
     info.setPID("")

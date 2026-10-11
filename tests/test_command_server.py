@@ -12,10 +12,10 @@ import urllib.request
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from tinypedal import app_signal, command_server
-from tinypedal.command_server import CommandServer
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
+from neopedal import app_signal, command_server
+from neopedal.command_server import CommandServer
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
 
 PORT = 18337
 
@@ -64,7 +64,9 @@ def test_run_command(server):
 
 
 def test_legacy_header_accepted(server):
-    status, data = request("/command/overlay_lock", method="POST", headers={"X-TinyPedal": "1"})
+    from neopedal.command_server import LEGACY_HEADER
+
+    status, data = request("/command/overlay_lock", method="POST", headers={LEGACY_HEADER: "1"})
     assert status == 200 and data["ok"]  # tools set up before the NeoPedal name
 
 
@@ -75,7 +77,7 @@ def test_unknown_command(server):
 
 def test_dns_rebinding_blocked(server):
     status, data = request(
-        "/command/overlay_lock", method="POST", headers={"X-TinyPedal": "1", "Host": f"evil.example:{PORT}"}
+        "/command/overlay_lock", method="POST", headers={"X-NeoPedal": "1", "Host": f"evil.example:{PORT}"}
     )
     assert status == 403 and "host" in data["error"]
     assert server == []
@@ -84,7 +86,7 @@ def test_dns_rebinding_blocked(server):
 
 
 def test_allowed_hosts():
-    from tinypedal.command_server import is_allowed_host
+    from neopedal.command_server import is_allowed_host
 
     assert is_allowed_host(f"localhost:{PORT}", PORT)
     assert is_allowed_host(f"127.0.0.1:{PORT}", PORT)
@@ -147,7 +149,7 @@ def test_stream_snapshot_error_logged_once_as_warning(server, monkeypatch, caplo
     """Bad telemetry never breaks stream, error visible at default log level without flooding the log"""
     import logging
 
-    from tinypedal.log_handler import ErrorThrottle
+    from neopedal.log_handler import ErrorThrottle
 
     def broken():
         raise KeyError("speed")
@@ -370,7 +372,7 @@ def mock_loader(monkeypatch, **kept):
     """Loader with every part mocked except the given ones, calls recorded"""
     from types import SimpleNamespace
 
-    from tinypedal import loader
+    from neopedal import loader
 
     calls = []
     for name in ("octrl", "mctrl", "wctrl", "kctrl", "cmdserver", "webdashboard", "streamoverlay", "api"):
@@ -563,7 +565,7 @@ def test_connections_per_address_limited(local_server, monkeypatch):
 
 @pytest.mark.parametrize("partial", [
     b"GET /commands HTTP/1.1\r\n",  # headers sent slowly
-    b"POST /command/overlay_lock HTTP/1.1\r\nHost: 127.0.0.1\r\nX-TinyPedal: 1\r\n",
+    b"POST /command/overlay_lock HTTP/1.1\r\nHost: 127.0.0.1\r\nX-NeoPedal: 1\r\n",
 ])
 def test_slow_request_closed_at_deadline(local_server, monkeypatch, partial):
     """Client sending a byte now and then (each read under socket timeout) closed once request deadline passed"""

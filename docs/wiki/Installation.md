@@ -35,23 +35,11 @@ Compare the result with the release notes. Full details: [Updates and Security](
 
 | What | Location |
 |---|---|
-| Program | `%LOCALAPPDATA%\Programs\NeoPedal` (`neopedal.exe`, `tinypedal.exe` until 0.23.0) |
+| Program | `%LOCALAPPDATA%\Programs\NeoPedal` (`neopedal.exe`, `neopedal.exe` until 0.23.0) |
 | Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `neopedal.exe`, in the program folder |
 | Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Black box incidents | `%APPDATA%\NeoPedal` |
 
 Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
-
-### Settings from TinyPedal
-
-The global config folder was `%APPDATA%\TinyPedal` in older versions (Linux: `~/.config/TinyPedal/` and `~/.local/share/TinyPedal/`), shared with the original TinyPedal. Since 0.23.0 each app has its own folder:
-
-- **First start**: if `%APPDATA%\NeoPedal` does not exist yet, the `TinyPedal` folder is copied there once (options, shortcuts, driver stats, language packs, Black box incidents). The `TinyPedal` folder is never changed, so the original TinyPedal keeps working.
-- **Your choice**: once the window is up, the app asks whether to **keep the imported settings** or **use default settings**. Default settings restart the app; the imported ones are set aside in `%APPDATA%\NeoPedal.imported-<date>`, never deleted. Closing the question keeps the imported settings.
-- **Later**: `Config` > `TinyPedal Settings` > `Import Again from TinyPedal...` takes a new copy, and `Start with Default Settings...` starts over. Both ask first, set the current folder aside (`NeoPedal.before-import-<date>` or `NeoPedal.imported-<date>`) and restart the app: the change is made before settings are loaded, so nothing saves over it.
-- **Never import**: create an empty `%APPDATA%\NeoPedal` folder before the first start.
-- **If something goes wrong**: a copy that fails leaves the app on the `TinyPedal` folder for that run and is tried again next start. A folder that cannot be set aside (in use) is tried again next start. Settings saved by a newer TinyPedal are loaded too: options this version does not know are ignored, invalid values are reset to default.
-
-Presets and data next to the executable (Windows) are not part of this: they never move.
 
 ### Updates
 
@@ -62,7 +50,7 @@ The app checks for a new version at startup, then every 12 hours while it runs, 
 Releases up to 0.19 also offered a portable ZIP. Portable copies cannot update themselves, and new releases no longer publish a portable ZIP. To turn a portable copy into an installed one, install the setup **into the folder of your portable copy**:
 
 1. Quit the portable copy (tray icon menu > `Quit`).
-2. Run the installer. On the destination page, select the folder of your portable copy (the folder that contains `tinypedal.exe` or `neopedal.exe`).
+2. Run the installer. On the destination page, select the folder of your portable copy (the folder that contains `neopedal.exe` or `neopedal.exe`).
 3. Finish the installation.
 
 Your presets and data are kept: they live next to the executable, and the installer only replaces program files. The global config in `%APPDATA%\NeoPedal` is shared by every copy and is not touched. From then on, the copy is an installed copy and updates itself.
@@ -106,9 +94,9 @@ sudo ./install.sh
 
 Pass another prefix as argument (for example `sudo ./install.sh /opt`, you are asked to confirm). Run it again from a newer source folder to update: the previous copy is removed first.
 
-Until 0.23.0 the app was installed in the paths of the original TinyPedal (`/usr/local/share/TinyPedal`, `TinyPedal` command), replacing it. `install.sh` removes such an older NeoPedal install and keeps an install of the original TinyPedal, so both apps can be installed and run together.
+Versions until 0.23.0 were installed under another name: `install.sh` removes such an older install.
 
-Permanent command line arguments for the `NeoPedal` launcher go in `~/.config/NeoPedal/launcher.conf` (when it does not exist, `~/.config/TinyPedal/launcher.conf` is read instead), for example:
+Permanent command line arguments for the `NeoPedal` launcher go in `~/.config/NeoPedal/launcher.conf`, for example:
 
 ```bash
 NEOPEDAL_RUN_ARGS="--log-level 2"
@@ -170,4 +158,4 @@ Remove the files written by `install.sh` (default prefix shown):
 sudo rm -r /usr/local/share/NeoPedal /usr/local/bin/NeoPedal /usr/local/share/applications/NeoPedal.desktop
 ```
 
-Your config and data stay in `~/.config/NeoPedal/` and `~/.local/share/NeoPedal/`: delete them too for a full removal. Older versions used `~/.config/TinyPedal/` and `~/.local/share/TinyPedal/` (copied to the new folders on first start, and also used by the original TinyPedal).
+Your config and data stay in `~/.config/NeoPedal/` and `~/.local/share/NeoPedal/`: delete them too for a full removal.

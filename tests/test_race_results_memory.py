@@ -15,7 +15,7 @@ from tests.test_race_results import (  # noqa: F401
 
 
 def make_backend():
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     backend = RaceResultsBackend()
     backend.page_shown()
@@ -46,8 +46,8 @@ def counter(signal) -> list:
 
 
 def test_list_keeps_infos_only(results_folder, english):  # noqa: F811
-    from tinypedal.process.results_file import SessionResult
-    from tinypedal.ui.quick.results_backend import KEPT_RESULTS, SessionInfo
+    from neopedal.process.results_file import SessionResult
+    from neopedal.ui.quick.results_backend import KEPT_RESULTS, SessionInfo
 
     race_files(results_folder, 8)
     backend = make_backend()
@@ -74,7 +74,7 @@ def test_results_released_while_hidden(results_folder, english):  # noqa: F811
     backend = make_backend()
     try:
         backend.setChartView(600, 300, 1.5, 3, 4)
-        from tinypedal.ui.quick.lines import VertexStore
+        from neopedal.ui.quick.lines import VertexStore
 
         keys = [series["thin"] for series in backend.positions["series"]]
         assert keys and all(VertexStore.has(key) for key in keys)
@@ -94,8 +94,8 @@ def test_results_released_while_hidden(results_folder, english):  # noqa: F811
 
 
 def test_pictures_tell_only_changes(results_folder, english, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import game_pictures
-    from tinypedal.userfile.game_images import images
+    from neopedal.ui.quick import game_pictures
+    from neopedal.userfile.game_images import images
 
     backend = make_backend()
     try:
@@ -118,7 +118,7 @@ def test_pictures_tell_only_changes(results_folder, english, monkeypatch):  # no
 
 
 def test_chart_lines_follow_view(results_folder, english):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = make_backend()
     try:
@@ -138,7 +138,7 @@ def test_chart_lines_follow_view(results_folder, english):  # noqa: F811
 
 
 def test_chart_lines_in_plot_pixels(ui_env):
-    from tinypedal.ui.quick import results_backend as rb
+    from neopedal.ui.quick import results_backend as rb
 
     chart = rb.positions_chart(race(), "")
     lines = rb.chart_lines(chart, rb.ChartView(300, 100, 2, 4, 6))

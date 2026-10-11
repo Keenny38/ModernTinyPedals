@@ -4,13 +4,13 @@ import json
 import os
 import zipfile
 
-from tinypedal.bug_report import create_bug_report, redact_setting, redact_text
-from tinypedal.setting import cfg
+from neopedal.bug_report import create_bug_report, redact_setting, redact_text
+from neopedal.setting import cfg
 
 
 def test_redact():
     home = os.path.expanduser("~")
-    assert home not in redact_text(f"path {home}/TinyPedal")
+    assert home not in redact_text(f"path {home}/NeoPedal")
     data = redact_setting({"web_dashboard": {"access_code": "SECRET12"}, "application": {"update_repository": "me/fork"}})
     assert data["web_dashboard"]["access_code"] == "<removed>"
     assert data["application"]["update_repository"] == "<removed>"
@@ -39,7 +39,7 @@ def test_report_dialog_writes_zip_in_background(ui_env, tmp_path, monkeypatch):
     from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui import bug_report_view
+    from neopedal.ui import bug_report_view
 
     zip_file = tmp_path / "report.zip"
     questions = []
@@ -83,7 +83,7 @@ def test_process_monitor():
     import threading
     import time
 
-    from tinypedal.perf_monitor import ProcessMonitor
+    from neopedal.perf_monitor import ProcessMonitor
 
     stop = threading.Event()
 
@@ -104,7 +104,7 @@ def test_process_monitor():
 
 
 def test_perf_view(ui_env):
-    from tinypedal.ui.perf_view import PerformanceView
+    from neopedal.ui.perf_view import PerformanceView
 
     view = PerformanceView(None)
     assert view.table_threads.rowCount() >= 1
@@ -123,9 +123,9 @@ def close_view(view):
 
 def test_perf_view_game_data(ui_env, monkeypatch):
     """Connector health: shared memory update age & Rest API resource status"""
-    from tinypedal.adapter.restapi_connector import EndpointStatus
-    from tinypedal.api_connector import ConnectorHealth
-    from tinypedal.ui import perf_view
+    from neopedal.adapter.restapi_connector import EndpointStatus
+    from neopedal.api_connector import ConnectorHealth
+    from neopedal.ui import perf_view
 
     view = perf_view.PerformanceView(None)
     try:

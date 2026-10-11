@@ -1,12 +1,12 @@
 /*
- * Integration test of TinyPedalXrLayer.dll (Windows, or Wine): a fake OpenXR runtime below the layer,
- * the app side written like tinypedal/vr_shared.py, real D3D11 / D3D12 / Vulkan devices when available
+ * Integration test of NeoPedalXrLayer.dll (Windows, or Wine): a fake OpenXR runtime below the layer,
+ * the app side written like neopedal/vr_shared.py, real D3D11 / D3D12 / Vulkan devices when available
  * (an API without a device is skipped). Checks the layer loads & negotiates like the OpenXR loader does,
  * appends one quad per tile (one swapchain, imageRect per tile) placed like the app's canvas, uploads correct
  * pixels, merges tiles when the runtime has too few layer slots, and stays a pure pass-through when it should
  * (app of another protocol version included).
  *
- *   layer_harness <path to TinyPedalXrLayer.dll>
+ *   layer_harness <path to NeoPedalXrLayer.dll>
  */
 
 #include "../src/xr_includes.h"
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "tinypedal_vr_shared.h"
+#include "neopedal_vr_shared.h"
 
 namespace {
 
@@ -42,7 +42,7 @@ T fake_handle(uintptr_t value) {
 }
 
 // -----------------------------------------------------------------------------------------------------------
-// App side (same as tinypedal/vr_shared.py)
+// App side (same as neopedal/vr_shared.py)
 
 struct CanvasRect {
     uint32_t x;
@@ -859,15 +859,15 @@ bool load_layer(const char* path, Layer& layer) {
     CHECK(layer.negotiate(&info, "XR_APILAYER_OTHER_name", &request) == XR_ERROR_INITIALIZATION_FAILED);
     XrNegotiateLoaderInfo bad = info;
     bad.structSize = 4;
-    CHECK(layer.negotiate(&bad, "XR_APILAYER_TINYPEDAL_overlay", &request) == XR_ERROR_INITIALIZATION_FAILED);
-    CHECK(layer.negotiate(nullptr, "XR_APILAYER_TINYPEDAL_overlay", &request) == XR_ERROR_INITIALIZATION_FAILED);
+    CHECK(layer.negotiate(&bad, "XR_APILAYER_NEOPEDAL_overlay", &request) == XR_ERROR_INITIALIZATION_FAILED);
+    CHECK(layer.negotiate(nullptr, "XR_APILAYER_NEOPEDAL_overlay", &request) == XR_ERROR_INITIALIZATION_FAILED);
     XrNegotiateLoaderInfo old_loader = info;  // loader of OpenXR 1.0 games
     old_loader.maxApiVersion = XR_MAKE_VERSION(1, 0, 9);
     request = layer_request();
-    CHECK(layer.negotiate(&old_loader, "XR_APILAYER_TINYPEDAL_overlay", &request) == XR_SUCCESS);
+    CHECK(layer.negotiate(&old_loader, "XR_APILAYER_NEOPEDAL_overlay", &request) == XR_SUCCESS);
     CHECK(request.layerApiVersion == XR_MAKE_VERSION(1, 0, 0));
     request = layer_request();
-    CHECK(layer.negotiate(&info, "XR_APILAYER_TINYPEDAL_overlay", &request) == XR_SUCCESS);
+    CHECK(layer.negotiate(&info, "XR_APILAYER_NEOPEDAL_overlay", &request) == XR_SUCCESS);
     CHECK(request.getInstanceProcAddr != nullptr && request.createApiLayerInstance != nullptr);
     CHECK(request.layerInterfaceVersion == 1);
     layer.request = request;
@@ -877,7 +877,7 @@ bool load_layer(const char* path, Layer& layer) {
     next.structType = XR_LOADER_INTERFACE_STRUCT_API_LAYER_NEXT_INFO;
     next.structVersion = XR_API_LAYER_NEXT_INFO_STRUCT_VERSION;
     next.structSize = sizeof(next);
-    const char layer_name[] = "XR_APILAYER_TINYPEDAL_overlay";
+    const char layer_name[] = "XR_APILAYER_NEOPEDAL_overlay";
     std::memcpy(next.layerName, layer_name, sizeof(layer_name));
     next.nextGetInstanceProcAddr = rt_xrGetInstanceProcAddr;
     next.nextCreateApiLayerInstance = rt_xrCreateApiLayerInstance;
@@ -1300,7 +1300,7 @@ void run_scenario(Layer& layer, App& app, const void* binding, uint32_t api_id, 
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: layer_harness <TinyPedalXrLayer.dll>\n");
+        std::printf("usage: layer_harness <NeoPedalXrLayer.dll>\n");
         return 2;
     }
     App app;

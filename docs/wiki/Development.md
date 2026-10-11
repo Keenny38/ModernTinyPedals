@@ -43,11 +43,11 @@ ruff check .
 ```
 
 ```bash
-mypy tinypedal
+mypy neopedal
 ```
 
 ```bash
-pytest --cov=tinypedal
+pytest --cov=neopedal
 ```
 
 - CI fails when total coverage drops under `fail_under` in `pyproject.toml` (88 % at the time of writing; current coverage is about 91 %). There are more than 2,300 tests.
@@ -64,17 +64,17 @@ pytest --cov=tinypedal
 | Path | Content |
 |---|---|
 | `run.py` | Entry point, command line arguments, `multiprocessing.freeze_support()` |
-| `tinypedal/main.py`, `loader.py`, `safe_mode.py` | Start, single instance check, load / reload / close, safe mode |
-| `tinypedal/adapter/` | Shared memory readers and REST API connectors (LMU, rFactor 2) |
-| `tinypedal/api_connector.py`, `api_control.py` | Game API selection |
-| `tinypedal/module/` | Data modules (`module_delta.py`, `module_fuel.py`, `module_recorder.py`, `module_stats.py`...) |
-| `tinypedal/process/` | Game data processing; LMU REST data in `game_info.py` and `team_usage.py` |
-| `tinypedal/widget/` | Overlays: classic layout `<name>.py`, modern design `_modern/<name>.py`, Black box `_black_box/`, base class `_base.py` |
-| `tinypedal/template/` | Default settings; overlay defaults per category in `template/widget/<category>.py` |
-| `tinypedal/ui/` | Qt Widgets pages and dialogs; QML pages in `ui/qml`, their Python backends in `ui/quick` |
-| `tinypedal/userfile/` | File formats and data: presets, laps, MoTeC, track corners and geometry, lap geometry jobs |
-| `tinypedal/i18n/` | Translations (`fr.py`, `fr_messages.py`, `fr_overlay.py`) and option labels / help (`data/`) |
-| `tinypedal/update.py`, `command_server.py`, `web_dashboard.py`, `vr_overlay.py`, `replay.py` | Updater, remote control, web dashboard, VR, telemetry replay |
+| `neopedal/main.py`, `loader.py`, `safe_mode.py` | Start, single instance check, load / reload / close, safe mode |
+| `neopedal/adapter/` | Shared memory readers and REST API connectors (LMU, rFactor 2) |
+| `neopedal/api_connector.py`, `api_control.py` | Game API selection |
+| `neopedal/module/` | Data modules (`module_delta.py`, `module_fuel.py`, `module_recorder.py`, `module_stats.py`...) |
+| `neopedal/process/` | Game data processing; LMU REST data in `game_info.py` and `team_usage.py` |
+| `neopedal/widget/` | Overlays: classic layout `<name>.py`, modern design `_modern/<name>.py`, Black box `_black_box/`, base class `_base.py` |
+| `neopedal/template/` | Default settings; overlay defaults per category in `template/widget/<category>.py` |
+| `neopedal/ui/` | Qt Widgets pages and dialogs; QML pages in `ui/qml`, their Python backends in `ui/quick` |
+| `neopedal/userfile/` | File formats and data: presets, laps, MoTeC, track corners and geometry, lap geometry jobs |
+| `neopedal/i18n/` | Translations (`fr.py`, `fr_messages.py`, `fr_overlay.py`) and option labels / help (`data/`) |
+| `neopedal/update.py`, `command_server.py`, `web_dashboard.py`, `vr_overlay.py`, `replay.py` | Updater, remote control, web dashboard, VR, telemetry replay |
 | `pyLMUSharedMemory/`, `pyRfactor2SharedMemory/` | Bundled shared memory libraries (no submodule) |
 | `tests/`, `tools/`, `installer/`, `fonts/`, `images/`, `docs/` | Tests, maintenance scripts, Inno Setup script, bundled fonts, icons, documentation |
 
@@ -82,39 +82,39 @@ pytest --cov=tinypedal
 
 ### Overlays and the modern design
 
-- Every overlay has a modern design in `tinypedal/widget/_modern/<name>.py` (the Black box and Pace Notes restyle their classic drawing), registered in `tinypedal/template/widget/modern.py` (`MODERN_DESIGN_OPTIONS`) with the options it reads: only these are shown in the Overlay Options page. That page (`tinypedal/ui/overlay_options.py`, `ui/quick/overlay_options_backend.py`, `qml/OverlayOptions.qml`) cuts the options of each overlay into sections from their order in the template (`ui/quick/overlay_sections.py`: an item section starts at its `show_*` / `enable_*` option and takes the options naming that item), so keep the options of an item together after its on/off option; an overlay with many options can declare its own sections in `WIDGET_OPTION_UI` (see `black_box_ui.OptionUI`). Shared components (value tiles, tables, gauges, wheels, car colors of maps and radar in `cars.py`, restyling of classic drawing) are in the same folder. A modern design reads game data like the classic widget through a mixin of the classic module (`RadarMixin`, `TrackMapMixin`, `TrailingMixin`...), so both layouts show the same values. The Barlow font is in `fonts`.
+- Every overlay has a modern design in `neopedal/widget/_modern/<name>.py` (the Black box and Pace Notes restyle their classic drawing), registered in `neopedal/template/widget/modern.py` (`MODERN_DESIGN_OPTIONS`) with the options it reads: only these are shown in the Overlay Options page. That page (`neopedal/ui/overlay_options.py`, `ui/quick/overlay_options_backend.py`, `qml/OverlayOptions.qml`) cuts the options of each overlay into sections from their order in the template (`ui/quick/overlay_sections.py`: an item section starts at its `show_*` / `enable_*` option and takes the options naming that item), so keep the options of an item together after its on/off option; an overlay with many options can declare its own sections in `WIDGET_OPTION_UI` (see `black_box_ui.OptionUI`). Shared components (value tiles, tables, gauges, wheels, car colors of maps and radar in `cars.py`, restyling of classic drawing) are in the same folder. A modern design reads game data like the classic widget through a mixin of the classic module (`RadarMixin`, `TrackMapMixin`, `TrailingMixin`...), so both layouts show the same values. The Barlow font is in `fonts`.
 - A changed overlay keeps both its modern design and its classic layout.
-- A new overlay needs its default options in `tinypedal/template/widget/<category>.py` and an entry in `WIDGET_DISPLAY_ORDER` (`tinypedal/template/widget/__init__.py`): startup fails if it is missing. Its category in the `Overlays` page comes from name prefixes in `tinypedal/ui/quick/overlay_backend.py` (`WIDGET_CATEGORIES`).
-- Every new option has a default value in `tinypedal/template/`, a label and a help text. Renaming or removing an option needs a migration in `tinypedal/setting_preupdate.py`, so existing presets still load.
-- The settings format version (`SETTING_VERSION` in `tinypedal/version.py`) is independent of the app version and stays on the TinyPedal 2.x numbering, so presets load without needless migration.
+- A new overlay needs its default options in `neopedal/template/widget/<category>.py` and an entry in `WIDGET_DISPLAY_ORDER` (`neopedal/template/widget/__init__.py`): startup fails if it is missing. Its category in the `Overlays` page comes from name prefixes in `neopedal/ui/quick/overlay_backend.py` (`WIDGET_CATEGORIES`).
+- Every new option has a default value in `neopedal/template/`, a label and a help text. Renaming or removing an option needs a migration in `neopedal/setting_preupdate.py`, so existing presets still load.
+- The settings format version (`SETTING_VERSION` in `neopedal/version.py`) is independent of the app version (2.x numbering), so presets load without needless migration.
 
 ### Qt Quick pages
 
-- The Lap Telemetry Viewer, Track Map Viewer, Driver Stats Viewer, Race Calculator and the Overlays page are QML pages in `tinypedal/ui/qml`, with their state in `tinypedal/ui/quick` (pure Python, testable without a display). New tool pages should preferably be Qt Quick, with logic in Python.
+- The Lap Telemetry Viewer, Track Map Viewer, Driver Stats Viewer, Race Calculator and the Overlays page are QML pages in `neopedal/ui/qml`, with their state in `neopedal/ui/quick` (pure Python, testable without a display). New tool pages should preferably be Qt Quick, with logic in Python.
 - Race Calculator: `race_backend.py` (QObject: inputs, actions, one property per part of the results, emitted only when that part changes), `race_model.py` (saved inputs & their ranges, texts, share code), `race_results.py` (results as plain values for QML), `race_tyres.py` (tyre plan model), `race_picture.py` (plan picture). The hosting page `ui/race_calculator.py` gives the dialogs, toasts and undo history, and builds the QML view when first shown.
 - Curves and maps are sent once to the graphics card (`GpuShape`); zooming only changes a matrix.
-- The executable bundles only the QML modules listed in `tinypedal/ui/quick/qml_modules.py`. A QML module newly imported by a page must be added there (a test loads every page with only these modules).
-- Official corner numbers are in `tinypedal/userfile/track_corners.py`, the LMU official track layouts in `tinypedal/userfile/track_geometry.py`.
+- The executable bundles only the QML modules listed in `neopedal/ui/quick/qml_modules.py`. A QML module newly imported by a page must be added there (a test loads every page with only these modules).
+- Official corner numbers are in `neopedal/userfile/track_corners.py`, the LMU official track layouts in `neopedal/userfile/track_geometry.py`.
 
 ### Lap viewer worker process
 
-Heavy viewer jobs (track limits, session values) run in a separate process (`tinypedal/userfile/lap_geometry.py`, which must not import Qt GUI). `multiprocessing.freeze_support()` must stay at the top of the main block of `run.py`, and any script that opens the viewer needs an `if __name__ == "__main__":` guard.
+Heavy viewer jobs (track limits, session values) run in a separate process (`neopedal/userfile/lap_geometry.py`, which must not import Qt GUI). `multiprocessing.freeze_support()` must stay at the top of the main block of `run.py`, and any script that opens the viewer needs an `if __name__ == "__main__":` guard.
 
 ### Le Mans Ultimate REST API
 
-The REST connection is in `tinypedal/adapter/` (`lmu_restapi.py`, `restapi_connector.py`). Game data is read in `tinypedal/process/game_info.py` (chat, contacts, pit entry, setup name, replays) and `tinypedal/process/team_usage.py` (team stints, tyre allocation, tank capacity). The app never sends commands to the game automatically, only on an explicit user action; features that change race data or give a competitive advantage are not accepted.
+The REST connection is in `neopedal/adapter/` (`lmu_restapi.py`, `restapi_connector.py`). Game data is read in `neopedal/process/game_info.py` (chat, contacts, pit entry, setup name, replays) and `neopedal/process/team_usage.py` (team stints, tyre allocation, tank capacity). The app never sends commands to the game automatically, only on an explicit user action; features that change race data or give a competitive advantage are not accepted.
 
 ### Translations (i18n)
 
-Source strings are English; `tinypedal/i18n/fr.py` maps them to French.
+Source strings are English; `neopedal/i18n/fr.py` maps them to French.
 
 | Text | Function | French source |
 |---|---|---|
-| Interface text (labels, menus, buttons) | `tr("...")` | `tinypedal/i18n/fr.py` |
-| Messages with variable content | `trm(f"...")` | Regular expression rules in `tinypedal/i18n/fr_messages.py` |
-| Labels drawn in modern overlays (keep them short) | `tr_overlay("...")` | `tinypedal/i18n/fr_overlay.py` |
+| Interface text (labels, menus, buttons) | `tr("...")` | `neopedal/i18n/fr.py` |
+| Messages with variable content | `trm(f"...")` | Regular expression rules in `neopedal/i18n/fr_messages.py` |
+| Labels drawn in modern overlays (keep them short) | `tr_overlay("...")` | `neopedal/i18n/fr_overlay.py` |
 | QML pages | `i18n.tr("...")`, `i18n.trm("...")` | Same tables (a test checks every page in French) |
-| Option labels and help | Generated | `tinypedal/i18n/data/` |
+| Option labels and help | Generated | `neopedal/i18n/data/` |
 
 After adding options or editing the documentation, regenerate option labels and help:
 
@@ -126,7 +126,7 @@ python tools/gen_fr_options.py
 python tools/gen_option_help.py
 ```
 
-The second script lists help texts that have no French translation yet (`tinypedal/i18n/data/fr_option_help.json`). `python tools/make_language_template.py <code> <name>` creates a language pack template (see [Presets and Settings](Presets-and-Settings.md#language-packs)).
+The second script lists help texts that have no French translation yet (`neopedal/i18n/data/fr_option_help.json`). `python tools/make_language_template.py <code> <name>` creates a language pack template (see [Presets and Settings](Presets-and-Settings.md#language-packs)).
 
 ## Windows build
 
@@ -154,7 +154,7 @@ iscc /DAppVersion=0.20.0 installer\neopedal.iss
 
 The installer `NeoPedal-<version>-windows-setup.exe` is written to `dist`. Its shortcut icon follows the Windows light or dark mode (`images/icon.ico` or `images/icon_dark.ico`). Icons are generated from `images/src/icon.webp` and `images/src/icon_dark.webp` with `images/export_icon.sh` (ImageMagick 7).
 
-User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). The legacy `TinyPedal` folders, shared with the original app, are copied once on first start by `userfile/folder_migration.py` (temporary folder renamed when complete, files that can not be read left out, Linux `user_path` values rewritten). The legacy folder is never used by the app, even when the copy fails (the new folder then starts with default settings): it holds the `pid.log` of a running TinyPedal, so sharing it would stop one app from starting while the other runs. `pid.log` ends with the app name (`<pid>,<create time>,NeoPedal`), a PID saved by another app is ignored, never moved nor modified. The copy records the user's choice in `migration.json` (`pending`, `kept`, `default`); `ui/settings_import.py` asks once the window is up (not in safe mode) and offers `Config` > `TinyPedal Settings`. A request (`reset`, `reimport`) is written there and applied by `folder_migration` on next start, before settings are loaded: the current folder is renamed aside, never deleted. `APP_ID` is `NeoPedal` since 0.23.1: build folder and `neopedal.exe` (`tinypedal.exe` until 0.23.0, the name of the original app's executable). Older updaters run the installer with the folder of the running copy, whatever the executable name; the installer removes `tinypedal.exe` and points shortcuts to `neopedal.exe`, and `update.installed_app_folder` accepts both names. The restart variable is `NEOPEDAL_RESTART`, the Linux desktop entry `NeoPedal.desktop` (`DESKTOP_FILE_NAME`), the SteamVR overlay key `neopedal.overlay`. The Python package, the QML module and the OpenXR layer (`TinyPedalXrLayer`, registered in the user's OpenXR settings) keep their internal names: the original TinyPedal has no VR overlay, so they never meet. The remote control asks for an `X-NeoPedal` header and still accepts `X-TinyPedal`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
+User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). `pid.log` ends with the app name (`<pid>,<create time>,NeoPedal`): a PID saved by another app is ignored. The executable is `neopedal.exe` (`APP_ID`, build folder `dist\NeoPedal`). Versions until 0.23.0 used another name (`LEGACY_NAME` in `const_app.py`), only read for compatibility: the installer removes the old executable and points shortcuts to `neopedal.exe` (older updaters run it with the folder of the running copy), `update.installed_app_folder` finds both names, plugins importing the old package name get this package (`plugin_loader.LegacyPackageFinder`), presets get their option keys renamed (`setting_preupdate`, 2.50.9), old preset packages still import, the remote control still accepts the old header besides `X-NeoPedal`, and the old OpenXR layer registration is replaced or removed (`vr_shared.LAYER_MANIFESTS`). The restart variable is `NEOPEDAL_RESTART`, the Linux desktop entry `NeoPedal.desktop` (`DESKTOP_FILE_NAME`), the SteamVR overlay key `neopedal.overlay`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
 
 ## Release process
 
@@ -217,7 +217,7 @@ python tools/make_change_visual.py black_box --title "Black box: engine map"
 
 Screenshots of new app pages go in `docs/changelog` and are inserted in the changelog by their `https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changelog/...` address, so they show on GitHub and in the release notes. The app's What's New page skips image lines.
 
-The README preview image is generated from the real overlays, on the simulated race of `tinypedal/demo_data.py` (the one the app's overlay pictures show: widget modules read it only while a picture is drawn, see `demo_globals`; `demo_state` keeps simulated cars out of user presets):
+The README preview image is generated from the real overlays, on the simulated race of `neopedal/demo_data.py` (the one the app's overlay pictures show: widget modules read it only while a picture is drawn, see `demo_globals`; `demo_state` keeps simulated cars out of user presets):
 
 ```bash
 python tools/make_readme_preview.py

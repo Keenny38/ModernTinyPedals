@@ -7,9 +7,9 @@ import time
 
 from test_setting import config, read_json, wait_saved  # noqa: F401
 
-from tinypedal.const_file import ConfigType
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord, last_record, read_records, record_line
+from neopedal.const_file import ConfigType
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord, last_record, read_records, record_line
 
 
 # Setting saver

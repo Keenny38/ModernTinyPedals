@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 @pytest.fixture
@@ -28,8 +28,8 @@ def close_dialog(dialog):
 
 def open_config(section, reload_calls, classic=True):
     """Widget config dialog, of classic layout (every option) unless classic is False"""
-    from tinypedal.const_file import ConfigType
-    from tinypedal.ui.config import UserConfig
+    from neopedal.const_file import ConfigType
+    from neopedal.ui.config import UserConfig
 
     if "enable_classic_layout" in cfg.user.setting[section]:
         cfg.user.setting[section]["enable_classic_layout"] = classic
@@ -69,7 +69,7 @@ def test_config_dialog_invalid_value(ui_env, no_message_box):
 
 
 def test_config_dialog_search_and_french(ui_env):
-    from tinypedal.i18n import set_language
+    from neopedal.i18n import set_language
 
     set_language("Français")
     try:
@@ -90,7 +90,7 @@ def test_config_dialog_search_and_french(ui_env):
 
 def test_every_widget_config_opens(ui_env):
     """All widget & module config dialogs build without error"""
-    from tinypedal.module_control import mctrl, wctrl
+    from neopedal.module_control import mctrl, wctrl
 
     for name in (*wctrl.names, *mctrl.names):
         dialog = open_config(name, [])
@@ -105,7 +105,7 @@ def test_every_option_accepts_its_own_default(ui_env):
     string default (for example a "Left"/"Right" position) is then rejected on save with
     "Invalid value for ... option", and the whole dialog refuses to save.
     """
-    from tinypedal.module_control import mctrl, wctrl
+    from neopedal.module_control import mctrl, wctrl
 
     rejected = []
     for name in (*wctrl.names, *mctrl.names):
@@ -120,7 +120,7 @@ def test_every_option_accepts_its_own_default(ui_env):
 
 
 def test_rename_preset_updates_references(ui_env, no_message_box, monkeypatch):
-    from tinypedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import CreatePreset
 
     settings = cfg.path.settings
     for name in ("race.json", "race.json.backup-auto-2026-01-01", "race.json.backup-2026-02-02"):
@@ -140,7 +140,7 @@ def test_rename_preset_updates_references(ui_env, no_message_box, monkeypatch):
 
 
 def test_rename_locked_file_shows_error(ui_env, no_message_box, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     with open(f"{cfg.path.settings}race.json", "w", encoding="utf-8") as file:
         file.write("{}")
@@ -157,7 +157,7 @@ def test_rename_locked_file_shows_error(ui_env, no_message_box, monkeypatch):
 
 
 def test_duplicate_does_not_create_default(ui_env, no_message_box, monkeypatch):
-    from tinypedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import CreatePreset
 
     created = []
     monkeypatch.setattr(type(cfg), "create", lambda self, filename: created.append(filename))
@@ -174,7 +174,7 @@ def test_duplicate_does_not_create_default(ui_env, no_message_box, monkeypatch):
 def test_restart_command_keeps_arguments(monkeypatch):
     import sys
 
-    from tinypedal import loader
+    from neopedal import loader
 
     monkeypatch.setattr(sys, "argv", ["run.py", "-l", "2"])
     monkeypatch.setattr(sys, "executable", r"C:\Program Files\Python\python.exe")
@@ -186,7 +186,7 @@ def test_restart_command_keeps_arguments(monkeypatch):
 
 
 def test_atomic_write_removes_temp_on_error(tmp_path):
-    from tinypedal.userfile import atomic_write
+    from neopedal.userfile import atomic_write
 
     target = tmp_path / "data.csv"
     with pytest.raises(ValueError), atomic_write(str(target)) as file:
@@ -201,7 +201,7 @@ def test_integer_option_rejects_decimal_without_crashing(ui_env):
     is_string_number() accepts decimals but int() cannot parse them, so the dialog used to
     crash with ValueError instead of showing "Invalid value for ... option".
     """
-    from tinypedal.ui._option import IntegerEdit
+    from neopedal.ui._option import IntegerEdit
 
     editor = IntegerEdit(None)
     editor.setText("10.5")
@@ -213,7 +213,7 @@ def test_integer_option_rejects_decimal_without_crashing(ui_env):
 
 
 def test_compound_target_table_editor():
-    from tinypedal.ui._option import CompoundTargetDialog
+    from neopedal.ui._option import CompoundTargetDialog
 
     table = CompoundTargetDialog(None, "S=160-190/75-105; W=150-175")
     assert table.table.rowCount() == 2
@@ -298,8 +298,8 @@ def test_invalid_value_keeps_dialog_open(ui_env, monkeypatch):
 
 
 def test_internal_application_options_hidden(ui_env):
-    from tinypedal.const_file import ConfigType
-    from tinypedal.ui.config import UserConfig
+    from neopedal.const_file import ConfigType
+    from neopedal.ui.config import UserConfig
 
     dialog = UserConfig(
         parent=None, key_name="application", preset_name="config.json", config_type=ConfigType.CONFIG,

@@ -6,7 +6,7 @@ NeoPedal reads telemetry from the game's shared memory, and for Le Mans Ultimate
 
 | Game | Windows | Linux |
 |---|---|---|
-| **Le Mans Ultimate** | Nothing to install. Turn on `Enable Plugins` in the game. | Requires a third-party plugin, see [TinyPedal discussion #9](https://github.com/TinyPedal/TinyPedal/issues/9). |
+| **Le Mans Ultimate** | Nothing to install. Turn on `Enable Plugins` in the game. | Requires a third-party plugin, see below. |
 | **rFactor 2** | [rF2SharedMemoryMapPlugin](https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download) | [Wine version of the plugin](https://github.com/schlegp/rF2SharedMemoryMapPlugin_Wine/blob/master/build) |
 
 ## Display mode
@@ -35,7 +35,7 @@ No plugin needs to be installed: LMU has its own shared memory API.
 
 ### Linux
 
-LMU's built-in API can be selected on Linux, but may need a third-party plugin to be readable from Linux. See [TinyPedal discussion #9](https://github.com/TinyPedal/TinyPedal/issues/9) for the current state.
+LMU's built-in API can be selected on Linux, but may need a third-party plugin to be readable from Linux.
 
 ### LMU REST API (automatic)
 

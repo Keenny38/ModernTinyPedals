@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: mypy
         name: mypy
-        entry: python -m mypy tinypedal
+        entry: python -m mypy neopedal
         language: system
         pass_filenames: false
-        files: ^tinypedal/.*\.py$
+        files: ^neopedal/.*\.py$

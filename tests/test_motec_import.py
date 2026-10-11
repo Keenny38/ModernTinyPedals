@@ -6,8 +6,8 @@ from array import array
 
 import pytest
 
-from tinypedal.userfile.motec_import import import_laps, import_ld_file, is_worn_percent
-from tinypedal.userfile.motec_ld import CHANNEL, EVENT, HEAD, LD_MARKER, VEHICLE, VENUE
+from neopedal.userfile.motec_import import import_laps, import_ld_file, is_worn_percent
+from neopedal.userfile.motec_ld import CHANNEL, EVENT, HEAD, LD_MARKER, VEHICLE, VENUE
 
 
 def write_logger_ld(filename, channels, venue="Spa", vehicle="GT3", driver="Pro Driver"):
@@ -82,7 +82,7 @@ def test_import_logger_laps(tmp_path):
 
 
 def test_import_saves_lap_files(tmp_path):
-    from tinypedal.userfile.telemetry_lap import lap_time_of, list_tracks, load_lap, read_lap_info
+    from neopedal.userfile.telemetry_lap import lap_time_of, list_tracks, load_lap, read_lap_info
 
     filename = str(tmp_path / "spa.ld")
     write_logger_ld(filename, logger_channels())
@@ -97,8 +97,8 @@ def test_import_saves_lap_files(tmp_path):
 
 
 def test_exported_lap_imported_back(tmp_path):
-    from tinypedal.userfile.motec_ld import export_lap
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.userfile.motec_ld import export_lap
+    from neopedal.userfile.telemetry_lap import LapData
 
     times = [index / 50 for index in range(3001)]  # 60 s at 50 Hz
     lap = LapData("lap", {
@@ -139,8 +139,8 @@ def test_worn_or_remaining_wear():
 def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
     from PySide6.QtCore import QCoreApplication, QEvent
 
-    from tinypedal.ui import lap_viewer
-    from tinypedal.ui.quick import lap_export
+    from neopedal.ui import lap_viewer
+    from neopedal.ui.quick import lap_export
 
     filename = str(tmp_path / "pro lap.ld")
     write_logger_ld(filename, logger_channels())
@@ -174,7 +174,7 @@ def test_lap_viewer_imports_motec_file(ui_env, tmp_path, monkeypatch):
 
 
 def test_read_ld_skips_unknown_channel_types(tmp_path):
-    from tinypedal.userfile.motec_ld import raw_typecode, read_ld
+    from neopedal.userfile.motec_ld import raw_typecode, read_ld
 
     assert raw_typecode(0x07, 4) == "f" and raw_typecode(0x07, 2) == "e" and raw_typecode(0x03, 4) == "i"
     assert raw_typecode(0x09, 4) == "" and raw_typecode(0x03, 8) == ""

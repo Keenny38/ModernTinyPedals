@@ -2,13 +2,13 @@
 
 import pytest
 
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
 
 
 @pytest.fixture
 def class_editor(monkeypatch):
-    from tinypedal.ui.vehicle_class_editor import VehicleClassEditor
+    from neopedal.ui.vehicle_class_editor import VehicleClassEditor
 
     cfg.default.set_default()
     monkeypatch.setattr(cfg.user, "classes", {
@@ -53,7 +53,7 @@ def test_new_edit_clears_redo(class_editor):
 
 
 def test_heatmap_undo(monkeypatch):
-    from tinypedal.ui.heatmap_editor import HeatmapEditor
+    from neopedal.ui.heatmap_editor import HeatmapEditor
 
     cfg.default.set_default()
     for name in ("config", "setting", "heatmap"):

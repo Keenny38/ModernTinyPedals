@@ -6,10 +6,10 @@ import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal import app_signal, demo_data
-from tinypedal.setting import cfg
-from tinypedal.ui import widget_preview
-from tinypedal.ui.quick.preview_provider import PreviewProvider, PreviewStore
+from neopedal import app_signal, demo_data
+from neopedal.setting import cfg
+from neopedal.ui import widget_preview
+from neopedal.ui.quick.preview_provider import PreviewProvider, PreviewStore
 
 
 def solid(color: str, width: int = 40, height: int = 20) -> QImage:
@@ -40,7 +40,7 @@ def draws(ui_env, bundled_fonts, monkeypatch):
 
 
 def test_same_inputs_same_picture_on_any_page(draws):
-    from tinypedal.ui.quick import overlay_backend, overlay_options_backend, setup_backend
+    from neopedal.ui.quick import overlay_backend, overlay_options_backend, setup_backend
 
     page = overlay_backend.render_preview("speedometer")
     assert page is not None and draws == [("speedometer", 1.0)]
@@ -127,7 +127,7 @@ def test_lap_widget_shapes_built_once(draws, monkeypatch):
     """Delta graph replay: trace fed every frame, chart shapes built once, same picture"""
     from contextlib import nullcontext
 
-    from tinypedal.widget import delta_graph
+    from neopedal.widget import delta_graph
 
     setting = cfg.user.setting["delta_graph"]
     builds = []
@@ -144,7 +144,7 @@ def test_lap_widget_shapes_built_once(draws, monkeypatch):
 
 
 def test_store_shares_pictures_and_compares_cheaply(monkeypatch):
-    from tinypedal.ui.quick import preview_provider
+    from neopedal.ui.quick import preview_provider
 
     store = PreviewStore()
     image = solid("#123456")

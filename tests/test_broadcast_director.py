@@ -5,9 +5,9 @@ import json
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
+from neopedal.process import director as dr
+from neopedal.process.game_info import Contact, Standing
 from tests.test_game_info import FakeGame, wait_commands, wait_requests
-from tinypedal.process import director as dr
-from tinypedal.process.game_info import Contact, Standing
 
 TRACK = 4000.0
 
@@ -282,8 +282,8 @@ def race_answers(session_time, *cars, focus=1, replay=False, contacts=(), info=N
 
 @pytest.fixture
 def director_page(ui_env, monkeypatch):
-    from tinypedal.ui import broadcast_director, game_rest
-    from tinypedal.ui._common import BaseDialog
+    from neopedal.ui import broadcast_director, game_rest
+    from neopedal.ui._common import BaseDialog
 
     game = FakeGame()
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
@@ -363,7 +363,7 @@ def test_automatic_mode_cuts_to_events(director_page):
 
 
 def test_settings_saved_automatic_mode_not_restored(director_page, ui_env):
-    from tinypedal.ui.quick import director_backend
+    from neopedal.ui.quick import director_backend
 
     page, backend = director_page, director_page.backend
     poll(page, race_answers(100.0, car(1, 1), car(2, 2, distance=200.0)))
@@ -398,7 +398,7 @@ def test_event_in_replay_seeks_before_it(director_page):
 
 
 def test_hotkeys_reach_open_page(director_page, monkeypatch):
-    from tinypedal.hotkey import command
+    from neopedal.hotkey import command
 
     page, backend = director_page, director_page.backend
     poll(page, race_answers(100.0, car(1, 1), car(2, 2, distance=200.0)))
@@ -412,7 +412,7 @@ def test_hotkeys_reach_open_page(director_page, monkeypatch):
     page.close()
     assert command.open_director() is None
     sent = []
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     monkeypatch.setattr(game_rest, "game_command", lambda *args: sent.append(args))
     monkeypatch.setattr(command.threading, "Thread", lambda target, args, **kwargs: type(
@@ -425,10 +425,10 @@ def test_page_qml_bundled_modules_and_translated():
     """Release build bundles only QML_MODULES; every text of the page has a French translation"""
     import re
 
-    from tinypedal.i18n.fr import TRANSLATION
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick import director_backend as db
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.i18n.fr import TRANSLATION
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import director_backend as db
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
@@ -448,8 +448,8 @@ def test_page_qml_bundled_modules_and_translated():
 
 
 def test_tool_registered():
-    from tinypedal.ui.nav_rail import TOOL_SHORT_LABELS
-    from tinypedal.ui.tools_view import TOOL_KEYWORDS, TOOL_SECTIONS
+    from neopedal.ui.nav_rail import TOOL_SHORT_LABELS
+    from neopedal.ui.tools_view import TOOL_KEYWORDS, TOOL_SECTIONS
 
     path = "broadcast_director.BroadcastDirector"
     assert any(entry[2] == path for _, entries in TOOL_SECTIONS for entry in entries)
@@ -459,8 +459,8 @@ def test_tool_registered():
 def test_navigation_bar_broadcast_in_place_of_spectate_for_everyone():
     """Setting 2.50.8: every navigation bar back to the new default once (Broadcast Director in place of Spectate),
     bars changed after the update kept"""
-    from tinypedal.setting_preupdate import preupdate_global_setting
-    from tinypedal.template.setting_global import GLOBAL_DEFAULT
+    from neopedal.setting_preupdate import preupdate_global_setting
+    from neopedal.template.setting_global import GLOBAL_DEFAULT
 
     default = GLOBAL_DEFAULT["application"]["rail_items"]
     assert "broadcast_director" in default and "spectate" not in default and "app_settings" not in default
@@ -474,7 +474,7 @@ def test_navigation_bar_broadcast_in_place_of_spectate_for_everyone():
 
 # From LMU Broadcast Control: slow cars, flags, race start, pit box time, laps & sectors, energy
 def test_standings_sectors_grid_and_session_state():
-    from tinypedal.process.game_info import parse_session_state, parse_standings
+    from neopedal.process.game_info import parse_session_state, parse_standings
 
     data = standings_json(car(3, 1, last=90.0, last_sector1=20.0, last_sector2=55.0, current_sector1=19.5,
                               sector=2, grid=4, pit_state="STOPPED"))
@@ -518,7 +518,7 @@ def test_slow_car_compared_with_usual_speed_at_that_place():
 
 
 def test_flags_full_course_yellow_and_sector_yellow():
-    from tinypedal.process.game_info import SessionState
+    from neopedal.process.game_info import SessionState
 
     watcher = dr.RaceWatcher()
     green = SessionState(phase=5, yellow="NONE", sector_flags=(False, False, False))
@@ -609,7 +609,7 @@ def test_lock_unseen_export_laps_and_weather(director_page, monkeypatch, tmp_pat
 
 
 def test_instant_replay_of_live_session(director_page, monkeypatch):
-    from tinypedal.ui.quick import game_camera
+    from neopedal.ui.quick import game_camera
 
     monkeypatch.setattr(game_camera, "REPLAY_READY", 0.0)
     monkeypatch.setattr(game_camera, "SEEK_WAIT", 0.0)
@@ -647,14 +647,14 @@ def test_instant_replay_of_live_session(director_page, monkeypatch):
 
 
 def test_lock_hotkey(director_page):
-    from tinypedal.hotkey import command
+    from neopedal.hotkey import command
 
     command.hotkey_director_lock()
     assert director_page.backend.carLocked
 
 
 def test_seek_replay_then_camera_on_car(monkeypatch):
-    from tinypedal.ui.quick import game_camera
+    from neopedal.ui.quick import game_camera
 
     monkeypatch.setattr(game_camera, "REPLAY_READY", 0.0)
     monkeypatch.setattr(game_camera, "SEEK_WAIT", 0.0)
@@ -670,7 +670,7 @@ def test_seek_replay_then_camera_on_car(monkeypatch):
 
 def test_instant_replay_kept_while_standings_tell_live(director_page, monkeypatch):
     """Replay of a live session: standings keep live times, the replay is still shown until its end"""
-    from tinypedal.ui.quick import game_camera
+    from neopedal.ui.quick import game_camera
 
     monkeypatch.setattr(game_camera, "REPLAY_READY", 0.0)
     monkeypatch.setattr(game_camera, "SEEK_WAIT", 0.0)
@@ -742,7 +742,7 @@ def test_state_requests_keep_one_connection(director_page):
         made.append(1)
         return connection()
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     game_rest.GameConnection = counted  # restored by monkeypatch of the fixture
     for now in (100.0, 101.0, 102.0):
@@ -779,7 +779,7 @@ def test_game_camera_changes_followed_without_holding_director(director_page):
     backend.last_cut = 0.0
     poll(page, race_answers(101.0, *cars, focus=3))  # another app put car 3 on air
     assert backend.on_air_slot == 3 and backend.director.hold_until == 0.0
-    from tinypedal.ui.quick import director_backend
+    from neopedal.ui.quick import director_backend
 
     assert director_backend.load_page_settings()["follow_game_cuts"] is False
 
@@ -831,7 +831,7 @@ def test_contact_severity_from_speed_lost():
 
 
 def test_forecast_and_tyres(ui_env):
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     answer = {"RACE": {"START": {"WNV_RAIN_CHANCE": {"currentValue": 10}, "WNV_TEMPERATURE": {"currentValue": 21.4},
                                  "WNV_SKY": {"stringValue": "Cloudy"}},
@@ -855,7 +855,7 @@ def test_forecast_and_tyres(ui_env):
 
 
 def test_tyres_logos_game_computer_and_log(director_page, monkeypatch):
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     page, backend = director_page, director_page.backend
     monkeypatch.setattr(db.DirectorBackend, "read_tyres", staticmethod(lambda: {1: ("W", "W"), 2: ("S", "M")}))
@@ -866,7 +866,7 @@ def test_tyres_logos_game_computer_and_log(director_page, monkeypatch):
     assert backend.sheet["tyres"] == "S/M"
     # Game on another computer: no shared memory (another session), commands & requests to that address
     made = []
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     connection = page.game.connection
     monkeypatch.setattr(game_rest, "GameConnection", lambda *args, **kwargs: made.append(kwargs) or connection())
@@ -894,7 +894,7 @@ def test_director_feed_long_poll():
     import threading
     import time as clock
 
-    from tinypedal.stream_director import DirectorFeed
+    from neopedal.stream_director import DirectorFeed
 
     feed = DirectorFeed()
     assert not feed.watched()
@@ -914,9 +914,9 @@ def test_graphics_source_routes(ui_env, monkeypatch):
     import threading
     import urllib.request
 
+    from neopedal.stream_director import director_feed
+    from neopedal.stream_overlay import StreamHandler, StreamServer, streamoverlay
     from tests.test_stream_overlay import free_port
-    from tinypedal.stream_director import director_feed
-    from tinypedal.stream_overlay import StreamHandler, StreamServer, streamoverlay
 
     port = free_port()
     StreamHandler.token = streamoverlay.access_token()
@@ -949,8 +949,8 @@ def test_graphics_source_routes(ui_env, monkeypatch):
 
 
 def test_graphics_state_and_settings(director_page, monkeypatch):
-    from tinypedal.stream_director import director_feed
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.stream_director import director_feed
+    from neopedal.ui.quick import director_backend as db
 
     page, backend = director_page, director_page.backend
     published = []
@@ -989,7 +989,7 @@ def test_graphics_state_and_settings(director_page, monkeypatch):
     assert db.graphics_setting({"towerRows": "9", "card": False})["towerRows"] == 12
     assert db.short_name("Tobias Mueller#7949") == "T. Mueller" and db.short_name("Senna") == "Senna"
     # Source address only while stream overlays run
-    from tinypedal.stream_overlay import streamoverlay
+    from neopedal.stream_overlay import streamoverlay
 
     monkeypatch.setattr(type(streamoverlay), "running", property(lambda self: False))
     assert backend.graphicsUrl == ""
@@ -998,7 +998,7 @@ def test_graphics_state_and_settings(director_page, monkeypatch):
 
 
 def test_pit_radar_of_car_on_air(director_page, monkeypatch):
-    from tinypedal.stream_director import director_feed
+    from neopedal.stream_director import director_feed
 
     # Cars near the car in the pit lane, closest first, across the start line too
     target = car(1, 1, distance=10.0, in_pit=True)
@@ -1027,8 +1027,8 @@ def test_pit_radar_of_car_on_air(director_page, monkeypatch):
 
 def test_overlays_follow_car_on_air_and_stop(director_page, monkeypatch):
     """Option on: spectate mode on the car on air; option off: spectate mode off (overlays back to own car)"""
-    from tinypedal.api_control import api
-    from tinypedal.setting import cfg
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
 
     page, backend = director_page, director_page.backend
     setups = []

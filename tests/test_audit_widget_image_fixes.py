@@ -19,12 +19,12 @@ from PySide6.QtCore import QCoreApplication, QEvent, QPointF, Qt
 from PySide6.QtGui import QColor, QHideEvent, QImage, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
-from tinypedal.api_control import api
-from tinypedal.module_info import ConsumptionDataSet, minfo
-from tinypedal.process import game_images as gi
-from tinypedal.setting import cfg
-from tinypedal.userfile import custom_image, game_images
-from tinypedal.widget._modern import create_widget
+from neopedal.api_control import api
+from neopedal.module_info import ConsumptionDataSet, minfo
+from neopedal.process import game_images as gi
+from neopedal.setting import cfg
+from neopedal.userfile import custom_image, game_images
+from neopedal.widget._modern import create_widget
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def widgets(ui_env, bundled_fonts):
     def make(name: str, modern: bool = True, **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -95,7 +95,7 @@ def test_classic_damage_old_session_impact_hidden(widgets, monkeypatch):
 # --- Pit lane helper shown always: box approach reset away from pit lane
 @pytest.mark.parametrize("modern", [True, False])
 def test_pit_lane_helper_shown_always_resets_box_approach(widgets, monkeypatch, modern):
-    from tinypedal.widget.pit_lane_helper import DASH
+    from neopedal.widget.pit_lane_helper import DASH
 
     widget = widgets("pit_lane_helper", modern=modern, show_always=True)
     reader(monkeypatch, "lap", "distance", 100.0)
@@ -145,7 +145,7 @@ def test_classic_lap_time_history_oldest_delta(widgets, monkeypatch):
 
 # --- Edit frame: size preview window never left on screen
 def test_resize_ghost_closed_on_new_press_and_hide(ui_env):
-    from tinypedal.widget._edit_frame import ResizeHandle
+    from neopedal.widget._edit_frame import ResizeHandle
 
     parent = QWidget()
     parent.resize(100, 50)
@@ -171,7 +171,7 @@ def test_resize_ghost_closed_on_new_press_and_hide(ui_env):
 
 # --- Race notifications: class best never goes up (holder leaving), no false fastest lap on return
 def test_class_best_not_raised_when_holder_leaves(monkeypatch):
-    from tinypedal.widget.race_notifications import RaceEvents
+    from neopedal.widget.race_notifications import RaceEvents
 
     def car(best):
         return SimpleNamespace(vehicleClass="GT3", bestLapTime=best, driverName="Driver")
@@ -197,7 +197,7 @@ def test_class_best_not_raised_when_holder_leaves(monkeypatch):
 
 # --- Delta graph: lap counter going up before progress wraps completes the lap once
 def test_delta_graph_lap_counter_before_progress_wrap(widgets, monkeypatch):
-    from tinypedal.widget import delta_graph
+    from neopedal.widget import delta_graph
 
     widget = widgets("delta_graph")
     monkeypatch.setattr(delta_graph, "delta_shown", lambda source: True)

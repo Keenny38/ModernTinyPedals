@@ -34,7 +34,7 @@ def record_threads(owner, name: str, calls: list[bool], only=None):
 
 def panel_vertices(page) -> dict[str, bytes]:
     """Vertex data of chart panels (series, reduced copies, envelopes) by key without page prefix"""
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     keys = [key for panel in page._panels for series in panel["series"]
             for key in [series["key"], *(lod for _, lod in series["lods"])]]
@@ -45,7 +45,7 @@ def panel_vertices(page) -> dict[str, bytes]:
 
 def series_values(page) -> dict[tuple, tuple]:
     """Chart series values of shown laps for visible channels"""
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     return {(lap.key, part): tuple(tuple(values) for values in page.data.series(CHANNEL_MAP[part], lap))
             for lap in page.data.laps for column in page.visible
@@ -55,7 +55,7 @@ def series_values(page) -> dict[tuple, tuple]:
 # --- Chart series built in background (settings changed), same as built at once
 @pytest.mark.parametrize("change", ["smoothing", "envelope", "channel", "ideal", "window"])
 def test_chart_built_in_background_same_as_at_once(backend, monkeypatch, change):  # noqa: F811
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     page = backend
     page.checked = {entry.file.path for entry in page.entries}  # 3 laps (envelope)
@@ -93,8 +93,8 @@ def test_chart_built_in_background_same_as_at_once(backend, monkeypatch, change)
 
 def test_chart_settings_waiting_applied_together(backend, monkeypatch):  # noqa: F811
     """Settings changed while series are built: older build dropped, every setting applied once built"""
-    from tinypedal.ui import lap_viewer
-    from tinypedal.ui.lap_viewer import SMOOTHING_LEVELS
+    from neopedal.ui import lap_viewer
+    from neopedal.ui.lap_viewer import SMOOTHING_LEVELS
 
     page = backend
     monkeypatch.setattr(lap_viewer, "BACKGROUND_CHART_SAMPLES", 1)
@@ -116,7 +116,7 @@ def test_chart_settings_waiting_applied_together(backend, monkeypatch):  # noqa:
 
 
 def test_time_axis_switched_in_background(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     page = backend
     restored = []
@@ -132,8 +132,8 @@ def test_time_axis_switched_in_background(backend, monkeypatch):  # noqa: F811
 
 def test_laps_shown_prepared_by_loading_thread(backend, monkeypatch):  # noqa: F811
     """Laps loaded in background: trace data set & chart series built by loading thread, same as set at once"""
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.quick.trace_data import TraceData
 
     page = backend
     paths = [entry.file.path for entry in page.entries]
@@ -163,7 +163,7 @@ def test_laps_shown_prepared_by_loading_thread(backend, monkeypatch):  # noqa: F
 
 
 def test_trace_data_snapshot_adopted_unless_changed(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     data = TraceData()
     snapshot = data.snapshot()
@@ -178,7 +178,7 @@ def test_trace_data_snapshot_adopted_unless_changed(ui_env):
 
 # --- Track map: shapes sized for map scale built in background
 def test_map_first_scale_built_in_background(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     page = backend
     calls: list[bool] = []
@@ -194,9 +194,9 @@ def test_map_first_scale_built_in_background(backend, monkeypatch):  # noqa: F81
 def test_track_infos_and_new_laps_read_in_background(ui_env, monkeypatch):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
-    from tinypedal.userfile import lap_cache
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.userfile import lap_cache
 
     folder = cfg.path.telemetry.rstrip("/")
     for number in (1, 2):
@@ -226,9 +226,9 @@ def test_track_infos_and_new_laps_read_in_background(ui_env, monkeypatch):
 def test_library_reads_lap_infos_once_in_background(ui_env, monkeypatch):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_library import LapLibrary
-    from tinypedal.userfile import lap_cache
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_library import LapLibrary
+    from neopedal.userfile import lap_cache
 
     import_log(cfg.path.telemetry, "Spa race", [139.5, 138.2])
     calls: list[bool] = []
@@ -254,8 +254,8 @@ def test_library_reads_lap_infos_once_in_background(ui_env, monkeypatch):
 
 # --- Single lap exports in background
 def test_motec_and_delta_best_exports_are_jobs(backend, monkeypatch, tmp_path):  # noqa: F811
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick import lap_export
+    from neopedal.setting import cfg
+    from neopedal.ui.quick import lap_export
 
     page = backend
     target = tmp_path / "lap.ld"
@@ -279,7 +279,7 @@ def test_motec_and_delta_best_exports_are_jobs(backend, monkeypatch, tmp_path): 
 
 # --- Lap marks: one marks file read & save per folder
 def test_marks_saved_once_per_folder(tmp_path, monkeypatch):
-    from tinypedal.userfile import lap_marks
+    from neopedal.userfile import lap_marks
 
     folder = tmp_path / "Track - GT3"
     folder.mkdir()

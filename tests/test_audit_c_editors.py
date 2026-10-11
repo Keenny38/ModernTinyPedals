@@ -10,10 +10,10 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import i18n
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseEditor, TableBatchReplace
-from tinypedal.ui._option import ColorEdit
+from neopedal import i18n
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseEditor, TableBatchReplace
+from neopedal.ui._option import ColorEdit
 
 
 class Env:
@@ -74,7 +74,7 @@ def join_request_threads():
 # --- Track notes editor (item 3)
 @pytest.fixture
 def notes_editor(env, monkeypatch):
-    from tinypedal.ui import track_notes_editor
+    from neopedal.ui import track_notes_editor
 
     monkeypatch.setattr(track_notes_editor, "show_toast", lambda *args, **kwargs: None)
     editor = track_notes_editor.TrackNotesEditor(None)
@@ -83,7 +83,7 @@ def notes_editor(env, monkeypatch):
 
 
 def test_notes_save_error_on_close_keeps_editor_open(notes_editor, env, tmp_path, monkeypatch):
-    from tinypedal.ui import track_notes_editor
+    from neopedal.ui import track_notes_editor
 
     def read_only(**kwargs):
         raise PermissionError(13, "Permission denied")
@@ -93,7 +93,7 @@ def test_notes_save_error_on_close_keeps_editor_open(notes_editor, env, tmp_path
     assert notes_editor.is_modified()
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Save))
     monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
-                        lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "TinyPedal Pace Notes (*.tppn)"))
+                        lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "NeoPedal Pace Notes (*.tppn)"))
     monkeypatch.setattr(track_notes_editor, "save_notes_file", read_only)
     assert notes_editor.close() is False  # saving failed: treated as cancel
     assert len(env.warnings) == 1 and "Unable to save notes at:" in env.warnings[0]
@@ -102,24 +102,24 @@ def test_notes_save_error_on_close_keeps_editor_open(notes_editor, env, tmp_path
 
 
 def test_notes_save_error_from_button(notes_editor, env, tmp_path, monkeypatch):
-    from tinypedal.ui import track_notes_editor
+    from neopedal.ui import track_notes_editor
 
     notes_editor.create_pacenotes()
     notes_editor.table_notes.item(0, 1).setText("R3")
     target = tmp_path / "missing folder" / "Spa.tppn"  # folder does not exist
     monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
-                        lambda *args, **kwargs: (str(target), "TinyPedal Pace Notes (*.tppn)"))
+                        lambda *args, **kwargs: (str(target), "NeoPedal Pace Notes (*.tppn)"))
     notes_editor.saving()
     assert env.warnings and notes_editor.is_modified()
     monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
-                        lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "TinyPedal Pace Notes (*.tppn)"))
+                        lambda *args, **kwargs: (str(tmp_path / "Spa.tppn"), "NeoPedal Pace Notes (*.tppn)"))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Save))
     assert notes_editor.confirm_discard()  # saved this time
     assert (tmp_path / "Spa.tppn").exists() and not notes_editor.is_modified()
 
 
 def test_notes_metadata_edit_marks_modified(notes_editor):
-    from tinypedal.ui.track_notes_editor import MetaDataEditor
+    from neopedal.ui.track_notes_editor import MetaDataEditor
 
     notes_editor.create_pacenotes()
     assert not notes_editor.is_modified()
@@ -162,7 +162,7 @@ def test_notes_show_map_button_translated(notes_editor, french):
 def map_view(env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.track_map_widget import MapView
+    from neopedal.ui.track_map_widget import MapView
 
     parent = QWidget()
     view = MapView(parent)
@@ -214,7 +214,7 @@ def test_map_menu_and_info_translated(map_view, french, monkeypatch):
 # --- Heatmap editor (item 12)
 @pytest.fixture
 def heatmap_editor(env):
-    from tinypedal.ui.heatmap_editor import HeatmapEditor
+    from neopedal.ui.heatmap_editor import HeatmapEditor
 
     editor = HeatmapEditor(None)
     yield editor
@@ -226,7 +226,7 @@ def combo_texts(combo) -> list[str]:
 
 
 def create_preset(editor, name: str, mode: str = ""):
-    from tinypedal.ui.heatmap_editor import CreateHeatmapPreset
+    from neopedal.ui.heatmap_editor import CreateHeatmapPreset
 
     dialog = CreateHeatmapPreset(editor, "test", mode)
     dialog.preset_entry.setText(name)
@@ -243,7 +243,7 @@ def test_heatmap_switch_preset_not_modified(heatmap_editor):
 
 
 def test_heatmap_new_name_checked_against_unsaved_presets(heatmap_editor, env):
-    from tinypedal.ui._common import FloatTableItem, table_item
+    from neopedal.ui._common import FloatTableItem, table_item
 
     create_preset(heatmap_editor, "custom")
     assert heatmap_editor.selected_heatmap_key == "custom" and heatmap_editor.is_modified()
@@ -321,7 +321,7 @@ def build_editor(config_type: str):
     import importlib
 
     module_name, class_name, table_name, add_row = EDITORS[config_type]
-    module = importlib.import_module(f"tinypedal.ui.{module_name}")
+    module = importlib.import_module(f"neopedal.ui.{module_name}")
     editor = getattr(module, class_name)(None)
     return editor, getattr(editor, table_name), add_row
 
@@ -385,7 +385,7 @@ def test_brand_import_refused_with_duplicate_names(env):
 # --- Vehicle brand Rest API import (item 28)
 @pytest.fixture
 def brand_editor(env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     monkeypatch.setattr(vehicle_brand_editor, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.user, "brands", {"Ferrari 296 #51": "Ferrari"}, raising=False)
@@ -397,7 +397,7 @@ def brand_editor(env, monkeypatch):
 
 
 def test_brand_restapi_import_in_background(brand_editor, env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     answer = threading.Event()
     requested = []
@@ -421,7 +421,7 @@ def test_brand_restapi_import_in_background(brand_editor, env, monkeypatch):
 
 
 def test_brand_restapi_unreachable_warns(brand_editor, env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     def refused(*args):
         raise OSError("refused")
@@ -435,7 +435,7 @@ def test_brand_restapi_unreachable_warns(brand_editor, env, monkeypatch):
 
 
 def test_brand_restapi_invalid_answer_warns(brand_editor, env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     monkeypatch.setattr(vehicle_brand_editor, "request_vehicle_data", lambda *args: [{"other": 1}])
     brand_editor.import_from_rf2()
@@ -444,7 +444,7 @@ def test_brand_restapi_invalid_answer_warns(brand_editor, env, monkeypatch):
 
 
 def test_brand_restapi_answer_after_editor_closed(env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     answer = threading.Event()
     answered = threading.Event()
@@ -477,9 +477,9 @@ def test_brand_restapi_answer_after_editor_closed(env, monkeypatch):
 def test_table_headers_translated(module_name, class_name, table_name, header_name, env, french):
     import importlib
 
-    from tinypedal.i18n.fr import TRANSLATION
+    from neopedal.i18n.fr import TRANSLATION
 
-    module = importlib.import_module(f"tinypedal.ui.{module_name}")
+    module = importlib.import_module(f"neopedal.ui.{module_name}")
     editor = getattr(module, class_name)(None)
     try:
         table = getattr(editor, table_name)
@@ -491,7 +491,7 @@ def test_table_headers_translated(module_name, class_name, table_name, header_na
 
 
 def test_batch_replace_with_translated_column(env, french):
-    from tinypedal.ui.tyre_compound_editor import TyreCompoundEditor
+    from neopedal.ui.tyre_compound_editor import TyreCompoundEditor
 
     editor = TyreCompoundEditor(None)
     try:
@@ -509,7 +509,7 @@ def test_batch_replace_with_translated_column(env, french):
 
 
 def test_heatmap_dialog_titles_translated(heatmap_editor, french):
-    from tinypedal.ui.heatmap_editor import CreateHeatmapPreset
+    from neopedal.ui.heatmap_editor import CreateHeatmapPreset
 
     heatmap_editor.open_create_dialog()
     heatmap_editor.open_copy_dialog()

@@ -11,9 +11,9 @@ import urllib.request
 
 import pytest
 
-from tinypedal.setting import cfg
-from tinypedal.userfile import tls_cert
-from tinypedal.web_dashboard import (
+from neopedal.setting import cfg
+from neopedal.userfile import tls_cert
+from neopedal.web_dashboard import (
     FAILURE_WINDOW_SECONDS,
     MAX_SESSIONS,
     DashboardHandler,
@@ -110,15 +110,15 @@ def test_telemetry_error_logged_as_warning_once(dashboard, monkeypatch, caplog):
     """Snapshot error answered, logged as warning (default log level shows it) then debug while repeated"""
     import logging
 
-    from tinypedal import web_dashboard
-    from tinypedal.log_handler import ErrorThrottle
+    from neopedal import web_dashboard
+    from neopedal.log_handler import ErrorThrottle
 
     def broken():
         raise KeyError("speed")
 
     monkeypatch.setattr(web_dashboard, "telemetry_snapshot", broken)
     monkeypatch.setattr(web_dashboard, "snapshot_errors", ErrorThrottle())
-    with caplog.at_level(logging.DEBUG, logger="tinypedal.web_dashboard"):
+    with caplog.at_level(logging.DEBUG, logger="neopedal.web_dashboard"):
         for _ in range(3):
             status, body = get("/api/telemetry", {"X-Access-Code": "TESTCODE"})
             assert status == 200 and json.loads(body) == {"active": False}
@@ -130,12 +130,12 @@ def test_telemetry_error_logged_as_warning_once(dashboard, monkeypatch, caplog):
 def test_handler_error_logged_unlike_dropped_client(monkeypatch, caplog):
     import logging
 
-    from tinypedal import web_dashboard
-    from tinypedal.log_handler import ErrorThrottle
+    from neopedal import web_dashboard
+    from neopedal.log_handler import ErrorThrottle
 
     monkeypatch.setattr(web_dashboard, "request_errors", ErrorThrottle())
     server = web_dashboard.DashboardServer.__new__(web_dashboard.DashboardServer)
-    with caplog.at_level(logging.DEBUG, logger="tinypedal.web_dashboard"):
+    with caplog.at_level(logging.DEBUG, logger="neopedal.web_dashboard"):
         try:
             raise ConnectionResetError
         except OSError:
@@ -199,7 +199,7 @@ def test_login_body_size_bounded(dashboard, length):
 
 
 def test_session_expires_when_unused(dashboard):
-    from tinypedal.web_dashboard import SESSION_IDLE_SECONDS, SESSION_MAX_SECONDS
+    from neopedal.web_dashboard import SESSION_IDLE_SECONDS, SESSION_MAX_SECONDS
 
     opener = browser()
     get("/?code=TESTCODE", opener=opener)
@@ -298,7 +298,7 @@ def test_certificate_mismatching_key_made_again(tmp_path):
 
 
 def test_https_error_reported_when_certificate_fails(ui_env, monkeypatch):
-    from tinypedal import web_dashboard
+    from neopedal import web_dashboard
 
     def broken(*args):
         raise OSError("disk full")
@@ -325,7 +325,7 @@ def test_idle_client_disconnected(dashboard, monkeypatch):
 
 def test_port_out_of_range_reported(ui_env):
     """OverflowError at bind reported like a busy port, never crashes app start"""
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     errors = []
     app_signal.error.connect(errors.append)
@@ -361,7 +361,7 @@ def mock_loader(monkeypatch, **kept):
     """Loader with every part mocked except the given ones"""
     from types import SimpleNamespace
 
-    from tinypedal import loader
+    from neopedal import loader
 
     calls = []
     for name in ("octrl", "mctrl", "wctrl", "kctrl", "cmdserver", "webdashboard", "streamoverlay", "api"):
@@ -392,7 +392,7 @@ def test_reload_keeps_dashboard_and_session(ui_env, monkeypatch):
     held by connections of the polling page (could not listen until next restart), and every reload
     forgot sessions (phone asked for the access code again).
     """
-    from tinypedal import web_dashboard
+    from neopedal import web_dashboard
 
     monkeypatch.setattr(web_dashboard.DashboardServer, "allow_reuse_address", False)  # as on Windows
     port = free_port()
@@ -469,7 +469,7 @@ def test_listening_tried_again_until_port_free(ui_env, monkeypatch):
     error reported once"""
     import socket
 
-    from tinypedal import app_signal, command_server
+    from neopedal import app_signal, command_server
 
     monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
     errors = []
@@ -598,7 +598,7 @@ def test_slow_login_body_closed_at_deadline(monkeypatch):
     import socket
     import threading
 
-    from tinypedal.web_dashboard import DashboardServer
+    from neopedal.web_dashboard import DashboardServer
 
     monkeypatch.setattr(DashboardHandler, "request_seconds", 0.5)
     monkeypatch.setattr(DashboardHandler, "secure", False)
@@ -628,7 +628,7 @@ def test_slow_login_body_closed_at_deadline(monkeypatch):
 
 def test_https_lan_enable_never_looks_up_addresses(ui_env, monkeypatch):
     """Reload with HTTPS & LAN access: cached LAN addresses used, never a host name lookup on GUI thread"""
-    from tinypedal import web_dashboard
+    from neopedal import web_dashboard
 
     calls = []
 
@@ -656,7 +656,7 @@ def test_https_certificate_follows_lan_addresses_without_restart(ui_env, monkeyp
     server kept (open connections stay, port never bound again)"""
     import socket
 
-    from tinypedal import app_signal, web_dashboard
+    from neopedal import app_signal, web_dashboard
 
     known = ["192.0.2.10"]
     monkeypatch.setattr(web_dashboard, "local_addresses", lambda max_age=0, wait=False: list(known))
@@ -709,7 +709,7 @@ def test_listening_signal_sees_server_running(ui_env, monkeypatch):
     """Settings card refreshed by "listening again" signal reads server running (signal sent once started)"""
     import socket
 
-    from tinypedal import app_signal, command_server
+    from neopedal import app_signal, command_server
 
     monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
     server = WebDashboard()

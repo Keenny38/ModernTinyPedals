@@ -14,8 +14,8 @@ from tests.test_lap_viewer_imported_reference import track  # noqa: F401
 def test_selection_changed_while_preparing_compared_in_background(track, tmp_path, monkeypatch):  # noqa: F811
     """Reference changed while imported laps are compared in background: new selection compared in background
     too (before: comparisons of former selection taken as done, new ones measured on GUI thread)"""
-    import tinypedal.ui.quick.trace_data as trace_data
-    from tinypedal.ui import lap_viewer
+    import neopedal.ui.quick.trace_data as trace_data
+    from neopedal.ui import lap_viewer
 
     backend, _ = track
     imported = [write_lap(str(tmp_path / "logs"), make_lap(7 + number, shift=40.0 * (number + 1)))
@@ -52,7 +52,7 @@ def recorded_plane(lap, start: float = 0.0, track_length: float = 3000.0, hills:
     0: flat circuit, start: track distance at lap distance zero)"""
     import math
 
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.userfile.telemetry_lap import LapData
 
     columns = dict(lap.columns)  # map plane in pos_x & pos_y already (see telemetry_sim.circuit_lap)
     columns["pos_z"] = [12.0 + hills * (20.0 * math.sin(math.tau * (distance + start) / track_length)
@@ -64,7 +64,7 @@ def recorded_plane(lap, start: float = 0.0, track_length: float = 3000.0, hills:
 def test_imported_offset_from_map_plane_positions():
     """Imported lap whose distance zero is 150 m away from the line, flat circuit: offset found from positions on
     the map plane (before: elevation taken as a map axis, no offset found without speed trace)"""
-    from tinypedal.userfile.lap_offset import lap_offset
+    from neopedal.userfile.lap_offset import lap_offset
 
     reference = make_lap(1, recorded=True)
     imported = make_lap(2, shift=150.0, pace=1.01)
@@ -77,8 +77,8 @@ def test_imported_offset_from_map_plane_positions():
 def test_same_circuit_shape_on_map_plane():
     """Lap of the same circuit with logger coordinates turned & moved on the map plane: same circuit (before:
     elevation taken as a map axis, refused as another circuit); lap of another circuit still refused"""
+    from neopedal.userfile.circuit_match import same_shape
     from tests.test_lap_viewer_circuit_shape import OTHER
-    from tinypedal.userfile.circuit_match import same_shape
 
     reference = recorded_plane(make_lap(1, recorded=True))
     same = recorded_plane(make_lap(2, turn=1.3, shift=0.0))
@@ -93,8 +93,8 @@ def test_map_line_without_non_finite_positions(value):
     lap raised ValueError, laps never shown)"""
     import math
 
-    from tinypedal.ui.quick.lap_map import LineGrid
-    from tinypedal.userfile.lap_geometry import map_line
+    from neopedal.ui.quick.lap_map import LineGrid
+    from neopedal.userfile.lap_geometry import map_line
 
     lap = make_lap(2, shift=50.0)
     for index in range(500, 540):

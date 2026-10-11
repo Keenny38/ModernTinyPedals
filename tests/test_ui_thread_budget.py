@@ -10,12 +10,12 @@ import time
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord, record_line
 from tests.test_driver_stats_viewer import backend, dialogs, settle, window  # noqa: F401  (fixtures)
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_e2 import START, write_lap
-from tinypedal.setting import cfg
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord, record_line
 
 UI_BUDGET = 0.05  # seconds a slot may hold the UI thread
 HISTORY_RECORDS = driver_history.MAX_RECORDS - 1  # one appended stays under the limit
@@ -41,7 +41,7 @@ def big_history():
 
 
 def test_driver_stats_reload_within_budget(window, big_history):  # noqa: F811
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
 
     start = time.perf_counter()
     page = DriverStatsBackend(window)
@@ -64,7 +64,7 @@ def long_laps(ui_env):
     """Lap viewer with 4 long laps checked & loaded"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     folder = cfg.path.telemetry.rstrip("/")
     for number in range(1, 5):
@@ -100,7 +100,7 @@ def test_lap_viewer_settings_within_budget(long_laps):
 
 def test_overlay_preview_within_budget(ui_env, bundled_fonts):
     """Overlay picture of a lap history widget at max zoom: drawn within budget, same inputs reused at once"""
-    from tinypedal.ui import widget_preview
+    from neopedal.ui import widget_preview
 
     widget_preview.CACHE.clear()
     try:
@@ -113,8 +113,8 @@ def test_overlay_preview_within_budget(ui_env, bundled_fonts):
 
 def test_overlays_page_refresh_while_hidden_within_budget(ui_env, bundled_fonts):
     """Hotkey, tray toggle or config save while the Overlays page is built but hidden: rows only"""
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui.quick.overlay_backend import OverlayBackend
+    from neopedal.module_control import wctrl
+    from neopedal.ui.quick.overlay_backend import OverlayBackend
 
     page = OverlayBackend(None, wctrl, lambda name: None, lambda text: False)
     try:

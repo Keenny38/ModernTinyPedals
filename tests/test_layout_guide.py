@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QRect
 
-from tinypedal.widget._layout_guide import alignment_lines
+from neopedal.widget._layout_guide import alignment_lines
 
 SCREEN = QRect(0, 0, 1920, 1080)
 

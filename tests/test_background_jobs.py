@@ -9,8 +9,8 @@ from functools import partial
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QObject
 
-from tinypedal.ui.quick import background
-from tinypedal.ui.quick.background import MAX_WORKERS, WORKER_NAME, BackgroundJobs, JobCancelled, JobToken
+from neopedal.ui.quick import background
+from neopedal.ui.quick.background import MAX_WORKERS, WORKER_NAME, BackgroundJobs, JobCancelled, JobToken
 
 
 @pytest.fixture(autouse=True)

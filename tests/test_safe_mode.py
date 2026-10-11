@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from tinypedal import loader, main, plugin_loader, safe_mode
-from tinypedal.setting import cfg
+from neopedal import loader, main, plugin_loader, safe_mode
+from neopedal.setting import cfg
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +108,7 @@ def test_flag_starts_safe_mode_without_question(ask, caplog):
 
 
 def test_question_translated(ui_env, monkeypatch):
-    from tinypedal.i18n import set_language
+    from neopedal.i18n import set_language
 
     shown = []
     monkeypatch.setattr(main.QMessageBox, "question", staticmethod(
@@ -155,11 +155,11 @@ def test_plugin_code_not_run_in_safe_mode(tmp_path, monkeypatch, normal_mode):
     monkeypatch.setattr(plugin_loader, "trust_filename", lambda: str(tmp_path / "trust.json"))
     plugin_loader.trust_plugin("plugin_sneaky", str(tmp_path))
     normal_mode.enable("flag")
-    module = plugin_loader.load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    module = plugin_loader.load_plugin_widget("neopedal.widget", "plugin_sneaky", str(tmp_path))
     assert not marker.exists() and module.Realtime.__doc__ == "Plugin error"
     assert plugin_loader.PLUGIN_ERRORS["plugin_sneaky"] == plugin_loader.SAFE_MODE_ERROR
     normal_mode.enabled = False
-    plugin_loader.load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    plugin_loader.load_plugin_widget("neopedal.widget", "plugin_sneaky", str(tmp_path))
     assert marker.exists() and "plugin_sneaky" not in plugin_loader.PLUGIN_ERRORS
 
 
@@ -183,7 +183,7 @@ def controls(ui_env, monkeypatch):
     monkeypatch.setattr(loader, "sync_screen_layout", lambda: None)
     monkeypatch.setattr(loader.signal, "signal", lambda *args: None)
     monkeypatch.setattr(loader, "freeze_collected", lambda: None)  # test process never left frozen
-    from tinypedal.ui import app
+    from neopedal.ui import app
 
     monkeypatch.setattr(app, "AppWindow", lambda: calls.append("window") or None)
     from PySide6.QtCore import QTimer
@@ -231,7 +231,7 @@ def test_restart_starts_normally(monkeypatch):
 def test_safe_mode_notice_restarts_normally(ui_env, monkeypatch):
     from PySide6.QtWidgets import QMainWindow, QMessageBox
 
-    from tinypedal.i18n import tr
+    from neopedal.i18n import tr
 
     window = QMainWindow()
     window.setWindowTitle("NeoPedal")

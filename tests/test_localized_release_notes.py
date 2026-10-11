@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from tinypedal import update
-from tinypedal.ui import home_view
+from neopedal import update
+from neopedal.ui import home_view
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

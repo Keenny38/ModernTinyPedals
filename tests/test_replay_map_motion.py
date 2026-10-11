@@ -3,9 +3,9 @@
 import pytest
 from PySide6.QtCore import QCoreApplication
 
+from neopedal.process.game_info import Standing
+from neopedal.ui.quick.track_path import TrackPath
 from tests.test_game_info import GAME_ANSWERS, answered, replays_page  # noqa: F401
-from tinypedal.process.game_info import Standing
-from tinypedal.ui.quick.track_path import TrackPath
 
 
 def loop() -> TrackPath:

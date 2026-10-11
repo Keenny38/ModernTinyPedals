@@ -5,11 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.telemetry_sim import LapSim, fake_reader
-from tests.test_race_calculator import host, live_race, page, set_race  # noqa: F401 (host, page: fixtures)
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.fuel_strategy import (
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.fuel_strategy import (
     PitStop,
     RaceState,
     Strategy,
@@ -21,8 +19,10 @@ from tinypedal.fuel_strategy import (
     tyre_life,
     tyre_stint_limit,
 )
-from tinypedal.module import module_fuel
-from tinypedal.module_info import DeltaInfo, FuelInfo, VehiclesInfo, minfo
+from neopedal.module import module_fuel
+from neopedal.module_info import DeltaInfo, FuelInfo, VehiclesInfo, minfo
+from tests.telemetry_sim import LapSim, fake_reader
+from tests.test_race_calculator import host, live_race, page, set_race  # noqa: F401 (host, page: fixtures)
 
 
 # --- Consumption estimate: median of green flag laps
@@ -133,7 +133,7 @@ def test_green_flag_median_needs_minimum_laps():
 
 
 def test_fuel_module_options(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     options = cfg.default.setting["module_fuel"]
     assert options["enable_green_flag_consumption"] is False  # last valid lap by default
@@ -182,7 +182,7 @@ def test_fuel_laps_left_count_leader_finishing_first(time_race, tmp_path):
 
 def test_fuel_time_race_without_known_laptime(time_race, tmp_path):
     """No lap time known (pace MAX_SECONDS from reference lap time): no laps left or minutes"""
-    from tinypedal.const_common import MAX_SECONDS
+    from neopedal.const_common import MAX_SECONDS
 
     minfo.delta.lapTimePace = MAX_SECONDS
     output = FuelInfo()
@@ -196,8 +196,8 @@ def test_fuel_time_race_without_known_laptime(time_race, tmp_path):
 
 
 def test_vehicles_module_leader_part_of_offset(ui_env, monkeypatch):
-    from tinypedal.module.module_vehicles import update_finish_time
-    from tinypedal.module_info import VehicleDataSet
+    from neopedal.module.module_vehicles import update_finish_time
+    from neopedal.module_info import VehicleDataSet
 
     output = VehiclesInfo()
     output.dataSet = [VehicleDataSet() for _ in range(2)]
@@ -224,7 +224,7 @@ def session_id(now: float, laps: int = 0) -> tuple[int, int, int]:
 
 
 def test_stop_counter_records_drivers():
-    from tinypedal.race_live import StopCounter
+    from neopedal.race_live import StopCounter
 
     counter = StopCounter()
     counter.update(session_id(0), False, 50, 40, 0, 90, 0, now=0, driver="Alice")
@@ -245,7 +245,7 @@ def test_stop_counter_records_drivers():
 
 
 def test_stint_drivers_with_stops_before_counting():
-    from tinypedal.race_live import StopCounter
+    from neopedal.race_live import StopCounter
 
     counter = StopCounter()
     counter.update(session_id(0, 10), False, 50, 40, 0, 90, 2, now=0, driver="Eve")  # opened after 2 stops
@@ -253,7 +253,7 @@ def test_stint_drivers_with_stops_before_counting():
 
 
 def test_race_state_carries_stint_drivers(ui_env, monkeypatch):
-    from tinypedal.race_live import StopCounter, read_race_state
+    from neopedal.race_live import StopCounter, read_race_state
 
     live_race(monkeypatch, laps_done=12, stops=0)
     monkeypatch.setattr(api.read.vehicle, "driver_name", lambda index=None: "Alice", raising=False)
@@ -263,7 +263,7 @@ def test_race_state_carries_stint_drivers(ui_env, monkeypatch):
 
 
 def test_plan_against_race_shows_drivers(page, monkeypatch):  # noqa: F811
-    from tinypedal.module_info import StintDataSet
+    from neopedal.module_info import StintDataSet
 
     backend = page.backend
     live_race(monkeypatch, laps_done=20, stops=1)
@@ -361,7 +361,7 @@ def test_tyre_life_in_plan_input_of_race_plan_widget(page, tmp_path):  # noqa: F
     """Race plan widget plans again from the plan input kept by the race calculator"""
     import json
 
-    from tinypedal.widget.race_plan import load_plan_input
+    from neopedal.widget.race_plan import load_plan_input
 
     backend = page.backend
     set_race(backend, laps=60, tank=100.0, laptime=100.0)
@@ -373,8 +373,8 @@ def test_tyre_life_in_plan_input_of_race_plan_widget(page, tmp_path):  # noqa: F
 
 
 def test_tyre_life_inputs_in_page(page):  # noqa: F811
-    from tinypedal.ui.quick.race_model import checked_inputs, ranged_inputs
-    from tinypedal.ui.quick.race_results import PLAN_COLUMNS
+    from neopedal.ui.quick.race_model import checked_inputs, ranged_inputs
+    from neopedal.ui.quick.race_results import PLAN_COLUMNS
 
     backend = page.backend
     set_race(backend, laps=60, tank=100.0, laptime=100.0)

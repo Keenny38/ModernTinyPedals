@@ -7,11 +7,11 @@ import os
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile.reference_trace import ReferenceLoader, load_trace, reference_file, stop_loading
+from neopedal.userfile.telemetry_lap import VIEWER_SETTING, lap_files, lap_folder_name, viewer_reference_name
+from neopedal.widget.telemetry_compare import JUMP_AHEAD, TILE_WIDTH, LiveTrail, channel_ranges, reference_line
 from tests.test_race_aid_widgets import grab, is_blank, make, set_reader
-from tinypedal.setting import cfg
-from tinypedal.userfile.reference_trace import ReferenceLoader, load_trace, reference_file, stop_loading
-from tinypedal.userfile.telemetry_lap import VIEWER_SETTING, lap_files, lap_folder_name, viewer_reference_name
-from tinypedal.widget.telemetry_compare import JUMP_AHEAD, TILE_WIDTH, LiveTrail, channel_ranges, reference_line
 
 TRACK = "Track - Class"
 LENGTH = 1000.0
@@ -309,7 +309,7 @@ def test_widget_without_reference_lap(ui_env, bundled_fonts, monkeypatch, modern
 
 
 def test_modern_options_hide_classic_colors(ui_env):
-    from tinypedal.widget._modern import design_option_keys
+    from neopedal.widget._modern import design_option_keys
 
     keys = list(cfg.user.setting["telemetry_compare"])
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"

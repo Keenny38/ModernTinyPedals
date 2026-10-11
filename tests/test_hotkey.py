@@ -4,8 +4,8 @@ import sys
 
 import pytest
 
-from tinypedal.hotkey import command
-from tinypedal.hotkey.common import (
+from neopedal.hotkey import command
+from neopedal.hotkey.common import (
     format_hotkey_name,
     load_hotkey,
     modifier_priority,
@@ -82,7 +82,7 @@ def commands(ui_env, monkeypatch):
 
 
 def test_overlay_toggles(commands):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     locked = cfg.overlay["fixed_position"]
     command.hotkey_overlay_lock()
@@ -96,7 +96,7 @@ def test_overlay_toggles(commands):
 
 
 def test_overlay_visibility(commands, monkeypatch):
-    from tinypedal import realtime_state
+    from neopedal import realtime_state
 
     monkeypatch.setattr(realtime_state, "hidden", False)
     command.hotkey_overlay_visibility()
@@ -110,8 +110,8 @@ def test_overlay_visibility(commands, monkeypatch):
     (1, -1, 4),  # leader: to last place
 ])
 def test_spectate_driver_cycles_by_place(commands, monkeypatch, current, step, expected):
-    from tinypedal.api_control import api
-    from tinypedal.setting import cfg
+    from neopedal.api_control import api
+    from neopedal.setting import cfg
 
     places = (3, 1, 4, 2)  # place of vehicle index 0..3
     slots = (17, 4, 9, 30)  # slot id of vehicle index 0..3, saved as spectated driver
@@ -128,7 +128,7 @@ def test_spectate_driver_cycles_by_place(commands, monkeypatch, current, step, e
 
 
 def test_spectate_driver_needs_spectate_mode(commands, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     monkeypatch.setitem(cfg.api, "enable_player_index_override", False)
     command.hotkey_spectate_next_driver()
@@ -140,8 +140,8 @@ def test_spectate_driver_needs_spectate_mode(commands, monkeypatch):
 
 
 def test_cycle_deltabest_source(commands):
-    from tinypedal.regex_pattern import CFG_DELTABEST_SOURCE, CHOICE_COMMON
-    from tinypedal.setting import cfg
+    from neopedal.regex_pattern import CFG_DELTABEST_SOURCE, CHOICE_COMMON
+    from neopedal.setting import cfg
 
     sources = CHOICE_COMMON[CFG_DELTABEST_SOURCE]
     options = cfg.user.setting["deltabest"]
@@ -155,7 +155,7 @@ def test_cycle_deltabest_source(commands):
 
 
 def test_load_next_and_previous_preset(commands, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     loaded = []
     monkeypatch.setattr(type(cfg), "preset_files", lambda self, **kwargs: ["a", "b", "c"])
@@ -168,7 +168,7 @@ def test_load_next_and_previous_preset(commands, monkeypatch):
 
 
 def test_load_shortcut_preset(commands, monkeypatch, tmp_path):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     key = next(iter(cfg.user.shortcuts))
     loaded = []
@@ -186,7 +186,7 @@ def test_load_shortcut_preset(commands, monkeypatch, tmp_path):
 
 def test_load_shortcut_preset_rejects_reserved_name(commands, monkeypatch, tmp_path):
     """brands.json (style file) never loaded as a preset, then saved over"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     key = next(iter(cfg.user.shortcuts))
     loaded = []
@@ -199,7 +199,7 @@ def test_load_shortcut_preset_rejects_reserved_name(commands, monkeypatch, tmp_p
 
 
 def test_pace_notes_playback_and_quit(commands):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     enabled = cfg.user.setting["pace_notes_playback"]["enable"]
     command.hotkey_pace_notes_playback()
@@ -230,8 +230,8 @@ def run_hotkeys(monkeypatch, key_states: list[set[int]], binds: dict[str, str]) 
     """Poll key states (one set of pressed keys per check), returns commands run"""
     from types import SimpleNamespace
 
-    from tinypedal import hotkey_control
-    from tinypedal.setting import cfg
+    from neopedal import hotkey_control
+    from neopedal.setting import cfg
 
     for name, bind in binds.items():
         monkeypatch.setitem(cfg.user.shortcuts, name, {"bind": bind})
@@ -264,7 +264,7 @@ WINDOWS_KEYS = pytest.mark.skipif(sys.platform != "win32", reason="global hotkey
 
 @WINDOWS_KEYS
 def test_hotkey_runs_once_per_key_press(ui_env, monkeypatch):
-    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+    from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
     ctrl, key_a = KEYMAP_MODIFIER["ctrl"], KEYMAP_GENERAL["a"]
     states = [set(), {ctrl}, {ctrl, key_a}, {ctrl, key_a}, {ctrl, key_a}, set(), {ctrl, key_a}]
@@ -273,7 +273,7 @@ def test_hotkey_runs_once_per_key_press(ui_env, monkeypatch):
 
 @WINDOWS_KEYS
 def test_hotkey_not_repeated_when_longer_combo_released(ui_env, monkeypatch):
-    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+    from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
     ctrl, shift, key_a = KEYMAP_MODIFIER["ctrl"], KEYMAP_MODIFIER["shift"], KEYMAP_GENERAL["a"]
     states = [{ctrl, key_a}, {ctrl, shift, key_a}, {ctrl, key_a}, {ctrl, key_a}]
@@ -283,7 +283,7 @@ def test_hotkey_not_repeated_when_longer_combo_released(ui_env, monkeypatch):
 
 @WINDOWS_KEYS
 def test_hotkey_with_modifiers_in_any_order(ui_env, monkeypatch):
-    from tinypedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
+    from neopedal.hotkey.keymap import KEYMAP_GENERAL, KEYMAP_MODIFIER
 
     ctrl, shift, key_f1 = KEYMAP_MODIFIER["ctrl"], KEYMAP_MODIFIER["shift"], KEYMAP_GENERAL["f1"]
     states = [set(), {ctrl, shift, key_f1}]
@@ -297,8 +297,8 @@ def test_hotkey_control_stops_without_commands(ui_env, monkeypatch):
 def test_hotkey_control_enable_disable(ui_env, monkeypatch, caplog):
     import threading
 
-    from tinypedal import hotkey_control, thread_guard
-    from tinypedal.setting import cfg
+    from neopedal import hotkey_control, thread_guard
+    from neopedal.setting import cfg
 
     control = hotkey_control.HotkeyControl()
     monkeypatch.setitem(cfg.application, "enable_global_hotkey", False)
@@ -325,8 +325,8 @@ def test_hotkey_control_old_thread_never_marks_new_stopped(ui_env, monkeypatch):
     """A thread stopping late (after reload started its replacement) never lets a third thread start"""
     import threading
 
-    from tinypedal import hotkey_control, thread_guard
-    from tinypedal.setting import cfg
+    from neopedal import hotkey_control, thread_guard
+    from neopedal.setting import cfg
 
     monkeypatch.setitem(cfg.application, "enable_global_hotkey", True)
     monkeypatch.setattr(thread_guard, "STOP_TIMEOUT", 0.05)
@@ -361,8 +361,8 @@ def test_hotkey_held_across_restart_not_run_again(ui_env, monkeypatch):
     so a held "load next preset" key never cycles presets on every reload"""
     from types import SimpleNamespace
 
-    from tinypedal import hotkey_control
-    from tinypedal.setting import cfg
+    from neopedal import hotkey_control
+    from neopedal.setting import cfg
 
     key = 65
     monkeypatch.setitem(cfg.user.shortcuts, "overlay_lock", {"bind": "held"})
@@ -408,7 +408,7 @@ def test_show_main_window(monkeypatch):
 def test_main_window_brought_to_front(ui_env, monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     calls = []
     window = SimpleNamespace(show_app=lambda: calls.append("show"), raise_=lambda: calls.append("raise"))
@@ -419,6 +419,6 @@ def test_main_window_brought_to_front(ui_env, monkeypatch):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows foreground lock only")
 def test_force_foreground_no_op_off_windows():
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     app_module.force_foreground(None)  # never reads window

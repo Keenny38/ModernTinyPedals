@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.setting import cfg
 
 
 def flush():
@@ -55,7 +55,7 @@ class Control:
     """Overlay control: every overlay, none running"""
 
     def __init__(self):
-        from tinypedal.template.setting_widget import WIDGET_DEFAULT
+        from neopedal.template.setting_widget import WIDGET_DEFAULT
 
         self.names = list(WIDGET_DEFAULT)
         self.reloaded: list[str] = []
@@ -66,7 +66,7 @@ class Control:
 
 @pytest.fixture
 def options(ui_env):
-    from tinypedal.ui.quick.overlay_options_backend import OverlayOptionsBackend
+    from neopedal.ui.quick.overlay_options_backend import OverlayOptionsBackend
 
     host = Host()
     backend = OverlayOptionsBackend(None, host, Control())
@@ -97,9 +97,9 @@ def set_classic(name: str, classic: bool = True):
 
 # Sections
 def test_sections_of_every_overlay_hold_every_shown_option_once(ui_env):
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
-    from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.widget._modern import design_option_keys
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+    from neopedal.widget._modern import design_option_keys
 
     for classic in (False, True):
         for name in WIDGET_DEFAULT:
@@ -113,8 +113,8 @@ def test_sections_of_every_overlay_hold_every_shown_option_once(ui_env):
 
 
 def test_item_sections_follow_their_on_off_option(ui_env):
-    from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.ui.quick.overlay_sections import SECTION_FONT, SECTION_GENERAL, SECTION_LAYOUT, SECTION_ORDER
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+    from neopedal.ui.quick.overlay_sections import SECTION_FONT, SECTION_GENERAL, SECTION_LAYOUT, SECTION_ORDER
 
     set_classic("relative")
     layout = build_layout("relative", cfg.user.setting["relative"])
@@ -133,8 +133,8 @@ def test_item_sections_follow_their_on_off_option(ui_env):
 
 
 def test_modern_design_sections(ui_env):
-    from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.ui.quick.overlay_sections import SECTION_SHOWN
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+    from neopedal.ui.quick.overlay_sections import SECTION_SHOWN
 
     set_classic("standings")
     layout = build_layout("standings", cfg.user.setting["standings"])
@@ -254,7 +254,7 @@ def test_search_this_overlay_and_every_overlay(options):
 
 
 def test_search_every_overlay_is_capped(options):
-    from tinypedal.ui.quick.overlay_options_backend import MAX_ROWS
+    from neopedal.ui.quick.overlay_options_backend import MAX_ROWS
 
     for name in options._names:
         set_classic(name)  # every color option shown
@@ -358,8 +358,8 @@ def test_black_box_tools(options):
 
 
 def test_black_box_sections_order_list_and_dependency_chain(options):
-    from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.ui.quick.overlay_sections import SECTION_GENERAL, SECTION_ORDER
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+    from neopedal.ui.quick.overlay_sections import SECTION_GENERAL, SECTION_ORDER
 
     layout = build_layout("black_box", cfg.user.setting["black_box"])
     assert layout.sections[0].key == SECTION_GENERAL and "visibility_context" in layout.sections[0].keys
@@ -378,8 +378,8 @@ def test_black_box_sections_order_list_and_dependency_chain(options):
 
 
 def test_listed_sections():
-    from tinypedal.template.widget.black_box_ui import ORDER_LIST
-    from tinypedal.ui.quick.overlay_sections import SECTION_OPTIONS, SECTION_ORDER, listed_sections, order_keys
+    from neopedal.template.widget.black_box_ui import ORDER_LIST
+    from neopedal.ui.quick.overlay_sections import SECTION_OPTIONS, SECTION_ORDER, listed_sections, order_keys
 
     keys = ["enable", "font_size", "show_a", "column_a", "column_b", "display_order_a", "display_order_b", "other"]
     layout = (("Size", ("font_size", "missing")), ("Items", (ORDER_LIST,)), ("A", ("show_a",)))
@@ -397,9 +397,9 @@ def test_listed_sections():
 def test_driver_list_sections_and_column_list(options):
     """Modern relative, standings & rivals: sections in page order, columns switched & moved in one list,
     listed as the overlay shows them"""
-    from tinypedal.template.widget.drivers_ui import RELATIVE_COLUMNS, STANDINGS_COLUMNS, order_option
-    from tinypedal.ui.quick.overlay_options_backend import build_layout
-    from tinypedal.ui.quick.overlay_sections import SECTION_ORDER
+    from neopedal.template.widget.drivers_ui import RELATIVE_COLUMNS, STANDINGS_COLUMNS, order_option
+    from neopedal.ui.quick.overlay_options_backend import build_layout
+    from neopedal.ui.quick.overlay_sections import SECTION_ORDER
 
     set_classic("standings", False)
     layout = build_layout("standings", cfg.user.setting["standings"])
@@ -440,7 +440,7 @@ def test_driver_list_sections_and_column_list(options):
 
 def test_class_order_edited_as_order_list(options):
     """Class order (text option) shown as an order list: classes of option then known classes, moved & reset"""
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
 
     cfg.user.classes = {"Hypercar": {}, "LMP2": {}, "GT3": {}, "Formula Pro": {}}
     options.selectOverlay("standings")
@@ -463,8 +463,8 @@ def test_class_order_edited_as_order_list(options):
 
 
 def test_driver_list_preview_shows_sample_race(ui_env, bundled_fonts):
-    from tinypedal.ui.widget_preview import render_widget
-    from tinypedal.widget._modern.sample_field import FIELD, PLAYER, sample_field, sample_standings
+    from neopedal.ui.widget_preview import render_widget
+    from neopedal.widget._modern.sample_field import FIELD, PLAYER, sample_field, sample_standings
 
     field = sample_field()
     setting = dict(cfg.user.setting["standings"])
@@ -530,8 +530,8 @@ def test_preview_renders_unsaved_values(options):
 
 def test_preview_drawn_again_only_when_inputs_change(options, monkeypatch):
     """Page shown again, refreshed, edit undone: picture kept; zoomed picture released while hidden"""
-    from tinypedal.ui.quick import overlay_options_backend
-    from tinypedal.ui.quick.preview_provider import STORE, key_of
+    from neopedal.ui.quick import overlay_options_backend
+    from neopedal.ui.quick.preview_provider import STORE, key_of
 
     drawn = []
     real = overlay_options_backend.render_overlay
@@ -594,7 +594,7 @@ def test_customized_counts_warm_in_background(options):
 # Page in app
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -617,13 +617,13 @@ def window(ui_env, monkeypatch):
 
 
 def option_pages(window):
-    from tinypedal.ui.overlay_options import OverlayOptions
+    from neopedal.ui.overlay_options import OverlayOptions
 
     return [page for page in window.centralWidget().dialog_pages() if isinstance(page.dialog, OverlayOptions)]
 
 
 def test_one_page_for_every_overlay(window):
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     first = open_overlay_options(window, "speedometer")
     assert first is not None and first.backend.overlay == "speedometer"
@@ -636,8 +636,8 @@ def test_one_page_for_every_overlay(window):
 
 def test_open_page_shown_without_building_another(window, monkeypatch):
     """Page open: shown & overlay selected, no second page built (QML view, every option read) to find it"""
-    from tinypedal.ui import overlay_options
-    from tinypedal.ui.overlay_options import OverlayOptions, open_overlay_options
+    from neopedal.ui import overlay_options
+    from neopedal.ui.overlay_options import OverlayOptions, open_overlay_options
 
     first = open_overlay_options(window, "speedometer")
     assert first is not None
@@ -660,8 +660,8 @@ def test_open_page_shown_without_building_another(window, monkeypatch):
 
 
 def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
-    from tinypedal.ui import overlay_options
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui import overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     restarts = []
     monkeypatch.setattr(overlay_options, "run_after_saving", lambda callback: restarts.append(callback))
@@ -685,7 +685,7 @@ def test_page_closed_again_while_asking_to_save(window, monkeypatch):
     """Close event delivered again during save question (nested event loop): no error"""
     from PySide6.QtGui import QCloseEvent
 
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     page = open_overlay_options(window, "speedometer")
     page.backend.setNumber("speedometer/opacity", 0.7)
@@ -707,7 +707,7 @@ def test_page_closed_again_while_asking_to_save(window, monkeypatch):
 
 
 def test_page_kept_open_when_preset_loads_unless_edited(window):
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.overlay_options import open_overlay_options
 
     page = open_overlay_options(window, "speedometer")
     assert page not in window.config_dialogs(preset_only=True)  # refreshed, not closed by preset loading
@@ -716,8 +716,8 @@ def test_page_kept_open_when_preset_loads_unless_edited(window):
 
 
 def test_page_rebuilt_in_new_language(window):
-    from tinypedal import i18n
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal import i18n
+    from neopedal.ui.overlay_options import open_overlay_options
 
     page = open_overlay_options(window, "speedometer")
     page.backend.setNumber("speedometer/opacity", 0.5)
@@ -734,9 +734,9 @@ def test_page_rebuilt_in_new_language(window):
 
 
 def test_overlay_entries_open_the_page(window, monkeypatch):
-    from tinypedal.ui.overlay_options import OverlayOptions
-    from tinypedal.ui.overlay_view import OverlayView
-    from tinypedal.widget._base import config_widget
+    from neopedal.ui.overlay_options import OverlayOptions
+    from neopedal.ui.overlay_view import OverlayView
+    from neopedal.widget._base import config_widget
 
     overlays = OverlayView(window)
     overlays.open_config("fuel")
@@ -744,8 +744,8 @@ def test_overlay_entries_open_the_page(window, monkeypatch):
     assert isinstance(page, OverlayOptions) and page.backend.overlay == "fuel"
     config_widget("speedometer")  # overlay right click menu
     assert page.backend.overlay == "speedometer" and len(option_pages(window)) == 1
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui.command_palette import module_commands
+    from neopedal.module_control import wctrl
+    from neopedal.ui.command_palette import module_commands
 
     configure = next(command for command in module_commands(wctrl, "Overlays", window)
                      if command.title.startswith("Relative") and "⚙" in command.title)
@@ -761,10 +761,10 @@ def test_page_qml_bundled_modules_and_translated():
     """Release build bundles only QML_MODULES; every text of the page has a French translation"""
     import re
 
-    from tinypedal.i18n.fr import TRANSLATION
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick.overlay_sections import FIXED_TITLES
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.i18n.fr import TRANSLATION
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick.overlay_sections import FIXED_TITLES
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
@@ -779,7 +779,7 @@ def test_page_qml_bundled_modules_and_translated():
 
 
 def test_backend_texts_translated(options):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     set_classic("speedometer")
     options.refresh()
@@ -803,8 +803,8 @@ def test_decimal_typed_in_whole_number_field(window):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
 
-    from tinypedal.i18n.options import option_label
-    from tinypedal.ui.overlay_options import open_overlay_options
+    from neopedal.i18n.options import option_label
+    from neopedal.ui.overlay_options import open_overlay_options
 
     key = "speed_minimum_reset_cooldown"
     assert cfg.user.setting["speedometer"][key] == 5

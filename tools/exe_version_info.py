@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 
 
-def written_version(version_file: str = "tinypedal/version.py") -> str:
+def written_version(version_file: str = "neopedal/version.py") -> str:
     """Version written in version file by release workflow (next_version.py --write)
 
-    Not tinypedal.version.__version__: when not frozen (build script), it is the last git tag.
+    Not neopedal.version.__version__: when not frozen (build script), it is the last git tag.
     """
     with open(version_file, encoding="utf-8") as file:
         match = re.search(r'^__version__ = "([^"]+)"', file.read(), re.MULTILINE)

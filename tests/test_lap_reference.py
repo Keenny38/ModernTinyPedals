@@ -6,9 +6,9 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tinypedal.setting import cfg
-from tinypedal.userfile import lap_reference
-from tinypedal.userfile.lap_reference import (
+from neopedal.setting import cfg
+from neopedal.userfile import lap_reference
+from neopedal.userfile.lap_reference import (
     csv_url,
     match_track,
     parse_lap_references,
@@ -98,8 +98,8 @@ def test_cache(tmp_path):
 # --- Driver stats viewer (Qt Quick page, state in quick/stats_backend.py)
 @pytest.fixture
 def viewer(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.ui import driver_stats_viewer
+    from neopedal.api_control import api
+    from neopedal.ui import driver_stats_viewer
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     stats = {
@@ -171,7 +171,7 @@ def test_viewer_reference_card(viewer):
 
 
 def test_viewer_reference_off_and_download(viewer, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     viewer.setCompare(False)
     assert cfg.user.config["driver_stats_viewer"]["enable_lap_reference"] is False
@@ -189,7 +189,7 @@ def test_viewer_reference_off_and_download(viewer, monkeypatch):
 
 
 def test_viewer_download_failure_keeps_cache(viewer, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     monkeypatch.setattr(stats_backend.threading, "Thread", Now)
     viewer.updateReference()  # offline (conftest)
@@ -199,8 +199,8 @@ def test_viewer_download_failure_keeps_cache(viewer, monkeypatch):
 
 
 def test_viewer_change_sheet_url(viewer, monkeypatch):
-    from tinypedal.ui import _common
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui import _common
+    from neopedal.ui.quick import stats_backend
 
     dialogs = []
     monkeypatch.setattr(_common.TextInputDialog, "open", lambda self: dialogs.append(self))

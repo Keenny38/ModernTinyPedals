@@ -6,10 +6,10 @@ import threading
 
 import pytest
 
-from tinypedal.module import module_recorder
-from tinypedal.process.vehicle import export_wheels
-from tinypedal.userfile import atomic_write, temp_file_name, track_notes, write_text_file
-from tinypedal.validator import valid_delta_set, vehicle_position_interp
+from neopedal.module import module_recorder
+from neopedal.process.vehicle import export_wheels
+from neopedal.userfile import atomic_write, temp_file_name, track_notes, write_text_file
+from neopedal.validator import valid_delta_set, vehicle_position_interp
 
 WHEELS_NA = (-1.0, -1.0, -1.0, -1.0)
 

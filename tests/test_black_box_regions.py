@@ -10,7 +10,7 @@ from PySide6.QtCore import QEvent, QRect
 from PySide6.QtGui import QImage, QRegion
 from PySide6.QtWidgets import QApplication
 
-from tinypedal.widget._black_box.regions import WHEEL_PARTS
+from neopedal.widget._black_box.regions import WHEEL_PARTS
 
 CONFIGS = {
     "default": {},
@@ -54,9 +54,9 @@ class Game:
         }
 
     def install(self, monkeypatch):
-        from tinypedal.api_control import api
-        from tinypedal.module_info import minfo
-        from tinypedal.widget._black_box import center, panels, reader, regions, wheels
+        from neopedal.api_control import api
+        from neopedal.module_info import minfo
+        from neopedal.widget._black_box import center, panels, reader, regions, wheels
 
         for module in (wheels, center, panels, reader, regions):
             monkeypatch.setattr(module, "monotonic", lambda: 1000.0)
@@ -71,8 +71,8 @@ class Game:
 
 
 def new_widget(cfg, overrides, modern=False):
-    from tinypedal.widget import black_box
-    from tinypedal.widget._modern import black_box as modern_black_box
+    from neopedal.widget import black_box
+    from neopedal.widget._modern import black_box as modern_black_box
 
     setting = cfg.user.setting["black_box"]
     setting.update(enable_heatmap_auto_matching=False, slow_data_update_interval=0, enable_auto_resize=False,
@@ -160,7 +160,7 @@ def changes(game: Game):
 @pytest.mark.parametrize("modern", [False, True])
 @pytest.mark.parametrize("config", sorted(CONFIGS))
 def test_partial_repaint_matches_full_repaint(ui_env, bundled_fonts, monkeypatch, config, modern, translucent=True):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     monkeypatch.setitem(cfg.compatibility, "enable_translucent_background", translucent)
     game = Game()
@@ -195,7 +195,7 @@ def test_partial_repaint_matches_full_repaint(ui_env, bundled_fonts, monkeypatch
 
 
 def test_unchanged_parts_skipped(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     game = Game()
     game.install(monkeypatch)
@@ -231,7 +231,7 @@ def repainted(widget, name: str) -> list[tuple]:
 
 
 def test_paint_skips_parts_outside_region(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     game = Game()
     game.install(monkeypatch)
@@ -256,7 +256,7 @@ def test_paint_skips_parts_outside_region(ui_env, bundled_fonts, monkeypatch):
 
 
 def test_part_rects_inside_widget_and_cover_wheels(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     game = Game()
     game.install(monkeypatch)
@@ -277,7 +277,7 @@ def test_part_rects_inside_widget_and_cover_wheels(ui_env, bundled_fonts, monkey
 
 
 def test_only_animated_parts_repainted(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     game = Game()
     game.values["wheel"]["is_detached"] = (False, False, False, True)  # pulsing tyre
@@ -303,8 +303,8 @@ def test_partial_repaint_of_opaque_window(ui_env, bundled_fonts, monkeypatch):
 def test_color_fade_repainted_at_final_color(ui_env, bundled_fonts, monkeypatch):
     """Fade starts when painted, repaints decided at update: once ended, wheel repainted one more time
     (last repaint while fading was short of final color)"""
-    from tinypedal.setting import cfg
-    from tinypedal.widget._black_box import regions, wheels
+    from neopedal.setting import cfg
+    from neopedal.widget._black_box import regions, wheels
 
     game = Game()
     game.install(monkeypatch)
@@ -343,7 +343,7 @@ def test_color_fade_repainted_at_final_color(ui_env, bundled_fonts, monkeypatch)
 
 
 def test_color_fade_shorter_than_update_interval_repainted(ui_env):
-    from tinypedal.widget._black_box.wheels import ColorFade
+    from neopedal.widget._black_box.wheels import ColorFade
 
     fade = ColorFade(0.05)
     fade.color_of("#000000", 0.0)
@@ -422,7 +422,7 @@ def random_change(game: Game, rng: random.Random):
 @pytest.mark.parametrize("config", sorted(RANDOM_CONFIGS))
 def test_random_changes_partial_repaint_matches_full(ui_env, bundled_fonts, monkeypatch, config, modern):
     """After any sequence of data changes, the window as repainted part by part equals a full repaint"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     monkeypatch.setitem(cfg.compatibility, "enable_translucent_background", True)
     rng = random.Random(f"{config}-{modern}")
@@ -475,7 +475,7 @@ def run_scaled(test: str, scale: str):
 def test_display_precision_keys(ui_env, bundled_fonts, monkeypatch):
     """Changes below what is drawn repaint nothing: RPM within a lit LED step, speed within its shown digit,
     tyre load not shown, wheel angle & travel noise below the motion grid"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     game = Game()
     game.install(monkeypatch)

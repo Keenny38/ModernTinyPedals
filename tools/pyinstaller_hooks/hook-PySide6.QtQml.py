@@ -2,7 +2,7 @@
 PyInstaller hook replacing PySide6.QtQml default hook: bundle only QML modules used by app pages
 
 Default hook bundles every QML module & its libraries (about 300 MB: WebEngine, 3D, charts...).
-Kept modules: tinypedal/ui/quick/qml_modules.py
+Kept modules: neopedal/ui/quick/qml_modules.py
 """
 
 import os
@@ -13,7 +13,7 @@ from PyInstaller.utils.hooks.qt import add_qt6_dependencies, pyside6_library_inf
 
 QML_MODULES = runpy.run_path(os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "tinypedal", "ui", "quick", "qml_modules.py"))["QML_MODULES"]
+    "neopedal", "ui", "quick", "qml_modules.py"))["QML_MODULES"]
 
 hiddenimports, binaries, datas = add_qt6_dependencies(__file__)
 qml_binaries, qml_datas = pyside6_library_info.collect_qtqml_files()

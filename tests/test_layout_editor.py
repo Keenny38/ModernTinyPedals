@@ -2,8 +2,8 @@
 
 from PySide6.QtCore import QPoint, QRect
 
-from tinypedal.ui import layout_editor
-from tinypedal.ui.layout_editor import LayoutEditor, snap_position
+from neopedal.ui import layout_editor
+from neopedal.ui.layout_editor import LayoutEditor, snap_position
 
 SCREEN = QRect(0, 0, 1920, 1080)
 
@@ -36,7 +36,7 @@ def test_snap_per_screen_center():
 def test_screenshot_mapped_to_matching_screen():
     from PySide6.QtCore import QSize
 
-    from tinypedal.ui.layout_editor import screen_for_image
+    from neopedal.ui.layout_editor import screen_for_image
 
     left, right = QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)
     screens = [(left, 1.0), (right, 1.0)]
@@ -51,7 +51,7 @@ def test_screenshot_mapped_to_matching_screen():
 def test_canvas_background_drawn_on_one_screen(ui_env):
     from PySide6.QtGui import QPixmap
 
-    from tinypedal.ui.layout_editor import LayoutCanvas
+    from neopedal.ui.layout_editor import LayoutCanvas
 
     canvas = LayoutCanvas(None)
     try:
@@ -74,7 +74,7 @@ def test_canvas_background_drawn_on_one_screen(ui_env):
 def test_background_scaled_once_per_size(ui_env):
     from PySide6.QtGui import QColor, QPixmap
 
-    from tinypedal.ui.layout_editor import LayoutCanvas
+    from neopedal.ui.layout_editor import LayoutCanvas
 
     canvas = LayoutCanvas(None)
     try:
@@ -111,7 +111,7 @@ class FakeWidget:
 
 
 def test_apply_moves_widgets_and_saves(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     widgets = {"speedometer": FakeWidget(QRect(10, 10, 80, 30)), "gear": FakeWidget(QRect(400, 400, 60, 60))}
     monkeypatch.setattr(layout_editor.wctrl, "_active_modules", widgets)
@@ -135,7 +135,7 @@ def test_apply_moves_widgets_and_saves(ui_env, monkeypatch):
 
 
 def test_layout_profiles_per_screen_setup(tmp_path):
-    from tinypedal.userfile.layout_profile import load_profiles, profile_filename, sync_layout
+    from neopedal.userfile.layout_profile import load_profiles, profile_filename, sync_layout
 
     filename = profile_filename(str(tmp_path), "race.json")
     assert filename.endswith("race.layouts")

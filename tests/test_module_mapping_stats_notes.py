@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module import module_mapping, module_notes, module_stats
-from tinypedal.module_info import MappingInfo, NotesData, StatsInfo
-from tinypedal.userfile import car_setup, driver_stats, track_notes
-from tinypedal.userfile.track_map import load_track_map_file
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module import module_mapping, module_notes, module_stats
+from neopedal.module_info import MappingInfo, NotesData, StatsInfo
+from neopedal.userfile import car_setup, driver_stats, track_notes
+from neopedal.userfile.track_map import load_track_map_file
 
 
 class Group(SimpleNamespace):
@@ -54,7 +54,7 @@ def test_sunlight_phase_sorted_by_time():
 
 
 def test_pit_lane_entry_exit_and_speed_saved(tele, ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     output = MappingInfo()
     gen = module_mapping.record_track_info(output)
@@ -107,8 +107,8 @@ def test_track_info_waits_for_driving(tele, monkeypatch):
 
 
 def test_pit_lane_calibration_saved_when_module_stops(tele, ui_env):
-    from tinypedal.module._base import MODULE_STOP
-    from tinypedal.setting import cfg
+    from neopedal.module._base import MODULE_STOP
+    from neopedal.setting import cfg
 
     output = MappingInfo()
     gen = module_mapping.record_track_info(output)
@@ -124,8 +124,8 @@ def test_pit_lane_calibration_saved_when_module_stops(tele, ui_env):
 
 
 def test_track_info_edited_meanwhile_kept_unless_measured(tele, ui_env):
-    from tinypedal.module._base import MODULE_STOP
-    from tinypedal.setting import cfg
+    from neopedal.module._base import MODULE_STOP
+    from neopedal.setting import cfg
 
     cfg.user.tracks["SimTrack"] = {"pit_entry": 3000.0, "pit_exit": 200.0, "pit_speed": 16.0}
     output = MappingInfo()
@@ -149,8 +149,8 @@ def test_track_info_edited_meanwhile_kept_unless_measured(tele, ui_env):
 
 
 def test_new_track_added_without_measurement(tele, ui_env):
-    from tinypedal.module._base import MODULE_STOP
-    from tinypedal.setting import cfg
+    from neopedal.module._base import MODULE_STOP
+    from neopedal.setting import cfg
 
     gen = module_mapping.record_track_info(MappingInfo())
     tele.update({"vehicle.in_pits": False, "vehicle.speed": 50.0, "lap.distance": 100.0})
@@ -245,7 +245,7 @@ def test_track_map_discarded_for_pit_lap(tele, tmp_path):
 
 
 def test_existing_track_map_not_recorded_again(tele, tmp_path):
-    from tinypedal.userfile.track_map import save_track_map_file
+    from neopedal.userfile.track_map import save_track_map_file
 
     filepath = f"{tmp_path.as_posix()}/"
     save_track_map_file(filepath, "SimTrack", "0 0 10 10", ((0.0, 0.0), (5.0, 5.0)), ((0.0, 0.0), (10.0, 1.0)),
@@ -310,7 +310,7 @@ def test_driver_stats_recorded_and_saved(stats_env):
 
 
 def test_driver_stats_starts_finish_position_and_history(stats_env, monkeypatch):
-    from tinypedal.userfile import driver_history
+    from neopedal.userfile import driver_history
 
     tele, filepath = stats_env
     monkeypatch.setattr(api, "_api", SimpleNamespace(NAME="Le Mans Ultimate"))
@@ -566,7 +566,7 @@ def test_notes_invalid_or_missing_file(tmp_path):
 
 
 def test_notes_file_filters_headers_and_parsers():
-    from tinypedal.const_file import FileFilter
+    from neopedal.const_file import FileFilter
 
     assert track_notes.set_notes_filter(track_notes.NOTESTYPE_PACE).startswith(FileFilter.TPPN)
     assert track_notes.set_notes_filter(track_notes.NOTESTYPE_TRACK).startswith(FileFilter.TPTN)

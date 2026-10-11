@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Implicit OpenXR API layer: draws the app's overlay tiles (shared memory, see tinypedal_vr_shared.h)
+ * Implicit OpenXR API layer: draws the app's overlay tiles (shared memory, see neopedal_vr_shared.h)
  * as quad layers after the game's layers (one swapchain, one quad per tile), in every OpenXR game and on every runtime (SteamVR, Meta,
  * Virtual Desktop, WMR, Pimax, Varjo...).
  *
@@ -30,13 +30,13 @@
 #include "graphics.h"
 #include "shared_frame.h"
 
-#define TPVR_LAYER_NAME "XR_APILAYER_TINYPEDAL_overlay"
+#define TPVR_LAYER_NAME "XR_APILAYER_NEOPEDAL_overlay"
 
 namespace tpvr {
 
 void log_message(const char* message) {
     char line[512];
-    std::snprintf(line, sizeof(line), "[TinyPedalXrLayer] %s\n", message);
+    std::snprintf(line, sizeof(line), "[NeoPedalXrLayer] %s\n", message);
     OutputDebugStringA(line);
 }
 

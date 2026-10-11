@@ -11,10 +11,10 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 
+from neopedal.process import game_images as gi
+from neopedal.userfile import custom_image, game_images
+from neopedal.userfile.custom_image import LOGO_LOADER, LogoLoader
 from tests.test_game_pictures import FakeGame
-from tinypedal.process import game_images as gi
-from tinypedal.userfile import custom_image, game_images
-from tinypedal.userfile.custom_image import LOGO_LOADER, LogoLoader
 
 
 def logo_file(path: str, color: str, margins: int = 10, width: int = 120, height: int = 60, fmt=None) -> str:
@@ -34,7 +34,7 @@ def game(ui_env, monkeypatch):
     monkeypatch.setattr(game_images, "fetch_from_game", fake)
     cache = game_images.GameImages()
     monkeypatch.setattr(game_images, "images", cache)
-    from tinypedal.ui.quick import game_pictures
+    from neopedal.ui.quick import game_pictures
 
     monkeypatch.setattr(game_pictures, "images", cache)
     monkeypatch.setattr(game_pictures, "light_theme", lambda: False)
@@ -174,7 +174,7 @@ def test_background_jobs_run_after_others():
 
 # --- Pages
 def test_page_logo_made_in_background(game, monkeypatch):
-    from tinypedal.ui.quick import game_pictures as gp
+    from neopedal.ui.quick import game_pictures as gp
 
     _, cache = game
     assert cache.fetch_picture(gi.BRAND, "McLaren")  # white logo, no copy for light pages yet
@@ -198,7 +198,7 @@ def test_page_logo_made_in_background(game, monkeypatch):
 
 
 def test_page_logos_kept_when_pictures_arrive(game, monkeypatch):
-    from tinypedal.ui.quick import game_pictures as gp
+    from neopedal.ui.quick import game_pictures as gp
 
     _, cache = game
     asked = []
@@ -223,9 +223,9 @@ def test_page_logos_kept_when_pictures_arrive(game, monkeypatch):
 
 # --- Home cards
 def test_home_last_session_logos_in_background(ui_env, monkeypatch):
-    from tinypedal.ui import home_view
-    from tinypedal.ui.home_view import HomeCard
-    from tinypedal.userfile.driver_history import SessionRecord
+    from neopedal.ui import home_view
+    from neopedal.ui.home_view import HomeCard
+    from neopedal.userfile.driver_history import SessionRecord
 
     record = SessionRecord(time=1759660000, track="Spa", vehicle="Hyper - Ferrari", session=2, best=123.456)
     calls = []
@@ -246,8 +246,8 @@ def test_home_last_session_logos_in_background(ui_env, monkeypatch):
 def test_home_card_logos_read_in_background_same_pixels(ui_env, tmp_path):
     from PySide6.QtGui import QPixmap
 
-    from tinypedal.ui._common import UIScaler
-    from tinypedal.ui.home_view import HomeCard
+    from neopedal.ui._common import UIScaler
+    from neopedal.ui.home_view import HomeCard
 
     paths = (logo_file(str(tmp_path / "a.png"), "#e02020"), logo_file(str(tmp_path / "b.png"), "#2020e0", 0))
     card = HomeCard(None, "Last Session", ("", "H"), "")
@@ -275,7 +275,7 @@ def test_home_card_logos_read_in_background_same_pixels(ui_env, tmp_path):
 # --- Classic overlays
 @pytest.mark.parametrize("fmt", [QImage.Format.Format_ARGB32, QImage.Format.Format_RGB32, QImage.Format.Format_Indexed8])
 def test_classic_logo_read_in_background_same_pixels(ui_env, tmp_path, fmt):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.brand_logo
     if fmt == QImage.Format.Format_Indexed8:
@@ -303,20 +303,20 @@ def test_classic_logo_read_in_background_same_pixels(ui_env, tmp_path, fmt):
 
 
 def new_classic_standings(cfg):
-    from tinypedal.widget._modern import create_widget
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Legacy Dark"
     cfg.user.setting["standings"]["show_brand_logo"] = True
-    return create_widget(import_module("tinypedal.widget.standings"), cfg, "standings")
+    return create_widget(import_module("neopedal.widget.standings"), cfg, "standings")
 
 
 def test_classic_logo_at_once_off_screen(ui_env, bundled_fonts):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     logo_file(os.path.join(cfg.path.brand_logo, "Ferrari.png"), "#e02020")
     widget = new_classic_standings(cfg)
     try:
-        assert type(widget).__module__ == "tinypedal.widget.standings"
+        assert type(widget).__module__ == "neopedal.widget.standings"
         pixmap = widget.set_brand_logo("Ferrari")
         expected = custom_image.load_brand_logo_image(cfg.path.brand_logo, "Ferrari", widget.brd_width,
                                                       widget.brd_height)
@@ -326,8 +326,8 @@ def test_classic_logo_at_once_off_screen(ui_env, bundled_fonts):
 
 
 def test_classic_logo_loaded_in_background_on_screen(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.userfile.game_images import images
+    from neopedal.setting import cfg
+    from neopedal.userfile.game_images import images
 
     logo_file(os.path.join(cfg.path.brand_logo, "Ferrari.png"), "#e02020")
     widget = new_classic_standings(cfg)

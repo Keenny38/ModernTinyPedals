@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from tinypedal import plugin_loader
-from tinypedal.plugin_loader import (
+from neopedal import plugin_loader
+from neopedal.plugin_loader import (
     BUNDLED_PLUGINS,
     PLUGIN_BASE_DEFAULT,
     PLUGIN_ERRORS,
@@ -54,7 +54,7 @@ def test_invalid_setting_json_skipped(tmp_path):
 
 def test_broken_widget_gets_placeholder(tmp_path):
     make_plugin(tmp_path, "crash", "raise RuntimeError('boom')")
-    module = load_plugin_widget("tinypedal.widget", "plugin_crash", str(tmp_path))
+    module = load_plugin_widget("neopedal.widget", "plugin_crash", str(tmp_path))
     assert module.Realtime.__doc__ == "Plugin error"
 
 
@@ -67,14 +67,14 @@ def test_example_plugin_removed():
 
 
 def test_plugin_error_recorded_and_cleared(tmp_path):
-    from tinypedal.plugin_loader import PLUGIN_ERRORS
+    from neopedal.plugin_loader import PLUGIN_ERRORS
 
     make_plugin(tmp_path, "flaky", "raise ValueError('bad value')")
-    load_plugin_widget("tinypedal.widget", "plugin_flaky", str(tmp_path))
+    load_plugin_widget("neopedal.widget", "plugin_flaky", str(tmp_path))
     assert "bad value" in PLUGIN_ERRORS["plugin_flaky"]
     (tmp_path / "flaky" / "widget.py").write_text("Realtime = object", encoding="utf-8")
     trust_plugin("plugin_flaky", str(tmp_path))  # code changed, trust again
-    load_plugin_widget("tinypedal.widget", "plugin_flaky", str(tmp_path))
+    load_plugin_widget("neopedal.widget", "plugin_flaky", str(tmp_path))
     assert "plugin_flaky" not in PLUGIN_ERRORS
 
 
@@ -83,7 +83,7 @@ def test_install_plugin_package(tmp_path):
 
     import pytest
 
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     package = tmp_path / "plugin.zip"
     with zipfile.ZipFile(package, "w") as archive:
@@ -106,13 +106,13 @@ def test_install_plugin_package(tmp_path):
 
 
 def test_plugin_manager(ui_env, tmp_path, monkeypatch):
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui.plugin_manager import PluginManager, reload_plugin
+    from neopedal.module_control import wctrl
+    from neopedal.ui.plugin_manager import PluginManager, reload_plugin
 
     monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
-    make_plugin(tmp_path / "plugins", "gauge", "from tinypedal.widget._base import Overlay\n\n\n"
+    make_plugin(tmp_path / "plugins", "gauge", "from neopedal.widget._base import Overlay\n\n\n"
                 "class Realtime(Overlay):\n    pass\n")
-    monkeypatch.setitem(wctrl._module_pack, "plugin_gauge", load_plugin_widget("tinypedal.widget", "plugin_gauge"))
+    monkeypatch.setitem(wctrl._module_pack, "plugin_gauge", load_plugin_widget("neopedal.widget", "plugin_gauge"))
     manager = PluginManager(None)
     try:
         assert manager.table.rowCount() == 1
@@ -132,12 +132,12 @@ def test_plugin_manager(ui_env, tmp_path, monkeypatch):
 def test_untrusted_plugin_not_executed(tmp_path):
     marker = tmp_path / "executed.txt"
     make_plugin(tmp_path, "sneaky", f"open({str(marker)!r}, 'w').close()\nRealtime = object", trusted=False)
-    module = load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    module = load_plugin_widget("neopedal.widget", "plugin_sneaky", str(tmp_path))
     assert not marker.exists()  # code never ran
     assert module.Realtime.__doc__ == "Plugin error"
     assert PLUGIN_ERRORS["plugin_sneaky"] == UNTRUSTED_ERROR
     trust_plugin("plugin_sneaky", str(tmp_path))
-    load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    load_plugin_widget("neopedal.widget", "plugin_sneaky", str(tmp_path))
     assert marker.exists() and "plugin_sneaky" not in PLUGIN_ERRORS
 
 
@@ -190,7 +190,7 @@ def test_bundled_plugin_digest_up_to_date():
 def test_install_rejects_files_outside_plugin_folder(tmp_path, member):
     import zipfile
 
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     package = tmp_path / "evil.zip"
     with zipfile.ZipFile(package, "w") as archive:
@@ -208,7 +208,7 @@ def test_install_rejects_files_outside_plugin_folder(tmp_path, member):
 def test_install_keeps_safe_sub_folder(tmp_path):
     import zipfile
 
-    from tinypedal.plugin_loader import install_plugin_package, is_safe_package_path
+    from neopedal.plugin_loader import install_plugin_package, is_safe_package_path
 
     package = tmp_path / "good.zip"
     with zipfile.ZipFile(package, "w") as archive:
@@ -224,7 +224,7 @@ def test_install_keeps_safe_sub_folder(tmp_path):
 def test_inside_folder_check(tmp_path):
     import os
 
-    from tinypedal.plugin_loader import is_inside_folder
+    from neopedal.plugin_loader import is_inside_folder
 
     folder = os.path.realpath(tmp_path / "plugin")
     assert is_inside_folder(str(tmp_path / "plugin" / "a" / "b.py"), folder)
@@ -246,7 +246,7 @@ def test_compiled_bytecode_never_runs_instead_of_source(tmp_path):
     cached = importlib.util.cache_from_source(str(widget))
     py_compile.compile(str(evil), cfile=cached, invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
     assert is_trusted("plugin_sneaky", str(tmp_path))  # digest covers .py files only
-    module = load_plugin_widget("tinypedal.widget", "plugin_sneaky", str(tmp_path))
+    module = load_plugin_widget("neopedal.widget", "plugin_sneaky", str(tmp_path))
     assert module.SOURCE == "reviewed"
     assert not (tmp_path / "sneaky" / "__pycache__").exists()  # compiled files removed
 
@@ -271,9 +271,9 @@ def fake_widgets(ui_env, monkeypatch):
     """Module control of fake plugin widgets: name: Realtime class"""
     from types import SimpleNamespace
 
-    from tinypedal.const_file import ConfigType
-    from tinypedal.module_control import ModuleControl
-    from tinypedal.setting import cfg
+    from neopedal.const_file import ConfigType
+    from neopedal.module_control import ModuleControl
+    from neopedal.setting import cfg
 
     def control(**classes):
         for name in classes:
@@ -320,7 +320,7 @@ def test_plugin_widget_crash_does_not_stop_app_start(fake_widgets):
 
 
 def test_stuck_module_does_not_hang_close(fake_widgets, monkeypatch):
-    from tinypedal import thread_guard
+    from neopedal import thread_guard
 
     class Stuck(FakeWidget):
         def stop(self, *args, **kwargs):
@@ -336,9 +336,9 @@ def test_stuck_module_does_not_hang_close(fake_widgets, monkeypatch):
 def test_module_reload_discard_reaches_data_modules(ui_env, monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal.const_file import ConfigType
-    from tinypedal.module_control import ModuleControl
-    from tinypedal.setting import cfg
+    from neopedal.const_file import ConfigType
+    from neopedal.module_control import ModuleControl
+    from neopedal.setting import cfg
 
     monkeypatch.setitem(cfg.user.setting, "module_fake", {"enable": True})
     created = []
@@ -367,7 +367,7 @@ def make_plugin_zip(path, name: str = "my_gauge"):
 
 
 def test_install_corrupt_package_is_value_error(tmp_path):
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     bad = tmp_path / "bad.zip"
     bad.write_bytes(b"not a zip file")
@@ -380,7 +380,7 @@ def test_install_failure_leaves_no_partial_plugin(tmp_path, monkeypatch, error):
     """Encrypted or unsupported member mid-extraction: ValueError, no folder left, reinstall works"""
     import zipfile
 
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     package = make_plugin_zip(tmp_path / "plugin.zip")
     folder = tmp_path / "plugins"
@@ -419,7 +419,7 @@ def test_plugin_manager_trusts_reviewed_code_only(ui_env, tmp_path, monkeypatch)
     from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui.plugin_manager import PluginManager
+    from neopedal.ui.plugin_manager import PluginManager
 
     monkeypatch.chdir(tmp_path)
     make_plugin(tmp_path / "plugins", "gauge", "Realtime = object", trusted=False)
@@ -454,7 +454,7 @@ def test_install_with_locked_leftover_temporary_folder(tmp_path, monkeypatch):
     """Leftover temporary folder that cannot be removed (locked): install uses another one"""
     import shutil
 
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     package = make_plugin_zip(tmp_path / "plugin.zip")
     folder = tmp_path / "plugins"
@@ -480,7 +480,7 @@ def test_install_rename_retried_while_locked(tmp_path, monkeypatch):
     """Antivirus briefly locks extracted files: rename retried, then given up"""
     import os
 
-    from tinypedal.plugin_loader import install_plugin_package
+    from neopedal.plugin_loader import install_plugin_package
 
     package = make_plugin_zip(tmp_path / "plugin.zip")
     folder = tmp_path / "plugins"

@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
-from tinypedal.userfile import custom_image
-from tinypedal.userfile.custom_image import LOGO_LOADER, LogoLoader
+from neopedal.userfile import custom_image
+from neopedal.userfile.custom_image import LOGO_LOADER, LogoLoader
 
 
 def own_logo(folder: str, name: str, color: str):
@@ -80,15 +80,15 @@ def test_loader_drops_results_nobody_took(monkeypatch):
 
 # --- Modern tables: logo shown once ready, same picture as when read at once
 def new_standings(cfg):
-    from tinypedal.widget._modern import create_widget
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
     cfg.user.setting["standings"]["column_brand_logo"] = True
-    return create_widget(import_module("tinypedal.widget.standings"), cfg, "standings")
+    return create_widget(import_module("neopedal.widget.standings"), cfg, "standings")
 
 
 def test_table_logo_read_at_once_off_screen(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     own_logo(cfg.path.brand_logo, "Ferrari", "#e02020")
     widget = new_standings(cfg)
@@ -99,9 +99,9 @@ def test_table_logo_read_at_once_off_screen(ui_env, bundled_fonts, monkeypatch):
 
 
 def test_table_logo_loaded_in_background_on_screen(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern.drivers import Context
-    from tinypedal.widget._modern.sample_field import sample_field
+    from neopedal.setting import cfg
+    from neopedal.widget._modern.drivers import Context
+    from neopedal.widget._modern.sample_field import sample_field
 
     own_logo(cfg.path.brand_logo, "Ferrari", "#e02020")
     field = sample_field()
@@ -150,9 +150,9 @@ def test_table_logo_drawn_when_update_timer_stopped(ui_env, bundled_fonts, monke
     """Paused or off track: rows not refreshed, logo arriving later still drawn (own check timer)"""
     from PySide6.QtTest import QTest
 
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern.drivers import Context
-    from tinypedal.widget._modern.sample_field import sample_field
+    from neopedal.setting import cfg
+    from neopedal.widget._modern.drivers import Context
+    from neopedal.widget._modern.sample_field import sample_field
 
     own_logo(cfg.path.brand_logo, "Ferrari", "#e02020")
     field = sample_field()
@@ -188,8 +188,8 @@ def test_table_logo_drawn_when_update_timer_stopped(ui_env, bundled_fonts, monke
 
 
 def test_table_no_logo_not_looked_for_again_until_pictures_change(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.userfile.game_images import images
+    from neopedal.setting import cfg
+    from neopedal.userfile.game_images import images
 
     widget = new_standings(cfg)
     calls = []
@@ -208,9 +208,9 @@ def test_table_no_logo_not_looked_for_again_until_pictures_change(ui_env, bundle
 
 # --- Readable copies made when game saves a logo
 def test_readable_copies_made_when_logo_arrives(ui_env, monkeypatch):
+    from neopedal.process import game_images as gi
+    from neopedal.userfile import game_images
     from tests.test_game_pictures import FakeGame
-    from tinypedal.process import game_images as gi
-    from tinypedal.userfile import game_images
 
     fake = FakeGame()
     monkeypatch.setattr(game_images, "fetch_from_game", fake)
@@ -232,9 +232,9 @@ def test_readable_copies_made_when_logo_arrives(ui_env, monkeypatch):
 
 # --- Home page: logos of track & car looked for in background, once per game pictures version
 def test_home_live_logos_in_background(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.ui import home_view
-    from tinypedal.userfile.game_images import images
+    from neopedal.api_control import api
+    from neopedal.ui import home_view
+    from neopedal.userfile.game_images import images
 
     monkeypatch.setattr(api.read.state, "active", lambda: True)
     monkeypatch.setattr(api.read.session, "track_name", lambda: "Le Mans")

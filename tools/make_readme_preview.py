@@ -6,7 +6,7 @@ speed mid race at Road Atlanta, in a 20 car multi-class field. Data modules do n
 here, so their outputs (minfo) are filled directly. Widgets are then packed on a neutral
 background, largest first.
 
-The simulated race (tinypedal/demo_data.py) is the one overlay pictures of the app show.
+The simulated race (neopedal/demo_data.py) is the one overlay pictures of the app show.
 
 Run from project root after visual changes to widgets:
     python tools/make_readme_preview.py
@@ -29,14 +29,14 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 APP = QApplication.instance() or QApplication(sys.argv)
 
-from tinypedal import demo_data
-from tinypedal.api_control import api
-from tinypedal.demo_data import HISTORY_WIDGETS, lmu_api, set_telemetry
-from tinypedal.main import load_bundled_fonts
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
-from tinypedal.widget._modern import create_widget
+from neopedal import demo_data
+from neopedal.api_control import api
+from neopedal.demo_data import HISTORY_WIDGETS, lmu_api, set_telemetry
+from neopedal.main import load_bundled_fonts
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
+from neopedal.widget._modern import create_widget
 
 OUTPUT = os.path.join("images", "readme_preview.png")
 WIDTH = 1920
@@ -48,12 +48,12 @@ __all__ = ("HISTORY_WIDGETS", "api", "copy_setting", "lmu_api", "load_bundled_fo
 
 
 def set_vehicles():
-    """Vehicles and relative module outputs (see tinypedal.demo_data)"""
+    """Vehicles and relative module outputs (see neopedal.demo_data)"""
     demo_data.set_vehicles(minfo, cfg.user.setting["standings"], api.read)
 
 
 def set_modules():
-    """Data module outputs the widgets read (see tinypedal.demo_data)"""
+    """Data module outputs the widgets read (see neopedal.demo_data)"""
     demo_data.set_modules(minfo)
 
 
@@ -105,7 +105,7 @@ def without_game_pictures():
     brand logo & game picture folders (user's own logos left out), never fetched from a running game"""
     import tempfile
 
-    from tinypedal.userfile import game_images
+    from neopedal.userfile import game_images
 
     cfg.path.game_image = tempfile.mkdtemp(prefix="preview_pictures_")
     cfg.path.brand_logo = tempfile.mkdtemp(prefix="preview_logos_") + os.sep
@@ -115,12 +115,12 @@ def without_game_pictures():
 def render_widgets(data) -> dict[str, QPixmap]:
     names = sorted(
         module.name
-        for module in pkgutil.iter_modules(import_module("tinypedal.widget").__path__)
+        for module in pkgutil.iter_modules(import_module("neopedal.widget").__path__)
         if not module.name.startswith("_")
     )
     pixmaps = {}
     for name in names:
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         widget.adjustSize()
         if name in HISTORY_WIDGETS:
             replay_history(widget, data)

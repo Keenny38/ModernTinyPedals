@@ -5,9 +5,9 @@ from contextlib import suppress
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.i18n import current_language, set_language
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.i18n import current_language, set_language
+from neopedal.setting import cfg
 
 
 def menu_titles(window):
@@ -17,7 +17,7 @@ def menu_titles(window):
 def test_style_applied_at_application_level(ui_env, monkeypatch):
     """Style must be set on QApplication, not just AppWindow, so QMessageBox and other
     Qt-built top-level windows are also styled (they are not visual children of AppWindow)"""
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     app_instance = QApplication.instance()
@@ -34,7 +34,7 @@ def test_style_applied_at_application_level(ui_env, monkeypatch):
 
 
 def test_live_language_switch(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["language"] = "English"
@@ -73,8 +73,8 @@ def test_navigation_rail(ui_env, monkeypatch):
     """Tools page, quick toggles & remembered page"""
     import os
 
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.tools_view import TOOL_SECTIONS, ToolCard, ToolsView
+    from neopedal.ui import app as app_module
+    from neopedal.ui.tools_view import TOOL_SECTIONS, ToolCard, ToolsView
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -116,12 +116,12 @@ def test_tool_paths_resolve():
     """Every lazily imported tool dialog exists"""
     from importlib import import_module
 
-    from tinypedal.ui.tools_view import TOOL_SECTIONS
+    from neopedal.ui.tools_view import TOOL_SECTIONS
 
     for _, tools in TOOL_SECTIONS:
         for _, _, dialog_path in tools:
             module_name, class_name = dialog_path.rsplit(".", 1)
-            assert hasattr(import_module(f"tinypedal.ui.{module_name}"), class_name), dialog_path
+            assert hasattr(import_module(f"neopedal.ui.{module_name}"), class_name), dialog_path
 
 
 def test_lazy_imported_packages_bundled():
@@ -131,7 +131,7 @@ def test_lazy_imported_packages_bundled():
 
     with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "build_pyinstaller.py"), encoding="utf-8") as file:
         build_script = file.read()
-    for package in ("tinypedal.ui", "tinypedal.widget", "tinypedal.module"):
+    for package in ("neopedal.ui", "neopedal.widget", "neopedal.module"):
         assert f'"--collect-submodules={package}"' in build_script, package
 
 
@@ -139,7 +139,7 @@ def test_window_color_themes(ui_env):
     from PySide6.QtGui import QPalette
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.ui import palette_theme, resolve_color_theme, set_style_palette
+    from neopedal.ui import palette_theme, resolve_color_theme, set_style_palette
 
     assert resolve_color_theme("Modern Dark") == resolve_color_theme("Legacy Dark") == "Dark"
     assert resolve_color_theme("Modern Light") == resolve_color_theme("Legacy Light") == "Light"
@@ -151,7 +151,7 @@ def test_window_color_themes(ui_env):
             windows[theme] = QApplication.palette().color(QPalette.ColorRole.Window).name().upper()
     finally:
         set_style_palette("Modern Dark")
-    assert windows["Legacy Dark"] == "#202124" and windows["Modern Dark"] == "#111318"  # TinyPedal 2.50 colors
+    assert windows["Legacy Dark"] == "#202124" and windows["Modern Dark"] == "#111318"  # classic colors
     assert len(set(windows.values())) == 4
 
 
@@ -159,9 +159,9 @@ def test_app_icon_follows_os_dark_mode(ui_env, monkeypatch):
     """White & gold icon for dark mode, black & gold for light mode, switched live"""
     from PySide6.QtGui import QPixmap
 
-    from tinypedal.const_file import ImageFile
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui import app_icon_file, system_dark_mode
+    from neopedal.const_file import ImageFile
+    from neopedal.ui import app as app_module
+    from neopedal.ui import app_icon_file, system_dark_mode
 
     assert app_icon_file(False) == ImageFile.APP_ICON
     assert app_icon_file(True) == ImageFile.APP_ICON_DARK
@@ -189,8 +189,8 @@ def test_app_icon_follows_os_dark_mode(ui_env, monkeypatch):
 
 
 def test_command_palette(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.command_palette import CommandPalette, match_commands
+    from neopedal.ui import app as app_module
+    from neopedal.ui.command_palette import CommandPalette, match_commands
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -232,7 +232,7 @@ def test_command_palette(ui_env, monkeypatch):
 def test_toast(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.toast import show_toast
+    from neopedal.ui.toast import show_toast
 
     window = QWidget()
     window.resize(400, 300)
@@ -251,7 +251,7 @@ def test_file_drop(ui_env, tmp_path):
 
     import pytest
 
-    from tinypedal.ui import file_drop
+    from neopedal.ui import file_drop
 
     preset = tmp_path / "My Preset.json"
     preset.write_text(json.dumps({"speedometer": {"enable": True}}), encoding="utf-8")
@@ -284,7 +284,7 @@ def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
 
     import pytest
 
-    from tinypedal.ui import file_drop
+    from neopedal.ui import file_drop
 
     classes = tmp_path / "classes.json"
     classes.write_text(json.dumps({"GT3": {"alias": "GT3"}}), encoding="utf-8")
@@ -298,8 +298,8 @@ def test_file_drop_rejects_style_and_global_files(ui_env, tmp_path):
 def test_plugin_manager_status_badges(ui_env, monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal.plugin_loader import PLUGIN_ERRORS, UNTRUSTED_ERROR
-    from tinypedal.ui import plugin_manager
+    from neopedal.plugin_loader import PLUGIN_ERRORS, UNTRUSTED_ERROR
+    from neopedal.ui import plugin_manager
 
     names = ["plugin_ok", "plugin_bad", "plugin_new", "plugin_unsafe"]
     monkeypatch.setattr(plugin_manager, "discover_plugins", lambda: names)

@@ -10,11 +10,11 @@ from PySide6.QtCore import QCoreApplication, QPoint, QRectF, Qt, QTimerEvent
 from PySide6.QtGui import QColor, QImage, QRegion
 from PySide6.QtWidgets import QWidget
 
+from neopedal import realtime_state
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.widget._modern import create_widget
 from tests.test_widget_benchmark import fill_field
-from tinypedal import realtime_state
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.widget._modern import create_widget
 
 NEW_WIDGETS = (
     "delta_graph", "gap_trend", "pit_lane_helper", "stint_timer", "spotter", "race_notifications", "tyre_temp_trend",
@@ -40,7 +40,7 @@ def is_blank(image: QImage) -> bool:
 
 def set_reader(monkeypatch, group: str, name: str, value):
     """Fake API reader method returning value (or calling it, if callable)"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     func = value if callable(value) else (lambda *args, **kwargs: value)
     monkeypatch.setattr(getattr(api.read, group), name, func)
@@ -50,7 +50,7 @@ def set_reader(monkeypatch, group: str, name: str, value):
 def reference_loading():
     """Background thread finding reference lap (telemetry comparison) ended after each test"""
     yield
-    from tinypedal.userfile.reference_trace import stop_loading
+    from neopedal.userfile.reference_trace import stop_loading
 
     stop_loading()
 
@@ -68,7 +68,7 @@ def field(ui_env, bundled_fonts, monkeypatch):
 def make(name: str, modern: bool, **options):
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     cfg.user.setting[name].update(options)
-    return create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    return create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
 
 
 def frames(widget, count: int = 3):
@@ -96,7 +96,7 @@ def grab(widget) -> QImage:
 
 # Shared parts
 def test_sample_runs_and_lines():
-    from tinypedal.widget._race_aids import line_polygons, sample_runs, scale_y, value_range
+    from neopedal.widget._race_aids import line_polygons, sample_runs, scale_y, value_range
 
     values = [1.0, math.nan, 2.0, 3.0, math.inf, 4.0]
     assert sample_runs(values) == [(0, 0), (2, 3), (5, 5)]
@@ -115,7 +115,7 @@ def test_sample_runs_and_lines():
 
 # Delta graph
 def test_delta_trace_laps():
-    from tinypedal.widget.delta_graph import DeltaTrace
+    from neopedal.widget.delta_graph import DeltaTrace
 
     trace = DeltaTrace(10)
     assert trace.update(5, 0.05, -0.1)
@@ -142,7 +142,7 @@ def test_delta_trace_laps():
 
 
 def test_delta_area_split_by_sign():
-    from tinypedal.widget.delta_graph import area_polygons
+    from neopedal.widget.delta_graph import area_polygons
 
     rect = QRectF(0, 0, 90, 40)
     values = [-1.0, 1.0, math.nan, 0.5]
@@ -180,7 +180,7 @@ def test_delta_graph_draws_lap(field, monkeypatch, modern):
 
 # Gap trend
 def test_gap_series_trend_and_rate():
-    from tinypedal.widget.gap_trend import BAD, GOOD, NEUTRAL, GapSeries, rate_meaning, time_gap
+    from neopedal.widget.gap_trend import BAD, GOOD, NEUTRAL, GapSeries, rate_meaning, time_gap
 
     series = GapSeries(5)
     assert series.trend() == [] and math.isnan(series.rate())
@@ -236,7 +236,7 @@ def test_gap_trend_without_cars(field, monkeypatch):
 
 # Pit lane helper
 def test_box_distance():
-    from tinypedal.widget.pit_lane_helper import box_distance
+    from neopedal.widget.pit_lane_helper import box_distance
 
     assert box_distance(4900.0, 100.0, 5000.0) == 200.0
     assert box_distance(50.0, 100.0, 5000.0) == 50.0
@@ -258,7 +258,7 @@ def pit_lane(monkeypatch, position, in_lane=1, requested=False, limiter=True, sp
 
 @pytest.mark.parametrize("modern", [True, False])
 def test_pit_lane_helper_visibility(field, monkeypatch, modern):
-    from tinypedal.widget.pit_lane_helper import DANGER, OK, WARNING
+    from neopedal.widget.pit_lane_helper import DANGER, OK, WARNING
 
     cfg.overlay["fixed_position"] = True  # locked: drawn only while shown
     monkeypatch.setattr(minfo.mapping, "pitSpeedLimit", 80 / 3.6)
@@ -316,7 +316,7 @@ def test_pit_lane_entry_unknown(field, monkeypatch):
 
 # Stint timer
 def test_driver_times():
-    from tinypedal.widget.stint_timer import DriverTimes
+    from neopedal.widget.stint_timer import DriverTimes
 
     times = DriverTimes()
     times.update(1, 100.0, "A", True, 0)
@@ -335,7 +335,7 @@ def test_driver_times():
 
 @pytest.mark.parametrize("modern", [True, False])
 def test_stint_timer_drivers(field, monkeypatch, modern):
-    from tinypedal.widget import stint_timer
+    from neopedal.widget import stint_timer
 
     monkeypatch.setattr(stint_timer, "DRIVER_TIMES", stint_timer.DriverTimes())
     clock = {"elapsed": 0.0, "driver": "Driver A"}
@@ -367,7 +367,7 @@ def test_stint_timer_drivers(field, monkeypatch, modern):
 
 
 def test_stint_timer_minimum_drive_target(field, monkeypatch):
-    from tinypedal.widget import stint_timer
+    from neopedal.widget import stint_timer
 
     times = stint_timer.DriverTimes()
     times.times.update({"A": 1800.0, "B": 600.0})
@@ -382,7 +382,7 @@ def test_stint_timer_minimum_drive_target(field, monkeypatch):
 
 # Spotter
 def test_side_overlap():
-    from tinypedal.widget.spotter import NO_CAR, side_overlap
+    from neopedal.widget.spotter import NO_CAR, side_overlap
 
     assert side_overlap([], 4.6, 5.0, 2.6) == (NO_CAR, NO_CAR)
     left, right = side_overlap([(-2.0, 2.3), (4.0, 0.0), (8.0, 0.0), (1.0, 9.0), (math.nan, 0.0)], 4.6, 5.0, 2.6)
@@ -419,7 +419,7 @@ def test_spotter_preview_in_edit_mode(field, monkeypatch):
 
 # Race notifications
 def test_settled_value():
-    from tinypedal.widget.race_notifications import Settled
+    from neopedal.widget.race_notifications import Settled
 
     settled = Settled(1.0)
     assert settled.update(5, 0.0) is None  # first value
@@ -438,7 +438,7 @@ def race(monkeypatch, **values):
 
 
 def test_race_events(field, monkeypatch):
-    from tinypedal.widget.race_notifications import BEST, GAIN, LOSS, WARNING, RaceEvents
+    from neopedal.widget.race_notifications import BEST, GAIN, LOSS, WARNING, RaceEvents
 
     options = ("show_position_change", "show_position_change_in_class", "show_penalty", "show_class_fastest_lap",
                "show_blue_flag", "show_full_course_yellow", "show_lap_invalidated")
@@ -475,7 +475,7 @@ def test_race_events(field, monkeypatch):
 @pytest.mark.parametrize("modern", [True, False])
 @pytest.mark.parametrize("layout", [0, 1])
 def test_race_notifications_queue(field, monkeypatch, modern, layout):
-    from tinypedal.widget.race_notifications import FADE_STEPS, Message
+    from neopedal.widget.race_notifications import FADE_STEPS, Message
 
     cfg.overlay["fixed_position"] = True
     race(monkeypatch)
@@ -516,7 +516,7 @@ def test_race_notifications_preview(field, monkeypatch):
 
 # Tyre temperature trend
 def test_temperature_trend_time_and_lap_modes():
-    from tinypedal.widget.tyre_temp_trend import TIME_SAMPLES, TemperatureTrend
+    from neopedal.widget.tyre_temp_trend import TIME_SAMPLES, TemperatureTrend
 
     trend = TemperatureTrend(60.0, False, 5)
     for step in range(200):
@@ -589,7 +589,7 @@ def test_new_widgets_render_empty_and_extreme(ui_env, bundled_fonts, monkeypatch
 
 
 def test_hidden_preview_follows_lock_signal(field):
-    from tinypedal import overlay_signal
+    from neopedal import overlay_signal
 
     widget = make("pit_lane_helper", True)
     calls = []
@@ -603,11 +603,11 @@ def test_hidden_preview_follows_lock_signal(field):
 
 
 def test_registered_everywhere():
-    from tinypedal.i18n.fr_overlay import OVERLAY_LABELS
-    from tinypedal.i18n.options import load_data
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
-    from tinypedal.template.widget.modern import MODERN_DESIGNS
-    from tinypedal.ui.quick.overlay_backend import CATEGORY_OTHER, widget_category
+    from neopedal.i18n.fr_overlay import OVERLAY_LABELS
+    from neopedal.i18n.options import load_data
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.widget.modern import MODERN_DESIGNS
+    from neopedal.ui.quick.overlay_backend import CATEGORY_OTHER, widget_category
 
     labels = load_data("fr_options.json")
     for name in NEW_WIDGETS:

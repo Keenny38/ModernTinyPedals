@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QWidget
 
-from tinypedal.ui import quick
-from tinypedal.ui.quick import Incubator, create_quick_view
+from neopedal.ui import quick
+from neopedal.ui.quick import Incubator, create_quick_view
 
 LOADER_READY, LOADER_LOADING = 1, 2
 

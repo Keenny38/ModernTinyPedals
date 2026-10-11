@@ -4,15 +4,15 @@ at once, by Load Live & Follow Live, values not followed left out, live tab of t
 
 import pytest
 
-from tests.test_race_calculator import host, page, set_race  # noqa: F401 (host, page: fixtures)
-from tinypedal.fuel_strategy import StrategyInput, stop_time
-from tinypedal.race_live_data import (
+from neopedal.fuel_strategy import StrategyInput, stop_time
+from neopedal.race_live_data import (
     GarageData,
     compound_key,
     parse_garage,
     rain_period,
     tyre_offer,
 )
+from tests.test_race_calculator import host, page, set_race  # noqa: F401 (host, page: fixtures)
 
 
 def wheel(name: str, *texts: str) -> dict:
@@ -98,7 +98,7 @@ def row(backend, key: str) -> dict:
 
 
 def test_live_tab_fill_in(page, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick.race_backend import TABS
+    from neopedal.ui.quick.race_backend import TABS
 
     backend = page.backend
     set_race(backend, minutes=600, laptime=100.0, tank=100.0, fuel=3.0)
@@ -126,7 +126,7 @@ def test_live_tab_fill_in(page, monkeypatch):  # noqa: F811
 
 
 def test_load_live_fills_in_garage_values_once_answered(page, monkeypatch):  # noqa: F811
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     backend = page.backend
     monkeypatch.setattr(api.read.state, "active", lambda: True)
@@ -156,7 +156,7 @@ def test_garage_cleared_out_of_session(page):  # noqa: F811
 
 
 def test_live_race_items(page, monkeypatch):  # noqa: F811
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     backend = page.backend
     assert backend.live_race_items() == []  # out of a race
@@ -181,7 +181,7 @@ def test_live_tab_qml(page):  # noqa: F811
     """Live tab built in the page without QML warning, rows shown"""
     from PySide6.QtCore import QCoreApplication
 
-    from tinypedal.ui.quick.race_backend import TABS
+    from neopedal.ui.quick.race_backend import TABS
 
     view = page.ensure_view()
     page.backend.received_garage([REFUEL_SCREEN, TYRE_SCREEN, SESSION_SETTINGS])
@@ -199,7 +199,7 @@ def test_live_tab_qml(page):  # noqa: F811
 
 
 def test_used_tyres_of_game_in_stock(page):  # noqa: F811
-    from tinypedal.userfile.tyre_strategy import validate_tyre_strategy
+    from neopedal.userfile.tyre_strategy import validate_tyre_strategy
 
     backend = page.backend
     set_race(backend, laps=40, wear=2.0, minimum=20)

@@ -13,7 +13,7 @@ def counter(signal) -> list:
 
 
 def test_folder_info_cached_and_copy_progress_signal(replays_page, monkeypatch, tmp_path):  # noqa: F811
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     backend = answered(replays_page, GAME_ANSWERS)
     sizes = []

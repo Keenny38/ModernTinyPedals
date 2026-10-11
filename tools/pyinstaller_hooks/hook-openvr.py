@@ -1,5 +1,5 @@
 """
-PyInstaller hook for optional "openvr" package (SteamVR overlay, see tinypedal/vr_overlay.py)
+PyInstaller hook for optional "openvr" package (SteamVR overlay, see neopedal/vr_overlay.py)
 
 openvr loads its native library (libopenvr_api_64.dll...) with ctypes from a computed path, which
 PyInstaller cannot detect: without this hook the library is left out of the build and

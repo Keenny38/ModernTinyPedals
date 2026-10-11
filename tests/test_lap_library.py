@@ -6,9 +6,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal.userfile.lap_library import delete_laps, group_name_error, list_imported, rename_group
-from tinypedal.userfile.motec_import import ImportedLap, save_imported_lap
-from tinypedal.userfile.telemetry_lap import IMPORT_FOLDER
+from neopedal.userfile.lap_library import delete_laps, group_name_error, list_imported, rename_group
+from neopedal.userfile.motec_import import ImportedLap, save_imported_lap
+from neopedal.userfile.telemetry_lap import IMPORT_FOLDER
 
 
 def import_log(filepath: str, log: str, lap_times: list[float], track: str = "Spa") -> list[str]:
@@ -65,8 +65,8 @@ def test_no_import_folder(tmp_path):
 # --- Library page & lap viewer
 @pytest.fixture
 def viewer(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import LapViewer
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     import_log(cfg.path.telemetry, "Spa race", [139.5, 138.2])
@@ -90,7 +90,7 @@ def wait_library(library, timeout: float = 10.0):
 
 
 def open_library(viewer):
-    from tinypedal.ui.lap_library import LapLibrary
+    from neopedal.ui.lap_library import LapLibrary
 
     viewer.backend.openLibrary()
     library = next(widget for widget in viewer.findChildren(LapLibrary) if widget.isVisible())
@@ -114,7 +114,7 @@ def test_library_lists_and_adds_to_viewer(viewer):
 
 
 def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
-    from tinypedal.ui import lap_library
+    from neopedal.ui import lap_library
 
     library = open_library(viewer)
     library.add_to_viewer([library.tree.topLevelItem(0)])
@@ -148,8 +148,8 @@ def test_library_rename_and_delete_update_viewer(viewer, monkeypatch):
 
 # --- Import, search, drop
 def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
+    from neopedal.ui import lap_library
     from tests.test_motec_import import logger_channels, write_logger_ld
-    from tinypedal.ui import lap_library
 
     log = tmp_path / "Monza run.ld"
     write_logger_ld(str(log), logger_channels(), venue="Monza", vehicle="LMP2", driver="Ace")
@@ -183,9 +183,9 @@ def test_library_import_search_and_date(viewer, monkeypatch, tmp_path):
 
 
 def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):
+    from neopedal.setting import cfg
+    from neopedal.ui import file_drop
     from tests.test_motec_import import logger_channels, write_logger_ld
-    from tinypedal.setting import cfg
-    from tinypedal.ui import file_drop
 
     log = tmp_path / "Shared lap.ld"
     write_logger_ld(str(log), logger_channels())
@@ -197,8 +197,8 @@ def test_drop_motec_log_on_app(ui_env, tmp_path, monkeypatch):
     try:
         messages = file_drop.handle_drop(window, [str(log)])
         assert "Shared lap" in messages[0] and "Importing" in messages[0]  # read in background by viewer page
+        from neopedal.ui._common import BaseDialog
         from tests.test_lap_viewer import wait_loaded
-        from tinypedal.ui._common import BaseDialog
 
         viewer = next(dialog for dialog in window.findChildren(BaseDialog) if type(dialog).__name__ == "LapViewer")
         wait_loaded(viewer)

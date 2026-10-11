@@ -14,11 +14,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tinypedal.i18n import LANGUAGE_PACK_FORMAT
-from tinypedal.i18n.fr import TRANSLATION
-from tinypedal.i18n.fr_messages import MESSAGE_RULES
-from tinypedal.i18n.fr_overlay import OVERLAY_LABELS
-from tinypedal.i18n.options import load_data
+from neopedal.i18n import LANGUAGE_PACK_FORMAT
+from neopedal.i18n.fr import TRANSLATION
+from neopedal.i18n.fr_messages import MESSAGE_RULES
+from neopedal.i18n.fr_overlay import OVERLAY_LABELS
+from neopedal.i18n.options import load_data
 
 
 def build_template(code: str, name: str) -> dict:

@@ -50,11 +50,11 @@ def correlation(pairs: list[tuple[float, float]]) -> float:
 
 
 def main(duration: float):
-    from tinypedal import calculation as calc
-    from tinypedal.api_control import api
-    from tinypedal.const_file import FileExt
-    from tinypedal.setting import cfg
-    from tinypedal.widget._black_box.state import SteerConvention, impact_arrow
+    from neopedal import calculation as calc
+    from neopedal.api_control import api
+    from neopedal.const_file import FileExt
+    from neopedal.setting import cfg
+    from neopedal.widget._black_box.state import SteerConvention, impact_arrow
 
     cfg.load_global()
     cfg.set_next_to_load(f"{cfg.preset_files()[0]}{FileExt.JSON}")

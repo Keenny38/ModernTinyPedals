@@ -17,9 +17,9 @@ from test_driver_stats_viewer import (  # noqa: F401
     write_stats,
 )
 
-from tinypedal.setting import cfg
-from tinypedal.userfile import driver_stats
-from tinypedal.userfile.driver_stats import DriverStats
+from neopedal.setting import cfg
+from neopedal.userfile import driver_stats
+from neopedal.userfile.driver_stats import DriverStats
 
 
 class LockHolder:

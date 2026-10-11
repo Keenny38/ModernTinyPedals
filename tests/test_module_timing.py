@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.const_common import MAX_SECONDS
-from tinypedal.module import module_force, module_hybrid, module_sectors, module_stint
-from tinypedal.module_info import ForceInfo, HistoryInfo, HybridInfo, SectorData, minfo
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.const_common import MAX_SECONDS
+from neopedal.module import module_force, module_hybrid, module_sectors, module_stint
+from neopedal.module_info import ForceInfo, HistoryInfo, HybridInfo, SectorData, minfo
 
 
 class Group(SimpleNamespace):
@@ -304,7 +304,7 @@ def wall_clock(monkeypatch):
     import time
     from types import SimpleNamespace
 
-    from tinypedal import validator
+    from neopedal import validator
 
     clock = {"now": 10_300.0}
     monkeypatch.setattr(validator, "time", SimpleNamespace(time=lambda: clock["now"], strftime=time.strftime))
@@ -346,10 +346,10 @@ def test_sector_best_invalid_values_ignored(tele, tmp_path):
 
 
 def test_csv_files_with_huge_field_fall_back_to_defaults(tmp_path):
-    from tinypedal.userfile.consumption_history import load_consumption_history_file
-    from tinypedal.userfile.delta_best import load_delta_best_file
-    from tinypedal.userfile.fuel_delta import load_fuel_delta_file
-    from tinypedal.userfile.sector_best import load_sector_best_file
+    from neopedal.userfile.consumption_history import load_consumption_history_file
+    from neopedal.userfile.delta_best import load_delta_best_file
+    from neopedal.userfile.fuel_delta import load_fuel_delta_file
+    from neopedal.userfile.sector_best import load_sector_best_file
 
     huge = "1" * 200_000 + "\n"  # csv.Error (field larger than field limit), not a ValueError
     for extension in (".sector", ".csv", ".fuel", ".consumption"):
@@ -363,7 +363,7 @@ def test_csv_files_with_huge_field_fall_back_to_defaults(tmp_path):
 
 
 def test_delta_file_with_nan_rejected(tmp_path):
-    from tinypedal.userfile.delta_best import load_delta_best_file
+    from neopedal.userfile.delta_best import load_delta_best_file
 
     rows = "".join(f"{index * 10.0},{index * 0.5}\n" for index in range(20)) + "200.0,nan\n"
     (tmp_path / "nan.csv").write_text(rows, encoding="utf-8")
@@ -371,7 +371,7 @@ def test_delta_file_with_nan_rejected(tmp_path):
 
 
 def test_consumption_history_line_with_nan_left_out(tmp_path):
-    from tinypedal.userfile.consumption_history import load_consumption_history_file
+    from neopedal.userfile.consumption_history import load_consumption_history_file
 
     (tmp_path / "laps.consumption").write_text(
         "lapNumber,lapTimeLast,lastLapUsedFuel\n2,91.0,nan\n1,90.0,3.0\n", encoding="utf-8")
@@ -380,7 +380,7 @@ def test_consumption_history_line_with_nan_left_out(tmp_path):
 
 
 def test_sectors_saved_when_module_stops(tele, tmp_path):
-    from tinypedal.module._base import MODULE_STOP
+    from neopedal.module._base import MODULE_STOP
 
     gen = module_sectors.record_sectors(SectorData(), SectorData(), f"{tmp_path}/")
     drive_sectors(tele, gen, [(30.0, 40.0, 20.0), (29.0, 39.0, 19.0)])
@@ -392,7 +392,7 @@ def test_sectors_saved_when_module_stops(tele, tmp_path):
 
 
 def test_module_save_on_stop_unless_discarded():
-    from tinypedal.module._base import MODULE_STOP, DataModule
+    from neopedal.module._base import MODULE_STOP, DataModule
 
     sent = []
 
@@ -465,7 +465,7 @@ def test_hybrid_net_change_reference_skips_pit_lap(tele):
     (-0.0004, "0.000", "0:00.000"),
 ])
 def test_laptime_format_rounded_before_split(seconds, short, full):
-    from tinypedal.calculation import sec2laptime, sec2laptime_full
+    from neopedal.calculation import sec2laptime, sec2laptime_full
 
     assert sec2laptime(seconds) == short
     assert sec2laptime_full(seconds) == full

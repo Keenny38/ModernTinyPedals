@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from tinypedal.widget._modern.table import Row
+from neopedal.widget._modern.table import Row
 
 TABLES = ("standings", "relative", "rivals")
 
@@ -28,15 +28,15 @@ def process_events():
 
 
 def new_table(cfg, name: str, theme: str = "Modern Dark"):
-    from tinypedal.widget._modern import create_widget
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = theme
-    return create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    return create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
 
 
 def sample(widget):
-    from tinypedal.widget._modern.drivers import Context
-    from tinypedal.widget._modern.sample_field import sample_field
+    from neopedal.widget._modern.drivers import Context
+    from neopedal.widget._modern.sample_field import sample_field
 
     field = sample_field()
     context = Context(in_race=True, player=field.vehicles[field.player_index], player_pit_request=False)
@@ -58,7 +58,7 @@ def changes(field):
 @pytest.mark.parametrize("theme", ["Modern Dark", "Modern Light"])
 @pytest.mark.parametrize("name", TABLES)
 def test_changed_rows_match_full_repaint(ui_env, bundled_fonts, monkeypatch, name, theme):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     widget = new_table(cfg, name, theme)
     field, context = sample(widget)
@@ -87,7 +87,7 @@ def test_changed_rows_match_full_repaint(ui_env, bundled_fonts, monkeypatch, nam
 
 
 def test_only_changed_rows_invalidated(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     widget = new_table(cfg, "standings")
     field, context = sample(widget)
@@ -110,7 +110,7 @@ def test_only_changed_rows_invalidated(ui_env, bundled_fonts, monkeypatch):
 def test_rows_skipped_outside_paint_region(ui_env, bundled_fonts, monkeypatch):
     from PySide6.QtGui import QRegion
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     widget = new_table(cfg, "standings")
     field, context = sample(widget)
@@ -131,9 +131,9 @@ def test_rows_skipped_outside_paint_region(ui_env, bundled_fonts, monkeypatch):
 
 
 def test_rows_with_logos_match_full_repaint(ui_env, bundled_fonts, monkeypatch):
+    from neopedal.setting import cfg
+    from neopedal.userfile.custom_image import LOGO_LOADER
     from tests.test_logo_loader import own_logo
-    from tinypedal.setting import cfg
-    from tinypedal.userfile.custom_image import LOGO_LOADER
 
     own_logo(cfg.path.brand_logo, "Ferrari", "#e02020")
     own_logo(cfg.path.brand_logo, "BMW", "#ffffff")
@@ -195,7 +195,7 @@ def test_random_changes_match_full_repaint(ui_env, bundled_fonts, monkeypatch, n
 
     from PySide6.QtCore import QEvent
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     rng = random.Random(name)
     widget = new_table(cfg, name)

@@ -3,7 +3,7 @@
 # Build (Windows, Visual Studio 2022 or Build Tools, from the repository root):
 #   cmake -S native/openxr_layer -B native/openxr_layer/build -A x64
 #   cmake --build native/openxr_layer/build --config Release
-# Output: native/openxr_layer/build/bin/TinyPedalXrLayer.dll & TinyPedalXrLayer.json, found there by the app
+# Output: native/openxr_layer/build/bin/NeoPedalXrLayer.dll & NeoPedalXrLayer.json, found there by the app
 # when run from source, bundled in lib/openxr_layer_bundle by build_pyinstaller.py.
 #
 # Unit tests of the platform neutral parts (any OS, run by CI on Linux):
@@ -14,7 +14,7 @@
 # -DFETCHCONTENT_SOURCE_DIR_OPENXR_SDK=<path> -DFETCHCONTENT_SOURCE_DIR_VULKAN_HEADERS=<path>
 
 cmake_minimum_required(VERSION 3.24)
-project(TinyPedalXrLayer VERSION 1.0.0 LANGUAGES CXX)
+project(NeoPedalXrLayer VERSION 1.0.0 LANGUAGES CXX)
 
 if(WIN32)
     set(_tpvr_layer_default ON)
@@ -46,7 +46,7 @@ if(TPVR_BUILD_LAYER)
         message(FATAL_ERROR "TPVR_BUILD_LAYER: Windows only (or a MinGW-w64 cross toolchain)")
     endif()
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-        message(FATAL_ERROR "TinyPedalXrLayer: 64-bit build only (games are 64-bit, manifest has one library)")
+        message(FATAL_ERROR "NeoPedalXrLayer: 64-bit build only (games are 64-bit, manifest has one library)")
     endif()
 
     include(FetchContent)
@@ -61,30 +61,30 @@ if(TPVR_BUILD_LAYER)
         SOURCE_SUBDIR headers-only)
     FetchContent_MakeAvailable(openxr_sdk vulkan_headers)
 
-    add_library(TinyPedalXrLayer SHARED
+    add_library(NeoPedalXrLayer SHARED
         src/layer.cpp
         src/graphics_d3d11.cpp
         src/graphics_d3d12.cpp
         src/graphics_vulkan.cpp)
-    target_include_directories(TinyPedalXrLayer SYSTEM PRIVATE
+    target_include_directories(NeoPedalXrLayer SYSTEM PRIVATE
         ${openxr_sdk_SOURCE_DIR}/include
         ${vulkan_headers_SOURCE_DIR}/include)
-    target_link_libraries(TinyPedalXrLayer PRIVATE tpvr_shared_frame)
-    target_compile_options(TinyPedalXrLayer PRIVATE ${TPVR_WARNINGS})
-    target_compile_definitions(TinyPedalXrLayer PRIVATE UNICODE _UNICODE)
+    target_link_libraries(NeoPedalXrLayer PRIVATE tpvr_shared_frame)
+    target_compile_options(NeoPedalXrLayer PRIVATE ${TPVR_WARNINGS})
+    target_compile_definitions(NeoPedalXrLayer PRIVATE UNICODE _UNICODE)
     if(MINGW)
         # No libstdc++ / libgcc / winpthread DLL next to the layer
-        target_link_options(TinyPedalXrLayer PRIVATE -static -static-libgcc -static-libstdc++)
+        target_link_options(NeoPedalXrLayer PRIVATE -static -static-libgcc -static-libstdc++)
     endif()
     # Same folder for every configuration ($<0:> removes the per-config subfolder of multi-config generators)
     set(TPVR_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin)
-    set_target_properties(TinyPedalXrLayer PROPERTIES
+    set_target_properties(NeoPedalXrLayer PROPERTIES
         PREFIX ""
         RUNTIME_OUTPUT_DIRECTORY ${TPVR_OUTPUT_DIR}$<0:>
         LIBRARY_OUTPUT_DIRECTORY ${TPVR_OUTPUT_DIR}$<0:>)
-    add_custom_command(TARGET TinyPedalXrLayer POST_BUILD
+    add_custom_command(TARGET NeoPedalXrLayer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_CURRENT_SOURCE_DIR}/TinyPedalXrLayer.json ${TPVR_OUTPUT_DIR}/TinyPedalXrLayer.json)
+            ${CMAKE_CURRENT_SOURCE_DIR}/NeoPedalXrLayer.json ${TPVR_OUTPUT_DIR}/NeoPedalXrLayer.json)
 
     if(TPVR_BUILD_TESTS)
         # Fake OpenXR runtime driving the DLL with real D3D11 / D3D12 / Vulkan devices (skipped when missing)
@@ -98,7 +98,7 @@ if(TPVR_BUILD_LAYER)
         if(MINGW)
             target_link_options(layer_harness PRIVATE -static -static-libgcc -static-libstdc++)
         endif()
-        add_test(NAME layer_harness COMMAND layer_harness $<TARGET_FILE:TinyPedalXrLayer>)
+        add_test(NAME layer_harness COMMAND layer_harness $<TARGET_FILE:NeoPedalXrLayer>)
     endif()
 endif()
 

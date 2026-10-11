@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 # Heatmap style with invalid content (edited by hand, imported from a package)
@@ -15,8 +15,8 @@ from tinypedal.setting import cfg
     {"50": 12},  # color not a text
 ])
 def test_invalid_heatmap_falls_back_to_default(monkeypatch, heatmap):
-    from tinypedal.template.setting_heatmap import HEATMAP_DEFAULT, HEATMAP_DEFAULT_TYRE
-    from tinypedal.userfile.heatmap import load_heatmap_color, verify_heatmap
+    from neopedal.template.setting_heatmap import HEATMAP_DEFAULT, HEATMAP_DEFAULT_TYRE
+    from neopedal.userfile.heatmap import load_heatmap_color, verify_heatmap
 
     assert not verify_heatmap(heatmap)
     monkeypatch.setattr(cfg.default, "heatmap", HEATMAP_DEFAULT, raising=False)
@@ -30,7 +30,7 @@ def test_invalid_heatmap_falls_back_to_default(monkeypatch, heatmap):
 
 
 def test_valid_heatmap_accepted():
-    from tinypedal.userfile.heatmap import verify_heatmap
+    from neopedal.userfile.heatmap import verify_heatmap
 
     assert verify_heatmap({"-10": "#FFFFFF", "25.5": "#000"})
 
@@ -38,7 +38,7 @@ def test_valid_heatmap_accepted():
 # Preset package with manifest version of wrong type
 @pytest.mark.parametrize("version", ["2", None, [1], True])
 def test_package_manifest_version_wrong_type_is_invalid(tmp_path, version):
-    from tinypedal.userfile.preset_package import PACKAGE_FORMAT, import_preset_package
+    from neopedal.userfile.preset_package import PACKAGE_FORMAT, import_preset_package
 
     package = tmp_path / "package.zip"
     with zipfile.ZipFile(package, "w") as file:
@@ -60,6 +60,6 @@ def test_package_manifest_version_wrong_type_is_invalid(tmp_path, version):
     (float("inf"), "0-00-000"),
 ])
 def test_car_setup_laptime_never_shows_1000_milliseconds(seconds, text):
-    from tinypedal.userfile.car_setup import set_car_setup_laptime
+    from neopedal.userfile.car_setup import set_car_setup_laptime
 
     assert set_car_setup_laptime(seconds) == text

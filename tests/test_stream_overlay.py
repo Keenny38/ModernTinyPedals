@@ -16,9 +16,9 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QWidget
 from test_race_results import PRACTICE_XML, RACE_NAME, RACE_XML, write_results
 
-from tinypedal import stream_overlay
-from tinypedal.process import results_file as rf
-from tinypedal.stream_overlay import FrameStore, OverlayCapture, Placement
+from neopedal import stream_overlay
+from neopedal.process import results_file as rf
+from neopedal.stream_overlay import FrameStore, OverlayCapture, Placement
 
 
 def image(width=40, height=20, color="#80ff0000") -> QImage:
@@ -207,15 +207,15 @@ def test_window_image_fallback_renders_widget():
 def test_stream_only_overlay_transparent_on_screen(ui_env, monkeypatch):
     from importlib import import_module
 
-    from tinypedal import realtime_state
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import create_widget
+    from neopedal import realtime_state
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import create_widget
 
     monkeypatch.setattr(realtime_state, "active", True)
     cfg.overlay["auto_hide"] = False
     cfg.overlay["fixed_position"] = True
     cfg.user.setting["gear"]["stream_visibility"] = "Stream Only"
-    widget = create_widget(import_module("tinypedal.widget.gear"), cfg, "gear")
+    widget = create_widget(import_module("neopedal.widget.gear"), cfg, "gear")
     try:
         widget.start()
         assert widget.screen_opacity() == 0.0
@@ -234,8 +234,8 @@ def test_stream_only_overlay_transparent_on_screen(ui_env, monkeypatch):
 
 # Race results source
 def test_results_snapshot(ui_env, tmp_path, monkeypatch):
-    from tinypedal import i18n
-    from tinypedal.setting import cfg
+    from neopedal import i18n
+    from neopedal.setting import cfg
 
     i18n.set_language("English")
     folder = tmp_path / "Results"
@@ -266,7 +266,7 @@ def test_results_snapshot(ui_env, tmp_path, monkeypatch):
 # Server
 @pytest.fixture
 def server(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     monkeypatch.setattr(rf, "find_results_folders", lambda libraries=None: {})
     port = free_port()
@@ -329,7 +329,7 @@ def test_server_routes(server):
 
 def test_on_air_only_with_overlay_source(server, monkeypatch):
     """Spectating kept shown only while a layout or overlay source asks frames, option on, server running"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     assert not server.on_air()
     server.store.touch("layout")
@@ -350,7 +350,7 @@ def test_layout_crop_source(server):
 
 
 def test_server_settings_change(server):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     old_base = server.base_urls()[0]
     port = free_port()
@@ -386,8 +386,8 @@ def test_disable_closes_open_connections(server):
 
 
 def test_port_unavailable(ui_env, monkeypatch):
-    from tinypedal import app_signal
-    from tinypedal.setting import cfg
+    from neopedal import app_signal
+    from neopedal.setting import cfg
 
     errors = []
     app_signal.error.connect(errors.append)
@@ -406,8 +406,8 @@ def test_port_unavailable(ui_env, monkeypatch):
 def test_listening_tried_again_until_port_free(ui_env, monkeypatch):
     """Port held (Windows: connections of a stopped server, up to minutes): server started once free,
     error reported once"""
-    from tinypedal import app_signal, command_server
-    from tinypedal.setting import cfg
+    from neopedal import app_signal, command_server
+    from neopedal.setting import cfg
 
     monkeypatch.setattr(command_server, "BIND_RETRY_MS", 20)
     errors = []
@@ -445,7 +445,7 @@ def test_reload_keeps_sources_connected(server, monkeypatch):
     from types import SimpleNamespace
     from urllib.parse import urlsplit
 
-    from tinypedal import loader
+    from neopedal import loader
 
     monkeypatch.setattr(stream_overlay.StreamServer, "allow_reuse_address", False)  # as on Windows
     calls = []
@@ -476,12 +476,12 @@ def test_reload_keeps_sources_connected(server, monkeypatch):
 # Page
 @pytest.fixture
 def page_backend(server, monkeypatch):
-    from tinypedal.ui.quick.stream_backend import StreamOverlaysBackend
+    from neopedal.ui.quick.stream_backend import StreamOverlaysBackend
 
     slot_errors = []
     monkeypatch.setattr(sys, "excepthook", lambda *exc_info: slot_errors.append(exc_info[1]))
     monkeypatch.setattr(stream_overlay, "streamoverlay", server)
-    from tinypedal.ui.quick import stream_backend
+    from neopedal.ui.quick import stream_backend
 
     monkeypatch.setattr(stream_backend, "streamoverlay", server)
     backend = StreamOverlaysBackend()
@@ -493,9 +493,9 @@ def page_backend(server, monkeypatch):
 
 
 def test_page_backend(page_backend, monkeypatch):
-    from tinypedal import i18n
-    from tinypedal.setting import cfg
-    from tinypedal.widget import _base
+    from neopedal import i18n
+    from neopedal.setting import cfg
+    from neopedal.widget import _base
 
     i18n.set_language("English")
     backend = page_backend
@@ -509,7 +509,7 @@ def test_page_backend(page_backend, monkeypatch):
     backend.setResultsRows(0)
     backend.setResultsSession(2)
     assert "class=cycle&rows=10&cycle=10&session=any" in backend.resultsUrl
-    from tinypedal.ui.quick.stream_backend import load_page_settings
+    from neopedal.ui.quick.stream_backend import load_page_settings
 
     assert load_page_settings()["results_class"] == "cycle"
     reloaded = []
@@ -532,9 +532,9 @@ def test_page_backend(page_backend, monkeypatch):
 
 
 def test_page_layout_format(page_backend, monkeypatch):
-    from tinypedal import i18n
-    from tinypedal.ui.quick import stream_backend
-    from tinypedal.ui.quick.stream_backend import crop_size, load_page_settings
+    from neopedal import i18n
+    from neopedal.ui.quick import stream_backend
+    from neopedal.ui.quick.stream_backend import crop_size, load_page_settings
 
     i18n.set_language("English")
     assert crop_size(5120, 1440, (16, 9)) == (2560, 1440)
@@ -557,9 +557,9 @@ def test_page_layout_format(page_backend, monkeypatch):
 
 
 def test_page_tells_why_sources_empty(page_backend, monkeypatch):
-    from tinypedal import i18n, realtime_state
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.stream_backend import hidden_reason
+    from neopedal import i18n, realtime_state
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.stream_backend import hidden_reason
 
     i18n.set_language("English")
     monkeypatch.setattr(realtime_state, "hidden", True)
@@ -583,7 +583,7 @@ def test_page_tells_why_sources_empty(page_backend, monkeypatch):
 
 
 def test_page_overlays_signaled_only_when_changed(page_backend, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     told = []
     page_backend.overlaysChanged.connect(lambda: told.append(page_backend.overlayCount))
@@ -601,7 +601,7 @@ def test_page_loads(page_backend):
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.stream_overlay_view import StreamOverlaysView
+    from neopedal.ui.stream_overlay_view import StreamOverlaysView
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -622,7 +622,7 @@ def test_page_loads(page_backend):
 
 
 def test_server_game_pictures(server):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = os.path.join(cfg.path.game_image, "brand")
     os.makedirs(folder, exist_ok=True)
@@ -640,8 +640,8 @@ def test_server_game_pictures(server):
 
 def test_port_out_of_range_reported(ui_env):
     """OverflowError at bind reported like a busy port, never crashes app start"""
-    from tinypedal import app_signal
-    from tinypedal.setting import cfg
+    from neopedal import app_signal
+    from neopedal.setting import cfg
 
     errors = []
     app_signal.error.connect(errors.append)
@@ -661,7 +661,7 @@ def test_safe_mode_reload_resumes_capture(server, monkeypatch):
     server never started by reload when off"""
     from types import SimpleNamespace
 
-    from tinypedal import loader, safe_mode
+    from neopedal import loader, safe_mode
 
     monkeypatch.setattr(safe_mode, "state", safe_mode.SafeModeState())
     safe_mode.state.enabled = True
@@ -682,7 +682,7 @@ def test_safe_mode_reload_resumes_capture(server, monkeypatch):
 
 def test_page_status_in_safe_mode(page_backend, monkeypatch):
     """Server enabled but never started (safe mode): status says so, not "port unavailable\""""
-    from tinypedal import i18n, safe_mode
+    from neopedal import i18n, safe_mode
 
     i18n.set_language("English")
     monkeypatch.setattr(safe_mode, "state", safe_mode.SafeModeState())
@@ -704,7 +704,7 @@ def test_handler_error_logged_unlike_dropped_client(monkeypatch, caplog):
     """Dropped client stays debug, handler bug logged as warning with traceback (once a minute)"""
     import logging
 
-    from tinypedal.log_handler import ErrorThrottle
+    from neopedal.log_handler import ErrorThrottle
 
     monkeypatch.setattr(stream_overlay, "request_errors", ErrorThrottle())
     server = stream_overlay.StreamServer.__new__(stream_overlay.StreamServer)

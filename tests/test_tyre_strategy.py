@@ -6,8 +6,8 @@ import json
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tinypedal.userfile import tyre_strategy
-from tinypedal.userfile.tyre_strategy import (
+from neopedal.userfile import tyre_strategy
+from neopedal.userfile.tyre_strategy import (
     DEFAULT_TYRE_RULE,
     create_tyre_strategy,
     decode_tyre_name,
@@ -56,7 +56,7 @@ def test_load_tyre_strategy_file(tmp_path):
 # --- Planner (tyre plan of race calculator)
 @pytest.fixture
 def plan(ui_env):
-    from tinypedal.ui.quick.race_tyres import TyrePlan
+    from neopedal.ui.quick.race_tyres import TyrePlan
 
     return TyrePlan()
 
@@ -127,7 +127,7 @@ def test_planner_rows(plan):
 def test_planner_save_load_and_export(ui_env, monkeypatch, tmp_path):
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(race_calculator.RaceCalculator, "toast", lambda self, text: None)
@@ -179,7 +179,7 @@ def test_planner_sort_tyre_list(plan):
 
 
 def test_planner_tread_texts_and_colors():
-    from tinypedal.ui.quick.race_tyres import tread_color, tread_text
+    from neopedal.ui.quick.race_tyres import tread_color, tread_text
 
     assert tread_text(1.0, 0.7) == "New-70%" and tread_text(0.95, 0.65) == "95-65%"
     assert tread_text(0.2, -0.1) == "Blowout" and tread_text(float("nan"), 0.1) == "-"
@@ -190,7 +190,7 @@ def test_tyre_file_values_type_checked(tmp_path):
     """Wrong types, NaN & Infinity in a tyre file are replaced by defaults"""
     import json
 
-    from tinypedal.userfile.tyre_strategy import DEFAULT_TYRE_RULE, DEFAULT_TYRE_SET, load_tyre_strategy_file
+    from neopedal.userfile.tyre_strategy import DEFAULT_TYRE_RULE, DEFAULT_TYRE_SET, load_tyre_strategy_file
 
     text = json.dumps({
         "tyre_rule": {"maximum_tyre": 4.5, "tyre_change_time_1": "slow", "tyre_change_time_2": 6.0},
@@ -212,7 +212,7 @@ def test_tyre_file_values_type_checked(tmp_path):
 def test_tyre_export_atomic(tmp_path):
     import pytest
 
-    from tinypedal.userfile.tyre_strategy import export_tyre_strategy_file
+    from neopedal.userfile.tyre_strategy import export_tyre_strategy_file
 
     (tmp_path / "plan.csv").write_text("old", encoding="utf-8")
     with pytest.raises(OSError):

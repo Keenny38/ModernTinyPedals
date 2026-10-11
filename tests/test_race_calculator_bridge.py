@@ -5,9 +5,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, qInstallMessageHandler
 from shiboken6 import getCppPointer
 
+from neopedal.module_info import ConsumptionDataSet
+from neopedal.process.team_usage import StintUsage
 from tests.test_race_calculator import find_item, host, page, set_race  # noqa: F401 (host, page: fixtures)
-from tinypedal.module_info import ConsumptionDataSet
-from tinypedal.process.team_usage import StintUsage
 
 STINTS = [StintUsage("A", 1, 1, 6, 4, 0.03, 0.04, 0.5), StintUsage("B", 2, 7, 12, 5, 0.04, 0.05, 0.6)]
 

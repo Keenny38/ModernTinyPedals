@@ -6,9 +6,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.setting import cfg
-from tinypedal.ui.quick import overlay_backend
-from tinypedal.ui.quick.overlay_backend import (
+from neopedal.setting import cfg
+from neopedal.ui.quick import overlay_backend
+from neopedal.ui.quick.overlay_backend import (
     CATEGORY_ALL,
     CATEGORY_COLORS,
     CATEGORY_OTHER,
@@ -107,7 +107,7 @@ def shown(backend) -> list[str]:
 
 
 def test_categories():
-    from tinypedal.template.setting_widget import WIDGET_FILENAME
+    from neopedal.template.setting_widget import WIDGET_FILENAME
 
     assert widget_category("tyre_pressure") == "Tyres & Wheels"
     assert widget_category("brake_wear") == "Brakes"
@@ -156,7 +156,7 @@ def test_search_state_and_category_filters(overlays):
 
 
 def test_search_in_french_labels(overlays):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -342,7 +342,7 @@ def test_refresh_redraws_previews_in_background(overlays, monkeypatch):
 
 
 def test_refresh_redraws_only_previews_whose_inputs_changed(overlays, monkeypatch):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     previews = overlays.previews
     overlays.set_active(True)
@@ -379,7 +379,7 @@ def test_refresh_redraws_only_previews_whose_inputs_changed(overlays, monkeypatc
 
 def test_refresh_while_hidden_reads_inputs_once_shown(overlays, monkeypatch):
     """Hotkeys, tray & saves refresh the page while racing: rows updated, preview inputs read only once shown"""
-    from tinypedal.ui import widget_preview
+    from neopedal.ui import widget_preview
 
     previews = overlays.previews
     overlays.set_active(True)
@@ -464,7 +464,7 @@ def test_counts_cached_and_signaled_on_change(overlays):
 # Page
 @pytest.fixture
 def page(overlays, monkeypatch):
-    from tinypedal.ui.overlay_view import OverlayView
+    from neopedal.ui.overlay_view import OverlayView
 
     view = OverlayView(None, overlays.test_control)
     monkeypatch.setattr(view.backend, "_confirm", lambda text: True)
@@ -519,8 +519,8 @@ def test_qml_page_list_view_and_filters(page):
 
 
 def test_qml_page_translated(overlays):
-    from tinypedal import i18n
-    from tinypedal.ui.overlay_view import OverlayView
+    from neopedal import i18n
+    from neopedal.ui.overlay_view import OverlayView
 
     i18n.set_language("Français")
     try:
@@ -547,8 +547,8 @@ def test_refresh_slot(page):
 def test_main_window_uses_overlay_page(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.overlay_view import OverlayView
+    from neopedal.ui import app as app_module
+    from neopedal.ui.overlay_view import OverlayView
 
     host = QWidget()
     try:
@@ -567,8 +567,8 @@ def test_qml_imports_bundled_modules():
     """
     import re
 
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     for name in ("Overlays.qml", "OverlayCard.qml", "OverlayListRow.qml", "OverlayChip.qml"):
         with open(f"{QML_FOLDER}/{name}", encoding="utf-8") as file:
@@ -577,7 +577,7 @@ def test_qml_imports_bundled_modules():
 
 
 def test_french_page_messages():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:

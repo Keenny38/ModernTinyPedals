@@ -2,9 +2,9 @@
 
 import pytest
 
+from neopedal.module import module_vehicles
+from neopedal.module_info import VehiclesInfo
 from tests.test_readers import lmu_api
-from tinypedal.module import module_vehicles
-from tinypedal.module_info import VehiclesInfo
 
 # (driver, class, place, lap distance, speed m/s, in pits, total laps, qualification)
 CARS = (
@@ -17,7 +17,7 @@ CARS = (
 
 @pytest.fixture
 def field(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     sim, data = lmu_api()
     info = data.scoring.scoringInfo
@@ -79,7 +79,7 @@ def test_vehicle_history_reset_when_another_car_takes_index(field, monkeypatch):
         car.fuelHistory.used = 2.5
         car.pitTimer.laps = 7
     timers = [(car.speedTrap, car.licoTimer) for car in field.dataSet[2:4]]
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
     api._api._shmmapi._shmm.data.scoring.vehScoringInfo[3].mID = 42  # another car now at index 3
     module_vehicles.update_vehicle_data(field, 1.0, 1.0, True, 600.1, True)
     kept, replaced = field.dataSet[2], field.dataSet[3]
@@ -94,8 +94,8 @@ def test_vehicle_history_reset_when_another_car_takes_index(field, monkeypatch):
 
 def test_slot_ids_forgotten_when_module_resets(field, monkeypatch):
     """New session (module reset): slot ids of previous session never reset history of new one"""
-    from tinypedal import realtime_state
-    from tinypedal.setting import cfg
+    from neopedal import realtime_state
+    from neopedal.setting import cfg
 
     monkeypatch.setattr(module_vehicles, "_index_slot_ids", {0: 99, 7: 5})
     monkeypatch.setattr(realtime_state, "paused", False)
@@ -175,7 +175,7 @@ class CountedReader:
 
 def count_calls(monkeypatch, group_name: str, name: str) -> list:
     """Count calls of a reader method (index of each call)"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     if not isinstance(api.read, CountedReader):
         monkeypatch.setattr(api, "read", CountedReader(api.read))

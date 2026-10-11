@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from tinypedal.userfile.track_corners import CIRCUITS, Circuit, bends, find_circuit, place_corners, track_corners, words
+from neopedal.userfile.track_corners import CIRCUITS, Circuit, bends, find_circuit, place_corners, track_corners, words
 
 
 def oval_with_bends(length: float, bend_fractions: list[float], step: float = 2.0):
@@ -85,7 +85,7 @@ def test_track_corners():
 
 
 def test_corner_labels_translated():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -100,10 +100,10 @@ def test_lap_viewer_uses_official_corners(ui_env):
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.userfile.telemetry_lap import LapData
 
     distances, xs, ys = oval_with_bends(4080.0, [0.112, 0.18, 0.238, 0.278, 0.346, 0.482, 0.532, 0.859, 0.876,
                                                  0.92, 0.96])

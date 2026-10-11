@@ -65,11 +65,11 @@ preview.set_vehicles()
 preview.set_modules()
 for name in names:
     try:
-        module = import_module(f"tinypedal.widget.{name}")
+        module = import_module(f"neopedal.widget.{name}")
     except ModuleNotFoundError:  # new widget: no before render, shown as "(new)"
         continue
     try:  # modern design (older revisions have none)
-        from tinypedal.widget._modern import create_widget
+        from neopedal.widget._modern import create_widget
     except ImportError:
         widget = module.Realtime(preview.cfg, name)
     else:
@@ -119,7 +119,7 @@ def compose(names: list[str], before_dir: str, after_dir: str, title: str, outpu
     from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.main import load_bundled_fonts
+    from neopedal.main import load_bundled_fonts
     from tools.make_readme_preview import BACKGROUND
 
     _app = QApplication.instance() or QApplication(sys.argv)

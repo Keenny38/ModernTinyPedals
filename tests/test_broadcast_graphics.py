@@ -8,10 +8,10 @@ import urllib.request
 import pytest
 from PySide6.QtCore import QCoreApplication, QObject
 
+from neopedal.process import championship as ch
+from neopedal.process import director as dr
 from tests.test_broadcast_director import car, director_page, poll, race_answers  # noqa: F401
 from tests.test_stream_overlay import get, parse_bundle, server  # noqa: F401
-from tinypedal.process import championship as ch
-from tinypedal.process import director as dr
 
 
 def post(url: str, body: bytes) -> int:
@@ -47,7 +47,7 @@ def test_championship_csv_titles_classes_ties():
 # Graphics of the director
 @pytest.fixture
 def english():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("English")
 
@@ -133,7 +133,7 @@ def test_on_demand_grid_event_results_championship(director_page, english, tmp_p
     standings = backend.graphics_state()["champ"]
     assert standings["title"] == "Endurance Cup" and standings["subtitle"] == "Hyper"
     assert [(row["name"], row["points"], row["medal"]) for row in standings["rows"]] == [("B", "80", 1), ("A", "50", 2)]
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     assert [item["name"] for item in db.load_championships()] == ["Endurance Cup"]
     bad = tmp_path / "empty.csv"
@@ -151,7 +151,7 @@ def test_graphics_settings_choices_and_limits(director_page):  # noqa: F811
     backend.setGraphic("onboardStyle", "nonsense")
     settings = backend.graphicsSettings
     assert (settings["onboardStyle"], settings["temperatureUnit"], settings["opacity"]) == ("helmet", "fahrenheit", 30)
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     assert db.temperature_text(20.0, "fahrenheit") == "68°F" and db.temperature_text(20.0, "celsius") == "20°C"
     kept = db.graphics_setting({"opacity": 250, "towerMode": "bad", "onboard": "yes"})
@@ -165,7 +165,7 @@ def test_timing_table_views_and_columns(director_page, english):  # noqa: F811
     model = backend.timingRows
     assert model.rowCount() == 2
     row = model.rows[1]
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     assert set(db.TIMING_COLUMNS) <= set(row) and row["interval"] == "+0.8" and row["battle"]
     assert row["pits"] == "1" and model.rows[0]["bestTone"] == "fastest"
@@ -218,8 +218,8 @@ def test_graphics_panels_load_without_warnings(director_page):  # noqa: F811
 
 # Layout editors (browser): broadcast graphics & stream layout
 def test_director_layout_editor_endpoints(server):  # noqa: F811
-    from tinypedal import stream_director as sd
-    from tinypedal.setting import cfg
+    from neopedal import stream_director as sd
+    from neopedal.setting import cfg
 
     status, body, _ = get(server.url("/director", "edit=1"))
     assert status == 200 and b"setupEditor" in body
@@ -251,8 +251,8 @@ def test_director_layout_editor_endpoints(server):  # noqa: F811
 
 
 def test_stream_layout_places(server, monkeypatch):  # noqa: F811
-    from tinypedal import stream_overlay
-    from tinypedal.ui.quick import stream_backend
+    from neopedal import stream_overlay
+    from neopedal.ui.quick import stream_backend
 
     places = {"gear": [0.5, 0.25, 1.5], "../x": [0, 0, 1]}
     assert post(server.url("/api/layout", "crop=16:9"), json.dumps(places).encode()) == 200
@@ -281,7 +281,7 @@ def test_stream_layout_places(server, monkeypatch):  # noqa: F811
 
 # Sections of the graphics state, layout presets, sources with some graphics only
 def test_section_feed_sends_changed_sections_only():
-    from tinypedal.stream_director import SectionFeed
+    from neopedal.stream_director import SectionFeed
 
     feed = SectionFeed()
     feed.publish({"tower": [1], "clock": {"text": "1:00"}})
@@ -300,8 +300,8 @@ def test_section_feed_sends_changed_sections_only():
 def test_layout_presets_and_partial_sources(server, director_page, monkeypatch):  # noqa: F811
     from PySide6.QtGui import QGuiApplication
 
-    from tinypedal import stream_director as sd
-    from tinypedal import stream_overlay as so
+    from neopedal import stream_director as sd
+    from neopedal import stream_overlay as so
 
     backend = director_page.backend
     assert post(server.url("/api/director/layout", "preset=race"), b'{"tower": [0.5, 0.5, 1]}') == 200
@@ -330,7 +330,7 @@ def test_layout_presets_and_partial_sources(server, director_page, monkeypatch):
 def test_league_branding_files(server, director_page, tmp_path):  # noqa: F811
     import os
 
-    from tinypedal import stream_director as sd
+    from neopedal import stream_director as sd
 
     backend = director_page.backend
     picture = tmp_path / "league.png"
@@ -416,15 +416,15 @@ def test_graphics_settings_new_choices(director_page):  # noqa: F811
     settings = backend.graphicsSettings
     assert (settings["mapRotation"], settings["towerGap"], settings["mapDots"], settings["sponsorSeconds"]) == (
         90, "leader", 200, 3)
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     kept = db.graphics_setting({"mapRotation": 33, "accent": "#zz0000", "brandName": "a" * 99})
     assert kept["mapRotation"] == 0 and kept["accent"] == "#e5383b" and len(kept["brandName"]) == 60
 
 
 def test_hotkeys_of_graphics(director_page):  # noqa: F811
-    from tinypedal.hotkey import command
-    from tinypedal.template.setting_shortcuts import SHORTCUTS_GENERAL
+    from neopedal.hotkey import command
+    from neopedal.template.setting_shortcuts import SHORTCUTS_GENERAL
 
     backend = director_page.backend
     command.hotkey_director_starting_grid()
@@ -467,8 +467,8 @@ def test_director_seen_comeback_and_overtake_camera():
 
 # Race history of the drivers (results files)
 def test_driver_history_from_race_files(tmp_path, monkeypatch):
-    from tinypedal.process import driver_history as dh
-    from tinypedal.process import results_file as rf
+    from neopedal.process import driver_history as dh
+    from neopedal.process import results_file as rf
 
     def entry(name, cls, place, finished=True, swaps=()):
         return rf.Entry(name, "Team", "Car", "Car", cls, "1", 1, place, 1, place, 10, 90.0,
@@ -503,7 +503,7 @@ def test_onboard_reads_shared_memory_of_car_on_air(director_page, english, monke
     """Onboard of the car on air from the game data of the app (groups & readers of the real API): gear, rpm,
     pedals, 10 times a second (a reader of a missing group made it fall back to the speed
     of the game answer, once a second, without gear, rpm or pedals)"""
-    from tinypedal.adapter import _reader
+    from neopedal.adapter import _reader
 
     page, backend = director_page, director_page.backend
     backend.setGraphic("onboard", True)
@@ -521,7 +521,7 @@ def test_onboard_reads_shared_memory_of_car_on_air(director_page, english, monke
     Reader.vehicle.slot_id = lambda index=None: (1, 7)[index]
     # Same group & reader names as the game data of the app
     groups = {"vehicle": _reader.Vehicle, "engine": _reader.Engine, "inputs": _reader.Inputs}
-    from tinypedal.adapter import APIDataReader
+    from neopedal.adapter import APIDataReader
 
     assert set(groups) <= set(APIDataReader._fields)
     for group, base in groups.items():
@@ -531,6 +531,6 @@ def test_onboard_reads_shared_memory_of_car_on_air(director_page, english, monke
     onboard = backend.live_state()["onboard"]
     assert (onboard["speed"], onboard["gear"], onboard["rpm"], onboard["throttle"]) == (180.0, 4, 7200, 0.8)
     assert "battery" not in onboard  # no battery on the onboard graphic
-    from tinypedal.ui.quick import director_backend as db
+    from neopedal.ui.quick import director_backend as db
 
     assert db.LIVE_MS <= 100

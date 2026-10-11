@@ -5,8 +5,8 @@ import math
 
 import pytest
 
-from tinypedal.widget._black_box import recorder as rec
-from tinypedal.widget._black_box.recorder import Event, EventLog, Recorder, Sample
+from neopedal.widget._black_box import recorder as rec
+from neopedal.widget._black_box.recorder import Event, EventLog, Recorder, Sample
 
 
 def sample(time, speed, throttle=0.0, brake=0.0, slip=""):
@@ -113,8 +113,8 @@ def test_format_event():
 
 # --- Widget
 def new_widget(overrides=None):
-    from tinypedal.setting import cfg
-    from tinypedal.widget import black_box
+    from neopedal.setting import cfg
+    from neopedal.widget import black_box
 
     # Layout tests need room for every block, auto resize has its own tests
     cfg.user.setting["black_box"].update({"enable_auto_resize": False, **(overrides or {})})
@@ -147,7 +147,7 @@ def test_layout_does_not_shadow_qwidget_methods(ui_env):
 
 
 def test_recorder_fed_by_updates_and_trace_drawn(ui_env, monkeypatch):
-    from tinypedal.widget._black_box import reader
+    from neopedal.widget._black_box import reader
 
     clock = [100.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -171,7 +171,7 @@ def test_recorder_fed_by_updates_and_trace_drawn(ui_env, monkeypatch):
 
 
 def test_incident_logged_and_exported(ui_env, monkeypatch, tmp_path):
-    from tinypedal.widget._black_box import reader
+    from neopedal.widget._black_box import reader
 
     saved = []
     monkeypatch.setattr(reader.EXPORT_QUEUE, "submit", lambda incident, folder, export_format: saved.append(folder))
@@ -193,7 +193,7 @@ def test_incident_logged_and_exported(ui_env, monkeypatch, tmp_path):
 def test_color_fade(ui_env):
     from PySide6.QtGui import QColor
 
-    from tinypedal.widget._black_box.wheels import ColorFade
+    from neopedal.widget._black_box.wheels import ColorFade
 
     fade = ColorFade(1.0)
     assert fade.color_of("#000000", 0.0) == QColor("#000000")  # first color: no fade
@@ -246,7 +246,7 @@ def test_robust_with_recorder_and_extreme_values(ui_env):
 def test_damage_panel_geometry():
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget._black_box.damage import damage_geometry
+    from neopedal.widget._black_box.damage import damage_geometry
 
     rect = QRectF(10, 20, 60, 80)
     shapes = damage_geometry(rect, 16)
@@ -277,7 +277,7 @@ def test_damage_panel_colors_and_integrity(ui_env):
 
 
 def test_car_silhouette_removed(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     assert "show_car_silhouette" not in cfg.default.setting["black_box"]
     widget = new_widget()
@@ -310,7 +310,7 @@ def test_damage_panel_modern_colors(ui_env):
 
 # --- Fuel & energy gauges (like Fuel / Virtual Energy widget level bar)
 def test_gauges_replace_refuel_rows(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     options = cfg.default.setting["black_box"]
     for key in ("show_refuel", "show_refill", "show_fuel_remaining", "show_energy_remaining", "text_refuel"):
@@ -323,7 +323,7 @@ def test_gauges_replace_refuel_rows(ui_env):
 
 
 def test_gauge_data_and_low_warning(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     for name, value in (("capacity", 100.0), ("amountStart", 90.0), ("amountCurrent", 40.0),
                         ("neededRelative", 25.0), ("estimatedLaps", 8.0)):
@@ -348,7 +348,7 @@ def test_gauge_marks_positions(ui_env, monkeypatch):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget._black_box import panels
+    from neopedal.widget._black_box import panels
 
     widget = new_widget()
     try:
@@ -372,7 +372,7 @@ def test_gauge_marks_positions(ui_env, monkeypatch):
 
 
 def test_old_rows_migrated_to_gauges():
-    from tinypedal.setting_preupdate import preupdate_user_setting
+    from neopedal.setting_preupdate import preupdate_user_setting
 
     user = {"black_box": {"show_refuel": False, "show_fuel_remaining": True,
                           "show_refill": False, "show_energy_remaining": False}}
@@ -382,7 +382,7 @@ def test_old_rows_migrated_to_gauges():
 
 
 def test_fuel_gauge_in_liters(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.units["fuel_unit"] = "Gallon"  # global unit ignored: widget default is liter
     try:
@@ -399,7 +399,7 @@ def test_fuel_gauge_in_liters(ui_env):
 
 # --- Data module dependencies
 def test_required_modules_follow_options():
-    from tinypedal.widget._black_box.modules import required_modules
+    from neopedal.widget._black_box.modules import required_modules
 
     assert required_modules({}) == ()
     assert required_modules({"show_delta_best": True, "show_fuel_gauge": True}) == ("module_fuel", "module_delta")
@@ -408,7 +408,7 @@ def test_required_modules_follow_options():
 
 
 def test_module_status_refresh_and_notice():
-    from tinypedal.widget._black_box.modules import ModuleStatus
+    from neopedal.widget._black_box.modules import ModuleStatus
 
     settings = {"module_wheels": {"enable": True}, "module_fuel": {"enable": False}}
     status = ModuleStatus(settings, ("module_wheels", "module_fuel"))
@@ -423,8 +423,8 @@ def test_module_status_refresh_and_notice():
 
 
 def test_disabled_module_data_not_read_and_cleared(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
-    from tinypedal.setting import cfg
+    from neopedal.module_info import minfo
+    from neopedal.setting import cfg
 
     monkeypatch.setattr(minfo.fuel, "amountCurrent", 42.0)
     monkeypatch.setattr(minfo.delta, "deltaBest", -0.5)
@@ -449,9 +449,9 @@ def test_disabled_module_data_not_read_and_cleared(ui_env, monkeypatch):
 
 
 def test_enable_required_modules(ui_env, monkeypatch):
-    from tinypedal import module_control
-    from tinypedal.setting import cfg
-    from tinypedal.widget import _base as black_box_base
+    from neopedal import module_control
+    from neopedal.setting import cfg
+    from neopedal.widget import _base as black_box_base
 
     started = []
     active = {}
@@ -491,7 +491,7 @@ def test_gauge_survives_non_finite_module_data(ui_env):
 
 # --- Dynamic size
 def test_debounce_applies_stable_value_only():
-    from tinypedal.widget._black_box.sizing import Debounce
+    from neopedal.widget._black_box.sizing import Debounce
 
     debounce = Debounce("a", delay=2.0)
     assert debounce.update("b", 0.0) == "a"
@@ -503,7 +503,7 @@ def test_debounce_applies_stable_value_only():
 
 
 def test_fit_content():
-    from tinypedal.widget._black_box.sizing import fit_content
+    from neopedal.widget._black_box.sizing import fit_content
 
     assert fit_content(200, 100) == (200, 100, 1.0, 0.0, 0.0)
     both = fit_content(200, 100, 400, 400)
@@ -515,7 +515,7 @@ def test_fit_content():
 
 
 def test_anchored_position():
-    from tinypedal.widget._black_box.sizing import anchored_position
+    from neopedal.widget._black_box.sizing import anchored_position
 
     assert anchored_position(100, 100, 300, 200, 300, 150, "Top Left") == (100, 100)
     assert anchored_position(100, 100, 300, 200, 250, 150, "Bottom Right") == (150, 150)
@@ -523,8 +523,8 @@ def test_anchored_position():
 
 
 def test_auto_resize_starts_compact_and_grows_with_data(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
-    from tinypedal.widget._black_box import reader
+    from neopedal.module_info import minfo
+    from neopedal.widget._black_box import reader
 
     clock = [0.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -553,7 +553,7 @@ def test_auto_resize_starts_compact_and_grows_with_data(ui_env, monkeypatch):
 
 
 def test_stint_row_appears_with_data(ui_env):
-    from tinypedal.widget._black_box.sizing import Presence
+    from neopedal.widget._black_box.sizing import Presence
 
     widget = new_widget({"enable_auto_resize": True, "show_stint_comparison": True})
     try:
@@ -569,7 +569,7 @@ def test_stint_row_appears_with_data(ui_env):
 
 
 def test_auto_resize_disabled_keeps_size(ui_env, monkeypatch):
-    from tinypedal.widget._black_box import reader
+    from neopedal.widget._black_box import reader
 
     clock = [0.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -613,7 +613,7 @@ def test_resize_keeps_anchor(ui_env):
         widget.show()
         widget.move(500, 400)
         right, bottom = widget.x() + widget.width(), widget.y() + widget.height()
-        from tinypedal.widget._black_box.sizing import Presence
+        from neopedal.widget._black_box.sizing import Presence
 
         widget.relayout(Presence(energy_row=False, battery=False, abs=False, tc=False))
         assert widget.x() + widget.width() == right
@@ -716,7 +716,7 @@ def test_damage_panel_any_corner(ui_env, corner):
 def test_damage_panel_car_shape():
     from PySide6.QtCore import QRectF
 
-    from tinypedal.widget._black_box.damage import damage_geometry
+    from neopedal.widget._black_box.damage import damage_geometry
 
     rect = QRectF(0, 0, 80, 100)
     shapes = damage_geometry(rect, 16)
@@ -761,7 +761,7 @@ def test_center_action_uses_centering_rect(ui_env, monkeypatch):
         area = widget.centering_rect()
         widget.move((screen_w - area.width()) // 2 - area.x(), 0)
         assert widget.x() + area.x() + area.width() // 2 == pytest.approx(screen_w // 2, abs=1)
-        from tinypedal.widget._base import Overlay
+        from neopedal.widget._base import Overlay
 
         assert Overlay.centering_rect(widget) == QRect(0, 0, widget.width(), widget.height())
     finally:
@@ -770,7 +770,7 @@ def test_center_action_uses_centering_rect(ui_env, monkeypatch):
 
 # --- Suspension (coilover beside brakes)
 def test_suspension_travel_uses_module_range():
-    from tinypedal.widget._black_box.state import DAMPER_FILTER_TIME, SuspensionTravel
+    from neopedal.widget._black_box.state import DAMPER_FILTER_TIME, SuspensionTravel
 
     travel = SuspensionTravel()
     assert travel.update(50.0, 0.0, 20.0, 80.0) == (0.5, 0.0)  # first sample: no speed yet
@@ -786,7 +786,7 @@ def test_suspension_travel_uses_module_range():
 
 
 def test_damper_speed_tint_has_low_and_high_speed_zones():
-    from tinypedal.widget._black_box.state import LOW_SPEED_TINT, damper_tint
+    from neopedal.widget._black_box.state import LOW_SPEED_TINT, damper_tint
 
     assert damper_tint(0.0, 50, 150) == 0.0
     assert damper_tint(25.0, 50, 150) == pytest.approx(LOW_SPEED_TINT / 2)  # body motion: light tint
@@ -797,7 +797,7 @@ def test_damper_speed_tint_has_low_and_high_speed_zones():
 
 
 def test_wheel_travel_from_motion_ratio():
-    from tinypedal.widget._black_box.state import wheel_offset
+    from neopedal.widget._black_box.state import wheel_offset
 
     assert wheel_offset(10.0, 0.5) == pytest.approx(20.0)  # pushrod: wheel moves twice the spring
     assert wheel_offset(10.0, 0.0) == 10.0  # ratio not learned yet: spring travel
@@ -805,7 +805,7 @@ def test_wheel_travel_from_motion_ratio():
 
 
 def test_bump_stop_from_force_above_spring_line():
-    from tinypedal.widget._black_box.state import BUMP_MIN_SAMPLES, BumpStop
+    from neopedal.widget._black_box.state import BUMP_MIN_SAMPLES, BumpStop
 
     bump = BumpStop()
     rate, preload = 100.0, 1000.0  # N/mm, N
@@ -826,7 +826,7 @@ def test_bump_stop_from_force_above_spring_line():
 def test_suspension_travel_learns_range_without_module():
     import math
 
-    from tinypedal.widget._black_box.state import SuspensionTravel
+    from neopedal.widget._black_box.state import SuspensionTravel
 
     travel = SuspensionTravel()
     assert travel.update(40.0, 0.0)[0] == 0.5  # no range yet
@@ -865,9 +865,9 @@ def test_suspension_hidden_frees_room(ui_env):
 
 
 def test_suspension_live_and_dynamic(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
-    from tinypedal.widget._black_box import reader
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
+    from neopedal.widget._black_box import reader
 
     clock = [0.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -908,7 +908,7 @@ def test_suspension_live_and_dynamic(ui_env, monkeypatch):
 
 
 def test_spring_shortens_when_compressed():
-    from tinypedal.widget._black_box.suspension import spring_length
+    from neopedal.widget._black_box.suspension import spring_length
 
     assert spring_length(100, 0) == 100
     assert spring_length(100, 1) == pytest.approx(20)
@@ -916,7 +916,7 @@ def test_spring_shortens_when_compressed():
 
 
 def test_suspension_offset_is_real_millimeters():
-    from tinypedal.widget._black_box.state import SuspensionTravel
+    from neopedal.widget._black_box.state import SuspensionTravel
 
     travel = SuspensionTravel()
     assert travel.offset(62.0, 50.0) == pytest.approx(12.0)  # 12 mm compressed from static
@@ -927,7 +927,7 @@ def test_suspension_offset_is_real_millimeters():
 
 
 def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
-    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM, spring_length_real
+    from neopedal.widget._black_box.suspension import TYRE_DIAMETER_MM, spring_length_real
 
     widget = new_widget({"suspension_motion_scale": 1.0})  # real scale (default magnifies 8 times)
     try:
@@ -944,7 +944,7 @@ def test_suspension_moves_one_to_one_with_tyre_scale(ui_env):
         assert magnified.susp_pixels_per_mm == pytest.approx(4 * tyre_h / TYRE_DIAMETER_MM)
     finally:
         magnified.deleteLater()
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
 
     assert WIDGET_DEFAULT["black_box"]["suspension_motion_scale"] == 8.0  # small travel easy to see by default
 
@@ -979,8 +979,8 @@ def test_suspension_turns_with_wheel(ui_env, monkeypatch):
 
 def test_tyre_and_disc_move_with_suspension(ui_env, monkeypatch):
     """Tyre & disc move by the real wheel travel (not spring travel), 1:1"""
-    from tinypedal.widget._black_box.drawn import MOTION_GRID
-    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+    from neopedal.widget._black_box.drawn import MOTION_GRID
+    from neopedal.widget._black_box.suspension import TYRE_DIAMETER_MM
 
     widget = new_widget({"suspension_motion_scale": 1.0})  # real scale (default magnifies 8 times)
     try:
@@ -1014,7 +1014,7 @@ def test_wheels_fixed_when_motion_off(ui_env, overrides):
 
 def test_wheel_mount_at_tyre_center(ui_env):
     """At static position, the suspension wheel mount is at the tyre (hub) & disc center"""
-    from tinypedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame
+    from neopedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame
 
     widget = new_widget()
     try:
@@ -1048,7 +1048,7 @@ def test_braking_noise_is_not_an_impact():
 
 
 def test_recorder_uses_game_impact_time(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     impact = [10.0]
     monkeypatch.setattr(api.read.vehicle, "impact_time", lambda: impact[0])
@@ -1065,7 +1065,7 @@ def test_recorder_uses_game_impact_time(ui_env, monkeypatch):
 
 
 def test_brake_window_by_car_class(ui_env):
-    from tinypedal.widget._black_box.state import class_target, parse_class_targets
+    from neopedal.widget._black_box.state import class_target, parse_class_targets
 
     targets = parse_class_targets("Hypercar=400-950; GT3=250-650; LMGT3=260-640; broken")
     assert class_target(targets, "LMGT3") == (260.0, 640.0)  # longest name wins
@@ -1088,7 +1088,7 @@ def test_brake_window_by_car_class(ui_env):
     ("Surface", "surface_temperature_avg"),
 ])
 def test_tyre_temperature_source(ui_env, monkeypatch, source, reader):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     for name in ("inner_temperature_avg", "carcass_temperature", "surface_temperature_avg"):
         value = 95.0 if name == reader else 40.0
@@ -1101,7 +1101,7 @@ def test_tyre_temperature_source(ui_env, monkeypatch, source, reader):
 
 
 def test_slip_ratio_against_each_wheel_ground_speed():
-    from tinypedal.module.module_wheels import wheel_ground_speed
+    from neopedal.module.module_wheels import wheel_ground_speed
 
     assert wheel_ground_speed(-31.0, 30.0) == 31.0  # outer wheel in a corner, sign of game axis dropped
     assert wheel_ground_speed(0.0, 30.0) == 30.0  # not reported: vehicle speed
@@ -1116,7 +1116,7 @@ def test_slip_ratio_against_each_wheel_ground_speed():
     (-12.0, 10.0, True, True),
 ])
 def test_steer_convention_learned_from_steering(front_left, front_right, mirrored, inverted):
-    from tinypedal.widget._black_box.state import STEER_VOTES, SteerConvention
+    from neopedal.widget._black_box.state import STEER_VOTES, SteerConvention
 
     convention = SteerConvention()
     convention.update(front_left, front_right, 0.5)
@@ -1155,8 +1155,8 @@ def test_tyre_load_display(ui_env, display, text):
 
 
 def test_brake_temperature_trend(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.widget._black_box import reader
+    from neopedal.api_control import api
+    from neopedal.widget._black_box import reader
 
     clock = [0.0]
     temps = [300.0]
@@ -1175,7 +1175,7 @@ def test_brake_temperature_trend(ui_env, monkeypatch):
 
 
 def test_tyre_diameter_from_wheel_radius(ui_env):
-    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+    from neopedal.widget._black_box.suspension import TYRE_DIAMETER_MM
 
     widget = new_widget()
     try:
@@ -1189,7 +1189,7 @@ def test_tyre_diameter_from_wheel_radius(ui_env):
 
 
 def test_estimated_rest_position_flagged():
-    from tinypedal.widget._black_box.state import SuspensionTravel
+    from neopedal.widget._black_box.state import SuspensionTravel
 
     travel = SuspensionTravel()
     travel.offset(40.0)
@@ -1199,7 +1199,7 @@ def test_estimated_rest_position_flagged():
 
 
 def test_vehicle_name_read_with_slow_data_only(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     calls = []
     monkeypatch.setattr(api.read.vehicle, "vehicle_name", lambda: calls.append(1) or "car")
@@ -1214,8 +1214,8 @@ def test_vehicle_name_read_with_slow_data_only(ui_env, monkeypatch):
 
 # --- Bug fixes: new session impact, slip before radius is known
 def test_new_session_impact_time_is_not_an_impact(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.widget._black_box.reader import is_new_impact
+    from neopedal.api_control import api
+    from neopedal.widget._black_box.reader import is_new_impact
 
     assert is_new_impact(55.0, 10.0)
     assert not is_new_impact(0.0, 120.0)  # session restart: time stamp back to 0
@@ -1238,7 +1238,7 @@ def test_new_session_impact_time_is_not_an_impact(ui_env, monkeypatch):
 
 
 def test_no_slip_before_wheel_radius_is_known():
-    from tinypedal import calculation as calc
+    from neopedal import calculation as calc
 
     assert calc.slip_ratio(50.0, 0.0, 30.0) == 0  # radius not learned: not a locked wheel
     assert calc.slip_ratio(50.0, 0.33, 30.0) == pytest.approx(50 * 0.33 / 30 - 1)
@@ -1246,8 +1246,8 @@ def test_no_slip_before_wheel_radius_is_known():
 
 def test_wheel_mount_moves_with_tyre(ui_env):
     """Spring wheel mount and tyre move by the same wheel travel: the corner stays in one piece"""
-    from tinypedal.widget._black_box.drawn import MOTION_GRID
-    from tinypedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame, spring_length_real
+    from neopedal.widget._black_box.drawn import MOTION_GRID
+    from neopedal.widget._black_box.suspension import STATIC_LENGTH, spring_frame, spring_length_real
 
     widget = new_widget()
     try:
@@ -1264,7 +1264,7 @@ def test_wheel_mount_moves_with_tyre(ui_env):
 
 
 def test_suspension_damage_on_coilover(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.wheel, "suspension_damage", lambda: (0.0, 0.2, 0.5, 0.95), raising=False)
     widget = new_widget({"show_damage_panel": False, "slow_data_update_interval": 0})
@@ -1292,7 +1292,7 @@ def test_suspension_damage_on_coilover(ui_env, monkeypatch):
 
 # --- Tyres: camber spread, rear pressure window, pressure range, surface overheat, wear forecast
 def test_camber_spread_inner_minus_outer():
-    from tinypedal.widget._black_box.state import camber_spread
+    from neopedal.widget._black_box.state import camber_spread
 
     # left / center / right of the car: inner side of a left wheel is on its right
     assert camber_spread(0, 80.0, 85.0, 90.0) == pytest.approx(10.0)  # FL inner hotter
@@ -1317,7 +1317,7 @@ def test_rear_pressure_window(ui_env):
 
 
 def test_pressure_range_of_stint():
-    from tinypedal.widget._black_box.state import PressureRange
+    from neopedal.widget._black_box.state import PressureRange
 
     stint = PressureRange()
     for pressure in (170.0, 183.0, 0.0, 176.0, math.nan):
@@ -1328,7 +1328,7 @@ def test_pressure_range_of_stint():
 
 
 def test_setup_readings_reach_wheels(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.tyre, "surface_temperature_ico", lambda: (80.0, 85.0, 90.0) * 4, raising=False)
     monkeypatch.setattr(api.read.tyre, "surface_temperature_avg", lambda: (125.0,) * 4, raising=False)
@@ -1352,7 +1352,7 @@ def test_setup_readings_reach_wheels(ui_env, monkeypatch):
 
 
 def test_wear_forecast_laps_without_fuel_module(ui_env, monkeypatch):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.wheels, "currentTreadDepth", [8.0] * 4)
     monkeypatch.setattr(minfo.wheels, "estimatedValidTreadWear", [0.5] * 4)
@@ -1367,7 +1367,7 @@ def test_wear_forecast_laps_without_fuel_module(ui_env, monkeypatch):
 
 # --- Brakes: peak per braking zone, laps left, imbalance, front / rear heat
 def test_brake_peak_of_braking_zone():
-    from tinypedal.widget._black_box.state import BrakePeak
+    from neopedal.widget._black_box.state import BrakePeak
 
     peak = BrakePeak()
     for temperature in (400.0, 650.0, 812.0, 790.0):
@@ -1379,7 +1379,7 @@ def test_brake_peak_of_braking_zone():
 
 
 def test_brake_laps_left():
-    from tinypedal.widget._black_box.state import brake_laps_left
+    from neopedal.widget._black_box.state import brake_laps_left
 
     assert brake_laps_left(30.0, 20.0, 0.5) == pytest.approx(20.0)
     assert brake_laps_left(30.0, 20.0, 0.0) == -1.0  # wear per lap not measured yet
@@ -1387,7 +1387,7 @@ def test_brake_laps_left():
 
 
 def test_brake_imbalance_and_heat_balance(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.brake, "temperature", lambda: (700.0, 450.0, 400.0, 420.0))
     widget = new_widget({"show_brake_heat_balance": True, "brake_imbalance_threshold": 150,
@@ -1406,7 +1406,7 @@ def test_brake_imbalance_and_heat_balance(ui_env, monkeypatch):
 
 
 def test_lights_and_engine_rows(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(api.read.switch, "headlights", lambda: 1)
     monkeypatch.setattr(api.read.switch, "ignition_starter", lambda: 1)
@@ -1427,7 +1427,7 @@ def test_lights_and_engine_rows(ui_env, monkeypatch):
 
 # --- Suspension: lap statistics, damper histogram
 def test_lap_stats_counts_and_resets():
-    from tinypedal.widget._black_box.state import LapStats
+    from neopedal.widget._black_box.state import LapStats
 
     stats = LapStats()
     for ride in (30.0, 4.0, 3.0, 20.0, 2.0, 25.0):  # two dips under 5 mm
@@ -1447,7 +1447,7 @@ def test_lap_stats_counts_and_resets():
 
 
 def test_lap_stats_reset_on_new_lap(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     lap = [5]
     monkeypatch.setattr(api.read.lap, "number", lambda: lap[0])
@@ -1500,7 +1500,7 @@ def test_small_damage_steps_not_logged():
 
 
 def test_impact_arrow_matches_damage_cone():
-    from tinypedal.widget._black_box.state import impact_arrow
+    from neopedal.widget._black_box.state import impact_arrow
 
     assert impact_arrow(180.0) == "↑"  # cone drawn up: front
     assert impact_arrow(0.0) == "↓"  # rear
@@ -1509,8 +1509,8 @@ def test_impact_arrow_matches_damage_cone():
 
 
 def test_browse_incidents_with_hotkey(ui_env, monkeypatch):
-    from tinypedal.widget._black_box import reader
-    from tinypedal.widget._black_box.recorder import request_next_incident
+    from neopedal.widget._black_box import reader
+    from neopedal.widget._black_box.recorder import request_next_incident
 
     clock = [100.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -1534,7 +1534,7 @@ def test_browse_incidents_with_hotkey(ui_env, monkeypatch):
 
 
 def test_new_session_clears_recording(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     elapsed = [500.0]
     monkeypatch.setattr(api.read.session, "elapsed", lambda: elapsed[0])
@@ -1551,7 +1551,7 @@ def test_new_session_clears_recording(ui_env, monkeypatch):
 
 
 def test_tyre_diameters_reset_on_car_change(ui_env):
-    from tinypedal.widget._black_box.suspension import TYRE_DIAMETER_MM
+    from neopedal.widget._black_box.suspension import TYRE_DIAMETER_MM
 
     widget = new_widget()
     try:
@@ -1604,7 +1604,7 @@ def test_brake_bias_and_migration_merged(ui_env):
     ("Best", "deltaBest"), ("Session", "deltaSession"), ("Stint", "deltaStint"), ("Last", "deltaLast"),
 ])
 def test_delta_source(ui_env, monkeypatch, source, field):
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     for name in ("deltaBest", "deltaSession", "deltaStint", "deltaLast"):
         monkeypatch.setattr(minfo.delta, name, -0.5 if name == field else 1.0)
@@ -1618,7 +1618,7 @@ def test_delta_source(ui_env, monkeypatch, source, field):
 
 @pytest.mark.parametrize("source, expected", [("Raw", (0.9, 0.8, 0.7)), ("Filtered", (0.6, 0.5, 0.4))])
 def test_pedal_source(ui_env, monkeypatch, source, expected):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     for name, value in (("throttle_raw", 0.9), ("brake_raw", 0.8), ("clutch_raw", 0.7),
                         ("throttle", 0.6), ("brake", 0.5), ("clutch", 0.4)):
@@ -1657,7 +1657,7 @@ def wheel_corner_bounds(widget, index):
     bar_w = widget.brake_bar_w
     bar = (QRectF(disc.right() - bar_w, disc.top(), bar_w, disc.height()) if index % 2
            else QRectF(disc.left(), disc.top(), bar_w, disc.height()))
-    from tinypedal.widget._black_box.common import REAR_MAX_STEER
+    from neopedal.widget._black_box.common import REAR_MAX_STEER
 
     limit = widget.max_steer if index < 2 else min(widget.max_steer, REAR_MAX_STEER)
     bounds = []
@@ -1728,8 +1728,8 @@ def test_drawn_wheel_shift_capped_to_reserved_travel(ui_env):
 
 
 def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._black_box import persist
+    from neopedal.setting import cfg
+    from neopedal.widget._black_box import persist
 
     monkeypatch.setattr(type(cfg), "save", lambda *args, **kwargs: None)
     setting = cfg.user.setting["black_box"]
@@ -1749,7 +1749,7 @@ def test_rebuilt_widget_keeps_resize_anchor(ui_env, monkeypatch):
 
 
 def test_pressure_target_in_kpa_psi_or_bar(ui_env):
-    from tinypedal.template.widget.black_box_ui import pressure_target_kpa
+    from neopedal.template.widget.black_box_ui import pressure_target_kpa
 
     assert pressure_target_kpa(160) == 160  # kPa
     assert pressure_target_kpa(23.2) == pytest.approx(160, abs=0.1)  # psi

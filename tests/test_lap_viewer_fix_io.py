@@ -11,15 +11,15 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 
+from neopedal.userfile import lap_library, motec_import
+from neopedal.userfile.lap_cache import cache_file, load_cached_lap
+from neopedal.userfile.lap_library import delete_laps, import_foreign_job, list_imported, restore_laps
+from neopedal.userfile.motec_import import ImportedLap, import_laps, import_ld_file, save_imported_lap
+from neopedal.userfile.motec_ld import Channel, LdInfo, export_lap, read_ld, write_ld
+from neopedal.userfile.telemetry_lap import LapData, lap_timestamp_of, load_lap, read_lap_info
 from tests.test_lap_library import import_log, open_library, viewer, wait_library  # noqa: F401
 from tests.test_lap_viewer_e2 import TRACK, backend, lap_info, write_lap  # noqa: F401
 from tests.test_motec_import import logger_channels, write_logger_ld
-from tinypedal.userfile import lap_library, motec_import
-from tinypedal.userfile.lap_cache import cache_file, load_cached_lap
-from tinypedal.userfile.lap_library import delete_laps, import_foreign_job, list_imported, restore_laps
-from tinypedal.userfile.motec_import import ImportedLap, import_laps, import_ld_file, save_imported_lap
-from tinypedal.userfile.motec_ld import Channel, LdInfo, export_lap, read_ld, write_ld
-from tinypedal.userfile.telemetry_lap import LapData, lap_timestamp_of, load_lap, read_lap_info
 
 
 def write_float_ld(filename: str, rate: int, channels: dict[str, list[float]], info: LdInfo | None = None):
@@ -219,7 +219,7 @@ def test_delete_laps_to_trash_with_locked_file(tmp_path, monkeypatch):
 
 
 def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_library as library_page
+    from neopedal.ui import lap_library as library_page
 
     library = open_library(viewer)
     library.add_to_viewer([library.tree.topLevelItem(0)])
@@ -251,8 +251,8 @@ def test_library_delete_undo_and_locked_file(viewer, monkeypatch):  # noqa: F811
 
 
 def test_library_import_is_page_job(viewer, monkeypatch, tmp_path):  # noqa: F811
-    from tinypedal.ui import lap_library as library_page
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui import lap_library as library_page
+    from neopedal.ui.quick import lap_backend
 
     log = tmp_path / "Monza run.ld"
     write_logger_ld(str(log), logger_channels(), venue="Monza")
@@ -354,7 +354,7 @@ def test_foreign_import_current_track_first(tmp_path, monkeypatch):
 
 # --- Delta best (J35, J67, J36)
 def test_added_lap_as_delta_best(backend, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     mate = tmp_path / "Teammate"
@@ -376,7 +376,7 @@ def test_added_lap_as_delta_best(backend, tmp_path, monkeypatch):  # noqa: F811
 
 
 def test_delta_best_backups_kept(tmp_path):
-    from tinypedal.ui.quick.lap_export import DELTA_BEST_BACKUPS, backup_delta_best
+    from neopedal.ui.quick.lap_export import DELTA_BEST_BACKUPS, backup_delta_best
 
     target = tmp_path / "Track - GT3.csv"
     target.write_text("driven", encoding="utf-8")
@@ -392,9 +392,9 @@ def test_delta_best_backups_kept(tmp_path):
 
 # --- Replay link (J48)
 def test_replay_link_of_imported_and_interrupted(backend, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal import replay
-    from tinypedal.replay import ReplayInfo
-    from tinypedal.ui.lap_viewer import PlotLap
+    from neopedal import replay
+    from neopedal.replay import ReplayInfo
+    from neopedal.ui.lap_viewer import PlotLap
 
     times = [index * 0.5 for index in range(181)]
     columns: dict = {"lap_time": times, "distance": [t * 30 for t in times]}

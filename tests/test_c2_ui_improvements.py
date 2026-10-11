@@ -16,9 +16,9 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QColor, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 
-from tinypedal import app_signal, i18n, update
-from tinypedal.const_file import ConfigType
-from tinypedal.setting import cfg
+from neopedal import app_signal, i18n, update
+from neopedal.const_file import ConfigType
+from neopedal.setting import cfg
 
 
 def flush_deleted():
@@ -65,7 +65,7 @@ def answers(monkeypatch):
 
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -92,7 +92,7 @@ def window(ui_env, monkeypatch):
 
 
 def open_tool_page(window, path: str):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     open_tool(path, window)
     view = window.centralWidget()
@@ -101,7 +101,7 @@ def open_tool_page(window, path: str):
 
 
 def open_config_page(window, name="speedometer", config_type=ConfigType.WIDGET, user_setting=None, default=None):
-    from tinypedal.ui.config import UserConfig
+    from neopedal.ui.config import UserConfig
 
     UserConfig(parent=window, key_name=name, preset_name=cfg.filename.setting, config_type=config_type,
                user_setting=user_setting if user_setting is not None else cfg.user.setting,
@@ -113,7 +113,7 @@ def open_config_page(window, name="speedometer", config_type=ConfigType.WIDGET, 
 
 # --- Item 1: unsaved changes marker, Ctrl+S
 def test_editor_page_marker_title_and_open_pages(window):
-    from tinypedal.ui._common import MODIFIED_MARKER
+    from neopedal.ui._common import MODIFIED_MARKER
 
     view = window.centralWidget()
     page = open_tool_page(window, "brake_editor.BrakeEditor")
@@ -138,8 +138,8 @@ def test_undo_back_to_saved_state_keeps_marker_logic(window):
 
 
 def test_rail_tool_entry_marker(window):
-    from tinypedal.ui._common import MODIFIED_MARKER
-    from tinypedal.ui.app import NavButton
+    from neopedal.ui._common import MODIFIED_MARKER
+    from neopedal.ui.app import NavButton
 
     page = open_tool_page(window, "race_calculator.RaceCalculator")
     button = window.findChild(NavButton, "railTool:race_calculator.RaceCalculator")
@@ -153,7 +153,7 @@ def test_rail_tool_entry_marker(window):
 
 
 def test_rail_marker_kept_after_rail_rebuilt(window):
-    from tinypedal.ui.app import NavButton
+    from neopedal.ui.app import NavButton
 
     page = open_tool_page(window, "race_calculator.RaceCalculator")
     page.dialog.set_modified()
@@ -176,7 +176,7 @@ def saved(ui_env):
 
 
 def test_ctrl_s_saves_editor_page(window, saved, monkeypatch):
-    from tinypedal.ui._common import BaseEditor
+    from neopedal.ui._common import BaseEditor
 
     monkeypatch.setattr(BaseEditor, "reloading", staticmethod(lambda *args, **kwargs: None))
     page = open_tool_page(window, "brake_editor.BrakeEditor")
@@ -209,8 +209,8 @@ def test_ctrl_s_without_save_action(window):
 
 
 def test_separate_window_has_own_save_shortcut(ui_env):
-    from tinypedal.ui.brake_editor import BrakeEditor
-    from tinypedal.ui.track_notes_editor import TrackNotesEditor
+    from neopedal.ui.brake_editor import BrakeEditor
+    from neopedal.ui.track_notes_editor import TrackNotesEditor
 
     editor = BrakeEditor(None)
     try:
@@ -231,7 +231,7 @@ def test_separate_window_has_own_save_shortcut(ui_env):
 
 
 def test_font_config_marker(window, answers):
-    from tinypedal.ui.config import FontConfig
+    from neopedal.ui.config import FontConfig
 
     FontConfig(window, cfg.user.setting, lambda: None).open()
     page = window.centralWidget().dialog_pages()[-1]
@@ -244,7 +244,7 @@ def test_font_config_marker(window, answers):
 
 # --- Item 2: inline validation of config pages
 def test_option_limits_table():
-    from tinypedal.ui.option_limits import NO_LIMIT, limit_error, option_limit
+    from neopedal.ui.option_limits import NO_LIMIT, limit_error, option_limit
 
     assert option_limit("opacity").maximum == 1
     assert option_limit("web_dashboard_port") == option_limit("remote_control_port")
@@ -260,7 +260,7 @@ def test_option_limits_table():
 
 def test_default_values_within_limits():
     """Every default option value is valid, so a fresh preset never shows errors"""
-    from tinypedal.ui.option_limits import limit_error
+    from neopedal.ui.option_limits import limit_error
 
     cfg.default.set_default()
     bad = [
@@ -343,7 +343,7 @@ def test_path_options_checked_when_saving_only(window, answers):
 
 
 def test_global_config_title_and_hidden_options(window):
-    from tinypedal.ui.config import HIDDEN_OPTIONS
+    from neopedal.ui.config import HIDDEN_OPTIONS
 
     assert "skipped_update_version" in HIDDEN_OPTIONS["application"]
     page = open_config_page(window, "application", ConfigType.CONFIG, cfg.user.config, cfg.default.config)
@@ -384,7 +384,7 @@ def write_preset(name: str):
 
 
 def test_trash_move_list_restore_purge(tmp_path):
-    from tinypedal.userfile import preset_trash
+    from neopedal.userfile import preset_trash
 
     settings = f"{tmp_path.as_posix()}/"
     (tmp_path / "race.json").write_text("{}", encoding="utf-8")
@@ -415,7 +415,7 @@ def test_trash_move_list_restore_purge(tmp_path):
 
 
 def test_trash_failed_move_leaves_no_entry(tmp_path, monkeypatch):
-    from tinypedal.userfile import preset_trash
+    from neopedal.userfile import preset_trash
 
     settings = f"{tmp_path.as_posix()}/"
     (tmp_path / "race.json").write_text("{}", encoding="utf-8")
@@ -431,7 +431,7 @@ def test_trash_failed_move_leaves_no_entry(tmp_path, monkeypatch):
 
 @pytest.fixture
 def preset_page(ui_env, answers, monkeypatch):
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     for name in ("race.json", "practice.json"):
         write_preset(name)
@@ -451,7 +451,7 @@ def preset_page(ui_env, answers, monkeypatch):
 
 
 def test_delete_moves_to_trash_and_undo_restores_references(preset_page):
-    from tinypedal.userfile.preset_trash import list_trash
+    from neopedal.userfile.preset_trash import list_trash
 
     assert preset_page.delete_preset("practice.json")
     assert not os.path.exists(f"{cfg.path.settings}practice.json")
@@ -479,7 +479,7 @@ def test_ctrl_z_undoes_last_delete(preset_page):
 
 
 def test_undo_after_preset_removed_from_trash(preset_page):
-    from tinypedal.userfile.preset_trash import list_trash, remove_entry
+    from neopedal.userfile.preset_trash import list_trash, remove_entry
 
     preset_page.delete_preset("race.json")
     remove_entry(list_trash(cfg.path.settings)[0])
@@ -494,8 +494,8 @@ def test_loaded_preset_still_refused(preset_page, answers, monkeypatch):
 
 
 def test_trash_dialog_restore_delete_empty(ui_env, answers, monkeypatch):
-    from tinypedal.ui import preset_management
-    from tinypedal.userfile.preset_trash import list_trash
+    from neopedal.ui import preset_management
+    from neopedal.userfile.preset_trash import list_trash
 
     monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
     cfg.user.tracks = {"Spa": {"preset": "race"}}
@@ -527,7 +527,7 @@ def test_trash_dialog_restore_delete_empty(ui_env, answers, monkeypatch):
 
 
 def test_trash_keep_days_option(ui_env):
-    from tinypedal.ui.preset_management import days_left, trash_keep_days
+    from neopedal.ui.preset_management import days_left, trash_keep_days
 
     assert cfg.default.config["application"]["number_of_days_to_keep_deleted_presets"] == 30
     cfg.application["number_of_days_to_keep_deleted_presets"] = 7
@@ -543,7 +543,7 @@ def test_trash_keep_days_option(ui_env):
 def test_action_toast_runs_once_and_stays_while_focused(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.toast import ActionToast, Toast, show_toast
+    from neopedal.ui.toast import ActionToast, Toast, show_toast
 
     host = QWidget()
     host.resize(600, 400)
@@ -573,7 +573,7 @@ ASSET = update.InstallerAsset("Setup.exe", "https://github.com/x/Setup.exe", "a"
 
 @pytest.fixture
 def updates(ui_env, monkeypatch):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     checker = update.update_checker
     monkeypatch.setattr(checker, "_update_available", True)
@@ -607,7 +607,7 @@ def test_version_number_and_skip(updates):
 
 
 def test_skipped_version_not_shown_nor_prompted(updates, monkeypatch):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     prompts = []
     monkeypatch.setattr(notification.UpdatesNotifyButton, "prompt_update", lambda self: prompts.append(1))
@@ -631,7 +631,7 @@ def test_skipped_version_not_shown_nor_prompted(updates, monkeypatch):
 
 
 def test_release_notes_skip_button(updates):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     button = notification.UpdatesNotifyButton("")
     dialog = button.release_notes_dialog(prompt=True)
@@ -683,7 +683,7 @@ def test_download_progress_and_cancel(monkeypatch, tmp_path):
 
 
 def test_progress_text(french):
-    from tinypedal.ui.notification import download_progress_text
+    from neopedal.ui.notification import download_progress_text
 
     i18n.set_language("English")
     assert download_progress_text(12_300_000, 29_100_000) == "42% (12.3 / 29.1 MB)"
@@ -694,7 +694,7 @@ def test_progress_text(french):
 
 
 def test_cancel_download_no_warning(updates, monkeypatch, answers):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     started = threading.Event()
 
@@ -726,7 +726,7 @@ def test_cancel_download_no_warning(updates, monkeypatch, answers):
 
 
 def test_release_notes_page_shows_progress(updates, monkeypatch):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     downloads = []
     monkeypatch.setattr(updates, "download", lambda auto_install=False: downloads.append(auto_install) or True)
@@ -757,7 +757,7 @@ def test_release_notes_page_shows_progress(updates, monkeypatch):
 
 
 def test_release_notes_opened_while_downloading(updates):
-    from tinypedal.ui import notification
+    from neopedal.ui import notification
 
     updates.busy = True
     updates.received, updates.total = 1_000_000, 0
@@ -775,7 +775,7 @@ def test_release_notes_opened_while_downloading(updates):
 
 # --- Item 5: remaining English texts
 def test_track_notes_labels_translated(ui_env, french, monkeypatch):
-    from tinypedal.ui import track_notes_editor
+    from neopedal.ui import track_notes_editor
 
     editor = track_notes_editor.TrackNotesEditor(None)
     try:
@@ -800,9 +800,9 @@ def test_track_notes_labels_translated(ui_env, french, monkeypatch):
 
 
 def test_file_filters_translated_and_mapped_back(french):
-    from tinypedal.const_file import FileFilter
-    from tinypedal.ui._common import original_filter, translate_filter
-    from tinypedal.userfile.track_notes import NOTESTYPE_TRACK, set_notes_filter
+    from neopedal.const_file import FileFilter
+    from neopedal.ui._common import original_filter, translate_filter
+    from neopedal.userfile.track_notes import NOTESTYPE_TRACK, set_notes_filter
 
     notes_filter = set_notes_filter(NOTESTYPE_TRACK)
     shown = translate_filter(notes_filter)
@@ -814,8 +814,8 @@ def test_file_filters_translated_and_mapped_back(french):
 
 
 def test_brand_import_menu_and_transfer_headers_translated(ui_env, french):
-    from tinypedal.ui.preset_management import ListHeader, PresetTransfer
-    from tinypedal.ui.vehicle_brand_editor import VehicleBrandEditor
+    from neopedal.ui.preset_management import ListHeader, PresetTransfer
+    from neopedal.ui.vehicle_brand_editor import VehicleBrandEditor
 
     editor = VehicleBrandEditor(None)
     transfer = PresetTransfer(None)
@@ -838,7 +838,7 @@ def test_brand_import_menu_and_transfer_headers_translated(ui_env, french):
 
 
 def test_new_texts_translated(french):
-    from tinypedal.i18n import tr, trm
+    from neopedal.i18n import tr, trm
 
     assert tr("Skip This Version") == "Ignorer cette version"
     assert tr("Unsaved changes") == "Modifications non enregistrées"
@@ -858,18 +858,18 @@ def test_safe_mode_skips_reopening_pages(window, monkeypatch):
     import sys
     import types
 
-    import tinypedal
-    from tinypedal.ui import app as app_module
+    import neopedal
+    from neopedal.ui import app as app_module
 
     view = window.centralWidget()
     restored = []
     monkeypatch.setattr(view, "restore_pages", lambda paths: restored.append(paths))
     cfg.application["remember_open_pages"] = True
     cfg.application["open_pages"] = "*heatmap_editor.HeatmapEditor"
-    fake = types.ModuleType("tinypedal.safe_mode")
+    fake = types.ModuleType("neopedal.safe_mode")
     fake.state = types.SimpleNamespace(enabled=True)
-    monkeypatch.setitem(sys.modules, "tinypedal.safe_mode", fake)
-    monkeypatch.setattr(tinypedal, "safe_mode", fake, raising=False)
+    monkeypatch.setitem(sys.modules, "neopedal.safe_mode", fake)
+    monkeypatch.setattr(neopedal, "safe_mode", fake, raising=False)
     assert app_module.safe_mode_enabled()
     window.restore_open_pages()
     assert not restored and view.track_pages
@@ -880,8 +880,8 @@ def test_safe_mode_skips_reopening_pages(window, monkeypatch):
 
 
 def test_plugin_error_text_translated(ui_env, french, monkeypatch):
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui import plugin_manager
+    from neopedal.module_control import wctrl
+    from neopedal.ui import plugin_manager
 
     monkeypatch.setitem(plugin_manager.PLUGIN_ERRORS, "plugin_test", "Unexpected error")
     monkeypatch.setattr(type(wctrl), "names", property(lambda self: ("plugin_test",)), raising=False)
@@ -901,8 +901,8 @@ def render(widget) -> QImage:
 
 @pytest.mark.parametrize("theme", ["Dark", "Light"])
 def test_focus_ring_on_new_buttons(ui_env, monkeypatch, theme):
-    from tinypedal.ui import has_keyboard_focus, set_style_palette, set_style_window
-    from tinypedal.ui._common import FocusRingButton
+    from neopedal.ui import has_keyboard_focus, set_style_palette, set_style_window
+    from neopedal.ui._common import FocusRingButton
 
     app = QApplication.instance()
     style_sheet = app.styleSheet()
@@ -927,8 +927,8 @@ def test_focus_ring_on_new_buttons(ui_env, monkeypatch, theme):
 
 
 def test_new_controls_keyboard_reachable(ui_env, updates):
-    from tinypedal.ui import notification
-    from tinypedal.ui.preset_management import PresetTrash
+    from neopedal.ui import notification
+    from neopedal.ui.preset_management import PresetTrash
 
     dialog = PresetTrash(None)
     button = notification.UpdatesNotifyButton("")
@@ -947,8 +947,8 @@ def test_new_controls_keyboard_reachable(ui_env, updates):
 def test_release_notes_page_kept_by_language_change_still_installs(window, updates, monkeypatch):
     """What's new page waiting inside app kept by a language change: its Install & Skip buttons still work (was:
     connected to update button of replaced view, deleted with it: clicks did nothing)"""
-    from tinypedal.ui.notification import UpdatesNotifyButton
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.release_notes import ReleaseNotesDialog
 
     window.show()
     button = window.centralWidget().findChild(UpdatesNotifyButton)

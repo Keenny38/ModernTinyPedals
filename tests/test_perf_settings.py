@@ -7,12 +7,12 @@ from PySide6.QtCore import QCoreApplication, QEvent, qInstallMessageHandler
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.setting import cfg
 
 
 def test_categories_cached_until_state_changes(ui_env):
-    from tinypedal.ui.quick.settings_backend import SettingsBackend
+    from neopedal.ui.quick.settings_backend import SettingsBackend
 
     class Host:
         pass
@@ -36,8 +36,8 @@ def test_categories_cached_until_state_changes(ui_env):
 
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal import loader
-    from tinypedal.ui import app as app_module
+    from neopedal import loader
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     monkeypatch.setattr(loader, "reload", lambda **kwargs: None)
@@ -77,7 +77,7 @@ def rows_made(listing):
 
 
 def test_rows_reused_between_categories(window):
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui.menu import open_config_application
 
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

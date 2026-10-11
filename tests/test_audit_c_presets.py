@@ -11,8 +11,8 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import app_signal, i18n
-from tinypedal.setting import cfg
+from neopedal import app_signal, i18n
+from neopedal.setting import cfg
 
 
 def flush():
@@ -48,7 +48,7 @@ def exists(name: str) -> bool:
 @pytest.fixture
 def page(ui_env, warnings, monkeypatch):
     """Preset page with presets "race" & "practice" ("default" loaded)"""
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     for name in ("race.json", "practice.json"):
         write_preset(name)
@@ -71,7 +71,7 @@ def choose(page, preset: str, text: str):
 
 
 def share_code(raw: str) -> str:
-    from tinypedal.userfile.preset_share import SHARE_PREFIX
+    from neopedal.userfile.preset_share import SHARE_PREFIX
 
     return SHARE_PREFIX + base64.urlsafe_b64encode(zlib.compress(raw.encode("utf-8"))).decode("ascii")
 
@@ -79,7 +79,7 @@ def share_code(raw: str) -> str:
 # Share code
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999", "deep"])
 def test_share_code_with_invalid_numbers_rejected(page, warnings, monkeypatch, value):
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     if value == "deep":  # nested beyond recursion limit
         value = "[" * 100000 + "]" * 100000
@@ -93,7 +93,7 @@ def test_share_code_with_invalid_numbers_rejected(page, warnings, monkeypatch, v
 
 
 def test_share_code_valid_still_accepted(page, warnings, monkeypatch):
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     opened = []
     monkeypatch.setattr(
@@ -124,7 +124,7 @@ def test_delete_clears_primary_preset_references(page, warnings, ui_env, monkeyp
 
 
 def test_delete_locked_file_warns(page, warnings, monkeypatch):
-    from tinypedal.userfile import preset_trash
+    from neopedal.userfile import preset_trash
 
     def locked(*args):
         raise PermissionError("used by another program")
@@ -138,7 +138,7 @@ def test_delete_locked_file_warns(page, warnings, monkeypatch):
 
 # Backups
 def backup_dialog(*backups: tuple[str, str]):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     for name, text in backups:
         with open(f"{cfg.path.settings}{name}", "w", encoding="utf-8") as file:
@@ -149,7 +149,7 @@ def backup_dialog(*backups: tuple[str, str]):
 
 
 def test_backup_delete_and_style_restore_errors_warn(ui_env, warnings, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     def locked(*args):
         raise PermissionError("used by another program")
@@ -175,7 +175,7 @@ def test_backup_delete_and_style_restore_errors_warn(ui_env, warnings, monkeypat
 
 
 def test_backup_list_colors_follow_window_theme(ui_env, warnings):
-    from tinypedal.ui import STATUS_COLORS
+    from neopedal.ui import STATUS_COLORS
 
     dialog, _ = backup_dialog(
         ("race.json.backup-2026-10-03-12-00-00-000000", "broken"),
@@ -203,7 +203,7 @@ def test_backup_list_colors_follow_window_theme(ui_env, warnings):
 
 # Rename
 def create(mode: str = "", source: str = "", name: str = "", title: str = "Test"):
-    from tinypedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import CreatePreset
 
     dialog = CreatePreset(None, title=title, mode=mode, source_filename=source)
     dialog.preset_entry.setText(name)
@@ -236,7 +236,7 @@ def test_rename_preset_by_case_only(ui_env, warnings, monkeypatch):
 
 # Preset comparison
 def test_preset_compare_save_keeps_changes_made_meanwhile(ui_env, warnings, monkeypatch):
-    from tinypedal.ui import preset_compare
+    from neopedal.ui import preset_compare
 
     monkeypatch.setattr(cfg.filename, "setting", "default.json")
     other = {section: dict(options) for section, options in cfg.user.setting.items()}
@@ -282,7 +282,7 @@ def test_preset_compare_save_keeps_changes_made_meanwhile(ui_env, warnings, monk
 # Translations
 def test_french_preset_dialog_titles(page, french):
     """Titles of preset name box (Presets page) & name dialog (restore backup) translated"""
-    from tinypedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import CreatePreset
 
     titles = [i18n.tr(text) for text in ("Create new default preset", "Duplicate Preset", "Rename Preset")]
     assert all(title != english for title, english in zip(
@@ -295,7 +295,7 @@ def test_french_preset_dialog_titles(page, french):
 
 
 def test_french_preset_access_error(ui_env, warnings, monkeypatch, french):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     def locked(*args):
         raise PermissionError("locked")
@@ -331,7 +331,7 @@ def test_french_preset_and_plugin_messages(french, message, expected):
 
 
 def test_french_plugin_trust_prompt(ui_env, monkeypatch, french, tmp_path):
-    from tinypedal.ui.plugin_manager import PluginManager
+    from neopedal.ui.plugin_manager import PluginManager
 
     monkeypatch.chdir(tmp_path)  # "plugins" folder of this test (no plugin shipped with the app)
     plugin = tmp_path / "plugins" / "gauge"
@@ -364,7 +364,7 @@ def test_french_plugin_trust_prompt(ui_env, monkeypatch, french, tmp_path):
 
 # Plugin badges
 def test_plugin_badge_colors_follow_window_theme(ui_env):
-    from tinypedal.ui import STATUS_COLORS, plugin_manager
+    from neopedal.ui import STATUS_COLORS, plugin_manager
 
     for theme, window in (("Dark", "#202020"), ("Light", "#F4F5F8")):
         palette = QPalette()
@@ -383,7 +383,7 @@ def test_plugin_badge_colors_follow_window_theme(ui_env):
 def test_plugin_enabled_badge_is_palette_accent(ui_env, monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal.ui import plugin_manager
+    from neopedal.ui import plugin_manager
 
     monkeypatch.setattr(plugin_manager, "discover_plugins", lambda: ["plugin_on", "plugin_off"])
     monkeypatch.setattr(plugin_manager, "wctrl", SimpleNamespace(names=["plugin_on", "plugin_off"]))

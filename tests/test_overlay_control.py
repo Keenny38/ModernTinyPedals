@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import overlay_control, realtime_state, thread_guard
-from tinypedal.overlay_control import OverlayControl, OverlayToggle
+from neopedal import overlay_control, realtime_state, thread_guard
+from neopedal.overlay_control import OverlayControl, OverlayToggle
 
 
 class StopAfter:
@@ -26,7 +26,7 @@ def recorder(calls: list, name: str):
 @pytest.fixture
 def overlay(ui_env, monkeypatch):
     """Overlay control with signals recorded and game state set by test"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     calls: list = []
     monkeypatch.setattr(overlay_control, "overlay_signal", SimpleNamespace(**{
@@ -55,7 +55,7 @@ def run_loop(control: OverlayControl, runs: int = 1):
 
 
 def test_state_read_from_game(overlay):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     control, game, calls = overlay
     cfg.overlay["auto_hide"] = True
@@ -73,7 +73,7 @@ def test_state_read_from_game(overlay):
 
 def test_spectating_shown_while_streamed(overlay):
     """Spectating or replay (game not driven): overlays shown & updated only while a stream source is on air"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     control, game, calls = overlay
     cfg.overlay["auto_hide"] = True
@@ -115,7 +115,7 @@ def test_state_signals_sent_on_change_only(overlay):
 
 
 def test_track_preset_auto_loaded_once(overlay, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     control, _game, calls = overlay
     cfg.application["enable_auto_load_preset"] = True
@@ -127,7 +127,7 @@ def test_track_preset_auto_loaded_once(overlay, monkeypatch):
 
 
 def test_class_preset_auto_loaded_without_track_preset(overlay, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     control, game, calls = overlay
     cfg.application["enable_auto_load_preset"] = True
@@ -146,7 +146,7 @@ def test_class_preset_auto_loaded_without_track_preset(overlay, monkeypatch):
 
 
 def test_missing_preset_not_loaded(overlay, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     control, _game, calls = overlay
     cfg.application["enable_auto_load_preset"] = True
@@ -157,7 +157,7 @@ def test_missing_preset_not_loaded(overlay, monkeypatch):
 
 
 def test_overlay_toggles(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     calls: list = []
     monkeypatch.setattr(overlay_control, "overlay_signal", SimpleNamespace(

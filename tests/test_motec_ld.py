@@ -2,7 +2,7 @@
 
 import pytest
 
-from tinypedal.userfile.motec_ld import (
+from neopedal.userfile.motec_ld import (
     CHANNEL,
     HEAD,
     Channel,
@@ -13,7 +13,7 @@ from tinypedal.userfile.motec_ld import (
     sample_rate,
     write_ld,
 )
-from tinypedal.userfile.telemetry_lap import LapData
+from neopedal.userfile.telemetry_lap import LapData
 
 
 def make_lap(rate: int = 50, seconds: float = 2.0) -> LapData:

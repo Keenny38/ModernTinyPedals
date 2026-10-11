@@ -9,6 +9,10 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QFontMetricsF
 
+from neopedal.setting import cfg
+from neopedal.ui.quick import game_pictures, stats_backend
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord, read_records, record_line
 from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
     HISTORY,
     OREGA,
@@ -22,10 +26,6 @@ from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
     window,
 )
 from tests.test_perf_stats_lock import LockHolder
-from tinypedal.setting import cfg
-from tinypedal.ui.quick import game_pictures, stats_backend
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord, read_records, record_line
 
 
 def history_file(folder: str) -> str:
@@ -227,7 +227,7 @@ def test_edit_saved_on_worker_with_history_loaded_once(backend, dialogs, monkeyp
 
 
 def test_rollback_delay_on_worker(backend, dialogs, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import json_setting
+    from neopedal.userfile import json_setting
 
     driver_history.save_history(cfg.path.config, HISTORY)
     sleeps = []
@@ -304,7 +304,7 @@ def test_logos_looked_for_once(backend, monkeypatch):  # noqa: F811
 
 
 def test_pictures_changed_refreshes_only_when_logos_change(backend, monkeypatch):  # noqa: F811
-    from tinypedal.userfile.game_images import images
+    from neopedal.userfile.game_images import images
 
     backend.selectTrack("")
     tracks_signals, refreshes = [], []
@@ -387,9 +387,9 @@ def visible_texts(view) -> set:
 def test_page_loading_without_qml_warnings(dialogs, big_history, monkeypatch):  # noqa: F811
     from PySide6.QtCore import QEvent, qInstallMessageHandler
 
+    from neopedal.api_control import api
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
     from tests.test_driver_stats_viewer import STATS, write_stats
-    from tinypedal.api_control import api
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
 
     write_stats(STATS)
     monkeypatch.setattr(type(api.read.session), "track_name", lambda self: SPA, raising=False)

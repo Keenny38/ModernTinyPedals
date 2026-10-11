@@ -7,7 +7,7 @@ from PySide6.QtGui import QImage, QPainter, QPixmap
 
 @pytest.mark.parametrize("ratio", [1.0, 1.25, 1.5, 2.0])
 def test_cached_alignment_same_as_device_transform(ratio):
-    from tinypedal.widget._painter import pixel_aligned
+    from neopedal.widget._painter import pixel_aligned
 
     pixmap = QPixmap(round(200 * ratio), round(100 * ratio))
     pixmap.setDevicePixelRatio(ratio)
@@ -30,7 +30,7 @@ def test_cached_alignment_same_as_device_transform(ratio):
 
 def test_alignment_cache_follows_painter():
     """A new painter (other device scale) never uses alignments of the previous one"""
-    from tinypedal.widget._painter import pixel_aligned
+    from neopedal.widget._painter import pixel_aligned
 
     point = QPointF(10.3, 4.6)
     results = []
@@ -47,10 +47,10 @@ def test_alignment_cache_follows_painter():
 def test_value_texts_never_push_out_labels(ui_env, bundled_fonts, monkeypatch):
     from importlib import import_module
 
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import base
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import base
 
-    widget = import_module("tinypedal.widget._modern.speedometer").Realtime(cfg, "speedometer")
+    widget = import_module("neopedal.widget._modern.speedometer").Realtime(cfg, "speedometer")
     try:
         monkeypatch.setattr(base, "VALUE_CACHE_MIN", 4)
         widget._text_cache.clear()

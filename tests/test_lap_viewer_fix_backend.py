@@ -19,8 +19,8 @@ def backend(ui_env, monkeypatch):
     """Page with 3 laps of TRACK: lap 1 fastest (90 s), lap 2 (91 s), lap 3 newest (92.5 s)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     folder = cfg.path.telemetry.rstrip("/")
@@ -57,7 +57,7 @@ class SteppedHandle:
     """Job alive for `alive` checks, then finished with its name as result"""
 
     def __init__(self, name: str, alive: int):
-        from tinypedal.ui.quick.lap_backend import JobHandle
+        from neopedal.ui.quick.lap_backend import JobHandle
 
         self.handle = JobHandle(name)
         self.handle.is_alive = self.is_alive  # type: ignore[method-assign]
@@ -87,7 +87,7 @@ def test_job_finishing_during_check_is_handled(backend):
 
 # --- J6. Job lost with worker process: imports never run again in page process, other jobs one at a time
 def broken_handle(name: str, pool):
-    from tinypedal.ui.quick.lap_backend import JobHandle
+    from neopedal.ui.quick.lap_backend import JobHandle
 
     future: concurrent.futures.Future = concurrent.futures.Future()
     future.set_exception(concurrent.futures.process.BrokenProcessPool("worker killed"))
@@ -95,7 +95,7 @@ def broken_handle(name: str, pool):
 
 
 def test_worker_death_import_not_run_again_in_page(backend, monkeypatch):
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     monkeypatch.setattr(lap_backend, "_worker_broken", False)
     pool = lap_backend.worker_pool()
@@ -130,7 +130,7 @@ def test_worker_death_import_not_run_again_in_page(backend, monkeypatch):
 
 
 def test_fallback_jobs_run_one_at_a_time(backend, monkeypatch):
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     monkeypatch.setattr(lap_backend, "_worker_broken", True)  # worker process not available
     lap_backend.stop_worker(kill=True)
@@ -166,7 +166,7 @@ def test_fallback_jobs_run_one_at_a_time(backend, monkeypatch):
 
 # --- J17 & J23. Added laps of shown track listed once, laps added again checked again
 def test_added_lap_of_shown_track_listed_once(backend):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     path = lap_path(backend, 2)
     picked = os.path.abspath(path).replace("\\", "/")  # file dialog: absolute path, other slashes
@@ -208,8 +208,8 @@ def test_library_lap_picked_again_is_checked(backend, tmp_path):
 
 # --- J18. Saved selection kept when reference is an added lap
 def test_selection_kept_with_added_reference(backend, tmp_path):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     other = write_other_track(str(tmp_path / "library"), "Track - GT3", 7, 89.5, START + 50)
     backend.add_from_library([other])
@@ -230,7 +230,7 @@ def test_selection_kept_with_added_reference(backend, tmp_path):
 
 # --- J21. Analysis of former track not carried over
 def test_track_change_resets_analysis(backend):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     write_other_track(cfg.path.telemetry.rstrip("/"), "Other - GT3", 4, 89.0, START + 400)
     selected = []
@@ -303,7 +303,7 @@ def test_unreadable_lap_read_again(backend, monkeypatch):
     backend._lap_cache.clear()
     check(backend, first, second, reference=first)
     assert shown_keys(backend) == [second] and backend.reference_key == second  # first lap read is reference
-    saved = __import__("tinypedal.ui.lap_viewer", fromlist=["x"]).load_viewer_setting(backend.folder)
+    saved = __import__("neopedal.ui.lap_viewer", fromlist=["x"]).load_viewer_setting(backend.folder)
     assert saved["selections"][TRACK]["reference"] == os.path.basename(second)
     rows = {row["path"]: row for row in backend.lap_rows()}
     assert rows[first]["error"] and rows[second]["reference"]
@@ -328,7 +328,7 @@ def test_unreadable_lap_read_again(backend, monkeypatch):
 
 # --- J58. Page hidden while laps are recorded: listed & read once shown
 def test_hidden_page_updated_once_shown(backend):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.telemetry.rstrip("/")
     backend.page_hidden()
@@ -361,7 +361,7 @@ def test_release_once_loading_is_done(backend):
 
 # --- J61. Live mode: new best lap compared, chosen reference kept, lap of another track shown
 def test_live_mode_keeps_chosen_reference(backend, tmp_path):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     other = write_other_track(str(tmp_path / "library"), "Track - GT3", 7, 89.5, START + 50)
     backend.setLiveMode(True)
@@ -382,7 +382,7 @@ def test_live_mode_keeps_chosen_reference(backend, tmp_path):
 
 
 def test_live_mode_shows_lap_of_other_track(backend):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.telemetry.rstrip("/")
     write_other_track(folder, "Other - GT3", 1, 80.0, START + 50)  # older laps on another track
@@ -418,7 +418,7 @@ def test_gcircle_built_when_shown(backend):
     backend.setSideTab(1)
     assert not backend._gcircle_stale and len(backend._gcircle["dots"]) == 2 and built
     key = backend._gcircle["dots"][0]["key"]
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     assert VertexStore.has(key)
     backend.setSideTab(2)
@@ -430,7 +430,7 @@ def test_gcircle_built_when_shown(backend):
 
 # --- J56. Panel height, corner sort & map turn: only their part of the page told (QML items of charts kept)
 def test_partial_changes_never_redraw_whole_page(backend):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     check(backend, *(entry.file.path for entry in backend.entries))
     sent: list[str] = []

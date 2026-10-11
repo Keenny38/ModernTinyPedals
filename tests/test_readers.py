@@ -10,10 +10,10 @@ import typing
 
 import pytest
 
+from neopedal import api_connector
+from neopedal.adapter import APIDataReader, _reader
 from pyLMUSharedMemory import lmu_data
 from pyRfactor2SharedMemory import rF2data
-from tinypedal import api_connector
-from tinypedal.adapter import APIDataReader, _reader
 
 
 def lmu_api() -> tuple[api_connector.SimLMU, lmu_data.LMUObjectOut]:

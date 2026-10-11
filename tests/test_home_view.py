@@ -6,10 +6,10 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
-from tinypedal.ui import home_view
-from tinypedal.userfile.driver_history import SessionRecord
+from neopedal import app_signal
+from neopedal.setting import cfg
+from neopedal.ui import home_view
+from neopedal.userfile.driver_history import SessionRecord
 
 CHANGELOG = """# Changelog
 
@@ -54,7 +54,7 @@ def test_session_record_text():
 
 @pytest.fixture
 def home(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     window = app_module.AppWindow()
@@ -76,7 +76,7 @@ def home(ui_env, monkeypatch):
 
 
 def test_release_notes_page_of_running_version(home, monkeypatch):
-    from tinypedal.ui.release_notes import ReleaseNotesDialog
+    from neopedal.ui.release_notes import ReleaseNotesDialog
 
     monkeypatch.setattr(home_view, "current_release_notes", lambda **kwargs: "### Overlays\n\n- **Delta graph** added.")
     home.button_notes.click()
@@ -89,7 +89,7 @@ def test_release_notes_page_of_running_version(home, monkeypatch):
 
 
 def test_game_card_session_and_setup_reminder(home, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     read = api.read
     monkeypatch.setattr(read.state, "version", lambda: "not running")
@@ -109,7 +109,7 @@ def test_game_card_session_and_setup_reminder(home, monkeypatch):
 
 
 def test_overlay_card_lock_button(home, monkeypatch):
-    from tinypedal.ui import home_view as module
+    from neopedal.ui import home_view as module
 
     calls = []
     monkeypatch.setattr(type(module.octrl.toggle), "lock", lambda self: (
@@ -177,7 +177,7 @@ def test_update_button(home, monkeypatch):
     assert not home.chip_update.isHidden() and "v0.20.0" in home.chip_update.text()
     assert home.button_update.text() == "See Update" and home.button_update.objectName() == "homePrimary"
     shown = []
-    from tinypedal.ui.notification import UpdatesNotifyButton
+    from neopedal.ui.notification import UpdatesNotifyButton
 
     monkeypatch.setattr(UpdatesNotifyButton, "show_release_notes", lambda self, *args, **kwargs: shown.append(1))
     home.button_update.click()

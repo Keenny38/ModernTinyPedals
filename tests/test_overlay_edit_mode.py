@@ -4,11 +4,11 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 
-from tinypedal import overlay_signal, realtime_state
-from tinypedal.widget import _base, _edit_mode
-from tinypedal.widget._common import MousePosition
-from tinypedal.widget._edit_mode import MERGE_SECONDS, EditHistory, EditStep
-from tinypedal.widget._snapping import (
+from neopedal import overlay_signal, realtime_state
+from neopedal.widget import _base, _edit_mode
+from neopedal.widget._common import MousePosition
+from neopedal.widget._edit_mode import MERGE_SECONDS, EditHistory, EditStep
+from neopedal.widget._snapping import (
     centered,
     constrain_axis,
     fit_on_screens,
@@ -133,7 +133,7 @@ def test_drag_snaps_magnetic_or_with_ctrl(ui_env):
 @pytest.fixture
 def editing(ui_env, monkeypatch):
     """Fresh edit mode state, overlays started here listed as active"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     overlays = {}
     monkeypatch.setattr(_edit_mode, "_edit_mode", None)
@@ -146,10 +146,10 @@ def editing(ui_env, monkeypatch):
     def start(name="speedometer", pos=(300, 300)):
         from importlib import import_module
 
-        from tinypedal.widget._modern import create_widget
+        from neopedal.widget._modern import create_widget
 
         cfg.user.setting[name]["position_x"], cfg.user.setting[name]["position_y"] = pos
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         widget.start()
         overlays[name] = widget
         return widget
@@ -172,8 +172,8 @@ def key(widget, code, modifiers=NONE):
 
 
 def test_unlock_enters_edit_mode_and_lock_leaves_it(editing):
-    from tinypedal.overlay_control import OverlayToggle
-    from tinypedal.setting import cfg
+    from neopedal.overlay_control import OverlayToggle
+    from neopedal.setting import cfg
 
     start, _overlays, _saved = editing
     cfg.application["enable_edit_mode_on_unlock"] = True
@@ -199,8 +199,8 @@ def test_unlock_enters_edit_mode_and_lock_leaves_it(editing):
 
 def test_unlock_without_edit_mode_moves_on_hover(editing):
     """Default: unlock only makes overlays movable, outline on hover, no toolbar, edit mode from menu"""
-    from tinypedal.overlay_control import OverlayToggle
-    from tinypedal.setting import cfg
+    from neopedal.overlay_control import OverlayToggle
+    from neopedal.setting import cfg
 
     start, _overlays, _saved = editing
     assert not cfg.application["enable_edit_mode_on_unlock"]
@@ -239,7 +239,7 @@ def test_lock_toggle_keeps_window_shown(editing):
 
 
 def test_arrow_keys_move_undo_redo(editing, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     start, _overlays, _saved = editing
     widget = start()
@@ -337,7 +337,7 @@ def test_context_menu_actions_undoable(editing, monkeypatch):
     menu_choice(monkeypatch, "Edit Mode")
     open_menu(widget)
     assert realtime_state.editing
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     menu_choice(monkeypatch, "Lock Overlay")
     open_menu(widget)
@@ -345,7 +345,7 @@ def test_context_menu_actions_undoable(editing, monkeypatch):
 
 
 def test_resize_and_disable_undoable(editing, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     start, _overlays, _saved = editing
     widget = start()
@@ -357,7 +357,7 @@ def test_resize_and_disable_undoable(editing, monkeypatch):
     assert cfg.user.setting["speedometer"]["font_size"] == font_size
     toggled = []
     monkeypatch.setattr(_base, "disable_widget", toggled.append)
-    from tinypedal.module_control import ModuleControl
+    from neopedal.module_control import ModuleControl
 
     monkeypatch.setattr(ModuleControl, "toggle", lambda self, name: toggled.append(("toggle", name)))
     key(widget, Qt.Key.Key_Delete)
@@ -370,7 +370,7 @@ def test_resize_and_disable_undoable(editing, monkeypatch):
 def test_toolbar_actions(editing, monkeypatch):
     from PySide6.QtGui import QPixmap
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     start, _overlays, _saved = editing
     widget = start()
@@ -408,7 +408,7 @@ def test_toolbar_actions(editing, monkeypatch):
 def test_layout_guide_redraws_changed_parts_only(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.widget import _layout_guide
+    from neopedal.widget import _layout_guide
 
     target = QWidget()
     target.setGeometry(100, 100, 80, 40)
@@ -438,7 +438,7 @@ def test_overlays_never_hide_base_methods():
              "change_options", "disable_overlay", "menu_actions", "centering_rect", "should_hide",
              "screen_opacity")
     assignment = re.compile(rf"self\.({'|'.join(names)})\s*=[^=]")
-    folders = [pathlib.Path("tinypedal/widget"), pathlib.Path("plugins")]
+    folders = [pathlib.Path("neopedal/widget"), pathlib.Path("plugins")]
     found = [
         f"{path}: {match.group(0)}"
         for folder in folders if folder.is_dir()

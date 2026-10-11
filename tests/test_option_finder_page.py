@@ -4,8 +4,8 @@ switch on / off in place, reset, open settings page of option, Qt Quick page"""
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tinypedal.const_file import ConfigType
-from tinypedal.setting import cfg
+from neopedal.const_file import ConfigType
+from neopedal.setting import cfg
 
 
 def flush():
@@ -15,7 +15,7 @@ def flush():
 
 @pytest.fixture
 def finder(ui_env, monkeypatch):
-    from tinypedal.ui.quick import finder_backend
+    from neopedal.ui.quick import finder_backend
 
     opened = []
     applied = []
@@ -32,7 +32,7 @@ def keys(finder) -> list[str]:
 
 
 def test_ranked_search_option_name_first(ui_env):
-    from tinypedal.ui import option_finder
+    from neopedal.ui import option_finder
 
     entries = option_finder.build_index()
     results = option_finder.search_options(entries, "opacity")
@@ -44,8 +44,8 @@ def test_ranked_search_option_name_first(ui_env):
 
 
 def test_french_search_ignores_accents(ui_env):
-    from tinypedal.i18n import set_language
-    from tinypedal.ui import option_finder
+    from neopedal.i18n import set_language
+    from neopedal.ui import option_finder
 
     set_language("Français")
     try:
@@ -106,7 +106,7 @@ def test_toggle_and_reset_saved_and_applied(finder, ui_env):
 
 
 def test_toggle_overlay_enable_uses_control(finder, monkeypatch):
-    from tinypedal.ui.quick import finder_backend
+    from neopedal.ui.quick import finder_backend
 
     toggled = []
     monkeypatch.setattr(type(finder_backend.wctrl), "toggle", lambda self, name: toggled.append(name))
@@ -130,7 +130,7 @@ def test_open_option_and_copy_key(finder):
 
 
 def test_global_option_opens_settings_page(ui_env, monkeypatch):
-    from tinypedal.ui import app_settings, option_finder
+    from neopedal.ui import app_settings, option_finder
 
     opened = []
     monkeypatch.setattr(app_settings, "open_app_settings", lambda *args: opened.append(args))
@@ -140,7 +140,7 @@ def test_global_option_opens_settings_page(ui_env, monkeypatch):
 
 
 def test_highlight_keeps_text():
-    from tinypedal.ui.quick.finder_backend import highlight
+    from neopedal.ui.quick.finder_backend import highlight
 
     assert highlight("Font Color", ("color",)) == "Font <b>Color</b>"
     assert highlight("Opacité", ("opacite",)) == "<b>Opacité</b>"
@@ -159,7 +159,7 @@ def item_texts(view) -> set[str]:
 
 
 def test_qml_page(ui_env):
-    from tinypedal.ui.option_finder import OptionFinder
+    from neopedal.ui.option_finder import OptionFinder
 
     page = OptionFinder(None)
     try:

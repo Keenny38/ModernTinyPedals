@@ -6,8 +6,8 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from tinypedal import loader
-from tinypedal.perf_monitor import STALL_THRESHOLD, PerfMonitor, _gc_probe
+from neopedal import loader
+from neopedal.perf_monitor import STALL_THRESHOLD, PerfMonitor, _gc_probe
 
 
 @pytest.fixture(autouse=True)

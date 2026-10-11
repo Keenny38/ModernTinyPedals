@@ -1,5 +1,5 @@
 [project]
-name = "tinypedal"
+name = "neopedal"
 dynamic = ["version"]
 description = "Free and Open Source telemetry overlay application for racing simulation"
 readme = "README.md"
@@ -32,23 +32,22 @@ vr = [
 Homepage = "https://github.com/Keenny38/ModernTinyPedals"
 Changelog = "https://github.com/Keenny38/ModernTinyPedals/blob/master/CHANGELOG.md"
 Issues = "https://github.com/Keenny38/ModernTinyPedals/issues"
-Upstream = "https://github.com/TinyPedal/TinyPedal"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tinypedal*", "pyLMUSharedMemory*", "pyRfactor2SharedMemory*"]
+include = ["neopedal*", "pyLMUSharedMemory*", "pyRfactor2SharedMemory*"]
 
 # Run from source folder (python run.py) or release build: fonts, images & docs are read from the
 # app folder (not packaged), so an installed wheel alone is not a supported way to run the app.
 [tool.setuptools.package-data]
-"tinypedal.i18n" = ["data/*.json"]
-"tinypedal.ui" = ["qml/*.qml"]
+"neopedal.i18n" = ["data/*.json"]
+"neopedal.ui" = ["qml/*.qml"]
 
 [tool.setuptools.dynamic]
-version = { attr = "tinypedal.version.__version__" }
+version = { attr = "neopedal.version.__version__" }
 
 [tool.ruff]
 target-version = "py311"
@@ -89,8 +88,8 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["tinypedal"]
-omit = ["tinypedal/i18n/fr.py"]
+source = ["neopedal"]
+omit = ["neopedal/i18n/fr.py"]
 
 [tool.coverage.report]
 skip_empty = true

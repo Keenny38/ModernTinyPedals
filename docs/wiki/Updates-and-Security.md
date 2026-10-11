@@ -114,7 +114,7 @@ Once published, a release cannot be modified: its files and tag stay as they wer
 ## Security of app features
 
 - **Game access**: the app reads game data. Commands are sent to the game only on an explicit action of yours (opening a replay, moving the camera, or the camera cuts of the [Broadcast Director](Broadcast-Director.md) once you put it in `Automatic` mode).
-- **Remote control** listens on `127.0.0.1` only and requires an `X-NeoPedal` (or `X-TinyPedal`) header, so web pages cannot send commands. See [Connections](Connections.md#remote-control).
+- **Remote control** listens on `127.0.0.1` only and requires an `X-NeoPedal` (or `X-NeoPedal`) header, so web pages cannot send commands. See [Connections](Connections.md#remote-control).
 - **Web dashboard** is off by default, requires an access code, is limited to this computer unless you allow LAN access, and can use HTTPS. See [Connections](Connections.md#web-dashboard).
 - **Plugins** run as normal Python code with full access to your computer: only install plugins you trust. Plugin ZIP files are checked before install (paths, code run).
 - **Bug reports** (`Help` > `Create Bug Report...`) remove your user folder name, access codes and repository names from the files they collect.
@@ -131,4 +131,4 @@ Use GitHub private vulnerability reporting: [Report a vulnerability](https://git
 
 Only the latest release receives fixes: check that the problem still exists in it. The project is maintained on free time; expect an answer within about 7 days. A confirmed vulnerability is fixed in a new release, then described in a security advisory, with your name if you wish.
 
-In scope: the app and its overlays, the web dashboard and command server, the updater, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain. A problem that also exists in the original [TinyPedal](https://github.com/TinyPedal/TinyPedal) can be reported to both projects. Full policy: [SECURITY.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md).
+In scope: the app and its overlays, the web dashboard and command server, the updater, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain. Full policy: [SECURITY.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md).

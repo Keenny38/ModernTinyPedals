@@ -1,0 +1,175 @@
+#  NeoPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of NeoPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Standings Widget, modern design
+
+Running order, split by class (space between class groups, class name above each group) or combined.
+Widget height follows the number of cars shown.
+"""
+
+from __future__ import annotations
+
+from math import ceil
+
+from ...i18n import tr_overlay
+from ...module_info import minfo
+from ...template.widget.drivers_ui import STANDINGS_COLUMNS
+from .drivers import DRIVER_OPTIONS, Context, DriverTable, gap_text
+from .rows import DASH, class_style
+from .table import DELTAS, RIGHT, SEPARATOR, TEXT, Cell, ClassHeader, Column
+
+
+class Realtime(DriverTable):
+    """Draw widget"""
+
+    COLUMNS = STANDINGS_COLUMNS
+    options = (
+        *DRIVER_OPTIONS,
+        "enable_multi_class_split_mode", "enable_single_class_exclusive_mode", "minimum_top_vehicles",
+        "show_class_header", "class_order",
+        "maximum_vehicles_exclusive_mode", "maximum_vehicles_combined_mode", "maximum_vehicles_split_mode",
+        "maximum_vehicles_per_split_player", "maximum_vehicles_per_split_others",
+        "column_delta_laptime", "number_of_delta_laptime", "display_order_delta_laptime",
+        "column_time_interval", "show_time_interval_from_same_class", "decimal_places_time_interval",
+        "time_interval_leader_text", "display_order_time_interval",
+        "column_time_gap", "show_time_gap_from_same_class", "decimal_places_time_gap", "time_gap_leader_text",
+        "display_order_time_gap",
+    )
+
+    def __init__(self, config, widget_name):
+        super().__init__(config, widget_name)
+        wcfg = self.wcfg
+        self.gap_decimals = max(int(wcfg["decimal_places_time_gap"]), 0)
+        self.int_decimals = max(int(wcfg["decimal_places_time_interval"]), 0)
+        split = wcfg["enable_multi_class_split_mode"]
+        self.class_gap = split and wcfg["show_time_gap_from_same_class"]
+        self.class_interval = split and wcfg["show_time_interval_from_same_class"]
+        self.delta_count = min(max(int(wcfg["number_of_delta_laptime"]), 2), 5)
+        self.gap_leader = self.user_text("time_gap_leader_text", tr_overlay("Leader"))
+        self.int_leader = self.user_text("time_interval_leader_text", DASH)
+        if wcfg["enable_single_class_exclusive_mode"]:
+            max_vehicles = wcfg["maximum_vehicles_exclusive_mode"]
+        elif split:
+            max_vehicles = wcfg["maximum_vehicles_split_mode"]
+        else:
+            max_vehicles = wcfg["maximum_vehicles_combined_mode"]
+        self.max_rows = min(max(int(max_vehicles), 5), 126)
+        # Cars grouped by class (split or exclusive mode): class name above each group instead of class column
+        self.class_headers = bool(wcfg["show_class_header"]) and (
+            split or wcfg["enable_single_class_exclusive_mode"])
+        self.setup_table()
+        self.set_size(self.table.width, self.table.height(1))
+
+    def extra_column(self, key: str) -> Column | None:
+        if key == "time_gap":
+            sample = "+888." + "8" * self.gap_decimals if self.gap_decimals else "+888"
+            return Column(key, max(self.text_width("strong", sample), self.text_width("label", self.gap_leader)), RIGHT)
+        if key == "time_interval":
+            sample = "888." + "8" * self.int_decimals if self.int_decimals else "888"
+            return Column(key, max(self.text_width("value", sample), self.text_width("label", self.int_leader)), RIGHT)
+        if key == "delta_laptime":
+            return Column(key, (self.text_width("small", "8.8") + self.unit * 0.3) * self.delta_count, RIGHT)
+        return None
+
+    def extra_cell(self, key: str, veh, ctx: Context, extra: dict) -> Cell:
+        theme = self.theme
+        if key == "time_gap":
+            return self.gap_cell(veh, ctx)
+        if key == "time_interval":
+            if self.class_interval:
+                position, gap = veh.positionInClass, veh.gapBehindNextInClass
+            else:
+                position, gap = veh.positionOverall, veh.gapBehindNext
+            if position == 1:
+                if self.int_leader == DASH:
+                    return Cell(TEXT, DASH, "value", theme.text_faint)
+                return Cell(TEXT, self.int_leader, "label", theme.accent)
+            return Cell(TEXT, gap_text(gap, self.int_decimals), "value", theme.text_dim)
+        if key == "delta_laptime":
+            if ctx.player is None or veh.isPlayer:
+                return Cell(DELTAS)
+            return Cell(DELTAS, extra=tuple(veh.lapTimeHistory.delta(ctx.player.lapTimeHistory, self.delta_count)))
+        return Cell()
+
+    def laptime_cell(self, veh, ctx: Context) -> Cell:
+        """Last lap in race (or if best lap column shown), else best lap"""
+        if ctx.in_race or self.wcfg["column_best_laptime"]:
+            return super().laptime_cell(veh, ctx)
+        from .rows import laptime_text
+
+        return Cell(TEXT, laptime_text(veh.bestLapTime), "dim", self.theme.text_dim)
+
+    def gap_cell(self, veh, ctx: Context) -> Cell:
+        """Gap to leader (race), or to leader best lap (other sessions)"""
+        theme = self.theme
+        leader_cell = Cell(TEXT, self.gap_leader, "label", theme.accent)
+        if ctx.in_race:
+            if self.class_gap:
+                position, gap = veh.positionInClass, veh.gapBehindLeaderInClass
+            else:
+                position, gap = veh.positionOverall, veh.gapBehindLeader
+            if position == 1:
+                return leader_cell
+            return Cell(TEXT, gap_text(gap, self.gap_decimals), "strong", theme.text)
+        best = veh.bestLapTime
+        leader_best = veh.classBestLapTime if self.class_gap else minfo.vehicles.leaderBestLapTime
+        gap = best - leader_best
+        if gap == 0 and best > 0:
+            return leader_cell
+        if gap < 0 or best < 1:
+            return Cell(TEXT, DASH, "strong", theme.text_faint)
+        return Cell(TEXT, f"+{gap:.{self.gap_decimals}f}", "strong", theme.text)
+
+    def class_header(self, class_name: str) -> ClassHeader:
+        """Header of a class group: class name (game name, words apart) on class color"""
+        _, color = class_style(self.cfg, class_name, self.theme)
+        return ClassHeader(class_name.replace("_", " ").strip() or DASH, color)
+
+    def timerEvent(self, event):
+        """Update when vehicle on track"""
+        self.show_rows(minfo.vehicles.dataSet, minfo.relative.standings, self.context())
+
+    def show_field(self, field, ctx: Context):
+        from .sample_field import sample_standings
+
+        self.show_rows(field.vehicles, sample_standings(field, self.wcfg), ctx)
+
+    def show_rows(self, data_set, standings: list[int], ctx: Context):
+        """Rows of cars in standings order (-1: space between classes or cars apart in a class), class name
+        above each class group if class headers, widget height follows"""
+        rows: list = []
+        shown_class = None
+        for index in standings[:self.max_rows]:
+            if index == -1:
+                if rows and rows[-1] is not SEPARATOR:
+                    rows.append(SEPARATOR)
+            elif 0 <= index < len(data_set):
+                veh = data_set[index]
+                if self.class_headers and veh.vehicleClass != shown_class:
+                    shown_class = veh.vehicleClass
+                    rows.append(self.class_header(shown_class))
+                rows.append(self.driver_row(veh, ctx))
+        while rows and rows[-1] is SEPARATOR:
+            rows.pop()
+        rows_tuple = tuple(rows)
+        if rows_tuple != self.state:
+            height = self.table.content_height(rows_tuple) if rows_tuple else self.table.height(1)
+            if ceil(height) != self.height():
+                self.set_size(self.table.width, height)
+        self.refresh(rows_tuple)

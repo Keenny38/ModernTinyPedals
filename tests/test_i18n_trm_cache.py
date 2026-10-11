@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tinypedal import i18n
+from neopedal import i18n
 
 SAMPLES = (
     "Delete <b>race</b> preset permanently?<br><br>This cannot be undone!",
@@ -69,6 +69,6 @@ def test_trm_cache_cleared_on_language_change(tmp_path):
         i18n.set_language("English")
         i18n._LANGUAGES.pop("Cachish", None)
         i18n._packs.pop("xy", None)
-        from tinypedal import regex_pattern
+        from neopedal import regex_pattern
 
         regex_pattern.LANGUAGE_NAMES[:] = list(i18n.LANGUAGES)

@@ -9,11 +9,11 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtTest import QTest
 
-from tinypedal.setting import cfg
-from tinypedal.template.setting_module import MODULE_DEFAULT
-from tinypedal.template.setting_widget import WIDGET_FILENAME
-from tinypedal.ui.quick import module_backend
-from tinypedal.ui.quick.module_backend import (
+from neopedal.setting import cfg
+from neopedal.template.setting_module import MODULE_DEFAULT
+from neopedal.template.setting_widget import WIDGET_FILENAME
+from neopedal.ui.quick import module_backend
+from neopedal.ui.quick.module_backend import (
     FILTER_ACTIVE,
     FILTER_INACTIVE,
     MODULE_PACKAGE,
@@ -110,19 +110,19 @@ def shown(backend) -> list[str]:
 
 # Specs & dependencies from code
 def test_every_module_has_spec_and_french_description():
-    from tinypedal.i18n.fr import TRANSLATION
+    from neopedal.i18n.fr import TRANSLATION
 
     assert set(MODULE_SPECS) == set(MODULE_DEFAULT)  # new module: add its spec (glyph, data, description)
     for name, spec in MODULE_SPECS.items():
         assert spec.glyph and spec.description in TRANSLATION, name
         for data_name, method in spec.resets:
-            from tinypedal.ui.menu import ResetDataMenu
+            from neopedal.ui.menu import ResetDataMenu
 
             assert callable(getattr(ResetDataMenu, method)) and data_name in TRANSLATION, (name, method)
 
 
 def test_module_title_without_module_prefix():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -256,7 +256,7 @@ def test_search_and_state_filter(modules):
 
 
 def test_search_in_french(modules):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -340,7 +340,7 @@ def test_dependencies_loaded_later(ui_env, monkeypatch):
 # Page
 @pytest.fixture
 def page(modules):
-    from tinypedal.ui.module_view import ModuleList
+    from neopedal.ui.module_view import ModuleList
 
     view = ModuleList(None, modules.test["control"], modules.test["widgets"])
     view.backend.load_dependencies(DEPENDENCIES)
@@ -410,8 +410,8 @@ def _items(root):
 
 
 def test_qml_page_translated(modules):
-    from tinypedal import i18n
-    from tinypedal.ui.module_view import ModuleList
+    from neopedal import i18n
+    from neopedal.ui.module_view import ModuleList
 
     i18n.set_language("Français")
     try:
@@ -431,7 +431,7 @@ def test_qml_page_translated(modules):
 
 
 def test_page_reset_data_uses_reset_menu(page, monkeypatch):
-    from tinypedal.ui import menu
+    from neopedal.ui import menu
 
     called = []
     monkeypatch.setattr(menu.ResetDataMenu, "reset_sectorbest", lambda self: called.append(self.title()))
@@ -448,8 +448,8 @@ def test_qml_imports_bundled_modules():
     """Release build bundles only QML_MODULES: page files import nothing else (checked statically)"""
     import re
 
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     for name in ("Modules.qml", "ModuleCard.qml"):
         with open(f"{QML_FOLDER}/{name}", encoding="utf-8") as file:
@@ -458,7 +458,7 @@ def test_qml_imports_bundled_modules():
 
 
 def test_french_page_messages():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -482,8 +482,8 @@ def test_french_page_messages():
 def test_main_window_uses_module_page(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.module_view import ModuleList
+    from neopedal.ui import app as app_module
+    from neopedal.ui.module_view import ModuleList
 
     host = QWidget()
     try:

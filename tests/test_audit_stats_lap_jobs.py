@@ -14,7 +14,7 @@ from tests.test_lap_viewer_fix_backend import backend, write_other_track  # noqa
 
 # --- 40. Recorded laps of selected vehicle read once selection settles, older reads never overwrite newer ones
 def test_stints_read_debounced_and_stale_read_ignored(stats_page, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     calls: list[str] = []
     real = stats_backend.read_laps
@@ -53,7 +53,7 @@ def test_stints_read_one_at_a_time(stats_page):  # noqa: F811
 
 
 def test_reference_kept_when_cache_not_written(stats_page, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import lap_reference
+    from neopedal.userfile import lap_reference
 
     def failing(*_args):
         raise OSError("disk full")
@@ -67,8 +67,8 @@ def test_reference_kept_when_cache_not_written(stats_page, monkeypatch):  # noqa
 
 # --- 41. Lap infos of a track with many new lap files read in background, stale reads ignored
 def test_track_infos_read_in_background(backend, monkeypatch):  # noqa: F811
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.setting import cfg
+    from neopedal.ui.quick import lap_backend
 
     monkeypatch.setattr(lap_backend, "INFO_BACKGROUND", 1)
     folder = cfg.path.telemetry.rstrip("/")
@@ -102,7 +102,7 @@ def test_damaged_limits_cache_ignored(backend):  # noqa: F811
 
 # --- 42a. Circuit shapes cache filled & trimmed by several map jobs at once
 def test_circuit_shapes_trimmed_from_threads(backend):  # noqa: F811
-    from tinypedal.ui.quick import lap_map_view
+    from neopedal.ui.quick import lap_map_view
 
     errors: list[BaseException] = []
 
@@ -125,7 +125,7 @@ def test_circuit_shapes_trimmed_from_threads(backend):  # noqa: F811
 def test_temp_size_of_removed_files(tmp_path):
     from types import SimpleNamespace
 
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     kept = tmp_path / "a.tmp"
     kept.write_bytes(b"x" * 2048)

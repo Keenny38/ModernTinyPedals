@@ -6,8 +6,8 @@
  * Windows, graphics API & OpenXR headers, in the order openxr_platform.h needs them.
  */
 
-#ifndef TINYPEDAL_XR_INCLUDES_H
-#define TINYPEDAL_XR_INCLUDES_H
+#ifndef NEOPEDAL_XR_INCLUDES_H
+#define NEOPEDAL_XR_INCLUDES_H
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -37,4 +37,4 @@
 #include <openxr/openxr_platform.h>
 #include <openxr/openxr_loader_negotiation.h>
 
-#endif  // TINYPEDAL_XR_INCLUDES_H
+#endif  // NEOPEDAL_XR_INCLUDES_H

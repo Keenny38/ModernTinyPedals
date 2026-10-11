@@ -9,7 +9,7 @@ import zipfile
 
 import pytest
 
-from tinypedal import update
+from neopedal import update
 
 DIGEST = "ab" * 32
 
@@ -57,9 +57,9 @@ def test_parse_installer_of_older_release():
 
 
 def test_parse_installer_requires_hash_and_github_url():
-    assert update.parse_installer(release_body([("TinyPedal-1.0.0-setup.zip", "https://github.com/a")])) is None
+    assert update.parse_installer(release_body([("NeoPedal-1.0.0-setup.zip", "https://github.com/a")])) is None
     assert update.parse_installer(release_body([
-        ("TinyPedal-1.0.0-setup.zip", "https://github.com/a", "md5:abc"),  # not a sha256 digest
+        ("NeoPedal-1.0.0-setup.zip", "https://github.com/a", "md5:abc"),  # not a sha256 digest
     ])) is None
     assert update.parse_installer(release_body([
         ("x-setup.zip", "https://evil.example/x.zip", f"sha256:{DIGEST}"),
@@ -69,7 +69,7 @@ def test_parse_installer_requires_hash_and_github_url():
 
 def test_parse_sha256():
     digest = "a" * 64
-    assert update.parse_sha256(f"{digest}  TinyPedal-setup.exe\n") == digest
+    assert update.parse_sha256(f"{digest}  NeoPedal-setup.exe\n") == digest
     with pytest.raises(ValueError):
         update.parse_sha256("not a hash")
 
@@ -200,7 +200,7 @@ def test_release_notes_visuals(tmp_path):
 
 
 def test_old_repository_name_is_migrated(ui_env):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.application["update_repository"] = "Keenny38/overlays"
     assert update.update_repository() == "Keenny38/ModernTinyPedals"

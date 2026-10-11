@@ -4,8 +4,8 @@ race plan files, share code, plan of car & track, QML page"""
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
 
 
 class Host:
@@ -22,8 +22,8 @@ class Host:
 
 @pytest.fixture
 def host(monkeypatch):
-    from tinypedal.ui import race_calculator
-    from tinypedal.ui.quick import race_backend
+    from neopedal.ui import race_calculator
+    from neopedal.ui.quick import race_backend
 
     found = Host()
     monkeypatch.setattr(race_calculator.RaceCalculator, "warn", lambda self, text: found.warnings.append(text))
@@ -38,7 +38,7 @@ def host(monkeypatch):
 
 @pytest.fixture
 def page(ui_env, monkeypatch, host):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
@@ -65,13 +65,13 @@ def tile(backend, key: str) -> dict:
 
 
 def cell(backend, row: int, column: str) -> str:
-    from tinypedal.ui.quick.race_results import PLAN_COLUMNS
+    from neopedal.ui.quick.race_results import PLAN_COLUMNS
 
     return backend.plan["rows"][row][PLAN_COLUMNS.index(column)]
 
 
 def test_one_page_three_tabs(page):
-    from tinypedal.ui.quick.race_backend import TABS
+    from neopedal.ui.quick.race_backend import TABS
 
     backend = page.backend
     assert TABS == ("fuel", "tyres", "team", "live")
@@ -170,7 +170,7 @@ def test_tyre_change_time_costs_laps_in_time_race(page):
 
 
 def test_tyre_plan_kept_between_sessions(page, monkeypatch):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     backend = page.backend
     set_race(backend, laps=40)
@@ -214,8 +214,8 @@ def test_tyre_plan_undo_redo(page):
 
 
 def test_former_tools_open_race_calculator(ui_env):
-    from tinypedal.ui.nav_rail import parse_rail_items
-    from tinypedal.ui.tools_view import RENAMED_TOOLS
+    from neopedal.ui.nav_rail import parse_rail_items
+    from neopedal.ui.tools_view import RENAMED_TOOLS
 
     assert set(RENAMED_TOOLS.values()) == {"race_calculator.RaceCalculator"}
     assert parse_rail_items("tyre_strategy_planner") == ["race_calculator"]
@@ -347,9 +347,9 @@ def test_tyre_rules_kept_in_range(page):
 
 
 def test_race_plan_widget(ui_env, monkeypatch, host):
-    from tinypedal.api_control import api
-    from tinypedal.ui import race_calculator
-    from tinypedal.widget import race_plan
+    from neopedal.api_control import api
+    from neopedal.ui import race_calculator
+    from neopedal.widget import race_plan
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
@@ -382,7 +382,7 @@ def test_race_plan_widget(ui_env, monkeypatch, host):
 
 def live_race(monkeypatch, laps_done=20, fuel=9.0, stops=1, in_pits=False, combo="Spa - GT3"):
     """Game in a race: player car state"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     values = {
         (api.read.state, "active"): True, (api.read.session, "combo_name"): combo,
@@ -412,7 +412,7 @@ def test_live_race_plans_rest_of_race(page, monkeypatch):
 
 
 def test_plan_of_car_and_track_opened_again(page, host, monkeypatch):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     backend = page.backend
     live_race(monkeypatch, laps_done=0)
@@ -430,8 +430,8 @@ def test_plan_of_car_and_track_opened_again(page, host, monkeypatch):
 
 
 def test_page_keeps_inputs_of_race_plan(page, monkeypatch, tmp_path):
-    from tinypedal.module_info import ConsumptionDataSet
-    from tinypedal.ui import race_calculator
+    from neopedal.module_info import ConsumptionDataSet
+    from neopedal.ui import race_calculator
 
     backend = page.backend
     set_race(backend, laptime=100.0, laps=40)
@@ -466,8 +466,8 @@ def test_tyre_plan_not_refreshed_for_same_stints(page, monkeypatch):
 
 
 def race_plan_widget(monkeypatch, completed: int, in_pits: bool = False):
-    from tinypedal.api_control import api
-    from tinypedal.widget import race_plan
+    from neopedal.api_control import api
+    from neopedal.widget import race_plan
 
     monkeypatch.setattr(api.read.lap, "completed_laps", lambda *args, **kwargs: completed, raising=False)
     monkeypatch.setattr(api.read.vehicle, "in_pits", lambda *args, **kwargs: in_pits, raising=False)
@@ -478,7 +478,7 @@ def race_plan_widget(monkeypatch, completed: int, in_pits: bool = False):
 
 def closed_page(set_values):
     """Race calculator opened, inputs set, closed: plan input written for the race plan widget"""
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     page = race_calculator.RaceCalculator(None)
     set_values(page.backend)
@@ -535,7 +535,7 @@ def test_inputs_undo_redo(page):
 
 
 def test_live_race_status_shown(page, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     backend = page.backend
     backend.setLiveRace(True)
@@ -575,8 +575,8 @@ def test_share_code_round_trip(page, host):
 
 
 def test_plan_against_race_and_rivals(page, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import StintDataSet
+    from neopedal.api_control import api
+    from neopedal.module_info import StintDataSet
 
     backend = page.backend
     live_race(monkeypatch, laps_done=20)
@@ -602,7 +602,7 @@ def test_plan_against_race_and_rivals(page, monkeypatch):
 
 
 def test_race_plan_widget_pit_menu_and_target(ui_env, monkeypatch, host):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())
@@ -690,8 +690,8 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
     from PySide6.QtCore import QLibraryInfo
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     source = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
     for module in QML_MODULES:
@@ -723,10 +723,10 @@ def test_qml_page_translated(ui_env, monkeypatch, host):
     import glob
     import re
 
-    from tinypedal import i18n
-    from tinypedal.i18n.fr import TRANSLATION
-    from tinypedal.ui import race_calculator
-    from tinypedal.ui.quick import QML_FOLDER
+    from neopedal import i18n
+    from neopedal.i18n.fr import TRANSLATION
+    from neopedal.ui import race_calculator
+    from neopedal.ui.quick import QML_FOLDER
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(minfo.history, "consumptionDataSet", ())

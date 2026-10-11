@@ -7,12 +7,12 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QMetaObject
 
+from neopedal.module import module_recorder
+from neopedal.ui.lap_viewer import CHANNEL_MAP, load_viewer_setting
+from neopedal.ui.quick.lap_backend import pedal_value
+from neopedal.ui.quick.lap_dashboard import CARD_CHANNELS, item_columns, other_items, value_text
 from tests.test_lap_viewer_features import laps  # noqa: F401
 from tests.test_lap_viewer_fix_qml import chart_of, evaluate, find, opener, wait, warnings  # noqa: F401
-from tinypedal.module import module_recorder
-from tinypedal.ui.lap_viewer import CHANNEL_MAP, load_viewer_setting
-from tinypedal.ui.quick.lap_backend import pedal_value
-from tinypedal.ui.quick.lap_dashboard import CARD_CHANNELS, item_columns, other_items, value_text
 
 
 def test_pedal_value():
@@ -205,8 +205,8 @@ def test_view_items_and_picker(opener, warnings):  # noqa: F811
 
 
 def test_simple_view_mode_saved_and_old_tab_migrated(opener, warnings):  # noqa: F811
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import save_viewer_setting
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import save_viewer_setting
 
     save_viewer_setting(cfg.path.telemetry.rstrip("/"), side_tab=6)  # simple view was side tab 6 before
     dialog = opener()

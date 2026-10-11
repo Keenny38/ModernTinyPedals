@@ -2,7 +2,7 @@
 Next release version from commits since the last release tag
 
 Semantic versioning, MAJOR.MINOR.PATCH:
-    - first release: version from tinypedal/version.py (0.10.0)
+    - first release: version from neopedal/version.py (0.10.0)
     - a commit title starting with "Add" (new feature) since last release: minor + 1, patch 0
     - otherwise (fixes, changes): patch + 1
     - no commit since last release: prints nothing (no release)
@@ -12,7 +12,7 @@ A major version (1.0.0...) is chosen by hand: run the release workflow with bump
 
 Usage (from project root):
     python tools/next_version.py [--bump auto|patch|minor|major]
-    python tools/next_version.py --write 0.11.0     set tinypedal/version.py
+    python tools/next_version.py --write 0.11.0     set neopedal/version.py
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gen_release_notes import commits, git, kind_of, release_tags
 
-VERSION_FILE = os.path.join("tinypedal", "version.py")
+VERSION_FILE = os.path.join("neopedal", "version.py")
 VERSION_LINE = re.compile(r'^__version__ = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
 # Documentation files: a commit changing only these does not change the app
 DOCS_ONLY = re.compile(
@@ -81,7 +81,7 @@ def next_version(bump: str = "auto") -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("--bump", choices=("auto", "patch", "minor", "major"), default="auto")
-    parser.add_argument("--write", metavar="VERSION", help="write VERSION to tinypedal/version.py")
+    parser.add_argument("--write", metavar="VERSION", help="write VERSION to neopedal/version.py")
     args = parser.parse_args()
     if args.write:
         write_version(args.write)

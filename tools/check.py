@@ -120,13 +120,13 @@ def main() -> int:
     python = sys.executable
     checks: list[tuple[str, list[str], dict | None]] = [
         ("ruff", [python, "-m", "ruff", "check", "."], None),
-        ("mypy (Windows)", [python, "-m", "mypy", "--platform", "win32", "tinypedal"], None),
-        ("mypy (Linux)", [python, "-m", "mypy", "--platform", "linux", "tinypedal"], None),
+        ("mypy (Windows)", [python, "-m", "mypy", "--platform", "win32", "neopedal"], None),
+        ("mypy (Linux)", [python, "-m", "mypy", "--platform", "linux", "neopedal"], None),
     ]
     checks += [(title, command, None) for title, command in workflow_linters()]
     if not options.quick:
         checks.append(("tests with coverage", [python, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                                               "--timeout=300", "--cov=tinypedal", "--cov-report=term:skip-covered"],
+                                               "--timeout=300", "--cov=neopedal", "--cov-report=term:skip-covered"],
                        {"QT_QPA_PLATFORM": "offscreen"}))
 
     failed = [title for title, command, env in checks if not run(title, command, env)]

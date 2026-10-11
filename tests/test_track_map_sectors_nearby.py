@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal.const_common import MAX_SECONDS
+from neopedal.const_common import MAX_SECONDS
 
 
 def sectors(last, best, delta_pb):
@@ -13,7 +13,7 @@ def sectors(last, best, delta_pb):
 
 
 def test_sector_performance_colors():
-    from tinypedal.widget._modern.track_map import sector_performance
+    from neopedal.widget._modern.track_map import sector_performance
 
     data = sectors(last=[30.0, 41.2, MAX_SECONDS], best=[30.0, 40.9, 28.0], delta_pb=[-0.2, -0.1, 0.0])
     assert sector_performance(data) == ("best", "positive", None)  # best, faster than best lap sector, no time
@@ -22,8 +22,8 @@ def test_sector_performance_colors():
 
 
 def test_nearby_vehicles_within_threshold(monkeypatch):
-    from tinypedal.module_info import minfo
-    from tinypedal.widget._modern.track_map import nearby_vehicles
+    from neopedal.module_info import minfo
+    from neopedal.widget._modern.track_map import nearby_vehicles
 
     monkeypatch.setattr(minfo.relative, "relativeAhead", [(0.4, 3), (1.6, 4), (30.0, 5)])
     monkeypatch.setattr(minfo.relative, "relativeBehind", [(-0.9, 6), (-1.2, 7)])
@@ -33,15 +33,15 @@ def test_nearby_vehicles_within_threshold(monkeypatch):
 
 @pytest.fixture
 def track_map(ui_env, bundled_fonts):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import create_widget
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
     widgets = []
 
     def make(**options):
         cfg.user.setting["track_map"].update(options)
-        widget = create_widget(import_module("tinypedal.widget.track_map"), cfg, "track_map")
+        widget = create_widget(import_module("neopedal.widget.track_map"), cfg, "track_map")
         widgets.append(widget)
         return widget
 
@@ -53,7 +53,7 @@ def track_map(ui_env, bundled_fonts):
 def test_sector_colors_drawn_once_player_completes_sector(track_map, monkeypatch):
     from PySide6.QtCore import QTimerEvent
 
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     data = sectors(last=[30.0, MAX_SECONDS, MAX_SECONDS], best=[30.0, 41.0, 28.0], delta_pb=[-0.1, 0.0, 0.0])
     monkeypatch.setattr(minfo.sectors, "sessionBest", data)
@@ -76,7 +76,7 @@ def test_sector_colors_drawn_once_player_completes_sector(track_map, monkeypatch
 def test_nearby_cars_ringed(track_map, monkeypatch):
     from PySide6.QtCore import QTimerEvent
 
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     monkeypatch.setattr(minfo.relative, "relativeAhead", [(0.5, 2)])
     monkeypatch.setattr(minfo.relative, "relativeBehind", [(-3.0, 4)])
@@ -90,8 +90,8 @@ def test_nearby_cars_ringed(track_map, monkeypatch):
 
 def test_preview_draws_sector_colors(ui_env, bundled_fonts):
     """Overlay picture of simulated race: sector colors & nearby ring drawn"""
-    from tinypedal.setting import cfg
-    from tinypedal.ui.widget_preview import render_widget
+    from neopedal.setting import cfg
+    from neopedal.ui.widget_preview import render_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
     image = render_widget(cfg, "track_map", cfg.user.setting["track_map"]).toImage()

@@ -26,7 +26,7 @@ def everything(root):
 def test_lap_rows_reused_with_sector_texts(page, sessions):  # noqa: F811
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     messages: list[str] = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))

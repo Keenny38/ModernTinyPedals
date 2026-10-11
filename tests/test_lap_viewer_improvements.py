@@ -8,11 +8,11 @@ from array import array
 import pytest
 from PySide6.QtGui import QColor
 
+from neopedal.module import module_recorder
+from neopedal.setting import cfg
+from neopedal.userfile.telemetry_lap import LapData
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, LENGTH, check_only, laps, rows_by_path, save, viewer  # noqa: F401
-from tinypedal.module import module_recorder
-from tinypedal.setting import cfg
-from tinypedal.userfile.telemetry_lap import LapData
 
 
 def oval_lap(name: str, lap_time: float, scale: float = 1.0, slow: float = 1.0, samples: int = 400) -> LapData:
@@ -35,8 +35,8 @@ def oval_lap(name: str, lap_time: float, scale: float = 1.0, slow: float = 1.0, 
 
 # --- Packed columns (memory)
 def test_loaded_lap_columns_are_packed(tmp_path):
-    from tinypedal.userfile import lap_cache
-    from tinypedal.userfile.telemetry_lap import load_lap
+    from neopedal.userfile import lap_cache
+    from neopedal.userfile.telemetry_lap import load_lap
 
     path = tmp_path / "lap.csv"
     path.write_text("time,lap_time,distance,speed_kph\n0,0,0,100\n1,1,10,110.5\n", encoding="utf-8")
@@ -52,9 +52,9 @@ def test_loaded_lap_columns_are_packed(tmp_path):
 
 # --- Imported lap measured on another length: every view on reference distance
 def test_scaled_lap_aligned_on_reference_distance(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.corner_analysis import compare_corners
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.corner_analysis import compare_corners
 
     reference = PlotLap("ref", "ref", oval_lap("ref", 70.0), QColor("red"))
     imported = PlotLap("log", "log", oval_lap("log", 71.0, scale=1.04), QColor("blue"))
@@ -75,8 +75,8 @@ def test_scaled_lap_aligned_on_reference_distance(ui_env):
 
 # --- Ideal lap & mini-sectors: invalid, out & in laps never count
 def test_ideal_lap_and_mini_sectors_from_clean_laps_only(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference = PlotLap("ref", "ref", oval_lap("ref", 70.0), QColor("red"))
     other = PlotLap("other", "other", oval_lap("other", 71.0), QColor("green"))
@@ -110,7 +110,7 @@ def test_backend_ideal_lap_ignores_invalid_lap(viewer, laps):  # noqa: F811
 
 # --- Cache keys never compare by id()
 def test_keys_match_by_identity():
-    from tinypedal.ui.quick.lap_backend import keys_match
+    from neopedal.ui.quick.lap_backend import keys_match
 
     first, second = LapData("a", {"distance": [0.0]}), LapData("a", {"distance": [0.0]})
     assert keys_match((first, 3, "x", (first,)), (first, 3, "x", (first,)))
@@ -120,8 +120,8 @@ def test_keys_match_by_identity():
 
 # --- Unit setting changed while page is open
 def test_units_refreshed_from_settings(viewer, monkeypatch):  # noqa: F811
-    from tinypedal import app_signal
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal import app_signal
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     backend = viewer.backend
     lap = backend.data.reference
@@ -136,7 +136,7 @@ def test_units_refreshed_from_settings(viewer, monkeypatch):  # noqa: F811
 
 # --- Coaching
 def test_coaching_tips_causes():
-    from tinypedal.userfile.corner_analysis import Corner, CornerComparison, CornerStats, coaching_tips
+    from neopedal.userfile.corner_analysis import Corner, CornerComparison, CornerStats, coaching_tips
 
     corner = Corner(1, 100.0, 200.0, 300.0)
     reference = CornerStats(90.0, 200.0, 150.0, 240.0, 5.0, coasting=0.1, exit_speed=180.0)
@@ -161,8 +161,8 @@ def test_coaching_in_corner_table(viewer, laps):  # noqa: F811
 
 # --- Trash & undo, bulk actions, session menu
 def test_trash_undo_and_bulk_actions(viewer, laps):  # noqa: F811
-    from tinypedal.ui.quick.lap_backend import TRASH_FOLDER, purge_trash
-    from tinypedal.userfile.lap_marks import kept_laps
+    from neopedal.ui.quick.lap_backend import TRASH_FOLDER, purge_trash
+    from neopedal.userfile.lap_marks import kept_laps
 
     backend = viewer.backend
     folder = os.path.dirname(laps[0])
@@ -208,7 +208,7 @@ def test_lap_list_search(viewer, laps):  # noqa: F811
 
 # --- Delta best
 def test_lap_as_delta_best(viewer, laps, monkeypatch):  # noqa: F811
-    from tinypedal.userfile.delta_best import load_delta_best_file
+    from neopedal.userfile.delta_best import load_delta_best_file
 
     backend = viewer.backend
     backend.exportDeltaBest(laps[2])
@@ -224,7 +224,7 @@ def test_lap_as_delta_best(viewer, laps, monkeypatch):  # noqa: F811
 
 # --- XY tab
 def test_scatter_and_histogram(viewer):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     scatter = backend.scatter("speed_kph", "throttle")
@@ -243,7 +243,7 @@ def test_scatter_and_histogram(viewer):  # noqa: F811
 
 # --- Session long run
 def test_session_trend():
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend, least_squares, time_weights
+    from neopedal.ui.quick.lap_backend import LapViewerBackend, least_squares, time_weights
 
     assert least_squares([(0, 1.0), (1, 2.0), (2, 3.0)]) == pytest.approx((1.0, 1.0))
     assert time_weights([0.0, 1.0, 3.0]) == pytest.approx([0.5, 1.5, 1.0])
@@ -257,7 +257,7 @@ def test_session_trend():
 
 # --- Heavy jobs in worker process
 def test_track_limits_job_in_worker_process(laps):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     folder = cfg.path.telemetry
     track = os.path.basename(os.path.dirname(laps[1]))
@@ -274,7 +274,7 @@ def test_track_limits_job_in_worker_process(laps):  # noqa: F811
 
 # --- Recorder channels
 def test_recorded_sample_matches_header(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     sample = module_recorder.read_sample(0.0)
     assert len(sample) == len(module_recorder.CSV_HEADER)
@@ -284,8 +284,8 @@ def test_recorded_sample_matches_header(ui_env):
 
 
 def test_new_computed_channels(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     columns = {"distance": [0.0, 10.0], "tyre_temp_in_fl": [90.0, 92.0], "tyre_temp_out_fl": [80.0, 81.0],
                "vel_lat": [1.0, 0.0], "vel_long": [10.0, 0.5]}
@@ -315,7 +315,7 @@ def test_range_stats_on_time_axis_measure_same_track_part(viewer, laps):  # noqa
 def test_worker_stopped_with_page_and_hooked_to_app_quit(viewer, laps):  # noqa: F811
     import time
 
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     assert lap_backend.worker_pool() is not None and lap_backend._quit_hooked
     handle = lap_backend.start_job("sleep", time.sleep, 10)
@@ -327,8 +327,8 @@ def test_worker_stopped_with_page_and_hooked_to_app_quit(viewer, laps):  # noqa:
 
 # --- XY tab choices kept
 def test_xy_choices_kept(viewer, laps):  # noqa: F811
+    from neopedal.ui.lap_viewer import LapViewer
     from tests.test_lap_viewer import flush_deleted
-    from tinypedal.ui.lap_viewer import LapViewer
 
     viewer.backend.setXyState("histogram", "speed_kph", "brake", "gear")
     viewer.backend.setXyState("scatter", "unknown", "brake", "gear")  # unknown channel: former one kept
@@ -345,8 +345,8 @@ def test_xy_choices_kept(viewer, laps):  # noqa: F811
 
 # --- Car settings not recorded (-1)
 def test_missing_car_settings_not_drawn(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     columns = {"distance": [0.0, 10.0, 20.0], "tc_level": [3.0, 3.0, 4.0], "abs_level": [-1.0, -1.0, -1.0]}
     lap = PlotLap("a", "a", LapData("a", columns), QColor("red"))
@@ -358,7 +358,7 @@ def test_missing_car_settings_not_drawn(ui_env):
 
 # --- Unit change: lap list tooltips too
 def test_units_refresh_lap_list_tooltips(viewer, laps, monkeypatch):  # noqa: F811
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     backend = viewer.backend
     next(entry for entry in backend.entries if entry.file.path == laps[1]).info["track_temperature"] = 25.0
@@ -371,7 +371,7 @@ def test_units_refresh_lap_list_tooltips(viewer, laps, monkeypatch):  # noqa: F8
 
 # --- Corners across start line, braking point after an earlier brake tap
 def test_corner_across_start_line_found_once():
-    from tinypedal.userfile.corner_analysis import find_corners
+    from neopedal.userfile.corner_analysis import find_corners
 
     def speed(distance):  # corner apex at the start line, another one mid lap
         if distance < 300:
@@ -391,7 +391,7 @@ def test_corner_across_start_line_found_once():
 
 
 def test_braking_point_ignores_earlier_brake_tap():
-    from tinypedal.userfile.corner_analysis import Corner, corner_stats
+    from neopedal.userfile.corner_analysis import Corner, corner_stats
 
     distances = [float(meter) for meter in range(0, 1001, 2)]
     speeds = [250 - 150 * max(0.0, 1 - abs(distance - 500) / 100) for distance in distances]
@@ -406,7 +406,7 @@ def test_braking_point_ignores_earlier_brake_tap():
 def test_lap_cache_prune_keeps_files_being_written(tmp_path):
     import time
 
-    from tinypedal.userfile import lap_cache
+    from neopedal.userfile import lap_cache
 
     folder = tmp_path / lap_cache.CACHE_FOLDER
     folder.mkdir()
@@ -421,7 +421,7 @@ def test_lap_cache_prune_keeps_files_being_written(tmp_path):
 
 # --- Increasing distances found once per lap
 def test_monotonic_distance_without_copy():
-    from tinypedal.userfile.telemetry_lap import increasing_indexes, monotonic_distance
+    from neopedal.userfile.telemetry_lap import increasing_indexes, monotonic_distance
 
     lap = LapData("a", {"distance": array("d", [0.0, 1.0, 2.0]), "speed_kph": array("f", [1.0, 2.0, 3.0])})
     distances, values = monotonic_distance(lap, "speed_kph")
@@ -433,7 +433,7 @@ def test_monotonic_distance_without_copy():
 
 # --- Shapes told about their own vertices only
 def test_vertex_store_wakes_only_shapes_of_key(ui_env):
-    from tinypedal.ui.quick.lines import GpuShape, VertexStore, line_strip
+    from neopedal.ui.quick.lines import GpuShape, VertexStore, line_strip
 
     first, second = GpuShape(), GpuShape()
     first.setProperty("key", "test|a")
@@ -449,7 +449,7 @@ def test_vertex_store_wakes_only_shapes_of_key(ui_env):
 
 
 def test_band_part_matches_band():
-    from tinypedal.ui.quick.lines import band, band_part, merge_strips, normals
+    from neopedal.ui.quick.lines import band, band_part, merge_strips, normals
 
     xs, ys = [0.0, 1.0, 2.0, 3.0], [0.0, 0.5, 0.0, 0.5]
     whole = band(xs, ys, 0.2)
@@ -461,8 +461,8 @@ def test_band_part_matches_band():
 
 # --- Per lap results kept when laps change, map scale built in background
 def test_lap_results_kept_and_map_scale_in_background(viewer, laps):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     check_only(viewer, [laps[1], laps[2]])
@@ -500,7 +500,7 @@ def test_exports_in_background(viewer, laps, tmp_path):  # noqa: F811
 
 # --- Recorder keeps binary copy, folder watch ignores hidden files
 def test_recorder_writes_lap_cache(ui_env):
-    from tinypedal.userfile import lap_cache
+    from neopedal.userfile import lap_cache
 
     path = save(1, 70.0, BASE)
     assert os.path.exists(lap_cache.cache_file(cfg.path.telemetry, path))
@@ -523,7 +523,7 @@ def test_folder_watch_ignores_settings_and_caches(viewer, laps):  # noqa: F811
 
 # --- Kept QML models: rows removed, moved, inserted & changed in place (delegates of kept rows stay)
 def test_list_model_sync_in_place(ui_env):
-    from tinypedal.ui.quick.models import DictListModel
+    from neopedal.ui.quick.models import DictListModel
 
     model = DictListModel(("key", "value"))
     model.sync([{"key": "a", "value": 1}, {"key": "b", "value": 2}, {"key": "c", "value": 3}])
@@ -542,8 +542,8 @@ def test_list_model_sync_in_place(ui_env):
 
 # --- Exports: whole files only, failures counted with reason, finished when viewer closes
 def test_export_failure_reported(viewer, laps, tmp_path):  # noqa: F811
-    from tinypedal.userfile.motec_ld import export_lap_job
-    from tinypedal.userfile.telemetry_lap import write_lap_csv
+    from neopedal.userfile.motec_ld import export_lap_job
+    from neopedal.userfile.telemetry_lap import write_lap_csv
 
     backend = viewer.backend
     out = tmp_path / "out"
@@ -562,7 +562,7 @@ def test_export_failure_reported(viewer, laps, tmp_path):  # noqa: F811
 
 
 def test_closing_viewer_lets_exports_finish(viewer, laps, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     backend = viewer.backend
     calls: list[tuple] = []
@@ -579,7 +579,7 @@ def test_closing_viewer_lets_exports_finish(viewer, laps, tmp_path, monkeypatch)
 def test_app_exit_waits_for_exports_only(laps):  # noqa: F811
     import time
 
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     export = lap_backend.start_job("MoTeC export", time.sleep, 0.3)
     lap_backend.stop_worker(finish=True)  # viewer closed while exporting: export goes on
@@ -606,8 +606,8 @@ def test_loading_one_lap_message(viewer, laps, monkeypatch):  # noqa: F811
 def test_theme_copy_follows_palette(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui import set_style_palette
-    from tinypedal.ui.quick import Theme, create_quick_view
+    from neopedal.ui import set_style_palette
+    from neopedal.ui.quick import Theme, create_quick_view
 
     parent = QWidget()
     view = create_quick_view(parent, "Card.qml", {})

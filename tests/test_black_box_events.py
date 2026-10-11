@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from tinypedal.widget._black_box import persist
-from tinypedal.widget._black_box import recorder as rec
-from tinypedal.widget._black_box.recorder import EventLog, RaceReadings, Recorder, Sample, log_race_events
-from tinypedal.widget._black_box.trace import replay_time, sample_at
+from neopedal.widget._black_box import persist
+from neopedal.widget._black_box import recorder as rec
+from neopedal.widget._black_box.recorder import EventLog, RaceReadings, Recorder, Sample, log_race_events
+from neopedal.widget._black_box.trace import replay_time, sample_at
 
 
 def sample(time, speed, throttle=0.0, brake=0.0, gear=3):
@@ -22,8 +22,8 @@ def clear_memory():
 
 
 def new_widget(overrides=None):
-    from tinypedal.setting import cfg
-    from tinypedal.widget import black_box
+    from neopedal.setting import cfg
+    from neopedal.widget import black_box
 
     cfg.user.setting["black_box"].update({"enable_auto_resize": False, **(overrides or {})})
     return black_box.Realtime(cfg, "black_box")
@@ -124,7 +124,7 @@ def test_race_events_reference_forgotten_on_new_session():
 
 
 def test_widget_logs_race_events(ui_env, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     yellow = [False]
     monkeypatch.setattr(api.read.session, "yellow_flag", lambda: yellow[0])
@@ -149,8 +149,8 @@ def test_race_events_off_without_event_log(ui_env):
 
 # --- Pause
 def test_recorder_clock_stops_while_paused(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.widget._black_box import reader
+    from neopedal.api_control import api
+    from neopedal.widget._black_box import reader
 
     clock = [100.0]
     paused = [False]
@@ -191,7 +191,7 @@ def test_sample_at():
 
 
 def test_frozen_incident_replayed_and_compared(ui_env, monkeypatch):
-    from tinypedal.widget._black_box import reader
+    from neopedal.widget._black_box import reader
 
     clock = [100.0]
     monkeypatch.setattr(reader, "monotonic", lambda: clock[0])
@@ -241,7 +241,7 @@ def test_rebuilt_widget_keeps_incidents_and_events(ui_env):
 
 
 def test_auto_resize_position_saved_once_off_track(ui_env, monkeypatch):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     saves = []
     monkeypatch.setattr(type(cfg), "save", lambda *args, **kwargs: saves.append(1))
@@ -258,7 +258,7 @@ def test_auto_resize_position_saved_once_off_track(ui_env, monkeypatch):
 
 
 def test_open_incident_folder_in_menu(ui_env, monkeypatch):
-    from tinypedal.widget import black_box
+    from neopedal.widget import black_box
 
     opened = []
     monkeypatch.setattr(black_box, "open_folder", opened.append)
@@ -319,7 +319,7 @@ def test_long_trace_thinned_to_pixel_columns(ui_env):
 
     from PySide6.QtCore import QPointF, QRectF
 
-    from tinypedal.widget._black_box.trace import mark_runs, trace_points
+    from neopedal.widget._black_box.trace import mark_runs, trace_points
 
     samples = [rec.Sample(t * 0.05, 40 + 30 * math.sin(t * 0.07) + (t * 7919 % 13) * 0.25, 0.0, 0.0, 3,
                           (t // 40) % 3 == 0, False, "") for t in range(2400)]

@@ -5,10 +5,10 @@ import sys
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
-from tinypedal.vr_overlay import MAX_PIXELS, VROverlay, compose_widgets, image_frame, overlay_transform
+from neopedal import app_signal
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
+from neopedal.vr_overlay import MAX_PIXELS, VROverlay, compose_widgets, image_frame, overlay_transform
 
 
 class FakeOverlay(QWidget):
@@ -103,7 +103,7 @@ def test_update_hides_and_skips_unchanged(monkeypatch):
 
 
 def test_mirror_window(ui_env, monkeypatch):
-    from tinypedal.vr_overlay import MIRROR_TITLE
+    from neopedal.vr_overlay import MIRROR_TITLE
 
     saved = copy_setting(cfg.user.config["vr_overlay"])
     cfg.user.config["vr_overlay"].update(enable_vr_overlay=False, enable_vr_mirror_window=True)

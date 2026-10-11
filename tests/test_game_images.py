@@ -2,7 +2,7 @@
 
 import pytest
 
-from tinypedal.process import game_images as gi
+from neopedal.process import game_images as gi
 
 
 @pytest.mark.parametrize("names, key", [

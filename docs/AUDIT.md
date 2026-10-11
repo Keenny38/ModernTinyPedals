@@ -1,8 +1,8 @@
-# Audit — TinyPedal 2.50.0 (fork modernisé)
+# Audit — NeoPedal 2.50.0 (fork modernisé)
 
 > Ce fichier garde l'historique des audits et de ce qui a été fait. Ce qui reste à faire est dans [ROADMAP.md](ROADMAP.md).
 
-Date : 27/09/2026 · Périmètre : tout le code `tinypedal/` (~60 000 lignes), `run.py`, build, CI.
+Date : 27/09/2026 · Périmètre : tout le code `neopedal/` (~60 000 lignes), `run.py`, build, CI.
 
 Méthode :
 - **ruff**, règles « bugs » (pyflakes, bugbear, pylint-erreurs, exceptions…) : 148 remarques, surtout du style.
@@ -18,12 +18,12 @@ Légende : ✅ corrigé dans ce fork · 🔴 grave · 🟠 moyen · 🟡 mineur 
 
 | # | Gravité | Problème | Correction |
 |---|---|---|---|
-| 1 | 🔴 ✅ | **L'app se fige quand on clique sur « Save ».** Si le thread de sauvegarde plante (ex. `RuntimeError: dictionary changed size during iteration`), `cfg.is_saving` reste bloqué à `True`. Huit dialogues attendent `while cfg.is_saving: sleep()` dans le thread de l'interface, et plus aucun réglage n'est sauvegardé jusqu'au redémarrage. | [setting.py](../tinypedal/setting.py) : verrou, `try/except`, erreur journalisée, état toujours remis à zéro. |
-| 2 | 🔴 ✅ | **Blocage au rechargement ou à la fermeture si un module plante.** `closed` n'était jamais remis à `True`, et `module_control` attend `while not module.closed` sans fin. | [module/_base.py](../tinypedal/module/_base.py) : `try/finally` + journalisation du crash. |
+| 1 | 🔴 ✅ | **L'app se fige quand on clique sur « Save ».** Si le thread de sauvegarde plante (ex. `RuntimeError: dictionary changed size during iteration`), `cfg.is_saving` reste bloqué à `True`. Huit dialogues attendent `while cfg.is_saving: sleep()` dans le thread de l'interface, et plus aucun réglage n'est sauvegardé jusqu'au redémarrage. | [setting.py](../neopedal/setting.py) : verrou, `try/except`, erreur journalisée, état toujours remis à zéro. |
+| 2 | 🔴 ✅ | **Blocage au rechargement ou à la fermeture si un module plante.** `closed` n'était jamais remis à `True`, et `module_control` attend `while not module.closed` sans fin. | [module/_base.py](../neopedal/module/_base.py) : `try/finally` + journalisation du crash. |
 | 3 | 🔴 ✅ | Même blocage possible avec les threads `overlay_control` et `hotkey_control` (`disable()` attend `_stopped`). | Petite fonction d'enveloppe `try/finally` dans les deux fichiers. |
 | 4 | 🟠 ✅ | **Race condition : une demande de sauvegarde pouvait être perdue** (fenêtre entre « file vide » et `is_saving = False`). | Le contrôle et le changement d'état se font maintenant sous le même verrou. |
-| 5 | 🟠 ✅ | **Fichiers de données corrompus ou perdus** : delta best, secteurs, carburant, consommation et carte étaient écrits directement dans le fichier final. Un crash, un disque plein ou un fichier verrouillé (OneDrive, antivirus) → fichier à moitié écrit, **meilleur tour réinitialisé**. L'exception tuait aussi le thread du module (delta figé). | Nouvelle fonction `atomic_write()` dans [userfile/\_\_init\_\_.py](../tinypedal/userfile/__init__.py) : fichier temporaire puis `os.replace`, erreur journalisée. |
-| 6 | 🟠 ✅ | **Marqueur de safety car mal placé** sur `track_map` : l'interpolation partait de la fin du segment au lieu du début (décalage d'un segment). Division par zéro, donc crash du dessin, si deux points de la carte ont la même distance. | `distance_interp_coordinate` dans [calculation.py](../tinypedal/calculation.py). |
+| 5 | 🟠 ✅ | **Fichiers de données corrompus ou perdus** : delta best, secteurs, carburant, consommation et carte étaient écrits directement dans le fichier final. Un crash, un disque plein ou un fichier verrouillé (OneDrive, antivirus) → fichier à moitié écrit, **meilleur tour réinitialisé**. L'exception tuait aussi le thread du module (delta figé). | Nouvelle fonction `atomic_write()` dans [userfile/\_\_init\_\_.py](../neopedal/userfile/__init__.py) : fichier temporaire puis `os.replace`, erreur journalisée. |
+| 6 | 🟠 ✅ | **Marqueur de safety car mal placé** sur `track_map` : l'interpolation partait de la fin du segment au lieu du début (décalage d'un segment). Division par zéro, donc crash du dessin, si deux points de la carte ont la même distance. | `distance_interp_coordinate` dans [calculation.py](../neopedal/calculation.py). |
 | 7 | 🟠 ✅ | `tri_coords_angle` : `acos()` recevait parfois une valeur à peine supérieure à 1 (erreur d'arrondi) → `ValueError: math domain error` dans l'éditeur de carte. | Valeur bornée à [-1, 1]. |
 | 8 | 🟡 ✅ | `scale_elevation` / `scale_map` : division par zéro sur un tracé plat ou un seul point. | Garde `or 1`. |
 | 9 | 🟡 ✅ | `DeltaLapTimeHistory.__init__` appelait `array.__init__(typecode, …)` sans `self` : l'appel ne faisait rien. | Ligne supprimée. |
@@ -47,7 +47,7 @@ Tous ces cas sont couverts par [tests/test_fixes.py](../tests/test_fixes.py) ou 
 ### 🟡 Mineurs
 6. `process/garage.py:278` : `_shared_data: dict = {}` en argument par défaut, utilisé comme cache global caché. Ça marche, mais c'est fragile (état partagé entre API, jamais vidé au changement de session). → Attribut explicite de module ou de classe.
 7. `update.py` : les dates et versions sont extraites du JSON de GitHub à coups de `bytes.find()`, ce qui est fragile. → `json.loads`.
-8. `update.py` / `const_app.py` : `REPO_NAME = "TinyPedal/TinyPedal"`. Ton fork vérifie les mises à jour du projet officiel et propose des versions qui écraseraient la modernisation. → Pointer vers ton dépôt ou désactiver.
+8. `update.py` / `const_app.py` : `REPO_NAME` pointe vers le dépôt d'origine. Ton fork vérifie les mises à jour du projet officiel et propose des versions qui écraseraient la modernisation. → Pointer vers ton dépôt ou désactiver.
 9. `ui/menu.py:340` : `subprocess.run(["xdg-open", …])` sans `check`, et l'échec n'est pas signalé à l'utilisateur.
 10. `ui/tyre_strategy_planner.py` (3×) : la variable `file_filter` est dépaquetée mais jamais utilisée. De même dans `setting.py` (ancienne boucle), `preset_view.py:184`, `tyre_strategy.py:100`, `track_clock.py:148` (variables de boucle inutilisées).
 11. `widget/steering_wheel.py:139`, `relative_finish_order.py:280` : chaînes `a and b or c` sans parenthèses. Le comportement est correct, mais la lecture est piégeuse.
@@ -127,7 +127,7 @@ redémarrage, gestion des presets), et des 505 erreurs mypy masquées (catégori
 ### 🔴 / 🟠 Prioritaires
 1. 🔴 **Contrôle à distance : attaque « DNS rebinding » possible** (confirmé par le code). Le serveur
    ne vérifie pas l'en-tête `Host`. Une page web malveillante qui fait pointer son domaine vers
-   127.0.0.1 devient « même origine » et peut alors envoyer l'en-tête `X-TinyPedal`, donc déclencher
+   127.0.0.1 devient « même origine » et peut alors envoyer l'en-tête `X-NeoPedal`, donc déclencher
    des commandes. Correctif : refuser toute requête dont `Host` n'est pas `127.0.0.1:<port>` ou
    `localhost:<port>`. Ne concerne que ceux qui ont activé le contrôle à distance.
 2. 🟠 **Renommer un preset casse le « preset principal » des pistes et des classes** (confirmé).
@@ -270,7 +270,7 @@ Réalisé (27/09/2026) : D1, D2, D4 à D12 dans le widget « Black box » (D3 no
 
 ## E. Audit du widget « Black box » (28/09/2026)
 
-Audit dédié du fichier `tinypedal/widget/black_box.py` (640 lignes exécutables, 114 options, 98 % de couverture de tests après corrections ; 2ᵉ widget le plus lourd sur 77 au benchmark).
+Audit dédié du fichier `neopedal/widget/black_box.py` (640 lignes exécutables, 114 options, 98 % de couverture de tests après corrections ; 2ᵉ widget le plus lourd sur 77 au benchmark).
 
 ### 🔴 Bugs corrigés
 1. ✅ La dernière LED de régime ne s'allumait jamais (son seuil était égal à `redline`, où la branche « surrégime » prend le dessus). Formule corrigée : `start + led / count * (redline - start)`.
@@ -309,11 +309,11 @@ Réalisé (28/09/2026) : E1 à E11, E13 à E16. Non traités : E12 (D3, non dema
 
 ## F. Audit du style / interface de l'application (28/09/2026)
 
-Contexte : l'app a deux couches de style bien distinctes. Les **widgets overlay** (ce qui s'affiche en jeu) ont déjà un vrai système de design moderne — thème « Modern Dark » par défaut, police JetBrains Mono, coins arrondis configurables, palettes Daltonien/Contraste élevé (`tinypedal/widget/_style.py`). Cet audit porte sur l'autre couche : **l'interface de configuration** (fenêtre principale, dialogues, menus — `tinypedal/ui/`), moins homogène. Vérifié par lecture de code (grep systématique des sélecteurs Qt) et par rendu réel de captures d'écran (fenêtre principale, dialogue de config, gestionnaire de plugins, menu, boîte de message), en thèmes clair et sombre.
+Contexte : l'app a deux couches de style bien distinctes. Les **widgets overlay** (ce qui s'affiche en jeu) ont déjà un vrai système de design moderne — thème « Modern Dark » par défaut, police JetBrains Mono, coins arrondis configurables, palettes Daltonien/Contraste élevé (`neopedal/widget/_style.py`). Cet audit porte sur l'autre couche : **l'interface de configuration** (fenêtre principale, dialogues, menus — `neopedal/ui/`), moins homogène. Vérifié par lecture de code (grep systématique des sélecteurs Qt) et par rendu réel de captures d'écran (fenêtre principale, dialogue de config, gestionnaire de plugins, menu, boîte de message), en thèmes clair et sombre.
 
 ### 🔴 Corrigé
 1. ✅ **Le style ne s'appliquait qu'à la fenêtre principale, pas à l'application.** `AppWindow.setStyleSheet(...)` au lieu de `QApplication.setStyleSheet(...)` : en Qt, une feuille de style posée sur un widget ne descend qu'à ses enfants *visuels* directs, pas aux fenêtres de haut niveau construites séparément (`QMessageBox`, `QColorDialog`…) même si elles sont « parentées » à la fenêtre stylée pour leur cycle de vie. Vérifié par capture d'écran : tous les `QMessageBox.warning/question/critical` (**108 appels dans 25 fichiers**) s'affichaient avec des boutons « Oui/Non » à coins carrés et chrome natif de l'OS, détonnant avec le reste de l'app (boutons arrondis partout ailleurs). Déplacé au niveau `QApplication`, vérifié en clair et en sombre après correctif — cohérent partout, y compris pour toute boîte de dialogue future.
-2. ✅ **Cases à cocher, boutons radio, listes déroulantes et curseurs non stylés.** Aucun sélecteur `QCheckBox`, `QComboBox`, `QRadioButton` ou `QSlider` dans la feuille de style (`tinypedal/ui/__init__.py`), seuls `QLineEdit`/`QPushButton`/`QTabBar` etc. l'étaient. Ces contrôles apparaissaient donc avec le rendu Fusion générique (petites cases natives) au milieu d'un habillage par ailleurs entièrement personnalisé. Ajout de règles cohérentes avec la palette existante : case à cocher/radio en carré/rond plein (couleur d'accent) au lieu de coche, liste déroulante avec bordure et arrondi assortis (la flèche Fusion native est conservée — une tentative de flèche personnalisée en CSS pur rendait mal, testé et écarté), curseur avec piste et poignée aux couleurs du thème.
+2. ✅ **Cases à cocher, boutons radio, listes déroulantes et curseurs non stylés.** Aucun sélecteur `QCheckBox`, `QComboBox`, `QRadioButton` ou `QSlider` dans la feuille de style (`neopedal/ui/__init__.py`), seuls `QLineEdit`/`QPushButton`/`QTabBar` etc. l'étaient. Ces contrôles apparaissaient donc avec le rendu Fusion générique (petites cases natives) au milieu d'un habillage par ailleurs entièrement personnalisé. Ajout de règles cohérentes avec la palette existante : case à cocher/radio en carré/rond plein (couleur d'accent) au lieu de coche, liste déroulante avec bordure et arrondi assortis (la flèche Fusion native est conservée — une tentative de flèche personnalisée en CSS pur rendait mal, testé et écarté), curseur avec piste et poignée aux couleurs du thème.
 
 ### 🟡 Mineur (non corrigé, signalé)
 3. Couleurs codées en dur hors du système de palette : `#638` (bouton de notification de mise à jour), `#2A6EC2` et `#777` (étiquettes de preset dans `preset_view.py`). Contraste correct dans les deux thèmes actuellement (texte blanc dessus), donc pas de bug visuel constaté, mais ces couleurs n'évolueraient pas si la palette change plus tard.

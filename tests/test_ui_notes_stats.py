@@ -7,9 +7,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseEditor
 from tests.test_driver_stats_viewer import settle
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseEditor
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def close(editor):
 # --- Track notes editor
 @pytest.fixture
 def notes_editor(dialogs, monkeypatch):
-    from tinypedal.ui import track_notes_editor
+    from neopedal.ui import track_notes_editor
 
     monkeypatch.setattr(track_notes_editor, "show_toast", lambda *args, **kwargs: None)
     editor = track_notes_editor.TrackNotesEditor(None)
@@ -46,8 +46,8 @@ def notes_column(editor, column: int) -> list[str]:
 
 
 def test_notes_edit_sort_tag_and_save(notes_editor, tmp_path, monkeypatch):
-    from tinypedal.ui import track_notes_editor
-    from tinypedal.userfile.track_notes import HEADER_PACE_NOTES, load_notes_file
+    from neopedal.ui import track_notes_editor
+    from neopedal.userfile.track_notes import HEADER_PACE_NOTES, load_notes_file
 
     notes_editor.create_pacenotes()
     table = notes_editor.table_notes
@@ -64,7 +64,7 @@ def test_notes_edit_sort_tag_and_save(notes_editor, tmp_path, monkeypatch):
     assert table.item(1, 3).text() == "#pit"
     target = tmp_path / "Spa.tppn"
     monkeypatch.setattr(track_notes_editor.QFileDialog, "getSaveFileName",
-                        lambda *args, **kwargs: (str(target), "TinyPedal Pace Notes (*.tppn)"))
+                        lambda *args, **kwargs: (str(target), "NeoPedal Pace Notes (*.tppn)"))
     notes_editor.saving()  # sorted by distance before saving
     assert notes_column(notes_editor, 1) == ["L2", "R3"]
     notes, _ = load_notes_file(f"{tmp_path.as_posix()}/", "Spa.tppn", HEADER_PACE_NOTES)
@@ -74,14 +74,14 @@ def test_notes_edit_sort_tag_and_save(notes_editor, tmp_path, monkeypatch):
 
 
 def test_notes_load_offset_and_undo(notes_editor, tmp_path, monkeypatch):
-    from tinypedal.ui import track_notes_editor
-    from tinypedal.userfile.track_notes import HEADER_TRACK_NOTES, create_notes_metadata, save_notes_file
+    from neopedal.ui import track_notes_editor
+    from neopedal.userfile.track_notes import HEADER_TRACK_NOTES, create_notes_metadata, save_notes_file
 
     notes = [{"distance": 100.0, "track note": "Eau Rouge", "comment": "", "tags": ""},
              {"distance": 900.0, "track note": "Kemmel", "comment": "flat", "tags": ""}]
     save_notes_file(f"{tmp_path.as_posix()}/", "Spa.tptn", HEADER_TRACK_NOTES, notes, create_notes_metadata())
     monkeypatch.setattr(track_notes_editor.QFileDialog, "getOpenFileName",
-                        lambda *args, **kwargs: (str(tmp_path / "Spa.tptn"), "TinyPedal Track Notes (*.tptn)"))
+                        lambda *args, **kwargs: (str(tmp_path / "Spa.tptn"), "NeoPedal Track Notes (*.tptn)"))
     notes_editor.load_tracknotes_file()
     assert notes_column(notes_editor, 1) == ["Eau Rouge", "Kemmel"]
     table = notes_editor.table_notes
@@ -95,7 +95,7 @@ def test_notes_load_offset_and_undo(notes_editor, tmp_path, monkeypatch):
 
 
 def test_notes_set_position_from_telemetry(notes_editor, dialogs):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     notes_editor.create_tracknotes()
     table = notes_editor.table_notes
@@ -151,9 +151,9 @@ def stats_file(ui_env):
 
 @pytest.fixture
 def stats_viewer(dialogs, stats_file, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.ui._common import BaseDialog
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
+    from neopedal.api_control import api
+    from neopedal.ui._common import BaseDialog
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
 
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
     api.read.session.track_name = lambda: "Spa"
@@ -178,7 +178,7 @@ def test_stats_viewer_shows_current_track(stats_viewer):
 
 
 def test_stats_viewer_display_units(stats_viewer, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     monkeypatch.setitem(cfg.units, "odometer_unit", "Kilometer")
     monkeypatch.setitem(cfg.units, "fuel_unit", "Gallon")

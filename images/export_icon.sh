@@ -1,5 +1,5 @@
 #!/bin/bash
-echo -e "Export TinyPedal icon, require ImageMagick v7.0+\n"
+echo -e "Export NeoPedal icon, require ImageMagick v7.0+\n"
 
 # Export app icons as ICO & PNG (raster source): icon (light theme), icon_dark (dark theme)
 SIZE_ICO="16,24,32,48,64,128,256"

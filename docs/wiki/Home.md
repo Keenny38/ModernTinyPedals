@@ -1,6 +1,6 @@
 # NeoPedal
 
-NeoPedal is a free, open-source telemetry overlay and analysis app for **Le Mans Ultimate** (LMU) and **rFactor 2**, on Windows and Linux. It is a modernized fork of [TinyPedal](https://github.com/TinyPedal/TinyPedal): the same data engine, with a new overlay design, a reworked interface, new tools and a lot of reliability work.
+NeoPedal is a free, open-source telemetry overlay and analysis app for **Le Mans Ultimate** (LMU) and **rFactor 2**, on Windows and Linux. Modern overlay design, a clear interface, many tools and a lot of reliability work.
 
 The app is built with PySide6 (Qt 6) and runs in English or French.
 
@@ -50,10 +50,9 @@ Every option of every overlay, module and tool is described in the [settings ref
 - [Roadmap](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/ROADMAP.md)
 - [Contributing](https://github.com/Keenny38/ModernTinyPedals/blob/master/CONTRIBUTING.md)
 - [Security policy](https://github.com/Keenny38/ModernTinyPedals/blob/master/SECURITY.md): report vulnerabilities privately, never in a public issue
-- [Upstream TinyPedal](https://github.com/TinyPedal/TinyPedal)
 
 ## License and credits
 
-NeoPedal is a modified version of TinyPedal, Copyright (C) 2022-2026 TinyPedal developers (see [contributors](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/contributors.md) and [NOTICE.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/NOTICE.md)).
+Copyright (C) 2022-2026 TinyPedal developers (see [contributors](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/contributors.md) and [NOTICE.md](https://github.com/Keenny38/ModernTinyPedals/blob/master/NOTICE.md)).
 
 It is free software under the [GNU GPL v3](https://github.com/Keenny38/ModernTinyPedals/blob/master/LICENSE.txt) or any later version, distributed WITHOUT ANY WARRANTY. The icon and images of the `images` folder are under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), the [Barlow](https://github.com/jpt/barlow) font under the SIL Open Font License 1.1. Third-party licenses are listed in [docs/licenses](https://github.com/Keenny38/ModernTinyPedals/blob/master/docs/licenses/THIRDPARTYNOTICES.txt).

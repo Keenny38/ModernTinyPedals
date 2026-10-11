@@ -10,14 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.telemetry_sim import LapSim, fake_reader
-from tests.test_delta_session import STEP, TRACK, Driver, Game, lap_rows
-from tinypedal import realtime_state, validator
-from tinypedal.api_control import api
-from tinypedal.const_common import DELTA_DEFAULT, MAX_SECONDS
-from tinypedal.module import _base, module_fuel, module_sectors, module_stats, module_stint
-from tinypedal.module._base import MODULE_STOP, PENDING_CHECK, PENDING_WAIT, PendingLap
-from tinypedal.module_info import (
+from neopedal import realtime_state, validator
+from neopedal.api_control import api
+from neopedal.const_common import DELTA_DEFAULT, MAX_SECONDS
+from neopedal.module import _base, module_fuel, module_sectors, module_stats, module_stint
+from neopedal.module._base import MODULE_STOP, PENDING_CHECK, PENDING_WAIT, PendingLap
+from neopedal.module_info import (
     ConsumptionDataSet,
     DeltaInfo,
     FuelInfo,
@@ -27,20 +25,22 @@ from tinypedal.module_info import (
     VehiclesInfo,
     minfo,
 )
-from tinypedal.userfile import consumption_history, delta_best, driver_stats, sector_best
-from tinypedal.userfile.consumption_history import (
+from neopedal.userfile import consumption_history, delta_best, driver_stats, sector_best
+from neopedal.userfile.consumption_history import (
     load_consumption_history_file,
     read_consumption_history_file,
     save_consumption_history_file,
 )
-from tinypedal.userfile.delta_best import (
+from neopedal.userfile.delta_best import (
     load_delta_best_file,
     read_delta_best_file,
     read_delta_session_file,
     save_delta_best_file,
 )
-from tinypedal.userfile.fuel_delta import load_fuel_delta_file
-from tinypedal.userfile.sector_best import read_sector_best_file, save_sector_best_file
+from neopedal.userfile.fuel_delta import load_fuel_delta_file
+from neopedal.userfile.sector_best import read_sector_best_file, save_sector_best_file
+from tests.telemetry_sim import LapSim, fake_reader
+from tests.test_delta_session import STEP, TRACK, Driver, Game, lap_rows
 
 
 @pytest.fixture

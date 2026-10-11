@@ -6,12 +6,12 @@ import re
 
 import pytest
 
-from tinypedal import web_dashboard
-from tinypedal.api_control import api
-from tinypedal.i18n import set_language
-from tinypedal.module_info import FuelInfo, minfo
-from tinypedal.setting import cfg
-from tinypedal.web_dashboard import dashboard_html, login_html, telemetry_snapshot
+from neopedal import web_dashboard
+from neopedal.api_control import api
+from neopedal.i18n import set_language
+from neopedal.module_info import FuelInfo, minfo
+from neopedal.setting import cfg
+from neopedal.web_dashboard import dashboard_html, login_html, telemetry_snapshot
 
 
 @pytest.fixture

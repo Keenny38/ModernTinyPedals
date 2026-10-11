@@ -7,6 +7,10 @@ from datetime import date, datetime, timedelta
 import pytest
 from PySide6.QtCore import QCoreApplication, qInstallMessageHandler
 
+from neopedal.setting import cfg
+from neopedal.ui.quick import stats_backend
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord
 from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
     HISTORY,
     OREGA,
@@ -19,10 +23,6 @@ from tests.test_driver_stats_viewer import (  # noqa: F401  (fixtures)
     settle,
     window,
 )
-from tinypedal.setting import cfg
-from tinypedal.ui.quick import stats_backend
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord
 
 
 def test_level_scale_marks(backend):  # noqa: F811
@@ -45,7 +45,7 @@ def test_level_scale_marks(backend):  # noqa: F811
 
 
 def test_level_scale_unknown_ladder():
-    from tinypedal.userfile.lap_reference import LapReference
+    from neopedal.userfile.lap_reference import LapReference
 
     viewer = stats_backend.DriverStatsBackend.__new__(stats_backend.DriverStatsBackend)
     reference = LapReference("Spa", "LMH", "", 100.0, (100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), "", 0.0)

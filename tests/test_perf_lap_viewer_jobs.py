@@ -26,9 +26,9 @@ def show_all(page):
 
 # --- Charts: single flight, stale build stopped, changes kept together
 def test_charts_single_flight_and_stale_build_stopped(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_viewer
-    from tinypedal.ui.lap_viewer import SMOOTHING_LEVELS
-    from tinypedal.userfile import lap_geometry
+    from neopedal.ui import lap_viewer
+    from neopedal.ui.lap_viewer import SMOOTHING_LEVELS
+    from neopedal.userfile import lap_geometry
 
     page = backend
     show_all(page)
@@ -61,7 +61,7 @@ def test_charts_single_flight_and_stale_build_stopped(backend, monkeypatch):  # 
 
 
 def test_yielder_cancels():
-    from tinypedal.userfile.lap_geometry import JobCancelled, Yielder
+    from neopedal.userfile.lap_geometry import JobCancelled, Yielder
 
     pause = Yielder(0.0, cancelled=lambda: True)
     with pytest.raises(JobCancelled):
@@ -70,7 +70,7 @@ def test_yielder_cancels():
 
 
 def test_time_axis_toggles_switch_once(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     page = backend
     show_all(page)
@@ -86,7 +86,7 @@ def test_time_axis_toggles_switch_once(backend, monkeypatch):  # noqa: F811
 
 
 def test_adopt_keeps_live_sector_lines(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     data = TraceData()
     snapshot = data.snapshot()
@@ -97,7 +97,7 @@ def test_adopt_keeps_live_sector_lines(ui_env):
 
 
 def test_rejected_snapshot_built_again_in_background(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_viewer
+    from neopedal.ui import lap_viewer
 
     page = backend
     show_all(page)
@@ -118,8 +118,8 @@ def test_rejected_snapshot_built_again_in_background(backend, monkeypatch):  # n
 
 # --- Simple view series built with charts once it was opened
 def test_simple_view_series_warmed_in_background(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import lap_viewer
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui import lap_viewer
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     page = backend
     show_all(page)
@@ -137,7 +137,7 @@ def test_simple_view_series_warmed_in_background(backend, monkeypatch):  # noqa:
 
 # --- Lap infos index parsed once while its file stays the same
 def test_info_index_parsed_once(backend, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import lap_cache
+    from neopedal.userfile import lap_cache
 
     page = backend
     path = page.info_index_path(TRACK)
@@ -164,7 +164,7 @@ def test_index_save_always_scheduled(backend):  # noqa: F811
 
 # --- Track limits cache read in a job, saved whole
 def test_limits_cache_read_in_job(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     page = backend
     page.wait_jobs()
@@ -186,8 +186,8 @@ def test_limits_cache_read_in_job(backend, monkeypatch):  # noqa: F811
 
 # --- Undo restores marks with one write per folder
 def test_undo_restores_marks_once_per_folder(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
-    from tinypedal.userfile import lap_marks
+    from neopedal.ui.quick import lap_backend
+    from neopedal.userfile import lap_marks
 
     page = backend
     paths = [entry.file.path for entry in page.entries[:2]]
@@ -206,7 +206,7 @@ def test_undo_restores_marks_once_per_folder(backend, monkeypatch):  # noqa: F81
 
 # --- Map: scale steps from frozen frame, caches bounded, mapBounds, hover in one call
 def test_map_steps_frozen_and_caches_bounded(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_map_view
+    from neopedal.ui.quick import lap_map_view
 
     page = backend
     show_all(page)
@@ -227,7 +227,7 @@ def test_map_steps_frozen_and_caches_bounded(backend, monkeypatch):  # noqa: F81
 
 
 def test_stale_map_step_stopped(backend, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import lap_geometry
+    from neopedal.userfile import lap_geometry
 
     page = backend
     show_all(page)
@@ -251,7 +251,7 @@ def test_stale_map_step_stopped(backend, monkeypatch):  # noqa: F811
 
 
 def test_part_bounds_same_as_part():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     count = 1000
     line = lap_map.MapLine([float(index) for index in range(count)], [(index * 37 % 101) - 50.0 for index in range(count)],
@@ -300,7 +300,7 @@ def test_session_state_built_once(backend, monkeypatch):  # noqa: F811
 
 
 def test_pictures_update_logos_in_place(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     page = backend
     rows = list(page.lap_model.rows)

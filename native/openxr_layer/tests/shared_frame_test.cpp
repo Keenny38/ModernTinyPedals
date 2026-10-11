@@ -1,6 +1,6 @@
 /*
  * Unit tests of the shared memory reader & pixel helpers (platform neutral, no OpenXR needed).
- * Writer below follows tinypedal/vr_shared.py (same layout, same seqlock order).
+ * Writer below follows neopedal/vr_shared.py (same layout, same seqlock order).
  */
 
 #include <cmath>

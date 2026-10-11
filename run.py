@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-#  TinyPedal is an open-source overlay application for racing simulation.
+#  NeoPedal is an open-source overlay application for racing simulation.
 #  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
 #
-#  This file is part of TinyPedal.
+#  This file is part of NeoPedal.
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -95,11 +95,11 @@ if __name__ == "__main__":
     cli_args = get_cli_argument()
 
     if cli_args.self_test is not None:
-        from tinypedal.self_test import run_self_test
+        from neopedal.self_test import run_self_test
 
         sys.exit(run_self_test(cli_args.self_test))
 
     # Start
-    from tinypedal.main import start_app
+    from neopedal.main import start_app
 
     start_app(cli_args)

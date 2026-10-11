@@ -5,8 +5,8 @@ from importlib import import_module
 import pytest
 from PySide6.QtCore import QTimerEvent
 
-from tinypedal import calculation as calc
-from tinypedal.const_common import MAX_SECONDS
+from neopedal import calculation as calc
+from neopedal.const_common import MAX_SECONDS
 
 
 def lap(speed_of):
@@ -41,7 +41,7 @@ def test_speed_delta_positive_when_faster():
 @pytest.fixture
 def delta_data(ui_env, monkeypatch):
     """Delta module output: reference laps recorded, current lap comparable, speed differences (m/s)"""
-    from tinypedal.module_info import minfo
+    from neopedal.module_info import minfo
 
     delta = minfo.delta
     values = {
@@ -55,17 +55,17 @@ def delta_data(ui_env, monkeypatch):
 
 
 def make(name: str, modern: bool, **options):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import create_widget
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     cfg.units["speed_unit"] = "KPH"
     cfg.user.setting[name].update(options)
-    return create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    return create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
 
 
 def test_modern_speed_delta_colors_and_dash(delta_data, bundled_fonts, monkeypatch):
-    from tinypedal.widget._modern.base import DASH
+    from neopedal.widget._modern.base import DASH
 
     widget = make("speed_delta", True)
     try:
@@ -126,9 +126,9 @@ def test_speed_delta_smoothing_option(delta_data, bundled_fonts, monkeypatch, mo
 
 
 def test_overlay_listed_with_both_designs():
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
-    from tinypedal.template.widget import WIDGET_DISPLAY_ORDER
-    from tinypedal.template.widget.modern import MODERN_DESIGNS
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.widget import WIDGET_DISPLAY_ORDER
+    from neopedal.template.widget.modern import MODERN_DESIGNS
 
     assert "speed_delta" in WIDGET_DISPLAY_ORDER and "speed_delta" in MODERN_DESIGNS
     assert WIDGET_DEFAULT["speed_delta"]["enable"] is False

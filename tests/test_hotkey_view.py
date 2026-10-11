@@ -6,15 +6,15 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QTimerEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal.const_app import PLATFORM
-from tinypedal.setting import cfg
-from tinypedal.template.setting_shortcuts import SHORTCUTS_PRESET
+from neopedal.const_app import PLATFORM
+from neopedal.setting import cfg
+from neopedal.template.setting_shortcuts import SHORTCUTS_PRESET
 
 
 @pytest.fixture
 def page(ui_env, monkeypatch):
     """Key bindings page, hotkey control & config saving recorded"""
-    from tinypedal.ui import hotkey_view
+    from neopedal.ui import hotkey_view
 
     calls = []
     for action in ("reload", "enable", "disable"):
@@ -27,7 +27,7 @@ def page(ui_env, monkeypatch):
 
 
 def items(widget):
-    from tinypedal.ui.hotkey_view import HotkeyConfigItem
+    from neopedal.ui.hotkey_view import HotkeyConfigItem
 
     found = {}
     for row in range(widget.listbox_hotkey.count()):
@@ -77,7 +77,7 @@ def test_clear_all(page, monkeypatch):
 @pytest.fixture
 def binding(page, monkeypatch):
     """Key binding input of first preset shortcut, pressed keys scripted"""
-    from tinypedal.ui import hotkey_view
+    from neopedal.ui import hotkey_view
 
     keys = []
     monkeypatch.setattr(hotkey_view, "set_hotkey_win", lambda get_state: tuple(keys))
@@ -126,7 +126,7 @@ def test_hidden_input_ignores_keys(binding):
 
 
 def test_not_supported_text_on_linux(page, monkeypatch):
-    from tinypedal.ui import hotkey_view
+    from neopedal.ui import hotkey_view
 
     monkeypatch.setattr(hotkey_view.PLATFORM, "WINDOWS", False)
     dialog = hotkey_view.ConfigHotkey(None, option_name="overlay_lock", hotkey_name="", reload_func=lambda: None)

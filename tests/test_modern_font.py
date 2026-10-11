@@ -7,9 +7,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QFontMetricsF
 
+from neopedal.setting import cfg
+from neopedal.widget._modern.base import design_font_family, is_value_text
 from tests.test_settings_page import Host, flush
-from tinypedal.setting import cfg
-from tinypedal.widget._modern.base import design_font_family, is_value_text
 
 MONO = "JetBrains Mono"
 DESIGN = "Barlow Semi Condensed"
@@ -20,7 +20,7 @@ def make(ui_env, bundled_fonts):
     """Build modern design widget with overlay style & widget options, deleted after test"""
     from importlib import import_module
 
-    from tinypedal.widget._modern import create_widget
+    from neopedal.widget._modern import create_widget
 
     cfg.overlay["fixed_position"] = True
     created = []
@@ -28,7 +28,7 @@ def make(ui_env, bundled_fonts):
     def build(name: str, style: dict | None = None, **options):
         cfg.user.config["overlay_style"].update({"overlay_theme": "Modern Dark", **(style or {})})
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -138,7 +138,7 @@ def test_restyled_widget_font(make):
 
 
 def test_font_option_shown_when_modern_font_off(ui_env):
-    from tinypedal.widget._modern import design_option_keys
+    from neopedal.widget._modern import design_option_keys
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark"
     keys = list(cfg.user.setting["relative"])
@@ -151,8 +151,8 @@ def test_font_option_shown_when_modern_font_off(ui_env):
 def test_restyled_font_weight_kept_when_modern_font_off(make):
     """Restyled widgets, modern font off: widget font weight option applied & shown
     (was: forced to design weight, option hidden)"""
-    from tinypedal.widget._modern import design_option_keys
-    from tinypedal.widget._modern.restyle import DESIGN_WEIGHT
+    from neopedal.widget._modern import design_option_keys
+    from neopedal.widget._modern.restyle import DESIGN_WEIGHT
 
     for name in ("black_box", "pace_notes"):
         cfg.user.setting[name]["font_weight"] = "Bold"
@@ -171,15 +171,15 @@ def test_restyled_font_weight_kept_when_modern_font_off(make):
 def test_classic_layout_unchanged(make):
     """Classic layout widgets: modern font name on every font option left at default"""
     on = make("relative", {"enable_modern_font": True, "modern_font_name": MONO}, enable_classic_layout=True)
-    assert type(on).__module__ == "tinypedal.widget.relative" and on.wcfg["font_name"] == MONO
+    assert type(on).__module__ == "neopedal.widget.relative" and on.wcfg["font_name"] == MONO
     off = make("relative", {"enable_modern_font": False}, enable_classic_layout=True)
     assert off.wcfg["font_name"] == cfg.default.setting["relative"]["font_name"]
 
 
 def test_font_options_applied_to_running_overlays(ui_env, bundled_fonts):
     """Overlay Style font options saved with Apply: overlays restarted (as at reload) in new fonts"""
-    from tinypedal.module_control import wctrl
-    from tinypedal.ui.quick.settings_backend import SettingsBackend
+    from neopedal.module_control import wctrl
+    from neopedal.ui.quick.settings_backend import SettingsBackend
 
     host = Host()
     settings = SettingsBackend(None, host)

@@ -24,9 +24,9 @@ pylintrc
 # local config file
 *.json
 !/plugins/*/setting.json
-!/tinypedal/i18n/data/*.json
+!/neopedal/i18n/data/*.json
 !/tools/readme_preview_track.json
-!/native/openxr_layer/TinyPedalXrLayer.json
+!/native/openxr_layer/NeoPedalXrLayer.json
 *.csv
 *.fuel
 

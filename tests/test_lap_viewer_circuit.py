@@ -6,9 +6,9 @@ import os
 
 import pytest
 
+from neopedal.module import module_recorder
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_fix_list import BASE, page, sessions  # noqa: F401
-from tinypedal.module import module_recorder
 
 
 def other_lap(folder: str, track: str = "Monza", length: float = 490.0, info: bool = True) -> str:
@@ -30,7 +30,7 @@ def listed(backend) -> set[str]:
 
 
 def test_circuit_name():
-    from tinypedal.ui.quick.lap_backend import circuit_name
+    from neopedal.ui.quick.lap_backend import circuit_name
 
     path = os.path.join("x", "Monza - Hyper", "lap.csv")
     assert circuit_name({"combo": "Spa - GT3", "track": "Spa"}, path) == "Spa"  # recorded: game track name
@@ -78,7 +78,7 @@ def test_older_lap_of_other_circuit_shown_alone(page, tmp_path):  # noqa: F811
 def test_lap_of_other_track_folder_shows_that_track(page):  # noqa: F811
     """Lap of another track folder of the app opened: that track shown (its laps listed to compare, picker on it),
     opened lap alone shown, refresh keeps it"""
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.telemetry.rstrip("/")
     other = other_lap(folder)
@@ -144,10 +144,10 @@ def test_lap_of_same_circuit_added(page, tmp_path):  # noqa: F811
 def test_compared_laps_line_up_on_distance(ui_env):
     """Corner of compared lap at the same axis position as on reference lap: other lap time & sampling, imported log
     on driven distance (scaled to reference lap length), on time axis delta & laps at their own lap time"""
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, LAP_COLORS, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.telemetry_lap import LapData
     from tests.test_lap_viewer_audit import game_lap
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, LAP_COLORS, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.telemetry_lap import LapData
 
     def with_corner(lap: LapData, length: float = 1000.0) -> LapData:
         speeds = [60.0 if abs(distance / length * 1000.0 - 400.0) < 20 else 200.0 for distance in lap.distance]
@@ -184,8 +184,8 @@ def test_overlay_reference_wraps_at_lap_length(tmp_path):
     distance past the line (lap length not a multiple of chosen step: no shift after the line)"""
     import json
 
-    from tinypedal.userfile.reference_trace import load_trace
-    from tinypedal.userfile.telemetry_lap import lap_files
+    from neopedal.userfile.reference_trace import load_trace
+    from neopedal.userfile.telemetry_lap import lap_files
 
     length = 1001.3
     folder = tmp_path / "Track - Class"

@@ -18,7 +18,7 @@ Include:
 
 The project is made in spare time: expect an answer within 7 days in general. A confirmed vulnerability is fixed in a new version, then described in a security advisory (`Security > Advisories`), with your name if you wish.
 
-In scope: the app and its overlays, the web dashboard and the command server, the automatic update, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain. A vulnerability that also exists in the original [TinyPedal](https://github.com/TinyPedal/TinyPedal) can be reported to both projects.
+In scope: the app and its overlays, the web dashboard and the command server, the automatic update, file imports (presets, laps, MoTeC), plugins, the Windows installer and the release build chain.
 
 ## Verifying a download
 

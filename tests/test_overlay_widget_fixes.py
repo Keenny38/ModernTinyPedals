@@ -11,12 +11,12 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
-from tinypedal import i18n
-from tinypedal.api_control import api
-from tinypedal.module_info import ConsumptionDataSet, minfo
-from tinypedal.setting import cfg
-from tinypedal.widget._modern import create_widget
-from tinypedal.widget._modern.base import DASH
+from neopedal import i18n
+from neopedal.api_control import api
+from neopedal.module_info import ConsumptionDataSet, minfo
+from neopedal.setting import cfg
+from neopedal.widget._modern import create_widget
+from neopedal.widget._modern.base import DASH
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def widgets(ui_env, bundled_fonts):
     def make(name: str, modern: bool = True, **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -48,7 +48,7 @@ def stat_value(widget, key: str):
 
 # --- Race plan: stop of the lap just completed still shown in the pits
 def test_race_plan_shows_current_stop_while_in_pits(widgets, monkeypatch):
-    from tinypedal.fuel_strategy import PitStop, Strategy
+    from neopedal.fuel_strategy import PitStop, Strategy
 
     widget = widgets("race_plan", show_next_stop=True, show_refuel=True)
     monkeypatch.setattr(widget, "refresh_plan", lambda: None)
@@ -109,9 +109,9 @@ def test_overlay_scale_scales_whole_widget(widgets, name, modern):
 
 
 def test_resize_handle_scales_radar_and_keeps_character_widths():
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
-    from tinypedal.widget._edit_frame import scale_widget_setting
-    from tinypedal.widget._style import scale_overrides
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.widget._edit_frame import scale_widget_setting
+    from neopedal.widget._style import scale_overrides
 
     radar = dict(WIDGET_DEFAULT["radar"])
     assert scale_widget_setting(radar, 1.5, "radar") == {"global_scale": 9}
@@ -125,7 +125,7 @@ def test_resize_handle_scales_radar_and_keeps_character_widths():
 
 # --- Track clock: midday & midnight phases named as such
 def test_track_clock_names_every_sunlight_phase(widgets, monkeypatch):
-    from tinypedal.module.module_mapping import set_sunlight_phase
+    from neopedal.module.module_mapping import set_sunlight_phase
 
     widget = widgets("track_clock", show_sunlight_phase_countdown=True)
     monkeypatch.setattr(minfo.mapping, "sunlightPhases", set_sunlight_phase("06:00", "18:00"))
@@ -274,8 +274,8 @@ def test_classic_drs_starts_not_available(widgets):
 
 # --- Options modern design reads are shown & stored
 def test_modern_driver_list_options_shown():
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
-    from tinypedal.widget._modern import modern_module
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.widget._modern import modern_module
 
     assert "show_vehicle_in_garage" in modern_module("relative").Realtime.options
     for name, keys in (
@@ -288,7 +288,7 @@ def test_modern_driver_list_options_shown():
 
 
 def test_restyled_options_keep_switches_named_color():
-    from tinypedal.widget._modern.restyle import restyled_options
+    from neopedal.widget._modern.restyle import restyled_options
 
     options = restyled_options("track_map", {"background_color_map": "surface_alt"})
     assert "show_custom_player_color_in_multi_class" in options
@@ -299,8 +299,8 @@ def test_restyled_options_keep_switches_named_color():
 
 
 def test_unused_stop_go_penalty_option_dropped_from_presets():
-    from tinypedal.setting_validator import PresetValidator
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.setting_validator import PresetValidator
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
 
     default = WIDGET_DEFAULT["pit_stop_estimate"]
     assert "stop_go_penalty_time" not in default
@@ -364,9 +364,9 @@ def test_modern_gear_battery_bar_only_with_motor(widgets, monkeypatch):
 
 # --- Overlay labels translated
 def test_overlay_labels_translated():
-    from tinypedal.widget._modern.drivers import pit_time_text
-    from tinypedal.widget._modern.rows import pit_cell
-    from tinypedal.widget._modern.theme import build_theme
+    from neopedal.widget._modern.drivers import pit_time_text
+    from neopedal.widget._modern.rows import pit_cell
+    from neopedal.widget._modern.theme import build_theme
 
     theme = build_theme(cfg.default.config["overlay_style"])
     i18n.set_language("Français")
@@ -381,7 +381,7 @@ def test_overlay_labels_translated():
 
 # --- Caches: text layouts least recently used, shared colors
 def test_text_cache_keeps_recently_drawn(widgets, monkeypatch):
-    from tinypedal.widget._modern import base
+    from neopedal.widget._modern import base
 
     widget = widgets("session")
     widget._text_cache.clear()
@@ -393,8 +393,8 @@ def test_text_cache_keeps_recently_drawn(widgets, monkeypatch):
 
 
 def test_shared_colors_cached():
-    from tinypedal.widget._modern.draw import fraction, readable_on
-    from tinypedal.widget._modern.theme import build_theme
+    from neopedal.widget._modern.draw import fraction, readable_on
+    from neopedal.widget._modern.theme import build_theme
 
     theme = build_theme(cfg.default.config["overlay_style"])
     assert readable_on(QColor("#FFFFFF")) is readable_on(QColor("#FFFFFF"))
@@ -416,7 +416,7 @@ def test_sub_pixel_change_does_not_repaint(widgets, monkeypatch):
 
 
 def test_app_memory_read_every_few_seconds(monkeypatch):
-    from tinypedal.widget import system_performance
+    from neopedal.widget import system_performance
 
     class Process:
         reads = 0
@@ -439,7 +439,7 @@ def test_app_memory_read_every_few_seconds(monkeypatch):
 
 def test_app_cpu_kept_within_every_core():
     """Readings close together go far over 100% (1026.88% cut the modern overlay text): shown at most 100%"""
-    from tinypedal.widget.system_performance import app_cpu_percent
+    from neopedal.widget.system_performance import app_cpu_percent
 
     class Process:
         def __init__(self, reading):

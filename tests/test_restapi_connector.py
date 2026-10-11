@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tinypedal import realtime_state
-from tinypedal.adapter.restapi_connector import (
+from neopedal import realtime_state
+from neopedal.adapter.restapi_connector import (
     ResOutput,
     RestAPIConnector,
     RestAPITask,
@@ -127,7 +127,7 @@ def config(port, **extra) -> dict:
 
 
 def test_valid_json_value_accepts_json_numbers():
-    from tinypedal.adapter.restapi_connector import valid_json_value
+    from neopedal.adapter.restapi_connector import valid_json_value
 
     assert valid_json_value(35, 0.0) == 35.0 and isinstance(valid_json_value(35, 0.0), float)  # was 0.0
     assert valid_json_value(12.5, 0.0) == 12.5
@@ -140,7 +140,7 @@ def test_valid_json_value_accepts_json_numbers():
 
 
 def test_lmu_numbers_from_json_ints():
-    from tinypedal.adapter import lmu_restapi
+    from neopedal.adapter import lmu_restapi
 
     data = lmu_restapi.RestAPIData()
     tasks = {task.path: task for task in lmu_restapi.lmu_restapi_tasks()}
@@ -152,7 +152,7 @@ def test_lmu_numbers_from_json_ints():
 
 
 def test_absolute_refilling_without_settings():
-    from tinypedal.process.vehicle import absolute_refilling
+    from neopedal.process.vehicle import absolute_refilling
 
     assert absolute_refilling([{"name": "FUEL:"}], 0.0) == 0.0  # KeyError used to stop the task
     assert absolute_refilling([{"name": "FUEL:", "currentSetting": 1, "settings": [{}, {"text": "40 L"}]}], 0.0) == 40.0
@@ -186,7 +186,7 @@ def test_bad_entry_does_not_stop_updates(server, monkeypatch, caplog):
 
 def test_null_answer_polled_again(server, monkeypatch):
     """Game answers null around session changes: resource requested again, not abandoned"""
-    from tinypedal.adapter import restapi_connector
+    from neopedal.adapter import restapi_connector
 
     monkeypatch.setattr(restapi_connector, "retry_delay", lambda attempt, retry, delay: 0.05)
     monkeypatch.setitem(RESOURCES, "/rest/session", None)
@@ -209,7 +209,7 @@ def test_null_answer_polled_again(server, monkeypatch):
 
 
 def test_retry_delay_grows_to_limit():
-    from tinypedal.adapter.restapi_connector import MISSING_RETRY_MAX, retry_delay
+    from neopedal.adapter.restapi_connector import MISSING_RETRY_MAX, retry_delay
 
     assert [retry_delay(attempt, 3, 1.0) for attempt in (1, 3)] == [1.0, 1.0]
     assert retry_delay(4, 3, 1.0) == 2.0 and retry_delay(50, 3, 1.0) == MISSING_RETRY_MAX
@@ -218,7 +218,7 @@ def test_retry_delay_grows_to_limit():
 def test_unchanged_data_interval_limit(monkeypatch):
     import asyncio
 
-    from tinypedal.adapter import restapi_connector
+    from neopedal.adapter import restapi_connector
 
     connector = RestAPIConnector((), SimpleNamespace())
     state = restapi_connector.TaskState()
@@ -242,7 +242,7 @@ def test_stop_does_not_wait_for_host_resolving(monkeypatch):
     """API restart from user interface: stop never waits for probing (up to 3s)"""
     import asyncio
 
-    from tinypedal.adapter import restapi_connector
+    from neopedal.adapter import restapi_connector
 
     async def slow_resolve(host, port, timeout=3):
         await asyncio.sleep(10)
@@ -263,7 +263,7 @@ def test_stop_does_not_wait_for_host_resolving(monkeypatch):
 def test_dead_after_repeated_errors_resets_data(monkeypatch):
     import threading
 
-    from tinypedal.adapter import restapi_connector
+    from neopedal.adapter import restapi_connector
 
     output = ResOutput("speed", 0.0, parse_float)
     data = SimpleNamespace(speed=90.0)
@@ -277,8 +277,8 @@ def test_dead_after_repeated_errors_resets_data(monkeypatch):
 
 
 def test_session_start_hook_clears_rf2_setup_parts():
-    from tinypedal import api_connector
-    from tinypedal.process import garage
+    from neopedal import api_connector
+    from neopedal.process import garage
 
     garage._rf2_setup_parts["VM_OIL_RADIATOR"] = {"value": 1}  # incomplete setup of previous car
     sim = api_connector.SimRF2()
@@ -289,8 +289,8 @@ def test_session_start_hook_clears_rf2_setup_parts():
 
 
 def test_health_lists_rest_resources():
-    from tinypedal import api_connector
-    from tinypedal.adapter import lmu_restapi
+    from neopedal import api_connector
+    from neopedal.adapter import lmu_restapi
 
     health = api_connector.SimLMU().health()
     assert health.data_age == -1.0 and not health.replaying and not health.error
@@ -303,7 +303,7 @@ def test_host_resolving_cancelled_by_brief_leave_retried(server, monkeypatch):
     """Resolving cancelled while briefly off track: tasks launched again once back on track"""
     import asyncio
 
-    from tinypedal.adapter import restapi_connector
+    from neopedal.adapter import restapi_connector
 
     calls = []
 
@@ -351,7 +351,7 @@ def test_each_thread_has_own_task_state(monkeypatch):
 
 def test_late_thread_never_resets_new_thread_data():
     """Thread finishing after stop timed out & a new start keeps the new thread's data & status"""
-    from tinypedal.adapter.restapi_connector import TaskState
+    from neopedal.adapter.restapi_connector import TaskState
 
     data = SimpleNamespace(speed=55.5, gear=4.0, missing=-1.0)
     connector = RestAPIConnector(TASKS, data)

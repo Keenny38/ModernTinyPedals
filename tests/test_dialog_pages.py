@@ -6,13 +6,13 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.setting import cfg
 
 
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -39,7 +39,7 @@ def settle():
 
 
 def rail_keys(main) -> list[str]:
-    from tinypedal.ui.app import NavButton
+    from neopedal.ui.app import NavButton
 
     view = main.centralWidget()
     keys = []
@@ -52,7 +52,7 @@ def rail_keys(main) -> list[str]:
 
 # --- Navigation rail
 def test_rail_items_setting():
-    from tinypedal.ui.nav_rail import default_rail_items, parse_rail_items
+    from neopedal.ui.nav_rail import default_rail_items, parse_rail_items
 
     assert parse_rail_items(" home, nope,race_calculator,home ,tools") == ["home", "race_calculator", "tools"]
     # Former fuel calculator & tyre strategy planner entries: merged race calculator, once
@@ -64,7 +64,7 @@ def test_rail_items_setting():
 
 
 def test_default_rail(window):
-    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.nav_rail import PAGE_INDEX
 
     keys = rail_keys(window)
     assert f"page:{PAGE_INDEX['pacenotes']}" not in keys
@@ -74,7 +74,7 @@ def test_default_rail(window):
 
 
 def test_customize_rail(window):
-    from tinypedal.ui.nav_rail import RailEditor
+    from neopedal.ui.nav_rail import RailEditor
 
     view = window.centralWidget()
     view.open_rail_editor()
@@ -95,7 +95,7 @@ def test_customize_rail(window):
 
 
 def test_rail_editor_reset_and_nothing_checked(window):
-    from tinypedal.ui.nav_rail import RailEditor, default_rail_items
+    from neopedal.ui.nav_rail import RailEditor, default_rail_items
 
     editor = RailEditor(None)
     editor.fill([])
@@ -109,8 +109,8 @@ def test_rail_editor_reset_and_nothing_checked(window):
 
 # --- Dialog pages
 def test_tool_and_config_shown_as_pages(window):
-    from tinypedal.ui.config import UserConfig
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.config import UserConfig
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     view.set_current_index(1)
@@ -137,8 +137,8 @@ def test_tool_and_config_shown_as_pages(window):
 
 def test_lap_viewer_page_releases_vertices(window):
     """Qt Quick page shown inside app like widget tools, page vertices released when closed"""
-    from tinypedal.ui.quick.lines import VertexStore, line_strip
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.quick.lines import VertexStore, line_strip
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("lap_viewer.LapViewer", window)
@@ -153,8 +153,8 @@ def test_lap_viewer_page_releases_vertices(window):
 
 
 def test_dialog_from_dialog_stays_popup(window):
-    from tinypedal.ui._common import BatchOffset, embedded_host
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui._common import BatchOffset, embedded_host
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("heatmap_editor.HeatmapEditor", window)
@@ -166,9 +166,9 @@ def test_dialog_from_dialog_stays_popup(window):
 
 def test_inputs_shown_as_pages(window, monkeypatch):
     """Preset name & other name inputs: pages too, also when opened from a dialog page"""
-    from tinypedal.ui._common import TextInputDialog, embedded_host
-    from tinypedal.ui.preset_management import CreatePreset
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui._common import TextInputDialog, embedded_host
+    from neopedal.ui.preset_management import CreatePreset
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     dialog = CreatePreset(view.preset_tab, title="Create new default preset")
@@ -193,8 +193,8 @@ def test_inputs_shown_as_pages(window, monkeypatch):
 def test_open_pages_indicator(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui.app import NavButton
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.app import NavButton
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     fuel = window.findChild(NavButton, "railTool:race_calculator.RaceCalculator")
@@ -219,7 +219,7 @@ def test_open_pages_indicator(window, monkeypatch):
 
 def test_left_pages_closed(window):
     """Page left for another one is closed (no pages piling up behind), rail tools are kept"""
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("race_calculator.RaceCalculator", window)
@@ -237,8 +237,8 @@ def test_left_pages_closed(window):
 def test_left_page_with_unsaved_changes_kept(window):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.app import status_color
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.app import status_color
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("brake_editor.BrakeEditor", window)
@@ -255,8 +255,8 @@ def test_left_page_with_unsaved_changes_kept(window):
 
 def test_page_opened_from_page_keeps_it_open(window):
     """Input page opened from a page (new name): page it was opened from kept behind it"""
-    from tinypedal.ui._common import TextInputDialog
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui._common import TextInputDialog
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("heatmap_editor.HeatmapEditor", window)
@@ -274,7 +274,7 @@ def test_page_opened_from_page_keeps_it_open(window):
 def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui.app import NavButton
+    from neopedal.ui.app import NavButton
 
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args))
@@ -303,7 +303,7 @@ def test_lap_viewer_opened_from_navigation_rail(window, monkeypatch):
 
 
 def test_closed_page_goes_back_to_page_shown_before(window):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("race_calculator.RaceCalculator", window)  # rail page kept in background
@@ -316,7 +316,7 @@ def test_closed_page_goes_back_to_page_shown_before(window):
 def test_window_grows_for_wide_page_and_restores(window):
     from PySide6.QtCore import QSize
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     window.resize(QSize(480, 520))
@@ -347,7 +347,7 @@ def test_window_grows_for_wide_page_and_restores(window):
 
 
 def test_hidden_tool_page_skips_refresh(window, monkeypatch):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     calls = []
     view = window.centralWidget()
@@ -364,9 +364,9 @@ def test_hidden_tool_page_skips_refresh(window, monkeypatch):
 
 # --- Open pages reopened at startup
 def test_open_pages_saved_and_reopened(window, monkeypatch):
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.config import UserConfig
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui import app as app_module
+    from neopedal.ui.config import UserConfig
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     open_tool("race_calculator.RaceCalculator", window)
@@ -401,7 +401,7 @@ def test_open_pages_saved_and_reopened(window, monkeypatch):
 
 
 def test_open_pages_current_app_page_kept(window):
-    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.nav_rail import PAGE_INDEX
 
     view = window.centralWidget()
     view.set_current_index(PAGE_INDEX["preset"])
@@ -412,7 +412,7 @@ def test_open_pages_current_app_page_kept(window):
 
 
 def test_open_pages_not_remembered_when_disabled(window, monkeypatch):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     open_tool("race_calculator.RaceCalculator", window)
     monkeypatch.setitem(cfg.application, "remember_open_pages", False)
@@ -421,7 +421,7 @@ def test_open_pages_not_remembered_when_disabled(window, monkeypatch):
 
 
 def test_language_change_keeps_open_pages(window):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     open_tool("race_calculator.RaceCalculator", window)
     window.retranslate()
@@ -429,8 +429,8 @@ def test_language_change_keeps_open_pages(window):
 
 
 def test_rail_entries_keep_size_and_scroll(window):
-    from tinypedal.ui.app import NavButton
-    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.app import NavButton
+    from neopedal.ui.nav_rail import PAGE_INDEX
 
     view = window.centralWidget()
     window.resize(700, 900)
@@ -456,8 +456,8 @@ def test_rail_entries_keep_size_and_scroll(window):
 def test_rail_tools_have_no_close_buttons(window):
     from PySide6.QtWidgets import QAbstractButton
 
-    from tinypedal.i18n import tr
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.i18n import tr
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
 
@@ -481,7 +481,7 @@ def test_rail_tools_have_no_close_buttons(window):
 def test_escape_does_not_close_rail_tool_page(window):
     from PySide6.QtGui import QKeyEvent
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
 
@@ -497,8 +497,8 @@ def test_escape_does_not_close_rail_tool_page(window):
 
 
 def test_language_change_keeps_config_and_edited_pages(window):
-    from tinypedal.ui.config import UserConfig
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.config import UserConfig
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     view.set_current_index(1)
@@ -524,7 +524,7 @@ def test_language_change_keeps_config_and_edited_pages(window):
 def test_config_reload_skipped_for_deleted_widget(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui._common import run_after_saving
+    from neopedal.ui._common import run_after_saving
 
     calls = []
 
@@ -542,9 +542,9 @@ def test_config_reload_skipped_for_deleted_widget(ui_env):
 
 
 def test_hotkey_restart_saves_open_pages(window, monkeypatch):
-    from tinypedal import loader
-    from tinypedal.hotkey.command import hotkey_restart_application
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal import loader
+    from neopedal.hotkey.command import hotkey_restart_application
+    from neopedal.ui.tools_view import open_tool
 
     restarted = []
     monkeypatch.setattr(loader, "restart", lambda: restarted.append(1))
@@ -558,7 +558,7 @@ def test_go_back_to_previous_pages(window):
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QMouseEvent
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     view.set_current_index(0)
@@ -593,7 +593,7 @@ def test_rail_fades_show_hidden_entries(window):
 
 def test_shown_page_remembered_without_quit(window):
     """Page shown is saved at once: a restart after a crash or a shutdown reopens it"""
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     view = window.centralWidget()
     QApplication.processEvents()  # startup pages restored: tracking on
@@ -609,8 +609,8 @@ def test_shown_page_remembered_without_quit(window):
 
 
 def test_last_tool_page_shown_at_next_startup(window, monkeypatch):
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui import app as app_module
+    from neopedal.ui.tools_view import open_tool
 
     QApplication.processEvents()
     open_tool("race_calculator.RaceCalculator", window)  # left shown, app killed (no quit)
@@ -628,8 +628,8 @@ def test_last_tool_page_shown_at_next_startup(window, monkeypatch):
 
 
 def test_quit_keeps_saved_pages(window, monkeypatch):
-    from tinypedal import loader
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal import loader
+    from neopedal.ui.tools_view import open_tool
 
     QApplication.processEvents()
     open_tool("race_calculator.RaceCalculator", window)
@@ -642,7 +642,7 @@ def test_quit_keeps_saved_pages(window, monkeypatch):
 
 
 def test_former_tool_pages_reopen_as_race_calculator(window, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     cfg.application["open_pages"] = "*fuel_calculator.FuelCalculator,tyre_strategy_planner.TyreStrategyPlanner"
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
@@ -663,7 +663,7 @@ def test_language_change_with_timer_pages_open(window):
     """Pages with a refresh timer deleted by a language change stop it (timer firing on a deleted page crashed)"""
     import time
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("perf_view.PerformanceView", window)
@@ -688,7 +688,7 @@ def test_language_change_unloads_qml_before_backends(window):
 
     from PySide6.QtCore import qInstallMessageHandler
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     for path in ("driver_stats_viewer.DriverStatsViewer", "game_replays.GameReplays",
@@ -718,9 +718,9 @@ def test_quit_unloads_qml_views(window, monkeypatch):
     """Quit: QML views unloaded before their backends are deleted with the window"""
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal import loader
-    from tinypedal.ui.nav_rail import PAGE_INDEX
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal import loader
+    from neopedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     view = window.centralWidget()
@@ -742,8 +742,8 @@ def test_quit_unloads_qml_views(window, monkeypatch):
 def test_language_change_closes_reopened_tool_pages(window):
     """Tool pages reopened in new language: old ones closed first, their close cleanup done (was: only
     deleted, backends never released, vertices of map pages kept in memory, loaders left running)"""
-    from tinypedal.ui.quick.lines import VertexStore, Vertices
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.quick.lines import VertexStore, Vertices
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("track_map_viewer.TrackMapViewer", window)
@@ -774,7 +774,7 @@ def test_language_changed_twice_in_a_row(window, monkeypatch):
     internal C++ object already deleted, in fit_pending_pages)"""
     import sys
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("race_calculator.RaceCalculator", window)
@@ -832,8 +832,8 @@ def test_key_binding_page_kept_by_language_change_closes(window, monkeypatch):
     came from was replaced)"""
     import sys
 
-    from tinypedal.ui.hotkey_view import ConfigHotkey, HotkeyConfigItem
-    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui.hotkey_view import ConfigHotkey, HotkeyConfigItem
+    from neopedal.ui.nav_rail import PAGE_INDEX
 
     window.show()
     view = window.centralWidget()
@@ -876,8 +876,8 @@ def change_language(window, name: str):
 def test_language_change_closes_input_of_app_page(window):
     """Text input opened from an app page (preset share code...): closed by a language change, app page shown
     again (was: kept, its OK called back the deleted preset list)"""
-    from tinypedal.ui._common import TextInputDialog
-    from tinypedal.ui.nav_rail import PAGE_INDEX
+    from neopedal.ui._common import TextInputDialog
+    from neopedal.ui.nav_rail import PAGE_INDEX
 
     window.show()
     view = window.centralWidget()
@@ -905,7 +905,7 @@ def test_language_change_closes_input_of_reopened_tool(window, tool, backend_cal
     already deleted, or note never shown)"""
     import sys
 
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool(tool, window)
@@ -935,8 +935,8 @@ def test_language_change_closes_input_of_reopened_tool(window, tool, backend_cal
 def test_language_change_closes_lap_library_of_reopened_lap_viewer(window):
     """Lap library (and its rename input) opened from lap viewer: closed with it by a language change (was: kept,
     adding laps went to the closed lap viewer)"""
-    from tinypedal.ui._common import TextInputDialog
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui._common import TextInputDialog
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("lap_viewer.LapViewer", window)
@@ -961,8 +961,8 @@ def test_language_change_closes_lap_library_of_reopened_lap_viewer(window):
 def test_language_change_keeps_input_of_kept_page(window):
     """Text input opened from a page kept by a language change (editor with unsaved changes): kept with it, its
     OK still reaches that page"""
-    from tinypedal.ui._common import TextInputDialog
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui._common import TextInputDialog
+    from neopedal.ui.tools_view import open_tool
 
     window.show()
     open_tool("heatmap_editor.HeatmapEditor", window)

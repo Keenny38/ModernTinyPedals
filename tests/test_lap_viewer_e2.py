@@ -7,8 +7,8 @@ import time
 
 import pytest
 
+from neopedal.module import module_recorder
 from tests.test_lap_viewer import wait_loaded
-from tinypedal.module import module_recorder
 
 TRACK = "Track - GT3"
 START = 1_700_000_000  # session start of test laps
@@ -50,7 +50,7 @@ def write_lap(folder, number, lap_time, brake=0.45, info=None, samples=400, leng
 def no_math_channels_left():
     """Math channels of a test never stay in CHANNEL_MAP (other tests list every channel)"""
     yield
-    from tinypedal.ui.lap_viewer import set_math_channels
+    from neopedal.ui.lap_viewer import set_math_channels
 
     set_math_channels([])
 
@@ -59,8 +59,8 @@ def no_math_channels_left():
 def backend(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     folder = cfg.path.telemetry.rstrip("/")
     write_lap(folder, 1, 90.0, brake=0.45, info=lap_info(setup="aaaa1111", setup_name="Quali"), timestamp=START + 100)
@@ -91,8 +91,8 @@ def show(page, *numbers, reference=None):
 
 # 1. Value zoom & autoscale of each panel
 def test_value_axis_and_autoscale(backend):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import load_viewer_setting
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import load_viewer_setting
 
     show(backend, 1, 2)
     speed = next(panel for panel in backend.panels if panel["column"] == "speed_kph")
@@ -118,7 +118,7 @@ def test_value_axis_and_autoscale(backend):
 
 # 2. Math channels
 def test_math_expression_parser_is_safe():
-    from tinypedal.ui.quick import math_channels as mc
+    from neopedal.ui.quick import math_channels as mc
 
     assert mc.expression_error("abs(steering) * 2 + max(speed_kph, 100) / d(brake) - pi") == ""
     for expression, error in (
@@ -149,8 +149,8 @@ def test_math_expression_parser_is_safe():
 
 
 def test_math_channels_on_charts(backend):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, load_viewer_setting
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, load_viewer_setting
 
     show(backend, 1, 2)
     assert backend.checkMathChannel("", "Release", "max(-d(brake), 0) * 100") == ""
@@ -192,7 +192,7 @@ def test_math_channels_on_charts(backend):
 def test_math_channels_restored_with_viewer(backend):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     backend.saveMathChannel("", "Twice", "speed_kph * 2", "")
     parent = QWidget()
@@ -206,7 +206,7 @@ def test_math_channels_restored_with_viewer(backend):
 
 # 3. Laps aligned on braking point
 def test_laps_aligned_on_braking_point(backend):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     show(backend, 1, 2, 3)
     assert backend.corners and backend.alignment == {}
@@ -252,7 +252,7 @@ def test_csv_on_time_base(backend, tmp_path):
 
 # 7. Laps imported from another driver's folder
 def test_import_foreign_laps(backend, tmp_path):
-    from tinypedal.userfile import lap_library
+    from neopedal.userfile import lap_library
 
     other = tmp_path / "Teammate"
     write_lap(str(other), 7, 89.5, info=lap_info(vehicle="Car B"), timestamp=START + 50)
@@ -275,7 +275,7 @@ def test_import_foreign_laps(backend, tmp_path):
     assert headers
     groups = lap_library.list_imported(backend.folder)
     assert [name for name, _ in groups] == ["Teammate"]
-    from tinypedal.ui.lap_library import LapLibrary
+    from neopedal.ui.lap_library import LapLibrary
 
     backend.openLibrary()  # imported laps library: group of another driver's laps told apart
     from tests.test_lap_library import wait_library
@@ -297,7 +297,7 @@ def test_import_foreign_laps(backend, tmp_path):
 
 # 8. Reference lap driven in similar conditions
 def test_reference_in_similar_conditions(backend):
-    from tinypedal.ui.quick.lap_conditions import lap_compound, similar_best
+    from neopedal.ui.quick.lap_conditions import lap_compound, similar_best
 
     show(backend, 1, 3, reference=1)  # lap 3 looked at (31 °C): lap 1 (30 °C) is fastest within 3 °C
     backend.compareSimilarConditions()
@@ -322,7 +322,7 @@ def test_reference_in_similar_conditions(backend):
 
 # 9. Setup differences
 def test_setup_differences(backend):
-    from tinypedal.ui.quick.lap_conditions import setup_diff
+    from neopedal.ui.quick.lap_conditions import setup_diff
 
     show(backend, 1, 2, 3, reference=1)
     diff = backend.setupDiff("", lap_path(backend, 2))
@@ -340,7 +340,7 @@ def test_setup_differences(backend):
 
 # 10. Corner report
 def test_corner_report(backend, tmp_path):
-    from tinypedal.ui.quick.corner_report import build_report
+    from neopedal.ui.quick.corner_report import build_report
 
     show(backend, 1, 2)
     image = backend.corner_map_image()
@@ -362,7 +362,7 @@ def test_corner_report(backend, tmp_path):
 
 # 6. Mini-sector consistency on map
 def test_mini_sector_spread_and_job(backend):
-    from tinypedal.userfile.lap_geometry import mini_sector_job, mini_sector_spread
+    from neopedal.userfile.lap_geometry import mini_sector_job, mini_sector_spread
 
     assert mini_sector_spread([[1.0, 2.0], [1.0, 2.2], [1.0, 2.4]]) == pytest.approx([0.0, 0.2])
     assert mini_sector_spread([[1.0], [1.1]]) == [-1.0]  # under 3 laps
@@ -390,8 +390,8 @@ def test_consistency_map(backend):
     assert backend.consistency_paths() == [lap_path(backend, 1)]
     backend.setConsistencyScope("bad")
     assert backend.consistencyScope == "stint"
-    from tinypedal.ui.quick import lap_map
-    from tinypedal.userfile.lap_geometry import MapLine
+    from neopedal.ui.quick import lap_map
+    from neopedal.userfile.lap_geometry import MapLine
 
     line = MapLine([0.0, 500.0, 1500.0, 2500.0], [0.0] * 4, [0.0] * 4)
     colors = lap_map.spread_colors(line, [0.0, 1000.0, 2000.0, 3000.0], [0.1, -1.0, 0.3])
@@ -404,7 +404,7 @@ def test_map_g_circle_and_xy_zoom(backend):
     from PySide6.QtCore import Q_ARG, QCoreApplication, QMetaObject, qInstallMessageHandler
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     show(backend, 1, 2)
     scatter = backend.scatter("speed_kph", "throttle")
@@ -469,7 +469,7 @@ def test_qml_page_loads_with_new_parts(backend):
     from PySide6.QtCore import QCoreApplication, qInstallMessageHandler
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import create_quick_view
+    from neopedal.ui.quick import create_quick_view
 
     show(backend, 1, 2)
     backend.saveMathChannel("", "Twice", "speed_kph * 2", "")

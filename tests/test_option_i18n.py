@@ -2,8 +2,8 @@
 
 import pytest
 
-from tinypedal.i18n import set_language
-from tinypedal.i18n.options import module_label, option_help, option_label, option_tooltip, search_text
+from neopedal.i18n import set_language
+from neopedal.i18n.options import module_label, option_help, option_label, option_tooltip, search_text
 
 
 @pytest.fixture
@@ -27,11 +27,11 @@ def test_french_labels(french):
 
 def test_every_option_has_french_label():
     """New options must be added by running tools/gen_fr_options.py"""
-    from tinypedal.i18n.options import load_data
+    from neopedal.i18n.options import load_data
 
     OPTIONS = load_data("fr_options.json")
     assert OPTIONS
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.default.set_default()
     missing = [
@@ -66,7 +66,7 @@ def test_option_help_french(french):
 
 
 def test_every_option_help_is_translated():
-    from tinypedal.i18n.options import _help, load_data
+    from neopedal.i18n.options import _help, load_data
 
     helps, _ = _help()
     translations = load_data("fr_option_help.json")
@@ -76,13 +76,13 @@ def test_every_option_help_is_translated():
 
 
 def test_untranslated_help_falls_back_to_english(french, monkeypatch):
-    from tinypedal.i18n import options
+    from neopedal.i18n import options
 
     monkeypatch.setattr(options, "_help_translations", lambda code: {})
     assert "degree sign" in option_help("brake_temperature", "show_degree_sign")
 
 def test_missing_i18n_data_falls_back(monkeypatch, tmp_path):
-    from tinypedal.i18n import options
+    from neopedal.i18n import options
 
     monkeypatch.setattr(options, "DATA_PATH", str(tmp_path))
     assert options.load_data("fr_options.json") == {}
@@ -94,7 +94,7 @@ def test_missing_i18n_data_falls_back(monkeypatch, tmp_path):
 
 # --- Unit hints: numeric options are stored in a base unit, the editor shows the display unit
 def test_unit_hint_converts_to_display_unit():
-    from tinypedal.ui._option import unit_hint
+    from neopedal.ui._option import unit_hint
 
     units = {"temperature_unit": "Fahrenheit", "tyre_pressure_unit": "psi"}
     assert unit_hint("tyre_pressure_target_minimum", "160", units) == "23.21 psi"
@@ -104,7 +104,7 @@ def test_unit_hint_converts_to_display_unit():
 
 
 def test_unit_hint_stays_silent_when_it_would_mislead():
-    from tinypedal.ui._option import unit_hint
+    from neopedal.ui._option import unit_hint
 
     units = {"temperature_unit": "Fahrenheit", "tyre_pressure_unit": "psi"}
     assert unit_hint("font_size", "160", units) == ""  # carries no unit
@@ -117,7 +117,7 @@ def test_unit_hint_stays_silent_when_it_would_mislead():
 
 
 def test_unit_hint_pressure_target_typed_in_psi_or_bar():
-    from tinypedal.ui._option import unit_hint
+    from neopedal.ui._option import unit_hint
 
     # Pressure targets read kPa, psi or bar from the value: the hint confirms how it is read
     assert unit_hint("tyre_pressure_target_minimum", "23", {"tyre_pressure_unit": "psi"}) == "23 psi"

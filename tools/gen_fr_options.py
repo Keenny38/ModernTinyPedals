@@ -1,5 +1,5 @@
 """
-Generate French option labels: tinypedal/i18n/data/fr_options.json
+Generate French option labels: neopedal/i18n/data/fr_options.json
 
 Run from project root after adding new options:
     python tools/gen_fr_options.py
@@ -20,7 +20,7 @@ from itertools import zip_longest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-OUTPUT = "tinypedal/i18n/data/fr_options.json"
+OUTPUT = "neopedal/i18n/data/fr_options.json"
 
 # Single words
 WORDS = {
@@ -143,7 +143,7 @@ WORDS = {
     "tank": "réservoir", "target": "cible", "tc": "TC", "telemetry": "télémétrie", "temperature": "température",
     "testday": "journée d'essais", "text": "texte", "theme": "thème", "thickness": "épaisseur",
     "third": "troisième", "threshold": "seuil", "throttle": "accélérateur", "time": "temps",
-    "timeout": "délai d'attente", "timer": "chrono", "timing": "chronométrage", "tinypedal": "TinyPedal",
+    "timeout": "délai d'attente", "timer": "chrono", "timing": "chronométrage", "neopedal": "NeoPedal",
     "title": "titre", "toe": "pincement", "toggle": "basculer", "top": "haut", "torque": "couple",
     "total": "total", "totaled": "détruit", "trace": "trace", "track": "piste", "traffic": "trafic",
     "trailing": "historique", "transient": "transitoire", "translucent": "translucide", "trap": "radar",
@@ -322,7 +322,7 @@ PHRASES = {
     "sound_path": "dossier audio", "sound_volume": "volume audio", "global_offset": "décalage global",
     "line_break": "retour à la ligne", "warning_flash": "clignotement d'alerte", "damage_stats": "statistiques de dégâts",
     "onboard_setting": "réglages embarqués", "system_performance": "performances système",
-    "tinypedal_performance": "performances de TinyPedal", "track_map_viewer": "visionneuse de carte",
+    "neopedal_performance": "performances de NeoPedal", "track_map_viewer": "visionneuse de carte",
     "tyre_strategy_planner": "planificateur de stratégie pneus", "vehicle_classification": "classement des véhicules",
     "class_standings": "classement par classe", "podium_by_class": "podium par classe",
     "multi_class_styling": "style multi-classe", "multi_class_split_mode": "mode de séparation multi-classe",
@@ -887,7 +887,7 @@ REGEX_WORDS = {
 
 
 PRE_ADJECTIVES = {"last": "dernier", "best": "meilleur", "next": "prochain", "total": "total"}
-PROPER_NAMES = ("TinyPedal", "Ackermann", "RestAPI")
+PROPER_NAMES = ("NeoPedal", "Ackermann", "RestAPI")
 
 CONNECTOR_PHRASES.update(
     text for phrase, text in PHRASES.items() if phrase.split("_")[0] in CONNECTORS or phrase.startswith("align_")
@@ -1007,8 +1007,8 @@ def capitalize(text: str) -> str:
 
 def collect_keys() -> list[str]:
     """All option, group, widget & module keys"""
-    from tinypedal.setting import cfg
-    from tinypedal.ui.config import option_group_name
+    from neopedal.setting import cfg
+    from neopedal.ui.config import option_group_name
 
     cfg.default.set_default()
     keys: set[str] = set()

@@ -7,15 +7,17 @@
 ; older install, such as Programs\Modern Tiny Pedals),
 ; because the app keeps presets & user data next to the executable.
 ; Updating keeps all user files; uninstalling only removes installed files, and the OpenXR layer registration
-; the app adds for the VR overlay (HKCU, see tinypedal/vr_shared.py).
+; the app adds for the VR overlay (HKCU, see neopedal/vr_shared.py).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #define AppName "NeoPedal"
-; PyInstaller output folder (dist\NeoPedal) & executable (tinypedal.exe until 0.23.0, removed below)
+; PyInstaller output folder (dist\NeoPedal) & executable
 #define AppFolder "NeoPedal"
 #define AppExe "neopedal.exe"
+; Name of versions until 0.23.0 (neopedal/const_app.py LEGACY_NAME): old executable & VR layer removed
+#define LegacyName "tinypedal"
 #define RepoUrl "https://github.com/Keenny38/ModernTinyPedals"
 
 [Setup]
@@ -58,9 +60,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Program files of previous version: lib is rebuilt by each release (Python, Qt & QML modules change),
 ; stale files would pile up. User data (presets, telemetry...) is next to the executable, not in lib.
 Type: filesandordirs; Name: "{app}\lib"
-; Executable named tinypedal.exe until 0.23.0, like the one of the original TinyPedal: renamed neopedal.exe
-; (shortcuts below point to the new name)
-Type: files; Name: "{app}\tinypedal.exe"
+; Executable of versions until 0.23.0, renamed neopedal.exe (shortcuts below point to the new name)
+Type: files; Name: "{app}\{#LegacyName}.exe"
 ; Shortcuts named "Modern Tiny Pedals" before the NeoPedal name (Start menu folder keeps its name on update)
 Type: files; Name: "{group}\Modern Tiny Pedals.lnk"
 Type: files; Name: "{userdesktop}\Modern Tiny Pedals.lnk"
@@ -101,9 +102,9 @@ begin
 end;
 
 // VR overlay: the app copies its OpenXR layer from lib\openxr_layer_bundle to {app}\openxr_layer\<build>\ and
-// registers that TinyPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
+// registers that NeoPedalXrLayer.json for the current user (older versions: lib\openxr_layer, same cleanup).
 // Non-ASCII app folder: registered by its 8.3 short path, or copied to the first writable ASCII folder of
-// tinypedal/vr_shared.py ascii_layer_roots: {commonappdata}, %PUBLIC% or system drive root, each followed by
+// neopedal/vr_shared.py ascii_layer_roots: {commonappdata}, %PUBLIC% or system drive root, each followed by
 // ModernTinyPedals\openxr_layer\<user>\<build>\.
 // Removed on uninstall (after files are deleted): OpenXR games must never look for a layer whose files are gone.
 const
@@ -142,7 +143,7 @@ begin
       for J := 0 to 3 do
         if (Roots[J] <> '') and (Pos(Lowercase(Roots[J]), Name) = 1) then
           Remove := True;
-      if (Pos('tinypedalxrlayer.json', Name) > 0) and Remove then
+      if ((Pos('neopedalxrlayer.json', Name) > 0) or (Pos('{#LegacyName}xrlayer.json', Name) > 0)) and Remove then
         RegDeleteValue(HKCU, OpenXRLayersKey, Names[I]);
     end;
 end;

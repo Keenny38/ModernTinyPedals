@@ -14,7 +14,7 @@ The server only listens on `127.0.0.1` (this computer):
 | Request | Effect |
 |---|---|
 | `GET http://127.0.0.1:8337/commands` | Lists the available commands (JSON) |
-| `POST http://127.0.0.1:8337/command/<name>` | Runs a command. The request must include an `X-NeoPedal` header (any value; `X-TinyPedal`, used by older versions, is still accepted) |
+| `POST http://127.0.0.1:8337/command/<name>` | Runs a command. The request must include an `X-NeoPedal` header (any value; `X-NeoPedal`, used by older versions, is still accepted) |
 
 Commands are the same as the hotkeys: `overlay_visibility`, `overlay_lock`, `overlay_auto_hide`, `reload_preset`, `load_next_preset`, `restart_api`, `spectate_next_driver`, `cycle_deltabest_source`, `black_box_next_incident`, `show_main_window` (main window in front of the game), the [Broadcast Director](Broadcast-Director.md#hotkeys) commands (`director_next_car`, `director_lock`...), `preset_1` to `preset_10`, `widget_<name>` to toggle an overlay (for example `widget_relative`), `module_<name>` to toggle a module, and more. Example:
 
@@ -100,7 +100,7 @@ How the OpenXR layer is installed and removed:
 
 - With `enable_vr_overlay` and `enable_openxr_layer` on, the app registers the layer for your Windows user account only (registry key `HKEY_CURRENT_USER\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`, no admin rights) while it runs.
 - Closing the app, turning an option off, or uninstalling the app removes it. Since 0.22.4 every start removes it unless `enable_openxr_layer` is on (0.22.3 registered it with `enable_vr_overlay` alone).
-- To keep it out of one game, set the environment variable `DISABLE_TINYPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
+- To keep it out of one game, set the environment variable `DISABLE_NEOPEDAL_XR_LAYER=1` for that game. Games run as administrator ignore layers registered for the user.
 - Every OpenXR game loads it, Le Mans Ultimate too (its VR goes through OpenXR with the built-in OpenComposite). If an OpenXR game misbehaves or no longer starts in VR, turn `enable_openxr_layer` off and [open an issue](https://github.com/Keenny38/ModernTinyPedals/issues): the layer is new and not yet tested on every headset. `Help` > `Show Log` says which graphics API the layer found in the game.
 - After an app update, restart an OpenXR game that was already running: it keeps the layer it started with, which draws nothing for a newer app (`Help` > `Show Log` says so). The SteamVR overlay and the mirror window still work meanwhile.
 - Overlays far apart on your desktop cost nothing more in VR: only the overlays themselves are sent to the game, not the empty space between them.

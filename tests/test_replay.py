@@ -8,9 +8,8 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from pyLMUSharedMemory import lmu_data
-from tinypedal.adapter import lmu_connector
-from tinypedal.replay import (
+from neopedal.adapter import lmu_connector
+from neopedal.replay import (
     KEYFRAME_INTERVAL,
     ReplayControl,
     ReplayFile,
@@ -18,6 +17,7 @@ from tinypedal.replay import (
     ReplayPlayer,
     ReplayWriter,
 )
+from pyLMUSharedMemory import lmu_data
 
 
 class Clock:
@@ -155,9 +155,9 @@ def test_lmu_info_switches_between_replay_and_live(tmp_path):
 
 
 def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view
+    from neopedal.api_control import api
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view
 
     frame = bytes(ctypes.sizeof(lmu_data.LMUObjectOut))
     filename = write_replay(tmp_path, [frame, frame])
@@ -186,8 +186,8 @@ def test_replay_view_loads_and_leaves_replay(ui_env, tmp_path, monkeypatch):
 
 
 def test_rf2_replay_reads_every_zone(tmp_path):
+    from neopedal.adapter import rf2_connector, rf2_restapi
     from pyRfactor2SharedMemory import rF2data
-    from tinypedal.adapter import rf2_connector, rf2_restapi
 
     info = rf2_connector.RF2Info()
     zones = []
@@ -223,7 +223,7 @@ def test_rf2_replay_reads_every_zone(tmp_path):
 
 
 def test_replay_compatibility():
-    from tinypedal.replay import replay_compatible
+    from neopedal.replay import replay_compatible
 
     assert replay_compatible("Le Mans Ultimate", "Le Mans Ultimate")
     assert replay_compatible("rFactor 2", "Le Mans Ultimate (legacy)")
@@ -260,7 +260,7 @@ def test_secondary_zone_reads_same_frame(tmp_path):
 
 
 def test_markers_summary_and_quick_info(tmp_path):
-    from tinypedal.replay import list_replays, read_replay_info
+    from neopedal.replay import list_replays, read_replay_info
 
     filename = str(tmp_path / "replay-a.tpreplay")
     with open(filename, "wb") as file:
@@ -283,7 +283,7 @@ def test_markers_summary_and_quick_info(tmp_path):
 
 
 def test_interrupted_recording_has_unknown_duration(tmp_path):
-    from tinypedal.replay import read_replay_info
+    from neopedal.replay import read_replay_info
 
     assert read_replay_info(write_replay(tmp_path, make_frames(5))).duration == -1
 
@@ -344,7 +344,7 @@ def test_player_step(tmp_path):
 def test_recording_skips_inactive_frames_and_writes_markers(tmp_path):
     import time
 
-    from tinypedal.replay import RecordingSources
+    from neopedal.replay import RecordingSources
 
     control = ReplayControl()
     state = {"active": True, "lap": 1}
@@ -385,7 +385,7 @@ def test_recording_without_frame_leaves_no_file(tmp_path):
 def test_remove_old_replays(tmp_path):
     import os
 
-    from tinypedal.replay import remove_old_replays
+    from neopedal.replay import remove_old_replays
 
     for index in range(4):
         path = tmp_path / f"replay-auto-{index}.tpreplay"
@@ -398,9 +398,9 @@ def test_remove_old_replays(tmp_path):
 
 
 def test_replay_view_markers_and_section(ui_env, tmp_path, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view
+    from neopedal.api_control import api
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view
 
     size = ctypes.sizeof(lmu_data.LMUObjectOut)
     filename = str(tmp_path / "markers.tpreplay")
@@ -475,7 +475,7 @@ def write_v1_replay(path, frames: list[bytes], header: dict | None = None, summa
     import json
     import zlib
 
-    from tinypedal.replay import FRAME_HEADER_V1, MAGIC_V1, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC
+    from neopedal.replay import FRAME_HEADER_V1, MAGIC_V1, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC
 
     filename = str(path / "old.tpreplay")
     with open(filename, "wb") as file:
@@ -492,7 +492,7 @@ def write_v1_replay(path, frames: list[bytes], header: dict | None = None, summa
 
 
 def test_replay_header_has_format_version(tmp_path):
-    from tinypedal.replay import FORMAT_VERSION, MAGIC, read_header
+    from neopedal.replay import FORMAT_VERSION, MAGIC, read_header
 
     filename = write_replay(tmp_path, make_frames(3))
     with open(filename, "rb") as file:
@@ -503,7 +503,7 @@ def test_replay_header_has_format_version(tmp_path):
 
 
 def test_format_1_replay_still_loads(tmp_path):
-    from tinypedal.replay import read_replay_info
+    from neopedal.replay import read_replay_info
 
     frames = make_frames(4)
     filename = write_v1_replay(tmp_path, frames)
@@ -549,7 +549,7 @@ def test_damaged_frame_skipped_until_keyframe(tmp_path):
 
 def test_summary_length_is_bounded(tmp_path):
     """Corrupt summary length must not make a 4 GB read"""
-    from tinypedal.replay import FRAME_HEADER, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC, read_summary
+    from neopedal.replay import FRAME_HEADER, SUMMARY_FRAME, TRAILER, TRAILER_MAGIC, read_summary
 
     data = io.BytesIO()
     data.write(b"x" * 10)
@@ -569,7 +569,7 @@ def test_invalid_frame_size_rejected(tmp_path, frame_size):
 
 
 def test_load_checks_api_and_structure_size(tmp_path):
-    from tinypedal.replay import ReplayMismatch
+    from neopedal.replay import ReplayMismatch
 
     control = ReplayControl()
     filename = write_replay(tmp_path, make_frames(3))  # old style LMU file: no layout, 64 bytes
@@ -587,8 +587,8 @@ def test_load_checks_api_and_structure_size(tmp_path):
 
 def test_api_falls_back_to_game_for_incompatible_replay(tmp_path, monkeypatch):
     """Switching API (hotkey, preset) with a replay loaded: start reads game instead of failing"""
-    from tinypedal import api_connector, app_signal
-    from tinypedal.replay import replay
+    from neopedal import api_connector, app_signal
+    from neopedal.replay import replay
 
     errors: list[str] = []
     app_signal.error.connect(errors.append)
@@ -606,7 +606,7 @@ def test_api_falls_back_to_game_for_incompatible_replay(tmp_path, monkeypatch):
 
 
 def test_recorded_header_has_layout(tmp_path):
-    from tinypedal import api_connector
+    from neopedal import api_connector
 
     lmu, rf2 = api_connector.SimLMU(), api_connector.SimRF2()
     assert lmu.replay_header()["layout"] == [["shmm", ctypes.sizeof(lmu_data.LMUObjectOut)]]
@@ -617,8 +617,8 @@ def test_recorded_header_has_layout(tmp_path):
 def test_auto_replay_rotation_keeps_sections(tmp_path):
     import os
 
-    from tinypedal.replay import remove_old_replays
-    from tinypedal.replay_session import AUTO_NAME, section_filename
+    from neopedal.replay import remove_old_replays
+    from neopedal.replay_session import AUTO_NAME, section_filename
 
     names = [f"replay-auto-2026-10-0{day}-12-00-00.tpreplay" for day in range(1, 5)]
     section = "replay-auto-2026-10-01-12-00-00-12-345.tpreplay"  # saved by older versions
@@ -638,7 +638,7 @@ def test_recording_file_complete_after_source_error(tmp_path):
     """Unexpected error in a source: file still gets summary & trailer"""
     import time
 
-    from tinypedal.replay import read_replay_info
+    from neopedal.replay import read_replay_info
 
     control = ReplayControl()
     count = [0]
@@ -673,7 +673,7 @@ def test_start_recording_only_once(tmp_path):
 
 def test_recording_never_overwrites_existing_file(tmp_path):
     """Recording started again within the same second (same name): previous file kept, "-2" added"""
-    from tinypedal.replay import read_replay_info
+    from neopedal.replay import read_replay_info
 
     filename = str(tmp_path / "replay-2026-10-10-12-00-00.tpreplay")
     for _ in range(2):

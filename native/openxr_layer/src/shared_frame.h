@@ -8,15 +8,15 @@
  * at any time, the reader never reads outside the mapped view and never keeps a torn image.
  */
 
-#ifndef TINYPEDAL_SHARED_FRAME_H
-#define TINYPEDAL_SHARED_FRAME_H
+#ifndef NEOPEDAL_SHARED_FRAME_H
+#define NEOPEDAL_SHARED_FRAME_H
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
-#include "tinypedal_vr_shared.h"
+#include "neopedal_vr_shared.h"
 
 namespace tpvr {
 
@@ -184,4 +184,4 @@ QuadPlacement quad_placement(const FrameInfo& info, uint32_t canvas_width, uint3
 
 }  // namespace tpvr
 
-#endif  // TINYPEDAL_SHARED_FRAME_H
+#endif  // NEOPEDAL_SHARED_FRAME_H

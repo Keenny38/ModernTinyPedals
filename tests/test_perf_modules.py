@@ -11,11 +11,11 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module_info import minfo
 from tests.test_rf2_connector import MemoryDataSet, Zone
 from tests.test_widget_track_map import track  # noqa: F401  (fixture)
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module_info import minfo
 
 
 def wait_until(check, timeout=5.0) -> bool:
@@ -49,8 +49,8 @@ def recording_generator(sends: list):
 # Data stamp gate
 def test_force_module_calculates_once_per_new_sample(ui_env, monkeypatch):
     """G force average (EMA) advances per telemetry sample, not per module tick"""
-    from tinypedal.module import module_force
-    from tinypedal.setting import cfg
+    from neopedal.module import module_force
+    from neopedal.setting import cfg
 
     sends: list = []
     game = {"tele": 1.0, "scor": 10.0, "player": 0, "total": 1}
@@ -82,8 +82,8 @@ def test_force_module_calculates_once_per_new_sample(ui_env, monkeypatch):
 
 
 def test_force_module_never_skips_first_tick_after_idle(ui_env, monkeypatch):
-    from tinypedal.module import module_force
-    from tinypedal.setting import cfg
+    from neopedal.module import module_force
+    from neopedal.setting import cfg
 
     sends: list = []
     game = {"tele": 1.0, "scor": 10.0, "player": 0, "total": 1}
@@ -106,8 +106,8 @@ def test_force_module_never_skips_first_tick_after_idle(ui_env, monkeypatch):
 
 def test_vehicles_data_version_only_changes_with_new_data(ui_env, monkeypatch):
     """Overlays redraw on dataSetVersion change: no bump while game data idle"""
-    from tinypedal.module import module_vehicles
-    from tinypedal.setting import cfg
+    from neopedal.module import module_vehicles
+    from neopedal.setting import cfg
 
     output = minfo.vehicles
     monkeypatch.setattr(output, "dataSetVersion", output.dataSetVersion)
@@ -142,7 +142,7 @@ def test_vehicles_data_version_only_changes_with_new_data(ui_env, monkeypatch):
 
 # Module stop
 def test_wait_all_stopped_shares_deadline(caplog):
-    from tinypedal.thread_guard import wait_all_stopped
+    from neopedal.thread_guard import wait_all_stopped
 
     waits = []
 
@@ -158,7 +158,7 @@ def test_wait_all_stopped_shares_deadline(caplog):
 
 
 def test_wait_all_stopped_waits_events_and_polls():
-    from tinypedal.thread_guard import wait_all_stopped
+    from neopedal.thread_guard import wait_all_stopped
 
     done = threading.Event()
     state = {"polled": False}
@@ -168,8 +168,8 @@ def test_wait_all_stopped_waits_events_and_polls():
 
 
 def test_close_all_signals_every_module_before_waiting(monkeypatch):
-    from tinypedal.const_file import ConfigType
-    from tinypedal.module_control import ModuleControl
+    from neopedal.const_file import ConfigType
+    from neopedal.module_control import ModuleControl
 
     calls: list[tuple] = []
 
@@ -203,10 +203,10 @@ def test_close_all_signals_every_module_before_waiting(monkeypatch):
 
 def test_close_waits_longest_stop_timeout_of_modules(monkeypatch):
     """Recorder waits for laps being saved when stopping: never started again before it finished"""
-    from tinypedal import module_control
-    from tinypedal.const_file import ConfigType
-    from tinypedal.module.module_recorder import Realtime as Recorder
-    from tinypedal.thread_guard import STOP_TIMEOUT
+    from neopedal import module_control
+    from neopedal.const_file import ConfigType
+    from neopedal.module.module_recorder import Realtime as Recorder
+    from neopedal.thread_guard import STOP_TIMEOUT
 
     timeouts = []
     monkeypatch.setattr(module_control, "wait_all_stopped", lambda targets, timeout=None: timeouts.append(timeout))
@@ -219,8 +219,8 @@ def test_close_waits_longest_stop_timeout_of_modules(monkeypatch):
 
 
 def test_data_module_wait_closed(ui_env):
-    from tinypedal.module._base import DataModule
-    from tinypedal.setting import cfg
+    from neopedal.module._base import DataModule
+    from neopedal.setting import cfg
 
     class Looping(DataModule):
         def update_data(self):
@@ -236,8 +236,8 @@ def test_data_module_wait_closed(ui_env):
 
 # Connector vehicle wrappers
 def lmu_game():
+    from neopedal.adapter.lmu_connector import LMUInfo
     from pyLMUSharedMemory import lmu_data
-    from tinypedal.adapter.lmu_connector import LMUInfo
 
     info = LMUInfo()
     zone = Zone(lmu_data.LMUObjectOut())
@@ -281,7 +281,7 @@ def test_lmu_vehicle_wrappers_follow_data_structure():
     info, zone = lmu_game()
     lmu_tick(info)
     sync = info._sync
-    from tinypedal.adapter.lmu_connector import EMPTY_TELE
+    from neopedal.adapter.lmu_connector import EMPTY_TELE
 
     # Index beyond vehicles in session: matched on demand, slot without telemetry zeroed
     assert sync.sync_tele_index(5) == -1 and info.lmuTeleVeh(5) is EMPTY_TELE
@@ -298,7 +298,7 @@ def test_lmu_vehicle_wrappers_follow_data_structure():
 
 
 def test_lmu_stop_releases_wrappers():
-    from tinypedal.adapter.lmu_connector import NO_ROWS, NO_TELE_MAP
+    from neopedal.adapter.lmu_connector import NO_ROWS, NO_TELE_MAP
 
     info, _ = lmu_game()
     lmu_tick(info)
@@ -310,7 +310,7 @@ def test_lmu_stop_releases_wrappers():
 
 
 def rf2_game():
-    from tinypedal.adapter.rf2_connector import RF2Info
+    from neopedal.adapter.rf2_connector import RF2Info
 
     info = RF2Info()
     dataset = MemoryDataSet()
@@ -333,7 +333,7 @@ def rf2_tick(info):
 
 
 def test_rf2_vehicle_wrappers_cached_and_matched():
-    from tinypedal.adapter.rf2_connector import copy_struct
+    from neopedal.adapter.rf2_connector import copy_struct
 
     info, dataset = rf2_game()
     rf2_tick(info)
@@ -341,7 +341,7 @@ def test_rf2_vehicle_wrappers_cached_and_matched():
         assert info.rf2TeleVeh(index).mID == info.rf2ScorVeh(index).mID
     assert info.rf2TeleVeh(2) is info.rf2TeleVeh(2)
     assert info.rf2ScorVeh(2) is info.rf2ScorVeh(2)
-    from tinypedal.adapter.rf2_connector import EMPTY_TELE
+    from neopedal.adapter.rf2_connector import EMPTY_TELE
 
     assert info._sync.sync_tele_index(6) == -1 and info.rf2TeleVeh(6) is EMPTY_TELE  # no telemetry: zeroed
     dataset.scor.data.mVehicles[6].mID = 7  # slot with telemetry, beyond vehicles in session
@@ -358,8 +358,8 @@ def test_rf2_vehicle_wrappers_cached_and_matched():
 # Track map place numbers
 @pytest.mark.parametrize("font_size", [11, 15, 22, 40])
 def test_track_map_place_number_same_pixels_as_draw_text(track, font_size):  # noqa: F811
-    from tinypedal.setting import cfg
-    from tinypedal.widget.track_map import Realtime
+    from neopedal.setting import cfg
+    from neopedal.widget.track_map import Realtime
 
     cfg.user.setting["track_map"].update(font_size=font_size, show_vehicle_class_standings=True)
     widget = Realtime(cfg, "track_map")

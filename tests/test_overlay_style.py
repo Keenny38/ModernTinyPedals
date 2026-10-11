@@ -2,7 +2,7 @@
 
 import pytest
 
-from tinypedal.widget._style import (
+from neopedal.widget._style import (
     BACKGROUND,
     FOREGROUND,
     ON_COLOR,
@@ -96,7 +96,7 @@ def test_colorblind_variant(theme, colorblind, expected):
 @pytest.mark.parametrize("theme", ["Modern Light", "Legacy Light"])
 def test_light_themes_stay_readable(theme):
     """Panels & text inverted, colors on panels darkened, text on colored background kept"""
-    from tinypedal.widget._style import _contrast
+    from neopedal.widget._style import _contrast
 
     default = {
         "font_color_gap": "#FFFFFF", "background_color_gap": "#222222",  # text on panel
@@ -130,9 +130,9 @@ def test_option_role():
 
 
 def test_theme_selects_design(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern import uses_modern_design
-    from tinypedal.widget._modern.theme import build_theme
+    from neopedal.setting import cfg
+    from neopedal.widget._modern import uses_modern_design
+    from neopedal.widget._modern.theme import build_theme
 
     style = cfg.user.config["overlay_style"]
     saved = style["overlay_theme"]
@@ -160,7 +160,7 @@ def test_theme_selects_design(ui_env):
 ])
 def test_overlay_theme_migration(before, colorblind):
     """Update: Modern Dark for everyone, former Colorblind Safe theme kept as colorblind safe colors"""
-    from tinypedal.setting_preupdate import preupdate_global_setting
+    from neopedal.setting_preupdate import preupdate_global_setting
 
     setting = {"overlay_style": dict(before)}
     preupdate_global_setting((2, 50, 3), setting)
@@ -170,7 +170,7 @@ def test_overlay_theme_migration(before, colorblind):
 
 
 def test_window_theme_migration():
-    from tinypedal.setting_preupdate import preupdate_global_setting
+    from neopedal.setting_preupdate import preupdate_global_setting
 
     for before in ("Dark", "Light", "System", "Legacy Light"):
         setting = {"application": {"window_color_theme": before}}
@@ -183,7 +183,7 @@ def test_window_theme_migration():
 
 
 def test_overlay_scale_overrides():
-    from tinypedal.widget._style import scale_overrides
+    from neopedal.widget._style import scale_overrides
 
     wcfg = {"font_size": 15, "bar_height": 10, "update_interval": 20, "driver_name_width": 18, "show_x": True,
             "display_scale": 1.0, "inner_gap": 2}
@@ -194,8 +194,8 @@ def test_overlay_scale_overrides():
 
 
 def test_overlay_scale_applied_to_widget(ui_env):
-    from tinypedal.setting import cfg
-    from tinypedal.widget import speedometer
+    from neopedal.setting import cfg
+    from neopedal.widget import speedometer
 
     cfg.user.config["overlay_style"]["overlay_scale"] = 2.0
     try:
@@ -210,8 +210,8 @@ def test_overlay_scale_applied_to_widget(ui_env):
 
 
 def test_visibility_context():
-    from tinypedal import realtime_state
-    from tinypedal.widget._base import context_visible
+    from neopedal import realtime_state
+    from neopedal.widget._base import context_visible
 
     saved = realtime_state.active, realtime_state.session_type, realtime_state.in_pits
     try:
@@ -229,7 +229,7 @@ def test_visibility_context():
 
 
 def test_every_widget_has_visibility_context():
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
 
     assert all(setting["visibility_context"] == "Always" for setting in WIDGET_DEFAULT.values())
 
@@ -237,9 +237,9 @@ def test_every_widget_has_visibility_context():
 def test_edit_frame_resize(ui_env, monkeypatch):
     from PySide6.QtCore import QPoint
 
-    from tinypedal.setting import cfg
-    from tinypedal.widget import _base, speedometer
-    from tinypedal.widget._edit_frame import drag_factor, scale_widget_setting
+    from neopedal.setting import cfg
+    from neopedal.widget import _base, speedometer
+    from neopedal.widget._edit_frame import drag_factor, scale_widget_setting
 
     assert drag_factor((100, 50), QPoint(50, 0)) == 1.5
     assert drag_factor((100, 50), QPoint(0, -25)) == 0.5
@@ -279,7 +279,7 @@ def test_cached_fill_matches_direct_fill(ui_env):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QPainter, QPixmap
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
     try:
@@ -316,7 +316,7 @@ def test_scaled_painter_fill_same_every_frame(ui_env):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QPainter, QPixmap
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
     try:
@@ -340,9 +340,9 @@ def test_scaled_painter_fill_same_every_frame(ui_env):
 
 
 def test_hidden_widget_does_not_update(ui_env):
-    from tinypedal import overlay_signal, realtime_state
-    from tinypedal.setting import cfg
-    from tinypedal.widget import speedometer
+    from neopedal import overlay_signal, realtime_state
+    from neopedal.setting import cfg
+    from neopedal.widget import speedometer
 
     saved = realtime_state.active, realtime_state.shown, realtime_state.hidden, cfg.overlay["fixed_position"]
     realtime_state.active, realtime_state.shown, realtime_state.hidden = True, True, False
@@ -363,8 +363,8 @@ def test_hidden_widget_does_not_update(ui_env):
 
 
 def test_character_bar_width_not_scaled():
-    from tinypedal.widget._edit_frame import scale_widget_setting
-    from tinypedal.widget._style import scale_overrides
+    from neopedal.widget._edit_frame import scale_widget_setting
+    from neopedal.widget._style import scale_overrides
 
     wcfg = {"font_size": 10, "bar_width": 5}
     assert scale_overrides(wcfg, 2.0, "fuel") == {"font_size": 20}  # bar_width = characters
@@ -378,7 +378,7 @@ def test_animated_fill_not_cached(ui_env):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QPainter, QPixmap
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale
     _painter.OverlayStyle.corner_scale = 0.2
@@ -400,7 +400,7 @@ def test_background_cache_bounded_in_bytes(ui_env):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QPainter, QPixmap
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale
     _painter.OverlayStyle.corner_scale = 0.2
@@ -424,7 +424,7 @@ def test_background_cache_bounded_in_bytes(ui_env):
 
 
 def test_black_box_updates_while_hidden():
-    from tinypedal.widget import black_box, speedometer, trailing
+    from neopedal.widget import black_box, speedometer, trailing
 
     assert black_box.Realtime.update_while_hidden and trailing.Realtime.update_while_hidden
     assert not speedometer.Realtime.update_while_hidden
@@ -436,7 +436,7 @@ def render_raw_text(text: str, alignment, font, offset_y: int = 0, static: bool 
     from PySide6.QtGui import QImage, QPainter, QRegion
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.widget._painter import RawText, fill_rect
+    from neopedal.widget._painter import RawText, fill_rect
 
     class DrawTextCell(RawText):
         def paintEvent(self, event):
@@ -460,8 +460,8 @@ def test_raw_text_cached_layout_matches_draw_text():
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.main import load_bundled_fonts
-    from tinypedal.widget._painter import OverlayStyle
+    from neopedal.main import load_bundled_fonts
+    from neopedal.widget._painter import OverlayStyle
 
     load_bundled_fonts()  # same glyphs on every platform
     app = QApplication.instance()
@@ -479,7 +479,7 @@ def test_raw_text_cached_layout_matches_draw_text():
 def compare_raw_text_layouts(align):
     from PySide6.QtGui import QFont
 
-    from tinypedal.const_file import FontFile
+    from neopedal.const_file import FontFile
 
     for bold in (False, True):
         font = QFont(FontFile.MODERN_FAMILY)
@@ -520,7 +520,7 @@ def test_transparent_cell_not_shaded():
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QImage, QPainter
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
     _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
@@ -543,7 +543,7 @@ def test_raw_text_background_kept_while_unchanged():
     from PySide6.QtGui import QImage, QPainter, QRegion
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
     _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True
@@ -580,7 +580,7 @@ def test_raw_text_background_kept_while_unchanged():
 
 def test_raw_text_background_redrawn_after_screen_scale_change(ui_env):
     """Cell moved to a screen of another scale (no resize): background pixmap rendered again"""
-    from tinypedal.widget import _painter
+    from neopedal.widget import _painter
 
     saved = _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects
     _painter.OverlayStyle.corner_scale, _painter.OverlayStyle.depth_effects = 0.2, True

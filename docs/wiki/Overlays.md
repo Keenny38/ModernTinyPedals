@@ -26,7 +26,7 @@ The modern design reads fewer options than the classic layout: the Overlay Optio
 
 The **classic layout** is still available:
 
-- for every overlay: choose a `Legacy` theme (see below), the original TinyPedal look;
+- for every overlay: choose a `Legacy` theme (see below), the classic look;
 - for one overlay: turn on its `enable_classic_layout` option (classic layout with modern colors).
 
 Other options of `Config` > `Overlay Style` (they apply to all presets): `enable_modern_font` (on: labels in `modern_design_font_name`, default `Barlow Semi Condensed`, and values in `modern_font_name`, default `JetBrains Mono`, monospace and bundled, also the font of classic layout overlays; off: each overlay in its own `font_name` option), `corner_radius_scale`, `enable_depth_effects`, `minimum_bar_gap`, `overlay_scale` (scale of all overlays) and `enable_fade_animation`.
@@ -39,8 +39,8 @@ Other options of `Config` > `Overlay Style` (they apply to all presets): `enable
 |---|---|
 | `Modern Dark` | Default: modern design, slate neutrals, softer accent colors |
 | `Modern Light` | Modern design, light panels and dark text |
-| `Legacy Dark` | Original TinyPedal look: classic layout, colors and fonts |
-| `Legacy Light` | Original TinyPedal look with light panels and dark text |
+| `Legacy Dark` | Classic look: classic layout, colors and fonts |
+| `Legacy Light` | Classic look with light panels and dark text |
 
 `enable_colorblind_colors` turns on the colorblind safe variant of any theme (Okabe-Ito palette: red / green pairs become orange / blue).
 

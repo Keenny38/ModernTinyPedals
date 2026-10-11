@@ -8,7 +8,7 @@ Args:
 OpenXR layer (VR overlay in OpenXR games), built before with CMake (see native/openxr_layer/CMakeLists.txt):
     cmake -S native/openxr_layer -B native/openxr_layer/build -A x64
     cmake --build native/openxr_layer/build --config Release
-bundled in lib/openxr_layer_bundle (found there by tinypedal/vr_shared.py, which copies it next to the
+bundled in lib/openxr_layer_bundle (found there by neopedal/vr_shared.py, which copies it next to the
 executable before registering it: games never load the DLL from lib, rewritten by each update).
 """
 
@@ -20,8 +20,8 @@ from glob import glob
 
 import PyInstaller.__main__
 
-from tinypedal import version_check
-from tinypedal.const_app import APP_ID, APP_NAME, COPYRIGHT, PLATFORM, VERSION
+from neopedal import version_check
+from neopedal.const_app import APP_ID, APP_NAME, COPYRIGHT, PLATFORM, VERSION
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 from exe_version_info import version_info_text, written_version
@@ -45,7 +45,7 @@ EXCLUDE_MODULES = [
 
 # OpenXR layer: DLL & its manifest, kept together (manifest gives DLL path relative to itself)
 OPENXR_LAYER_BUILD = os.path.join("native", "openxr_layer", "build", "bin")
-OPENXR_LAYER_FILES = ("TinyPedalXrLayer.dll", "TinyPedalXrLayer.json")
+OPENXR_LAYER_FILES = ("NeoPedalXrLayer.dll", "NeoPedalXrLayer.json")
 OPENXR_LAYER_FOLDER = "openxr_layer_bundle"  # in lib folder (sys._MEIPASS)
 
 # Files that must stay next to executable (loaded with relative path)
@@ -142,16 +142,16 @@ def build_exe(extra_arguments: list[str]):
         f"--workpath={WORK_FOLDER}",
         f"--specpath={WORK_FOLDER}",
         "--optimize=2",
-        f"--add-data={os.path.abspath('tinypedal/i18n/data')}{os.pathsep}tinypedal/i18n/data",
+        f"--add-data={os.path.abspath('neopedal/i18n/data')}{os.pathsep}neopedal/i18n/data",
         # Qt Quick pages (ui/qml), loaded by file path
-        f"--add-data={os.path.abspath('tinypedal/ui/qml')}{os.pathsep}tinypedal/ui/qml",
+        f"--add-data={os.path.abspath('neopedal/ui/qml')}{os.pathsep}neopedal/ui/qml",
         # Only QML modules used by pages (default PySide6.QtQml hook bundles every one, about 300 MB)
         f"--additional-hooks-dir={os.path.abspath('tools/pyinstaller_hooks')}",
         # Widget & module packages import submodules dynamically via __all__
-        "--collect-submodules=tinypedal.widget",
-        "--collect-submodules=tinypedal.module",
+        "--collect-submodules=neopedal.widget",
+        "--collect-submodules=neopedal.module",
         # Tool dialogs are imported by name when first opened (ui.tools_view.open_tool)
-        "--collect-submodules=tinypedal.ui",
+        "--collect-submodules=neopedal.ui",
         *(f"--exclude-module={name}" for name in EXCLUDE_MODULES),
         *extra_arguments,
     ])

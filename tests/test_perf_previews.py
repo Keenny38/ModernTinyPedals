@@ -8,9 +8,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QSize, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.ui.quick import preview_provider
-from tinypedal.ui.quick.overlay_backend import OverlayModel, PreviewCache
-from tinypedal.ui.quick.preview_provider import STORE, PreviewProvider, PreviewStore, fit_image, key_of
+from neopedal.ui.quick import preview_provider
+from neopedal.ui.quick.overlay_backend import OverlayModel, PreviewCache
+from neopedal.ui.quick.preview_provider import STORE, PreviewProvider, PreviewStore, fit_image, key_of
 
 
 def solid(color: str, width: int = 40, height: int = 20) -> QImage:
@@ -107,7 +107,7 @@ def qml_messages():
 
 
 def test_overlays_page_shows_provider_pictures(ui_env, qml_messages):
-    from tinypedal.ui.overlay_view import OverlayView
+    from neopedal.ui.overlay_view import OverlayView
 
     view = OverlayView(None)
     view.resize(900, 640)

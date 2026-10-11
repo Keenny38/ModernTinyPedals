@@ -1,0 +1,1063 @@
+#  NeoPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of NeoPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Config dialog: options of a module, preset settings (units, API) or a config section
+
+Overlay options have their own page, see overlay_options.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from itertools import islice, zip_longest
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QCompleter,
+    QDialogButtonBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .. import regex_pattern as rxp
+from ..const_file import ConfigType
+from ..i18n import tr, trm
+from ..i18n.options import module_label, option_label, option_tooltip, search_text
+from ..setting import cfg
+from ._common import (
+    QVAL_COLOR,
+    QVAL_FLOAT,
+    QVAL_INTEGER,
+    BaseDialog,
+    CompactButton,
+    UIScaler,
+    run_after_saving,
+    singleton_dialog,
+)
+from ._option import (
+    BooleanEdit,
+    ClockFormatEdit,
+    ColorEdit,
+    DropDownListEdit,
+    FilePathEdit,
+    FloatEdit,
+    ImagePathEdit,
+    IntegerEdit,
+    OptionGroup,
+    StringEdit,
+    unit_hint,
+)
+from .option_limits import limit_error
+
+COLUMN_LABEL = 0  # grid layout column index
+COLUMN_OPTION = 1
+COLUMN_ERROR = 2  # short reason next to invalid value
+FONT_NO_CHANGE = "no change"  # font override choice keeping option as is
+# Choice lists shown as is (names, not words): others shown translated, English value saved
+UNTRANSLATED_CHOICES = (rxp.CFG_API_NAME, rxp.CFG_CHARACTER_ENCODING, rxp.CFG_LANGUAGE, rxp.CFG_FONT_WEIGHT)
+
+
+# Global options kept up to date by app itself, not shown in config dialog (still in config file)
+HIDDEN_OPTIONS = {
+    "application": (
+        "position_x", "position_y", "window_width", "window_height", "window_maximized", "last_page_index",
+        "rail_items", "open_pages", "skipped_update_version", "home_quick_access",
+    ),
+    "vr_overlay": ("mirror_position_x", "mirror_position_y"),
+}
+
+
+@dataclass
+class OptionRow:
+    """One option line of the config dialog"""
+
+    key: str
+    label: QLabel
+    editor: QWidget
+    group: QWidget | None  # group title shown above it, if any
+
+
+def get_font_list() -> list[str]:
+    """Get all available font families list"""
+    return QFontDatabase.families()
+
+
+def option_error(key: str, editor: QWidget) -> str:
+    """Short reason (English, see trm) why edited option value is invalid, "" if valid
+
+    Number is checked against option limits (range, whole number), see option_limits.
+    Editors validated with side effects (folder path) are checked when saving only.
+    """
+    invalid_reason = getattr(editor, "invalid_reason", None)
+    if not callable(invalid_reason):  # check box, choice list
+        return ""
+    reason = invalid_reason()
+    if reason or not isinstance(editor, (IntegerEdit, FloatEdit)):
+        return reason
+    return limit_error(key, float(editor.validate()))
+
+
+def reason_text(reason: str) -> str:
+    """Translated reason of invalid value (fixed text, or with numbers)"""
+    return trm(tr(reason))
+
+
+def user_setting_name(user_setting: dict) -> str:
+    """Name of loaded setting dictionary (cfg.user.setting or config), "" if another one
+
+    Loading a preset replaces cfg.user.setting with a new dictionary: config dialogs read
+    the loaded one by name when saving, never the one given when opened (see live_setting).
+    """
+    for name in ("setting", "config"):
+        if getattr(cfg.user, name, None) is user_setting:
+            return name
+    return ""
+
+
+class LiveSetting:
+    """Config dialog setting dictionary, always the loaded one, see user_setting_name"""
+
+    def __init__(self, user_setting: dict):
+        self._name = user_setting_name(user_setting)
+        self._setting = user_setting
+        # Preset the options belong to, see preset_changed
+        self.preset_filename = cfg.filename.setting
+
+    @property
+    def is_preset(self) -> bool:
+        """Options of loaded preset (replaced when another preset loads), not global config"""
+        return self._name == "setting"
+
+    def get(self) -> dict:
+        """Loaded setting dictionary"""
+        if self._name:
+            return getattr(cfg.user, self._name)
+        return self._setting
+
+    def preset_changed(self) -> bool:
+        """Another preset was loaded since dialog opened"""
+        return self.is_preset and cfg.filename.setting != self.preset_filename
+
+    def confirm_preset(self, parent) -> bool:
+        """Ask before saving options into a preset loaded since dialog opened (auto-load)"""
+        if not self.preset_changed():
+            return True
+        preset_name = cfg.filename.setting.removesuffix(".json")
+        msg_text = (
+            f"Preset <b>{preset_name}</b> was loaded since this page was opened."
+            f"<br><br>Save changed options to <b>{preset_name}</b>?"
+        )
+        confirm = QMessageBox.question(
+            parent, tr("Confirm"), trm(msg_text),
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            defaultButton=QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return False
+        self.preset_filename = cfg.filename.setting
+        return True
+
+
+@singleton_dialog(ConfigType.CONFIG)
+class FontConfig(BaseDialog):
+    """Config global font setting"""
+
+    def __init__(self, parent, user_setting: dict, reload_func: Callable):
+        super().__init__(parent)
+        self.set_config_title(tr("Global Font Override"), cfg.filename.setting)
+
+        self.reloading = reload_func
+        self.live_setting = LiveSetting(user_setting)
+
+        # Create options ("no change" item keeps its English text as data, see selected_choice)
+        self.edit_fontname = DropDownListEdit(self)
+        self.edit_fontname.addItem(tr("no change"), FONT_NO_CHANGE)
+        self.edit_fontname.addItems(get_font_list())
+        self.edit_fontname.setFixedWidth(UIScaler.size(9))
+
+        self.edit_fontsize = QSpinBox(self)
+        self.edit_fontsize.setRange(-999, 999)
+        self.edit_fontsize.setFixedWidth(UIScaler.size(9))
+
+        self.edit_fontweight = DropDownListEdit(self)
+        self.edit_fontweight.addItem(tr("no change"), FONT_NO_CHANGE)
+        self.edit_fontweight.addItems(rxp.CHOICE_COMMON[rxp.CFG_FONT_WEIGHT])
+        self.edit_fontweight.setFixedWidth(UIScaler.size(9))
+
+        self.edit_autooffset = DropDownListEdit(self)
+        for choice in (FONT_NO_CHANGE, "enable", "disable"):
+            self.edit_autooffset.addItem(tr(choice), choice)
+        self.edit_autooffset.setFixedWidth(UIScaler.size(9))
+
+        self.edit_fontoffset = QSpinBox(self)
+        self.edit_fontoffset.setRange(-999, 999)
+        self.edit_fontoffset.setFixedWidth(UIScaler.size(9))
+
+        layout_option = QGridLayout()
+        layout_option.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout_option.addWidget(QLabel(tr("Font Name")), 0, 0)
+        layout_option.addWidget(self.edit_fontname, 0, 1)
+        layout_option.addWidget(QLabel(tr("Font Size Addend")), 1, 0)
+        layout_option.addWidget(self.edit_fontsize, 1, 1)
+        layout_option.addWidget(QLabel(tr("Font Weight")), 2, 0)
+        layout_option.addWidget(self.edit_fontweight, 2, 1)
+        layout_option.addWidget(QLabel(tr("Enable Auto Font Offset")), 3, 0)
+        layout_option.addWidget(self.edit_autooffset, 3, 1)
+        layout_option.addWidget(QLabel(tr("Font Offset Vertical Addend")), 4, 0)
+        layout_option.addWidget(self.edit_fontoffset, 4, 1)
+
+        # Button
+        button_apply = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply)
+        button_apply.clicked.connect(self.applying)
+
+        button_save = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        button_save.accepted.connect(self.saving)
+        button_save.rejected.connect(self.reject)
+
+        layout_button = QHBoxLayout()
+        layout_button.addStretch(1)
+        layout_button.addWidget(button_apply)
+        layout_button.addWidget(button_save)
+
+        # Set layout
+        layout_main = QVBoxLayout()
+        layout_main.addLayout(layout_option)
+        layout_main.addLayout(layout_button)
+        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        self.setLayout(layout_main)
+        self.applied_state = self.capture()  # choices last applied, see is_modified
+        # Unsaved changes marker follows choices
+        for combo in (self.edit_fontname, self.edit_fontweight, self.edit_autooffset):
+            combo.currentIndexChanged.connect(self.refresh_modified)
+        for spin in (self.edit_fontsize, self.edit_fontoffset):
+            spin.valueChanged.connect(self.refresh_modified)
+
+    @property
+    def user_setting(self) -> dict:
+        """Loaded preset setting (replaced when another preset loads)"""
+        return self.live_setting.get()
+
+    def save_action(self):
+        """Ctrl+S: Apply"""
+        return self.applying
+
+    @staticmethod
+    def selected_choice(editor: QComboBox) -> str:
+        """Selected choice, English value of translated items"""
+        data = editor.currentData()
+        return data if isinstance(data, str) else editor.currentText()
+
+    def capture(self) -> tuple:
+        """Current choices"""
+        return (
+            self.selected_choice(self.edit_fontname),
+            self.edit_fontsize.value(),
+            self.selected_choice(self.edit_fontweight),
+            self.selected_choice(self.edit_autooffset),
+            self.edit_fontoffset.value(),
+        )
+
+    def is_modified(self) -> bool:
+        """Whether choices were changed since opened or last applied"""
+        return self.capture() != self.applied_state
+
+    def is_preset_setting(self) -> bool:
+        """Edits options of loaded preset"""
+        return self.live_setting.is_preset
+
+    def applying(self) -> bool:
+        """Save & apply, False if cancelled"""
+        if not self.live_setting.confirm_preset(self):
+            return False
+        self.save_setting(self.user_setting)
+        return True
+
+    def saving(self):
+        """Save & close"""
+        if self.applying():
+            self.accept()  # close
+
+    def save_setting(self, dict_user: dict[str, dict]):
+        """Save setting"""
+        for setting in dict_user.values():
+            for key in setting:
+                # Font name
+                if re.search(rxp.CFG_FONT_NAME, key):
+                    font_name = self.selected_choice(self.edit_fontname)
+                    if font_name != FONT_NO_CHANGE:
+                        setting[key] = font_name
+                    continue
+                # Font weight
+                if re.search(rxp.CFG_FONT_WEIGHT, key):
+                    font_weight = self.selected_choice(self.edit_fontweight)
+                    if font_weight != FONT_NO_CHANGE:
+                        setting[key] = font_weight
+                    continue
+                # Font size addend
+                if re.search("font_size", key):
+                    font_size = self.edit_fontsize.value()
+                    if font_size != 0:
+                        setting[key] = max(setting[key] + font_size, 1)
+                    continue
+                # Auto font offset
+                if key == "enable_auto_font_offset":
+                    auto_offset = self.selected_choice(self.edit_autooffset)
+                    if auto_offset == "disable":
+                        setting[key] = False
+                    elif auto_offset == "enable":
+                        setting[key] = True
+                    continue
+                # Font offset vertical
+                if key == "font_offset_vertical":
+                    font_offset = self.edit_fontoffset.value()
+                    if font_offset != 0:
+                        setting[key] += font_offset
+                    continue
+        # Reset after applied
+        self.edit_fontsize.setValue(0)
+        self.edit_fontoffset.setValue(0)
+        self.applied_state = self.capture()
+        self.refresh_modified()
+        # Wait saving finish
+        cfg.save(0)
+        run_after_saving(self.reloading)
+
+
+class EditorHistory:
+    """Undo & redo of option editors (raw editor contents), changes grouped while typing"""
+
+    MAX_UNDO = 100
+    GROUP_MS = 500
+
+    def __init__(self, editors: dict, on_change: Callable[[], None], parent):
+        self.editors = editors
+        self.on_change = on_change  # undo or redo state changed
+        self.undo_stack: list[dict] = []
+        self.redo_stack: list[dict] = []
+        self.state = self.capture()
+        self.busy = False
+        self.timer = QTimer(parent)  # deleted with dialog, never fires on deleted editors
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(self.GROUP_MS)
+        self.timer.timeout.connect(self.record)
+        for editor in editors.values():
+            if isinstance(editor, QCheckBox):
+                editor.toggled.connect(self.changed)
+            elif isinstance(editor, QComboBox):
+                editor.currentTextChanged.connect(self.changed)
+            else:
+                editor.textChanged.connect(self.changed)
+
+    def capture(self) -> dict:
+        state: dict[str, bool | str] = {}
+        for key, editor in self.editors.items():
+            if isinstance(editor, QCheckBox):
+                state[key] = editor.isChecked()
+            elif isinstance(editor, QComboBox):
+                state[key] = editor.currentText()
+            else:
+                state[key] = editor.text()
+        return state
+
+    def restore(self, state: dict):
+        self.busy = True
+        try:
+            for key, value in state.items():
+                editor = self.editors[key]
+                if isinstance(editor, QCheckBox):
+                    editor.setChecked(value)
+                elif isinstance(editor, QComboBox):
+                    editor.setCurrentText(value)
+                else:
+                    editor.setText(value)
+        finally:
+            self.busy = False
+        self.state = state
+        self.on_change()
+
+    def changed(self, *_):
+        if not self.busy:
+            self.timer.start()
+
+    def record(self):
+        """Store previous state if changed"""
+        self.timer.stop()
+        new_state = self.capture()
+        if new_state == self.state:
+            return
+        self.undo_stack.append(self.state)
+        del self.undo_stack[:-self.MAX_UNDO]
+        self.redo_stack.clear()
+        self.state = new_state
+        self.on_change()
+
+    def undo(self):
+        self.record()  # pending typing
+        if self.undo_stack:
+            self.redo_stack.append(self.state)
+            self.restore(self.undo_stack.pop())
+
+    def redo(self):
+        self.record()
+        if self.redo_stack:
+            self.undo_stack.append(self.state)
+            self.restore(self.redo_stack.pop())
+
+
+@singleton_dialog(ConfigType.CONFIG)
+class UserConfig(BaseDialog):
+    """User configuration"""
+
+    def __init__(
+        self,
+        parent,
+        key_name: str,
+        preset_name: str,
+        config_type: str,
+        user_setting: dict,
+        default_setting: dict,
+        reload_func: Callable,
+        option_width: int = 9,
+    ):
+        """
+        Args:
+            key_name: config key name.
+            preset_name: preset name, can be file name.
+            config_type: config type name from "ConfigType"; set to "" for non-preset config type (apply only, without save button).
+            user_setting: user setting dictionary, ex. cfg.user.setting.
+            default_setting: default setting dictionary, ex. cfg.default.setting.
+            reload_func: config reload (callback) function.
+            option_width: option column width in pixels.
+        """
+        super().__init__(parent)
+        self.set_config_title(module_label(key_name), set_preset_name(preset_name, config_type))
+
+        self.reloading = reload_func
+        self.key_name = key_name
+        self.config_type = config_type
+        self.live_setting = LiveSetting(user_setting)
+        self.default_setting = default_setting
+        self.option_width = UIScaler.size(option_width)
+
+        # Option dict (key: option editor)
+        self.option_edit: dict = {}
+        option_word_set: set[str] = set()
+        # Rows: label & editor of each option (search shows or hides them)
+        self.rows: list[OptionRow] = []
+        self.search_words: list[str] = []
+        # Inline validation: invalid options (key: short reason), marks next to their editor
+        self.option_grid_rows: dict[str, int] = {}
+        self.option_errors: dict[str, str] = {}
+        self.error_marks: dict[str, QLabel] = {}
+
+        # Create options
+        self.layout_option = QGridLayout()
+        self.layout_option.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.create_options(self.layout_option, option_word_set)
+        option_box = QWidget(self)
+        option_box.setLayout(self.layout_option)
+
+        # Create scroll box
+        self.scroll_box = scroll_box = QScrollArea(self)
+        scroll_box.setWidget(option_box)
+        scroll_box.setWidgetResizable(True)
+
+        # Search box
+        auto_complete_search = QCompleter(sorted(option_word_set), self)
+        auto_complete_search.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+
+        self.edit_search = edit_search = QLineEdit(self)
+        edit_search.setPlaceholderText(tr(" Type here to search options"))
+        edit_search.setCompleter(auto_complete_search)
+        edit_search.textChanged.connect(self.search_options)
+
+        button_clearsearch = CompactButton(tr("Clear"))
+        button_clearsearch.clicked.connect(edit_search.clear)
+        button_clearsearch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        layout_search = QHBoxLayout()
+        layout_search.addWidget(edit_search, stretch=1)
+        layout_search.addWidget(button_clearsearch)
+
+        # Button
+        button_reset = QDialogButtonBox(QDialogButtonBox.StandardButton.Reset)
+        button_reset.clicked.connect(self.reset_setting)
+        button_reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.button_apply = button_apply = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply)
+        button_apply.clicked.connect(self.applying)
+
+        self.button_save = button_save = QDialogButtonBox(QDialogButtonBox.StandardButton.Save)
+        button_save.accepted.connect(self.saving)
+
+        button_cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        button_cancel.rejected.connect(self.reject)
+
+        # Invalid values: Apply & Save disabled, reason shown here
+        self.label_invalid = QLabel(self)
+        self.label_invalid.setObjectName("optionInvalidStatus")
+        self.label_invalid.setHidden(True)
+
+        # Undo & redo of edited (not yet applied) values
+        self.history = EditorHistory(self.option_edit, self.history_changed, self)
+        self.button_undo = CompactButton(tr("Undo"))
+        self.button_undo.setToolTip(tr("Undo (Ctrl+Z)"))
+        self.button_undo.clicked.connect(self.history.undo)
+        self.button_redo = CompactButton(tr("Redo"))
+        self.button_redo.setToolTip(tr("Redo (Ctrl+Y)"))
+        self.button_redo.clicked.connect(self.history.redo)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self, self.history.undo)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Redo), self, self.history.redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.history.redo)
+        self.refresh_history_buttons()
+        self.saved_state = self.history.capture()  # editor contents last saved, see is_modified
+        self.connect_option_checks()
+
+        layout_button = QHBoxLayout()
+        layout_button.addWidget(button_reset)
+        layout_button.addWidget(self.button_undo)
+        layout_button.addWidget(self.button_redo)
+        layout_button.addStretch(1)
+        layout_button.addWidget(self.label_invalid)
+        layout_button.addWidget(button_apply)
+        layout_button.addWidget(button_save)
+        layout_button.addWidget(button_cancel)
+
+        if not self.config_type:
+            button_save.hide()
+
+        # Set layout
+        layout_main = QVBoxLayout()
+        layout_main.addLayout(layout_search)
+        layout_main.addWidget(scroll_box, stretch=1)
+        layout_main.addLayout(layout_button)
+        layout_main.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        self.setLayout(layout_main)
+        self.setMinimumWidth(self.sizeHint().width() + UIScaler.size(2))
+        self.refresh_visibility()
+
+    @property
+    def user_setting(self) -> dict:
+        """Loaded setting dictionary (preset one is replaced when another preset loads)"""
+        return self.live_setting.get()
+
+    def is_preset_setting(self) -> bool:
+        """Edits options of loaded preset, not global config"""
+        return self.live_setting.is_preset
+
+    def refresh_history_buttons(self):
+        """Enable undo & redo buttons when history is available"""
+        self.button_undo.setEnabled(bool(self.history.undo_stack) or self.history.timer.isActive())
+        self.button_redo.setEnabled(bool(self.history.redo_stack))
+
+    def history_changed(self):
+        """Undo or redo state changed (edited values restored by undo or redo)"""
+        self.refresh_history_buttons()
+        self.refresh_modified()
+
+    def save_action(self):
+        """Ctrl+S: save, page kept open"""
+        return self.save_setting
+
+    # Inline validation: invalid value marked next to its editor, Apply & Save disabled
+    def connect_option_checks(self):
+        """Check edited values while typing, follow unsaved changes"""
+        for key, editor in self.option_edit.items():
+            if isinstance(editor, QCheckBox):
+                editor.toggled.connect(lambda _checked: self.option_changed())
+            elif isinstance(editor, QComboBox):
+                editor.currentTextChanged.connect(lambda _text: self.option_changed())
+            else:
+                editor.textChanged.connect(lambda _text, name=key: self.option_changed(name))
+        for key in self.option_edit:
+            self.check_option(key)
+
+    def option_changed(self, key: str = ""):
+        """Option edited: value checked (text editors), unsaved changes marker refreshed"""
+        if key:
+            self.check_option(key)
+        if not self.history.busy:  # undo & redo refresh once restored, see history_changed
+            self.refresh_modified()
+
+    def check_option(self, key: str) -> str:
+        """Check edited value, mark it if invalid, returns short reason ("" if valid)"""
+        reason = option_error(key, self.option_edit[key])
+        if reason == self.option_errors.get(key, ""):
+            return reason
+        if reason:
+            self.option_errors[key] = reason
+        else:
+            self.option_errors.pop(key, None)
+        self.mark_invalid(key, reason)
+        self.refresh_invalid_state()
+        return reason
+
+    def mark_invalid(self, key: str, reason: str):
+        """Highlight editor (see style) & show short reason next to it"""
+        editor = self.option_edit[key]
+        editor.setProperty("invalid", bool(reason))
+        editor.style().unpolish(editor)
+        editor.style().polish(editor)
+        text = reason_text(reason)
+        editor.setAccessibleDescription(text)
+        mark = self.error_marks.get(key)
+        if mark is None and reason:
+            mark = QLabel(self)
+            mark.setObjectName("optionError")
+            self.layout_option.addWidget(mark, self.option_grid_rows.get(key, 0), COLUMN_ERROR)
+            self.error_marks[key] = mark
+        if mark is not None:
+            mark.setText(f"⚠ {text}" if reason else "")
+            mark.setToolTip(f"{option_label(key)}: {text}" if reason else "")
+            mark.setHidden(not reason or editor.isHidden())
+
+    def first_invalid_key(self) -> str:
+        """First invalid option in page order, "" if none"""
+        return next((key for key in self.option_edit if key in self.option_errors), "")
+
+    def refresh_invalid_state(self):
+        """Apply & Save disabled while a value is invalid, count & first reason shown"""
+        count = len(self.option_errors)
+        self.button_apply.setEnabled(not count)
+        self.button_save.setEnabled(not count)
+        self.label_invalid.setHidden(not count)
+        if not count:
+            return
+        self.label_invalid.setText(f"⚠ {trm(f'Fix {count} invalid value(s) to save')}")
+        self.label_invalid.setToolTip("<br>".join(
+            f"{option_label(key)}: {reason_text(self.option_errors[key])}"
+            for key in self.option_edit if key in self.option_errors))
+
+    def show_invalid_option(self, key: str):
+        """Show option (search cleared if hiding it) & focus its editor"""
+        if self.search_words and not all(word in search_text(key) for word in self.search_words):
+            self.edit_search.clear()
+        editor = self.option_edit[key]
+        self.scroll_box.ensureWidgetVisible(editor)
+        editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    # Visibility: search
+    def refresh_visibility(self):
+        """Show rows matching search (every word, any order), group titles hidden while searching"""
+        words = self.search_words
+        group_shown: dict[int, bool] = {}
+        for row in self.rows:
+            visible = not words or all(word in search_text(row.key) for word in words)
+            row.label.setHidden(not visible)
+            row.editor.setHidden(not visible)
+            mark = self.error_marks.get(row.key)
+            if mark is not None:
+                mark.setHidden(not visible or row.key not in self.option_errors)
+            if row.group is not None:
+                group_shown[id(row.group)] = group_shown.get(id(row.group), False) or visible
+        for row in self.rows:
+            if row.group is not None:
+                row.group.setHidden(bool(words) or not group_shown.get(id(row.group), False))
+
+    def search_options(self, text: str):
+        """Search for options: all words must match (any order), in displayed name or option key"""
+        self.search_words = text.strip().lower().split()
+        self.refresh_visibility()
+
+    def applying(self):
+        """Save & apply"""
+        self.save_setting()
+        if not self.config_type:
+            self.accept()
+
+    def saving(self):
+        """Save & close, stays open if a value is invalid"""
+        if self.save_setting():
+            self.accept()
+
+    def is_modified(self) -> bool:
+        """Whether options were edited since opened or last saved"""
+        return self.history.capture() != self.saved_state
+
+    def reject(self):
+        """Cancel, Esc or close button: ask before losing edited options"""
+        self.close()
+
+    def closeEvent(self, event):
+        if not self.is_modified():
+            event.accept()
+            return
+        confirm = QMessageBox.question(
+            self, tr("Confirm"), tr("<b>Save changes before continue?</b>"),
+            buttons=QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel)
+        if confirm == QMessageBox.StandardButton.Cancel or (
+                confirm == QMessageBox.StandardButton.Save and not self.save_setting()):
+            event.ignore()
+            return
+        event.accept()
+
+    def reset_setting(self):
+        """Reset setting"""
+        msg_text = (
+            f"Reset all <b>{module_label(self.key_name)}</b> options to default?<br><br>"
+            "Changes are only saved after clicking Apply or Save Button."
+        )
+        if self.confirm_operation(title=tr("Reset Options"), message=msg_text):
+            for key, editor in self.option_edit.items():
+                if key != "enable":
+                    editor.reset_to_default()
+
+    def save_setting(self) -> bool:
+        """Save setting, False if a value is invalid or saving cancelled (nothing saved)
+
+        Only options edited since opened or last saved are written, into the loaded setting:
+        options changed meanwhile elsewhere (widget moved, another preset loaded) are kept.
+        Values marked invalid (see check_option) are shown instead, others not checked while
+        typing (folder path) warn by message.
+        """
+        invalid_key = self.first_invalid_key()
+        if invalid_key:
+            self.show_invalid_option(invalid_key)
+            return False
+        state = self.history.capture()
+        values = {}
+        for key, editor in self.option_edit.items():
+            value = editor.validate()
+            if value is None:  # abort if error found
+                self.value_error_message(key)
+                return False
+            if state[key] != self.saved_state.get(key):
+                values[key] = value
+        if not self.live_setting.confirm_preset(self):
+            return False
+        self.user_setting[self.key_name].update(values)
+        self.saved_state = state
+        self.refresh_modified()
+        # Check saving type
+        if self.config_type:
+            # Save global settings
+            if self.config_type == ConfigType.CONFIG:
+                cfg.update_path()
+                cfg.save(0, config_type=ConfigType.CONFIG)
+            # Save user preset settings
+            else:
+                cfg.save(0)
+        # Reload once saving finished
+        run_after_saving(self.reloading)
+        return True
+
+    def value_error_message(self, option_name: str):
+        """Value error message"""
+        msg_text = (
+            f"Invalid value for <b>{option_label(option_name)}</b> option."
+            "<br><br>Changes are not saved."
+        )
+        QMessageBox.warning(self, tr("Error"), trm(msg_text))
+
+    def create_options(self, layout: QGridLayout, option_word_set: set[str]):
+        """Create options"""
+        option_keys = self.user_setting[self.key_name].keys()
+        row_index = -1
+        show_group_title = cfg.application["show_option_group_title"]
+        group_name = ""
+        group_label: QWidget | None = None
+        pending: list[tuple[str, QLabel, QWidget | None]] = []
+
+        hidden = HIDDEN_OPTIONS.get(self.key_name, ()) if self.config_type == ConfigType.CONFIG else ()
+        option_keys = [key for key in option_keys if key not in hidden]
+        for key, next_key in zip_longest(option_keys, islice(option_keys, 1, None), fillvalue=""):
+            row_index += 1
+            # Group name
+            if show_group_title:
+                group_name = option_group_name(key, next_key, group_name)
+                if group_name and group_name != "_same_group":
+                    group_label = self._add_group_label(row_index, option_label(group_name), layout)
+                    row_index += 1
+                elif not group_name:
+                    group_label = None
+            # Option name
+            option_name = option_label(key)
+            option_word_set.update(option_name.split())
+            label = self._add_option_label(row_index, option_name, layout, key)
+            pending.append((key, label, group_label))
+            self.option_grid_rows[key] = row_index
+            self._add_option_editor(row_index, key, layout)
+
+        self.rows = [
+            OptionRow(key, label, self.option_edit[key], group)
+            for key, label, group in pending if key in self.option_edit
+        ]
+
+    def _add_option_editor(self, row_index: int, key: str, layout: QGridLayout):
+        """Editor matching option type"""
+        # Bool
+        if re.search(rxp.CFG_BOOL, key):
+            self._add_option_bool(row_index, key, layout)
+            return
+        # Units choice list string
+        if self._choice_match(rxp.CHOICE_UNITS, row_index, key, layout):
+            return
+        # Common choice list string
+        if self._choice_match(rxp.CHOICE_COMMON, row_index, key, layout):
+            return
+        # Color string
+        if re.search(rxp.CFG_COLOR, key):
+            self._add_option_color(row_index, key, layout)
+            return
+        # User path string
+        if re.search(rxp.CFG_USER_PATH, key):
+            self._add_option_path(row_index, key, layout)
+            return
+        # User image file path string
+        if re.search(rxp.CFG_USER_IMAGE, key):
+            self._add_option_image(row_index, key, layout)
+            return
+        # Font name string
+        if re.search(rxp.CFG_FONT_NAME, key):
+            self._add_option_combolist(row_index, key, layout, get_font_list())
+            return
+        # Heatmap string
+        if re.search(rxp.CFG_HEATMAP, key):
+            self._add_option_combolist(row_index, key, layout, tuple(cfg.user.heatmap))
+            return
+        # Clock format string
+        if re.search(rxp.CFG_CLOCK_FORMAT, key):
+            self._add_option_clock(row_index, key, layout)
+            return
+        # String
+        if "by_compound" in key or re.search(rxp.CFG_STRING, key):
+            self._add_option_string(row_index, key, layout)
+            return
+        # Int
+        if re.search(rxp.CFG_INTEGER, key):
+            self._add_option_integer(row_index, key, layout)
+            return
+        # Float or int
+        self._add_option_float(row_index, key, layout)
+
+    def _choice_match(self, choice_dict: Mapping, row_index: int, key: str, layout: QGridLayout) -> bool:
+        """Choice match"""
+        for ref_key, choice_list in choice_dict.items():
+            if re.search(ref_key, key):
+                self._add_option_combolist(
+                    row_index, key, layout, choice_list, translate=ref_key not in UNTRANSLATED_CHOICES)
+                return True
+        return False
+
+    def _add_group_label(self, row_index: int, option_name: str, layout: QGridLayout) -> QLabel:
+        """Option group"""
+        label = OptionGroup(option_name, self)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label, row_index, COLUMN_LABEL, 1, 2)
+        return label
+
+    def _add_option_label(self, row_index: int, option_name: str, layout: QGridLayout, key: str = "") -> QLabel:
+        """Option label, with documentation tooltip"""
+        label = QLabel(option_name, self)
+        if key:
+            label.setToolTip(option_tooltip(self.key_name, key))
+        label.setMinimumHeight(UIScaler.size(1.8))
+        layout.addWidget(label, row_index, COLUMN_LABEL)
+        return label
+
+    def _add_option_bool(self, row_index: int, key: str, layout: QGridLayout):
+        """Bool"""
+        editor = BooleanEdit(self)
+        editor.setFixedWidth(self.option_width)
+        # Load selected option
+        editor.setChecked(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_color(self, row_index: int, key: str, layout: QGridLayout):
+        """Color string"""
+        editor = ColorEdit(self, self.user_setting[self.key_name][key])
+        editor.setFixedWidth(self.option_width)
+        editor.setMaxLength(9)
+        editor.setValidator(QVAL_COLOR)
+        # Load selected option
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_path(self, row_index: int, key: str, layout: QGridLayout):
+        """Path string"""
+        editor = FilePathEdit(self, self.user_setting[self.key_name][key])
+        editor.setFixedWidth(self.option_width)
+        # Load selected option
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_image(self, row_index: int, key: str, layout: QGridLayout):
+        """Image file path string"""
+        editor = ImagePathEdit(self, self.user_setting[self.key_name][key])
+        editor.setFixedWidth(self.option_width)
+        # Load selected option
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_combolist(
+        self, row_index: int, key: str, layout: QGridLayout, items: Sequence[str], translate: bool = False):
+        """Combo droplist string, choices shown translated if set (English value saved)"""
+        editor = DropDownListEdit(self)
+        editor.setFixedWidth(self.option_width)
+        editor.add_choices(items, translate)
+        # Load selected option
+        editor.setCurrentText(str(self.user_setting[self.key_name][key]))
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_clock(self, row_index: int, key: str, layout: QGridLayout):
+        """Clock string"""
+        editor = ClockFormatEdit(self)
+        editor.setFixedWidth(self.option_width)
+        # Load selected option
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_string(self, row_index: int, key: str, layout: QGridLayout):
+        """String"""
+        editor = StringEdit(self)
+        editor.setFixedWidth(self.option_width)
+        # Load selected option
+        editor.setText(self.user_setting[self.key_name][key])
+        editor.set_default(self.default_setting[self.key_name][key])
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _attach_unit_hint(self, editor, key: str):
+        """Show the value in the user's display unit while they type, for unit-bearing options"""
+        def refresh(text: str):
+            hint = unit_hint(key, text, cfg.units)
+            editor.setPlaceholderText(hint)
+            editor.setToolTip(hint)
+
+        if unit_hint(key, "1", cfg.units):  # option carries a unit the user does not type in
+            editor.textChanged.connect(refresh)
+            refresh(editor.text())
+
+    def _add_option_integer(self, row_index: int, key: str, layout: QGridLayout):
+        """Integer"""
+        editor = IntegerEdit(self)
+        editor.setFixedWidth(self.option_width)
+        editor.setValidator(QVAL_INTEGER)
+        # Load selected option
+        editor.setText(str(self.user_setting[self.key_name][key]))
+        editor.set_default(self.default_setting[self.key_name][key])
+        self._attach_unit_hint(editor, key)
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+    def _add_option_float(self, row_index: int, key: str, layout: QGridLayout):
+        """Float"""
+        editor = FloatEdit(self)
+        editor.setFixedWidth(self.option_width)
+        editor.setValidator(QVAL_FLOAT)
+        # Load selected option
+        editor.setText(str(self.user_setting[self.key_name][key]))
+        editor.set_default(self.default_setting[self.key_name][key])
+        self._attach_unit_hint(editor, key)
+        # Add layout
+        layout.addWidget(editor, row_index, COLUMN_OPTION)
+        self.option_edit[key] = editor
+
+
+def set_preset_name(preset_name: str, config_type: str) -> str:
+    """Set preset name"""
+    if config_type == ConfigType.CONFIG:
+        preset_name += f" ({tr('global')})"
+    return preset_name
+
+
+def is_different_option(key: str, next_key: str) -> bool:
+    """Check if two options are different types"""
+    option_refer = set(key.split("_"))
+    option_refer.difference_update(
+        (
+            "show",
+            "enable",
+            "for",
+            "to",
+            "in",
+            "on",
+            "and",
+            "by",
+            "into",
+            "if",
+            "of",
+            "while",
+            "from",
+            "as",
+            "info",
+            "decimal",
+            "places",
+            "prefix",
+        )
+    )
+    return option_refer.isdisjoint(next_key.split("_"))
+
+
+def option_group_name(key: str, next_key: str, group_name: str) -> str:
+    """Create option group name"""
+    # Unique group
+    if key == "opacity":
+        return "base_display"
+    if key == "font_name":
+        return "font_style"
+    # Ignore font_offset
+    if "font_offset" in key:
+        return ""
+    # Ignore none option group key name
+    if not re.search(rxp.CFG_GROUP_KEY, key):
+        return ""
+    # Ignore all-different keywords
+    if is_different_option(key, next_key):
+        return ""
+    # Same group already created
+    if group_name:
+        return "_same_group"
+    # New group if current and next option are same
+    if "display_order" in key:
+        return "display_order"
+    return re.sub(rxp.CFG_GROUP_KEY, "", key)

@@ -11,10 +11,10 @@ from importlib import import_module
 import pytest
 from PySide6.QtCore import QCoreApplication
 
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.template.widget import WIDGET_DISPLAY_ORDER
-from tinypedal.widget._modern import create_widget
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.template.widget import WIDGET_DISPLAY_ORDER
+from neopedal.widget._modern import create_widget
 
 EXTREME_VALUES = {
     "zero": 0.0,
@@ -30,7 +30,7 @@ FUZZED_GROUPS = ("wheels", "hybrid", "fuel", "energy", "delta", "force", "stint"
 def reference_loading():
     """Background thread finding reference lap (telemetry comparison) ended after each test"""
     yield
-    from tinypedal.userfile.reference_trace import stop_loading
+    from neopedal.userfile.reference_trace import stop_loading
 
     stop_loading()
 
@@ -59,7 +59,7 @@ def test_widgets_survive_extreme_values(ui_env, bundled_fonts, monkeypatch, mode
     for name in WIDGET_DISPLAY_ORDER:
         widget = None
         try:
-            widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+            widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
             widget.timerEvent(None)
             widget.grab()
         except Exception as error:  # collect every widget, report them together
@@ -75,7 +75,7 @@ def test_widgets_survive_extreme_values(ui_env, bundled_fonts, monkeypatch, mode
 
 def test_calculation_helpers_reject_non_finite():
     """Helpers feeding round()/floor()/tan() must not pass nan or inf through"""
-    from tinypedal import calculation as calc
+    from neopedal import calculation as calc
 
     assert calc.end_stint_laps(math.nan, 2.0) == 0
     assert calc.end_stint_laps(10.0, math.nan) == 0

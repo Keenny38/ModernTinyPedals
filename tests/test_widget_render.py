@@ -11,15 +11,15 @@ from importlib import import_module
 import pytest
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.setting import cfg
-from tinypedal.template.widget.modern import MODERN_DESIGNS
-from tinypedal.userfile.json_setting import copy_setting
-from tinypedal.widget._modern import create_widget
+from neopedal.setting import cfg
+from neopedal.template.widget.modern import MODERN_DESIGNS
+from neopedal.userfile.json_setting import copy_setting
+from neopedal.widget._modern import create_widget
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "_render")
 WIDGET_NAMES = sorted(
     module.name
-    for module in pkgutil.iter_modules(import_module("tinypedal.widget").__path__)
+    for module in pkgutil.iter_modules(import_module("neopedal.widget").__path__)
     if not module.name.startswith("_")
 )
 
@@ -27,7 +27,7 @@ WIDGET_NAMES = sorted(
 @pytest.fixture(scope="module")
 def default_setting(bundled_fonts):
     """Use factory default settings only (never read or write user files)"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     cfg.default.set_default()
     backup = {name: getattr(cfg.user, name, None) for name in cfg.user.__slots__}
@@ -48,7 +48,7 @@ def default_setting(bundled_fonts):
 
 def render(name: str, modern: bool) -> QImage:
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
-    widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+    widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
     widget.adjustSize()
     image = widget.grab().toImage()
     widget.deleteLater()
@@ -68,8 +68,8 @@ def is_blank(image: QImage) -> bool:
 @pytest.fixture(autouse=True)
 def fixed_clock(monkeypatch):
     """Same system clock text in every render: visual diff compares renders of two commits"""
-    from tinypedal.widget import session
-    from tinypedal.widget._modern import session as modern_session
+    from neopedal.widget import session
+    from neopedal.widget._modern import session as modern_session
 
     for module in (session, modern_session):
         monkeypatch.setattr(module, "strftime", lambda fmt, *args: "15:04PM" if "%" in fmt else fmt)
@@ -94,7 +94,7 @@ def test_render_widget(default_setting, name):
 
 def test_perf_monitor_wraps_mixin_events_once():
     """Update time of widgets whose timerEvent comes from a mixin (Black box) is recorded, once"""
-    from tinypedal.widget._base import Overlay
+    from neopedal.widget._base import Overlay
 
     class Mixin:
         def timerEvent(self, event):

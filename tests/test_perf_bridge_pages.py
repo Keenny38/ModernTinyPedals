@@ -9,9 +9,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QSystemTrayIcon
 
+from neopedal import app_signal
+from neopedal.setting import cfg
 from tests.test_perf_page_state import qml_warnings  # noqa: F401
-from tinypedal import app_signal
-from tinypedal.setting import cfg
 
 
 def flush():
@@ -20,7 +20,7 @@ def flush():
 
 
 def qml_text(name: str) -> str:
-    from tinypedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick import QML_FOLDER
 
     with open(os.path.join(QML_FOLDER, name), encoding="utf-8") as file:
         return file.read()
@@ -28,7 +28,7 @@ def qml_text(name: str) -> str:
 
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -59,8 +59,8 @@ def settle(seconds: float = 0.3):
 
 def test_overlay_switch_reads_few_values_per_row(window, qml_warnings):  # noqa: F811
     """Rows of another overlay: hot roles fed once as required properties, not read by every binding"""
-    from tinypedal.ui.overlay_options import open_overlay_options
-    from tinypedal.ui.quick.models import DictListModel
+    from neopedal.ui.overlay_options import open_overlay_options
+    from neopedal.ui.quick.models import DictListModel
 
     page = open_overlay_options(window, "speedometer")
     assert page is not None and not page.view.errors()
@@ -128,7 +128,7 @@ def test_reused_rows_do_not_animate_from_previous_row():
 
 
 def test_option_finder_rows_reused_while_typing(ui_env, qml_warnings):  # noqa: F811
-    from tinypedal.ui.option_finder import OptionFinder
+    from neopedal.ui.option_finder import OptionFinder
 
     page = OptionFinder(None)
     try:
@@ -154,8 +154,8 @@ def test_option_finder_rows_reused_while_typing(ui_env, qml_warnings):  # noqa: 
 
 def test_option_index_built_once_per_settings_version(ui_env, monkeypatch):
     """Find Option opened again: option index (every option, folded text) reused until settings change"""
-    from tinypedal.ui import option_finder
-    from tinypedal.ui.quick import finder_backend
+    from neopedal.ui import option_finder
+    from neopedal.ui.quick import finder_backend
 
     built = []
     original = option_finder.build_index
@@ -187,8 +187,8 @@ def test_replay_clock_timers_read_cached_values():
 
 def test_updated_time_message_translated_from_cache(ui_env):
     """Message with the time of day: fixed part translated (cached), time added after"""
-    from tinypedal import i18n
-    from tinypedal.ui.quick import race_backend, replays_backend
+    from neopedal import i18n
+    from neopedal.ui.quick import race_backend, replays_backend
 
     for module in (race_backend, replays_backend):
         with open(module.__file__, encoding="utf-8") as file:

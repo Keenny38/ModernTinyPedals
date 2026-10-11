@@ -12,7 +12,7 @@ describe notable releases in CHANGELOG.md (optional).
 
 CHANGELOG.md is in English (GitHub release notes). Its translations (CHANGELOG.fr.md) have
 the same sections: the app shows the section of its language in place of the English one,
-read from the release tag (see tinypedal/update.py).
+read from the release tag (see neopedal/update.py).
 
 Usage (from project root):
     python tools/gen_release_notes.py v2.51.0      notes of v2.51.0 (commits up to HEAD if tag is new)

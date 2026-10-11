@@ -7,14 +7,14 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal import realtime_state
-from tinypedal.adapter import lmu_restapi
-from tinypedal.api_control import api
-from tinypedal.module import module_fuel
-from tinypedal.module_info import FuelInfo, minfo
-from tinypedal.process import team_usage
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseEditor
+from neopedal import realtime_state
+from neopedal.adapter import lmu_restapi
+from neopedal.api_control import api
+from neopedal.module import module_fuel
+from neopedal.module_info import FuelInfo, minfo
+from neopedal.process import team_usage
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseEditor
 
 
 def entry(lap, stint, fuel, ve=1.0, tread=100.0, pit=False):
@@ -121,7 +121,7 @@ def test_tyre_screen_task_gives_game_estimate():
 
 
 def test_readers_give_game_estimate():
-    from tinypedal import api_connector
+    from neopedal import api_connector
 
     for sim in (api_connector.SimLMU(), api_connector.SimLMULegacy()):
         sim._restapi_dataset.expectedFuelConsumption = 2.5
@@ -182,7 +182,7 @@ def test_fuel_estimate_without_game_estimate(tele, tmp_path):
 
 
 def test_fuel_estimate_from_record_first(tele, tmp_path):
-    from tinypedal.userfile.fuel_delta import save_fuel_delta_file
+    from neopedal.userfile.fuel_delta import save_fuel_delta_file
 
     rows = (*((index * 100.0, index * 0.1) for index in range(20)), (2000.0, 2.5, 90.0))
     save_fuel_delta_file(f"{tmp_path}/", "SimTrack - SimCar", ".fuel", rows)
@@ -194,7 +194,7 @@ def test_fuel_estimate_from_record_first(tele, tmp_path):
 # --- Race calculator: team tab, game estimate, tyre allocation
 @pytest.fixture
 def page(ui_env, monkeypatch):
-    from tinypedal.ui import race_calculator
+    from neopedal.ui import race_calculator
 
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: None)
     monkeypatch.setattr(BaseEditor, "confirm_operation", lambda self, *args, **kwargs: True)
@@ -221,8 +221,8 @@ def wait_request(request, timeout=5.0):
 
 
 def test_team_stints_from_game(page, monkeypatch):
-    from tinypedal.ui import game_rest
-    from tinypedal.ui.quick.race_backend import TABS
+    from neopedal.ui import game_rest
+    from neopedal.ui.quick.race_backend import TABS
 
     answers = {"/rest/strategy/usage": USAGE, "/rest/garage/UIScreen/RepairAndRefuel": {"fuelInfo": {"maxFuel": 100.0}}}
     monkeypatch.setattr(game_rest, "request_game", answers.get)
@@ -248,7 +248,7 @@ def test_team_stints_from_game(page, monkeypatch):
 
 
 def test_team_asked_while_team_tab_shown(page, monkeypatch):
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     asked = []
     monkeypatch.setattr(game_rest, "request_game", lambda resource: asked.append(resource))
@@ -265,7 +265,7 @@ def test_team_asked_while_team_tab_shown(page, monkeypatch):
 
 
 def test_team_stints_game_not_running(page, monkeypatch):
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     monkeypatch.setattr(game_rest, "request_game", lambda resource: None)
     backend = page.backend
@@ -277,7 +277,7 @@ def test_team_stints_game_not_running(page, monkeypatch):
 
 def test_game_request_errors_clear_busy_state(page, monkeypatch):
     """Request raised an error: busy indicators refreshed (signal emitted), status/toast shown"""
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     def broken(resource):
         raise ValueError("unexpected answer")
@@ -319,7 +319,7 @@ def test_fill_in_game_estimate_without_valid_lap(page, monkeypatch):
 
 
 def test_tyre_allocation_from_game(page, monkeypatch):
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     backend = page.backend
     monkeypatch.setattr(game_rest, "request_game", lambda resource: TYRE_SCREEN)

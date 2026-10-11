@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module import module_delta, module_fuel
+from neopedal.module_info import DeltaInfo, FuelInfo, minfo
 from tests.telemetry_sim import LapSim, fake_reader
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module import module_delta, module_fuel
-from tinypedal.module_info import DeltaInfo, FuelInfo, minfo
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def test_fuel_consumption(sim_api, tmp_path, monkeypatch):
 
 
 def test_telemetry_recorder(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = LapSim([95.0, 90.0, 91.0])  # first lap is out lap (not complete), 2 complete laps saved
     sim_api(sim)
@@ -124,7 +124,7 @@ class InvalidLapSim(LapSim):
 
 
 def test_telemetry_recorder_invalid_lap(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = InvalidLapSim([95.0, 90.0])
     sim_api(sim)
@@ -137,7 +137,7 @@ def test_telemetry_recorder_invalid_lap(sim_api, tmp_path):
 
 
 def test_telemetry_recorder_limit_per_track(tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     for lap in range(5):
         module_recorder.save_lap(f"{tmp_path}/", "TrackA - GT3", lap, 90.0 + lap, [], max_saved_laps=3)
@@ -153,7 +153,7 @@ def run_recorder(sim, gen, extra=2.0):
 
 
 def test_telemetry_recorder_keeps_best_laps(tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     times = [95.0, 88.0, 91.0, 92.0, 93.0, 94.0]
     for lap, lap_time in enumerate(times):
@@ -167,7 +167,7 @@ def test_telemetry_recorder_keeps_best_laps(tmp_path):
 
 def test_telemetry_recorder_discards_lap_when_time_goes_back(sim_api, tmp_path):
     """Replay looping: elapsed time jumps back, incomplete lap is dropped instead of saved with wrong time"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = LapSim([95.0, 90.0, 91.0])
     sim_api(sim)
@@ -184,7 +184,7 @@ def test_telemetry_recorder_discards_lap_when_time_goes_back(sim_api, tmp_path):
 
 
 def test_telemetry_recorder_skips_duplicate_samples(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = LapSim([95.0, 90.0])
     sim_api(sim)
@@ -206,8 +206,8 @@ class PitLapSim(LapSim):
 
 
 def test_telemetry_recorder_out_and_in_laps(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
-    from tinypedal.userfile.telemetry_lap import list_laps, load_lap
+    from neopedal.module import module_recorder
+    from neopedal.userfile.telemetry_lap import list_laps, load_lap
 
     for save_out_in, expected in ((False, 1), (True, 3)):
         folder = tmp_path / str(save_out_in)
@@ -225,8 +225,8 @@ def test_telemetry_recorder_out_and_in_laps(sim_api, tmp_path):
 
 
 def test_auto_replay(monkeypatch):
-    from tinypedal import replay_session
-    from tinypedal.replay import replay
+    from neopedal import replay_session
+    from neopedal.replay import replay
 
     calls = []
     state = {"recording": False}
@@ -282,7 +282,7 @@ class LateResetSim(LapSim):
 def test_telemetry_recorder_ignores_late_distance_reset(sim_api, tmp_path):
     """A short lap (timing restarted 6s after start line) was saved because its first samples
     carried previous lap distance, passing the minimum distance check"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = LateResetSim([95.0, 90.0, 6.0, 91.0])
     sim_api(sim)
@@ -293,7 +293,7 @@ def test_telemetry_recorder_ignores_late_distance_reset(sim_api, tmp_path):
 
 
 def test_telemetry_recorder_validates_lap_when_leaving_track(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = LapSim([95.0, 90.0])
     sim_api(sim)
@@ -307,7 +307,7 @@ def test_telemetry_recorder_validates_lap_when_leaving_track(sim_api, tmp_path):
 
 
 def test_telemetry_recorder_background_saver(sim_api, tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     saved = []
     sim = LapSim([95.0, 90.0])
@@ -324,7 +324,7 @@ def test_lap_samples_same_csv_as_rows():
     """Samples stored in typed columns: same values & types back, CSV unchanged"""
     from array import array
 
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     rows = [
         (1.5, 2, 0, "x", True, 7.25, 1e-7),
@@ -346,7 +346,7 @@ def test_lap_samples_same_csv_as_rows():
 
 def test_recorder_samples_written_as_before(sim_api, tmp_path):
     """Lap file content from typed columns equals content from rows of tuples"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     saved = []
     sim = LapSim([95.0, 90.0])
@@ -364,8 +364,8 @@ def test_recorder_module_saves_pending_lap_on_stop(ui_env, monkeypatch):
     """Module stopped (reload, quit) right after a lap: lap waiting for validation is saved, saver awaited"""
     import time
 
-    from tinypedal.module import module_recorder
-    from tinypedal.setting import cfg
+    from neopedal.module import module_recorder
+    from neopedal.setting import cfg
 
     sends = []
 
@@ -397,7 +397,7 @@ def test_recorder_module_saves_pending_lap_on_stop(ui_env, monkeypatch):
 def test_wait_lap_saver():
     import threading
 
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     release = threading.Event()
     module_recorder.LAP_SAVER.submit(release.wait, 5)
@@ -408,7 +408,7 @@ def test_wait_lap_saver():
 
 def test_background_lap_save_error_logged(caplog):
     """Unexpected error while saving lap in background is logged, not lost with discarded future"""
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     class BrokenLap:
         def save(self, options, valid):
@@ -425,7 +425,7 @@ def test_remove_old_laps_skips_locked_file(tmp_path, monkeypatch):
     """A lap open in lap viewer (Windows: PermissionError) must not stop rotation"""
     import os
 
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     folder = tmp_path / "T - C"
     for lap in range(5):
@@ -452,8 +452,8 @@ def test_unreadable_lap_marks_keep_kept_laps_and_marks(tmp_path, monkeypatch):
     import json
     import os
 
-    from tinypedal.module import module_recorder
-    from tinypedal.userfile import lap_marks
+    from neopedal.module import module_recorder
+    from neopedal.userfile import lap_marks
 
     folder = tmp_path / "T - C"
     for lap in range(4):
@@ -492,7 +492,7 @@ def test_unreadable_lap_marks_keep_kept_laps_and_marks(tmp_path, monkeypatch):
 
 
 def test_lap_folder_name_valid_on_windows(tmp_path):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     name = module_recorder.lap_folder_name
     assert name("Spa - ") == "Spa"  # empty class: Windows drops trailing space, files not writable

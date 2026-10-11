@@ -2,8 +2,8 @@
 
 import pytest
 
-from tinypedal import i18n
-from tinypedal.i18n.fr import TRANSLATION
+from neopedal import i18n
+from neopedal.i18n.fr import TRANSLATION
 
 
 @pytest.fixture
@@ -59,9 +59,9 @@ def test_french_game_data_messages(french):
 def test_language_pack(tmp_path):
     import json
 
-    from tinypedal import regex_pattern
-    from tinypedal.i18n import LANGUAGE_PACK_FORMAT, LANGUAGES, load_language_packs
-    from tinypedal.i18n.options import option_label
+    from neopedal import regex_pattern
+    from neopedal.i18n import LANGUAGE_PACK_FORMAT, LANGUAGES, load_language_packs
+    from neopedal.i18n.options import option_label
 
     pack = {
         "format": LANGUAGE_PACK_FORMAT, "code": "xx", "name": "Testish",
@@ -92,7 +92,7 @@ def test_language_pack_bad_replacement_skipped(tmp_path):
     """Bad replacement only raises at sub(): skipped at read, never on each trm() call"""
     import json
 
-    from tinypedal.i18n import LANGUAGE_PACK_FORMAT, read_language_pack
+    from neopedal.i18n import LANGUAGE_PACK_FORMAT, read_language_pack
 
     pack = {
         "format": LANGUAGE_PACK_FORMAT, "code": "xx", "name": "Testish",
@@ -106,7 +106,7 @@ def test_language_pack_invalid_messages_skipped(tmp_path):
     """Pack with non-list messages (or too deep json) skipped, never breaks startup"""
     import json
 
-    from tinypedal.i18n import LANGUAGE_PACK_FORMAT, LANGUAGES, load_language_packs, read_language_pack
+    from neopedal.i18n import LANGUAGE_PACK_FORMAT, LANGUAGES, load_language_packs, read_language_pack
 
     for index, messages in enumerate((None, 5, {"a": "b"})):
         pack = {"format": LANGUAGE_PACK_FORMAT, "code": f"x{index}", "name": f"Bad{index}", "messages": messages}
@@ -123,10 +123,10 @@ def test_pack_language_kept_at_launch(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
 
-    from tinypedal import main, regex_pattern
-    from tinypedal.i18n import LANGUAGE_PACK_FOLDER, LANGUAGE_PACK_FORMAT, LANGUAGES
-    from tinypedal.setting import cfg
-    from tinypedal.setting_validator import PresetValidator
+    from neopedal import main, regex_pattern
+    from neopedal.i18n import LANGUAGE_PACK_FOLDER, LANGUAGE_PACK_FORMAT, LANGUAGES
+    from neopedal.setting import cfg
+    from neopedal.setting_validator import PresetValidator
 
     folder = tmp_path / LANGUAGE_PACK_FOLDER
     folder.mkdir()
@@ -146,7 +146,7 @@ def test_pack_language_kept_at_launch(tmp_path, monkeypatch):
                  "set_environment", "check_safe_mode"):
         monkeypatch.setattr(main, name, lambda *args: None)
     monkeypatch.setattr(main, "init_gui", lambda: SimpleNamespace(exec=lambda: 0))
-    from tinypedal import loader
+    from neopedal import loader
 
     monkeypatch.setattr(loader, "start", lambda: None)
     try:

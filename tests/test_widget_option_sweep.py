@@ -12,12 +12,12 @@ from importlib import import_module
 import pytest
 from PySide6.QtCore import QCoreApplication, QTimerEvent
 
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.template.widget import WIDGET_DISPLAY_ORDER
+from neopedal.widget._modern import create_widget
 from tests.test_readers import lmu_api
 from tests.test_widget_benchmark import drive, fill_field
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.template.widget import WIDGET_DISPLAY_ORDER
-from tinypedal.widget._modern import create_widget
 
 FIELD_SIZE = 20
 FRAMES = 3
@@ -37,7 +37,7 @@ FIELD_ATTRIBUTES = {
 def reference_loading():
     """Background thread finding reference lap (telemetry comparison) ended after each test"""
     yield
-    from tinypedal.userfile.reference_trace import stop_loading
+    from neopedal.userfile.reference_trace import stop_loading
 
     stop_loading()
 
@@ -45,7 +45,7 @@ def reference_loading():
 @pytest.fixture
 def live(ui_env, bundled_fonts, monkeypatch):
     """API reader on in-memory shared memory, field of cars in data module output"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     sim, data = lmu_api()
     monkeypatch.setattr(api, "_api", sim)
@@ -73,7 +73,7 @@ def test_widget_option_sweep(live, mode, modern):
         switch_options(cfg.user.setting[name], mode, random.Random(f"{mode}-{name}"))
         widget = None
         try:
-            widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+            widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
             widget.adjustSize()
             for frame in range(FRAMES):
                 drive(live, frame)

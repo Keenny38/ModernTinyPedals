@@ -2,9 +2,9 @@
 
 import os
 
-from tinypedal import calculation as calc
-from tinypedal.userfile import atomic_write
-from tinypedal.userfile.track_geometry import rest_get as real_rest_get  # replaced by conftest in tests
+from neopedal import calculation as calc
+from neopedal.userfile import atomic_write
+from neopedal.userfile.track_geometry import rest_get as real_rest_get  # replaced by conftest in tests
 
 
 def test_distance_interp_between_points():
@@ -48,7 +48,7 @@ def test_atomic_write_keeps_old_file_on_error(tmp_path):
 
 
 def test_versioned_backup(tmp_path, monkeypatch):
-    from tinypedal.userfile import json_setting
+    from neopedal.userfile import json_setting
 
     folder = f"{tmp_path}/"
     (tmp_path / "preset.json").write_text("{}", encoding="utf-8")
@@ -67,7 +67,7 @@ def test_versioned_backup(tmp_path, monkeypatch):
 
 def test_versioned_backup_without_interval_ignores_clock_resolution(tmp_path, monkeypatch):
     """No interval: backup file time ahead of time() (coarse clock, Python 3.11 on Windows) never throttles"""
-    from tinypedal.userfile import json_setting
+    from neopedal.userfile import json_setting
 
     folder = f"{tmp_path}/"
     (tmp_path / "preset.json").write_text("{}", encoding="utf-8")
@@ -81,7 +81,7 @@ def test_versioned_backup_without_interval_ignores_clock_resolution(tmp_path, mo
 
 def test_backup_timestamps_unique_with_coarse_clock(tmp_path, monkeypatch):
     """Equal clock readings (15 ms clock of Python 3.11 on Windows) never give the same backup name"""
-    from tinypedal.userfile import driver_stats, json_setting
+    from neopedal.userfile import driver_stats, json_setting
 
     monkeypatch.setattr(json_setting, "time", lambda: 1_700_000_000.5)
     first, second = json_setting.set_backup_timestamp(), json_setting.set_backup_timestamp()
@@ -115,7 +115,7 @@ def test_end_lap_pit_counts():
 
 
 def test_pace_note_offset_wraps_into_lap():
-    from tinypedal.module.module_notes import offset_position
+    from neopedal.module.module_notes import offset_position
 
     assert offset_position(4950.0, 100.0, 5000.0) == 50.0  # note after finish line on time
     assert offset_position(10.0, -50.0, 5000.0) == 4960.0
@@ -124,7 +124,7 @@ def test_pace_note_offset_wraps_into_lap():
 
 # --- Session
 def test_same_session_rule():
-    from tinypedal.validator import is_same_session, session_token
+    from neopedal.validator import is_same_session, session_token
 
     saved = session_token((360004, 300, 3), now=10_300.0)  # session started at 10000
     assert saved == (360004, 300, 3, 10_300.0)
@@ -138,7 +138,7 @@ def test_same_session_rule():
 
 
 def test_invalid_save_name():
-    from tinypedal.validator import invalid_save_name
+    from neopedal.validator import invalid_save_name
 
     assert invalid_save_name("") and invalid_save_name(" - GT3") and invalid_save_name("Track - ")
     assert invalid_save_name("Track -")  # class name missing, trailing space stripped
@@ -148,7 +148,7 @@ def test_invalid_save_name():
 def test_strict_json_for_untrusted_text():
     import pytest
 
-    from tinypedal.validator import load_json_strict
+    from neopedal.validator import load_json_strict
 
     assert load_json_strict('{"a": 1.5, "b": [1, 2]}') == {"a": 1.5, "b": [1, 2]}
     for text in ('{"a": NaN}', '{"a": Infinity}', '{"a": -Infinity}', '{"a": 1e999}', "{broken", "[" * 100_000):
@@ -157,7 +157,7 @@ def test_strict_json_for_untrusted_text():
 
 
 def test_value_type_accepts_int_as_float():
-    from tinypedal.validator import valid_value_type
+    from neopedal.validator import valid_value_type
 
     assert valid_value_type(2, 0.0) == 2.0 and isinstance(valid_value_type(2, 0.0), float)
     assert valid_value_type(True, 0.0) == 0.0 and valid_value_type("2", -1.0) == -1.0
@@ -166,7 +166,7 @@ def test_value_type_accepts_int_as_float():
 
 
 def test_game_rest_connection_error_forgets_resolved_host(monkeypatch):
-    from tinypedal import async_request
+    from neopedal import async_request
 
     forgotten = []
     monkeypatch.setattr(async_request, "forget_hostname", lambda host, port: forgotten.append((host, port)))
@@ -180,7 +180,7 @@ def test_game_rest_connection_error_forgets_resolved_host(monkeypatch):
 
 
 def test_game_command_connection_error_forgets_resolved_host(monkeypatch):
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     forgotten = []
     monkeypatch.setattr(game_rest, "forget_hostname", lambda host, port: forgotten.append((host, port)))
@@ -201,8 +201,8 @@ def test_wear_lifespan_never_negative():
 
 
 def test_consumption_history_save_result(tmp_path):
-    from tinypedal.module_info import ConsumptionDataSet
-    from tinypedal.userfile.consumption_history import save_consumption_history_file
+    from neopedal.module_info import ConsumptionDataSet
+    from neopedal.userfile.consumption_history import save_consumption_history_file
 
     laps = [ConsumptionDataSet(2, 1, 90.0), ConsumptionDataSet(1, 1, 91.0)]
     assert save_consumption_history_file(laps, f"{tmp_path}/", "Spa - GT3")
@@ -211,7 +211,7 @@ def test_consumption_history_save_result(tmp_path):
 
 
 def test_file_name_without_trailing_space_or_dot():
-    from tinypedal.formatter import strip_invalid_char
+    from neopedal.formatter import strip_invalid_char
 
     assert strip_invalid_char("Spa - ") == "Spa -"
     assert strip_invalid_char("Spa - LMP2.") == "Spa - LMP2"
@@ -222,7 +222,7 @@ def test_file_name_without_trailing_space_or_dot():
 
 # --- Files
 def test_atomic_write_flushed_to_disk(tmp_path, monkeypatch):
-    from tinypedal import userfile
+    from neopedal import userfile
 
     synced = []
     monkeypatch.setattr(userfile.os, "fsync", lambda fileno: synced.append(fileno))
@@ -240,7 +240,7 @@ def test_atomic_write_can_raise(tmp_path):
 
 
 def test_car_setup_save_error_logged_not_raised(tmp_path):
-    from tinypedal.userfile.car_setup import save_car_setup_file
+    from neopedal.userfile.car_setup import save_car_setup_file
 
     save_car_setup_file(f"{tmp_path}/missing/", "setup", ("line 1", "line 2"))  # no folder: logged only
     save_car_setup_file(f"{tmp_path}/", "setup", ("line 1", "line 2"))
@@ -251,8 +251,8 @@ def test_car_setup_save_error_logged_not_raised(tmp_path):
 def test_tyre_strategy_and_notes_saved_atomically(tmp_path):
     import pytest
 
-    from tinypedal.userfile.track_notes import save_notes_file
-    from tinypedal.userfile.tyre_strategy import create_tyre_strategy, save_tyre_strategy_file
+    from neopedal.userfile.track_notes import save_notes_file
+    from neopedal.userfile.tyre_strategy import create_tyre_strategy, save_tyre_strategy_file
 
     folder = f"{tmp_path}/"
     (tmp_path / "plan.tyres").write_text("old", encoding="utf-8")
@@ -273,7 +273,7 @@ def test_tyre_strategy_and_notes_saved_atomically(tmp_path):
 def test_log_stream_keeps_latest_text_only():
     import logging
 
-    from tinypedal.log_handler import BoundedLogStream
+    from neopedal.log_handler import BoundedLogStream
 
     stream = BoundedLogStream(max_chars=100)
     logger = logging.getLogger("test_bounded_log")
@@ -300,7 +300,7 @@ def test_logging_level_0_console_and_unwritable_log_file(tmp_path, capsys):
     does not stop startup (console output kept)"""
     import logging
 
-    from tinypedal.log_handler import set_logging_level
+    from neopedal.log_handler import set_logging_level
 
     logger = logging.getLogger("test_log_level_0")
     try:
@@ -330,7 +330,7 @@ def test_error_throttle_warns_once_per_interval(monkeypatch, caplog):
     """Error of a repeated path: warning (visible at INFO level) then debug until interval passed"""
     import logging
 
-    from tinypedal import log_handler
+    from neopedal import log_handler
 
     now = [100.0]
     monkeypatch.setattr(log_handler, "monotonic", lambda: now[0])
@@ -354,7 +354,7 @@ def test_logging_without_console(tmp_path, monkeypatch):
     import logging
     import sys
 
-    from tinypedal.log_handler import BoundedLogStream, set_logging_level
+    from neopedal.log_handler import BoundedLogStream, set_logging_level
 
     monkeypatch.setattr(sys, "stdout", None)
     monkeypatch.setattr(sys, "stderr", None)
@@ -380,8 +380,8 @@ def test_time_interp_without_earlier_sample():
 
 
 def test_vehicle_history_reset_forgets_previous_car_time():
-    from tinypedal.module.module_vehicles import reset_vehicle_history
-    from tinypedal.module_info import VehicleDataSet
+    from neopedal.module.module_vehicles import reset_vehicle_history
+    from neopedal.module_info import VehicleDataSet
 
     data = VehicleDataSet()
     data.elapsedTime = 123.4
@@ -390,7 +390,7 @@ def test_vehicle_history_reset_forgets_previous_car_time():
 
 
 def test_energy_available_kept_by_reset():
-    from tinypedal.module_info import FuelInfo
+    from neopedal.module_info import FuelInfo
 
     energy = FuelInfo()
     assert energy.available is False
@@ -400,7 +400,7 @@ def test_energy_available_kept_by_reset():
 
 
 def test_lap_filename_never_60_seconds():
-    from tinypedal.module.module_recorder import lap_filename
+    from neopedal.module.module_recorder import lap_filename
 
     assert " 2m00.000s" in lap_filename(1, 119.9996, timestamp=0)
     assert " 1m59.999s" in lap_filename(1, 119.999, timestamp=0)

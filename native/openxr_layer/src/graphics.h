@@ -7,8 +7,8 @@
  * Called from xrEndFrame only (game render thread), with the session lock held.
  */
 
-#ifndef TINYPEDAL_GRAPHICS_H
-#define TINYPEDAL_GRAPHICS_H
+#ifndef NEOPEDAL_GRAPHICS_H
+#define NEOPEDAL_GRAPHICS_H
 
 #include "xr_includes.h"
 
@@ -48,4 +48,4 @@ void log_message(const char* message);
 
 }  // namespace tpvr
 
-#endif  // TINYPEDAL_GRAPHICS_H
+#endif  // NEOPEDAL_GRAPHICS_H

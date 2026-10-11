@@ -8,9 +8,9 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
 
-from tinypedal import app_signal
-from tinypedal.const_file import ConfigType
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.const_file import ConfigType
+from neopedal.setting import cfg
 
 
 def flush():
@@ -57,7 +57,7 @@ class Host:
 
 @pytest.fixture
 def settings(ui_env):
-    from tinypedal.ui.quick.settings_backend import SettingsBackend
+    from neopedal.ui.quick.settings_backend import SettingsBackend
 
     host = Host()
     backend = SettingsBackend(None, host)
@@ -72,8 +72,8 @@ def row(backend, key: str) -> dict:
 
 
 def test_every_global_option_shown_once(settings):
-    from tinypedal.ui.config import HIDDEN_OPTIONS
-    from tinypedal.ui.quick.settings_backend import CATEGORIES
+    from neopedal.ui.config import HIDDEN_OPTIONS
+    from neopedal.ui.quick.settings_backend import CATEGORIES
 
     for category in CATEGORIES:
         expected = [key for key in cfg.user.config[category.key] if key not in HIDDEN_OPTIONS.get(category.key, ())]
@@ -90,7 +90,7 @@ def test_groups_and_editor_kinds(settings):
     assert rows[0]["group"] == "Interface" and rows[0]["first"]
     language = row(settings, "application/language")
     assert language["kind"] == "choice" and "Français" in language["choices"]
-    from tinypedal import regex_pattern as rxp
+    from neopedal import regex_pattern as rxp
 
     theme = row(settings, "application/window_color_theme")
     themes = list(rxp.CHOICE_COMMON[rxp.CFG_WINDOW_COLOR_THEME])
@@ -144,7 +144,7 @@ def test_invalid_values_block_apply(settings):
 
 
 def test_number_text_and_choice_edits_applied(settings, ui_env):
-    from tinypedal import regex_pattern as rxp
+    from neopedal import regex_pattern as rxp
 
     themes = list(rxp.CHOICE_COMMON[rxp.CFG_WINDOW_COLOR_THEME])
     other = next(theme for theme in themes if theme != cfg.application["window_color_theme"])
@@ -194,9 +194,9 @@ def test_options_read_at_startup_offer_restart(settings):
 def test_overlay_style_applied_to_running_overlays(settings, bundled_fonts):
     """Design & font options saved, then overlays restarted (as at reload) in new style without waiting:
     a stopped overlay reports closed (its Hide event once stopped used to keep it "open" until timeout)"""
-    from tinypedal.module_control import wctrl
-    from tinypedal.thread_guard import STOP_TIMEOUT
-    from tinypedal.ui.quick.option_kinds import font_families
+    from neopedal.module_control import wctrl
+    from neopedal.thread_guard import STOP_TIMEOUT
+    from neopedal.ui.quick.option_kinds import font_families
 
     font_families.cache_clear()  # read once: maybe by an earlier test, before bundled fonts were loaded (offscreen)
     cfg.user.setting["relative"]["enable"] = True
@@ -313,7 +313,7 @@ def test_status_cards(settings):
 
 def test_status_card_updated_when_lan_addresses_found(settings):
     """LAN addresses looked up in background: web dashboard card read again once found"""
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     changed = []
     settings.infoChanged.connect(lambda: changed.append(1))
@@ -323,7 +323,7 @@ def test_status_card_updated_when_lan_addresses_found(settings):
 
 def test_status_card_updated_when_server_listening_again(settings):
     """Port unavailable at enable, listening once free (tried again in background): status cards read again"""
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     changed = []
     settings.infoChanged.connect(lambda: changed.append(1))
@@ -334,8 +334,8 @@ def test_status_card_updated_when_server_listening_again(settings):
 # Page in app
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal import loader
-    from tinypedal.ui import app as app_module
+    from neopedal import loader
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     # Applied settings restart overlays, modules & servers: not in tests (overlay control thread
@@ -362,13 +362,13 @@ def window(ui_env, monkeypatch):
 
 
 def settings_pages(window):
-    from tinypedal.ui.app_settings import AppSettings
+    from neopedal.ui.app_settings import AppSettings
 
     return [page for page in window.centralWidget().dialog_pages() if isinstance(page.dialog, AppSettings)]
 
 
 def test_config_menu_entries_open_one_page_at_category(window):
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui.menu import open_config_application
 
     first = open_config_application(window, "web_dashboard")
     assert first.backend.category == "web_dashboard" and len(settings_pages(window)) == 1
@@ -380,8 +380,8 @@ def test_config_menu_entries_open_one_page_at_category(window):
 
 
 def test_page_unsaved_marker_ctrl_s_and_close(window, monkeypatch):
-    from tinypedal.ui import app_settings
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui import app_settings
+    from neopedal.ui.menu import open_config_application
 
     reloads = []
     monkeypatch.setattr(app_settings, "run_after_saving", lambda callback: reloads.append(callback))
@@ -405,7 +405,7 @@ def test_page_closed_again_while_asking_to_save(window, monkeypatch):
     """Close event delivered again during save question (nested event loop): no error"""
     from PySide6.QtGui import QCloseEvent
 
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui.menu import open_config_application
 
     page = open_config_application(window)
     page.backend.setNumber("application/snap_gap", 6)
@@ -442,8 +442,8 @@ def test_undo_history_capped(settings):
 
 
 def test_page_rebuilt_in_new_language(window):
-    from tinypedal import i18n
-    from tinypedal.ui.menu import open_config_application
+    from neopedal import i18n
+    from neopedal.ui.menu import open_config_application
 
     page = open_config_application(window)
     page.backend.setNumber("application/snap_gap", 4)  # pending edit kept
@@ -461,10 +461,10 @@ def test_page_rebuilt_in_new_language(window):
 
 
 def test_config_page_in_navigation_bar_and_tools(window):
-    from tinypedal.ui.home_view import default_quick_items
-    from tinypedal.ui.menu import open_config_application
-    from tinypedal.ui.nav_rail import default_rail_items, rail_entries
-    from tinypedal.ui.tools_view import TOOL_KEYWORDS, TOOL_SECTIONS, open_tool
+    from neopedal.ui.home_view import default_quick_items
+    from neopedal.ui.menu import open_config_application
+    from neopedal.ui.nav_rail import default_rail_items, rail_entries
+    from neopedal.ui.tools_view import TOOL_KEYWORDS, TOOL_SECTIONS, open_tool
 
     entry = rail_entries()["app_settings"]
     assert entry.dialog == "app_settings.AppSettings" and entry.label == "Config"
@@ -472,7 +472,7 @@ def test_config_page_in_navigation_bar_and_tools(window):
     assert "app_settings" not in default_rail_items() and "app_settings" in default_quick_items()
     assert any(path == "app_settings.AppSettings" for _, tools in TOOL_SECTIONS for _, _, path in tools)
     assert "reglages" in TOOL_KEYWORDS["app_settings.AppSettings"]
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.application["rail_items"] = ",".join([*default_rail_items(), "app_settings"])  # added to the bar
     window.centralWidget().build_rail_items()
@@ -499,8 +499,8 @@ def test_number_typed_in_page_applied_without_enter(window):
     """Number typed in its field then Ctrl+S (or Apply): taken although field kept focus"""
     from PySide6.QtTest import QTest
 
-    from tinypedal.i18n.options import option_label
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.i18n.options import option_label
+    from neopedal.ui.menu import open_config_application
 
     page = open_config_application(window, "application")
     page.view.setFocus()
@@ -525,7 +525,7 @@ def test_number_typed_in_page_applied_without_enter(window):
 
 
 def test_refresh_deferred_while_hidden(window):
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui.menu import open_config_application
 
     page = open_config_application(window, "application")
     calls = []
@@ -547,10 +547,10 @@ def test_page_qml_bundled_modules_and_translated():
     """Release build bundles only QML_MODULES; every text of the pages has a French translation"""
     import re
 
-    from tinypedal.i18n.fr import TRANSLATION
-    from tinypedal.ui.quick import QML_FOLDER
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
-    from tinypedal.ui.quick.settings_backend import CATEGORIES
+    from neopedal.i18n.fr import TRANSLATION
+    from neopedal.ui.quick import QML_FOLDER
+    from neopedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick.settings_backend import CATEGORIES
 
     pattern = re.compile(r'i18n\.tr\("((?:[^"\\]|\\.)*)"\)')
     missing = []
@@ -568,7 +568,7 @@ def test_page_qml_bundled_modules_and_translated():
 
 def test_config_page_never_grows_window(window):
     """Page layout follows its width: opening it keeps window size"""
-    from tinypedal.ui.menu import open_config_application
+    from neopedal.ui.menu import open_config_application
 
     window.resize(700, 520)
     window.show()
@@ -582,8 +582,8 @@ def test_config_page_never_grows_window(window):
 def test_language_change_keeps_window_size(window):
     """View rebuilt in new language: window not grown again for reopened pages (measured once laid out),
     back to its size once the wide page that grew it closes"""
-    from tinypedal import i18n
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal import i18n
+    from neopedal.ui.tools_view import open_tool
 
     window.resize(760, 560)  # room for config page, not for driver stats
     window.show()

@@ -11,10 +11,10 @@ from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRectF, Qt
 from PySide6.QtGui import QCloseEvent, QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QTableWidget, QTableWidgetItem
 
-from tinypedal import app_signal, i18n
-from tinypedal.const_file import ConfigType
-from tinypedal.setting import cfg
-from tinypedal.userfile.json_setting import copy_setting
+from neopedal import app_signal, i18n
+from neopedal.const_file import ConfigType
+from neopedal.setting import cfg
+from neopedal.userfile.json_setting import copy_setting
 
 
 def flush_deleted():
@@ -31,7 +31,7 @@ def french():
 
 @pytest.fixture
 def window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -78,14 +78,14 @@ def answers(monkeypatch):
 
 
 def open_editor_page(window, path="heatmap_editor.HeatmapEditor"):
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui.tools_view import open_tool
 
     open_tool(path, window)
     return window.centralWidget().dialog_pages()[-1].dialog
 
 
 def open_config_page(window, name="speedometer"):
-    from tinypedal.ui.config import UserConfig
+    from neopedal.ui.config import UserConfig
 
     UserConfig(parent=window, key_name=name, preset_name=cfg.filename.setting, config_type=ConfigType.WIDGET,
                user_setting=cfg.user.setting, default_setting=cfg.default.setting, reload_func=lambda: None).open()
@@ -95,7 +95,7 @@ def open_config_page(window, name="speedometer"):
 
 # Item 1: Cancel on unsaved changes keeps window (and tray icon)
 def test_close_cancelled_keeps_window(window, answers, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     quits = []
     monkeypatch.setattr(app_module.loader, "close", lambda: quits.append("loader"))
@@ -116,7 +116,7 @@ def test_close_cancelled_keeps_window(window, answers, monkeypatch):
 
 # Item 6: restart asks for unsaved pages first
 def test_restart_asks_unsaved_pages(window, answers, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     restarts = []
     monkeypatch.setattr(app_module.loader, "restart", lambda: restarts.append(cfg.application["open_pages"]))
@@ -140,7 +140,7 @@ def test_restart_asks_unsaved_pages(window, answers, monkeypatch):
 
 # Item 2: config pages registered, preset load guarded, save into loaded preset
 def test_config_pages_registered(window):
-    from tinypedal.ui._common import DialogSingleton
+    from neopedal.ui._common import DialogSingleton
 
     assert not DialogSingleton.is_opened(ConfigType.CONFIG)
     dialog = open_config_page(window)
@@ -152,7 +152,7 @@ def test_config_pages_registered(window):
 
 
 def test_preset_load_with_unsaved_config_page(window, answers, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     reloads = []
     monkeypatch.setattr(app_module.loader, "reload", lambda reload_preset=False: reloads.append(reload_preset))
@@ -202,7 +202,7 @@ def test_config_save_keeps_options_changed_elsewhere(window):
 
 
 def test_font_config_unsaved_state(window, answers):
-    from tinypedal.ui.config import FONT_NO_CHANGE, FontConfig
+    from neopedal.ui.config import FONT_NO_CHANGE, FontConfig
 
     dialog = FontConfig(parent=window, user_setting=cfg.user.setting, reload_func=lambda: None)
     dialog.open()
@@ -217,7 +217,7 @@ def test_font_config_unsaved_state(window, answers):
 
 
 def test_screen_change_waits_for_unsaved_config(window, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     reloads = []
     monkeypatch.setattr(app_module.loader, "reload", lambda reload_preset=False: reloads.append(1))
@@ -233,7 +233,7 @@ def test_screen_change_waits_for_unsaved_config(window, monkeypatch):
 
 
 def test_singleton_error_shows_dialog_title(ui_env, answers):
-    from tinypedal.ui._common import BaseDialog, DialogSingleton, DialogSingletonError
+    from neopedal.ui._common import BaseDialog, DialogSingleton, DialogSingletonError
 
     assert DialogSingletonError("lap_viewer")._title() == "Lap Viewer"
     dialog = BaseDialog(None)
@@ -266,7 +266,7 @@ def test_capture_screen_keeps_layout_editor_page(window, monkeypatch):
 
 # Item 9: setup wizard, see test_setup_wizard.py
 def test_language_change_reloads_running_overlays(window, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     reloaded = []
     monkeypatch.setattr(type(app_module.wctrl), "reload", lambda self, name="": reloaded.append(name))
@@ -277,7 +277,7 @@ def test_language_change_reloads_running_overlays(window, monkeypatch):
 
 # Item 8: saving log never moves log stream
 def test_log_save_keeps_stream(ui_env, monkeypatch, tmp_path, answers):
-    from tinypedal.ui import log_info
+    from neopedal.ui import log_info
 
     stream = log_info.log_stream
     stream.write("first line\n")
@@ -302,7 +302,7 @@ def test_log_save_keeps_stream(ui_env, monkeypatch, tmp_path, answers):
 
 # Items 13, 14: batch replace text, float cells
 def test_batch_replace_is_plain_text(ui_env):
-    from tinypedal.ui._common import TableBatchReplace
+    from neopedal.ui._common import TableBatchReplace
 
     table = QTableWidget(2, 1)
     table.setItem(0, 0, QTableWidgetItem("AF Corse"))
@@ -320,7 +320,7 @@ def test_batch_replace_is_plain_text(ui_env):
 
 @pytest.mark.parametrize("text", ["nan", "inf", "-inf", "1e999", "abc"])
 def test_float_cell_rejects_non_finite(text):
-    from tinypedal.ui._common import FloatTableItem
+    from neopedal.ui._common import FloatTableItem
 
     item = FloatTableItem(1.5)
     item.setText(text)
@@ -333,8 +333,8 @@ def test_float_cell_rejects_non_finite(text):
 
 # Item 17: refresh never runs toggle side effects
 def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
-    from tinypedal.ui import hotkey_view, spectate_view
-    from tinypedal.ui.quick import spectate_backend
+    from neopedal.ui import hotkey_view, spectate_view
+    from neopedal.ui.quick import spectate_backend
 
     calls = []
     for action in ("reload", "enable", "disable"):
@@ -362,8 +362,8 @@ def test_hotkey_and_spectate_refresh_without_side_effects(ui_env, monkeypatch):
 
 
 def test_spectate_texts_translated(ui_env, french, monkeypatch):
-    from tinypedal.ui import spectate_view
-    from tinypedal.ui.quick import spectate_backend
+    from neopedal.ui import spectate_view
+    from neopedal.ui.quick import spectate_backend
 
     monkeypatch.setattr(type(spectate_backend.api), "setup", lambda self: None)
     cfg.api["enable_player_index_override"] = True
@@ -389,8 +389,8 @@ def test_spectate_texts_translated(ui_env, french, monkeypatch):
 
 # Item 18: global hotkeys off only while capturing a key
 def test_hotkeys_disabled_only_while_capturing(ui_env, monkeypatch):
-    from tinypedal.template.setting_shortcuts import SHORTCUTS_GENERAL
-    from tinypedal.ui import hotkey_view
+    from neopedal.template.setting_shortcuts import SHORTCUTS_GENERAL
+    from neopedal.ui import hotkey_view
 
     calls = []
     for action in ("enable", "disable"):
@@ -409,7 +409,7 @@ def test_hotkeys_disabled_only_while_capturing(ui_env, monkeypatch):
 
 # Item 21: same page already open gets the call
 def test_option_finder_filters_open_page(window):
-    from tinypedal.ui import option_finder
+    from neopedal.ui import option_finder
 
     entries = option_finder.search_options(option_finder.build_index(), "speedometer opacity")
     first = option_finder.open_option(window, entries[0])  # Overlay Options page
@@ -420,14 +420,14 @@ def test_option_finder_filters_open_page(window):
 
 
 def test_option_finder_hides_app_kept_options(ui_env):
-    from tinypedal.ui import option_finder
+    from neopedal.ui import option_finder
 
     keys = {(entry.section, entry.key) for entry in option_finder.build_index()}
     assert ("vr_overlay", "mirror_position_x") not in keys and ("vr_overlay", "enable_vr_overlay") in keys
 
 
 def test_plugin_drop_installed_from_open_page(window, monkeypatch, tmp_path):
-    from tinypedal.ui import file_drop
+    from neopedal.ui import file_drop
 
     installs = []
     monkeypatch.setattr(file_drop, "classify", lambda path: file_drop.DROP_PLUGIN)
@@ -442,7 +442,7 @@ def test_plugin_drop_installed_from_open_page(window, monkeypatch, tmp_path):
 @pytest.mark.parametrize("text", ["", "  ", "/", pytest.param("C:/", marks=pytest.mark.skipif(
     sys.platform != "win32", reason="drive root on Windows only (a folder name elsewhere)"))])
 def test_empty_or_root_path_rejected(ui_env, text):
-    from tinypedal.ui._option import FilePathEdit
+    from neopedal.ui._option import FilePathEdit
 
     editor = FilePathEdit(None, "settings/")
     editor.setText(text)
@@ -450,7 +450,7 @@ def test_empty_or_root_path_rejected(ui_env, text):
 
 
 def test_valid_path_accepted(ui_env, tmp_path):
-    from tinypedal.ui._option import FilePathEdit
+    from neopedal.ui._option import FilePathEdit
 
     editor = FilePathEdit(None, "settings/")
     editor.setText(tmp_path.as_posix())
@@ -461,7 +461,7 @@ def test_valid_path_accepted(ui_env, tmp_path):
 def test_api_menu_reset_frees_action_group(window):
     from PySide6.QtGui import QActionGroup
 
-    from tinypedal.ui.menu import APIMenu
+    from neopedal.ui.menu import APIMenu
 
     menu = APIMenu("API", window)
     count = len(menu.findChildren(QActionGroup))
@@ -475,7 +475,7 @@ def test_api_menu_reset_frees_action_group(window):
 
 # Item 29: titles & literals translated
 def test_titles_translated(window, french):
-    from tinypedal.ui.config import FontConfig
+    from neopedal.ui.config import FontConfig
 
     font = FontConfig(parent=window, user_setting=cfg.user.setting, reload_func=lambda: None)
     try:
@@ -484,7 +484,7 @@ def test_titles_translated(window, french):
         assert font.edit_autooffset.itemText(1) == "activer"
     finally:
         font.close()
-    from tinypedal.ui.menu import OverlayMenu
+    from neopedal.ui.menu import OverlayMenu
 
     menu = OverlayMenu("Overlay", window)
     assert "Réinitialiser les données" in [action.text() for action in menu.actions()]
@@ -521,7 +521,7 @@ def contrast(first: str, second: str) -> float:
 
 
 def test_status_text_colors_contrast():
-    from tinypedal.ui import STATUS_COLORS, palette_dark, palette_light
+    from neopedal.ui import STATUS_COLORS, palette_dark, palette_light
 
     for theme, palette in (("Dark", palette_dark()), ("Light", palette_light())):
         backgrounds = [row[0] for row in palette if row[3].name in ("Window", "Base")]
@@ -533,7 +533,7 @@ def test_status_text_colors_contrast():
 
 
 def test_running_pill_follows_theme(ui_env):
-    from tinypedal.ui import set_style_palette, set_style_window, status_color
+    from neopedal.ui import set_style_palette, set_style_window, status_color
 
     try:
         set_style_palette("Light")
@@ -554,9 +554,9 @@ def render(widget) -> QImage:
 
 
 def test_focus_ring_drawn_for_keyboard_focus(ui_env, monkeypatch):
-    from tinypedal.ui import has_keyboard_focus
-    from tinypedal.ui.app import NavButton
-    from tinypedal.ui.tools_view import ToolCard
+    from neopedal.ui import has_keyboard_focus
+    from neopedal.ui.app import NavButton
+    from neopedal.ui.tools_view import ToolCard
 
     for button in (NavButton("Home", "", "H", ""), ToolCard("Tool", "", "")):
         button.resize(button.sizeHint())
@@ -584,7 +584,7 @@ def test_tray_single_click_shows_window(window, monkeypatch):
 
 # Item 32: message box icons drawn in theme
 def test_message_icons_follow_theme(window):
-    from tinypedal.ui import STATUS_COLORS, set_style_palette
+    from neopedal.ui import STATUS_COLORS, set_style_palette
 
     try:
         for theme in ("Dark", "Light"):
@@ -603,7 +603,7 @@ def test_message_icons_follow_theme(window):
 
 # Item 33: VR mirror window kept on reload, position remembered
 def test_mirror_window_kept_and_position_saved(ui_env, monkeypatch):
-    from tinypedal.vr_overlay import MirrorWindow, VROverlay
+    from neopedal.vr_overlay import MirrorWindow, VROverlay
 
     saved = copy_setting(cfg.user.config["vr_overlay"])
     cfg.user.config["vr_overlay"].update(enable_vr_overlay=False, enable_vr_mirror_window=True)
@@ -636,8 +636,8 @@ def test_mirror_window_kept_and_position_saved(ui_env, monkeypatch):
 def test_about_modified_version_notice(ui_env, french):
     from PySide6.QtWidgets import QLabel
 
-    from tinypedal.const_app import URL_FORK, URL_WEBSITE
-    from tinypedal.ui.about import About
+    from neopedal.const_app import URL_FORK, URL_WEBSITE
+    from neopedal.ui.about import About
 
     dialog = About(None)
     try:
@@ -654,7 +654,7 @@ def test_layout_editor_capture_window_mode(ui_env, monkeypatch):
     """Separate window (not a page): the editor itself is hidden while capturing"""
     from PySide6.QtGui import QGuiApplication
 
-    from tinypedal.ui.layout_editor import LayoutEditor
+    from neopedal.ui.layout_editor import LayoutEditor
 
     editor = LayoutEditor(None)
     editor.show()
@@ -671,8 +671,8 @@ def test_layout_editor_capture_window_mode(ui_env, monkeypatch):
 
 def test_focus_ring_painter_restored(ui_env):
     """Ring drawing keeps painter state for drawing after it"""
-    from tinypedal.ui import draw_focus_ring
-    from tinypedal.ui.app import NavButton
+    from neopedal.ui import draw_focus_ring
+    from neopedal.ui.app import NavButton
 
     button = NavButton("Home", "", "H", "")
     image = QImage(40, 40, QImage.Format.Format_ARGB32)

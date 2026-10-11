@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from neopedal.widget._modern.table import TREND, Row
 from tests.test_modern_table_rows import new_table, sample
-from tinypedal.widget._modern.table import TREND, Row
 
 
 def relative(**options):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["relative"].update(options)
     return new_table(cfg, "relative")
@@ -47,9 +47,9 @@ def test_trend_cell(ui_env, bundled_fonts, gap, rate, expected):
 
 
 def test_live_trends_from_relative_module(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
-    from tinypedal.widget._modern.relative import live_trends
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
+    from neopedal.widget._modern.relative import live_trends
 
     monkeypatch.setattr(api.read.timing, "estimated_laptime", lambda *args: 100.0)
     ahead, behind = minfo.relative.relativeDeltaAhead, minfo.relative.relativeDeltaBehind

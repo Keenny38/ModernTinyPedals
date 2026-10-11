@@ -20,7 +20,7 @@ def find_search(root):
 
 
 def test_search_debounced_and_enter_flushes(ui_env):
-    from tinypedal.ui.option_finder import OptionFinder
+    from neopedal.ui.option_finder import OptionFinder
 
     page = OptionFinder(None)
     try:

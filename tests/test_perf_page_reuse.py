@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.setting import cfg
+from neopedal.setting import cfg
 
 
 def flush():
@@ -76,8 +76,8 @@ def check_rows(list_view, model, role: str, key: str):
 
 
 def test_overlays_grid_reuses_cards(ui_env, monkeypatch, qml_messages):
-    from tinypedal.ui.overlay_view import OverlayView
-    from tinypedal.ui.quick import overlay_backend
+    from neopedal.ui.overlay_view import OverlayView
+    from neopedal.ui.quick import overlay_backend
 
     image = QImage(40, 20, QImage.Format.Format_ARGB32)
     image.fill(QColor("#336699"))
@@ -115,7 +115,7 @@ def test_overlays_grid_reuses_cards(ui_env, monkeypatch, qml_messages):
 
 
 def test_presets_list_reuses_rows(ui_env, monkeypatch, qml_messages):
-    from tinypedal.ui import preset_view
+    from neopedal.ui import preset_view
 
     for number in range(40):
         with open(f"{cfg.path.settings}preset {number:02d}.json", "w", encoding="utf-8") as file:
@@ -146,8 +146,8 @@ def test_presets_list_reuses_rows(ui_env, monkeypatch, qml_messages):
 def test_spectate_list_reuses_rows(ui_env, monkeypatch, qml_messages):
     from test_spectate_page import Reader
 
-    from tinypedal import realtime_state
-    from tinypedal.ui.spectate_view import SpectateList
+    from neopedal import realtime_state
+    from neopedal.ui.spectate_view import SpectateList
 
     monkeypatch.setattr(realtime_state, "paused", False)
     cars = [(f"Driver {number:02d}", f"Car {number % 5}", f"Class {number % 3}", number + 1, 100 + number)
@@ -175,8 +175,8 @@ def test_spectate_list_reuses_rows(ui_env, monkeypatch, qml_messages):
 
 
 def test_modules_grid_reuses_cards(ui_env, qml_messages):
-    from tinypedal.module_control import mctrl, wctrl
-    from tinypedal.ui.module_view import ModuleList
+    from neopedal.module_control import mctrl, wctrl
+    from neopedal.ui.module_view import ModuleList
 
     page = ModuleList(None, mctrl, wctrl)
     page.resize(700, 420)

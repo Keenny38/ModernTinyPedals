@@ -1,11 +1,11 @@
-"""Overlay pictures on simulated race data (tinypedal.demo_data): values shown, real data untouched"""
+"""Overlay pictures on simulated race data (neopedal.demo_data): values shown, real data untouched"""
 
 import threading
 
 import pytest
 
-from tinypedal import demo_data
-from tinypedal.setting import cfg
+from neopedal import demo_data
+from neopedal.setting import cfg
 
 
 def widget_globals() -> set[tuple[str, str, int]]:
@@ -19,11 +19,11 @@ def widget_globals() -> set[tuple[str, str, int]]:
 
 
 def test_render_reads_simulated_race_then_puts_real_data_back(ui_env, bundled_fonts):
-    from tinypedal import race_live
-    from tinypedal.api_control import api
-    from tinypedal.module_info import minfo
-    from tinypedal.ui.widget_preview import render_widget
-    from tinypedal.widget._modern import gear
+    from neopedal import race_live
+    from neopedal.api_control import api
+    from neopedal.module_info import minfo
+    from neopedal.ui.widget_preview import render_widget
+    from neopedal.widget._modern import gear
 
     render_widget(cfg, "gear", dict(cfg.user.setting["gear"]))  # widget modules loaded
     before = widget_globals()
@@ -41,13 +41,13 @@ def test_render_reads_simulated_race_then_puts_real_data_back(ui_env, bundled_fo
         raise RuntimeError
     assert widget_globals() == before
     # Data modules never pointed to simulated data
-    from tinypedal.module import module_relative
+    from neopedal.module import module_relative
 
     assert module_relative.api is api and module_relative.minfo is minfo
 
 
 def test_render_never_changes_user_presets(ui_env, bundled_fonts, monkeypatch):
-    from tinypedal.ui.widget_preview import render_widget
+    from neopedal.ui.widget_preview import render_widget
 
     saved = []
     monkeypatch.setattr(type(cfg), "save", lambda self, *args, **kwargs: saved.append(kwargs))
@@ -59,7 +59,7 @@ def test_render_never_changes_user_presets(ui_env, bundled_fonts, monkeypatch):
 
 
 def test_demo_state_is_per_thread():
-    from tinypedal.demo_state import demo_drawing, demo_reader, drawing_demo
+    from neopedal.demo_state import demo_drawing, demo_reader, drawing_demo
 
     reader = object()
     seen = []
@@ -74,8 +74,8 @@ def test_demo_state_is_per_thread():
 
 def test_simulated_lists_match_relative_module(ui_env, monkeypatch):
     """vehicles_info copies module_relative.get_vehicles_info (without its shared buffers)"""
-    from tinypedal.module import module_relative
-    from tinypedal.module_info import RelativeInfo
+    from neopedal.module import module_relative
+    from neopedal.module_info import RelativeInfo
 
     session = demo_data.DemoSession(cfg.user.setting["standings"])
     monkeypatch.setattr(module_relative, "api", session.api)
@@ -105,7 +105,7 @@ def test_history_replays_put_state_back():
 
 
 def test_preview_zoom_steps():
-    from tinypedal.ui.quick.overlay_options_backend import drawn_scale, preview_zoom
+    from neopedal.ui.quick.overlay_options_backend import drawn_scale, preview_zoom
 
     assert preview_zoom(0.4) == preview_zoom(float("nan")) == preview_zoom(1) == 1
     assert preview_zoom(1.1) == 1.25 and preview_zoom(2) == 2 and preview_zoom(9) == 3
@@ -115,9 +115,9 @@ def test_preview_zoom_steps():
 
 
 def test_zoomed_preview_drawn_bigger(ui_env, bundled_fonts):
+    from neopedal.ui.quick.overlay_options_backend import OverlayOptionsBackend
+    from neopedal.ui.quick.preview_provider import STORE, key_of
     from tests.test_overlay_options import Control, Host, flush
-    from tinypedal.ui.quick.overlay_options_backend import OverlayOptionsBackend
-    from tinypedal.ui.quick.preview_provider import STORE, key_of
 
     backend = OverlayOptionsBackend(None, Host(), Control())
     try:

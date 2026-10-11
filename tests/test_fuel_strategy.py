@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from tinypedal.fuel_strategy import (
+from neopedal.fuel_strategy import (
     StrategyInput,
     history_laps,
     lap_time,
@@ -15,7 +15,7 @@ from tinypedal.fuel_strategy import (
     strategy_input_from_values,
     target_consumption,
 )
-from tinypedal.module_info import ConsumptionDataSet
+from neopedal.module_info import ConsumptionDataSet
 
 
 def test_lap_race_without_stop_loads_exact_fuel():
@@ -154,7 +154,7 @@ def test_no_fuel_effect_without_fuel():
 
 
 def test_saving_target_bounded_by_stint_limit(monkeypatch):
-    from tinypedal import fuel_strategy
+    from neopedal import fuel_strategy
 
     calls = []
     real_plan = fuel_strategy.plan
@@ -285,7 +285,7 @@ def test_drivers_pace_limits_and_turns():
 
 
 def test_saving_cost_and_comparison():
-    from tinypedal.fuel_strategy import compare_strategies, race_result
+    from neopedal.fuel_strategy import compare_strategies, race_result
 
     setup = StrategyInput(laptime=100, race_laps=40, tank_capacity=45, fuel_per_lap=3.0, pit_seconds=60,
                           saving_cost=0.5)
@@ -299,7 +299,7 @@ def test_saving_cost_and_comparison():
 
 
 def test_rest_of_race_from_live_state():
-    from tinypedal.fuel_strategy import RaceState, remaining_input
+    from neopedal.fuel_strategy import RaceState, remaining_input
 
     setup = StrategyInput(laptime=90, race_laps=40, tank_capacity=45, fuel_per_lap=3.0)
     base = plan(setup)
@@ -314,7 +314,7 @@ def test_rest_of_race_from_live_state():
 
 
 def test_pace_estimate_from_history():
-    from tinypedal.fuel_strategy import estimate_pace
+    from neopedal.fuel_strategy import estimate_pace
 
     laps = []
     number = 1
@@ -406,7 +406,7 @@ def test_time_race_back_and_forth_keeps_longest_of_it():
 
 
 def test_consumption_target_to_stop():
-    from tinypedal.fuel_strategy import target_to_stop
+    from neopedal.fuel_strategy import target_to_stop
 
     setup = StrategyInput(laptime=90, race_laps=40, tank_capacity=45, fuel_per_lap=3.0, margin_laps=1)
     assert target_to_stop(setup, 30.0, 9) == pytest.approx((30 - 3) / 9)
@@ -418,7 +418,7 @@ def session_id(now: float, laps: int = 0, start: float = 0.0, stamp: int = 36000
 
 
 def test_stop_counter():
-    from tinypedal.race_live import StopCounter
+    from neopedal.race_live import StopCounter
 
     counter = StopCounter()
     assert counter.update(session_id(0), False, 50, 40, 0, 90, 0, now=0) == 0
@@ -436,7 +436,7 @@ def test_stop_counter():
 
 
 def test_stop_counter_serviced_stop_not_counted_by_game():
-    from tinypedal.race_live import StopCounter
+    from neopedal.race_live import StopCounter
 
     counter = StopCounter()
     counter.update(session_id(100), False, 50, 40, 0, 90, 0, now=100)
@@ -447,7 +447,7 @@ def test_stop_counter_serviced_stop_not_counted_by_game():
 
 
 def test_stop_counter_new_session():
-    from tinypedal.race_live import StopCounter
+    from neopedal.race_live import StopCounter
 
     counter = StopCounter()
     counter.update(session_id(600, 10), False, 50, 40, 0, 90, 2, now=600)
@@ -463,7 +463,7 @@ def test_stop_counter_new_session():
 def test_rival_tracker_keeps_stop_on_driver_swap(monkeypatch):
     from types import SimpleNamespace
 
-    from tinypedal import race_live
+    from neopedal import race_live
 
     cars = {"driver": ["A1", "B1"], "stops": [0, 0], "laps": [10, 10], "elapsed": 600}
     read = SimpleNamespace(
@@ -487,7 +487,7 @@ def test_rival_tracker_keeps_stop_on_driver_swap(monkeypatch):
 
 
 def test_rest_of_race_counts_stint_from_real_stop():
-    from tinypedal.fuel_strategy import RaceState, remaining_input
+    from neopedal.fuel_strategy import RaceState, remaining_input
 
     # 60 min stint limit: plan stops at lap 36, car pits at lap 20
     setup = StrategyInput(laptime=100, race_laps=100, tank_capacity=200, fuel_per_lap=2.0, max_stint_minutes=60)
@@ -506,7 +506,7 @@ def test_rest_of_race_counts_stint_from_real_stop():
 
 
 def test_leader_extra_lap_not_added_again_after_timer():
-    from tinypedal.fuel_strategy import RaceState, remaining_input
+    from neopedal.fuel_strategy import RaceState, remaining_input
 
     setup = StrategyInput(laptime=100, race_minutes=60, tank_capacity=100, fuel_per_lap=3.0, extra_laps=1)
     base = plan(setup)

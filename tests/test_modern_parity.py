@@ -12,11 +12,11 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor, QImage
 
-from tinypedal.api_control import api
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.widget._modern import create_widget
-from tinypedal.widget._modern.base import DASH
+from neopedal.api_control import api
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.widget._modern import create_widget
+from neopedal.widget._modern.base import DASH
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def widgets(ui_env, bundled_fonts):
     def make(name: str, modern: bool = True, **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -108,7 +108,7 @@ def test_display_order_of_driver_columns_and_gear_bars(widgets, field):
 
 
 def test_display_order_options_listed_for_modern_design():
-    from tinypedal.widget._modern import modern_module
+    from neopedal.widget._modern import modern_module
 
     for name, key in (("brake_bias", "display_order_brake_bias"), ("relative", "display_order_driver"),
                       ("stint_history", "display_order_consistency"), ("engine", "display_order_rpm")):
@@ -117,7 +117,7 @@ def test_display_order_options_listed_for_modern_design():
 
 # --- Race plan: live replan, pit menu check, consumption target
 def plan(widget, monkeypatch, stops_done: int = 0):
-    from tinypedal.fuel_strategy import PitStop, Strategy, StrategyInput
+    from neopedal.fuel_strategy import PitStop, Strategy, StrategyInput
 
     monkeypatch.setattr(widget, "refresh_plan", lambda: None)
     widget.setup = StrategyInput(laptime=100.0, race_laps=30, tank_capacity=100.0, fuel_per_lap=3.0)
@@ -156,9 +156,9 @@ def test_race_plan_target_consumption(widgets, monkeypatch):
 
 
 def test_race_plan_live_replan(widgets, monkeypatch):
-    from tinypedal.fuel_strategy import PitStop, Strategy
-    from tinypedal.race_live import LiveRead
-    from tinypedal.widget._modern import race_plan
+    from neopedal.fuel_strategy import PitStop, Strategy
+    from neopedal.race_live import LiveRead
+    from neopedal.widget._modern import race_plan
 
     widget = widgets("race_plan", enable_live_replan=True, show_next_stop=True, show_stops_left=True)
     plan(widget, monkeypatch)
@@ -201,7 +201,7 @@ def test_race_plan_stint_limit_and_consumption_estimate(widgets, monkeypatch):
 def test_driver_columns_brand_logo_average_speed_trap_lico(widgets, field, monkeypatch, tmp_path):
     from PySide6.QtGui import QPixmap
 
-    from tinypedal.widget._modern.table import LOGO
+    from neopedal.widget._modern.table import LOGO
 
     logo = QPixmap(64, 32)
     logo.fill(QColor("#FF0000"))
@@ -230,7 +230,7 @@ def test_driver_columns_brand_logo_average_speed_trap_lico(widgets, field, monke
 
 
 def test_compound_cell_per_wheel(ui_env):
-    from tinypedal.widget._modern.rows import compound_cell
+    from neopedal.widget._modern.rows import compound_cell
 
     assert len(compound_cell(("S", "S", "S", "S")).extra) == 1
     assert len(compound_cell(("S", "S", "M", "M")).extra) == 2
@@ -263,7 +263,7 @@ def test_driver_list_custom_pit_and_leader_texts(widgets, field, monkeypatch):
 
 
 def test_driver_list_class_styled_position(widgets, field):
-    from tinypedal.widget._modern.table import CLASS
+    from neopedal.widget._modern.table import CLASS
 
     widget = widgets("relative", column_class=True, show_class_style_for_position_in_class=True)
     update(widget)
@@ -277,7 +277,7 @@ def test_driver_list_class_styled_position(widgets, field):
 
 # --- Restyled widgets: colors not set by design stay customizable
 def test_restyled_widgets_show_unmapped_colors():
-    from tinypedal.widget._modern import modern_module
+    from neopedal.widget._modern import modern_module
 
     black_box = modern_module("black_box").Realtime.options
     assert "background_color" not in black_box and "font_color_temperature" in black_box
@@ -310,7 +310,7 @@ def test_brake_pressure_input_mark(widgets, monkeypatch):
 
 # --- Gear: readings, custom limiter text, limiter reminder in pit lane
 def test_gear_readings_and_limiter(widgets, monkeypatch):
-    from tinypedal.widget._modern.gear import LIMITER_OFF, LIMITER_ON, LIMITER_REMINDER
+    from neopedal.widget._modern.gear import LIMITER_OFF, LIMITER_ON, LIMITER_REMINDER
 
     reader(monkeypatch, "engine", "rpm", 7345.0)
     reader(monkeypatch, "engine", "rpm_max", 8000.0)
@@ -335,7 +335,7 @@ def test_gear_readings_and_limiter(widgets, monkeypatch):
 
 
 def test_gear_limiter_default_text_is_design_label(widgets):
-    from tinypedal import i18n
+    from neopedal import i18n
 
     assert widgets("gear").text_limiter == i18n.tr_overlay("LIMIT")
 
@@ -427,7 +427,7 @@ def test_invalid_lap_highlight(widgets, monkeypatch):
 
 # --- Damage: inverted integrity, flash timing, puncture from game flat state
 def test_damage_inverted_integrity_and_flash(widgets, monkeypatch):
-    from tinypedal.widget._modern import damage
+    from neopedal.widget._modern import damage
 
     reader(monkeypatch, "vehicle", "damage_severity", (2, 2, 0, 0, 0, 0, 0, 0))
     widget = widgets("damage", show_inverted_integrity=True, warning_flash_highlight_duration=0.4,
@@ -442,7 +442,7 @@ def test_damage_inverted_integrity_and_flash(widgets, monkeypatch):
 
 
 def test_puncture_from_game_flat_state(widgets, monkeypatch):
-    from tinypedal.widget._common import tyre_punctured
+    from neopedal.widget._common import tyre_punctured
 
     reader(monkeypatch, "tyre", "flat", (False, True, False, False))
     reader(monkeypatch, "tyre", "puncture", (False, False, False, True))  # worn through: fallback
@@ -467,8 +467,8 @@ def test_tyre_widgets_left_right_compound_badges(widgets, monkeypatch):
 
 
 def test_heatmap_from_game_optimal_temperature(widgets, monkeypatch):
-    from tinypedal import calculation as calc
-    from tinypedal.widget._modern.wheels import heatmap_around
+    from neopedal import calculation as calc
+    from neopedal.widget._modern.wheels import heatmap_around
 
     reader(monkeypatch, "tyre", "optimal_temperature", (90.0, 90.0, 0.0, 0.0))  # rear: unavailable
     widget = widgets("tyre_temperature", enable_heatmap_from_optimal_temperature=True)

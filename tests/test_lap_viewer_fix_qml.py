@@ -14,9 +14,9 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtQml import QQmlExpression
 from PySide6.QtTest import QTest
 
+from neopedal.setting import cfg
 from tests.test_lap_viewer import flush_deleted, wait_loaded, write_lap
 from tests.test_lap_viewer_features import laps  # noqa: F401
-from tinypedal.setting import cfg
 
 
 def wait(seconds: float = 0.3):
@@ -95,7 +95,7 @@ def warnings():
 
 @pytest.fixture
 def opener(laps):  # noqa: F811
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.ui.lap_viewer import LapViewer
 
     dialogs = []
 
@@ -136,8 +136,8 @@ def test_window_keys_on_charts_track_box_never_keeps_them(opener, warnings):
 
 
 def test_undo_shortcut_of_shown_page_only(laps, monkeypatch):  # noqa: F811
-    from tinypedal.ui import app as app_module
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui import app as app_module
+    from neopedal.ui.tools_view import open_tool
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -446,7 +446,7 @@ def test_g_circle_follows_shown_laps(opener, warnings):
 
 
 def test_closed_without_qml_warnings(laps):  # noqa: F811
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.ui.lap_viewer import LapViewer
 
     dialog = LapViewer(None)
     wait_loaded(dialog)

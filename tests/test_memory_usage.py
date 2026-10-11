@@ -9,9 +9,9 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel, QSystemTrayIcon, QWidget
 
-from tinypedal import app_signal
-from tinypedal.const_file import ConfigType
-from tinypedal.setting import cfg
+from neopedal import app_signal
+from neopedal.const_file import ConfigType
+from neopedal.setting import cfg
 
 
 def flush_deleted():
@@ -47,7 +47,7 @@ class Recorder:
 
 
 def test_disabled_module_never_imported(ui_env, monkeypatch):
-    from tinypedal.module_control import ModuleControl
+    from neopedal.module_control import ModuleControl
 
     target = Recorder(["module_on", "module_off"])
     monkeypatch.setitem(cfg.user.setting, "module_on", {"enable": True})
@@ -62,7 +62,7 @@ def test_disabled_module_never_imported(ui_env, monkeypatch):
 
 
 def test_modern_design_does_not_import_classic_widget(ui_env, monkeypatch):
-    from tinypedal import module_control
+    from neopedal import module_control
 
     target = Recorder(["speedometer"])
     monkeypatch.setitem(cfg.user.setting, "speedometer", {"enable": True})
@@ -76,7 +76,7 @@ def test_modern_design_does_not_import_classic_widget(ui_env, monkeypatch):
 
 
 def test_widget_module_failing_to_import_is_skipped(ui_env, monkeypatch):
-    from tinypedal.module_control import ModuleControl
+    from neopedal.module_control import ModuleControl
 
     class Broken:
         __all__ = ["module_broken"]
@@ -91,17 +91,17 @@ def test_widget_module_failing_to_import_is_skipped(ui_env, monkeypatch):
 
 
 def test_widget_package_imports_submodule_on_access():
-    from tinypedal import widget
+    from neopedal import widget
 
     module = widget.speedometer
-    assert module is sys.modules["tinypedal.widget.speedometer"]
+    assert module is sys.modules["neopedal.widget.speedometer"]
     with pytest.raises(AttributeError):
         widget.not_a_widget  # noqa: B018
 
 
 def test_preview_of_modern_design_skips_classic_widget(ui_env, monkeypatch):
-    from tinypedal.ui import widget_preview
-    from tinypedal.widget import _modern
+    from neopedal.ui import widget_preview
+    from neopedal.widget import _modern
 
     imported = []
     monkeypatch.setattr(_modern, "uses_modern_design", lambda config, name: True)
@@ -112,7 +112,7 @@ def test_preview_of_modern_design_skips_classic_widget(ui_env, monkeypatch):
 
 # --- Pace notes player only while playback enabled
 def test_pace_notes_player_only_while_enabled(ui_env, monkeypatch):
-    from tinypedal.ui.pace_notes_view import PaceNotesPlayback
+    from neopedal.ui.pace_notes_view import PaceNotesPlayback
 
     setting = cfg.user.setting["pace_notes_playback"]
     monkeypatch.setitem(setting, "enable", False)
@@ -156,7 +156,7 @@ def counting():
 
 
 def test_lazy_page_built_once_when_shown(ui_env, counting):
-    from tinypedal.ui.lazy_page import LazyPage
+    from neopedal.ui.lazy_page import LazyPage
 
     lazy = LazyPage(None, counting)
     try:
@@ -175,7 +175,7 @@ def test_lazy_page_built_once_when_shown(ui_env, counting):
 
 def test_lazy_page_shown_while_building_is_built_once(ui_env):
     """Page creating its view when shown (Qt Quick page) re-enters showEvent of placeholder"""
-    from tinypedal.ui.lazy_page import LazyPage
+    from neopedal.ui.lazy_page import LazyPage
 
     built = []
 
@@ -199,7 +199,7 @@ def test_lazy_page_shown_while_building_is_built_once(ui_env):
 
 
 def test_lazy_page_released_and_built_again(ui_env, counting):
-    from tinypedal.ui.lazy_page import LazyPage
+    from neopedal.ui.lazy_page import LazyPage
 
     lazy = LazyPage(None, counting)
     try:
@@ -221,7 +221,7 @@ def test_lazy_page_release_clears_qml_before_backend(ui_env, tmp_path):
     from PySide6.QtCore import Property, QObject, QUrl, qInstallMessageHandler
     from PySide6.QtQuickWidgets import QQuickWidget
 
-    from tinypedal.ui.lazy_page import LazyPage
+    from neopedal.ui.lazy_page import LazyPage
 
     class Backend(QObject):
         @Property(int, constant=True)
@@ -256,7 +256,7 @@ def test_lazy_page_release_clears_qml_before_backend(ui_env, tmp_path):
 
 
 def test_pages_released_while_window_hidden(ui_env, counting):
-    from tinypedal.ui.lazy_page import LazyPage, PageRelease
+    from neopedal.ui.lazy_page import LazyPage, PageRelease
 
     window = QWidget()
     window.resize(200, 200)
@@ -287,7 +287,7 @@ def test_pages_kept_while_modal_dialog_runs(ui_env, counting, monkeypatch):
     """Message box opened from a page (its handler on the call stack): page & window released after it"""
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.ui.lazy_page import LazyPage, PageRelease
+    from neopedal.ui.lazy_page import LazyPage, PageRelease
 
     window = QWidget()
     lazy = LazyPage(window, counting)
@@ -310,7 +310,7 @@ def test_pages_kept_while_modal_dialog_runs(ui_env, counting, monkeypatch):
 
 
 def test_hidden_window_kept_with_qt_quick_page_open(ui_env):
-    from tinypedal.ui.lazy_page import PageRelease
+    from neopedal.ui.lazy_page import PageRelease
 
     window = QWidget()
     try:
@@ -330,7 +330,7 @@ def test_hidden_window_kept_with_qt_quick_page_open(ui_env):
 
 @pytest.fixture
 def app_window(ui_env, monkeypatch):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -349,7 +349,7 @@ def app_window(ui_env, monkeypatch):
 
 
 def test_only_shown_page_built_at_startup(app_window):
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     view = app_window.centralWidget()
     built = {key for key, page in view._lazy_pages.items() if page.page is not None}
@@ -362,7 +362,7 @@ def test_only_shown_page_built_at_startup(app_window):
 @pytest.fixture
 def tray_window(ui_env, monkeypatch):
     """Main window started hidden in tray, brake editor page left open at last quit"""
-    from tinypedal.ui import app as app_module
+    from neopedal.ui import app as app_module
 
     monkeypatch.setattr(app_module.AppWindow, "set_window_state", lambda self: None)
     cfg.application["show_setup_wizard_at_startup"] = False
@@ -432,8 +432,8 @@ def test_started_in_tray_pages_built_once_shown_and_released_when_hidden(tray_wi
 
 
 def test_ui_font_family_set_on_app_font_not_style_sheet(ui_env):
-    from tinypedal.main import UI_FONT_FAMILIES, set_app_font
-    from tinypedal.ui import set_style_window
+    from neopedal.main import UI_FONT_FAMILIES, set_app_font
+    from neopedal.ui import set_style_window
 
     fonts = []
     set_app_font(SimpleNamespace(font=lambda: QFont("System UI"), setFont=fonts.append))
@@ -447,9 +447,9 @@ def test_ui_font_family_set_on_app_font_not_style_sheet(ui_env):
 def test_text_cache_follows_texts_drawn(ui_env, bundled_fonts, monkeypatch):
     from importlib import import_module
 
-    from tinypedal.widget._modern import base
+    from neopedal.widget._modern import base
 
-    widget = import_module("tinypedal.widget._modern.speedometer").Realtime(cfg, "speedometer")
+    widget = import_module("neopedal.widget._modern.speedometer").Realtime(cfg, "speedometer")
     try:
         monkeypatch.setattr(base, "TEXT_CACHE_MIN", 4)
         monkeypatch.setattr(base, "TEXT_CACHE_PER_DRAW", 2)

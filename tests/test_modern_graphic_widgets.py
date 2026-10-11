@@ -9,13 +9,13 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QTimerEvent
 from PySide6.QtGui import QColor, QImage
 
+from neopedal.api_control import api
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.template.setting_widget import WIDGET_DEFAULT
+from neopedal.widget._modern import create_widget, modern_module
+from neopedal.widget._modern.base import DASH
 from tests.test_widget_benchmark import fill_field
-from tinypedal.api_control import api
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.template.setting_widget import WIDGET_DEFAULT
-from tinypedal.widget._modern import create_widget, modern_module
-from tinypedal.widget._modern.base import DASH
 
 GRAPHIC_WIDGETS = (
     "friction_circle", "heading", "instrument", "navigation", "radar", "steering_wheel", "track_map", "track_notes",
@@ -41,7 +41,7 @@ def widgets(ui_env, bundled_fonts, monkeypatch):
     def make(name: str, modern: bool = True, theme: str = "Modern Dark", **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = theme if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -99,7 +99,7 @@ def has_color(image: QImage, color: QColor, tolerance: int = 40) -> bool:
 # --- Every graphic overlay has its own design now (no classic drawing restyle)
 @pytest.mark.parametrize("name", GRAPHIC_WIDGETS)
 def test_own_design_reads_existing_options(name):
-    from tinypedal.widget._modern.base import ModernOverlay
+    from neopedal.widget._modern.base import ModernOverlay
 
     realtime = modern_module(name).Realtime
     assert issubclass(realtime, ModernOverlay)
@@ -176,7 +176,7 @@ def test_heading_readings_and_lines(widgets, monkeypatch):
 
 
 def test_heading_labels_translated():
-    from tinypedal.i18n.fr_overlay import OVERLAY_LABELS
+    from neopedal.i18n.fr_overlay import OVERLAY_LABELS
 
     assert OVERLAY_LABELS["Yaw"] == "Lacet" and "Front slip" in OVERLAY_LABELS
 
@@ -309,7 +309,7 @@ def test_radar_fade_with_distance(widgets, monkeypatch):
 @pytest.mark.parametrize("fade", [0.0, 0.5])
 def test_classic_radar_fade_mask_uniform_in_modern_style(widgets, monkeypatch, fade):
     """Fade mask scales every pixel alpha, never rounded/shaded (nor skipped at alpha 0) by modern style"""
-    from tinypedal.widget import _painter, radar
+    from neopedal.widget import _painter, radar
 
     widget = widgets("radar", enable_classic_layout=True, enable_auto_hide=False, show_background=True,
                      show_edge_fade_out=False, background_color="#FF222222")
@@ -405,7 +405,7 @@ def test_trailing_samples_and_pause(widgets, monkeypatch):
 
 # --- Weather forecast
 def test_weather_forecast_columns(widgets, monkeypatch):
-    from tinypedal.process.weather import WeatherNode
+    from neopedal.process.weather import WeatherNode
 
     nodes = (WeatherNode(0.0, 1, 20.0, 0.0), WeatherNode(0.2, 6, 18.0, 0.4), WeatherNode(0.5, 10, 16.0, 0.9))
     reader(monkeypatch, "session", "weather_forecast", nodes)
@@ -432,8 +432,8 @@ def test_weather_icons_for_every_sky(widgets):
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QPainter, QPixmap
 
-    from tinypedal.widget._modern.theme import build_theme
-    from tinypedal.widget._modern.weather_forecast import weather_icon
+    from neopedal.widget._modern.theme import build_theme
+    from neopedal.widget._modern.weather_forecast import weather_icon
 
     for theme_name in ("Modern Dark", "Modern Light"):
         theme = build_theme({"overlay_theme": theme_name})
@@ -449,7 +449,7 @@ def test_weather_icons_for_every_sky(widgets):
 # --- Classic widgets keep their drawing, read data through the same mixins
 @pytest.mark.parametrize("name", GRAPHIC_WIDGETS)
 def test_classic_layout_kept(widgets, name):
-    from tinypedal.widget._modern.base import ModernOverlay
+    from neopedal.widget._modern.base import ModernOverlay
 
     widget = widgets(name, modern=False)
     assert not isinstance(widget, ModernOverlay)

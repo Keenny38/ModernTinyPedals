@@ -9,10 +9,10 @@ import threading
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile.telemetry_lap import LapData, interpolate
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_circuit_shape import COMBO, OTHER, listed_path, make_lap, write_lap
-from tinypedal.setting import cfg
-from tinypedal.userfile.telemetry_lap import LapData, interpolate
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def track(ui_env):
     """Viewer of a track with 2 laps recorded by the app (shown)"""
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     folder = os.path.join(cfg.path.telemetry.rstrip("/"), COMBO)
     paths = [write_lap(folder, make_lap(number, recorded=True, pace=1 + number / 100)) for number in (1, 2)]
@@ -36,14 +36,14 @@ def track(ui_env):
 def plot_lap(key, data):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.lap_viewer import PlotLap
 
     return PlotLap(key, key, data, QColor("red"))
 
 
 def corner_distance(data, lap) -> float:
     """Chart distance of lowest speed of lap (slowest corner, same place on every aligned lap)"""
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
 
     xs, ys = data.series(CHANNEL_MAP["speed_kph"], lap)
     return min((y, x) for x, y in zip(xs, ys) if 100.0 < x < max(xs) - 100.0)[1]
@@ -51,7 +51,7 @@ def corner_distance(data, lap) -> float:
 
 # A) Imported reference lap aligned on a lap recorded by the app
 def test_imported_reference_aligned_on_recorded_lap(ui_env):
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.quick.trace_data import TraceData
 
     recorded = make_lap(1, recorded=True)
     reference = make_lap(2, shift=150.0, pace=0.99)
@@ -93,9 +93,9 @@ def test_library_reference_aligned_in_viewer(track, tmp_path):
 
 
 def test_consistency_job_aligns_imported_reference(ui_env, tmp_path):
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.lap_geometry import mini_sector_job
-    from tinypedal.userfile.telemetry_lap import load_lap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.lap_geometry import mini_sector_job
+    from neopedal.userfile.telemetry_lap import load_lap
 
     folder = str(tmp_path / COMBO)
     reference_path = write_lap(folder, make_lap(1, shift=120.0, positions=False))
@@ -149,8 +149,8 @@ def gap_lap(lap: LapData, value: float, start: int = 500, count: int = 40) -> La
 
 @pytest.mark.parametrize("value", [math.nan, math.inf])
 def test_positions_gap_ignored(value):
-    from tinypedal.userfile.circuit_match import same_imported_circuit
-    from tinypedal.userfile.lap_offset import aligned_on, has_positions
+    from neopedal.userfile.circuit_match import same_imported_circuit
+    from neopedal.userfile.lap_offset import aligned_on, has_positions
 
     reference = make_lap(1, recorded=True)
     imported = gap_lap(make_lap(2, shift=120.0), value)
@@ -174,8 +174,8 @@ def test_lap_with_nan_positions_shown(track, tmp_path):
 
 
 def test_comparison_failure_keeps_lap(track, tmp_path, monkeypatch, caplog):
-    import tinypedal.ui.quick.lap_backend as lap_backend
-    import tinypedal.userfile.lap_offset as lap_offset
+    import neopedal.ui.quick.lap_backend as lap_backend
+    import neopedal.userfile.lap_offset as lap_offset
 
     def broken(*args, **kwargs):
         raise ValueError("cannot convert float NaN to integer")
@@ -229,9 +229,9 @@ def test_shape_checks_keep_no_lap_data(track, tmp_path):
 
 # F) Slow comparisons of imported laps in background
 def test_imported_laps_compared_in_background(track, tmp_path, monkeypatch):
-    import tinypedal.ui.quick.lap_backend as lap_backend
-    import tinypedal.ui.quick.trace_data as trace_data
-    from tinypedal.ui import lap_viewer
+    import neopedal.ui.quick.lap_backend as lap_backend
+    import neopedal.ui.quick.trace_data as trace_data
+    from neopedal.ui import lap_viewer
 
     backend, _ = track
     imported = [write_lap(str(tmp_path / "logs"), make_lap(7 + number, shift=40.0 * (number + 1)))

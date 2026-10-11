@@ -10,12 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.telemetry_sim import LapSim, fake_reader
-from tests.test_replay_load import replay_view, wait_loaded, write_long_replay  # noqa: F401
-from tinypedal import realtime_state
-from tinypedal import replay as replay_module
-from tinypedal.api_control import api
-from tinypedal.replay import (
+from neopedal import realtime_state
+from neopedal import replay as replay_module
+from neopedal.api_control import api
+from neopedal.replay import (
     FRAME_HEADER,
     REST_DELTA,
     REST_FRAME,
@@ -26,6 +24,8 @@ from tinypedal.replay import (
     ReplayPlayer,
     ReplayWriter,
 )
+from tests.telemetry_sim import LapSim, fake_reader
+from tests.test_replay_load import replay_view, wait_loaded, write_long_replay  # noqa: F401
 
 
 # --- Rest API snapshots: changed fields only, decoded on demand
@@ -159,8 +159,8 @@ def test_export_rebuilds_rest_snapshots(tmp_path):
 
 # --- Replay window: recording kept while replay file loads
 def test_open_file_keeps_recording_until_loaded(replay_view, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view as module
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view as module
 
     state = {"recording": True}
     stopped = []
@@ -208,8 +208,8 @@ def test_recording_error_reported(tmp_path, monkeypatch):
 
 
 def test_auto_replay_retries_after_recording_error(monkeypatch):
-    from tinypedal import replay_session
-    from tinypedal.replay import replay
+    from neopedal import replay_session
+    from neopedal.replay import replay
 
     calls = []
     state = {"recording": False}
@@ -256,7 +256,7 @@ def lagging_scoring(monkeypatch):
 
 
 def test_recorder_lap_number_read_after_validation(lagging_scoring):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     sim = lagging_scoring
     saved = []
@@ -270,7 +270,7 @@ def test_recorder_lap_number_read_after_validation(lagging_scoring):
 
 
 def test_recorder_invalid_lap_keeps_crossing_number(lagging_scoring, monkeypatch):
-    from tinypedal.module import module_recorder
+    from neopedal.module import module_recorder
 
     saved = []
     pending = module_recorder.PendingLap("T - C", 4, 90.0, 0.0, [], {}, 0.0)

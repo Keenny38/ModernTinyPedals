@@ -9,11 +9,11 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
+from neopedal.adapter import lmu_restapi
+from neopedal.api_control import api
+from neopedal.process import game_info
+from neopedal.setting import cfg
 from tests.test_dialog_pages import window  # noqa: F401 (window: fixture)
-from tinypedal.adapter import lmu_restapi
-from tinypedal.api_control import api
-from tinypedal.process import game_info
-from tinypedal.setting import cfg
 
 CHAT = [
     {"message": "M Toit: Leaving pits", "timestamp": 17911691634142719},
@@ -135,7 +135,7 @@ def update_task(data, path: str, answer):
 
 
 def test_rest_tasks_and_readers():
-    from tinypedal import api_connector
+    from neopedal import api_connector
 
     sim = api_connector.SimLMU()
     data = sim._restapi_dataset
@@ -151,14 +151,14 @@ def test_rest_tasks_and_readers():
     assert read.vehicle.setup_name() == "Race Bahrain" and read.vehicle.setup_modified()
     update_task(data, "/rest/sessions/GetGameState", {"status": "unavailable"})
     assert read.lap.pit_entry_distance() == -1.0
-    from tinypedal.template.setting_api import API_DEFAULT
+    from neopedal.template.setting_api import API_DEFAULT
 
     assert API_DEFAULT["api_lmu"]["enable_race_info"]
 
 
 # --- Chat widget
 def test_chat_lines_wrap_hide_and_highlight():
-    from tinypedal.widget.chat import chat_lines
+    from neopedal.widget.chat import chat_lines
 
     messages = ((100.0, "A: old message"), (170.0, "B: " + "word " * 12), (195.0, "C: new"))
     lines = chat_lines(messages, 200.0, 20, 5, 60.0, 10.0, False)
@@ -174,13 +174,13 @@ def test_chat_lines_wrap_hide_and_highlight():
 
 @pytest.mark.parametrize("modern", [False, True])
 def test_chat_widget(ui_env, monkeypatch, modern):
-    from tinypedal.widget._modern import create_widget
+    from neopedal.widget._modern import create_widget
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     cfg.user.setting["chat"]["number_of_lines"] = 3
     monkeypatch.setattr(api.read.session, "chat_messages",
                         lambda: tuple(game_info.parse_chat(CHAT, ())))
-    widget = create_widget(import_module("tinypedal.widget.chat"), cfg, "chat")
+    widget = create_widget(import_module("neopedal.widget.chat"), cfg, "chat")
     widget.max_duration = 0  # sample messages are old
     widget.timerEvent(None)
     if modern:  # sender & message apart
@@ -192,7 +192,7 @@ def test_chat_widget(ui_env, monkeypatch, modern):
 
 
 def test_chat_lines_newest_at_top():
-    from tinypedal.widget.chat import chat_lines
+    from neopedal.widget.chat import chat_lines
 
     messages = ((100.0, "A: one two three four five six"), (101.0, "B: last"))
     assert chat_lines(messages, 102.0, 12, 3, 0.0, 0.0, False, True) == (
@@ -204,8 +204,8 @@ def test_chat_lines_newest_at_top():
 @pytest.mark.parametrize("modern", [False, True])
 def test_chat_overlay_picture_shows_sample_conversation(ui_env, bundled_fonts, modern):
     """Overlays page & options picture: sample conversation (messages of the sample race)"""
-    from tinypedal.ui import widget_preview
-    from tinypedal.widget.chat import SAMPLE_MESSAGES
+    from neopedal.ui import widget_preview
+    from neopedal.widget.chat import SAMPLE_MESSAGES
 
     cfg.user.config["overlay_style"]["overlay_theme"] = "Modern Dark" if modern else "Legacy Dark"
     image = widget_preview.render_widget(cfg, "chat", cfg.user.setting["chat"]).toImage()
@@ -216,8 +216,8 @@ def test_chat_overlay_picture_shows_sample_conversation(ui_env, bundled_fonts, m
 
 # --- Black box contact events
 def test_black_box_contact_events(monkeypatch):
-    from tinypedal.widget._black_box.reader import DataReader
-    from tinypedal.widget._black_box.recorder import EventLog
+    from neopedal.widget._black_box.reader import DataReader
+    from neopedal.widget._black_box.recorder import EventLog
 
     state = {"elapsed": 1780.0, "contacts": game_info.parse_contacts(CONTACTS, ())}
     monkeypatch.setattr(api, "read", SimpleNamespace(
@@ -249,7 +249,7 @@ def test_black_box_contact_events(monkeypatch):
 
 # --- Race plan: pit lane entry
 def test_race_plan_pit_entry(monkeypatch):
-    from tinypedal.widget import race_plan
+    from neopedal.widget import race_plan
 
     monkeypatch.setattr(api, "read", SimpleNamespace(lap=SimpleNamespace(
         pit_entry_distance=lambda: 4902.0, distance=lambda: 4500.0, track_length=lambda: 5412.0)))
@@ -262,8 +262,8 @@ def test_race_plan_pit_entry(monkeypatch):
 
 # --- Setup name with laps
 def test_lap_info_setup_name(monkeypatch):
-    from tinypedal.module import module_recorder
-    from tinypedal.ui.quick.lap_backend import setup_text
+    from neopedal.module import module_recorder
+    from neopedal.ui.quick.lap_backend import setup_text
 
     vehicle = SimpleNamespace(setup=lambda: ("a=1",), setup_name=lambda: "Race Bahrain", setup_modified=lambda: True)
     monkeypatch.setattr(api, "read", SimpleNamespace(vehicle=vehicle))
@@ -338,8 +338,8 @@ class FakeGame:
 
 @pytest.fixture
 def replays_page(ui_env, monkeypatch):
-    from tinypedal.ui import game_replays, game_rest
-    from tinypedal.ui._common import BaseDialog
+    from neopedal.ui import game_replays, game_rest
+    from neopedal.ui._common import BaseDialog
 
     game = FakeGame()
     monkeypatch.setattr(BaseDialog, "confirm_operation", lambda self, *args, **kwargs: True)
@@ -445,7 +445,7 @@ def test_game_replays_incident_markers_canvas(replays_page):
 
 
 def test_game_replays_replay_time_from_standings(replays_page):
-    from tinypedal.process import game_info as info
+    from neopedal.process import game_info as info
 
     cars = info.parse_standings([
         {"driverName": "A", "slotID": 1, "lapStartET": 600.0, "timeIntoLap": 12.5},
@@ -460,7 +460,7 @@ def test_game_replays_replay_time_from_standings(replays_page):
 
 
 def test_game_replays_filters(replays_page):
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     backend = answered(replays_page, GAME_ANSWERS)
     algarve, bahrain = "Algarve P1 1", "Bahrain R1"
@@ -510,7 +510,7 @@ def test_game_replays_filters(replays_page):
 
 
 def test_game_replays_page_game_states(replays_page, monkeypatch):
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     backend = answered(replays_page, {})  # nothing answers
     assert backend.gameState == "offline" and backend.replayCount == 0 and backend.statusText
@@ -616,7 +616,7 @@ def test_game_replays_map(replays_page):
     answered(replays_page, GAME_ANSWERS)
     view = backend.mapView
     assert view["minX"] == 0 and view["maxX"] == 500 and view["minY"] == -400 and view["maxY"] == 0  # x, -z
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     assert VertexStore.has(view["road"]) and VertexStore.has(view["pit"])
     cars = {row["key"]: row for row in backend.mapCars.rows}
@@ -638,7 +638,7 @@ def test_game_replays_live_rewatch(replays_page, monkeypatch):
     """Live session: jump opens the replay of the session (toggle read first), back to live later"""
     import time
 
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     answers = dict(GAME_ANSWERS, **{"/rest/replay/isActive": False})
@@ -657,7 +657,7 @@ def test_game_replays_live_rewatch(replays_page, monkeypatch):
         link.send = sending
         return link
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     monkeypatch.setattr(game_rest, "GameConnection", connection)
     key = backend.incidentRows.rows[1]["key"]
@@ -677,7 +677,7 @@ def test_game_replays_go_to_lap(monkeypatch):
     """Lap start found from lap times of car, replay moved until car is in that lap"""
     import time
 
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     state = {"time": 950.0}
@@ -703,7 +703,7 @@ def test_game_replays_go_to_lap(monkeypatch):
 def test_replay_files_copy(tmp_path, monkeypatch):
     import threading
 
-    from tinypedal.ui.quick import replay_files
+    from neopedal.ui.quick import replay_files
 
     folder, source = tmp_path / "Replays", tmp_path / "Downloads"
     folder.mkdir()
@@ -744,7 +744,7 @@ def test_replay_temp_file_deleted_during_scan(tmp_path, monkeypatch):
     """Game deleting a _vcr*.tmp file between scandir & stat: file skipped, no FileNotFoundError"""
     import os
 
-    from tinypedal.ui.quick import replay_files
+    from neopedal.ui.quick import replay_files
 
     (tmp_path / "_vcr1.tmp").write_bytes(b"t")
     (tmp_path / "_vcr2.tmp").write_bytes(b"t")
@@ -762,7 +762,7 @@ def test_replay_temp_file_deleted_during_scan(tmp_path, monkeypatch):
 def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
     from types import SimpleNamespace
 
-    from tinypedal.ui.quick import replay_files, replays_backend
+    from neopedal.ui.quick import replay_files, replays_backend
 
     backend = answered(replays_page, GAME_ANSWERS)
     assert backend.replayFolder == ""  # game gave no replay folder: files cannot be added
@@ -833,7 +833,7 @@ def test_game_replays_add_and_delete(replays_page, monkeypatch, tmp_path):
 def test_game_replays_incidents_export(replays_page, monkeypatch, tmp_path):
     from PySide6.QtGui import QGuiApplication
 
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     backend = answered(replays_page, GAME_ANSWERS)
     backend.copyIncidents()
@@ -848,7 +848,7 @@ def test_game_replays_incidents_export(replays_page, monkeypatch, tmp_path):
 
 
 def test_game_replays_settings_kept(replays_page):
-    from tinypedal.ui.quick.replays_backend import GameReplaysBackend
+    from neopedal.ui.quick.replays_backend import GameReplaysBackend
 
     backend = replays_page.backend
     backend.setSecondsBefore(12)
@@ -864,7 +864,7 @@ def test_game_replays_settings_kept(replays_page):
 
 
 def test_game_replays_french_messages():
-    from tinypedal import i18n
+    from neopedal import i18n
 
     i18n.set_language("Français")
     try:
@@ -1070,7 +1070,7 @@ def test_game_replays_toggle_game_ui(replays_page, monkeypatch):
     """Whole game UI shown or hidden as a middle click in game (posted to game window)"""
     import time
 
-    from tinypedal.ui.quick import game_window
+    from neopedal.ui.quick import game_window
 
     backend = answered(replays_page, GAME_ANSWERS)
     clicks: list = []
@@ -1095,7 +1095,7 @@ def test_game_window_click_only_to_game(monkeypatch):
     """Middle click posted only to a window of game process"""
     import sys
 
-    from tinypedal.ui.quick import game_window
+    from neopedal.ui.quick import game_window
 
     real_path = game_window.process_path
     monkeypatch.setattr(game_window, "process_path", lambda pid: "C:/Windows/explorer.exe")
@@ -1112,8 +1112,8 @@ def test_game_window_click_only_to_game(monkeypatch):
 
 def test_game_replays_shown_as_app_page(window):  # noqa: F811
     """Page inside app: game asked while page shown, not while another page is shown, closed with page"""
-    from tinypedal.ui import game_rest
-    from tinypedal.ui.tools_view import open_tool
+    from neopedal.ui import game_rest
+    from neopedal.ui.tools_view import open_tool
 
     game = FakeGame()
     import pytest as _pytest
@@ -1141,7 +1141,7 @@ def test_game_connection_keeps_connection(monkeypatch):
     """One connection for the requests of a job, error status with json body kept, no answer: None at once"""
     import http.client
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     opened: list = []
 
@@ -1187,7 +1187,7 @@ def test_game_request_thread_kept(ui_env, monkeypatch):
 
     from PySide6.QtCore import QObject
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     parent = QObject()
     # Default work (team stints, tyre allocation pages): json answers of resources
@@ -1224,7 +1224,7 @@ def test_game_request_page_freed_at_once(ui_env):
 
     from PySide6.QtCore import QObject
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     class Page(QObject):
         def __init__(self):
@@ -1254,7 +1254,7 @@ def test_game_request_failed_callback(ui_env):
 
     from PySide6.QtCore import QObject
 
-    from tinypedal.ui import game_rest
+    from neopedal.ui import game_rest
 
     parent = QObject()
     results: list = []
@@ -1272,7 +1272,7 @@ def test_game_request_failed_callback(ui_env):
 
 def test_replay_files_copy_robust(tmp_path, monkeypatch):
     """Source gone before copy skipped, part file that cannot be removed: error told, copy goes on"""
-    from tinypedal.ui.quick import replay_files
+    from neopedal.ui.quick import replay_files
 
     folder, source = tmp_path / "Replays", tmp_path / "Downloads"
     folder.mkdir()
@@ -1294,7 +1294,7 @@ def test_replay_files_copy_robust(tmp_path, monkeypatch):
 
 def test_game_replays_request_failures(replays_page, monkeypatch, tmp_path):
     """Copy or state request ended by an unexpected error: copy ends with an error notice, refresh goes on"""
-    from tinypedal.ui.quick import replay_files, replays_backend
+    from neopedal.ui.quick import replay_files, replays_backend
 
     backend = answered(replays_page, GAME_ANSWERS)
     monkeypatch.setattr(replay_files, "copy_replays", lambda *args: 1 / 0)
@@ -1315,7 +1315,7 @@ def test_game_replays_request_failures(replays_page, monkeypatch, tmp_path):
 def test_game_replays_text_helpers(ui_env):
     from PySide6.QtCore import QDate, QDateTime
 
-    from tinypedal.ui.quick import replays_backend
+    from neopedal.ui.quick import replays_backend
 
     assert replays_backend.clock_text(3725.9) == "1:02:05"
     assert replays_backend.size_text(190658701) == "182 MB"
@@ -1332,8 +1332,8 @@ def test_game_replays_text_helpers(ui_env):
 
 
 def test_lap_info_tyre_compound(monkeypatch):
-    from tinypedal.module import module_recorder
-    from tinypedal.ui.quick.stint_analysis import lap_compound
+    from neopedal.module import module_recorder
+    from neopedal.ui.quick.stint_analysis import lap_compound
 
     def value(result):
         return lambda *args: result

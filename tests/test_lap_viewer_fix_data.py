@@ -10,7 +10,7 @@ from array import array
 import pytest
 from PySide6.QtGui import QColor
 
-from tinypedal.userfile.telemetry_lap import LapData, interpolate
+from neopedal.userfile.telemetry_lap import LapData, interpolate
 
 TRACK = {"combo": "Track - GT3", "track": "Track", "track_length": 1000.0}  # recorded lap info (game track distance)
 WHEELS = ("fl", "fr", "rl", "rr")
@@ -48,7 +48,7 @@ def write_lap_file(folder, lap: LapData) -> str:
 
 # --- J3 imported lap scaled from lap ends (track length once lap reaches the line)
 def test_imported_lap_scaled_from_lap_ends():
-    from tinypedal.userfile.telemetry_lap import compute_delta, distance_scale, lap_time_curve
+    from neopedal.userfile.telemetry_lap import compute_delta, distance_scale, lap_time_curve
 
     reference = make_lap(1, 70.0, 1000.0, 990.0, dict(TRACK))  # last sample 10 m before the line
     imported = make_lap(2, 69.5, 992.3, 992.3, {"track_length": 992.3})  # MoTeC log: driven distance 0.77% short
@@ -66,10 +66,10 @@ def test_imported_lap_scaled_from_lap_ends():
 
 
 def test_mini_sector_job_scales_like_viewer(ui_env, tmp_path):
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.lap_geometry import mini_sector_job
-    from tinypedal.userfile.telemetry_lap import load_lap
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.lap_geometry import mini_sector_job
+    from neopedal.userfile.telemetry_lap import load_lap
 
     paths = [write_lap_file(tmp_path, lap) for lap in (
         make_lap(1, 70.0, 1000.0, 990.0, dict(TRACK)), make_lap(2, 69.5, 992.3, 992.3, {"track_length": 992.3}),
@@ -87,7 +87,7 @@ def test_mini_sector_job_scales_like_viewer(ui_env, tmp_path):
 
 # --- J25 lap end added when last samples are a bit past rounded track length (imported lap)
 def test_lap_end_added_past_rounded_track_length():
-    from tinypedal.userfile.telemetry_lap import lap_time_curve
+    from neopedal.userfile.telemetry_lap import lap_time_curve
 
     lap = make_lap(10, 69.68, 1000.03, 1000.03, {"track_length": 1000.0}, pace=lambda share: share * 69.64 / 69.68)
     distances, times = lap_time_curve(lap)
@@ -97,8 +97,8 @@ def test_lap_end_added_past_rounded_track_length():
 
 # --- J4 series of laps scaled again when reference changes
 def test_series_scaled_again_when_reference_changes(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     first = PlotLap("a", "a", make_lap(1, 70.0, 1000.0, 990.0, dict(TRACK)), QColor("red"))
     longer = PlotLap("b", "b", make_lap(2, 70.5, 1050.0, 1050.0, {"track_length": 1050.0}), QColor("blue"))
@@ -118,8 +118,8 @@ def test_series_scaled_again_when_reference_changes(ui_env):
 
 # --- J5 math channels computed again when a computed input changes
 def test_math_channel_follows_delta_window_and_placement(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap, math_channel, set_math_channels
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap, math_channel, set_math_channels
+    from neopedal.ui.quick.trace_data import TraceData
 
     def wavy(share):  # time lost & gained along lap
         return share + 0.003 * math.sin(share * math.tau * 3)
@@ -164,8 +164,8 @@ def test_math_channel_follows_delta_window_and_placement(ui_env):
 
 
 def test_math_delta_of_scaled_lap(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap, math_channel, set_math_channels
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap, math_channel, set_math_channels
+    from neopedal.ui.quick.trace_data import TraceData
 
     reference = PlotLap("a", "a", make_lap(1, 70.0, 1000.0, 990.0, dict(TRACK)), QColor("red"))
     imported = PlotLap("b", "b", make_lap(2, 72.0, 1040.0, 1040.0, {"track_length": 1040.0},
@@ -186,13 +186,13 @@ def test_math_delta_of_scaled_lap(ui_env):
 
 # --- J24 stints split on pit stops shown in lap info, trend along lap numbers
 def stint_lap(number: int, lap_time: float = 70.0, fuel=None, wear=None, compound: str = "", kind: str = "lap"):
-    from tinypedal.ui.quick.stint_analysis import StintLap
+    from neopedal.ui.quick.stint_analysis import StintLap
 
     return StintLap(lap_time, True, kind, compound, 0.0, "Practice", 0.0, number, fuel, wear)
 
 
 def test_stints_split_on_pit_stops_between_recorded_laps():
-    from tinypedal.ui.quick.stint_analysis import split_stints
+    from neopedal.ui.quick.stint_analysis import split_stints
 
     def numbers(laps):
         return [[lap.number for lap in stint] for stint in split_stints(laps)]
@@ -211,8 +211,8 @@ def test_stints_split_on_pit_stops_between_recorded_laps():
 
 
 def test_stint_and_session_trend_along_lap_numbers():
-    from tinypedal.ui.quick.lap_session import SessionTab
-    from tinypedal.ui.quick.stint_analysis import stint_summary, trend_positions
+    from neopedal.ui.quick.lap_session import SessionTab
+    from neopedal.ui.quick.stint_analysis import stint_summary, trend_positions
 
     times = {1: 70.0, 2: 70.1, 5: 70.4, 6: 70.5}  # 0.1 s slower each lap, laps 3 & 4 not recorded
     assert stint_summary([stint_lap(number, lap_time) for number, lap_time in times.items()])["slope"] == (
@@ -227,7 +227,7 @@ def test_stint_and_session_trend_along_lap_numbers():
 
 # --- J37 lap time text rounded before minutes are split
 def test_lap_time_text_rounded_first():
-    from tinypedal.ui.lap_viewer import format_laptime
+    from neopedal.ui.lap_viewer import format_laptime
 
     assert format_laptime(119.9996) == "2:00.000"
     assert format_laptime(59.9997) == "1:00.000"
@@ -236,8 +236,8 @@ def test_lap_time_text_rounded_first():
 
 # --- J42 setup differences show lap times timed by game
 def test_setup_diff_shows_official_lap_times(ui_env):
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.ui.quick.lap_conditions import LapConditions
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.ui.quick.lap_conditions import LapConditions
 
     laps = [PlotLap("a", "a", make_lap(5, 70.495, 1000.0, 990.0, dict(TRACK)), QColor("red")),  # last sample 0.7 s
             PlotLap("b", "b", make_lap(6, 71.2, 1000.0, 990.0, dict(TRACK)), QColor("blue"))]  # before the line
@@ -249,7 +249,7 @@ def test_setup_diff_shows_official_lap_times(ui_env):
 
 # --- J43 time gain rate over the part of window inside lap
 def test_delta_rate_at_lap_ends():
-    from tinypedal.userfile.telemetry_lap import delta_rate
+    from neopedal.userfile.telemetry_lap import delta_rate
 
     distances = [float(meter) for meter in range(0, 1001, 10)]
     deltas = [distance * 0.002 for distance in distances]  # 0.2 s lost every 100 m
@@ -259,10 +259,10 @@ def test_delta_rate_at_lap_ends():
 
 # --- J44 tyre wear unknown when tyres were changed during lap
 def test_tyre_wear_unknown_when_tyres_changed_during_lap(ui_env, tmp_path):
-    from tinypedal.ui.lap_viewer import LapEntry
-    from tinypedal.ui.quick.lap_session import SessionTab
-    from tinypedal.userfile.lap_geometry import session_values
-    from tinypedal.userfile.telemetry_lap import LapFile
+    from neopedal.ui.lap_viewer import LapEntry
+    from neopedal.ui.quick.lap_session import SessionTab
+    from neopedal.userfile.lap_geometry import session_values
+    from neopedal.userfile.telemetry_lap import LapFile
 
     worn, changed = make_lap(1, 70.0, 1000.0, 990.0, dict(TRACK)), make_lap(2, 70.0, 1000.0, 990.0, dict(TRACK))
     count = len(worn)
@@ -288,9 +288,9 @@ def test_tyre_wear_unknown_when_tyres_changed_during_lap(ui_env, tmp_path):
 
 # --- J57 lap samples shared between channels, series values packed
 def test_lap_samples_shared_between_channels(ui_env):
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.telemetry_lap import increasing_indexes, monotonic_distance, pack_columns
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.telemetry_lap import increasing_indexes, monotonic_distance, pack_columns
 
     glitch = LapData("g", pack_columns({"distance": [0.0, 5.0, 4.0, 6.0, 8.0], "lap_time": [0.0, 0.5, 0.6, 0.7, 0.9],
                                         "speed_kph": [1.0, 2.0, 3.0, 4.0, 5.0], "throttle": [0.1, 0.2, 0.3, 0.4, 0.5]}))

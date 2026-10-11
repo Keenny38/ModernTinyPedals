@@ -18,8 +18,8 @@ def run_git(repo, *args):
 def git_repo(tmp_path, monkeypatch):
     """Empty repo with version file, as working directory"""
     repo = tmp_path / "repo"
-    os.makedirs(repo / "tinypedal")
-    (repo / "tinypedal" / "version.py").write_text('__version__ = "0.10.0"\n', encoding="utf-8")
+    os.makedirs(repo / "neopedal")
+    (repo / "neopedal" / "version.py").write_text('__version__ = "0.10.0"\n', encoding="utf-8")
     run_git(repo, "init", "-q", "-b", "master")
     run_git(repo, "config", "user.email", "test@example.com")
     run_git(repo, "config", "user.name", "Test")
@@ -50,7 +50,7 @@ def test_next_version_bumps(git_repo):
     assert next_version("major") == "1.0.0"
     assert next_version("patch") == "0.10.1"
     write_version("0.11.0")
-    assert '__version__ = "0.11.0"' in (git_repo / "tinypedal" / "version.py").read_text(encoding="utf-8")
+    assert '__version__ = "0.11.0"' in (git_repo / "neopedal" / "version.py").read_text(encoding="utf-8")
 
 
 def test_release_tags_by_version_and_reachable(git_repo):
@@ -103,7 +103,7 @@ def test_documentation_commits_do_not_release(git_repo):
     commit_file(git_repo, "docs/changes/shot.png", "Add before/after image")
     assert next_version() == ""  # documentation only: no release
     assert next_version("patch") == "0.10.1"  # asked by hand
-    commit_file(git_repo, "tinypedal/version.py", "Fix overlay text")
+    commit_file(git_repo, "neopedal/version.py", "Fix overlay text")
     assert next_version() == "0.10.1"  # "Add wiki" does not make a minor release
     commit_file(git_repo, "docs/wiki/Usage.md", "Add usage page")
     assert not is_docs_only("HEAD~1") and is_docs_only("HEAD")
@@ -115,8 +115,8 @@ def test_documentation_paths():
     for path in ("docs/wiki/Home.md", "docs/wiki/_Sidebar.md", "README.md", "CHANGELOG.md", "CHANGELOG.fr.md",
                  "CONTRIBUTING.md", "SECURITY.md", "docs/ROADMAP.md", "docs/changelog/0.19.0-chat.png"):
         assert DOCS_ONLY.match(path), path
-    for path in ("tinypedal/update.py", "docs/customization.md", "docs/contributors.md", "NOTICE.md",
-                 ".github/workflows/build-release.yml", "tinypedal/README.md", "images/icon.png"):
+    for path in ("neopedal/update.py", "docs/customization.md", "docs/contributors.md", "NOTICE.md",
+                 ".github/workflows/build-release.yml", "neopedal/README.md", "images/icon.png"):
         assert not DOCS_ONLY.match(path), path
 
 
@@ -133,7 +133,7 @@ def test_translated_changelog_check(git_repo, monkeypatch):
 
 
 def test_source_version(monkeypatch, tmp_path):
-    from tinypedal import version
+    from neopedal import version
 
     def fake_run(output):
         def run(*args, **kwargs):
@@ -155,20 +155,20 @@ def test_source_version(monkeypatch, tmp_path):
 
 
 def test_local_build_after_release_is_not_outdated(monkeypatch):
-    from tinypedal import version, version_check
+    from neopedal import version, version_check
 
     assert not version_check.is_new_version((0, 19, 1), (0, 19, 1), "+3.g8a0f9f3")
     assert version_check.is_new_version((0, 19, 1), (0, 19, 1), "beta")  # pre-release of that version
     assert version_check.is_new_version((0, 19, 2), (0, 19, 1), "+3.g8a0f9f3")
     monkeypatch.setattr(version, "__version__", "0.19.1")
     monkeypatch.setattr(version, "DEVELOPMENT", "+3.g8a0f9f3")
-    assert version_check.tinypedal() == "0.19.1+3.g8a0f9f3"
+    assert version_check.neopedal() == "0.19.1+3.g8a0f9f3"
     monkeypatch.setattr(version, "DEVELOPMENT", "")
-    assert version_check.tinypedal() == "0.19.1"
+    assert version_check.neopedal() == "0.19.1"
 
 
 def test_self_test_checks():
-    from tinypedal import self_test
+    from neopedal import self_test
 
     assert "data files" in self_test.check_data_files()
     assert "QML pages compiled" in self_test.check_qml_pages()
@@ -177,13 +177,13 @@ def test_self_test_checks():
 
 
 def test_self_test_worker_process():
-    from tinypedal import self_test
+    from neopedal import self_test
 
     assert self_test.check_worker_process() == "worker process answered"
 
 
 def test_self_test_report(monkeypatch, tmp_path):
-    from tinypedal import self_test
+    from neopedal import self_test
 
     def broken():
         raise FileNotFoundError("fonts/*.ttf")

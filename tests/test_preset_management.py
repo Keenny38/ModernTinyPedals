@@ -7,8 +7,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseDialog
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseDialog
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def flush():
 
 
 def create(mode: str = "", source: str = "", name: str = ""):
-    from tinypedal.ui.preset_management import CreatePreset
+    from neopedal.ui.preset_management import CreatePreset
 
     dialog = CreatePreset(None, title="Test", mode=mode, source_filename=source)
     dialog.preset_entry.setText(name)
@@ -59,7 +59,7 @@ def test_duplicate_and_rename_preset(presets):
 
 
 def test_rename_locked_file_warns(presets, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     def locked(*args):
         raise PermissionError("locked by another program")
@@ -72,7 +72,7 @@ def test_rename_locked_file_warns(presets, monkeypatch):
 
 
 def test_restore_backup_list_restore_delete(presets, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     folder = cfg.path.settings
     with open(f"{folder}a.json.backup-2026-10-03-12-00-00-000000", "w", encoding="utf-8") as file:
@@ -106,7 +106,7 @@ def test_restore_backup_list_restore_delete(presets, monkeypatch):
 
 
 def test_transfer_selected_option_types(presets, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
@@ -142,8 +142,8 @@ def test_transfer_selected_option_types(presets, monkeypatch):
 @pytest.mark.parametrize("name", [
     "CON", "con", "nul.json", "Aux.txt", "prn ", "COM1", "lpt9", "a\x01b", "tab\tname"])
 def test_reserved_and_control_character_names_refused(presets, name):
-    from tinypedal.ui.preset_management import check_preset_name
-    from tinypedal.validator import is_allowed_filename
+    from neopedal.ui.preset_management import check_preset_name
+    from neopedal.validator import is_allowed_filename
 
     assert check_preset_name(name) == "Invalid preset name."
     assert not is_allowed_filename(name.removesuffix(".json"))
@@ -151,7 +151,7 @@ def test_reserved_and_control_character_names_refused(presets, name):
 
 @pytest.mark.parametrize("name", ["console", "com10", "lpt", "nullable", "aux race"])
 def test_names_close_to_reserved_allowed(presets, name):
-    from tinypedal.ui.preset_management import check_preset_name
+    from neopedal.ui.preset_management import check_preset_name
 
     assert check_preset_name(name) == ""
 
@@ -159,7 +159,7 @@ def test_names_close_to_reserved_allowed(presets, name):
 @pytest.fixture
 def loaded_a(presets, monkeypatch):
     """Preset a loaded, flush & reload recorded (reload refused: nothing loaded)"""
-    from tinypedal import app_signal
+    from neopedal import app_signal
 
     calls = []
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
@@ -172,7 +172,7 @@ def loaded_a(presets, monkeypatch):
 
 
 def test_rename_loaded_preset_follows_new_name(loaded_a, monkeypatch):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     calls, reloaded = loaded_a
     rename = os.rename
@@ -196,7 +196,7 @@ def test_duplicate_loaded_preset_flushes_first(loaded_a):
 
 @pytest.mark.parametrize("change", ["loaded", "locked"])
 def test_transfer_refused_if_destination_loaded_or_locked_meanwhile(presets, monkeypatch, change):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     monkeypatch.setattr(preset_management, "show_toast", lambda *args, **kwargs: None)
     monkeypatch.setattr(cfg.filename, "setting", "a.json")
@@ -227,7 +227,7 @@ def test_transfer_refused_if_destination_loaded_or_locked_meanwhile(presets, mon
 
 
 def test_list_header_select_all(presets):
-    from tinypedal.ui import preset_management
+    from neopedal.ui import preset_management
 
     dialog = preset_management.PresetTransfer(None)
     try:

@@ -6,11 +6,11 @@ import pytest
 from PySide6.QtCore import QTimerEvent
 from PySide6.QtGui import QColor
 
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
 from tests.test_list_widgets import visible_pixels
 from tests.test_readers import lmu_api
 from tests.test_widget_benchmark import fill_field
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
 
 NODES = 200
 LENGTH = 4000.0
@@ -19,7 +19,7 @@ LENGTH = 4000.0
 @pytest.fixture
 def track(ui_env, bundled_fonts, monkeypatch):
     """Recorded oval map, 20 cars on it, best lap delta data, API reader on in-memory shared memory"""
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     saved = (minfo.vehicles.dataSet, minfo.vehicles.totalVehicles, minfo.vehicles.playerIndex)
     mapping, delta = minfo.mapping, minfo.delta
@@ -50,7 +50,7 @@ def track(ui_env, bundled_fonts, monkeypatch):
 
 
 def render(**options):
-    from tinypedal.widget.track_map import Realtime
+    from neopedal.widget.track_map import Realtime
 
     wcfg = cfg.user.setting["track_map"]
     wcfg.update(options)
@@ -120,7 +120,7 @@ def test_sector_index_out_of_map_skipped(track, name):
     minfo.mapping.sectors = (66, NODES + 50)
     wcfg = cfg.user.setting[name]
     wcfg.update(show_sector_line=True, show_start_line=True)
-    widget = import_module(f"tinypedal.widget.{name}").Realtime(cfg, name)
+    widget = import_module(f"neopedal.widget.{name}").Realtime(cfg, name)
     try:
         widget.timerEvent(QTimerEvent(0))  # raised IndexError (map image left half drawn)
         assert visible_pixels(widget.grab().toImage()) > 100

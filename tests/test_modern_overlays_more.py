@@ -9,13 +9,13 @@ from PySide6.QtCore import QCoreApplication, QPointF, QRectF, Qt, QTimerEvent
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module_info import minfo
+from neopedal.setting import cfg
+from neopedal.template.setting_widget import WIDGET_DEFAULT
+from neopedal.widget._modern import create_widget, modern_module
 from tests.test_widget_benchmark import fill_field
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module_info import minfo
-from tinypedal.setting import cfg
-from tinypedal.template.setting_widget import WIDGET_DEFAULT
-from tinypedal.widget._modern import create_widget, modern_module
 
 OWN_DESIGNS = ("chat", "elevation", "flag", "race_notifications", "rpm_led", "spotter", "steering_meter")
 FIELD_ATTRIBUTES = {
@@ -43,7 +43,7 @@ def widgets(ui_env, bundled_fonts, monkeypatch):
     def make(name: str, modern: bool = True, theme: str = "Modern Dark", **options):
         cfg.user.config["overlay_style"]["overlay_theme"] = theme if modern else "Legacy Dark"
         cfg.user.setting[name].update(options)
-        widget = create_widget(import_module(f"tinypedal.widget.{name}"), cfg, name)
+        widget = create_widget(import_module(f"neopedal.widget.{name}"), cfg, name)
         created.append(widget)
         return widget
 
@@ -103,7 +103,7 @@ def place_cars(positions):
 
 # --- Every overlay has a modern design
 def test_every_overlay_has_modern_design():
-    from tinypedal.template.widget.modern import MODERN_DESIGNS
+    from neopedal.template.widget.modern import MODERN_DESIGNS
 
     builtin = {name for name in WIDGET_DEFAULT if not name.startswith("plugin_")}
     assert builtin <= MODERN_DESIGNS
@@ -111,7 +111,7 @@ def test_every_overlay_has_modern_design():
 
 @pytest.mark.parametrize("name", OWN_DESIGNS)
 def test_own_design_reads_existing_options(name):
-    from tinypedal.widget._modern.base import ModernOverlay
+    from neopedal.widget._modern.base import ModernOverlay
 
     realtime = modern_module(name).Realtime
     assert issubclass(realtime, ModernOverlay)
@@ -173,7 +173,7 @@ def test_rpm_led_zone_tints(widgets, monkeypatch):
     reader(monkeypatch, "engine", "rpm", 0.0)
     widget = widgets("rpm_led", number_of_led=10)
     update(widget)
-    from tinypedal.widget._modern.rpm_led import LOW, REDLINE, SAFE
+    from neopedal.widget._modern.rpm_led import LOW, REDLINE, SAFE
 
     assert widget.zones[0] == LOW and widget.zones[-1] == REDLINE and SAFE in widget.zones
     assert all(state == 0 for state in widget.state)  # nothing lit at idle
@@ -181,8 +181,8 @@ def test_rpm_led_zone_tints(widgets, monkeypatch):
 
 # --- Race notifications
 def test_race_notifications_icons_and_time_left(widgets):
-    from tinypedal.widget._modern.race_notifications import ICONS, TIME_STEPS
-    from tinypedal.widget.race_notifications import GAIN, TITLES, Message
+    from neopedal.widget._modern.race_notifications import ICONS, TIME_STEPS
+    from neopedal.widget.race_notifications import GAIN, TITLES, Message
 
     assert set(TITLES) <= set(ICONS)
     widget = widgets("race_notifications", display_duration=4)
@@ -255,7 +255,7 @@ def test_flag_display_order(widgets, monkeypatch):
 def test_chat_wrap_senders_and_new_messages(widgets, monkeypatch):
     from time import time
 
-    from tinypedal.widget._modern.chat import split_sender
+    from neopedal.widget._modern.chat import split_sender
 
     assert split_sender("Race Control: track clear") == ("Race Control", "track clear")
     assert split_sender("no sender here") == ("", "no sender here")
@@ -300,7 +300,7 @@ def test_chat_nothing_drawn_before_first_update(widgets):
 def test_chat_sample_conversation_in_edit_mode(widgets, monkeypatch):
     """Edit mode without message: sample conversation drawn faded for placement, no "Chat" word; never while
     overlay merely unlocked (default): it passed for real messages in game (garage, joining a server)"""
-    from tinypedal.widget._modern.chat import NOTICE, OWN
+    from neopedal.widget._modern.chat import NOTICE, OWN
 
     reader(monkeypatch, "session", "chat_messages", ())
     widget = widgets("chat", number_of_lines=5)
@@ -322,8 +322,8 @@ def test_chat_sample_conversation_in_edit_mode(widgets, monkeypatch):
 @pytest.mark.parametrize("modern", [True, False])
 def test_chat_gone_after_display_duration_while_not_driving(widgets, monkeypatch, modern):
     """Updates paused (garage, menus): messages shown still hidden at end of display duration, card gone"""
-    import tinypedal.widget._modern.chat as modern_chat
-    import tinypedal.widget.chat as classic_chat
+    import neopedal.widget._modern.chat as modern_chat
+    import neopedal.widget.chat as classic_chat
 
     clock = [1000.0]
     for module in (modern_chat, classic_chat):
@@ -362,7 +362,7 @@ def test_chat_expiry_stopped_when_driving_again_or_closed(widgets, monkeypatch):
     assert widget._expire_timer.isActive()
     widget.timerEvent(QTimerEvent(0))  # driving again: overlay updates take over
     assert not widget._expire_timer.isActive()
-    from tinypedal.widget._race_aids import HiddenPreview
+    from neopedal.widget._race_aids import HiddenPreview
 
     monkeypatch.setattr(HiddenPreview, "stop", lambda self: self.post_update())  # closing pauses updates first
     timer = widget._expire_timer
@@ -407,7 +407,7 @@ def test_chat_newest_message_at_top_or_bottom(widgets, monkeypatch, modern):
 def test_chat_own_messages_and_notices(widgets, monkeypatch):
     from time import time
 
-    from tinypedal.widget._modern.chat import NOTICE, OTHER, OWN
+    from neopedal.widget._modern.chat import NOTICE, OTHER, OWN
 
     now = time()
     reader(monkeypatch, "vehicle", "driver_name", "S. Player ")
@@ -454,7 +454,7 @@ def test_elevation_without_map(widgets, monkeypatch):
 
 # --- Spotter: clear signal & cars coming up behind
 def test_side_closeness_and_approach():
-    from tinypedal.widget.spotter import side_approach, side_overlap
+    from neopedal.widget.spotter import side_approach, side_overlap
 
     left, right = side_overlap([(-4.0, 0.0), (2.0, 0.0)], 4.6, 5.0, 2.6)
     assert not left.critical and 0 < left.closeness < 1
@@ -467,7 +467,7 @@ def test_side_closeness_and_approach():
 
 @pytest.mark.parametrize("modern", [True, False])
 def test_spotter_clear_signal(widgets, modern):
-    from tinypedal.widget.spotter import CLEAR_STEPS
+    from neopedal.widget.spotter import CLEAR_STEPS
 
     widget = widgets("spotter", modern, clear_signal_duration=1.0)
     clock = {"now": 100.0}
@@ -512,12 +512,12 @@ def test_spotter_closeness_color(widgets):
 
 # --- Black box
 def test_black_box_modern_design(widgets):
-    from tinypedal.widget._modern.base import design_font_family
-    from tinypedal.widget._modern.black_box import COLOR_TOKENS
-    from tinypedal.widget._modern.restyle import token_color
+    from neopedal.widget._modern.base import design_font_family
+    from neopedal.widget._modern.black_box import COLOR_TOKENS
+    from neopedal.widget._modern.restyle import token_color
 
     widget = widgets("black_box", enable_auto_resize=False)
-    assert type(widget).__module__ == "tinypedal.widget._modern.black_box"
+    assert type(widget).__module__ == "neopedal.widget._modern.black_box"
     style = cfg.user.config["overlay_style"]
     assert widget.wcfg["font_name"] == design_font_family(style)
     default = cfg.default.setting["black_box"]
@@ -534,9 +534,9 @@ def test_black_box_user_color_kept_and_classic_layout(widgets):
     widget = widgets("black_box", enable_auto_resize=False, throttle_color="#123456")
     assert widget.wcfg["throttle_color"] == "#123456"
     classic = widgets("black_box", enable_classic_layout=True, throttle_color="#2FC46A")
-    assert type(classic).__module__ == "tinypedal.widget.black_box"
+    assert type(classic).__module__ == "neopedal.widget.black_box"
     legacy = widgets("black_box", modern=False, enable_classic_layout=False)
-    assert type(legacy).__module__ == "tinypedal.widget.black_box"
+    assert type(legacy).__module__ == "neopedal.widget.black_box"
 
 
 def test_black_box_leds_lit_and_zones(widgets):

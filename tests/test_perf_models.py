@@ -7,7 +7,7 @@ from itertools import pairwise
 import pytest
 from PySide6.QtCore import QPersistentModelIndex, QtMsgType, qInstallMessageHandler
 
-from tinypedal.ui.quick.models import DictListModel, FoldedListModel, longest_increasing, too_many_moves
+from neopedal.ui.quick.models import DictListModel, FoldedListModel, longest_increasing, too_many_moves
 
 try:
     from PySide6.QtTest import QAbstractItemModelTester

@@ -7,8 +7,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 from test_stream_overlay import FakeOverlay, page_backend, process_events, server  # noqa: F401
 
-from tinypedal import stream_overlay, vr_overlay, web_dashboard
-from tinypedal.stream_overlay import FrameStore, OverlayCapture
+from neopedal import stream_overlay, vr_overlay, web_dashboard
+from neopedal.stream_overlay import FrameStore, OverlayCapture
 
 
 @pytest.fixture
@@ -99,7 +99,7 @@ def test_local_addresses_looked_up_in_background(monkeypatch):
 
 
 def test_stream_url_without_address_lookup(server, lookups):  # noqa: F811
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.config["stream_overlay"]["enable_lan_access"] = True
     try:
@@ -113,7 +113,7 @@ def test_stream_url_without_address_lookup(server, lookups):  # noqa: F811
 
 
 def test_page_signals_server_state_only_when_changed(page_backend, server, lookups, monkeypatch):  # noqa: F811
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     backend = page_backend
     emitted = []
@@ -214,15 +214,15 @@ def test_real_overlay_paint_serial(ui_env, monkeypatch):
     """Overlay window serial changes when its content (child widgets too) is painted or window moves"""
     from importlib import import_module
 
-    from tinypedal import realtime_state
-    from tinypedal.setting import cfg
-    from tinypedal.widget._base import PaintCounter
-    from tinypedal.widget._modern import create_widget
+    from neopedal import realtime_state
+    from neopedal.setting import cfg
+    from neopedal.widget._base import PaintCounter
+    from neopedal.widget._modern import create_widget
 
     monkeypatch.setattr(realtime_state, "active", True)
     cfg.overlay["auto_hide"] = False
     cfg.overlay["fixed_position"] = True
-    widget = create_widget(import_module("tinypedal.widget.gear"), cfg, "gear")
+    widget = create_widget(import_module("neopedal.widget.gear"), cfg, "gear")
     try:
         widget.start()
         process_events(0.3)

@@ -8,14 +8,14 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 
+from neopedal.process import player_profile as pp
+from neopedal.process import results_file as rf
+from neopedal.process import results_index as ri
+from neopedal.setting import cfg
+from neopedal.userfile import driver_history
+from neopedal.userfile.driver_history import SessionRecord, parse_record, record_line
 from tests.test_driver_stats_viewer import OREGA, SPA, STATS, backend, dialogs, settle, window  # noqa: F401
 from tests.test_race_results import PRACTICE_XML, RACE_NAME, RACE_XML, wait_until, write_results
-from tinypedal.process import player_profile as pp
-from tinypedal.process import results_file as rf
-from tinypedal.process import results_index as ri
-from tinypedal.setting import cfg
-from tinypedal.userfile import driver_history
-from tinypedal.userfile.driver_history import SessionRecord, parse_record, record_line
 
 END = 1_790_001_000.0  # results file written
 
@@ -217,7 +217,7 @@ def test_player_profile(tmp_path, monkeypatch):
 
 # Driver stats page
 def results_data(*summaries, profile=None):
-    from tinypedal.ui.quick.stats_backend import ResultsData
+    from neopedal.ui.quick.stats_backend import ResultsData
 
     return ResultsData(list(summaries), profile)
 
@@ -230,7 +230,7 @@ def spa_race(**changes) -> ri.ResultSummary:
 
 
 def test_stats_sessions_from_results(backend):  # noqa: F811
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     driver_history.save_history(cfg.path.config, [
         SessionRecord(1_700_100_000.0, SPA, OREGA, 2, 121.5, valid=4, game_version="1.41"),
@@ -284,7 +284,7 @@ def test_stats_driver_card_and_fixes(backend, monkeypatch):  # noqa: F811
 
 
 def test_stats_open_results(backend, monkeypatch):  # noqa: F811
-    from tinypedal.ui import tools_view
+    from neopedal.ui import tools_view
 
     opened = []
     page = SimpleNamespace(backend=SimpleNamespace(open_path=opened.append))
@@ -307,7 +307,7 @@ def lmu_results(tmp_path, ui_env, monkeypatch):
     written = os.path.getmtime(folder / RACE_NAME)
     os.utime(replay, (written + 60, written + 60))
     monkeypatch.setattr(rf, "find_results_folders", lambda libraries=None: {"LMU": str(folder)})
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     page = RaceResultsBackend()
     page.page_shown()
@@ -319,7 +319,7 @@ def lmu_results(tmp_path, ui_env, monkeypatch):
 
 
 def test_results_replay_button(lmu_results, monkeypatch):
-    from tinypedal.ui import tools_view
+    from neopedal.ui import tools_view
 
     page, folder = lmu_results
     assert page.sessionHeader["replay"] == "24 Heures du Mans R1 1"
@@ -341,7 +341,7 @@ def test_results_open_path(lmu_results):
     page.open_path(str(folder / RACE_NAME))
     assert wait_until(lambda: page.hasSession and page.selectedKey.endswith(RACE_NAME))
     assert page.kindFilter == 0
-    from tinypedal.ui.quick.results_backend import load_page_settings
+    from neopedal.ui.quick.results_backend import load_page_settings
 
     assert load_page_settings()["kind"] == 3  # filter of user kept for next time
     page.open_path(str(folder / "missing.xml"))  # not a session: read again, nothing shown instead
@@ -353,7 +353,7 @@ def test_results_open_path_before_loaded(ui_env, tmp_path, monkeypatch):
     folder = tmp_path / "Results"
     write_results(folder, {RACE_NAME: RACE_XML, "2026_09_21_18_00_00-10P1.xml": PRACTICE_XML.format(laps=5)})
     monkeypatch.setattr(rf, "find_results_folders", lambda libraries=None: {"LMU": str(folder)})
-    from tinypedal.ui.quick.results_backend import RaceResultsBackend
+    from neopedal.ui.quick.results_backend import RaceResultsBackend
 
     page = RaceResultsBackend()
     try:
@@ -368,7 +368,7 @@ def test_results_open_path_before_loaded(ui_env, tmp_path, monkeypatch):
 
 # Game replays page: replay asked by race results page
 def test_watch_named_waits_for_replays_list():
-    from tinypedal.ui.quick.replays_backend import GameReplaysBackend
+    from neopedal.ui.quick.replays_backend import GameReplaysBackend
 
     notices, watched, asked = [], [], []
     known = {"Spa R1 1"}

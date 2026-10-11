@@ -7,7 +7,7 @@ Neither screen had any coverage, so these pin down what they produce.
 
 import pytest
 
-from tinypedal.module_info import ConsumptionDataSet
+from neopedal.module_info import ConsumptionDataSet
 
 
 def lap(number: int, *, valid: bool = True) -> ConsumptionDataSet:
@@ -19,7 +19,7 @@ def lap(number: int, *, valid: bool = True) -> ConsumptionDataSet:
 
 
 def test_fuel_history_table_keeps_its_columns_and_highlight(ui_env):
-    from tinypedal.ui.race_calculator import RaceCalculator
+    from neopedal.ui.race_calculator import RaceCalculator
 
     dialog = RaceCalculator(None)
     try:
@@ -41,7 +41,7 @@ def test_fuel_history_table_keeps_its_columns_and_highlight(ui_env):
 
 
 def test_fuel_history_table_accepts_an_empty_history(ui_env):
-    from tinypedal.ui.race_calculator import RaceCalculator
+    from neopedal.ui.race_calculator import RaceCalculator
 
     dialog = RaceCalculator(None)
     try:
@@ -54,16 +54,16 @@ def test_fuel_history_table_accepts_an_empty_history(ui_env):
 
 @pytest.mark.parametrize("value", [160, 0, -5])
 def test_unit_hint_handles_any_stored_number(value):
-    from tinypedal.ui._option import unit_hint
+    from neopedal.ui._option import unit_hint
 
     assert unit_hint("tyre_pressure_target_minimum", str(value), {"tyre_pressure_unit": "bar"})
 
 
 def test_pace_notes_player_ticks_in_background(ui_env):
     """Audio player is not a page: it keeps queueing notes while no window shows (no visibility check)"""
-    from tinypedal.module_info import minfo
-    from tinypedal.setting import cfg
-    from tinypedal.ui.pace_notes_player import PaceNotesPlayer
+    from neopedal.module_info import minfo
+    from neopedal.setting import cfg
+    from neopedal.ui.pace_notes_player import PaceNotesPlayer
 
     player = PaceNotesPlayer(None, cfg.user.setting["pace_notes_playback"])
     try:

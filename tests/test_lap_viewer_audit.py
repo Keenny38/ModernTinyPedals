@@ -14,11 +14,11 @@ from itertools import pairwise
 import pytest
 from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, qInstallMessageHandler
 
+from neopedal.module import module_recorder
+from neopedal.setting import cfg
+from neopedal.userfile.telemetry_lap import LapData
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, TRACK, lap_rows, laps, save, viewer  # noqa: F401
-from tinypedal.module import module_recorder
-from tinypedal.setting import cfg
-from tinypedal.userfile.telemetry_lap import LapData
 
 LENGTH = 1000.0
 _UNPICKLED: list[bool] = []
@@ -75,7 +75,7 @@ def flush_deleted():
 
 # --- 1. Delta, mini-sectors & ideal lap from line to line
 def test_lap_time_curve_from_line_to_line():
-    from tinypedal.userfile.telemetry_lap import lap_time_curve
+    from neopedal.userfile.telemetry_lap import lap_time_curve
 
     distances, times = lap_time_curve(game_lap(1, 20.0))
     assert (distances[0], times[0]) == (0.0, 0.0)  # lap start added (first sample 0.15 s after the line)
@@ -91,7 +91,7 @@ def test_lap_time_curve_from_line_to_line():
 
 
 def test_delta_at_line_is_lap_time_gap():
-    from tinypedal.userfile.telemetry_lap import compute_delta, sector_times
+    from neopedal.userfile.telemetry_lap import compute_delta, sector_times
 
     reference, compared = game_lap(1, 20.0, first=0.2), game_lap(2, 21.5, first=0.05, late=0.03)
     delta = compute_delta(reference, compared)
@@ -104,9 +104,9 @@ def test_delta_at_line_is_lap_time_gap():
 
 
 def test_mini_sectors_add_up_to_lap_time(ui_env):
-    from tinypedal.ui.lap_viewer import PlotLap, lap_color
-    from tinypedal.ui.quick.trace_data import TraceData
-    from tinypedal.userfile.telemetry_lap import official_lap_time
+    from neopedal.ui.lap_viewer import PlotLap, lap_color
+    from neopedal.ui.quick.trace_data import TraceData
+    from neopedal.userfile.telemetry_lap import official_lap_time
 
     timed = [game_lap(1, 20.0, first=0.2), game_lap(2, 20.4, first=0.02, late=0.04), game_lap(3, 20.2, stale=0.1)]
     data = TraceData()
@@ -134,7 +134,7 @@ def damaged_lap(folder: str, name: str) -> str:
 
 
 def test_damaged_gzip_lap_read_as_unreadable(tmp_path):
-    from tinypedal.userfile.telemetry_lap import load_lap, read_lap_info
+    from neopedal.userfile.telemetry_lap import load_lap, read_lap_info
 
     path = damaged_lap(str(tmp_path), "lap.csv.gz")
     assert read_lap_info(path) == {}
@@ -163,8 +163,8 @@ def test_damaged_lap_flagged_once_not_loaded_again(viewer, laps):  # noqa: F811
 def test_track_limits_not_cached_with_unreadable_lap(ui_env, tmp_path):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
-    from tinypedal.userfile.lap_geometry import track_limits_job
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.userfile.lap_geometry import track_limits_job
 
     folder = cfg.path.telemetry.rstrip("/")
     paths = [save(number, 70.0 + number, BASE + number * 100) for number in (2, 3, 4)]
@@ -191,7 +191,7 @@ def test_track_limits_not_cached_with_unreadable_lap(ui_env, tmp_path):
 
 # --- 3. Lap file without lap time
 def test_lap_without_lap_time_never_breaks_charts(viewer, tmp_path):  # noqa: F811
-    from tinypedal.userfile.telemetry_lap import compute_delta, load_lap, sector_times
+    from neopedal.userfile.telemetry_lap import compute_delta, load_lap, sector_times
 
     path = tmp_path / "other" / "no time.csv"
     path.parent.mkdir()
@@ -256,7 +256,7 @@ def test_markers_and_zoom_history_follow_time_axis(viewer):  # noqa: F811
 def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
     from PySide6.QtWidgets import QApplication, QMessageBox
 
-    from tinypedal.ui.lap_viewer import LapViewer, save_viewer_setting
+    from neopedal.ui.lap_viewer import LapViewer, save_viewer_setting
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     folder = cfg.path.telemetry.rstrip("/")
@@ -288,8 +288,8 @@ def test_session_values_read_for_session_chosen_while_busy(ui_env, monkeypatch):
 def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
-    from tinypedal.ui.lap_viewer import LapViewer
-    from tinypedal.userfile.telemetry_lap import same_circuit
+    from neopedal.ui.lap_viewer import LapViewer
+    from neopedal.userfile.telemetry_lap import same_circuit
 
     assert not same_circuit(game_lap(1, 70.0), game_lap(2, 70.0, track="Monza"))
     assert not same_circuit(game_lap(1, 70.0), game_lap(2, 70.0, length=LENGTH * 1.05))
@@ -335,8 +335,8 @@ def test_other_circuit_lap_never_compared(ui_env, tmp_path, monkeypatch):
 
 # --- 9. Damaged driver history & MoTeC half float channel
 def test_driver_history_survives_damaged_lines(tmp_path):
-    from tinypedal.userfile import driver_history
-    from tinypedal.userfile.driver_history import SessionRecord, append_record, read_records
+    from neopedal.userfile import driver_history
+    from neopedal.userfile.driver_history import SessionRecord, append_record, read_records
 
     good = driver_history.record_line(SessionRecord(time=1000.0, track="Spa", vehicle="GT3", best=130.0))
     with open(driver_history.history_path(str(tmp_path)), "wb") as file:
@@ -352,7 +352,7 @@ def test_driver_history_survives_damaged_lines(tmp_path):
 
 
 def test_motec_half_float_channel_read(tmp_path):
-    from tinypedal.userfile.motec_ld import CHANNEL, EVENT, HEAD, LD_MARKER, VEHICLE, VENUE, read_ld
+    from neopedal.userfile.motec_ld import CHANNEL, EVENT, HEAD, LD_MARKER, VEHICLE, VENUE, read_ld
 
     values = [0.5, 1.25, -2.0, 100.0]
     filename = str(tmp_path / "half.ld")
@@ -380,7 +380,7 @@ def test_motec_half_float_channel_read(tmp_path):
 
 # --- 10. Plain data caches: pickled files never loaded
 def test_pickled_caches_ignored_and_rebuilt(ui_env, tmp_path, monkeypatch):
-    from tinypedal.userfile import lap_cache, lap_geometry
+    from neopedal.userfile import lap_cache, lap_geometry
 
     path = save(2, 70.0, BASE + 200)
     folder = cfg.path.telemetry.rstrip("/")
@@ -422,9 +422,9 @@ def test_reference_download_failure_resets_state(ui_env, monkeypatch):
 
     from PySide6.QtWidgets import QWidget
 
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.userfile import lap_reference
     from tests.test_lap_reference import SHEET
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
-    from tinypedal.userfile import lap_reference
 
     def cut_off(url, timeout=15):
         raise http.client.IncompleteRead(b"partial")
@@ -450,7 +450,7 @@ def test_fetch_sheet_cut_off_response_is_os_error(monkeypatch):
     import http.client
     import urllib.request
 
-    from tinypedal.userfile import lap_reference
+    from neopedal.userfile import lap_reference
 
     class Response:
         def __enter__(self):
@@ -470,7 +470,7 @@ def test_fetch_sheet_cut_off_response_is_os_error(monkeypatch):
 
 # --- 12 & 14. Vertices of former settings, timers of closed page
 def test_former_vertices_dropped_and_watchers_pruned(viewer):  # noqa: F811
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
 
@@ -497,7 +497,7 @@ def test_former_vertices_dropped_and_watchers_pruned(viewer):  # noqa: F811
 
 
 def test_release_stops_page_timers(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     monkeypatch.setattr(lap_backend, "_worker_broken", False)
     backend = viewer.backend
@@ -510,7 +510,7 @@ def test_release_stops_page_timers(viewer, monkeypatch):  # noqa: F811
 
 # --- 13. CSV export resampled by worker
 def test_export_series_csv_resamples(tmp_path):
-    from tinypedal.userfile.telemetry_lap import export_series_csv
+    from neopedal.userfile.telemetry_lap import export_series_csv
 
     filename = str(tmp_path / "laps.csv")
     assert export_series_csv(filename, ["Distance (m)", "a", "b"], 0.0, 30.0,
@@ -533,10 +533,10 @@ def test_stats_level_colors_follow_theme_and_backups_cached(ui_env, monkeypatch)
     from PySide6.QtGui import QColor, QPalette
     from PySide6.QtWidgets import QApplication, QWidget
 
+    from neopedal.ui.quick import stats_backend
+    from neopedal.userfile import lap_reference
     from tests.test_driver_stats_viewer import OREGA, SPA, STATS, write_stats
     from tests.test_lap_reference import SHEET
-    from tinypedal.ui.quick import stats_backend
-    from tinypedal.userfile import lap_reference
 
     calls = []
     original = stats_backend.list_stats_backups
@@ -573,12 +573,12 @@ def test_stats_level_colors_follow_theme_and_backups_cached(ui_env, monkeypatch)
 def test_qml_pages_without_warnings(viewer):  # noqa: F811
     from PySide6.QtWidgets import QWidget
 
+    from neopedal.ui.quick import create_quick_view
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.ui.quick.track_map_backend import TrackMapBackend
+    from neopedal.userfile import lap_reference
     from tests.test_driver_stats_viewer import OREGA, SPA, STATS, write_stats
     from tests.test_lap_reference import SHEET
-    from tinypedal.ui.quick import create_quick_view
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
-    from tinypedal.ui.quick.track_map_backend import TrackMapBackend
-    from tinypedal.userfile import lap_reference
 
     messages: list[str] = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
@@ -613,8 +613,8 @@ def test_qml_pages_without_warnings(viewer):  # noqa: F811
 
 
 def test_help_lists_every_map_key():
-    from tinypedal import i18n
-    from tinypedal.ui.quick import QML_FOLDER
+    from neopedal import i18n
+    from neopedal.ui.quick import QML_FOLDER
 
     with open(os.path.join(QML_FOLDER, "LapViewer.qml"), encoding="utf-8") as file:
         help_text = file.read()
@@ -632,9 +632,9 @@ def test_help_lists_every_map_key():
 
 # --- 17. Units & decimals
 def test_distance_unit_and_decimal_separator(viewer, monkeypatch):  # noqa: F811
-    from tinypedal import i18n
-    from tinypedal.ui import lap_viewer
-    from tinypedal.ui.quick import Theme
+    from neopedal import i18n
+    from neopedal.ui import lap_viewer
+    from neopedal.ui.quick import Theme
 
     backend = viewer.backend
     assert backend.cursorTitle(1500.0) == "1500 m" and backend.distanceUnit == "m"
@@ -670,7 +670,7 @@ def test_session_temperature_in_user_unit(viewer, monkeypatch):  # noqa: F811
 
 # --- 11. MoTeC import job
 def test_import_ld_job_reports_error(tmp_path):
-    from tinypedal.userfile.motec_ld import import_ld_job
+    from neopedal.userfile.motec_ld import import_ld_job
 
     paths, error = import_ld_job(str(tmp_path / "missing.ld"), str(tmp_path / "out"))
     assert paths == [] and error

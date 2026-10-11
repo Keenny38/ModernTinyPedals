@@ -2,7 +2,7 @@
 
 Thank you for your interest in **NeoPedal**! Every contribution is welcome: bug report, idea, translation or code.
 
-NeoPedal is a modified version of [TinyPedal](https://github.com/TinyPedal/TinyPedal) (see [NOTICE.md](NOTICE.md)). Report here what concerns this project; a problem that also exists in the original TinyPedal can be reported to both projects.
+Report here what concerns this project (license and credits: [NOTICE.md](NOTICE.md)).
 
 Before opening an issue, check the [wiki](https://github.com/Keenny38/ModernTinyPedals/wiki), especially [Troubleshooting](https://github.com/Keenny38/ModernTinyPedals/wiki/Troubleshooting), and search the [existing issues](https://github.com/Keenny38/ModernTinyPedals/issues?q=is%3Aissue) to avoid duplicates.
 
@@ -42,7 +42,7 @@ Before you submit your change, `python tools/check.py` must pass: it runs what C
 
 ```bash
 ruff check .
-mypy tinypedal
+mypy neopedal
 pytest
 ```
 
@@ -51,10 +51,10 @@ pytest
 ### Project rules
 
 - **Tests**: every bug fix comes with its regression test in `tests/`. CI checks the minimum coverage (`fail_under` in `pyproject.toml`).
-- **Texts**: every visible text goes through `tr()` / `trm()` (interface) or `tr_overlay()` (overlays), with its French translation in `tinypedal/i18n/`. Every new option has a label and a tooltip (`tinypedal/i18n/data/`, regenerated with `tools/gen_fr_options.py` and `tools/gen_option_help.py`).
-- **Presets**: a new option has a default value in `tinypedal/template/`. Renaming or removing an option needs a migration in `tinypedal/setting_preupdate.py`, so that existing presets keep loading.
-- **Overlays**: a changed overlay keeps both its modern design (`tinypedal/widget/_modern/`) and its classic design. A visible change comes with a before/after image, titled in English (`python tools/make_change_visual.py <overlay> --title "..."`), shown in the release notes.
-- **Interface**: test your changes in light and dark theme, and on Windows and Linux if you can. New tool pages are preferably written in Qt Quick (`tinypedal/ui/qml/`), with their logic in Python (`tinypedal/ui/quick/`).
+- **Texts**: every visible text goes through `tr()` / `trm()` (interface) or `tr_overlay()` (overlays), with its French translation in `neopedal/i18n/`. Every new option has a label and a tooltip (`neopedal/i18n/data/`, regenerated with `tools/gen_fr_options.py` and `tools/gen_option_help.py`).
+- **Presets**: a new option has a default value in `neopedal/template/`. Renaming or removing an option needs a migration in `neopedal/setting_preupdate.py`, so that existing presets keep loading.
+- **Overlays**: a changed overlay keeps both its modern design (`neopedal/widget/_modern/`) and its classic design. A visible change comes with a before/after image, titled in English (`python tools/make_change_visual.py <overlay> --title "..."`), shown in the release notes.
+- **Interface**: test your changes in light and dark theme, and on Windows and Linux if you can. New tool pages are preferably written in Qt Quick (`neopedal/ui/qml/`), with their logic in Python (`neopedal/ui/quick/`).
 - **Commit titles** in English, imperative mood. A title starting with "Add" publishes a minor version, the others a patch version ([tools/next_version.py](tools/next_version.py)). Commits that only change documentation (wiki, README, changelogs, this file) do not publish a release on their own.
 - **Changelog**: a notable version has its section in [CHANGELOG.md](CHANGELOG.md) (English, used for the GitHub release notes) **and** in [CHANGELOG.fr.md](CHANGELOG.fr.md) (French, shown by the app in French), with the same `## X.Y.Z (date)` headings. Use the English UI labels of the app in CHANGELOG.md.
 - **Documentation**: the wiki is generated from [docs/wiki](docs/wiki) on every push to `master`: update the matching page in the same pull request, never on the wiki itself.

@@ -6,12 +6,12 @@ from types import SimpleNamespace
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget
 
-from tinypedal import api_connector, api_control
-from tinypedal.const_api import API_LMU_NAME, API_LMULEGACY_NAME
-from tinypedal.userfile import custom_image
-from tinypedal.userfile.game_images import images
-from tinypedal.widget._black_box import modules as bb_modules
-from tinypedal.widget._painter import layer_fits
+from neopedal import api_connector, api_control
+from neopedal.const_api import API_LMU_NAME, API_LMULEGACY_NAME
+from neopedal.userfile import custom_image
+from neopedal.userfile.game_images import images
+from neopedal.widget._black_box import modules as bb_modules
+from neopedal.widget._painter import layer_fits
 
 
 def layer(width, height, ratio):
@@ -44,7 +44,7 @@ def test_default_api_always_selectable(monkeypatch):
 
 
 def fake_mctrl(monkeypatch, starts):
-    from tinypedal import module_control
+    from neopedal import module_control
 
     active = {}
     fake = SimpleNamespace(active_modules=active, start=lambda name: active.update({name: 1}) if starts else None)

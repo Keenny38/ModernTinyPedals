@@ -2,12 +2,12 @@
 
 import pytest
 
+from neopedal.widget._modern.table import SEPARATOR, ClassHeader, Row
 from tests.test_modern_table_rows import new_table, sample
-from tinypedal.widget._modern.table import SEPARATOR, ClassHeader, Row
 
 
 def items(**options):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.user.setting["standings"].update(options)
     table = new_table(cfg, "standings")
@@ -40,8 +40,8 @@ def test_class_name_above_each_class_group(ui_env, bundled_fonts):
 
 
 def test_header_color_of_class(ui_env, bundled_fonts):
-    from tinypedal.setting import cfg
-    from tinypedal.widget._modern.rows import class_style
+    from neopedal.setting import cfg
+    from neopedal.widget._modern.rows import class_style
 
     widget, _ = items(enable_multi_class_split_mode=True, show_class_header=True)
     try:
@@ -121,6 +121,6 @@ def test_class_order_of_groups(ui_env, bundled_fonts, order, expected):
 
 
 def test_default_class_order():
-    from tinypedal.template.setting_widget import WIDGET_DEFAULT
+    from neopedal.template.setting_widget import WIDGET_DEFAULT
 
     assert WIDGET_DEFAULT["standings"]["class_order"] == "Hypercar, Hyper, LMP2 ELMS, LMP2, LMP3, GT3, LMGT3, GTE"

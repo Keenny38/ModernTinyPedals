@@ -6,9 +6,9 @@ import time
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 
+from neopedal import replay as replay_module
+from neopedal.replay import SCAN_CHECK_STEP, ReplayControl, ReplayLoadCancelled, ReplayWriter
 from tests.test_lap_viewer_features import laps, viewer  # noqa: F401
-from tinypedal import replay as replay_module
-from tinypedal.replay import SCAN_CHECK_STEP, ReplayControl, ReplayLoadCancelled, ReplayWriter
 
 FRAME_SIZE = 256  # small frames: API restart not tested here, layout checked with API layout below
 
@@ -32,9 +32,9 @@ def wait_loaded(dialog, timeout: float = 10.0):
 
 @pytest.fixture
 def replay_view(ui_env, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view as module
+    from neopedal.api_control import api
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view as module
 
     monkeypatch.setattr(module, "restart_api", lambda: None)
     monkeypatch.setattr(type(api), "name", property(lambda self: module.API_LMU_NAME))
@@ -74,7 +74,7 @@ def test_scan_cancelled_closes_file(tmp_path, monkeypatch):
 
 
 def test_long_replay_loads_without_blocking_event_loop(replay_view, tmp_path):
-    from tinypedal.replay import replay
+    from neopedal.replay import replay
 
     filename = write_long_replay(tmp_path, SCAN_CHECK_STEP * 20)
     ticks = []
@@ -97,7 +97,7 @@ def test_long_replay_loads_without_blocking_event_loop(replay_view, tmp_path):
 
 
 def test_stale_load_ignored(replay_view, tmp_path, monkeypatch):
-    from tinypedal.replay import replay
+    from neopedal.replay import replay
 
     first = write_long_replay(tmp_path, 10, "first.tpreplay")
     second = write_long_replay(tmp_path, 20, "second.tpreplay")
@@ -129,8 +129,8 @@ def test_stale_load_ignored(replay_view, tmp_path, monkeypatch):
 
 
 def test_load_error_reported(replay_view, tmp_path, monkeypatch):
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view as module
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view as module
 
     bad = tmp_path / "bad.tpreplay"
     bad.write_bytes(b"not a replay")
@@ -148,7 +148,7 @@ def test_load_error_reported(replay_view, tmp_path, monkeypatch):
 
 
 def test_close_during_load_stops_thread(replay_view, tmp_path, monkeypatch):
-    from tinypedal.replay import replay
+    from neopedal.replay import replay
 
     filename = write_long_replay(tmp_path, SCAN_CHECK_STEP * 4)
     opened = spy_open(monkeypatch)
@@ -173,10 +173,10 @@ def test_close_during_load_stops_thread(replay_view, tmp_path, monkeypatch):
 
 
 def test_lap_viewer_open_replay_seeks_after_load(viewer, tmp_path, monkeypatch):  # noqa: F811
-    from tinypedal.api_control import api
-    from tinypedal.replay import replay
-    from tinypedal.ui import replay_view as module
-    from tinypedal.ui._common import BaseDialog
+    from neopedal.api_control import api
+    from neopedal.replay import replay
+    from neopedal.ui import replay_view as module
+    from neopedal.ui._common import BaseDialog
 
     filename = write_long_replay(tmp_path, SCAN_CHECK_STEP * 3)
     monkeypatch.setattr(module, "restart_api", lambda: None)

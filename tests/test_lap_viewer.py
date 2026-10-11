@@ -2,8 +2,8 @@
 
 import pytest
 
-from tinypedal.module import module_recorder
-from tinypedal.userfile.telemetry_lap import compute_delta, interpolate, list_laps, list_tracks, load_lap
+from neopedal.module import module_recorder
+from neopedal.userfile.telemetry_lap import compute_delta, interpolate, list_laps, list_tracks, load_lap
 
 
 def write_lap(folder, lap_number, lap_time, samples=300, length=3000.0):
@@ -65,7 +65,7 @@ def test_invalid_file(tmp_path):
 
 
 def test_decimate_minmax_keeps_peaks():
-    from tinypedal.userfile.telemetry_lap import decimate_minmax
+    from neopedal.userfile.telemetry_lap import decimate_minmax
 
     xs = [float(index) for index in range(10000)]
     ys = [0.0] * 10000
@@ -78,7 +78,7 @@ def test_decimate_minmax_keeps_peaks():
 
 
 def test_sectors_and_theoretical_best():
-    from tinypedal.userfile.telemetry_lap import LapData, sector_bounds, sector_times, theoretical_best
+    from neopedal.userfile.telemetry_lap import LapData, sector_bounds, sector_times, theoretical_best
 
     distance = [float(index) for index in range(0, 3001, 10)]
     lap = LapData("a", {
@@ -115,7 +115,7 @@ def test_old_lap_file_without_info(tmp_path):
 
 
 def test_lap_bounds_drop_previous_and_next_lap_distance():
-    from tinypedal.userfile.telemetry_lap import lap_bounds
+    from neopedal.userfile.telemetry_lap import lap_bounds
 
     # Lap distance reset late (previous lap distance at start), next lap distance at end
     distances = [3584.0, 3584.0, 5.0, 500.0, 1500.0, 2500.0, 3580.0, 3.0]
@@ -125,7 +125,7 @@ def test_lap_bounds_drop_previous_and_next_lap_distance():
 
 
 def test_smooth_distance_between_game_updates():
-    from tinypedal.userfile.telemetry_lap import smooth_distance
+    from neopedal.userfile.telemetry_lap import smooth_distance
 
     times = [0.0, 0.1, 0.2, 0.3, 0.4]
     assert smooth_distance(times, [0.0, 0.0, 10.0, 10.0, 20.0]) == pytest.approx([0.0, 5.0, 10.0, 15.0, 20.0])
@@ -134,7 +134,7 @@ def test_smooth_distance_between_game_updates():
 
 def test_load_lap_with_late_distance_reset(tmp_path):
     """Recorded lap starting with previous lap distance must still plot (was a single point)"""
-    from tinypedal.userfile.telemetry_lap import monotonic_distance
+    from neopedal.userfile.telemetry_lap import monotonic_distance
 
     rows = []
     for index in range(500):
@@ -148,7 +148,7 @@ def test_load_lap_with_late_distance_reset(tmp_path):
 
 
 def test_delta_limit_ignores_aberrant_lap():
-    from tinypedal.ui.lap_viewer import delta_limit
+    from neopedal.ui.lap_viewer import delta_limit
 
     normal = [0.1 * index / 100 for index in range(100)]  # up to 0.1s
     close = [0.3 * index / 100 for index in range(100)]  # up to 0.3s
@@ -161,7 +161,7 @@ def test_delta_limit_ignores_aberrant_lap():
 
 def test_sector_lines_at_official_sector_times():
     """Sector column changes late (scoring data at 5 Hz): official times place sector lines exactly"""
-    from tinypedal.userfile.telemetry_lap import LapData, sector_bounds
+    from neopedal.userfile.telemetry_lap import LapData, sector_bounds
 
     distance = [float(index) for index in range(0, 3001, 10)]
     columns = {
@@ -186,7 +186,7 @@ def save_session_lap(folder, number, lap_time, timestamp, session="Practice", st
 def test_laps_grouped_by_session():
     import time
 
-    from tinypedal.userfile.telemetry_lap import group_sessions, lap_number_of, lap_timestamp_of
+    from neopedal.userfile.telemetry_lap import group_sessions, lap_number_of, lap_timestamp_of
 
     base = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))
     laps = [  # (file name, info)
@@ -212,7 +212,7 @@ def test_laps_grouped_by_session():
 @pytest.fixture
 def open_viewer(ui_env):
     """Open lap viewer dialogs, closed after test"""
-    from tinypedal.ui.lap_viewer import LapViewer
+    from neopedal.ui.lap_viewer import LapViewer
 
     viewers = []
 
@@ -236,7 +236,7 @@ def lap_paths(backend) -> list[str]:
 
 
 def test_lap_viewer_dialog(open_viewer):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
     write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
@@ -251,7 +251,7 @@ def test_lap_viewer_dialog(open_viewer):
 
 
 def test_lap_viewer_multiple_laps(open_viewer):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.telemetry.rstrip("/")
     write_lap(folder, 1, 92.0)
@@ -277,8 +277,8 @@ def test_lap_viewer_multiple_laps(open_viewer):
 def test_trace_data_many_laps(ui_env, tmp_path):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
-    from tinypedal.ui.quick.trace_data import TraceData
+    from neopedal.ui.lap_viewer import CHANNEL_MAP, PlotLap
+    from neopedal.ui.quick.trace_data import TraceData
 
     write_lap(tmp_path, 1, 90.0)
     write_lap(tmp_path, 2, 91.0)
@@ -296,8 +296,8 @@ def test_trace_data_many_laps(ui_env, tmp_path):
 
 
 def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick import lap_export
+    from neopedal.setting import cfg
+    from neopedal.ui.quick import lap_export
 
     folder = cfg.path.telemetry.rstrip("/")
     info = {"sectors": [30.0, 30.0, 30.0]}
@@ -317,8 +317,8 @@ def test_lap_viewer_added_file_not_in_theoretical_best(open_viewer, tmp_path, mo
 
 
 def test_lap_cache_is_bounded(open_viewer, monkeypatch):
-    from tinypedal.setting import cfg
-    from tinypedal.ui import lap_viewer
+    from neopedal.setting import cfg
+    from neopedal.ui import lap_viewer
 
     monkeypatch.setattr(lap_viewer, "LAP_CACHE_SIZE", 5)
     folder = cfg.path.telemetry.rstrip("/")
@@ -331,8 +331,8 @@ def test_lap_cache_is_bounded(open_viewer, monkeypatch):
 
 
 def test_channel_order_kept(open_viewer):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import load_visible_channels
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import load_visible_channels
 
     folder = cfg.path.telemetry.rstrip("/")
     write_lap(folder, 1, 90.0)
@@ -348,9 +348,9 @@ def test_channel_order_kept(open_viewer):
 
 
 def test_track_map_draws_circuit_from_track_map_file(open_viewer):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.quick.lines import VertexStore
-    from tinypedal.userfile.track_map import save_track_map_file
+    from neopedal.setting import cfg
+    from neopedal.ui.quick.lines import VertexStore
+    from neopedal.userfile.track_map import save_track_map_file
 
     folder = cfg.path.telemetry.rstrip("/")
     write_lap(folder, 1, 90.0)  # positions not recorded by helper: (0, 0)
@@ -369,8 +369,8 @@ def test_track_map_draws_circuit_from_track_map_file(open_viewer):
 def test_track_map_circuit_falls_back_to_reference_lap(open_viewer):
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.lap_viewer import PlotLap
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.ui.lap_viewer import PlotLap
+    from neopedal.userfile.telemetry_lap import LapData
 
     distance = [float(index) for index in range(0, 101, 10)]
     times = [d / 10 for d in distance]
@@ -389,7 +389,7 @@ def test_track_map_circuit_falls_back_to_reference_lap(open_viewer):
 
 
 def test_hidden_viewer_releases_laps_and_reloads(open_viewer):
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     write_lap(cfg.path.telemetry.rstrip("/"), 1, 90.0)
     write_lap(cfg.path.telemetry.rstrip("/"), 2, 91.0)
@@ -415,9 +415,9 @@ def test_hidden_viewer_releases_laps_and_reloads(open_viewer):
 def test_map_colored_by_time_gain():
     import math
 
-    from tinypedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR, gain_color
-    from tinypedal.ui.quick import lap_map
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.ui.lap_viewer import GAIN_COLOR, LOSS_COLOR, gain_color
+    from neopedal.ui.quick import lap_map
+    from neopedal.userfile.telemetry_lap import LapData
 
     distance = [float(index) for index in range(0, 2001, 10)]
     xs = [500 * math.cos(d / 2000 * math.tau) for d in distance]
@@ -434,8 +434,8 @@ def test_map_colored_by_time_gain():
 
 
 def test_map_mode_saved(open_viewer):
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import load_viewer_setting
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import load_viewer_setting
 
     backend = open_viewer().backend
     assert backend.mapMode == "laps"
@@ -451,9 +451,9 @@ def test_map_mode_saved(open_viewer):
 def test_former_time_gain_option_kept(ui_env):
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.setting import cfg
-    from tinypedal.ui.lap_viewer import save_viewer_setting
-    from tinypedal.ui.quick.lap_backend import LapViewerBackend
+    from neopedal.setting import cfg
+    from neopedal.ui.lap_viewer import save_viewer_setting
+    from neopedal.ui.quick.lap_backend import LapViewerBackend
 
     save_viewer_setting(cfg.path.telemetry, map_time_gain=True)  # before color modes
     parent = QWidget()
@@ -464,7 +464,7 @@ def test_former_time_gain_option_kept(ui_env):
 def test_lap_list_shows_sessions(open_viewer):
     import time
 
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     folder = cfg.path.telemetry.rstrip("/")
     base = time.mktime((2026, 10, 3, 14, 0, 0, 0, 0, -1))

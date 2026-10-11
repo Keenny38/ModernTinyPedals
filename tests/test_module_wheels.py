@@ -9,14 +9,14 @@ import math
 
 import pytest
 
-from tinypedal import realtime_state
-from tinypedal.api_control import api
-from tinypedal.module.module_wheels import (
+from neopedal import realtime_state
+from neopedal.api_control import api
+from neopedal.module.module_wheels import (
     calc_vehicle_weight,
     calc_wheel_angle,
     calc_wheel_rotation,
 )
-from tinypedal.module_info import WheelsInfo
+from neopedal.module_info import WheelsInfo
 
 
 @pytest.fixture

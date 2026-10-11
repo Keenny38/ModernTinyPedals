@@ -13,11 +13,11 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox
 from test_lap_reference import SHEET
 
-from tinypedal.const_common import MAX_SECONDS, TEXT_NOLAPTIME
-from tinypedal.setting import cfg
-from tinypedal.userfile import driver_history, driver_stats, lap_reference
-from tinypedal.userfile.driver_history import SessionRecord
-from tinypedal.userfile.driver_stats import DriverStats, validate_stats_file
+from neopedal.const_common import MAX_SECONDS, TEXT_NOLAPTIME
+from neopedal.setting import cfg
+from neopedal.userfile import driver_history, driver_stats, lap_reference
+from neopedal.userfile.driver_history import SessionRecord
+from neopedal.userfile.driver_stats import DriverStats, validate_stats_file
 
 SPA = "Circuit de Spa-Francorchamps Endurance"
 OREGA = "LMP2_ELMS - Oreca"
@@ -26,7 +26,7 @@ OREGA = "LMP2_ELMS - Oreca"
 @pytest.fixture
 def dialogs(ui_env, monkeypatch):
     """Confirm every question, record warnings, fail on exception raised in Qt slots"""
-    from tinypedal.ui._common import BaseDialog
+    from neopedal.ui._common import BaseDialog
 
     warnings = []
     slot_errors = []
@@ -62,8 +62,8 @@ STATS = {
 @pytest.fixture
 def window(dialogs, monkeypatch):
     """Page host without Qt Quick view: backend alone"""
-    from tinypedal.api_control import api
-    from tinypedal.ui._common import BaseDialog
+    from neopedal.api_control import api
+    from neopedal.ui._common import BaseDialog
 
     write_stats(STATS)
     lap_reference.save_cache(cfg.path.config, SHEET)
@@ -77,7 +77,7 @@ def window(dialogs, monkeypatch):
 
 @pytest.fixture
 def backend(window):
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
 
     page = DriverStatsBackend(window)
     settle(page)  # lap time reference & results read in background
@@ -110,7 +110,7 @@ def test_invalid_values_converted():
 
 
 def test_page_with_invalid_values(window):
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
 
     write_stats({"T": {"Car": {"pb": None, "rb": "abc", "seconds": "x", "valid": "4"}}})
     page = DriverStatsBackend(window)
@@ -233,8 +233,8 @@ def test_reset_lap_time_clears_history_best(backend):
 
 
 def test_plurals_and_dates(backend, monkeypatch):
-    from tinypedal import i18n
-    from tinypedal.ui.quick import stats_backend
+    from neopedal import i18n
+    from neopedal.ui.quick import stats_backend
 
     tiles = {tile["title"]: tile for tile in backend.tiles}
     assert tiles["Races"]["detail"] == "1 win · 1 podium"
@@ -295,7 +295,7 @@ def test_next_level_and_qualifying_mark(backend):
 
 
 def test_durations_and_derived_columns(backend, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     assert stats_backend.format_duration(45 * 60) == "45 min"
     assert stats_backend.format_duration(12 * 3600 + 5 * 60) == "12 h 05 min"
@@ -383,7 +383,7 @@ def test_history_trimmed_when_loaded_over_limit(tmp_path, monkeypatch):
 
 
 def test_vehicle_name_classification_grouped_by_recorded_class(window):
-    from tinypedal.ui.quick.stats_backend import DriverStatsBackend
+    from neopedal.ui.quick.stats_backend import DriverStatsBackend
 
     write_stats({SPA: {"Oreca 07 #22": {"pb": 121.5}, "Ferrari 499P #50": {"pb": 119.0}}})
     driver_history.save_history(cfg.path.config, [
@@ -418,7 +418,7 @@ def test_all_tracks_view_actions_and_letters(backend):
 
 
 def test_colorblind_level_colors(backend):
-    from tinypedal.ui.quick.stats_backend import COLORBLIND_LEVEL_COLORS
+    from neopedal.ui.quick.stats_backend import COLORBLIND_LEVEL_COLORS
 
     normal = backend.cell(OREGA, "level").color
     backend.setColorblind(True)
@@ -430,8 +430,8 @@ def test_colorblind_level_colors(backend):
 
 
 def test_theoretical_best_read_again_when_changed(backend, monkeypatch):
-    from tinypedal.ui.quick import stats_backend
-    from tinypedal.userfile.sector_best import save_sector_best_file
+    from neopedal.ui.quick import stats_backend
+    from neopedal.userfile.sector_best import save_sector_best_file
 
     save_sector_best_file(cfg.path.sector_best, f"{SPA} - LMP2_ELMS", (0, 0, 0), [40.0] * 3, [40.0] * 3,
                           [40.0, 40.2, 40.3], [40.1, 40.5, 40.9])
@@ -451,8 +451,8 @@ def test_theoretical_best_read_again_when_changed(backend, monkeypatch):
 
 
 def test_open_lap_viewer_on_personal_best_lap(backend, monkeypatch):
-    from tinypedal.ui import tools_view
-    from tinypedal.userfile.telemetry_lap import LapFile
+    from neopedal.ui import tools_view
+    from neopedal.userfile.telemetry_lap import LapFile
 
     folder = f"{SPA} - LMP2_ELMS"
 
@@ -570,7 +570,7 @@ def test_undo_with_unreadable_history_keeps_sessions(backend, dialogs, monkeypat
 
 def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
     """Stats file not saved (locked, disk full): history unchanged, no undo, warned (was: treated as saved)"""
-    from tinypedal.userfile import json_setting
+    from neopedal.userfile import json_setting
 
     driver_history.save_history(cfg.path.config, EDIT_HISTORY)
     monkeypatch.setattr(json_setting, "save_json_file", lambda *args, **kwargs: None)  # write lost
@@ -586,8 +586,8 @@ def test_edit_not_saved_leaves_history_and_undo(backend, dialogs, monkeypatch):
 def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, rollback_failures):
     """Stats not saved & history change undo fails: tried again, else history-only undo recorded & warned
     (was: single attempt, error suppressed, history and stats out of sync without undo)"""
-    from tinypedal.ui.quick import stats_backend
-    from tinypedal.userfile import json_setting
+    from neopedal.ui.quick import stats_backend
+    from neopedal.userfile import json_setting
 
     driver_history.save_history(cfg.path.config, EDIT_HISTORY)
     real_replace = stats_backend.replace_records
@@ -630,8 +630,8 @@ def test_edit_not_saved_history_rollback_retried(backend, dialogs, monkeypatch, 
 # --- Qt Quick page
 @pytest.fixture
 def page(dialogs, monkeypatch):
-    from tinypedal.api_control import api
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
+    from neopedal.api_control import api
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
 
     write_stats(STATS)
     lap_reference.save_cache(cfg.path.config, SHEET)
@@ -669,9 +669,9 @@ def test_qml_page_loads(page):
 
 
 def test_qml_page_translated(dialogs, monkeypatch):
-    from tinypedal import i18n
-    from tinypedal.api_control import api
-    from tinypedal.ui.driver_stats_viewer import DriverStatsViewer
+    from neopedal import i18n
+    from neopedal.api_control import api
+    from neopedal.ui.driver_stats_viewer import DriverStatsViewer
 
     write_stats(STATS)
     monkeypatch.setattr(type(api.read.session), "track_name", lambda self: SPA, raising=False)
@@ -693,8 +693,8 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
     from PySide6.QtQuickWidgets import QQuickWidget
     from PySide6.QtWidgets import QWidget
 
-    from tinypedal.ui.quick import QML_FOLDER, create_quick_view
-    from tinypedal.ui.quick.qml_modules import QML_MODULES
+    from neopedal.ui.quick import QML_FOLDER, create_quick_view
+    from neopedal.ui.quick.qml_modules import QML_MODULES
 
     source = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
     for module in QML_MODULES:
@@ -721,7 +721,7 @@ def test_qml_page_loads_with_bundled_modules(page, tmp_path):
 
 def test_open_map_loaded_in_page_already_open(backend, monkeypatch):
     """Track map viewer already open as page: shown instead, on the track asked (not the one shown before)"""
-    from tinypedal.ui.quick import stats_backend
+    from neopedal.ui.quick import stats_backend
 
     loaded = []
     open_page = SimpleNamespace(backend=SimpleNamespace(load_map=lambda path, name: loaded.append(name)))

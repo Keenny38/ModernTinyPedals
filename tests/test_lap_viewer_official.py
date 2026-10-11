@@ -6,10 +6,10 @@ import os
 
 import pytest
 
+from neopedal.setting import cfg
+from neopedal.userfile.telemetry_lap import LapData
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, laps, save, viewer  # noqa: F401
-from tinypedal.setting import cfg
-from tinypedal.userfile.telemetry_lap import LapData
 
 
 def ellipse(step: float = 5.0, rx: float = 300.0, ry: float = 200.0) -> list[tuple[float, float, float]]:
@@ -27,7 +27,7 @@ def game_points(center, pit=()) -> list[dict]:
 
 # --- Lap cache
 def test_lap_cache_reads_lap_again_until_file_changes(laps):  # noqa: F811
-    from tinypedal.userfile import lap_cache
+    from neopedal.userfile import lap_cache
 
     folder = cfg.path.telemetry
     path = laps[1]
@@ -50,7 +50,7 @@ def test_lap_cache_reads_lap_again_until_file_changes(laps):  # noqa: F811
 
 # --- Official circuit
 def test_track_geometry_parsed_matched_and_saved(tmp_path, monkeypatch):
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     assert track_geometry.base_name("Circuit de la Sarthe 1.35") == "circuit de la sarthe"
     assert track_geometry.base_name("Paul Ricard Circuit") == "paul ricard circuit"
@@ -87,7 +87,7 @@ def test_track_geometry_parsed_matched_and_saved(tmp_path, monkeypatch):
 
 
 def test_official_line_placement_and_track_events():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     center = ellipse()
     start = (center[10][0] + 0.5, center[10][1])
@@ -116,7 +116,7 @@ def test_official_line_placement_and_track_events():
 
 
 def test_game_limits_one_side_seen_and_fallback():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     xs = [index * 2.0 for index in range(251)]
     base = lap_map.MapLine(list(xs), list(xs), [0.0] * len(xs))
@@ -142,7 +142,7 @@ def test_game_limits_one_side_seen_and_fallback():
 
 
 def test_mini_sectors_and_backend_helpers():
-    from tinypedal.ui.quick import lap_backend, lap_map
+    from neopedal.ui.quick import lap_backend, lap_map
 
     bounds = lap_map.mini_sector_bounds(2000.0)
     assert len(bounds) == 11 and bounds[-1] == 2000.0  # 10 mini-sectors of 200 m
@@ -170,7 +170,7 @@ def test_mini_sectors_and_backend_helpers():
 
 # --- Viewer
 def official_answers(monkeypatch):
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     answers = {
         "/rest/race/track": [{"id": "atl", "shortName": "Atlanta 1.0", "sceneDesc": "ATL", "length": "1.585"}],
@@ -181,8 +181,8 @@ def official_answers(monkeypatch):
 
 
 def test_official_circuit_from_game(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
-    from tinypedal.userfile import track_geometry
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     assert backend._geometry is None and not backend.trackMap.get("official")
@@ -239,7 +239,7 @@ def test_viewer_frames_passage_minisectors_session(viewer, laps):  # noqa: F811
 
 
 def test_map_zoom_steps_cached_and_prepared(viewer):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
+    from neopedal.ui.quick import lap_backend
 
     backend = viewer.backend
     for index in range(16):
@@ -262,8 +262,8 @@ def test_map_zoom_steps_cached_and_prepared(viewer):  # noqa: F811
 
 
 def test_long_series_reduced_copy(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_backend
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick import lap_backend
+    from neopedal.ui.quick.lines import VertexStore
 
     backend = viewer.backend
     assert all(series["lods"] == [] for panel in backend.panels for series in panel["series"])  # short laps

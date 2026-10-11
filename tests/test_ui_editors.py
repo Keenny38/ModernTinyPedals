@@ -8,8 +8,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
-from tinypedal.setting import cfg
-from tinypedal.ui._common import BaseEditor
+from neopedal.setting import cfg
+from neopedal.ui._common import BaseEditor
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def column_texts(table, column: int) -> list[str]:
 # --- Tyre compounds
 @pytest.fixture
 def compound_editor(editor_env, monkeypatch):
-    from tinypedal.ui.tyre_compound_editor import TyreCompoundEditor
+    from neopedal.ui.tyre_compound_editor import TyreCompoundEditor
 
     monkeypatch.setattr(cfg.user, "compounds", {
         "Soft": {"symbol": "S", "color": "#FF0000", "heatmap": "HEATMAP_DEFAULT_TYRE"},
@@ -58,7 +58,7 @@ def compound_editor(editor_env, monkeypatch):
 
 
 def test_compound_add_from_session_then_new_name(compound_editor, editor_env):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 2
     api.read.tyre.compound_class = lambda index=None: ("Medium", "Medium", "Wet", "Wet") if index else ("Soft",) * 4
@@ -102,7 +102,7 @@ def test_compound_delete_sort_reset(compound_editor, editor_env):
 # --- Brakes
 @pytest.fixture
 def brake_editor(editor_env, monkeypatch):
-    from tinypedal.ui.brake_editor import BrakeEditor
+    from neopedal.ui.brake_editor import BrakeEditor
 
     monkeypatch.setattr(cfg.user, "brakes", {
         "GT3 - Front Brake": {"failure_thickness": 10.0, "heatmap": "HEATMAP_DEFAULT_BRAKE"},
@@ -122,7 +122,7 @@ def test_brake_thickness_validated_and_saved(brake_editor):
 
 
 def test_brake_add_from_session(brake_editor):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 1
     api.read.vehicle.class_name = lambda index=None: "LMP2"
@@ -146,7 +146,7 @@ def test_brake_delete_and_reset(brake_editor, editor_env):
 # --- Track info
 @pytest.fixture
 def track_editor(editor_env, monkeypatch):
-    from tinypedal.ui.track_info_editor import TrackInfoEditor
+    from neopedal.ui.track_info_editor import TrackInfoEditor
 
     monkeypatch.setattr(cfg.user, "tracks", {
         "Spa": {"pit_entry": 6800.0, "pit_exit": 300.0, "pit_speed": 16.67, "speed_trap": 2000.0,
@@ -181,7 +181,7 @@ def test_track_info_clock_and_number_validation(track_editor):
 
 
 def test_track_info_add_current_track(track_editor):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.session.track_name = lambda: "Monza"
     track_editor.add_track()
@@ -192,7 +192,7 @@ def test_track_info_add_current_track(track_editor):
 
 
 def test_track_info_speed_trap_from_telemetry(track_editor, editor_env):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     table = track_editor.table_tracks
     track_editor.set_position_from_tele()  # nothing selected
@@ -225,7 +225,7 @@ def test_track_info_delete_sort_reset(track_editor):
 # --- Heatmap
 @pytest.fixture
 def heatmap_editor(editor_env):
-    from tinypedal.ui.heatmap_editor import HeatmapEditor
+    from neopedal.ui.heatmap_editor import HeatmapEditor
 
     editor = HeatmapEditor(None)
     yield editor
@@ -260,7 +260,7 @@ def test_heatmap_reset_is_undoable(heatmap_editor):
 # --- Vehicle brands
 @pytest.fixture
 def brand_editor(editor_env, monkeypatch):
-    from tinypedal.ui.vehicle_brand_editor import VehicleBrandEditor
+    from neopedal.ui.vehicle_brand_editor import VehicleBrandEditor
 
     monkeypatch.setattr(cfg.user, "brands", {"Ferrari 296 #51": "Ferrari"}, raising=False)
     editor = VehicleBrandEditor(None)
@@ -269,7 +269,7 @@ def brand_editor(editor_env, monkeypatch):
 
 
 def test_brand_import_lmu_file_keeps_user_names(brand_editor, editor_env, tmp_path, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     data = [{"desc": "Ferrari 296 #51", "manufacturer": "Scuderia"}, {"desc": "Porsche 963 #6", "manufacturer": "Porsche"}]
     filename = tmp_path / "vehicles.json"
@@ -297,7 +297,7 @@ def test_reset_is_one_undo_step(brand_editor):
 
 
 def test_brand_import_invalid_file(brand_editor, editor_env, tmp_path, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     filename = tmp_path / "bad.json"
     filename.write_text('[{"other": 1}]', encoding="utf-8")
@@ -307,7 +307,7 @@ def test_brand_import_invalid_file(brand_editor, editor_env, tmp_path, monkeypat
 
 
 def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeypatch):
-    from tinypedal.ui import vehicle_brand_editor
+    from neopedal.ui import vehicle_brand_editor
 
     def refused(*args):
         raise OSError("refused")
@@ -322,7 +322,7 @@ def test_brand_import_from_restapi_unreachable(brand_editor, editor_env, monkeyp
 
 
 def test_brand_add_delete_sort_reset(brand_editor):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 1
     api.read.vehicle.vehicle_name = lambda index=None: "Alpine A424 #35"
@@ -355,7 +355,7 @@ def count_reads(editor, monkeypatch) -> list:
 
 
 def test_brand_add_from_session_is_one_undo_step(brand_editor, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 40
     api.read.vehicle.vehicle_name = lambda index=None: f"Car #{index}"
@@ -374,7 +374,7 @@ def test_brand_add_from_session_is_one_undo_step(brand_editor, monkeypatch):
 
 
 def test_batch_replace_is_one_undo_step(brand_editor, monkeypatch):
-    from tinypedal.ui._common import TableBatchReplace
+    from neopedal.ui._common import TableBatchReplace
 
     brand_editor.parse_brand_data([{"desc": f"Car #{index}", "manufacturer": "Acme"} for index in range(30)])
     table = brand_editor.table_brands
@@ -392,7 +392,7 @@ def test_batch_replace_is_one_undo_step(brand_editor, monkeypatch):
 
 
 def test_class_and_compound_add_from_session_one_undo_step(compound_editor, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 3
     api.read.tyre.compound_class = lambda index=None: (f"C{index}", f"C{index}", "Wet", "Wet")
@@ -407,7 +407,7 @@ def test_class_and_compound_add_from_session_one_undo_step(compound_editor, monk
 
 
 def test_brake_add_from_session_one_undo_step(brake_editor, monkeypatch):
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.read.vehicle.total_vehicles = lambda: 2
     api.read.vehicle.class_name = lambda index=None: "LMP2"

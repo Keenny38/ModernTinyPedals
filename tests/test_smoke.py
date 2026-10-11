@@ -13,8 +13,8 @@ def _iter_modules(package_name: str):
 
 
 @pytest.mark.parametrize("module_name", [
-    *_iter_modules("tinypedal.ui"),
-    *_iter_modules("tinypedal.widget"),
+    *_iter_modules("neopedal.ui"),
+    *_iter_modules("neopedal.widget"),
 ])
 def test_import_module(module_name):
     """All UI & widget modules import without error under PySide6"""
@@ -26,7 +26,7 @@ def test_window_style(theme):
     """Palette & style sheet can be generated for each theme"""
     from PySide6.QtWidgets import QApplication
 
-    from tinypedal.ui import set_style_palette, set_style_window
+    from neopedal.ui import set_style_palette, set_style_window
 
     set_style_palette(theme)
     style = set_style_window(QApplication.font().pointSize())
@@ -35,7 +35,7 @@ def test_window_style(theme):
 
 def test_about_dialog(ui_env):
     """About dialog can be created"""
-    from tinypedal.ui.about import About
+    from neopedal.ui.about import About
 
     dialog = About(None)
     dialog.close()

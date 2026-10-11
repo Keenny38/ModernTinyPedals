@@ -9,11 +9,11 @@ from collections import namedtuple
 
 import pytest
 
+from neopedal.module import module_recorder
+from neopedal.setting import cfg
 from tests.test_lap_viewer import wait_loaded
 from tests.test_lap_viewer_features import BASE, TRACK, lap_rows, laps, save, viewer  # noqa: F401
 from tests.test_lap_viewer_official import ellipse, game_points
-from tinypedal.module import module_recorder
-from tinypedal.setting import cfg
 
 Corner = namedtuple("Corner", "number start end apex")  # corner found on reference lap (fields used by map)
 Row = namedtuple("Row", "corner time_delta")  # corner row of corner table (fields used by map)
@@ -45,7 +45,7 @@ def save_game_lap(number: int, lap_time: float, timestamp: float, lateral: float
 
 def answer_game(monkeypatch, short_name: str = "Atlanta 1.0", center=None) -> list[str]:
     """Game REST API answers (official circuit of test laps), returns asked resources"""
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     asked: list[str] = []
     answers = {
@@ -72,7 +72,7 @@ def check_geometry_again(backend):
 # --- Game track edges (J1)
 def laps_around(base, center, half_widths, offsets, sign=1.0):
     """Laps near base line at several offsets: game lateral position from game center path, track edge on car side"""
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     found = []
     for offset in offsets:
@@ -87,7 +87,7 @@ def laps_around(base, center, half_widths, offsets, sign=1.0):
 
 @pytest.mark.parametrize("game_sign", [1.0, -1.0])
 def test_game_edges_from_laps_following_base_line(game_sign):
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     xs = [index * 4.0 for index in range(301)]
     base = lap_map.MapLine(list(xs), list(xs), [0.0] * len(xs))  # driving line, not track center
@@ -110,7 +110,7 @@ def test_game_edges_from_laps_following_base_line(game_sign):
 
 
 def test_game_edges_each_side_seen_or_mirrored():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     xs = [index * 4.0 for index in range(301)]
     base = lap_map.MapLine(list(xs), list(xs), [0.0] * len(xs))
@@ -125,8 +125,8 @@ def test_game_edges_each_side_seen_or_mirrored():
 
 # --- Track edges & official circuit caches (J52, J41)
 def test_limits_cache_versioned_and_base_key(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_map
-    from tinypedal.userfile import track_geometry
+    from neopedal.ui.quick import lap_map
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     answer_game(monkeypatch)
@@ -163,7 +163,7 @@ def test_limits_cache_versioned_and_base_key(viewer, monkeypatch):  # noqa: F811
 
 
 def test_saved_circuit_checked_against_laps_and_game_version(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     track = backend.currentTrack
@@ -189,7 +189,7 @@ def test_saved_circuit_checked_against_laps_and_game_version(viewer, monkeypatch
 
 
 def test_circuit_received_after_track_change_still_saved(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     track = backend.currentTrack
@@ -205,7 +205,7 @@ def test_circuit_received_after_track_change_still_saved(viewer, monkeypatch):  
 
 
 def test_track_geometry_name_and_layout_versions(tmp_path):
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     geometry = track_geometry.TrackGeometry("ATL", 1585, ellipse(), [], (1.0, 2.0), "Atlanta 1.0")
     track_geometry.save_geometry(str(tmp_path), "Atlanta - Hyper", geometry)
@@ -220,8 +220,8 @@ def test_track_geometry_name_and_layout_versions(tmp_path):
 
 # --- Placement across track (J2)
 def test_recorded_game_placement_kept_measured_only_without(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.lap_viewer import CHANNEL_MAP
-    from tinypedal.userfile import track_geometry
+    from neopedal.ui.lap_viewer import CHANNEL_MAP
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     monkeypatch.setattr(track_geometry, "rest_get", lambda host, port, resource, timeout=3: None)  # no game
@@ -251,8 +251,8 @@ def test_recorded_game_placement_kept_measured_only_without(viewer, monkeypatch)
 
 # --- Official corner deltas (J26)
 def test_official_corner_won_by_corner_covering_it(viewer):  # noqa: F811
-    from tinypedal.ui.lap_viewer import signed
-    from tinypedal.userfile.track_corners import TrackCorner
+    from neopedal.ui.lap_viewer import signed
+    from neopedal.userfile.track_corners import TrackCorner
 
     backend = viewer.backend
     backend._official = [TrackCorner("1", 300.0, 0.0, 0.0), TrackCorner("2", 1000.0, 10.0, 10.0)]
@@ -269,7 +269,7 @@ def test_official_corner_won_by_corner_covering_it(viewer):  # noqa: F811
     assert set(own) == {0, 2} and own[0]["delta"] == signed(0.10, 2) and own[2]["delta"] == signed(0.05, 2)
     assert own[2]["label"] == "—" and len({point["index"] for point in points}) == len(points)
     line = backend.reference_map_line()
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     assert (own[0]["x"], own[0]["y"]) == pytest.approx(lap_map.point_at(line, 420.0))
 
@@ -277,14 +277,14 @@ def test_official_corner_won_by_corner_covering_it(viewer):  # noqa: F811
 # --- Reference lap without positions (J27)
 def colored_count(backend) -> int:
     """Vertices of colored map line"""
-    from tinypedal.ui.quick.lines import VertexStore
+    from neopedal.ui.quick.lines import VertexStore
 
     vertices = VertexStore.get(backend._map["colored"])
     return vertices.vertex_count if vertices is not None else 0
 
 
 def test_reference_without_positions(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     backend = viewer.backend
     reference = backend.data.reference
@@ -319,7 +319,7 @@ def test_reference_without_positions(viewer, monkeypatch):  # noqa: F811
 
 # --- Le Mans corners (J28)
 def test_le_mans_esses_and_indianapolis_on_their_bends():
-    from tinypedal.userfile import track_corners
+    from neopedal.userfile import track_corners
 
     length = 13624.0
     # Bends of a recorded Le Mans lap (apexes found by track_corners.bends), kinks before Esses & Indianapolis
@@ -345,8 +345,8 @@ def test_le_mans_esses_and_indianapolis_on_their_bends():
 
 # --- Corner table (J42, J45, J46)
 def test_corner_table_sums_and_ideal_gap(viewer, monkeypatch):  # noqa: F811
-    from tinypedal.ui.quick import lap_corners
-    from tinypedal.userfile.telemetry_lap import LapData
+    from neopedal.ui.quick import lap_corners
+    from neopedal.userfile.telemetry_lap import LapData
 
     backend = viewer.backend
     reference = backend.data.reference.data
@@ -380,8 +380,8 @@ def test_trail_band_same_shape_as_trail():
 
     from PySide6.QtGui import QColor
 
-    from tinypedal.ui.quick import lap_map
-    from tinypedal.ui.quick.lines import COLORED_VERTEX, colored_band, normals
+    from neopedal.ui.quick import lap_map
+    from neopedal.ui.quick.lines import COLORED_VERTEX, colored_band, normals
 
     count = 400
     distances = [index * 1.0 for index in range(count)]
@@ -405,7 +405,7 @@ def test_trail_band_same_shape_as_trail():
 
 
 def test_line_grid_nearest_same_as_scan():
-    from tinypedal.ui.quick import lap_map
+    from neopedal.ui.quick import lap_map
 
     count = 3000
     distances = [index * 4.0 for index in range(count)]

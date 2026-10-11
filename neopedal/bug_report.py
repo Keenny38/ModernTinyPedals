@@ -1,0 +1,194 @@
+#  NeoPedal is an open-source overlay application for racing simulation.
+#  Copyright (C) 2022-2026 TinyPedal developers, see contributors.md file
+#
+#  This file is part of NeoPedal.
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Bug report: collect logs, settings & system info into one zip file
+
+Personal data is removed: user home folder in paths, access codes, repository names.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import platform
+import sys
+import zipfile
+from contextlib import suppress
+from time import localtime, strftime
+from typing import Any, NamedTuple
+
+from . import version_check
+from .const_app import APP_NAME
+from .const_file import LogFile
+from .log_handler import ERROR_LOG_FILE
+from .setting import cfg
+
+logger = logging.getLogger(__name__)
+
+SECRET_KEYS = ("access_code", "access_token", "update_repository")
+MAX_LOG_SIZE = 5 * 1024 * 1024
+
+
+def redact_text(text: str) -> str:
+    """Remove user home folder from text"""
+    home = os.path.expanduser("~")
+    if len(home) > 3:
+        for variant in {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}:
+            text = text.replace(variant, "~")
+    return text
+
+
+def redact_setting(data):
+    """Copy of setting with secret values removed"""
+    if isinstance(data, dict):
+        return {
+            key: ("<removed>" if key in SECRET_KEYS and value else redact_setting(value))
+            for key, value in data.items()
+        }
+    if isinstance(data, list):  # copied too: snapshot written on another thread
+        return [redact_setting(value) for value in data]
+    if isinstance(data, str):
+        return redact_text(data)
+    return data
+
+
+def system_info() -> str:
+    """Versions & platform info"""
+    lines = [
+        f"{APP_NAME}: {version_check.neopedal()}",
+        f"Python: {version_check.python()}",
+        f"Qt: {version_check.qt()}",
+        f"PySide: {version_check.pyside()}",
+        f"psutil: {version_check.psutil()}",
+        f"OS: {platform.platform()}",
+        f"Machine: {platform.machine()}",
+        f"Frozen: {getattr(sys, 'frozen', False)}",
+        f"Loaded preset: {cfg.filename.setting}",
+        f"API: {cfg.api_name if cfg.user.setting else '-'}",
+    ]
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        for screen in QApplication.screens():
+            geometry = screen.geometry()
+            lines.append(
+                f"Screen: {screen.name()} {geometry.width()}x{geometry.height()} "
+                f"scale {screen.devicePixelRatio():g}"
+            )
+    except Exception:  # no GUI, report must still be generated
+        logger.debug("BUG REPORT: screen info unavailable", exc_info=True)
+    try:
+        from .module_control import mctrl, wctrl
+
+        lines.append(f"Active widgets: {', '.join(sorted(wctrl.active_modules)) or '-'}")
+        lines.append(f"Active modules: {', '.join(sorted(mctrl.active_modules)) or '-'}")
+    except Exception:  # module control not loaded, report must still be generated
+        logger.debug("BUG REPORT: module info unavailable", exc_info=True)
+    return redact_text("\n".join(lines)) + "\n"
+
+
+def read_log(path: str) -> str:
+    """Read log file tail (limited size)"""
+    with open(path, "rb") as file:
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(max(size - MAX_LOG_SIZE, 0))
+        return redact_text(file.read().decode("utf-8", errors="replace"))
+
+
+class ReportSnapshot(NamedTuple):
+    """App state of bug report, taken on GUI thread (screens, live settings), zip written from it on any thread"""
+
+    system_info: str
+    config_path: str
+    settings: dict[str, Any]  # file name in zip: redacted copy of setting
+
+
+def snapshot_report() -> ReportSnapshot:
+    """Take bug report state (GUI thread): system info & copies of settings"""
+    sources = {
+        "config.json": cfg.user.config,
+        "shortcuts.json": cfg.user.shortcuts,
+        f"preset/{cfg.filename.setting}": cfg.user.setting,
+    }
+    settings = {}
+    for name, data in sources.items():
+        try:
+            settings[name] = redact_setting(dict(data))
+        except (AttributeError, TypeError, ValueError, RuntimeError) as error:  # changed while copied
+            logger.warning("BUG REPORT: unable to add %s: %s", name, error)
+    return ReportSnapshot(system_info(), cfg.path.config, settings)
+
+
+def create_bug_report(
+    zip_filename: str, session_log: str = "", description: str = "", snapshot: ReportSnapshot | None = None,
+) -> list[str]:
+    """Create bug report zip, returns added file names, raise OSError on error
+
+    Written to temporary file, then replaces target: no truncated zip left on error. Without snapshot
+    (taken by snapshot_report on GUI thread), state is taken here: GUI thread only.
+    """
+    temp_name = f"{zip_filename}.part"
+    try:
+        added = write_bug_report(temp_name, session_log, description, snapshot)
+        os.replace(temp_name, zip_filename)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(temp_name)
+        raise
+    logger.info("BUG REPORT: created %s (%s files)", zip_filename, len(added))
+    return added
+
+
+def write_bug_report(
+    zip_filename: str, session_log: str, description: str, snapshot: ReportSnapshot | None = None,
+) -> list[str]:
+    """Write bug report zip, returns added file names"""
+    if snapshot is None:
+        snapshot = snapshot_report()
+    added: list[str] = []
+    config_path = snapshot.config_path
+    with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as package:
+
+        def add_text(name: str, text: str):
+            package.writestr(name, text)
+            added.append(name)
+
+        add_text("system-info.txt", snapshot.system_info)
+        if description.strip():
+            add_text("description.txt", description.strip() + "\n")
+        if session_log:
+            add_text("logs/session.log", redact_text(session_log))
+        for log_name in os.listdir(config_path) if os.path.isdir(config_path) else ():
+            if log_name.startswith((LogFile.APP_LOG, ERROR_LOG_FILE)):
+                try:
+                    add_text(f"logs/{log_name}", read_log(os.path.join(config_path, log_name)))
+                except OSError as error:
+                    logger.warning("BUG REPORT: unable to read %s: %s", log_name, error)
+        for name, data in snapshot.settings.items():
+            try:
+                add_text(f"settings/{name}", json.dumps(data, indent=4, default=str))
+            except (TypeError, ValueError) as error:
+                logger.warning("BUG REPORT: unable to add %s: %s", name, error)
+    return added
+
+
+def default_report_filename() -> str:
+    return f"neopedal-bug-report-{strftime('%Y-%m-%d-%H%M%S', localtime())}.zip"

@@ -31,7 +31,7 @@ def isolated_user_paths(tmp_path_factory):
     Tests without ui_env (benchmark, widgets) may still save presets (new brake or compound
     found...): never in repository folder or real user config.
     """
-    from tinypedal.setting import FilePath, cfg
+    from neopedal.setting import FilePath, cfg
 
     root = tmp_path_factory.mktemp("user_paths")
     saved = {name: getattr(cfg.path, name) for name in FilePath.__slots__}
@@ -55,13 +55,13 @@ def quit_like_app(isolated_user_paths):
     # Session end or exit still stuck: stack of every thread printed (real stderr, not pytest capture) and run
     # stopped, instead of blocking until job timeout
     faulthandler.dump_traceback_later(120, exit=True, file=sys.__stderr__)
-    lap_backend = sys.modules.get("tinypedal.ui.quick.lap_backend")
+    lap_backend = sys.modules.get("neopedal.ui.quick.lap_backend")
     if lap_backend is not None:
         lap_backend.quit_workers()
-    module_recorder = sys.modules.get("tinypedal.module.module_recorder")
+    module_recorder = sys.modules.get("neopedal.module.module_recorder")
     if module_recorder is not None:
         module_recorder.LAP_SAVER.shutdown(wait=True, cancel_futures=True)
-    from tinypedal.setting import cfg
+    from neopedal.setting import cfg
 
     cfg.flush()
 
@@ -99,7 +99,7 @@ def pytest_unconfigure(config):
 def no_openxr_registration(monkeypatch):
     """VR overlay never registers the OpenXR layer in the real registry nor opens the real shared memory
     (Windows): tests mock both (test_vr_shared.py)"""
-    from tinypedal import vr_shared
+    from neopedal import vr_shared
 
     monkeypatch.setattr(vr_shared, "WINDOWS", False)
 
@@ -107,7 +107,7 @@ def no_openxr_registration(monkeypatch):
 @pytest.fixture(autouse=True)
 def offline_lap_reference(monkeypatch):
     """Community lap times never downloaded in tests (tests feed sheet text themselves)"""
-    from tinypedal.userfile import lap_reference
+    from neopedal.userfile import lap_reference
 
     def offline(url, timeout=15):
         raise OSError("offline in tests")
@@ -118,7 +118,7 @@ def offline_lap_reference(monkeypatch):
 @pytest.fixture(autouse=True)
 def offline_track_geometry(monkeypatch):
     """Official circuit never asked to a running game in tests (tests feed game answers themselves)"""
-    from tinypedal.userfile import track_geometry
+    from neopedal.userfile import track_geometry
 
     monkeypatch.setattr(track_geometry, "rest_get", lambda *args, **kwargs: None)
 
@@ -130,7 +130,7 @@ def offline_game_images(monkeypatch):
     Thread of app cache (started by first lookup) lives as long as the app; tests replacing the cache
     (monkeypatch, set up before this fixture: still replaced at teardown) would leave one thread each.
     """
-    from tinypedal.userfile import game_images
+    from neopedal.userfile import game_images
 
     monkeypatch.setattr(game_images, "fetch_from_game", lambda *args, **kwargs: (0, b""))
     app_cache = game_images.images
@@ -142,8 +142,8 @@ def offline_game_images(monkeypatch):
 @pytest.fixture
 def ui_env(monkeypatch, tmp_path):
     """Isolated setting for UI tests: default presets, data paths in tmp folder, saving disabled"""
-    from tinypedal.setting import FilePath, Preset, Setting, cfg
-    from tinypedal.userfile.json_setting import copy_setting
+    from neopedal.setting import FilePath, Preset, Setting, cfg
+    from neopedal.userfile.json_setting import copy_setting
 
     # Real save left running by a previous test finished first: while is_saving, run_after_saving
     # defers reloads past the end of the test
@@ -157,12 +157,12 @@ def ui_env(monkeypatch, tmp_path):
         monkeypatch.setattr(cfg.path, name, f"{folder.as_posix()}/")
     (tmp_path / "settings" / "default.json").write_text("{}", encoding="utf-8")
     # API connected but not started, reader returns neutral values
-    from tinypedal.api_control import api
+    from neopedal.api_control import api
 
     api.connect()
     monkeypatch.setattr(api, "read", _FakeReader())
     # No game found in Steam libraries: pages never read results files & profile of this computer
-    from tinypedal.process import results_file
+    from neopedal.process import results_file
 
     monkeypatch.setattr(results_file, "find_results_folders", lambda libraries=None: {})
     saved = []
@@ -223,7 +223,7 @@ class _FakeReader:
     """
 
     def __getattr__(self, name):
-        from tinypedal.adapter import APIDataReader
+        from neopedal.adapter import APIDataReader
 
         group = _FakeGroup(APIDataReader.__annotations__.get(name))
         setattr(self, name, group)  # cache, so the same object is returned next time
@@ -233,6 +233,6 @@ class _FakeReader:
 @pytest.fixture(scope="session")
 def bundled_fonts():
     """Bundled fonts (Barlow...) loaded once: widgets render & size text as in the app, on every platform"""
-    from tinypedal.main import load_bundled_fonts
+    from neopedal.main import load_bundled_fonts
 
     load_bundled_fonts()
