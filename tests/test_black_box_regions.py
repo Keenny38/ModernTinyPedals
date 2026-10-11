@@ -85,11 +85,53 @@ def full_image(widget) -> QImage:
     return widget.grab().toImage().convertToFormat(QImage.Format.Format_ARGB32)
 
 
+# Text rasterizer variance allowed: on Linux (FreeType) the antialiased edge of a large glyph (gear digit) comes out a
+# few levels apart after another part changed, in full repaints too (not a partial repaint fault). A stale part
+# (old text or color left on screen) differs far more
+EDGE_LEVELS = 24  # largest channel difference of a pixel
+EDGE_PIXELS = 400  # pixels allowed to differ by that much
+
+
+def images_match(screen: QImage, full: QImage) -> bool:
+    """Same pixels, or only antialiased edges a few levels apart (see EDGE_LEVELS)"""
+    if screen == full:
+        return True
+    if screen.size() != full.size():
+        return False
+    count = 0
+    for y in range(full.height()):
+        for x in range(full.width()):
+            a, b = screen.pixel(x, y), full.pixel(x, y)
+            if a == b:
+                continue
+            if max(abs((a >> shift & 0xFF) - (b >> shift & 0xFF)) for shift in (0, 8, 16, 24)) > EDGE_LEVELS:
+                return False
+            count += 1
+            if count > EDGE_PIXELS:
+                return False
+    return True
+
+
 def screen_matches_full(widget) -> bool:
     """Window as last painted on screen (backing store) same as a full repaint"""
     full = full_image(widget)
     screen = widget.backingStore().paintDevice().copy(0, 0, full.width(), full.height())
-    return screen.convertToFormat(QImage.Format.Format_ARGB32) == full
+    return images_match(screen.convertToFormat(QImage.Format.Format_ARGB32), full)
+
+
+def test_images_match_allows_edge_variance_only(ui_env):
+    full = QImage(40, 20, QImage.Format.Format_ARGB32)
+    full.fill(0xFF303640)
+    edge = full.copy()
+    for x in range(30):
+        edge.setPixel(x, 5, 0xFF38393A)  # a few levels off: antialiased edge
+    assert images_match(edge, full)
+    stale = full.copy()
+    stale.setPixel(3, 3, 0xFFF9AC21)  # old glyph pixel: far off
+    assert not images_match(stale, full)
+    many = QImage(40, 20, QImage.Format.Format_ARGB32)
+    many.fill(0xFF323640)  # small difference over a whole area: not just edges
+    assert EDGE_PIXELS < 40 * 20 and not images_match(many, full)
 
 
 def process_events():

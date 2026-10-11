@@ -40,6 +40,20 @@ def rows_made(listing):
     return [item for item in listing.property("contentItem").childItems() if item.property("rowType") is not None]
 
 
+def settled_rows(listing) -> list:
+    """Rows once the list stops making them (rows are incubated over several frames: a slow machine has made only
+    part of the view after 50 ms)"""
+    rows, same = rows_made(listing), 0
+    for _ in range(60):
+        QTest.qWait(50)
+        now = rows_made(listing)
+        same = same + 1 if len(now) == len(rows) else 0
+        rows = now
+        if same >= 4:
+            break
+    return rows
+
+
 def check_shown_rows(page, listing) -> int:
     """Every row in view shows its own option: title, label, editor value; one block per row"""
     rows = page.backend.rows.rows
@@ -100,8 +114,8 @@ def test_rows_reused_show_their_own_option(window):  # noqa: F811
         page.backend.setAdvanced(True)
         QTest.qWait(50)
         listing = find_list(page.view)
-        assert 0 < len(rows_made(listing)) < page.backend.rows.rowCount()
-        made = {id(item) for item in rows_made(listing)}
+        made = {id(item) for item in settled_rows(listing)}
+        assert 0 < len(made) < page.backend.rows.rowCount()
         for name in ("relative", "fuel", "black_box", "speedometer", "relative"):
             page.backend.selectOverlay(name)
             page.backend.setAdvanced(True)
