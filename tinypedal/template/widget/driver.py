@@ -504,7 +504,7 @@ WIDGET_DRIVER = {
         "font_color_system": "#FFFFFF",
         "background_color_system": "#222222",
         "show_tinypedal_performance": True,
-        "prefix_tinypedal": "TP ",
+        "prefix_tinypedal": "NP ",
         "font_color_tinypedal": "#FFFFFF",
         "background_color_tinypedal": "#222222",
         "display_order_system": 1,

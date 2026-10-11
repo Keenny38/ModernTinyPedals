@@ -16,13 +16,26 @@ def test_pid_file_of_running_app(ui_env):
     assert main.is_pid_exist()  # this process, same creation time
 
 
-@pytest.mark.parametrize("content", ["", "not a pid", "999999999,0", f"{os.getpid()},12345.0"])
+@pytest.mark.parametrize("content", ["", "not a pid", "999999999,0,NeoPedal", f"{os.getpid()},12345.0,NeoPedal"])
 def test_pid_file_stale_or_invalid(ui_env, content):
     from tinypedal.const_file import LogFile
 
     with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
         file.write(content)
     assert not main.is_pid_exist()  # other process, reused PID or broken file
+
+
+def test_pid_file_of_other_app_ignored(ui_env):
+    """PID saved by original TinyPedal (no app name), or another app: never blocks this app"""
+    import psutil
+
+    from tinypedal.const_file import LogFile
+
+    create_time = psutil.Process(os.getpid()).create_time()
+    for content in (f"{os.getpid()},{create_time}", f"{os.getpid()},{create_time},TinyPedal"):
+        with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as file:
+            file.write(content)
+        assert not main.is_pid_exist()
 
 
 def test_pid_file_unwritable_or_locked(ui_env, monkeypatch, caplog):
@@ -44,9 +57,9 @@ def test_single_instance_modes(ui_env, monkeypatch):
     monkeypatch.setattr(realtime_state, "singleton", False)
     main.single_instance_check(False)
     assert not realtime_state.singleton and not os.path.exists(pid_file)
-    monkeypatch.setenv("TINYPEDAL_RESTART", "TRUE")  # restarted: no check, PID saved
+    monkeypatch.setenv("NEOPEDAL_RESTART", "TRUE")  # restarted: no check, PID saved
     main.single_instance_check(True)
-    assert realtime_state.singleton and os.path.exists(pid_file) and "TINYPEDAL_RESTART" not in os.environ
+    assert realtime_state.singleton and os.path.exists(pid_file) and "NEOPEDAL_RESTART" not in os.environ
     os.remove(pid_file)
     main.single_instance_check(True)  # first instance
     assert os.path.exists(pid_file)
@@ -98,8 +111,8 @@ def test_restart_command(monkeypatch):
     monkeypatch.setattr(sys, "executable", "C:/Python/python.exe")
     assert loader.restart_command() == ["C:/Python/python.exe", "run.py", "--log-level", "2"]
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", "C:/App/tinypedal.exe")
-    assert loader.restart_command() == ["C:/App/tinypedal.exe", "--log-level", "2"]
+    monkeypatch.setattr(sys, "executable", "C:/App/neopedal.exe")
+    assert loader.restart_command() == ["C:/App/neopedal.exe", "--log-level", "2"]
 
 
 @pytest.fixture
@@ -159,7 +172,7 @@ def test_restart_waits_for_lap_saving(controls, monkeypatch):
     monkeypatch.setattr(loader.os, "_exit", lambda code: controls.append("exit"))
     monkeypatch.setattr(loader.os, "execv", lambda *args: controls.append("exit"))
     monkeypatch.setattr(loader.logging, "shutdown", lambda: None)
-    monkeypatch.setenv("TINYPEDAL_RESTART", "")
+    monkeypatch.setenv("NEOPEDAL_RESTART", "")
     loader.restart()
     assert controls.index("api.close") < controls.index("wait_lap_saver") < controls.index("exit")
 
@@ -175,9 +188,9 @@ def test_restart_failure_reloads_app(controls, monkeypatch):
     monkeypatch.setattr(loader.os, "execv", blocked)
     monkeypatch.setattr(loader.os, "_exit", lambda code: controls.append("exit"))
     monkeypatch.setattr(loader.logging, "shutdown", lambda: None)
-    monkeypatch.setenv("TINYPEDAL_RESTART", "")
+    monkeypatch.setenv("NEOPEDAL_RESTART", "")
     loader.restart()
-    assert "exit" not in controls and "TINYPEDAL_RESTART" not in os.environ
+    assert "exit" not in controls and "NEOPEDAL_RESTART" not in os.environ
     assert controls.index("api.close") < controls.index("api.connect") < controls.index("api.start")
     assert controls.index("api.start") < controls.index("mctrl.start")
 

@@ -366,7 +366,7 @@ class TrackMapBackend(QObject):
             QMessageBox.warning(self._window, tr("Error"), trm(
                 "Unable to load track map file from<br>"
                 f"<b>{filepath}{filename}{FileExt.SVG}</b><br><br>"
-                "Only support SVG file that generated with TinyPedal."))
+                "Only support SVG file that generated with NeoPedal or TinyPedal."))
             return
         self.geometry = geometry
         self.raw_coords, self.raw_dists, self.sectors = geometry.coords, geometry.dists, geometry.sectors

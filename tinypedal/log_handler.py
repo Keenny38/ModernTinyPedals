@@ -28,7 +28,7 @@ from collections.abc import Iterator
 from logging.handlers import RotatingFileHandler
 from time import monotonic
 
-ERROR_LOG_FILE = "tinypedal-errors.log"
+ERROR_LOG_FILE = "neopedal-errors.log"
 LOG_STREAM_MAX_CHARS = 2 * 1024 * 1024  # log kept in memory (log dialog, bug report)
 
 

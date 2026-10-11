@@ -1,7 +1,7 @@
 ; NeoPedal Windows installer (Inno Setup 6)
 ;
 ; Build after PyInstaller (python build_pyinstaller.py -c):
-;   iscc /DAppVersion=0.10.0 installer\tinypedal.iss
+;   iscc /DAppVersion=0.10.0 installer\neopedal.iss
 ;
 ; Installs per user in %LOCALAPPDATA%\Programs\NeoPedal (no admin rights; updates keep the folder of an
 ; older install, such as Programs\Modern Tiny Pedals),
@@ -13,9 +13,9 @@
   #define AppVersion "0.0.0"
 #endif
 #define AppName "NeoPedal"
-; PyInstaller output folder (dist\TinyPedal) & executable: internal name kept, found by older updaters
-#define AppFolder "TinyPedal"
-#define AppExe "tinypedal.exe"
+; PyInstaller output folder (dist\NeoPedal) & executable (tinypedal.exe until 0.23.0, removed below)
+#define AppFolder "NeoPedal"
+#define AppExe "neopedal.exe"
 #define RepoUrl "https://github.com/Keenny38/ModernTinyPedals"
 
 [Setup]
@@ -58,6 +58,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Program files of previous version: lib is rebuilt by each release (Python, Qt & QML modules change),
 ; stale files would pile up. User data (presets, telemetry...) is next to the executable, not in lib.
 Type: filesandordirs; Name: "{app}\lib"
+; Executable named tinypedal.exe until 0.23.0, like the one of the original TinyPedal: renamed neopedal.exe
+; (shortcuts below point to the new name)
+Type: files; Name: "{app}\tinypedal.exe"
 ; Shortcuts named "Modern Tiny Pedals" before the NeoPedal name (Start menu folder keeps its name on update)
 Type: files; Name: "{group}\Modern Tiny Pedals.lnk"
 Type: files; Name: "{userdesktop}\Modern Tiny Pedals.lnk"

@@ -35,8 +35,12 @@ VERSION = version_check.tinypedal()
 
 # App info
 APP_NAME = "NeoPedal"  # displayed name
-APP_ID = "TinyPedal"  # build folder & executable (tinypedal.exe): unchanged, found by older updaters
+APP_ID = "NeoPedal"  # build folder & executable (neopedal.exe)
+EXECUTABLE = f"{APP_ID.lower()}.exe"  # Windows executable
+LEGACY_EXECUTABLE = "tinypedal.exe"  # executable until 0.23.0, also the one of original TinyPedal
 CONFIG_ID = "NeoPedal"  # user config & data folders
+DESKTOP_FILE_NAME = "NeoPedal"  # Linux desktop entry (NeoPedal.desktop), not the one of original TinyPedal
+RESTART_ENVIRONMENT = "NEOPEDAL_RESTART"  # set by restart, skips single instance check
 LEGACY_CONFIG_ID = "TinyPedal"  # user folders of older versions, shared with original TinyPedal, copied once
 REPO_NAME = "TinyPedal/TinyPedal"  # upstream project (wiki, credits)
 FORK_REPO_NAME = "Keenny38/ModernTinyPedals"  # this fork (releases, updates)

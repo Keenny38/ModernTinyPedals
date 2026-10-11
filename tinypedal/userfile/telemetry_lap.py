@@ -281,7 +281,7 @@ def load_lap(path: str) -> LapData:
             reader = csv.reader(lines)
             header = next(reader, None)
             if not header or "distance" not in header:
-                raise ValueError("not a TinyPedal telemetry file")
+                raise ValueError("not a NeoPedal telemetry file")
             width = len(header)
             rows = [row for row in reader if len(row) == width]
     except (EOFError, gzip.BadGzipFile, zlib.error, UnicodeDecodeError, csv.Error) as error:

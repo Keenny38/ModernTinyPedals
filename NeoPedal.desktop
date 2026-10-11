@@ -1,0 +1,12 @@
+[Desktop Entry]
+Exec=/usr/local/bin/NeoPedal
+GenericName=Overlay for Racing Simulator
+Icon=/usr/local/share/NeoPedal/images/icon.png
+Name=NeoPedal
+Keywords=neopedal;tinypedal;overlay;rfactor2;lmu;
+Path=/usr/local/share/NeoPedal
+StartupNotify=true
+Terminal=false
+Type=Application
+StartupWMClass=NeoPedal
+Categories=Game

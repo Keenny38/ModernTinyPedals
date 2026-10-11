@@ -21,8 +21,11 @@ User folder migration: legacy "TinyPedal" folders copied once to "NeoPedal" fold
 
 Legacy folders are shared with the original TinyPedal app, so they are copied, never moved
 nor modified. Copy goes to a temporary folder renamed when complete: an interrupted copy
-never leaves a half new folder, and is retried on next start. If copy fails, the legacy
-folder is used for this run (no setting lost).
+never leaves a half new folder, and is retried on next start. Files that can not be read
+(in use by a running TinyPedal) are left out, the rest is copied. Legacy folder is never
+used by this app, even if copy fails: TinyPedal keeps its settings & running state (pid.log)
+there, so both apps can run at the same time (failed copy: new folder starts with default
+settings, "Import Again from TinyPedal" copies again).
 
 Runs on first path request (setting import, before logging is set): messages are kept
 and written to log by log_migration_report() once logging is ready.
@@ -224,7 +227,11 @@ def migrate_folder(
     try:
         if os.path.exists(temp_folder):  # left by an interrupted copy
             shutil.rmtree(temp_folder)
-        shutil.copytree(old_folder, temp_folder, ignore=shutil.ignore_patterns(*SKIPPED_FILES))
+        try:
+            shutil.copytree(old_folder, temp_folder, ignore=shutil.ignore_patterns(*SKIPPED_FILES))
+        except shutil.Error as error:  # other files copied: unreadable ones left out
+            _record(logging.WARNING, f"MIGRATION: some files not copied: {error}")
+            os.makedirs(temp_folder, exist_ok=True)
         config_file = os.path.join(temp_folder, CONFIG_FILE)
         if os.path.isfile(config_file):
             check_setting_version(config_file)
@@ -239,7 +246,8 @@ def migrate_folder(
             raise OSError(f"{STATE_FILE} not saved")
         os.rename(temp_folder, new_folder)
     except (OSError, shutil.Error) as error:
-        _record(logging.ERROR, f"MIGRATION: failed, {old_folder} used for this run: {error}")
+        _record(logging.ERROR, f"MIGRATION: failed, {old_folder} not used (kept for TinyPedal), "
+                f"starting with default settings: {error}")
         shutil.rmtree(temp_folder, ignore_errors=True)
         return False
     _record(logging.INFO, f"MIGRATION: done, {old_folder} kept unchanged")
@@ -250,16 +258,17 @@ def user_folder_id(kind: str = "config") -> str:
     """Folder name of user folders (kind "config" or "data"), migrate legacy folder first
 
     Migration runs once per kind & run. Linux data folder is migrated before config folder,
-    so copied config.json only points to new data folder if it exists.
+    copied config.json points to new data folder. Legacy folder is never used (shared with
+    a running TinyPedal), even if copy failed: see module doc.
     """
     folder_id = _folder_ids.get(kind)
     if folder_id is not None:
         return folder_id
     path_map = {}
     if kind == "config" and not PLATFORM.WINDOWS:
-        if user_folder_id("data") == CONFIG_ID:
-            data_base = base_folder("data")
-            path_map[os.path.join(data_base, LEGACY_CONFIG_ID)] = os.path.join(data_base, CONFIG_ID)
+        user_folder_id("data")
+        data_base = base_folder("data")
+        path_map[os.path.join(data_base, LEGACY_CONFIG_ID)] = os.path.join(data_base, CONFIG_ID)
     base = base_folder(kind)
     old_folder = os.path.join(base, LEGACY_CONFIG_ID)
     new_folder = os.path.join(base, CONFIG_ID)
@@ -269,7 +278,6 @@ def user_folder_id(kind: str = "config") -> str:
         reimport = read_state(new_folder).get("state") == STATE_REIMPORT
         apply_requested_change(new_folder, old_folder)
         state = STATE_KEPT if reimport else STATE_PENDING  # asked for new copy: not asked again
-    migrated = migrate_folder(old_folder, new_folder, path_map, state)
-    folder_id = CONFIG_ID if migrated else LEGACY_CONFIG_ID
-    _folder_ids[kind] = folder_id
-    return folder_id
+    migrate_folder(old_folder, new_folder, path_map, state)
+    _folder_ids[kind] = CONFIG_ID
+    return CONFIG_ID

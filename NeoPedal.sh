@@ -8,9 +8,11 @@ if [ ! -f "${CONFIG_FILE}" ];
 then
     CONFIG_FILE="${CONFIG_BASE}/TinyPedal/launcher.conf"
 fi
-if [ -f "${CONFIG_FILE}" ] && [ -z "${TINYPEDAL_RUN_ARGS:-}" ];
+if [ -f "${CONFIG_FILE}" ] && [ -z "${NEOPEDAL_RUN_ARGS:-}" ];
 then
     . "${CONFIG_FILE}"
+    # Variable named TINYPEDAL_RUN_ARGS until 0.23.0
+    NEOPEDAL_RUN_ARGS="${NEOPEDAL_RUN_ARGS:-${TINYPEDAL_RUN_ARGS:-}}"
 fi
 
-./run.py ${TINYPEDAL_RUN_ARGS:-} "$@"
+./run.py ${NEOPEDAL_RUN_ARGS:-} "$@"

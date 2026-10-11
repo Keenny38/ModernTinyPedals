@@ -152,12 +152,12 @@ def read_manifest(package: zipfile.ZipFile) -> dict:
             raise ValueError("manifest too large")
         manifest = load_json_strict(read_entry(package, info).decode("utf-8"))
     except (KeyError, ValueError) as error:  # UnicodeDecodeError & JSONDecodeError included
-        raise ValueError("not a TinyPedal preset package") from error
+        raise ValueError("not a NeoPedal preset package") from error
     if not isinstance(manifest, dict) or manifest.get("format") != PACKAGE_FORMAT:
-        raise ValueError("not a TinyPedal preset package")
+        raise ValueError("not a NeoPedal preset package")
     version = manifest.get("version", 0)
     if not isinstance(version, (int, float)) or isinstance(version, bool):  # never a TypeError below
-        raise ValueError("not a TinyPedal preset package")
+        raise ValueError("not a NeoPedal preset package")
     if version > PACKAGE_VERSION:
         raise ValueError("package made by newer NeoPedal version")
     return manifest

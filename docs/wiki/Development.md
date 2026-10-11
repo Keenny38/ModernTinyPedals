@@ -138,23 +138,23 @@ pip install -r requirements-build.txt
 python build_pyinstaller.py -c
 ```
 
-The executable is built in `dist\TinyPedal` (`tinypedal.exe`, program files in `lib`). `-c` removes the previous build first. The hook `tools/pyinstaller_hooks/hook-PySide6.QtQml.py` bundles only the QML modules in use (about 2 MB instead of about 300 MB with WebEngine and 3D). `requirements-build.txt` pins PyInstaller and the runtime versions used by the release workflow.
+The executable is built in `dist\NeoPedal` (`neopedal.exe`, program files in `lib`). `-c` removes the previous build first. The hook `tools/pyinstaller_hooks/hook-PySide6.QtQml.py` bundles only the QML modules in use (about 2 MB instead of about 300 MB with WebEngine and 3D). `requirements-build.txt` pins PyInstaller and the runtime versions used by the release workflow.
 
 Check the build like CI does (the report file is optional, the executable has no console):
 
 ```bash
-dist\TinyPedal\tinypedal.exe --self-test report.txt
+dist\NeoPedal\neopedal.exe --self-test report.txt
 ```
 
 To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then (with the version):
 
 ```bash
-iscc /DAppVersion=0.20.0 installer\tinypedal.iss
+iscc /DAppVersion=0.20.0 installer\neopedal.iss
 ```
 
 The installer `NeoPedal-<version>-windows-setup.exe` is written to `dist`. Its shortcut icon follows the Windows light or dark mode (`images/icon.ico` or `images/icon_dark.ico`). Icons are generated from `images/src/icon.webp` and `images/src/icon_dark.webp` with `images/export_icon.sh` (ImageMagick 7).
 
-User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). The legacy `TinyPedal` folders, shared with the original app, are copied once on first start by `userfile/folder_migration.py` (temporary folder renamed when complete, legacy folder used for that run if the copy fails, Linux `user_path` values rewritten), never moved nor modified. The copy records the user's choice in `migration.json` (`pending`, `kept`, `default`); `ui/settings_import.py` asks once the window is up (not in safe mode) and offers `Config` > `TinyPedal Settings`. A request (`reset`, `reimport`) is written there and applied by `folder_migration` on next start, before settings are loaded: the current folder is renamed aside, never deleted. `APP_ID` stays `TinyPedal`: build folder and `tinypedal.exe`, looked for by older updaters. The remote control asks for an `X-NeoPedal` header and still accepts `X-TinyPedal`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
+User folders are named `NeoPedal` (`CONFIG_ID` in `const_app.py`). The legacy `TinyPedal` folders, shared with the original app, are copied once on first start by `userfile/folder_migration.py` (temporary folder renamed when complete, files that can not be read left out, Linux `user_path` values rewritten). The legacy folder is never used by the app, even when the copy fails (the new folder then starts with default settings): it holds the `pid.log` of a running TinyPedal, so sharing it would stop one app from starting while the other runs. `pid.log` ends with the app name (`<pid>,<create time>,NeoPedal`), a PID saved by another app is ignored, never moved nor modified. The copy records the user's choice in `migration.json` (`pending`, `kept`, `default`); `ui/settings_import.py` asks once the window is up (not in safe mode) and offers `Config` > `TinyPedal Settings`. A request (`reset`, `reimport`) is written there and applied by `folder_migration` on next start, before settings are loaded: the current folder is renamed aside, never deleted. `APP_ID` is `NeoPedal` since 0.23.1: build folder and `neopedal.exe` (`tinypedal.exe` until 0.23.0, the name of the original app's executable). Older updaters run the installer with the folder of the running copy, whatever the executable name; the installer removes `tinypedal.exe` and points shortcuts to `neopedal.exe`, and `update.installed_app_folder` accepts both names. The restart variable is `NEOPEDAL_RESTART`, the Linux desktop entry `NeoPedal.desktop` (`DESKTOP_FILE_NAME`), the SteamVR overlay key `neopedal.overlay`. The Python package, the QML module and the OpenXR layer (`TinyPedalXrLayer`, registered in the user's OpenXR settings) keep their internal names: the original TinyPedal has no VR overlay, so they never meet. The remote control asks for an `X-NeoPedal` header and still accepts `X-TinyPedal`. Release files are named `NeoPedal-<version>-…`: every updater, also the one of 0.19, finds the installer by its end (`-setup.zip`, `-windows-setup.exe`). The repository keeps its `Keenny38/ModernTinyPedals` address: updaters up to 0.22.4 send a raw request that never follows GitHub's redirect of a renamed repository (they would find no update). Since 0.23.0, `request_latest_release` requests again with redirects followed (GitHub API host only) when the direct request gives nothing, so a rename becomes possible once most users have that version; then add the old name to `RENAMED_REPOS`.
 
 ## Release process
 

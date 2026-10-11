@@ -31,7 +31,7 @@ from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QIcon, QPixmapC
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import realtime_state, safe_mode, version_check
-from .const_app import APP_NAME, PLATFORM, VERSION
+from .const_app import APP_NAME, CONFIG_ID, DESKTOP_FILE_NAME, PLATFORM, RESTART_ENVIRONMENT, VERSION
 from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
 from .log_handler import BoundedLogStream, set_logging_level
@@ -44,12 +44,16 @@ log_stream = BoundedLogStream()  # latest log text only (log dialog, bug report)
 
 
 def save_pid_file():
-    """Save PID info to file (locked file or read-only config folder: single instance not enforced)"""
+    """Save PID info to file (locked file or read-only config folder: single instance not enforced)
+
+    Format "pid,create time,NeoPedal": app name tells a PID saved by original TinyPedal apart
+    (same file name in its own config folder), so each app only checks its own instance.
+    """
     try:
         with open(f"{cfg.path.config}{LogFile.PID}", "w", encoding="utf-8") as f:
             current_pid = os.getpid()
             pid_create_time = psutil.Process(current_pid).create_time()
-            pid_str = f"{current_pid},{pid_create_time}"
+            pid_str = f"{current_pid},{pid_create_time},{CONFIG_ID}"
             f.write(pid_str)
     except (OSError, psutil.Error) as error:
         logger.warning("PID file not saved: %s", error)
@@ -61,10 +65,12 @@ def is_pid_exist() -> bool:
         # Load last recorded PID and creation time from pid log file
         with open(f"{cfg.path.config}{LogFile.PID}", encoding="utf-8") as f:
             pid_read = f.readline()
-        pid = pid_read.split(",")
+        pid = pid_read.strip().split(",")
         pid_last = int(pid[0])
         pid_last_create_time = pid[1]
-        # Verify if last PID is running and belongs to TinyPedal
+        if pid[2] != CONFIG_ID:  # saved by another app (original TinyPedal)
+            return False
+        # Verify if last PID is running and belongs to NeoPedal
         if psutil.pid_exists(pid_last) and str(psutil.Process(pid_last).create_time()) == pid_last_create_time:
             return True  # already running
     except (OSError, psutil.Error, ValueError, IndexError):  # also unreadable (locked) file
@@ -81,8 +87,8 @@ def single_instance_check(is_single_instance: bool):
         return
     logger.info("Single instance mode: ON")
     # Skip if restarted
-    if os.getenv("TINYPEDAL_RESTART") == "TRUE":
-        os.environ.pop("TINYPEDAL_RESTART", None)
+    if os.getenv(RESTART_ENVIRONMENT) == "TRUE":
+        os.environ.pop(RESTART_ENVIRONMENT, None)
         save_pid_file()
         return
     # Check existing PID file first, then exe PID
@@ -152,7 +158,7 @@ def set_app_icon(root: QApplication):
     root.setWindowIcon(QIcon(app_icon_file(system_dark_mode())))
     # Set window icon for X11/Wayland (workaround)
     if not PLATFORM.WINDOWS:
-        root.setDesktopFileName("TinyPedal-overlay")
+        root.setDesktopFileName(DESKTOP_FILE_NAME)
 
 
 def load_bundled_fonts():

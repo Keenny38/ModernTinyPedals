@@ -192,8 +192,8 @@ jobs:
       shell: pwsh
       run: |
         $report = Join-Path $env:RUNNER_TEMP "self-test.txt"
-        $process = Start-Process -FilePath ./dist/TinyPedal/tinypedal.exe -ArgumentList "--self-test", "`"$report`"" `
-          -WorkingDirectory ./dist/TinyPedal -Wait -PassThru
+        $process = Start-Process -FilePath ./dist/NeoPedal/neopedal.exe -ArgumentList "--self-test", "`"$report`"" `
+          -WorkingDirectory ./dist/NeoPedal -Wait -PassThru
         if (Test-Path $report) { Get-Content $report }
         if ($process.ExitCode -ne 0) { Write-Error "Self test failed (exit code $($process.ExitCode))"; exit 1 }
 
@@ -210,7 +210,7 @@ jobs:
         [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
         try {
           # OpenXR layer too: loaded by games (some anti-cheat or antivirus tools distrust unsigned DLLs)
-          $files = @((Get-ChildItem ./dist/TinyPedal -Filter *.exe).FullName) + (Resolve-Path ./dist/TinyPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll).Path
+          $files = @((Get-ChildItem ./dist/NeoPedal -Filter *.exe).FullName) + (Resolve-Path ./dist/NeoPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll).Path
           & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $files
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         } finally {
@@ -227,7 +227,7 @@ jobs:
         endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
         signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files-folder: ${{ github.workspace }}/dist/TinyPedal
+        files-folder: ${{ github.workspace }}/dist/NeoPedal
         files-folder-filter: exe
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
@@ -243,7 +243,7 @@ jobs:
         endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
         signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files: ${{ github.workspace }}/dist/TinyPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll
+        files: ${{ github.workspace }}/dist/NeoPedal/lib/openxr_layer_bundle/TinyPedalXrLayer.dll
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256
@@ -253,7 +253,7 @@ jobs:
       run: |
         $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
         if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-        & $iscc "/DAppVersion=$env:APP_VER" installer\tinypedal.iss
+        & $iscc "/DAppVersion=$env:APP_VER" installer\neopedal.iss
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Move-Item "./dist/NeoPedal-$env:APP_VER-windows-setup.exe" .
 

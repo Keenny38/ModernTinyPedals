@@ -53,7 +53,7 @@ If a start did not finish (crash, or app killed before the window and overlays w
 - You can force safe mode from the command line:
 
 ```bash
-tinypedal.exe --safe-mode
+neopedal.exe --safe-mode
 ```
 
 ```bash
@@ -67,14 +67,14 @@ If another program (antivirus, OneDrive or another sync tool, a backup tool) hol
 ## Logs
 
 - `Help` > `Show Log` shows the log of the running app: `Save`, `Copy`, `Clear`, `Refresh`, `Auto Refresh`.
-- To write the log to a file, start the app with `--log-level 2`: the log is written to `tinypedal.log` in the global config folder. The Windows executable has no console, so this is the way to keep a log there. On Linux, put permanent arguments in `~/.config/NeoPedal/launcher.conf` (see [Installation](Installation.md#install-a-launcher)).
+- To write the log to a file, start the app with `--log-level 2`: the log is written to `neopedal.log` in the global config folder. The Windows executable has no console, so this is the way to keep a log there. On Linux, put permanent arguments in `~/.config/NeoPedal/launcher.conf` (see [Installation](Installation.md#install-a-launcher)).
 
 ### Command line arguments
 
 | Argument | Effect |
 |---|---|
 | `-h`, `--help` | List the arguments (from source) |
-| `-l`, `--log-level 0` / `1` / `2` | Warnings and errors only / all messages (default) / all messages, also to `tinypedal.log` |
+| `-l`, `--log-level 0` / `1` / `2` | Warnings and errors only / all messages (default) / all messages, also to `neopedal.log` |
 | `-s`, `--single-instance 0` / `1` | Allow several copies at once / single instance (default). Driver stats are not recorded with `0`. |
 | `--safe-mode` | Start without plugins and overlays |
 
@@ -108,7 +108,7 @@ Memory: overlays turned off and pages you have not opened take no memory (their 
 
 | Files | Windows (installed) | Linux |
 |---|---|---|
-| Global config: `config.json`, `shortcuts.json`, `tinypedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\NeoPedal` | `~/.config/NeoPedal/` |
+| Global config: `config.json`, `shortcuts.json`, `neopedal.log`, driver stats (`.stats`, `driver.history`), `languages`, `blackbox` | `%APPDATA%\NeoPedal` | `~/.config/NeoPedal/` |
 | Presets and style presets (`settings`), `brandlogo`, `pacenotes`, `tracknotes` | Program folder, `%LOCALAPPDATA%\Programs\NeoPedal` | `~/.config/NeoPedal/` |
 | `deltabest` (delta, fuel, energy, sectors, consumption), `trackmap`, `carsetups`, `telemetry` (laps and replays) | Program folder | `~/.local/share/NeoPedal/` |
 

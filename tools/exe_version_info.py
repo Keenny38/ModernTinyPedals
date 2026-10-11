@@ -2,7 +2,7 @@
 Windows version resource of the executable (PyInstaller --version-file)
 
 Windows shows FileDescription as the process name (Task Manager, Alt+Tab grouping,
-file properties); without it, the executable name ("tinypedal") is shown.
+file properties); without it, the executable name ("neopedal") is shown.
 """
 
 from __future__ import annotations

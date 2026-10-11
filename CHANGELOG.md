@@ -3,6 +3,15 @@
 All notable changes to **NeoPedal** (formerly Modern Tiny Pedals), newest version first. Version française : [CHANGELOG.fr.md](CHANGELOG.fr.md).
 The full list of commits of each version is on the [Releases](https://github.com/Keenny38/ModernTinyPedals/releases) page.
 
+## 0.23.1 (2026-10-11)
+
+### NeoPedal and TinyPedal at the same time
+
+- **NeoPedal and the original TinyPedal run together**: NeoPedal could refuse to start ("NeoPedal is already running") while TinyPedal was open, or stop TinyPedal from starting. When copying the `TinyPedal` settings folder failed, NeoPedal fell back to that folder and shared its `pid.log`, the file each app checks to run only once. The `TinyPedal` folder is now never used: files that can not be copied are left out (the rest is copied), and if the whole copy fails the app starts with default settings (`Config` > `TinyPedal Settings` > `Import Again from TinyPedal` copies them later). `pid.log` also carries the app name, so a PID written by TinyPedal is never taken for a running NeoPedal.
+- **Windows: executable renamed `neopedal.exe`**: it was `tinypedal.exe`, the name of the original app's executable (Task Manager, firewall, tools watching the process). The update removes `tinypedal.exe` and points the Start menu and desktop shortcuts to `neopedal.exe`: a shortcut you pinned yourself (taskbar) has to be pinned again.
+- **Linux: own install paths**: `install.sh` installed the app in the paths of the original TinyPedal (`/usr/local/share/TinyPedal`, `TinyPedal` command, `TinyPedal-overlay.desktop`), replacing it. It now installs in `/usr/local/share/NeoPedal` with a `NeoPedal` command and `NeoPedal.desktop`, removes an older NeoPedal install found in the TinyPedal paths and keeps an install of the original TinyPedal. Windows are no longer grouped with TinyPedal's in the task bar. The launcher script is `NeoPedal.sh`, its arguments variable `NEOPEDAL_RUN_ARGS` (`TINYPEDAL_RUN_ARGS` of an existing `launcher.conf` still read).
+- **Fewer TinyPedal names**: log files `neopedal.log` and `neopedal-errors.log`, bug report `neopedal-bug-report-….zip`, `NeoPedal` labels of the `System Performance` options (default prefix `NP `, presets keep theirs), messages about telemetry, replay and preset package files, track maps saved "with NeoPedal" (maps of TinyPedal still load), web dashboard certificate, SteamVR overlay and command line help.
+
 ## 0.23.0 (2026-10-11)
 
 ### New name: NeoPedal

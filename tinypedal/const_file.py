@@ -130,5 +130,5 @@ class StatsFile:
 class LogFile:
     """Log file name constants"""
 
-    APP_LOG = "tinypedal.log"
+    APP_LOG = "neopedal.log"
     PID = "pid.log"

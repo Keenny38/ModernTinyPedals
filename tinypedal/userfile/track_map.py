@@ -127,7 +127,7 @@ def save_track_map_file(
     # Create new svg file
     new_svg = xml.dom.minidom.Document()
     # Create comments
-    root_comment = new_svg.createComment(" Track map generated with TinyPedal ")
+    root_comment = new_svg.createComment(" Track map generated with NeoPedal ")
     new_svg.appendChild(root_comment)
     # Create svg
     root_node = new_svg.createElement("svg")

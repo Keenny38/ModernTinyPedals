@@ -3,6 +3,15 @@
 Toutes les nouveautés de **NeoPedal** (anciennement Modern Tiny Pedals), la version la plus récente en premier. English version: [CHANGELOG.md](CHANGELOG.md).
 C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en français. La liste détaillée des commits de chaque version est sur la page [Releases](https://github.com/Keenny38/ModernTinyPedals/releases).
 
+## 0.23.1 (2026-10-11)
+
+### NeoPedal et TinyPedal en même temps
+
+- **NeoPedal et TinyPedal d'origine tournent ensemble** : NeoPedal pouvait refuser de démarrer (« NeoPedal is already running ») quand TinyPedal était ouvert, ou empêcher TinyPedal de démarrer. Quand la copie du dossier de réglages `TinyPedal` échouait, NeoPedal se rabattait sur ce dossier et partageait son `pid.log`, le fichier que chaque app vérifie pour ne tourner qu'une fois. Le dossier `TinyPedal` n'est maintenant jamais utilisé : les fichiers qui ne peuvent pas être copiés sont laissés de côté (le reste est copié), et si toute la copie échoue l'app démarre avec les réglages par défaut (`Config` > `Réglages de TinyPedal` > `Réimporter depuis TinyPedal` les copie plus tard). `pid.log` contient aussi le nom de l'app : un PID écrit par TinyPedal n'est jamais pris pour un NeoPedal lancé.
+- **Windows : exécutable renommé `neopedal.exe`** : c'était `tinypedal.exe`, le nom de l'exécutable de l'app d'origine (Gestionnaire des tâches, pare-feu, outils qui surveillent le processus). La mise à jour retire `tinypedal.exe` et fait pointer les raccourcis du menu Démarrer et du bureau vers `neopedal.exe` : un raccourci épinglé par toi (barre des tâches) est à épingler de nouveau.
+- **Linux : emplacements d'installation propres** : `install.sh` installait l'app aux emplacements de TinyPedal d'origine (`/usr/local/share/TinyPedal`, commande `TinyPedal`, `TinyPedal-overlay.desktop`), en la remplaçant. Il installe maintenant dans `/usr/local/share/NeoPedal` avec une commande `NeoPedal` et `NeoPedal.desktop`, retire une ancienne installation de NeoPedal trouvée aux emplacements de TinyPedal et garde une installation de TinyPedal d'origine. Les fenêtres ne sont plus regroupées avec celles de TinyPedal dans la barre des tâches. Le script de lancement est `NeoPedal.sh`, sa variable d'arguments `NEOPEDAL_RUN_ARGS` (`TINYPEDAL_RUN_ARGS` d'un `launcher.conf` existant toujours lu).
+- **Moins de noms TinyPedal** : fichiers journaux `neopedal.log` et `neopedal-errors.log`, rapport de bug `neopedal-bug-report-….zip`, libellés `NeoPedal` des options de `Performances système` (préfixe par défaut `NP `, les presets gardent le leur), messages sur les fichiers de télémétrie, de replay et de paquet de presets, cartes enregistrées « avec NeoPedal » (les cartes de TinyPedal se chargent toujours), certificat du tableau de bord web, overlay SteamVR et aide de la ligne de commande.
+
 ## 0.23.0 (2026-10-11)
 
 ### Nouveau nom : NeoPedal

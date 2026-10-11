@@ -15,6 +15,7 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QMessageBox
 
 from tinypedal import app_signal, update
+from tinypedal.const_app import APP_ID
 from tinypedal.setting import cfg
 
 DIGEST = "a" * 64
@@ -271,6 +272,22 @@ def test_installed_app_folder(monkeypatch, tmp_path):
         old_link.write_bytes(shortcut_bytes(os.path.join(installed, update.APP_EXECUTABLE)))
         assert update.installed_app_folder() == os.path.normpath(installed)
         old_link.unlink()
+
+
+def test_installed_app_folder_of_older_version(monkeypatch, tmp_path):
+    """Installed until 0.23.0 with tinypedal.exe: found by its shortcut (run from source updates it)"""
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    (installed / update.LEGACY_EXECUTABLE).write_bytes(b"")
+    (installed / update.UNINSTALLER_NAME).write_bytes(b"")
+    appdata = tmp_path / "appdata"
+    link = appdata / update.START_MENU_SHORTCUT
+    link.parent.mkdir(parents=True)
+    link.write_bytes(shortcut_bytes(os.path.join(str(installed), update.LEGACY_EXECUTABLE)))
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr(update, "registry_install_folder", lambda: "")
+    assert update.APP_EXECUTABLE == "neopedal.exe"
+    assert update.installed_app_folder() == os.path.normpath(installed)
 
 
 def test_install_folder(monkeypatch, frozen_exe):
@@ -801,3 +818,15 @@ def test_window_checks_updates_while_running(window, monkeypatch):
     assert timer.isActive() and timer.interval() == app_module.UPDATE_CHECK_POLL_MS
     timer.timeout.emit()
     assert due == [1]
+
+
+def test_installer_matches_app_names():
+    """Installer & build use the executable name looked for by updates, old tinypedal.exe removed"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "installer", "neopedal.iss"), encoding="utf-8") as file:
+        script = file.read()
+    assert f'#define AppExe "{update.APP_EXECUTABLE}"' in script
+    assert f"AppId={{{update.INSTALLER_APP_ID}" in script
+    assert f'Type: files; Name: "{{app}}\\{update.LEGACY_EXECUTABLE}"' in script
+    assert f'#define AppFolder "{APP_ID}"' in script
+    assert f"{APP_ID.lower()}.exe" == update.APP_EXECUTABLE

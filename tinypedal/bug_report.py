@@ -191,4 +191,4 @@ def write_bug_report(
 
 
 def default_report_filename() -> str:
-    return f"tinypedal-bug-report-{strftime('%Y-%m-%d-%H%M%S', localtime())}.zip"
+    return f"neopedal-bug-report-{strftime('%Y-%m-%d-%H%M%S', localtime())}.zip"

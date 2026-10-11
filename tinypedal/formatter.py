@@ -50,11 +50,12 @@ def format_module_name(name: str) -> str:
 
 
 def format_option_name(name: str) -> str:
-    """Format option name"""
+    """Format option name ("tinypedal" in option keys kept from TinyPedal: shown as app name)"""
     return uppercase_abbr(
         name
         .replace("_", " ")
         .title()
+        .replace("Tinypedal", "NeoPedal")
     )
 
 

@@ -29,7 +29,7 @@ from exe_version_info import version_info_text, written_version
 DIST_FOLDER = "dist"
 WORK_FOLDER = "build"
 APP_FOLDER = os.path.join(DIST_FOLDER, APP_ID)
-EXE_NAME = APP_ID.lower()  # "tinypedal.exe" is checked for restart & cli arguments
+EXE_NAME = APP_ID.lower()  # "neopedal.exe" is checked for restart & cli arguments
 
 EXCLUDE_MODULES = [
     "difflib",
@@ -70,7 +70,7 @@ DATA_FILES = {
 def get_cli_argument():
     """Get command line argument"""
     parse = argparse.ArgumentParser(
-        description="TinyPedal windows executable build command line arguments"
+        description=f"{APP_NAME} windows executable build command line arguments"
     )
     parse.add_argument(
         "-c",
@@ -117,7 +117,7 @@ def remove_old_build(clean_build: bool) -> bool:
 
 
 def write_version_file() -> str:
-    """Windows version resource: process shown as app name (Task Manager), not "tinypedal" """
+    """Windows version resource: process shown as app name (Task Manager)"""
     os.makedirs(WORK_FOLDER, exist_ok=True)
     path = os.path.abspath(os.path.join(WORK_FOLDER, "version_info.txt"))
     with open(path, "w", encoding="utf-8") as file:

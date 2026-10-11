@@ -17,7 +17,7 @@
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Release build self test: run.py --self-test [REPORT_FILE] (tinypedal.exe --self-test report.txt)
+Release build self test: run.py --self-test [REPORT_FILE] (neopedal.exe --self-test report.txt)
 
 Checks what a frozen build can miss, without game, settings window or overlays:
 data files next to executable, modules imported by name (widgets, modern designs, tools),

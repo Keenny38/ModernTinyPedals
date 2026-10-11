@@ -262,7 +262,7 @@ def read_header(file: BinaryIO) -> dict:
     elif line.startswith(MAGIC_V1):
         version = 1
     else:
-        raise ValueError("not a TinyPedal replay file")
+        raise ValueError("not a NeoPedal replay file")
     try:
         header = json.loads(line[len(MAGIC):])
     except ValueError as error:

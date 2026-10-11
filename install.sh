@@ -42,7 +42,9 @@ fi
 SHARE_PATH="${DESTINATION_PREFIX}/share"
 APPLICATIONS_PATH="${SHARE_PATH}/applications"
 BIN_PATH="${DESTINATION_PREFIX}/bin"
-DESTINATION_PATH="${SHARE_PATH}/TinyPedal"
+DESTINATION_PATH="${SHARE_PATH}/NeoPedal"
+# Installed there until 0.23.0, like the original TinyPedal: both apps could not be installed together
+LEGACY_PATH="${SHARE_PATH}/TinyPedal"
 
 if [ ! -w "${SHARE_PATH}" -o ! -w "${BIN_PATH}" -o ! -w "${APPLICATIONS_PATH}" ];
 then
@@ -63,7 +65,16 @@ then
     fi
 fi
 
-rm -f "${APPLICATIONS_PATH}/TinyPedal-overlay.desktop" "${BIN_PATH}/TinyPedal"
+rm -f "${APPLICATIONS_PATH}/NeoPedal.desktop" "${BIN_PATH}/NeoPedal"
+
+# Older NeoPedal install in TinyPedal paths: removed (an install of the original TinyPedal is kept)
+if grep -qs -e "NeoPedal" -e "ModernTinyPedals" -e "Modern Tiny Pedals" \
+    "${LEGACY_PATH}/README.md" "${LEGACY_PATH}/tinypedal/const_app.py";
+then
+    echo "Removing older NeoPedal install in ${LEGACY_PATH}"
+    rm -rf "${LEGACY_PATH}"
+    rm -f "${APPLICATIONS_PATH}/TinyPedal-overlay.desktop" "${BIN_PATH}/TinyPedal"
+fi
 
 # Write new file
 BASE_FILE='
@@ -107,13 +118,13 @@ copyfiles() {
 }
 
 # Copy desktop file
-echo "Writing ${APPLICATIONS_PATH}/TinyPedal-overlay.desktop"
-replace "/usr/local" "${DESTINATION_PREFIX}" <"${SOURCE_PATH}/TinyPedal-overlay.desktop" >"${APPLICATIONS_PATH}/TinyPedal-overlay.desktop"
+echo "Writing ${APPLICATIONS_PATH}/NeoPedal.desktop"
+replace "/usr/local" "${DESTINATION_PREFIX}" <"${SOURCE_PATH}/NeoPedal.desktop" >"${APPLICATIONS_PATH}/NeoPedal.desktop"
 
 # Copy launch script
-echo "Writing ${BIN_PATH}/TinyPedal"
-replace "./" "${DESTINATION_PATH}/" <"${SOURCE_PATH}/TinyPedal.sh" >"${BIN_PATH}/TinyPedal"
-chmod a+x "${BIN_PATH}/TinyPedal"
+echo "Writing ${BIN_PATH}/NeoPedal"
+replace "./" "${DESTINATION_PATH}/" <"${SOURCE_PATH}/NeoPedal.sh" >"${BIN_PATH}/NeoPedal"
+chmod a+x "${BIN_PATH}/NeoPedal"
 
 # Copy base folder file
 echo "Writing ${DESTINATION_PATH}"
@@ -136,10 +147,13 @@ echo "Writing ${DESTINATION_PATH}/fonts"
 mkdir -p "${DESTINATION_PATH}/fonts"
 cp fonts/*.ttf fonts/*.txt "${DESTINATION_PATH}/fonts"
 
-# Copy plugins folder file (example plugin)
-echo "Writing ${DESTINATION_PATH}/plugins"
-mkdir -p "${DESTINATION_PATH}/plugins"
-cp -r plugins/. "${DESTINATION_PATH}/plugins"
+# Copy plugins folder file (none shipped since 0.22, folder made by app)
+if [ -d plugins ];
+then
+    echo "Writing ${DESTINATION_PATH}/plugins"
+    mkdir -p "${DESTINATION_PATH}/plugins"
+    cp -r plugins/. "${DESTINATION_PATH}/plugins"
+fi
 
 # Copy submodule folder file
 for LINE in ${SUBMODULE_FILE};
@@ -153,7 +167,7 @@ done
 echo "Writing ${DESTINATION_PATH}/docs"
 cp -r "docs" "${DESTINATION_PATH}/docs"
 
-# Copy tinypedal folder file
+# Copy app source folder file (Python package keeps its "tinypedal" name)
 echo "Writing ${DESTINATION_PATH}/tinypedal"
 mkdir -p "${DESTINATION_PATH}/tinypedal"
 copyfiles "tinypedal"

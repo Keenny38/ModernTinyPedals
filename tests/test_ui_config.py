@@ -180,9 +180,9 @@ def test_restart_command_keeps_arguments(monkeypatch):
     monkeypatch.setattr(sys, "executable", r"C:\Program Files\Python\python.exe")
     assert loader.restart_command() == [r"C:\Program Files\Python\python.exe", "run.py", "-l", "2"]
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", r"C:\Program Files\TinyPedal\tinypedal.exe")
-    monkeypatch.setattr(sys, "argv", [r"C:\Program Files\TinyPedal\tinypedal.exe", "-s", "0"])
-    assert loader.restart_command() == [r"C:\Program Files\TinyPedal\tinypedal.exe", "-s", "0"]
+    monkeypatch.setattr(sys, "executable", r"C:\Program Files\NeoPedal\neopedal.exe")
+    monkeypatch.setattr(sys, "argv", [r"C:\Program Files\NeoPedal\neopedal.exe", "-s", "0"])
+    assert loader.restart_command() == [r"C:\Program Files\NeoPedal\neopedal.exe", "-s", "0"]
 
 
 def test_atomic_write_removes_temp_on_error(tmp_path):

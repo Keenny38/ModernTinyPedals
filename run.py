@@ -30,7 +30,7 @@ import sys
 def get_cli_argument() -> argparse.Namespace:
     """Get command line argument"""
     parse = argparse.ArgumentParser(
-        description="TinyPedal command line arguments",
+        description="NeoPedal command line arguments",
     )
     parse.add_argument(
         "-l",

@@ -17,7 +17,7 @@ def test_version_numbers():
 
 
 def test_version_info_text_is_valid_for_pyinstaller():
-    text = version_info_text("NeoPedal", "0.22.5", "tinypedal", "Copyright (C) 'x' developers", "NeoPedal")
+    text = version_info_text("NeoPedal", "0.22.5", "neopedal", "Copyright (C) 'x' developers", "NeoPedal")
     try:
         from PyInstaller.utils.win32 import versioninfo
     except ImportError:  # PyInstaller only in build environment
@@ -27,7 +27,7 @@ def test_version_info_text_is_valid_for_pyinstaller():
     strings = {item.name: item.val for item in info.kids[0].kids[0].kids}
     assert strings["FileDescription"] == "NeoPedal"
     assert strings["ProductName"] == "NeoPedal"
-    assert strings["OriginalFilename"] == "tinypedal.exe"
+    assert strings["OriginalFilename"] == "neopedal.exe"
     assert strings["LegalCopyright"] == "Copyright (C) 'x' developers"
     assert info.ffi.fileVersionMS == (0 << 16) | 22 and info.ffi.fileVersionLS == 5 << 16
 

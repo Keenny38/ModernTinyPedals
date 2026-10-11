@@ -36,6 +36,7 @@ from collections.abc import Callable
 from . import realtime_state, safe_mode
 from .api_control import api
 from .command_server import cmdserver
+from .const_app import EXECUTABLE, RESTART_ENVIRONMENT
 from .const_file import FileExt
 from .hotkey_control import kctrl
 from .module.module_recorder import wait_lap_saver
@@ -216,7 +217,7 @@ def restart():
     if not wait_lap_saver(LAP_SAVER_TIMEOUT):
         logger.warning("RESTARTING: lap saving not finished")
     # 2 set restart env for skipping single instance check
-    os.environ["TINYPEDAL_RESTART"] = "TRUE"
+    os.environ[RESTART_ENVIRONMENT] = "TRUE"
     command = restart_command()
     try:
         if sys.platform == "win32":
@@ -229,7 +230,7 @@ def restart():
     except OSError as error:
         # exe moved or blocked: keep running, reload what close() unloaded
         logger.error("RESTARTING: failed, %s", error)
-        os.environ.pop("TINYPEDAL_RESTART", None)
+        os.environ.pop(RESTART_ENVIRONMENT, None)
         api.connect()
         api.start()
         load_modules()
@@ -238,7 +239,7 @@ def restart():
 def restart_command() -> list[str]:
     """Command line to relaunch APP, normal start (safe mode flag left out)"""
     arguments = safe_mode.restart_arguments(sys.argv)
-    if getattr(sys, "frozen", False) or "tinypedal.exe" in sys.executable:  # if run as exe
+    if getattr(sys, "frozen", False) or os.path.basename(sys.executable).lower() == EXECUTABLE:  # if run as exe
         return [sys.executable, *arguments[1:]]
     return [sys.executable, *arguments]  # if run as script
 

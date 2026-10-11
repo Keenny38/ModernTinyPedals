@@ -35,8 +35,8 @@ Compare the result with the release notes. Full details: [Updates and Security](
 
 | What | Location |
 |---|---|
-| Program | `%LOCALAPPDATA%\Programs\NeoPedal` (`tinypedal.exe`) |
-| Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `tinypedal.exe`, in the program folder |
+| Program | `%LOCALAPPDATA%\Programs\NeoPedal` (`neopedal.exe`, `tinypedal.exe` until 0.23.0) |
+| Presets and user data: `settings`, `deltabest`, `trackmap`, `telemetry`, `pacenotes`, `tracknotes`, `brandlogo`, `carsetups` | Next to `neopedal.exe`, in the program folder |
 | Global config: `config.json`, `shortcuts.json`, driver stats, logs, language packs, Black box incidents | `%APPDATA%\NeoPedal` |
 
 Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
@@ -62,7 +62,7 @@ The app checks for a new version at startup, then every 12 hours while it runs, 
 Releases up to 0.19 also offered a portable ZIP. Portable copies cannot update themselves, and new releases no longer publish a portable ZIP. To turn a portable copy into an installed one, install the setup **into the folder of your portable copy**:
 
 1. Quit the portable copy (tray icon menu > `Quit`).
-2. Run the installer. On the destination page, select the folder of your portable copy (the folder that contains `tinypedal.exe`).
+2. Run the installer. On the destination page, select the folder of your portable copy (the folder that contains `tinypedal.exe` or `neopedal.exe`).
 3. Finish the installation.
 
 Your presets and data are kept: they live next to the executable, and the installer only replaces program files. The global config in `%APPDATA%\NeoPedal` is shared by every copy and is not touched. From then on, the copy is an installed copy and updates itself.
@@ -98,7 +98,7 @@ Prefer the release `-source.zip` over the "Source code" archives that GitHub add
 
 ### Install a launcher
 
-To install the app in `/usr/local/share/TinyPedal`, a `TinyPedal` command in `/usr/local/bin` and a desktop entry:
+To install the app in `/usr/local/share/NeoPedal`, a `NeoPedal` command in `/usr/local/bin` and a desktop entry (`NeoPedal.desktop`):
 
 ```bash
 sudo ./install.sh
@@ -106,10 +106,12 @@ sudo ./install.sh
 
 Pass another prefix as argument (for example `sudo ./install.sh /opt`, you are asked to confirm). Run it again from a newer source folder to update: the previous copy is removed first.
 
-Permanent command line arguments for the `TinyPedal` launcher go in `~/.config/NeoPedal/launcher.conf` (when it does not exist, `~/.config/TinyPedal/launcher.conf` is read instead), for example:
+Until 0.23.0 the app was installed in the paths of the original TinyPedal (`/usr/local/share/TinyPedal`, `TinyPedal` command), replacing it. `install.sh` removes such an older NeoPedal install and keeps an install of the original TinyPedal, so both apps can be installed and run together.
+
+Permanent command line arguments for the `NeoPedal` launcher go in `~/.config/NeoPedal/launcher.conf` (when it does not exist, `~/.config/TinyPedal/launcher.conf` is read instead), for example:
 
 ```bash
-TINYPEDAL_RUN_ARGS="--log-level 2"
+NEOPEDAL_RUN_ARGS="--log-level 2"
 ```
 
 ### Linux folders
@@ -165,7 +167,7 @@ Uninstall from Windows `Settings` > `Apps` > `Installed apps`, or with the `Unin
 Remove the files written by `install.sh` (default prefix shown):
 
 ```bash
-sudo rm -r /usr/local/share/TinyPedal /usr/local/bin/TinyPedal /usr/local/share/applications/TinyPedal-overlay.desktop
+sudo rm -r /usr/local/share/NeoPedal /usr/local/bin/NeoPedal /usr/local/share/applications/NeoPedal.desktop
 ```
 
 Your config and data stay in `~/.config/NeoPedal/` and `~/.local/share/NeoPedal/`: delete them too for a full removal. Older versions used `~/.config/TinyPedal/` and `~/.local/share/TinyPedal/` (copied to the new folders on first start, and also used by the original TinyPedal).

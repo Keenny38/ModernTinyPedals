@@ -43,7 +43,7 @@ from typing import NamedTuple
 
 from . import app_signal, realtime_state, version
 from .async_request import get_response, set_header_get
-from .const_app import APP_NAME, FORK_REPO_NAME
+from .const_app import APP_NAME, EXECUTABLE, FORK_REPO_NAME, LEGACY_EXECUTABLE
 from .const_common import DATE_NA, VERSION_NA
 from .const_file import ConfigType
 from .i18n import current_language
@@ -312,9 +312,11 @@ def is_portable_copy() -> bool:
     return is_frozen_windows() and not is_installed_copy()
 
 
-APP_EXECUTABLE = "tinypedal.exe"  # installer/tinypedal.iss AppExe
-INSTALLER_APP_ID = "{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}"  # installer/tinypedal.iss AppId
-# Start menu shortcut of app, written by installer at every install (installer/tinypedal.iss Icons)
+APP_EXECUTABLE = EXECUTABLE  # installer/neopedal.iss AppExe
+# Executable names of an installed app: tinypedal.exe until 0.23.0 (renamed by installer on update)
+APP_EXECUTABLES = (EXECUTABLE, LEGACY_EXECUTABLE)
+INSTALLER_APP_ID = "{6C3F5B8E-4A2D-4E1B-9C7A-1D2E3F4A5B6C}"  # installer/neopedal.iss AppId
+# Start menu shortcut of app, written by installer at every install (installer/neopedal.iss Icons)
 START_MENU_FOLDER = os.path.join("Microsoft", "Windows", "Start Menu", "Programs")
 START_MENU_SHORTCUT = os.path.join(START_MENU_FOLDER, "NeoPedal", "NeoPedal.lnk")
 # Installed as "Modern Tiny Pedals": updates keep the Start menu folder (Inno Setup UsePreviousGroup)
@@ -326,8 +328,11 @@ LEGACY_START_MENU_SHORTCUTS = (
 
 def is_install_folder(folder: str) -> bool:
     """Folder of app installed by installer: executable & uninstaller"""
-    return bool(folder) and all(
-        os.path.isfile(os.path.join(folder, name)) for name in (APP_EXECUTABLE, UNINSTALLER_NAME))
+    return (
+        bool(folder)
+        and os.path.isfile(os.path.join(folder, UNINSTALLER_NAME))
+        and any(os.path.isfile(os.path.join(folder, name)) for name in APP_EXECUTABLES)
+    )
 
 
 def registry_install_folder() -> str:
@@ -398,7 +403,7 @@ def installed_app_folder() -> str:
     if appdata:
         for shortcut in (START_MENU_SHORTCUT, *LEGACY_START_MENU_SHORTCUTS):
             target = shortcut_target(os.path.join(appdata, shortcut))
-            if os.path.basename(target).lower() == APP_EXECUTABLE:
+            if os.path.basename(target).lower() in APP_EXECUTABLES:
                 candidates.append(os.path.dirname(target))
     for folder in candidates:
         if is_install_folder(folder):
@@ -653,7 +658,7 @@ def verify_installer(path: str, repository: str | None = None) -> None:
 
 
 def run_installer(path: str, folder: str | None = None, repository: str | None = None) -> None:
-    """Start installer silently, it closes TinyPedal and starts it again when done
+    """Start installer silently, it closes NeoPedal and starts it again when done
 
     Args:
         folder: install folder, None for install_folder() (empty: chosen by installer).

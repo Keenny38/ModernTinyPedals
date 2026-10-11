@@ -227,7 +227,7 @@ def test_corrupt_or_encrypted_manifest_is_invalid_package(tmp_path, flag_encrypt
     """Manifest unreadable: import error message, never an uncaught zlib.error/RuntimeError"""
     target = tmp_path / "dst"
     target.mkdir()
-    with pytest.raises(ValueError, match="not a TinyPedal preset package"):
+    with pytest.raises(ValueError, match="not a NeoPedal preset package"):
         import_preset_package(corrupt_package(tmp_path, flag_encrypted, "manifest.json"), f"{target}/")
     assert not list(target.iterdir())
 
@@ -240,7 +240,7 @@ def test_oversized_manifest_never_inflated(tmp_path, monkeypatch):
     read = []
     monkeypatch.setattr(zipfile.ZipFile, "read", lambda self, name, pwd=None: read.append(name))
     monkeypatch.setattr(zipfile.ZipFile, "open", lambda self, name, *args, **kwargs: read.append(name))
-    with zipfile.ZipFile(filename) as package, pytest.raises(ValueError, match="not a TinyPedal preset package"):
+    with zipfile.ZipFile(filename) as package, pytest.raises(ValueError, match="not a NeoPedal preset package"):
         read_manifest(package)
     assert not read
 

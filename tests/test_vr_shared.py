@@ -632,7 +632,7 @@ def test_prepare_layer(tmp_path, monkeypatch):
 def test_installer_never_closes_openxr_games():
     """Updates replace no file a game loads: Restart Manager limited to executables, copies removed on
     uninstall (registry entries too, by install folder)"""
-    with open(os.path.join(ROOT, "installer", "tinypedal.iss"), encoding="utf-8") as file:
+    with open(os.path.join(ROOT, "installer", "neopedal.iss"), encoding="utf-8") as file:
         script = file.read()
     assert re.search(r"^CloseApplicationsFilter=\*\.exe$", script, re.MULTILINE)
     assert f'Type: filesandordirs; Name: "{{app}}\\{vr_shared.LAYER_INSTALL_FOLDER}"' in script
@@ -647,7 +647,7 @@ def test_installer_never_closes_openxr_games():
 def test_installer_removes_every_ascii_layer_copy(monkeypatch):
     """Uninstall removes the copies of each ascii_layer_roots folder (%PUBLIC%, system drive root too) and
     their registry entries, even while the files still exist: no OpenXR game keeps loading the layer"""
-    with open(os.path.join(ROOT, "installer", "tinypedal.iss"), encoding="utf-8") as file:
+    with open(os.path.join(ROOT, "installer", "neopedal.iss"), encoding="utf-8") as file:
         script = file.read()
     monkeypatch.setenv("PROGRAMDATA", "C:\\ProgramData")
     monkeypatch.setenv("PUBLIC", "C:\\Users\\Public")

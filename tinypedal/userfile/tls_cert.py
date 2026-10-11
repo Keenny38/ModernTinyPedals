@@ -72,7 +72,7 @@ def create_certificate(cert_file: str, key_file: str, addresses: list[str]) -> N
     from cryptography.x509.oid import NameOID
 
     key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "TinyPedal web dashboard")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "NeoPedal web dashboard")])
     now = datetime.datetime.now(datetime.UTC)
     alt_names: list[x509.GeneralName] = [x509.DNSName("localhost")]
     alt_names.extend(x509.IPAddress(ipaddress.ip_address(address)) for address in addresses)

@@ -21,15 +21,15 @@ def test_redact():
 def test_create_report(ui_env, tmp_path):
     cfg.user.config["web_dashboard"]["access_code"] = "SECRET12"
     log_folder = cfg.path.config
-    with open(f"{log_folder}tinypedal.log", "w", encoding="utf-8") as file:
+    with open(f"{log_folder}neopedal.log", "w", encoding="utf-8") as file:
         file.write(f"INFO start from {os.path.expanduser('~')}\n")
     zip_file = tmp_path / "report.zip"
     files = create_bug_report(str(zip_file), "session log line", "widget froze")
-    assert {"system-info.txt", "description.txt", "logs/session.log", "logs/tinypedal.log", "settings/config.json"} <= set(files)
+    assert {"system-info.txt", "description.txt", "logs/session.log", "logs/neopedal.log", "settings/config.json"} <= set(files)
     with zipfile.ZipFile(zip_file) as package:
         config = json.loads(package.read("settings/config.json"))
         assert config["web_dashboard"]["access_code"] == "<removed>"
-        assert os.path.expanduser("~") not in package.read("logs/tinypedal.log").decode()
+        assert os.path.expanduser("~") not in package.read("logs/neopedal.log").decode()
         assert "NeoPedal" in package.read("system-info.txt").decode()
 
 

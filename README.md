@@ -286,7 +286,7 @@ On Windows, `Download And Install` of an update found while running from source 
 
 On **Linux**, run the app from source the same way (no executable). Needed packages: `PySide6`, `psutil`, `cryptography` and `pyxdg`. `sudo ./install.sh` installs a launcher and the `TinyPedal` command in `/usr/local/`. Settings are in `$HOME/.config/NeoPedal/` and data in `$HOME/.local/share/NeoPedal/`. See [Installation](https://github.com/Keenny38/ModernTinyPedals/wiki/Installation#linux) for distribution packages and known issues (KDE, compositing).
 
-> Settings and data folders are named `NeoPedal` (`%APPDATA%\NeoPedal`, `~/.config/NeoPedal/`, `~/.local/share/NeoPedal/`), separate from the original TinyPedal. On first start, an existing `TinyPedal` folder is copied there once and left unchanged, so both apps can be used side by side. The executable keeps its name (`tinypedal.exe`, looked for by older updaters), and the remote control still accepts the old `X-TinyPedal` header besides `X-NeoPedal`.
+> Settings and data folders are named `NeoPedal` (`%APPDATA%\NeoPedal`, `~/.config/NeoPedal/`, `~/.local/share/NeoPedal/`), separate from the original TinyPedal. On first start, an existing `TinyPedal` folder is copied there once and left unchanged, so both apps can be used side by side. Since 0.23.1 the executable is `neopedal.exe` (Linux: `NeoPedal` command, `/usr/local/share/NeoPedal`), no longer the `tinypedal.exe` name of the original app, and the remote control still accepts the old `X-TinyPedal` header besides `X-NeoPedal`.
 
 ## Contributing
 

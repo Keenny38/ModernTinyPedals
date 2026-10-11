@@ -392,35 +392,35 @@ List all available command line arguments.
 
 Usage: `python .\run.py -h`
 
-Note, the Windows executable (`tinypedal.exe`) is a windowed app without console: arguments work the same, but nothing is printed. Use `--log-level 2` to write log to file, or the `Show Log` dialog.
+Note, the Windows executable (`neopedal.exe`) is a windowed app without console: arguments work the same, but nothing is printed. Use `--log-level 2` to write log to file, or the `Show Log` dialog.
 
     -l, --log-level
 Set logging output level. Supported values are:
   * `--log-level 0` outputs only warning or error log to `console`.
   * `--log-level 1` outputs all log to `console`.
-  * `--log-level 2` outputs all log to both `console` and `tinypedal.log` file.
+  * `--log-level 2` outputs all log to both `console` and `neopedal.log` file.
 
 Log location:
-  * On windows, `tinypedal.log` is located under `username\AppData\Roaming\TinyPedal` folder.
-  * On Linux, `tinypedal.log` is located under `home/username/.config/NeoPedal` folder.
+  * On windows, `neopedal.log` is located under `username\AppData\Roaming\NeoPedal` folder.
+  * On Linux, `neopedal.log` is located under `home/username/.config/NeoPedal` folder.
 
 Default logging output level is set on `1` if argument is not set.
 
-Usage: `python .\run.py -l 2` or `.\tinypedal.exe --log-level 2`
+Usage: `python .\run.py -l 2` or `.\neopedal.exe --log-level 2`
 
     -s, --single-instance
 Set running mode. `0` allows running multiple instances (copies) of NeoPedal. `1` allows only single instance (default).
 
-To run multiple copies of NeoPedal at same time: `python .\run.py -s 0` or `.\tinypedal.exe --single-instance 0`
+To run multiple copies of NeoPedal at same time: `python .\run.py -s 0` or `.\neopedal.exe --single-instance 0`
 
-Single instance mode saves `pid.log` file in the same folder as `tinypedal.log`, which is used for instance identification.
+Single instance mode saves `pid.log` file in the same folder as `neopedal.log`, which is used for instance identification. It is separate from the one of the original TinyPedal (`%APPDATA%\TinyPedal`), so both apps can run at the same time.
 
     --safe-mode
 Start in safe mode: plugins are not loaded, overlays (widgets & VR overlay) are not started, so settings can be fixed in the main window (a widget can still be turned on by hand). Window title and a notice show safe mode; `Restart Normally` in the notice, or `Restart NeoPedal` in `Window` menu, starts normally again.
 
-Usage: `python .\run.py --safe-mode` or `.\tinypedal.exe --safe-mode`
+Usage: `python .\run.py --safe-mode` or `.\neopedal.exe --safe-mode`
 
-When a start did not finish (crash or app killed before the main window and overlays were up for a few seconds), the next start asks whether to start in safe mode. A `startup.marker` file is kept in the same folder as `tinypedal.log` while starting, and removed once started or when quitting; a normal start never asks.
+When a start did not finish (crash or app killed before the main window and overlays were up for a few seconds), the next start asks whether to start in safe mode. A `startup.marker` file is kept in the same folder as `neopedal.log` while starting, and removed once started or when quitting; a normal start never asks.
 
 [**`Back to Top`**](#)
 

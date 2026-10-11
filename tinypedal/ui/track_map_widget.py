@@ -335,7 +335,7 @@ class MapView(QWidget):
             msg_text = (
                 "Unable to load track map file from<br>"
                 f"<b>{filepath}{filename}{FileExt.SVG}</b><br><br>"
-                "Only support SVG file that generated with TinyPedal."
+                "Only support SVG file that generated with NeoPedal or TinyPedal."
             )
             QMessageBox.warning(self, tr("Error"), trm(msg_text))
 

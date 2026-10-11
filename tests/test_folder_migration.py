@@ -74,17 +74,36 @@ def test_interrupted_copy_retried(fresh):
     assert not leftover.exists()
 
 
-def test_failed_copy_uses_legacy_folder(fresh, monkeypatch, caplog):
+def test_unreadable_files_left_out(fresh, monkeypatch, caplog):
+    """Files in use by a running TinyPedal: rest copied, new folder used"""
+    make_legacy(fresh / "config", {"a": 1})
+    copytree = shutil.copytree
+
+    def copy_then_fail(src, dst, *args, **kwargs):
+        copytree(src, dst, *args, **kwargs)
+        raise shutil.Error([(f"{src}/locked.json", f"{dst}/locked.json", "in use")])
+
+    monkeypatch.setattr(fm.shutil, "copytree", copy_then_fail)
+    assert fm.user_folder_id("config") == CONFIG_ID
+    new = fresh / "config" / CONFIG_ID
+    assert json.loads((new / "config.json").read_text(encoding="utf-8")) == {"a": 1}
+    assert fm.read_state(str(new))["state"] == fm.STATE_PENDING
+    with caplog.at_level(logging.INFO):
+        fm.log_migration_report()
+    assert "locked.json" in caplog.text
+
+
+def test_failed_copy_never_uses_legacy_folder(fresh, monkeypatch, caplog):
+    """Legacy folder holds pid.log of a running TinyPedal: never used, else one app blocks the other"""
     make_legacy(fresh / "config")
 
     def broken_copy(src, dst, **kwargs):
-        os.makedirs(dst)
-        raise shutil.Error([(src, dst, "disk full")])
+        raise OSError("disk full")
 
     monkeypatch.setattr(fm.shutil, "copytree", broken_copy)
-    assert fm.user_folder_id("config") == LEGACY_CONFIG_ID
-    assert fm.user_folder_id("config") == LEGACY_CONFIG_ID  # cached, not retried in same run
-    assert not (fresh / "config" / CONFIG_ID).exists()
+    assert fm.user_folder_id("config") == CONFIG_ID
+    assert fm.user_folder_id("config") == CONFIG_ID  # cached, not retried in same run
+    assert not (fresh / "config" / CONFIG_ID).exists()  # created by caller, default settings
     assert not (fresh / "config" / f"{CONFIG_ID}{fm.TEMP_SUFFIX}").exists()
     with caplog.at_level(logging.INFO):
         fm.log_migration_report()
@@ -116,7 +135,7 @@ def test_user_paths_rewritten(fresh, monkeypatch):
     assert legacy["user_path"]["settings_path"] == f"{config_old}/settings/"
 
 
-def test_data_paths_kept_if_data_copy_failed(fresh, monkeypatch):
+def test_data_paths_point_to_new_folder_if_data_copy_failed(fresh, monkeypatch):
     monkeypatch.setattr(fm.PLATFORM, "WINDOWS", False)
     data_old = (fresh / "data" / LEGACY_CONFIG_ID).as_posix()
     make_legacy(fresh / "data")
@@ -130,9 +149,9 @@ def test_data_paths_kept_if_data_copy_failed(fresh, monkeypatch):
 
     monkeypatch.setattr(fm.shutil, "copytree", copy_config_only)
     assert fm.user_folder_id("config") == CONFIG_ID
-    assert fm.user_folder_id("data") == LEGACY_CONFIG_ID
+    assert fm.user_folder_id("data") == CONFIG_ID
     config = json.loads((fresh / "config" / CONFIG_ID / "config.json").read_text(encoding="utf-8"))
-    assert config["user_path"]["track_map_path"] == f"{data_old}/trackmap/"
+    assert config["user_path"]["track_map_path"] == f"{(fresh / 'data' / CONFIG_ID).as_posix()}/trackmap/"
 
 
 def test_invalid_config_still_copied(fresh):
