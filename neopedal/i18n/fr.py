@@ -2856,6 +2856,24 @@ TRANSLATION = MappingProxyType({
     "Type more words to narrow the search": "Tapez d'autres mots pour affiner la recherche",
     "Used only while on:": "Utilisé seulement si activé :",
     "Where search & filter look": "Où cherchent la recherche et le filtre",
+    # Settings imported from a folder (ui/settings_import.py)
+    "Import Settings...": "Importer des réglages...",
+    "Import Settings": "Importer des réglages",
+    "This folder has no global settings (config.json or shortcuts.json).\n\n"
+    "Choose the global settings folder of the other copy of the app, "
+    "for example in %APPDATA% on Windows or ~/.config on Linux.":
+        "Ce dossier ne contient pas de réglages globaux (config.json ou shortcuts.json).\n\n"
+        "Choisissez le dossier de réglages globaux de l'autre copie de l'app, "
+        "par exemple dans %APPDATA% sous Windows ou ~/.config sous Linux.",
+    "Import settings from this folder?": "Importer les réglages de ce dossier ?",
+    "Options, shortcuts, driver stats, language packs and Black box incidents are copied, "
+    "the folder is not changed. Current settings are set aside in a backup folder (never "
+    "deleted), then the app restarts with the imported settings.":
+        "Options, raccourcis, statistiques pilote, packs de langue et incidents de la boîte noire "
+        "sont copiés, le dossier n'est pas modifié. Les réglages actuels sont mis de côté dans un "
+        "dossier de sauvegarde (jamais supprimé), puis l'app redémarre avec les réglages importés.",
+    "Request not saved, see log.": "Demande non enregistrée, voir le journal.",
+    "Applied at next start of NeoPedal.": "Appliqué au prochain démarrage de NeoPedal.",
     # Race calculator live tab (every input value the game gives)
     "Calculator": "Calculateur",
     "Calculator already holds the live values": "Le calculateur a déjà les valeurs du jeu",

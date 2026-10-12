@@ -36,6 +36,7 @@ from .const_file import ConfigType, FontFile, LogFile
 from .i18n import LANGUAGE_PACK_FOLDER, install_qt_translation, load_language_packs, set_language, tr
 from .log_handler import BoundedLogStream, set_logging_level
 from .setting import cfg
+from .userfile.settings_import import log_import_report
 
 logger = logging.getLogger(__package__)
 UI_FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans")  # app UI, not overlays
@@ -243,6 +244,7 @@ def start_app(cli_args):
     unset_environment()
     set_logging_level(logger, cfg.path.config, LogFile.APP_LOG, log_stream, cli_args.log_level)
     get_version()
+    log_import_report()  # settings import, done before logging was set
     # load global config (language packs first, else a pack language is reset to English)
     load_ui_language_packs()
     cfg.load_global()

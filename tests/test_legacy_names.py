@@ -21,6 +21,7 @@ def test_plugin_imports_legacy_package(monkeypatch):
         import neopedal.widget._base as current
 
         assert legacy is current
+        assert current.__spec__.name == "neopedal.widget._base"  # module unchanged for relative imports
     finally:
         for name in [name for name in sys.modules if name.split(".")[0] == LEGACY_PACKAGE]:
             del sys.modules[name]

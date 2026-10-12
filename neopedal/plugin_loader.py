@@ -275,11 +275,18 @@ class LegacyPackageFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             return None
         return importlib.util.spec_from_loader(fullname, self, is_package=True)
 
+    def __init__(self):
+        self._specs: dict[str, Any] = {}  # legacy name: own spec of module, replaced by import system
+
     def create_module(self, spec):
-        return importlib.import_module(APP_PACKAGE + spec.name[len(LEGACY_PACKAGE):])
+        module = importlib.import_module(APP_PACKAGE + spec.name[len(LEGACY_PACKAGE):])
+        self._specs[spec.name] = module.__spec__
+        return module
 
     def exec_module(self, module):
-        """Module already loaded under its own name"""
+        """Module already loaded under its own name: its own spec put back (relative imports)"""
+        legacy_name = LEGACY_PACKAGE + module.__name__[len(APP_PACKAGE):]
+        module.__spec__ = self._specs.pop(legacy_name, module.__spec__)
 
 
 def install_legacy_package_finder() -> None:

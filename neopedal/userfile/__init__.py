@@ -135,11 +135,17 @@ def set_global_config_path() -> str:
 
     Default to APPDATA folder (AppData/Roaming) on Windows.
     Default to XDG_CONFIG_HOME ($HOME/.config) on Linux.
+    Settings import asked last run applied first, see settings_import.
     """
+    from .settings_import import apply_pending_import
+
     if PLATFORM.WINDOWS:
-        return set_user_data_path(f"{os.getenv('APPDATA', '.')}\\{CONFIG_ID}\\")
+        folder = f"{os.getenv('APPDATA', '.')}\\{CONFIG_ID}\\"
+        apply_pending_import(folder)
+        return set_user_data_path(folder)
     # Linux
     from xdg import BaseDirectory as BD
+    apply_pending_import(os.path.join(BD.xdg_config_home, CONFIG_ID), os.path.join(BD.xdg_data_home, CONFIG_ID))
     return BD.save_config_path(CONFIG_ID) + "/"
 
 

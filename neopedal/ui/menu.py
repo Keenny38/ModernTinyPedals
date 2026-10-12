@@ -367,6 +367,16 @@ class ConfigMenu(QMenu):
             _folder = open_folder.addAction(option_label(path_name))
             _folder.triggered.connect(lambda checked=True, p=path_name: self.open_folder(checked, p))
 
+        # Global settings of another copy of the app (older version, other computer): applied after restart
+        import_settings = self.addAction(tr("Import Settings..."))
+        import_settings.triggered.connect(self.import_settings)
+
+    def import_settings(self):
+        """Import global settings from a chosen folder (app restarts)"""
+        from .settings_import import import_settings
+
+        import_settings(self._parent)
+
     def open_folder(self, checked: bool, path_name: str):
         """Open folder in file manager"""
         filepath = getattr(cfg.path, path_name)

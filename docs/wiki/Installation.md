@@ -41,6 +41,12 @@ Compare the result with the release notes. Full details: [Updates and Security](
 
 Data folders can be moved with `Config` > `User Path`, and opened with `Config` > `Open Folder`.
 
+### Import settings
+
+`Config` > `Import Settings...` takes the global settings of another copy of the app (an older version, another computer, a backup): choose its global settings folder (the one holding `config.json`, for example in `%APPDATA%` on Windows or `~/.config` on Linux). After you confirm, the app restarts and copies options, shortcuts, driver stats, language packs and Black box incidents before loading them. The chosen folder is never changed, your current settings are set aside next to it (`NeoPedal.before-import-<date>`, never deleted), and they stay in place if the copy fails. On Linux, the data folder of the same name in `~/.local/share` is imported too.
+
+Presets are separate files: drop them (`.json`) or a preset package (`.zip`) on the main window to add them.
+
 ### Updates
 
 The app checks for a new version at startup, then every 12 hours while it runs, and can download and install it for you. See [Updates and Security](Updates-and-Security.md#in-app-updates). You can also run a newer setup over your installation at any time: your presets and data are kept.

@@ -101,7 +101,7 @@ The menus open the matching category:
 | `API` > `Options` | Game connection, see [Game Setup](Game-Setup.md) |
 | `Window` | `Show at Startup`, `Minimize to Tray`, `Remember Position`, `Remember Size`, `Reopen Pages at Startup`, `Reset Window Size and Position`, `Restart NeoPedal` |
 
-`Config` > `Open Folder` opens any user folder in your file manager. Data folders set inside the app folder are stored as relative paths (each copy keeps its own data); set them outside the app folder to share data between copies.
+`Config` > `Import Settings...` copies the global settings of another copy of the app, see [Import settings](Installation.md#import-settings). `Config` > `Open Folder` opens any user folder in your file manager. Data folders set inside the app folder are stored as relative paths (each copy keeps its own data); set them outside the app folder to share data between copies.
 
 ### Reset data
 
