@@ -442,7 +442,7 @@ def demo_state() -> dict[str, Any]:
         })
     car = {"number": "13", "name": "Kenji Sato", "team": "Vortex Racing", "cls": "Hypercar", "color": colors[0],
            "classPos": 3, "logo": "", "picture": "",
-           "stats": [[tr("Best"), "1:34.902"], [tr("Last"), "1:35.211"], [tr("Laps"), "42"], [tr("Places"), "+2"]],
+           "stats": [[tr("Best"), "1:34.902"], [tr("Last"), "1:35.211"], [tr("Laps"), "42"], [tr("Places"), "+2"], ["DR", "S2"], ["SR", "P3"]],
            "story": tr("Battle for P%1").replace("%1", "2"), "storyTone": "accent"}
     side = {"number": "10", "name": "L. Hartmann", "team": "Apex Motorsport"}
     other = {"number": "13", "name": "K. Sato", "team": "Vortex Racing"}

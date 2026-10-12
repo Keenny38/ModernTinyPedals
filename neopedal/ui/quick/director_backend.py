@@ -69,6 +69,7 @@ from ...process.game_info import (
     parse_standings,
     standings_time,
 )
+from ...rank_info import ranks
 from ...setting import cfg
 from ...userfile import atomic_write
 from .. import game_rest
@@ -1032,14 +1033,19 @@ class DirectorBackend(QObject):
         """Driver card of a car"""
         logo, picture = self.picture_links(car.vehicle)
         gained = grid.get(car.slot, 0) - self.places.get(car.slot, 0) if car.slot in grid else 0
+        name = car.driver.split("#", 1)[0].strip() or car.driver
+        ranks.poll()
+        known = ranks.team_ranks(name)  # player & team members only (game menu data)
         return {
-            "number": car.number, "name": car.driver.split("#", 1)[0].strip() or car.driver,
+            "number": car.number, "name": name,
             "team": car.team or car.vehicle, "cls": car.car_class, "color": class_color(car.car_class),
             "classPos": self.places.get(car.slot, 0), "logo": logo, "picture": picture,
             "stats": [[tr("Best"), lap_text(car.best) if car.best > 0 else ""],
                       [tr("Last"), lap_text(car.last) if car.last > 0 else ""],
                       [tr("Laps"), str(car.laps)],
-                      [tr("Places"), f"{'+' if gained > 0 else ''}{gained}" if gained else ""]],
+                      [tr("Places"), f"{'+' if gained > 0 else ''}{gained}" if gained else ""],
+                      ["DR", known.driver.short if known is not None and known.driver else ""],
+                      ["SR", known.safety.short if known is not None and known.safety else ""]],
             "story": story, "storyTone": tone,
         }
 

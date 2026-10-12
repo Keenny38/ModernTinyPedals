@@ -77,6 +77,7 @@ WIDGET_DISPLAY_ORDER = (
     "deltabest",
     "deltabest_extended",
     "differential",
+    "driver_rank",
     "drs",
     "electric_motor",
     "elevation",

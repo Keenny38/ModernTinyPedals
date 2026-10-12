@@ -91,6 +91,16 @@ The **Speed Delta** overlay (off by default, `Timing` category) shows your speed
 
 ![New Speed Delta overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-11-speed-delta-overlay.png)
 
+## Driver Rank
+
+The **Driver Rank** overlay (off by default, `Timing` category, Le Mans Ultimate) shows your **Driver Rank (DR)** and **Safety Rank (SR)** as the game menu shows them (rank, tier and progress to the next tier), and your **track limits points** against the points allowed per penalty of the session (`1.25/5`, in race, qualifying and practice).
+
+- Ranks are read from the game folder (`coherent_local_storage.json`, written by the game menu, only read): they change once the game menu shows new ones, after an online race. A dash while they are unknown (game folder not found, never signed in online).
+- The game folder is found like for race results (folder chosen on the `Results` page, else your Steam libraries); you are found by the Steam account last signed in, else by your game profile name.
+- `show_progress` shows the progress to the next tier; each item can be shown or hidden (`show_driver_rank`, `show_safety_rank`, `show_track_limits`), with its own prefix and colors in the classic design. The modern design shows each rank in its color, with the progress as a bar.
+
+![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
+
 ## Relative, Standings and Track Map
 
 - **Relative: `Gap Trend` column** (modern design, `column_gap_trend`, on by default): how the gap to each car changes per lap, averaged over about 30 s. Green arrow when you gain (closing on the car ahead, pulling away from the car behind), red when you lose, a dash when steady (under 0.05 s per lap) or for a car in the pits.
@@ -117,6 +127,7 @@ Overlays are grouped by the categories of the `Overlays` page filter. Names are 
 | Deltabest | Delta to your best lap; optional official delta of LMU; a dash on out laps (pit lane, back to garage) |
 | Deltabest Extended | Delta against several lap time sources; session best kept when the app restarts in the same session |
 | Gap Trend | Gap to cars ahead and behind, lap after lap (race aid) |
+| Driver Rank | Driver Rank (DR), Safety Rank (SR) and track limits points, see [above](#driver-rank) |
 | Laps And Position | Lap number, overall position, position in class |
 | Lap Time History | Recent lap times |
 | Pit Stop Estimate | Estimated pit stop duration and refuelling |

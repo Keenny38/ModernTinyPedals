@@ -1150,5 +1150,7 @@
 "Capture the classification now and show it on the broadcast graphics, or hide it when shown (page open).": "Capture le classement maintenant et l'affiche sur l'habillage, ou le masque s'il est affiché (page ouverte).",
 "Show or hide the championship standings chosen on the broadcast graphics (page open).": "Affiche ou masque le classement du championnat choisi sur l'habillage (page ouverte).",
 "Hide every broadcast graphic at once, or show them again (page open).": "Masque tout l'habillage d'un coup, ou le réaffiche (page ouverte).",
-"Use the next layout preset of the broadcast graphics: default, pre-race, race, post-race (page open).": "Passe au préréglage de disposition suivant de l'habillage : par défaut, avant-course, course, après-course (page ouverte)."
+"Use the next layout preset of the broadcast graphics: default, pre-race, race, post-race (page open).": "Passe au préréglage de disposition suivant de l'habillage : par défaut, avant-course, course, après-course (page ouverte).",
+"Show progress to next tier of each rank, in percent. Default is enabled.": "Affiche la progression vers le palier suivant de chaque rang, en pourcentage. Activé par défaut.",
+"Show Driver Rank (DR), Safety Rank (SR), track limits points.": "Affiche le Driver Rank (DR), le Safety Rank (SR), les points de track limits."
 }

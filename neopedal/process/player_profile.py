@@ -72,18 +72,22 @@ def read_profile(game_root: str) -> PlayerProfile | None:
                          _text(livery, "teamName"), _text(livery, "vehicleNumber"), "")
 
 
-def steam_avatar(steam: str) -> str:
-    """Profile picture Steam keeps of account last signed in, "" if none"""
+def recent_steam_users(steam: str) -> list[str]:
+    """Steam IDs (SteamID64) of account last signed in first, empty if unknown"""
     if not steam:
-        return ""
+        return []
     try:
         with open(os.path.join(steam, "config", "loginusers.vdf"), encoding="utf-8", errors="replace") as file:
             content = file.read()
     except OSError:
-        return ""
+        return []
     users = [(match["id"], bool(MOST_RECENT.search(match["body"]))) for match in STEAM_USER.finditer(content)]
-    recent = [user for user, most_recent in users if most_recent] or [user for user, _ in users[:1]]
-    for user in recent:
+    return [user for user, most_recent in users if most_recent] or [user for user, _ in users[:1]]
+
+
+def steam_avatar(steam: str) -> str:
+    """Profile picture Steam keeps of account last signed in, "" if none"""
+    for user in recent_steam_users(steam):
         path = os.path.join(steam, "config", "avatarcache", f"{user}.png")
         if os.path.isfile(path):
             return path

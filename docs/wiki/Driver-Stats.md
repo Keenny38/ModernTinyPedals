@@ -45,7 +45,10 @@ The **Lap Time Reference** card on the right shows the **level scale** of the se
 
 - **Activity**: a calendar of the last 12 months, one square per day colored by your driving time (all tracks), with the days driven, the total time and your longest streak. Hover a day for its sessions.
 - **Recent Sessions**: your latest sessions on every track, with the best lap (★ when it was your personal best), the race result and the session type. Click one to open its track with its car selected.
-- **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty) and contacts per race. Positions are class positions.
+- **Driver**: name, country, team and number of your game profile (`UserData/player/Settings.JSON`), your Steam profile picture (from Steam's own cache, nothing is downloaded), and your races in the game results files: races, wins, podiums, average finish, clean races (no contact, no penalty) and contacts per race. Positions are class positions. With Le Mans Ultimate, your **Driver Rank** and **Safety Rank** too, as the game menu shows them, each in its color with the progress to the next tier, and the change since your previous rank (`▲ +10%`): every change of rank is kept in `driver_ranks.history` of the global config folder.
+
+![Driver card with ranks](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-card-ranks.png)
+
 
 ### Complete lap times from race results
 

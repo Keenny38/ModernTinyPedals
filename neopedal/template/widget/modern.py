@@ -108,6 +108,7 @@ MODERN_DESIGN_OPTIONS: MappingProxyType[str, dict[str, Any]] = MappingProxyType(
     "deltabest": {"show_invalid_lap_indicator": True},
     "deltabest_extended": {},
     "speed_delta": {},
+    "driver_rank": {},
     "sectors": {},
     "session": {},
     "track_clock": {},

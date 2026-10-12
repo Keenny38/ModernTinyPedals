@@ -528,6 +528,13 @@
             "show_inverted_locking": "Invert minimum differential locking percent reading.",
             "show_power_locking_*": "Show minimum differential locking percent between left and right wheels on the same axle under power (on throttle) or coasting (off throttle).\n\nA 100% reading indicates two wheels on the same axle are rotating at same speed; while 0% indicates that one of the wheels is completely spinning or locked."
         },
+        "driver_rank": {
+            "layout": "2 layouts are available: 0 = vertical layout, 1 = horizontal layout.",
+            "show_driver_rank": "Show Driver Rank (DR), Safety Rank (SR), track limits points.",
+            "show_progress": "Show progress to next tier of each rank, in percent. Default is enabled.",
+            "show_safety_rank": "Show Driver Rank (DR), Safety Rank (SR), track limits points.",
+            "show_track_limits": "Show Driver Rank (DR), Safety Rank (SR), track limits points."
+        },
         "drs": {
             "background_color_activated": "Set color when DRS is activated by player.",
             "background_color_allowed": "Set color when DRS is allowed but not yet activated by player.",
@@ -1467,8 +1474,8 @@
         },
         "system_performance": {
             "average_samples": "Set number of samples for average CPU utilization calculation. Lower value may result more fluctuated reading. Set 1 to disable averaging.",
-            "show_system_performance": "Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by update_interval setting.",
-            "show_neopedal_performance": "Show NeoPedal's CPU utilization (percent) and memory usage (MB)."
+            "show_neopedal_performance": "Show NeoPedal's CPU utilization (percent) and memory usage (MB).",
+            "show_system_performance": "Show system's overall CPU utilization (percent) and memory usage (GB). Note, sampling interval is determined by update_interval setting."
         },
         "telemetry_compare": {
             "bar_gap": "Set gap between charts in pixels (classic layout).",

@@ -87,6 +87,19 @@ def test_graphics_train_tower_onboard_map_replay(director_page, english, monkeyp
     backend.replayEvent("stopped|t")
     info = backend.graphics_state()["replayInfo"]
     assert info["mode"] == "driver" and info["car"]["number"] == "3" and info["kind"] == "Stopped Car"
+    stats = dict(info["car"]["stats"])
+    assert stats["DR"] == "" and stats["SR"] == ""  # ranks unknown (not player nor team member)
+    backend.backToLive()
+    # Ranks of player & team members (game menu data) on driver card
+    from neopedal import rank_info
+    from neopedal.process import driver_ranks as ranks
+
+    monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
+    monkeypatch.setattr(rank_info.ranks, "drivers", [
+        ranks.DriverRanks("Driver 3", "", "x", "FR", ranks.Rank("Silver", 2, 40), ranks.Rank("Gold", 1, 5))])
+    backend.replayEvent("stopped|t")
+    stats = dict(backend.graphics_state()["replayInfo"]["car"]["stats"])
+    assert stats["DR"] == "S2" and stats["SR"] == "G1"
     backend.backToLive()
 
 

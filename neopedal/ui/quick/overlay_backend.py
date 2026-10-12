@@ -82,7 +82,7 @@ WIDGET_CATEGORIES = (
     ("Timing", (
         "deltabest", "lap_time_history", "laps_and_position", "pit_stop_estimate", "race_plan", "relative", "rivals",
         "sectors", "session", "standings", "stint_history", "timing", "track_clock",
-        "delta_graph", "gap_trend", "stint_timer", "speed_delta",
+        "delta_graph", "gap_trend", "stint_timer", "speed_delta", "driver_rank",
     )),
     ("Tyres & Wheels", ("friction_circle", "slip_", "tyre_", "wheel_")),
     ("Brakes", ("brake_",)),

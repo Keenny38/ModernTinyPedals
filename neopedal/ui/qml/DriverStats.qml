@@ -1047,6 +1047,72 @@ TpPage {
                         }
                     }
                 }
+                ColumnLayout {  // driver & safety ranks of game menu: rank in its color, progress to next tier
+                    visible: (page.driver.ranks || []).length > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: theme.em * 0.3
+                    spacing: theme.em * 0.35
+                    Repeater {
+                        model: page.driver.ranks || []
+                        RowLayout {
+                            required property var modelData
+                            readonly property color rankColor: (theme.dark ? modelData.color : modelData.lightColor)
+                                                               || theme.accent
+                            Layout.fillWidth: true
+                            spacing: theme.em * 0.5
+                            Text {
+                                text: modelData.label
+                                color: theme.dimText
+                                font.pointSize: theme.fontPoint * 0.85
+                                Layout.preferredWidth: theme.em * 6.5
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: modelData.value
+                                color: parent.rankColor
+                                font.weight: Font.DemiBold
+                                font.pointSize: theme.fontPoint * 1.05
+                                Layout.preferredWidth: theme.em * 5.5
+                            }
+                            Rectangle {  // progress to next tier
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.max(3, Math.round(theme.em * 0.3))
+                                Layout.alignment: Qt.AlignVCenter
+                                radius: height / 2
+                                color: Qt.rgba(theme.text.r, theme.text.g, theme.text.b, 0.12)
+                                Rectangle {
+                                    width: parent.width * Math.max(0, Math.min(1, modelData.progress))
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: parent.parent.rankColor
+                                }
+                            }
+                            Text {
+                                text: modelData.progressText
+                                color: theme.text
+                                font.pointSize: theme.fontPoint * 0.85
+                                font.features: { "tnum": 1 }
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: theme.em * 2.6
+                            }
+                            Text {  // change since previous rank
+                                visible: modelData.change !== ""
+                                text: (modelData.changeTone > 0 ? "\u25B2 " : "\u25BC ") + modelData.change
+                                color: modelData.changeTone > 0 ? theme.gain : theme.loss
+                                font.pointSize: theme.fontPoint * 0.8
+                                font.features: { "tnum": 1 }
+                            }
+                        }
+                    }
+                    Text {
+                        visible: text !== ""
+                        text: page.driver.ranksInfo || ""
+                        color: theme.dimText
+                        font.pointSize: theme.fontPoint * 0.75
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
                 GridLayout {  // races of results files
                     visible: (page.driver.figures || []).length > 0
                     Layout.fillWidth: true

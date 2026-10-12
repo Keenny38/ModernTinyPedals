@@ -75,9 +75,12 @@ from ...const_common import MAX_SECONDS, TEXT_NOLAPTIME
 from ...const_file import ConfigType
 from ...formatter import strip_invalid_char
 from ...i18n import current_language, tr, trm
+from ...process import driver_ranks as dr
 from ...process import results_file as rf
 from ...process import results_index as ri
 from ...process.player_profile import PlayerProfile, player_profile
+from ...rank_info import history_path as ranks_history_path
+from ...rank_info import ranks
 from ...setting import cfg
 from ...userfile import lap_reference
 from ...userfile.brands import select_brand_name
@@ -135,6 +138,7 @@ WATCH_DELAY = 800  # milliseconds after stats or history file changed before rel
 LAPS_DELAY = 150  # milliseconds after selection changed before recorded laps are read (arrow keys: one read)
 SYNC_HISTORY_BYTES = 64 * 1024  # history file read at once up to this size (a few ms), bigger one in background
 SYNC_STATS_BYTES = 128 * 1024  # stats file read at once (saved every lap) up to this size, bigger one in background
+RANKS_CHECK = 5_000  # milliseconds between checks of game ranks file (driver card)
 HIDDEN_RELEASE_DELAY = 60_000  # milliseconds page hidden before session history is released (read again once shown)
 LAP_FOLDERS_KEPT = 4  # recorded laps folders whose lap infos are kept (stints of selected vehicle)
 MAX_UNDO = 50
@@ -232,6 +236,40 @@ def format_date(timestamp: float) -> str:
 def format_day(day: date) -> str:
     """Short date of a calendar day in language format"""
     return date_locale().toString(QDate(day.year, day.month, day.day), QLocale.FormatType.ShortFormat)
+
+
+def rank_rows(player: dr.DriverRanks | None, history: list[dr.HistoryEntry]) -> list[dict]:
+    """Driver card rank rows: label, value, color, progress (0-1), progress text, change since previous rank
+    (percent of a tier, history of rank changes) & its tone (1 better, -1 worse, 0 none)"""
+    if player is None:
+        return []
+    rows = []
+    for label, field in (("Driver Rank", "driver"), ("Safety Rank", "safety")):
+        rank = getattr(player, field)
+        if rank is None:
+            continue
+        previous = next((getattr(entry, field) for entry in reversed(history)
+                         if getattr(entry, field) not in (None, rank)), None)
+        change = dr.rank_change(previous, rank)
+        progress = max(min(rank.progress, 100), 0)
+        rows.append({
+            "label": tr(label),
+            "value": rank.text,
+            "color": dr.RANK_COLORS.get(rank.name.casefold(), ""),  # dark theme
+            "lightColor": dr.RANK_COLORS_LIGHT.get(rank.name.casefold(), ""),
+            "progress": progress / 100,
+            "progressText": f"{progress}%",
+            "change": f"{change:+d}%" if change else "",
+            "changeTone": (change > 0) - (change < 0),
+        })
+    return rows
+
+
+def rank_info_text(player: dr.DriverRanks | None) -> str:
+    """Where ranks come from & when game menu updated them"""
+    if player is None or not ranks.updated:
+        return ""
+    return trm(f"Ranks of game menu, updated {format_date(ranks.updated)}")
 
 
 def session_kind(session: int) -> int:
@@ -786,6 +824,12 @@ class DriverStatsBackend(QObject):
         self.hidden_timer.setSingleShot(True)
         self.hidden_timer.setInterval(HIDDEN_RELEASE_DELAY)
         self.hidden_timer.timeout.connect(self.release_history)
+        # Driver & safety ranks of game menu file: driver card made again when they change
+        self._ranks_serial = ranks.serial
+        self.ranks_timer = QTimer(self)
+        self.ranks_timer.setInterval(RANKS_CHECK)
+        self.ranks_timer.timeout.connect(self.check_ranks)
+        self.ranks_timer.start()
         self._history_released = False
         # Reloads & edits of stats files run in order, one at a time, on a worker thread (see run_locked)
         self.jobs = BackgroundJobs(self, "Driver stats")
@@ -1112,9 +1156,19 @@ class DriverStatsBackend(QObject):
         self._fixes_key = key
         return ri.best_lap_fixes(self.results, self.stats_temp, linked, self.classification(), brands)
 
+    def check_ranks(self):
+        """Game ranks file checked in background, driver card made again once ranks changed"""
+        ranks.poll()
+        if ranks.serial == self._ranks_serial:
+            return
+        self._ranks_serial = ranks.serial
+        if not self.selected_stats_key:
+            self._driver = self.driver_card()
+            self.publish("driver", self._driver, self.driverChanged)
+
     def driver_card(self) -> dict:
-        """Driver card, made again only when results or fixes changed"""
-        key = (self._results_serial, len(self._fixes), current_language())
+        """Driver card, made again only when results, fixes or ranks changed"""
+        key = (self._results_serial, len(self._fixes), current_language(), ranks.serial)
         if key != self._driver_key:
             self._driver_key = key
             self._driver = self.driver_data()
@@ -1124,9 +1178,13 @@ class DriverStatsBackend(QObject):
         """Driver card (All Tracks): game profile, Steam picture, races of results files, lap times to complete"""
         profile = self.profile
         races = [summary for summary in self.results if summary.kind == "Race"]
-        if profile is None and not races:
+        player = ranks.player
+        if profile is None and not races and player is None:
             return {"visible": False}
-        name = profile.name if profile is not None else races[-1].driver
+        if profile is not None:
+            name = profile.name
+        else:
+            name = races[-1].driver if races else player.name if player is not None else ""
         details = []
         if profile is not None:
             details = [country_name(profile.nationality), profile.team, f"#{profile.number}" if profile.number else ""]
@@ -1153,6 +1211,8 @@ class DriverStatsBackend(QObject):
             "detail": " · ".join(part for part in details if part),
             "avatar": QUrl.fromLocalFile(profile.avatar).toString() if profile is not None and profile.avatar else "",
             "figures": figures,
+            "ranks": rank_rows(player, dr.read_history(ranks_history_path()) if player is not None else []),
+            "ranksInfo": rank_info_text(player),
             "info": trm(f"From {len(races)} race results of the game, class positions") if races else "",
             "fixes": fixes,
             "fixText": trm(f"{fixes} lap time(s) found in race results") if fixes else "",
@@ -1160,7 +1220,8 @@ class DriverStatsBackend(QObject):
 
     @Property(dict, notify=driverChanged)
     def driver(self) -> dict:
-        """Driver card: name, initials, detail, avatar URL, figures (label, value), info, fixes, fixText"""
+        """Driver card: name, initials, detail, avatar URL, figures (label, value), ranks (see rank_rows), ranksInfo,
+        info, fixes, fixText"""
         return self._driver
 
     @Slot(str)

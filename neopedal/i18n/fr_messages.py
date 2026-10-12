@@ -109,6 +109,7 @@ MESSAGE_RULES = (
     (r"Only support SVG file that generated with NeoPedal\.",
      "Seuls les fichiers SVG créés par NeoPedal sont pris en charge."),
     (r"Notes saved at:", "Notes enregistrées dans :"),
+    (r"^Ranks of game menu, updated (.+)$", r"Rangs du menu du jeu, mis à jour le \1"),
     (r"Tyre strategy file saved at:", "Stratégie pneus enregistrée dans :"),
     (r"Tyre strategy file exported at:", "Stratégie pneus exportée dans :"),
     (r"<b>(.+?)</b> already installed on <b>(.+?)</b> wheel\.", r"<b>\1</b> est déjà monté sur la roue <b>\2</b>."),

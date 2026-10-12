@@ -13,6 +13,14 @@ C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en 
 - **Linux : emplacements d'installation propres** : `install.sh` installe dans `/usr/local/share/NeoPedal`, avec une commande `NeoPedal`, `NeoPedal.sh` et `NeoPedal.desktop`, et retire une ancienne installation faite sous l'ancien nom (une installation de TinyPedal est gardée). Les fenêtres ne sont plus regroupées avec celles de TinyPedal dans la barre des tâches. Les arguments du lanceur vont dans `NEOPEDAL_RUN_ARGS`.
 - **Nouveau nom dans chaque fichier et message** : paquet Python `neopedal`, journaux `neopedal.log` et `neopedal-errors.log`, rapport de bug `neopedal-bug-report-….zip`, options de l'overlay `Performances système` (`show_neopedal_performance`..., renommées dans tes presets, préfixe par défaut `NP `), couche de l'overlay VR (`NeoPedalXrLayer`, l'ancienne inscription est remplacée), notes, paquets de presets, cartes, certificat du tableau de bord web et documentation. Les anciens plugins, paquets de presets et outils de télécommande continuent de fonctionner.
 
+### Driver Rank et Safety Rank
+
+- **Nouvel overlay `Rang pilote`** (Le Mans Ultimate, désactivé par défaut, catégorie `Timing`) : ton Driver Rank (DR) et ton Safety Rank (SR) tels que le menu du jeu les affiche (`Silver 2`, progression vers le palier suivant `40%`), et tes points de track limits face à la limite de la session (`1.25/5`). Les rangs sont lus dans le dossier du jeu (`coherent_local_storage.json`, écrit par le menu du jeu, seulement lu : rien n'est envoyé nulle part, aucune connexion), mis à jour dès que le menu du jeu affiche les nouveaux après une course en ligne.
+- **`Statistiques pilote` : rangs sur la fiche pilote**, chacun dans sa couleur avec la progression vers le palier suivant et l'évolution depuis ton rang précédent (`▲ +10%`). Chaque changement est gardé dans `driver_ranks.history` du dossier de configuration globale.
+- **`Broadcast Director` : DR et SR sur la carte pilote** de toi et de tes coéquipiers (les pilotes dont le menu du jeu connaît les rangs).
+
+![Overlay Rang pilote](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
+
 ### Track limits dans chaque session
 
 - **`Tours et position` : points de track limits avec la limite de la session aussi en essais et en qualification** (`show_track_limits_points`), plus seulement en course : `1.25/5` quand le jeu donne une limite pour la session, un tiret sinon. Les deux designs affichent les points de la même façon (`1.25`, `1.5`, `3`), le design classique ne les complète plus (`1.250`).

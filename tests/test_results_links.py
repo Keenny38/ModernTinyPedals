@@ -390,3 +390,30 @@ def test_watch_named_waits_for_replays_list():
     fake.pending_watch = "Spa R1 1"
     fake.watch_pending()
     assert watched == ["Spa R1 1", "Spa R1 1"]
+
+
+def test_stats_driver_card_ranks(backend, monkeypatch, tmp_path):  # noqa: F811
+    """Driver & safety ranks of game menu file on driver card, change since previous rank of history"""
+    from neopedal import rank_info
+    from neopedal.process import driver_ranks as dr
+    from neopedal.ui.quick import stats_backend
+
+    settle(backend)
+    history = tmp_path / dr.HISTORY_FILE
+    dr.append_history(str(history), dr.HistoryEntry(1_700_000_000, dr.Rank("Silver", 1, 90), dr.Rank("Platinum", 3, 50)))
+    monkeypatch.setattr(rank_info, "history_path", lambda: str(history))
+    monkeypatch.setattr(stats_backend, "ranks_history_path", lambda: str(history))
+    monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
+    monkeypatch.setattr(rank_info.ranks, "updated", 1_700_000_000.0)
+    monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
+        "Alice Driver", "1", "", "FR", dr.Rank("Silver", 2, 40), dr.Rank("Platinum", 3, 50)))
+    monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
+    backend.selectTrack("")  # All Tracks: driver card shown
+    backend.check_ranks()  # ranks changed: card made again
+    driver = backend.driver
+    assert driver["visible"] and driver["name"] == "Alice Driver"
+    rows = {row["label"]: row for row in driver["ranks"]}
+    assert rows["Driver Rank"]["value"] == "Silver 2" and rows["Driver Rank"]["progress"] == 0.4
+    assert rows["Driver Rank"]["change"] == "+50%" and rows["Driver Rank"]["changeTone"] == 1  # 90% S1 -> 40% S2
+    assert rows["Safety Rank"]["value"] == "Platinum 3" and rows["Safety Rank"]["change"] == ""  # no change
+    assert "updated" in driver["ranksInfo"]

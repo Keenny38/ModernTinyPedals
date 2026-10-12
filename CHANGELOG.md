@@ -13,6 +13,14 @@ The full list of commits of each version is on the [Releases](https://github.com
 - **Linux: own install paths**: `install.sh` installs in `/usr/local/share/NeoPedal`, with a `NeoPedal` command, `NeoPedal.sh` and `NeoPedal.desktop`, and removes an older install made under the former name (an install of TinyPedal is kept). Windows are no longer grouped with TinyPedal's in the task bar. Launcher arguments go in `NEOPEDAL_RUN_ARGS`.
 - **New name in every file and message**: Python package `neopedal`, log files `neopedal.log` and `neopedal-errors.log`, bug report `neopedal-bug-report-….zip`, options of the `System Performance` overlay (`show_neopedal_performance`..., renamed in your presets, default prefix `NP `), VR overlay layer (`NeoPedalXrLayer`, the old registration is replaced), notes, preset packages, track maps, web dashboard certificate and documentation. Older plugins, preset packages and remote control tools keep working.
 
+### Driver Rank & Safety Rank
+
+- **New `Driver Rank` overlay** (Le Mans Ultimate, off by default, `Timing` category): your Driver Rank (DR) and Safety Rank (SR) as the game menu shows them (`Silver 2`, progress to next tier `40%`), and your track limits points against the session limit (`1.25/5`). Ranks are read from the game folder (`coherent_local_storage.json`, written by the game menu, only read: nothing is sent anywhere, no sign-in), updated once the game menu shows new ones after an online race.
+- **`Driver Stats Viewer`: ranks on the driver card**, each in its color with the progress to the next tier and the change since your previous rank (`▲ +10%`). Every change is kept in `driver_ranks.history` of the global config folder.
+- **`Broadcast Director`: DR and SR on the driver card** of you and your team members (the drivers whose ranks the game menu knows).
+
+![Driver Rank overlay](https://raw.githubusercontent.com/Keenny38/ModernTinyPedals/master/docs/changes/2026-10-12-driver-rank-overlay.png)
+
 ### Track limits in every session
 
 - **`Laps & Position`: track limits points with the session limit in practice and qualifying too** (`show_track_limits_points`), not only in races: `1.25/5` when the game gives a limit for the session, a dash otherwise. Both designs show the points the same way (`1.25`, `1.5`, `3`), the classic design no longer pads them (`1.250`).

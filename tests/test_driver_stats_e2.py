@@ -218,3 +218,45 @@ def test_driver_stats_page_with_stints_and_friend(stats_page, tmp_path):
         qInstallMessageHandler(previous)
         parent.deleteLater()
     assert not [text for text in messages if ".qml" in text], messages
+
+
+def test_driver_card_shows_ranks(stats_page, monkeypatch):
+    """Driver & safety ranks of game menu file drawn on driver card (All Tracks), no QML error"""
+    from PySide6.QtCore import qInstallMessageHandler
+    from PySide6.QtWidgets import QWidget
+
+    from neopedal import rank_info
+    from neopedal.process import driver_ranks as dr
+    from neopedal.ui.quick import create_quick_view
+
+    monkeypatch.setattr(rank_info.ranks, "poll", lambda: None)
+    monkeypatch.setattr(rank_info.ranks, "updated", float(START))
+    monkeypatch.setattr(rank_info.ranks, "player", dr.DriverRanks(
+        "Alice Driver", "1", "", "FR", dr.Rank("Silver", 2, 40), dr.Rank("Platinum", 3, 50)))
+    monkeypatch.setattr(rank_info.ranks, "serial", rank_info.ranks.serial + 1)
+    stats_page.selectTrack("")
+    stats_page.check_ranks()
+    messages: list[str] = []
+    previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
+    parent = QWidget()
+    try:
+        view = create_quick_view(parent, "DriverStats.qml", {"backend": stats_page})
+        view.resize(1400, 900)
+        view.show()
+        for _ in range(10):
+            QCoreApplication.processEvents()
+        assert not view.errors()
+        texts, stack = set(), [view.rootObject()]
+        while stack:
+            item = stack.pop()
+            text = item.property("text")
+            if isinstance(text, str):
+                texts.add(text)
+            stack.extend(item.childItems())
+        assert {"Driver Rank", "Silver 2", "40%", "Safety Rank", "Platinum 3", "50%"} <= texts
+        if os.environ.get("NEOPEDAL_SHOT"):
+            view.grab().save(os.environ["NEOPEDAL_SHOT"])
+    finally:
+        qInstallMessageHandler(previous)
+        parent.deleteLater()
+    assert not [text for text in messages if ".qml" in text], messages

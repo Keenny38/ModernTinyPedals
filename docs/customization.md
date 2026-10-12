@@ -2642,6 +2642,25 @@ Set cooldown duration (seconds) before resetting minimum power or coast locking 
 [**`Back to Top`**](#)
 
 
+## Driver rank
+**This widget displays Le Mans Ultimate Driver Rank (DR), Safety Rank (SR) and track limits points of player.**
+
+Driver Rank and Safety Rank are the ones shown by game menu (rank, tier and progress to next tier), read from game folder (`coherent_local_storage.json`, written by the game while in menus, read only): they are updated once the game menu shows new ones, after an online race. Game folder is found like [Race results](#race-results) (folder chosen there, else Steam libraries), player by Steam account last signed in, else game profile name. A dash while ranks are unknown (game folder not found, never signed in online). Each change of rank is kept in `driver_ranks.history` of global config folder, shown in `Driver Stats Viewer`. Modern design shows each rank in its color with progress as a bar.
+
+Track limits shows track limits points against points allowed per penalty of current session (race, qualifying or practice), like [Laps and position](#laps-and-position): a dash in place of the limit when the game gives none for the session.
+
+    layout
+2 layouts are available: `0` = vertical layout, `1` = horizontal layout.
+
+    show_progress
+Show progress to next tier of each rank, in percent. Default is enabled.
+
+    show_driver_rank, show_safety_rank, show_track_limits
+Show Driver Rank (DR), Safety Rank (SR), track limits points.
+
+[**`Back to Top`**](#)
+
+
 ## DRS
 **This widget displays DRS(rear flap) usage info.**
 

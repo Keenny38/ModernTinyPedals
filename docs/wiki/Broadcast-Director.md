@@ -75,7 +75,7 @@ TV graphics made for the director, as one **browser source (1920 x 1080)** for O
 `Graphics` tab, each graphic on or off:
 
 - **Standings tower**: overall, each class in turn, or the class of the car on air; gaps to the car ahead or to the leader, lap times shown a few seconds as each car completes a lap (purple for the fastest of its class), tyres, penalties, fastest lap tag, pit stops, classes apart in overall. Rows move on overtakes.
-- **Driver card** on each cut, with the car picture if you want.
+- **Driver card** on each cut, with the car picture if you want, and the Driver Rank and Safety Rank (`DR S2`, `SR P3`) of drivers whose ranks the game menu knows: you and your team members.
 - **Battle card** while a battle is on air, and **battle train**: up to 6 cars of a class following each other, kept 10 s after the train breaks up.
 - **Banners**: fastest lap, penalties, flags, lead changes, heavy contacts. The most important first, the same news never twice in 30 seconds, 4 waiting at most.
 - **Replay** mark during replays, and **instant replay graphics**: a contact replayed shows both cars, a flag or a stopped car shows the driver card all along the replay, and banners wait until 5 s after the replay.

@@ -981,6 +981,8 @@ TRANSLATION = MappingProxyType({
     "Ruler: click two points (Esc to quit)": "Règle : cliquer deux points (Échap pour quitter)",
     "Throttle application": "Remise des gaz",
     "Track limits": "Limites de piste",
+    "Driver Rank": "Driver Rank",
+    "Safety Rank": "Safety Rank",
     "Track-out": "Point extérieur",
     "Track-out (outside edge)": "Point extérieur (bord de piste)",
     "Wheelspin": "Patinage",

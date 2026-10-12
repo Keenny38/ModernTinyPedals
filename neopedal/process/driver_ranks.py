@@ -31,13 +31,17 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+import threading
+import time
+from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple
 
 STORAGE_FILE = "coherent_local_storage.json"
 MAX_FILE_SIZE = 64 * 1024 * 1024  # never read a huge file whole
 MAX_DEPTH = 12  # nested items & JSON text values
 RANK_ORDER = ("Bronze", "Silver", "Gold", "Platinum")  # lowest first
+RANK_COLORS = {"bronze": "#CD8A4B", "silver": "#C9CED6", "gold": "#E8C14A", "platinum": "#7FD6DF"}  # readable on dark
+RANK_COLORS_LIGHT = {"bronze": "#9A5B22", "silver": "#6B7380", "gold": "#A07A00", "platinum": "#1C8A96"}  # on light
 
 
 class Rank(NamedTuple):
@@ -167,3 +171,160 @@ def find_driver(drivers: list[DriverRanks], name: str = "", steam_id: str = "") 
             if entry.name.casefold() == key:
                 return entry
     return None
+
+
+# Player ranks: storage file watched in background (read again only when changed), history of changes
+HISTORY_FILE = "driver_ranks.history"  # JSON lines in config folder: one line each time a rank changed
+CHECK_SECONDS = 5.0  # storage file modification time checked this often
+LOCATE_SECONDS = 60.0  # game folder & player looked for again this often (game installed or moved)
+
+
+class Located(NamedTuple):
+    """Where & who: storage file path ("" if game not found), player Steam ID & names"""
+
+    path: str
+    steam_id: str
+    names: tuple[str, ...]
+
+
+class HistoryEntry(NamedTuple):
+    """Ranks of player at a time (seconds since epoch)"""
+
+    time: float
+    driver: Rank | None
+    safety: Rank | None
+
+
+def player_entry(drivers: list[DriverRanks], located: Located) -> DriverRanks | None:
+    """Ranks of player: by Steam ID, else by profile names"""
+    found = find_driver(drivers, steam_id=located.steam_id)
+    for name in located.names:
+        if found is not None:
+            break
+        found = find_driver(drivers, name=name)
+    return found
+
+
+def _rank_list(rank: Rank | None) -> list | None:
+    return [rank.name, rank.tier, rank.progress] if rank else None
+
+
+def _rank_from_list(value: Any) -> Rank | None:
+    if isinstance(value, list) and len(value) == 3 and isinstance(value[0], str):
+        return Rank(value[0], _int(value[1]), _int(value[2]))
+    return None
+
+
+def append_history(path: str, entry: HistoryEntry) -> bool:
+    """Add entry to history file, False if not saved"""
+    line = json.dumps({"time": round(entry.time), "driver": _rank_list(entry.driver),
+                       "safety": _rank_list(entry.safety)})
+    try:
+        with open(path, "a", encoding="utf-8") as file:
+            file.write(line + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def read_history(path: str) -> list[HistoryEntry]:
+    """History entries, oldest first (invalid lines skipped)"""
+    entries = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as file:
+            for line in file:
+                try:
+                    data = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and isinstance(data.get("time"), (int, float)):
+                    entries.append(HistoryEntry(float(data["time"]), _rank_from_list(data.get("driver")),
+                                                _rank_from_list(data.get("safety"))))
+    except OSError:
+        return []
+    return entries
+
+
+def rank_change(previous: Rank | None, current: Rank | None) -> int:
+    """Change between two ranks in percent of a tier (+ better), 0 if either unknown"""
+    if previous is None or current is None or previous.level < 0 or current.level < 0:
+        return 0
+    return round((current.level - previous.level) * 100)
+
+
+class RankWatcher:
+    """Player & team members ranks of storage file, read in a background thread when file changed
+
+    Args:
+        locate: function giving storage file, player Steam ID & names (called in background thread).
+        history_path: function giving history file path ("" for no history).
+        clock: time function (tests).
+    """
+
+    def __init__(self, locate: Callable[[], Located], history_path: Callable[[], str] = lambda: "",
+                 clock: Callable[[], float] | None = None):
+        self._locate = locate
+        self._history_path = history_path
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._located: Located | None = None
+        self._located_time = -LOCATE_SECONDS
+        self._checked_time = -CHECK_SECONDS
+        self._mtime = -1.0
+        self.drivers: list[DriverRanks] = []
+        self.player: DriverRanks | None = None
+        self.updated = 0.0  # storage file modification time of values (seconds since epoch), 0 if none
+        self.serial = 0  # incremented each time values change
+
+    def poll(self) -> None:
+        """Check file in background if due (non blocking)"""
+        now = self._clock()
+        with self._lock:
+            if now - self._checked_time < CHECK_SECONDS or (self._thread is not None and self._thread.is_alive()):
+                return
+            self._checked_time = now
+            self._thread = threading.Thread(target=self.check, name="Driver ranks", daemon=True)
+            self._thread.start()
+
+    def check(self) -> None:
+        """Locate & read storage file if changed (blocking)"""
+        now = self._clock()
+        if self._located is None or now - self._located_time >= LOCATE_SECONDS:
+            try:
+                self._located = self._locate()
+            except Exception:  # any locate error: nothing found this time
+                self._located = Located("", "", ())
+            self._located_time = now
+        located = self._located
+        try:
+            mtime = os.path.getmtime(located.path) if located.path else -1.0
+        except OSError:
+            mtime = -1.0
+        if mtime == self._mtime:
+            return
+        self._mtime = mtime
+        drivers = read_storage(located.path) if mtime >= 0 else []
+        player = player_entry(drivers, located)
+        with self._lock:
+            changed = player != self.player or drivers != self.drivers
+            self.drivers, self.player = drivers, player
+            self.updated = max(mtime, 0.0)
+            if changed:
+                self.serial += 1
+        if player is not None:
+            self.record(player, mtime)
+
+    def record(self, player: DriverRanks, mtime: float) -> None:
+        """Add ranks to history when changed since last entry"""
+        path = self._history_path()
+        if not path:
+            return
+        history = read_history(path)
+        if history and history[-1].driver == player.driver and history[-1].safety == player.safety:
+            return
+        append_history(path, HistoryEntry(mtime, player.driver, player.safety))
+
+    def team_ranks(self, name: str) -> DriverRanks | None:
+        """Ranks of player or team member by name, None if unknown"""
+        return find_driver(self.drivers, name=name)

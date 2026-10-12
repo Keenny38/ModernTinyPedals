@@ -1,6 +1,7 @@
 """Driver Rank & Safety Rank read from the game menu storage file (coherent_local_storage.json)"""
 
 import json
+import os
 
 from neopedal.process import driver_ranks as dr
 
@@ -16,9 +17,9 @@ TEAM = {"teams": [{"name": "Team", "drivers": [
 ]}], "driverRank": None, "split": None}
 
 
-def storage_text():
+def storage_text(profile=None):
     """Same layout as game file: stored items are JSON text inside a JSON object"""
-    return json.dumps({"profile": json.dumps({"user": PROFILE}), "events": json.dumps(TEAM), "other": "x"})
+    return json.dumps({"profile": json.dumps({"user": profile or PROFILE}), "events": json.dumps(TEAM), "other": "x"})
 
 
 def test_parse_storage():
@@ -46,3 +47,32 @@ def test_invalid_or_missing_file(tmp_path):
     path = tmp_path / dr.STORAGE_FILE
     path.write_text(storage_text(), encoding="utf-8")
     assert len(dr.read_storage(str(path))) == 2
+
+
+def test_watcher_reads_when_changed_and_keeps_history(tmp_path):
+    path = tmp_path / dr.STORAGE_FILE
+    path.write_text(storage_text(), encoding="utf-8")
+    history = tmp_path / dr.HISTORY_FILE
+    located = []
+    watcher = dr.RankWatcher(lambda: located.append(1) or dr.Located(str(path), "76561190000000001", ()),
+                             lambda: str(history))
+    watcher.check()
+    assert watcher.player is not None and watcher.player.driver.text == "Silver 2" and watcher.serial == 1
+    assert len(watcher.drivers) == 2 and watcher.team_ranks("Flo Veninski") is not None
+    watcher.check()  # file unchanged: not read again, located once (cached)
+    assert watcher.serial == 1 and len(located) == 1
+    assert [entry.driver for entry in dr.read_history(str(history))] == [dr.Rank("Silver", 2, 40)]
+    # Rank changed in game menu: read again, history gets a line
+    profile = {**PROFILE, "driverRank": {**PROFILE["driverRank"], "progress": 55}}
+    path.write_text(storage_text(profile), encoding="utf-8")
+    os.utime(path, (2_000_000_000, 2_000_000_000))
+    watcher.check()
+    assert watcher.player.driver.progress == 55 and watcher.serial == 2
+    assert [entry.driver.progress for entry in dr.read_history(str(history))] == [40, 55]
+    assert dr.rank_change(dr.Rank("Silver", 2, 40), dr.Rank("Silver", 2, 55)) == 15
+
+
+def test_watcher_without_game(tmp_path):
+    watcher = dr.RankWatcher(lambda: dr.Located("", "", ()))
+    watcher.check()
+    assert watcher.player is None and watcher.drivers == [] and watcher.serial == 0
