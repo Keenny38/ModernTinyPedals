@@ -13,6 +13,10 @@ C'est ce fichier que l'app affiche dans la page `Nouveautés` quand elle est en 
 - **Linux : emplacements d'installation propres** : `install.sh` installe dans `/usr/local/share/NeoPedal`, avec une commande `NeoPedal`, `NeoPedal.sh` et `NeoPedal.desktop`, et retire une ancienne installation faite sous l'ancien nom (une installation de TinyPedal est gardée). Les fenêtres ne sont plus regroupées avec celles de TinyPedal dans la barre des tâches. Les arguments du lanceur vont dans `NEOPEDAL_RUN_ARGS`.
 - **Nouveau nom dans chaque fichier et message** : paquet Python `neopedal`, journaux `neopedal.log` et `neopedal-errors.log`, rapport de bug `neopedal-bug-report-….zip`, options de l'overlay `Performances système` (`show_neopedal_performance`..., renommées dans tes presets, préfixe par défaut `NP `), couche de l'overlay VR (`NeoPedalXrLayer`, l'ancienne inscription est remplacée), notes, paquets de presets, cartes, certificat du tableau de bord web et documentation. Les anciens plugins, paquets de presets et outils de télécommande continuent de fonctionner.
 
+### Track limits dans chaque session
+
+- **`Tours et position` : points de track limits avec la limite de la session aussi en essais et en qualification** (`show_track_limits_points`), plus seulement en course : `1.25/5` quand le jeu donne une limite pour la session, un tiret sinon. Les deux designs affichent les points de la même façon (`1.25`, `1.5`, `3`), le design classique ne les complète plus (`1.250`).
+
 ## 0.23.0 (2026-10-11)
 
 ### Nouveau nom : NeoPedal

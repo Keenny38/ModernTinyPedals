@@ -59,6 +59,11 @@ def format_option_name(name: str) -> str:
     )
 
 
+def format_points(value: float) -> str:
+    """Track limits points: 2 decimal places at most, no trailing zero (1.25, 1.5, 5)"""
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 def strip_filename_extension(name: str, extension: str) -> str:
     """Strip file name extension"""
     if name.lower().endswith(extension):

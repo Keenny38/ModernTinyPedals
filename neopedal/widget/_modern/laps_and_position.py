@@ -29,6 +29,7 @@ from PySide6.QtGui import QPainter
 
 from ... import calculation as calc
 from ...api_control import api
+from ...formatter import format_points
 from ...module_info import minfo
 from .base import DASH, ModernOverlay
 from .stats import Stat, StatsMixin, Value
@@ -87,11 +88,12 @@ class Realtime(StatsMixin, ModernOverlay):
                 position, class_total = self.position_in_class(place, total)
                 values.append(Value(f"{position}/{class_total}"))
             elif key == "track_limits":
+                # Every session (race, qualifying, practice): limit of the session given by game, dash if none
                 points = api.read.session.cut_points()
-                limit = api.read.session.limits_points() * api.read.session.in_race()
-                text_limit = f"{limit:.0f}" if limit > 0 else DASH
+                limit = api.read.session.limits_points()
+                text_limit = format_points(limit) if limit > 0 else DASH
                 color = theme.negative if limit > 0 and points >= limit - 1 else (theme.warning if points > 0 else theme.text_dim)
-                values.append(Value(f"{points:.2f}".rstrip("0").rstrip(".") + f"/{text_limit}", color))
+                values.append(Value(f"{format_points(points)}/{text_limit}", color))
             elif key == "position_change":
                 veh = minfo.vehicles.dataSet[minfo.vehicles.playerIndex]
                 if self.wcfg["show_position_change_in_class"]:

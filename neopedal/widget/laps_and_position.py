@@ -22,6 +22,7 @@ Laps and position Widget
 
 from .. import calculation as calc
 from ..api_control import api
+from ..formatter import format_points
 from ..module_info import minfo
 from ._base import Overlay
 
@@ -215,7 +216,7 @@ class Realtime(Overlay):
         # Track limits points
         if self.wcfg["show_track_limits_points"]:
             current_points = api.read.session.cut_points()
-            total_points = api.read.session.limits_points() * api.read.session.in_race()
+            total_points = api.read.session.limits_points()  # every session: limit given by game, if any
             self.update_cut_points(self.bar_cut_points, current_points, total_points)
 
         # Position change
@@ -268,12 +269,10 @@ class Realtime(Overlay):
         if target.last != data:
             target.last = data
             if data[1] > 0:
-                text_total = f"{data[1]:.0f}"
+                text_total = format_points(data[1])
             else:
                 text_total = "-"
-            size = 3 - (len(text_total) > 1)
-            text_cut = f"{data[0]:.{size}f}"
-            text_points = f"{text_cut:.{size + 2}}/{text_total}"
+            text_points = f"{format_points(data[0])}/{text_total}"
             target.text = f"{self.prefix_cut_points}{text_points:>{self.just_cut_points}}"
             target.update()
 

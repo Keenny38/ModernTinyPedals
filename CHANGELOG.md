@@ -13,6 +13,10 @@ The full list of commits of each version is on the [Releases](https://github.com
 - **Linux: own install paths**: `install.sh` installs in `/usr/local/share/NeoPedal`, with a `NeoPedal` command, `NeoPedal.sh` and `NeoPedal.desktop`, and removes an older install made under the former name (an install of TinyPedal is kept). Windows are no longer grouped with TinyPedal's in the task bar. Launcher arguments go in `NEOPEDAL_RUN_ARGS`.
 - **New name in every file and message**: Python package `neopedal`, log files `neopedal.log` and `neopedal-errors.log`, bug report `neopedal-bug-report-….zip`, options of the `System Performance` overlay (`show_neopedal_performance`..., renamed in your presets, default prefix `NP `), VR overlay layer (`NeoPedalXrLayer`, the old registration is replaced), notes, preset packages, track maps, web dashboard certificate and documentation. Older plugins, preset packages and remote control tools keep working.
 
+### Track limits in every session
+
+- **`Laps & Position`: track limits points with the session limit in practice and qualifying too** (`show_track_limits_points`), not only in races: `1.25/5` when the game gives a limit for the session, a dash otherwise. Both designs show the points the same way (`1.25`, `1.5`, `3`), the classic design no longer pads them (`1.250`).
+
 ## 0.23.0 (2026-10-11)
 
 ### New name: NeoPedal
